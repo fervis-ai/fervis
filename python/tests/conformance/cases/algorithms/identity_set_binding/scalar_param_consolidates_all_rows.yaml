@@ -1,0 +1,24 @@
+id: scalar_param_consolidates_all_rows
+description: Repeated singleton invocations consolidate all returned rows without dropping identities.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_memory_identity_set_compilation.py::test_identity_set_binding_consolidates_paginated_results_without_dropping_ids
+kind: algorithm
+algorithm: execution.identity_set_binding
+input:
+  param_type: uuid
+  identity_values: [store_1, store_2]
+  responses:
+    - param_value: store_1
+      body:
+        results:
+          - {sale_id: sale_1a, store_id: store_1}
+          - {sale_id: sale_1b, store_id: store_1}
+    - param_value: store_2
+      body:
+        results:
+          - {sale_id: sale_2a, store_id: store_2}
+          - {sale_id: sale_2b, store_id: store_2}
+expect:
+  result_contains:
+    request_param_values: [store_1, store_2]
+    sale_ids: [sale_1a, sale_1b, sale_2a, sale_2b]

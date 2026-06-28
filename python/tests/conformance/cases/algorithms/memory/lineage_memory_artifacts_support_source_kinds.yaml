@@ -1,0 +1,62 @@
+id: lineage_memory_artifacts_support_source_kinds
+description: Memory artifact reads support requested-fact framing and known-input identity artifacts.
+kind: algorithm
+algorithm: memory.lineage_memory_artifacts
+input:
+  conversation_id: conversation_1
+  limit: 5
+  memory_artifacts:
+    - memory_artifact_id: mem_requested_fact_1
+      conversation_id: conversation_1
+      run_id: run_1
+      produced_by_step_id: step_question_contract
+      source_kind: requested_fact
+      requested_fact_id: fact_1
+      payload_schema: fervis.memory_artifact
+      payload_schema_rev: 1
+      payload_json:
+        artifactId: mem_requested_fact_1
+        sourceKind: requested_fact
+        outcome: answered
+        sourceQuestion: How many stores are open?
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: count open stores
+    - memory_artifact_id: mem_known_input_1
+      conversation_id: conversation_1
+      run_id: run_1
+      produced_by_step_id: step_grounding
+      source_kind: known_input
+      payload_schema: fervis.memory_artifact
+      payload_schema_rev: 1
+      payload_json:
+        artifactId: mem_known_input_1
+        sourceKind: known_input
+        outcome: answered
+        sourceQuestion: How many stores are open in London?
+        addresses:
+          - address: entity.input_1
+            kind: entity
+            resource: area
+            referenceText: London
+            identity:
+              area_id: area_1
+expect:
+  result_contains:
+    artifacts:
+      - artifactId: mem_requested_fact_1
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: count open stores
+      - artifactId: mem_known_input_1
+        addresses:
+          - address: entity.input_1
+            kind: entity
+            resource: area
+            referenceText: London
+            identity:
+              area_id: area_1

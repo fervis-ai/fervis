@@ -1,0 +1,37 @@
+id: row_source_prompt_exposes_blocked_facts
+description: Row-source prompt payload exposes structured blocked facts with proof refs.
+migrates:
+  - api/tests/fervis/lookup/fact_planning/test_row_sources.py::test_row_source_prompt_exposes_structured_blocked_facts
+kind: algorithm
+algorithm: relation_catalog.row_source_projection
+input:
+  catalog:
+    reads:
+      - id: payment_read
+        endpoint_name: list_payments
+        resource_names: [payment]
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - ref: field.data.last_four
+            path: data.last_four
+            row_path_id: data
+            type: string
+        facts:
+          - ref: payment.card.full_number
+            availability: not_readable
+            field_ref: field.data.last_four
+            read_id: payment_read
+            proof_refs: [endpoint_docs:payment_masking]
+expect:
+  result_contains:
+    read_id: payment_read
+    row_path_id: data
+    prompt_api_row_sources:
+      - blocked_facts:
+          - fact_ref: payment.card.full_number
+            availability: not_readable
+            field_id: last_four
+            proof_refs: [endpoint_docs:payment_masking]

@@ -1,0 +1,28 @@
+id: retains_candidate_without_copied_evidence_tokens
+description: Parser can retain a candidate even when the model did not copy obvious evidence tokens.
+migrates:
+  - api/tests/fervis/lookup/test_read_eligibility_contract.py::test_read_eligibility_retains_candidates_without_model_copied_evidence_tokens
+kind: algorithm
+algorithm: read_eligibility.parse
+input:
+  request_fixture: sales_count
+  payload:
+    requested_fact_assessments:
+      - requested_fact_id: fact_1
+        read_candidate_reviews:
+          - source_candidate_id: source_1
+            read_id: list_sales_summary
+            relevant_row_path_tokens: []
+            relevant_field_tokens: []
+            retention_basis: The read exposes sales summary evidence that later turns can inspect for the count.
+            retention_decision: RETAIN
+          - source_candidate_id: source_2
+            read_id: list_payment_list
+            relevant_row_path_tokens: []
+            relevant_field_tokens: []
+            retention_basis: Payments are not sales evidence for this requested fact.
+            retention_decision: DROP
+expect:
+  result_contains:
+    retained_read_ids_by_requested_fact:
+      fact_1: [list_sales_summary]

@@ -1,0 +1,20 @@
+id: named_month_with_year_resolves_full_month
+description: Named month period with a year resolves to that full calendar month.
+migrates:
+  - api/tests/fervis/business_time/test_resolver.py::test_resolve_period_named_month_with_year
+kind: algorithm
+algorithm: business_time.resolve
+input:
+  anchor_date: "2026-04-11"
+  intent:
+    kind: period
+    unit: month
+    named:
+      value: 3
+      year: 2025
+    mode: full
+expect:
+  result_contains:
+    status: resolved
+    start: "2025-03-01"
+    end: "2025-03-31"

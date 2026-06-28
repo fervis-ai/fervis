@@ -1,0 +1,296 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  completedRunFixture,
+  conversationListFixture,
+  failedRunFixture,
+  freeTextClarificationRunFixture,
+  questionStateFixture,
+  runListFixture
+} from "./__fixtures__/payloads";
+import {
+  decodeConversationList,
+  decodeQuestionRunList,
+  decodeQuestionState,
+  decodeRun
+} from "./decoder";
+
+describe("Fervis API boundary decoder", () => {
+  it("decodes the conversation rail payload in backend order", () => {
+    const decoded = decodeConversationList(conversationListFixture);
+
+    if (!decoded.ok) {
+      throw new Error(decoded.error.message);
+    }
+    expect(decoded.ok).toBe(true);
+    expect(decoded.value.conversations.map((item) => item.conversationId)).toEqual([
+      "conv_new",
+      "conv_old"
+    ]);
+    expect(decoded.value.conversations[0]?.firstQuestion).toBe(
+      "How many orders came in today?"
+    );
+  });
+
+  it("decodes question state without requiring worker or usage diagnostics", () => {
+    const decoded = decodeQuestionState(questionStateFixture);
+
+    if (!decoded.ok) {
+      throw new Error(decoded.error.message);
+    }
+    expect(decoded.ok).toBe(true);
+    expect(decoded.value.currentRunId).toBe("run_sales");
+    expect(decoded.value.resultData?.kind).toBe("answer");
+  });
+
+  it("decodes the live Fervis question-state field names", () => {
+    const decoded = decodeQuestionState({
+      questionId: "q_live",
+      conversationId: "conv_live",
+      tenantId: "default",
+      status: "COMPLETED",
+      currentRunId: "run_live",
+      question: "How many in-person sales happened this month?",
+      answer: "1",
+      resultData: {
+        kind: "answer",
+        outputs: [{ key: "answer_1", valueKind: "number", value: "1" }]
+      },
+      error: ""
+    });
+
+    if (!decoded.ok) {
+      throw new Error(decoded.error.message);
+    }
+    expect(decoded.ok).toBe(true);
+    expect(decoded.value.question).toBe(
+      "How many in-person sales happened this month?"
+    );
+    expect(decoded.value.resultData?.kind).toBe("answer");
+    if (decoded.value.resultData?.kind !== "answer") {
+      throw new Error("expected answer result data");
+    }
+    expect(decoded.value.resultData.outputs[0]?.valueKind).toBe("number");
+    expect(decoded.value.nextActions).toEqual([]);
+  });
+
+  it("decodes live clarification payloads without option lists", () => {
+    const decoded = decodeQuestionState({
+      questionId: "q_clarify",
+      conversationId: "conv_clarify",
+      status: "NEEDS_CLARIFICATION",
+      currentRunId: "run_clarify",
+      question: "Show me performance for ABC Mall yesterday.",
+      answer: null,
+      resultData: {
+        kind: "needs_clarification",
+        details: {
+          clarifications: [
+            {
+              id: "clarification_1",
+              basis: "missing_answer_metric",
+              question: "Which metric should I use?",
+              factResultId: null,
+              stepId: null,
+              evidenceRefs: ["question_contract:needs_clarification"]
+            }
+          ]
+        }
+      }
+    });
+
+    if (!decoded.ok) {
+      throw new Error(decoded.error.message);
+    }
+    expect(decoded.value.resultData?.kind).toBe("needs_clarification");
+    if (decoded.value.resultData?.kind !== "needs_clarification") {
+      throw new Error("expected clarification result data");
+    }
+    expect(
+      decoded.value.resultData.details.clarifications[0]?.availableOptions
+    ).toEqual([]);
+    expect(decoded.value.resultData.details.clarifications[0]?.factResultId).toBeNull();
+    expect(decoded.value.resultData.details.clarifications[0]?.stepId).toBeNull();
+  });
+
+  it("decodes structured next actions without CLI command text", () => {
+    const decoded = decodeQuestionState({
+      questionId: "q_clarify",
+      conversationId: "conv_clarify",
+      status: "NEEDS_CLARIFICATION",
+      currentRunId: "run_clarify",
+      question: "Show me performance.",
+      answer: null,
+      resultData: {
+        kind: "needs_clarification",
+        details: {
+          clarifications: [
+            {
+              id: "clarification_1",
+              basis: "missing_answer_metric",
+              question: "Which metric should I use?",
+              factResultId: null,
+              stepId: "step_1",
+              evidenceRefs: []
+            }
+          ]
+        }
+      },
+      nextActions: [
+        {
+          kind: "provide_clarification",
+          questionId: "q_clarify",
+          conversationId: "conv_clarify",
+          previousRunId: "run_clarify",
+          clarificationId: "clarification_1",
+          request: {
+            method: "POST",
+            path: "/questions/q_clarify/runs/",
+            body: {
+              question: "<clarification-answer>",
+              triggerKind: "clarification_response",
+              triggerRunId: "run_clarify",
+              clarificationId: "clarification_1"
+            }
+          }
+        }
+      ]
+    });
+
+    if (!decoded.ok) {
+      throw new Error(decoded.error.message);
+    }
+    expect(decoded.value.nextActions[0]?.command).toBeNull();
+    expect(decoded.value.nextActions[0]?.request?.path).toBe(
+      "/questions/q_clarify/runs/"
+    );
+  });
+
+  it("decodes completed run result data and explanation", () => {
+    const decoded = decodeRun(completedRunFixture);
+
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) {
+      throw new Error(decoded.error.message);
+    }
+    expect(decoded.value.resultData?.kind).toBe("answer");
+    expect(decoded.value.explanation.inputs.results[0]?.factDescription).toBe(
+      "Count of in-person sales this month"
+    );
+    expect(decoded.value.worker).toBeNull();
+    expect(decoded.value.usage).toBeNull();
+  });
+
+  it("treats absent optional diagnostics as null", () => {
+    const { worker: _worker, usage: _usage, ...payload } = completedRunFixture;
+    const decoded = decodeRun(payload);
+
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) {
+      throw new Error(decoded.error.message);
+    }
+    expect(decoded.value.worker).toBeNull();
+    expect(decoded.value.usage).toBeNull();
+  });
+
+  it("treats null live next actions as no actions", () => {
+    const decoded = decodeRun({
+      ...completedRunFixture,
+      nextActions: null
+    });
+
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) {
+      throw new Error(decoded.error.message);
+    }
+    expect(decoded.value.nextActions).toEqual([]);
+  });
+
+  it("decodes canonical clarification result data with actionable ids", () => {
+    const decoded = decodeQuestionRunList(runListFixture);
+
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) {
+      throw new Error(decoded.error.message);
+    }
+    const firstRun = decoded.value.runs[0];
+    expect(firstRun?.resultData?.kind).toBe("needs_clarification");
+    if (firstRun?.resultData?.kind !== "needs_clarification") {
+      throw new Error("expected clarification result data");
+    }
+    expect(firstRun.resultData.details.clarifications[0]?.id).toBe("clar_store");
+    expect(firstRun.resultData.details.clarifications[0]?.availableOptions).toHaveLength(2);
+  });
+
+  it("decodes free-text clarification as the same contract with zero options", () => {
+    const decoded = decodeRun(freeTextClarificationRunFixture);
+
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) {
+      throw new Error(decoded.error.message);
+    }
+    if (decoded.value.resultData?.kind !== "needs_clarification") {
+      throw new Error("expected clarification result data");
+    }
+    expect(decoded.value.resultData.details.clarifications[0]?.availableOptions).toEqual([]);
+  });
+
+  it("rejects a clarification terminal payload with no clarification objects", () => {
+    const broken = {
+      ...freeTextClarificationRunFixture,
+      resultData: {
+        kind: "needs_clarification",
+        details: { clarifications: [] }
+      }
+    };
+
+    const decoded = decodeRun(broken);
+
+    expect(decoded.ok).toBe(false);
+    if (decoded.ok) {
+      throw new Error("expected decode failure");
+    }
+    expect(decoded.error.message).toContain("must include an actionable clarification");
+  });
+
+  it("rejects a clarification with an empty id", () => {
+    const broken = {
+      ...freeTextClarificationRunFixture,
+      resultData: {
+        kind: "needs_clarification",
+        details: {
+          clarifications: [
+            {
+              id: "",
+              basis: "ambiguous_period",
+              question: "Which March should I use?",
+              availableOptions: [],
+              evidenceRefs: ["ev_period"],
+              factResultId: "fr_period",
+              stepId: "step_clarify"
+            }
+          ]
+        }
+      }
+    };
+
+    const decoded = decodeRun(broken);
+
+    expect(decoded.ok).toBe(false);
+    if (decoded.ok) {
+      throw new Error("expected decode failure");
+    }
+    expect(decoded.error.message).toContain("clarification.id must not be empty");
+  });
+
+  it("preserves debug-oriented next action for failed runs", () => {
+    const decoded = decodeRun(failedRunFixture);
+
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) {
+      throw new Error(decoded.error.message);
+    }
+    expect(decoded.value.status).toBe("FAILED");
+    expect(decoded.value.nextActions[0]?.command).toContain("--debug");
+  });
+});

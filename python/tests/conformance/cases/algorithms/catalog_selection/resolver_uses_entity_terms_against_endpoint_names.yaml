@@ -1,0 +1,43 @@
+id: resolver_uses_entity_terms_against_endpoint_names
+description: Resolver catalog selection matches entity terms against endpoint names rather than field metadata labels.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_resolver_selection_uses_entity_terms_against_endpoint_names_only
+kind: algorithm
+algorithm: catalog_selection.resolver_select
+input:
+  catalog:
+    reads:
+      - id: staff_list
+        endpoint_name: list_staff_list
+        fields:
+          - ref: staff.field.staff_id
+            type: uuid
+            identity:
+              entity_ref: staff
+              identity_field: staff_id
+              primary_key: true
+              stable: true
+      - id: field_docstring_decoy
+        endpoint_name: list_notes
+        source_metadata:
+          description: staff profile lookup notes
+        fields:
+          - ref: notes.field.staff_profile
+            type: uuid
+            metadata:
+              label: staff profile
+            identity:
+              entity_ref: note
+              identity_field: note_id
+              primary_key: true
+              stable: true
+  entity_targets:
+    - target_id: entity_1
+      catalog_search_terms: [staff profile]
+  max_reads_per_target: 3
+expect:
+  result_contains:
+    selected_read_ids: [staff_list]
+    entity_target_selections:
+      - target_id: entity_1
+        selected_read_ids: [staff_list]

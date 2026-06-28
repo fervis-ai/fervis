@@ -1,0 +1,41 @@
+id: role_specific_open_population_reads_preserved
+description: Catalog selection preserves open population reads for a role-specific source match.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_preserves_role_specific_open_population_reads
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - {id: population_read, endpoint_name: list_population, resource_names: [population]}
+      - {id: crowd_read_a, endpoint_name: list_crowd_a, resource_names: [crowd a]}
+      - {id: crowd_read_b, endpoint_name: list_crowd_b, resource_names: [crowd b]}
+      - id: metric_detail_read
+        endpoint_name: get_metric_detail
+        resource_names: [metric record]
+        params:
+          - {ref: metric_detail_read.path.metric_id, name: metric_id, source: path, type: uuid, required: true}
+      - {id: metric_list_read, endpoint_name: list_metric_records, resource_names: [metric record]}
+  requested_facts:
+    - id: fact_1
+      description: which population item has the highest metric
+      answer_outputs:
+        - id: answer_1
+  resource_name_matches:
+    - requested_fact_id: fact_1
+      answer_output_resource_lineage:
+        - answer_output_id: answer_1
+          support_role: ROW_POPULATION
+          source_text: population rows with metric context
+          matching_resource_names: [population, crowd a, crowd b, metric record]
+        - answer_output_id: answer_1
+          support_role: MEASURED_VALUE
+          source_text: metric
+          matching_resource_names: [metric record]
+  max_reads_per_fact: 3
+expect:
+  result_contains:
+    requested_fact_selections:
+      - requested_fact_id: fact_1
+        selected_read_ids: [population_read, metric_list_read]
+

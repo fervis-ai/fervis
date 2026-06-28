@@ -1,0 +1,56 @@
+id: activation_carries_entity_without_scope_contamination
+description: Activating a prior entity carries only the entity identity, not the prior fact scope.
+migrates:
+  - api/tests/fervis/memory/test_fact_memory.py::test_activated_input_carries_entity_without_prior_scope_contamination
+kind: algorithm
+algorithm: memory.activate
+input:
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_alice_today
+        outcome: answered
+        provenance: {runId: run_1}
+        addresses:
+          - address: entity.staff.alice
+            kind: entity
+            resource: staff
+            referenceText: Alice
+            identity: {staff_id: staff-1}
+            accessor:
+              endpointName: get_staff_detail
+              argBindings:
+                - paramRef: path.staff_id
+                  valueFrom: identity.staff_id
+          - address: value.sales_total
+            kind: value
+            value: {type: decimal, value: "12000.00"}
+            scope: {businessDate: today, staff_id: staff-1}
+            derivation:
+              operation: sum
+              source: relation.sales_rows.amount
+  requests:
+    - id: current.staff
+      from_artifact_id: turn_alice_today
+      from_address: entity.staff.alice
+      use_as: identity_value_binding
+      target_binding_id: sales.staff
+      requested_scope: {businessDate: "2026-01-13"}
+expect:
+  result_contains:
+    activated:
+      activatedInputs:
+        - id: current.staff
+          from:
+            artifactId: turn_alice_today
+            address: entity.staff.alice
+          useAs: identity_value_binding
+          targetBindingId: sales.staff
+          requestedScope: {businessDate: "2026-01-13"}
+      addresses:
+        - artifactId: turn_alice_today
+          address: entity.staff.alice
+          kind: entity
+          resource: staff
+          referenceText: Alice
+          identity: {staff_id: staff-1}
+

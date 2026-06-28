@@ -1,0 +1,70 @@
+id: scripted_pattern_count_with_query_param
+description: Lookup runtime executes a count-records aggregate with a selected query-param binding.
+migrates:
+  - api/tests/fervis/lookup/test_pattern_fact_plan_contract.py::test_pattern_contract_executes_optional_choice_param_binding_end_to_end
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: How many in-person records are there?
+  question_contract:
+    fact_description: count of in-person records
+    subject_text: records
+    answer_expression_family: scalar_aggregate
+    answer_outputs: [count]
+    resource_terms: [record]
+  catalog:
+    reads:
+      - id: records_read
+        endpoint_name: records_read
+        resource_names: [record]
+        params:
+          - ref: records_read.query.channel
+            name: channel
+            source: query
+            type: choice
+            choices: [STORE, ONLINE]
+            semantics: population_filter
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - ref: field.record_id
+            path: data.record_id
+            row_path_id: data
+            type: uuid
+            identity: {entity_ref: record, identity_field: record_id, primary_key: true, stable: true}
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers:
+        - requested_fact_id: fact_1
+          answer_output_ids: [answer_1]
+          pattern: aggregate_scalar
+          source:
+            kind: read
+            read_id: records_read
+            param_bindings:
+              - {param_id: channel, value: STORE}
+          metric:
+            kind: count_records
+            count_basis:
+              kind: row_population
+              row_path_id: data
+              row_cardinality: many
+            record_id_field_id: record_id
+            label: count
+  responses:
+    records_read:
+      data:
+        - {record_id: record_1}
+        - {record_id: record_2}
+expect:
+  result_contains:
+    status: COMPLETED
+    endpoint_args:
+      records_read:
+        records_read.query.channel: STORE
+    rendered_rows:
+      - count: 2

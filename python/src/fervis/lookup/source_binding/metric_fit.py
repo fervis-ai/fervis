@@ -1,0 +1,7 @@
+"""Source-binding answer-metric fit contract constants."""
+
+from __future__ import annotations
+
+METRIC_FIT_DECISION = "FITS_REQUESTED_ANSWER"
+METRIC_NOT_FIT_DECISION = "DOES_NOT_FIT_REQUESTED_ANSWER"
+METRIC_FIT_DECISIONS = (METRIC_FIT_DECISION, METRIC_NOT_FIT_DECISION)

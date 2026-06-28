@@ -1,0 +1,32 @@
+id: question_run_ask_active_run_conflict_does_not_duplicate_lineage
+description: Re-asking in a conversation with an active run returns the active run without duplicate lineage.
+kind: algorithm
+algorithm: questions.lifecycle
+input:
+  scenario: ask
+  execution_mode: queued
+  tenant_id: tenant_1
+  principal_id: user_1
+  conversation_id: conversation_existing
+  question: "How many orders came in today?"
+  repeat_count: 2
+  model:
+    provider: anthropic
+    model_key: HAIKU
+expect:
+  result_contains:
+    ask_result:
+      status: QUEUED
+      run_id: run_1
+    repeated_ask_result:
+      status: ACTIVE_RUN_CONFLICT
+      error: active_run_conflict
+      active_run_id: run_1
+    lineage:
+      question_count: 1
+      run_count: 1
+    queue:
+      enqueued_count: 1
+      terminal_count: 0
+    lookup:
+      call_count: 0

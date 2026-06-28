@@ -1,0 +1,32 @@
+id: impossible_rendering_preserves_blocking_proof
+description: Impossible rendering preserves catalog blocking proof and nearest fields.
+migrates:
+  - api/tests/fervis/lookup/outcomes/test_results.py::test_impossible_rendering_preserves_catalog_blocking_proof
+kind: algorithm
+algorithm: outcomes.classify
+input:
+  mode: impossible
+  requested_facts:
+    - id: rf_secret
+      description: secret token
+      answer_outputs: [secret_token]
+  plan_impossible:
+    blocked_facts:
+      - requested_fact_id: rf_secret
+        basis: policy_access
+        evidence_refs: [secret_read, secret_read.masked_token]
+        reviewed_read_ids: [secret_read]
+        nearest_fields:
+          - {read_id: secret_read, field_id: masked_token}
+expect:
+  result_contains:
+    outcome_kind: impossible
+    rendered_message: I cannot answer secret token from the available API evidence.
+    blocked_requirements:
+      - requested_fact_id: rf_secret
+        fact_ref: rf_secret
+        reviewed_read_ids: [secret_read]
+        nearest_fields:
+          - {read_id: secret_read, field_id: masked_token}
+        proof_refs: [secret_read, secret_read.masked_token]
+    proof_refs: [secret_read, secret_read.masked_token]

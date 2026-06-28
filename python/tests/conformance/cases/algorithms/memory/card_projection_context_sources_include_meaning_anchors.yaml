@@ -1,0 +1,55 @@
+id: card_projection_context_sources_include_meaning_anchors
+description: Prior context sources carry typed meaning anchors derived from memory facts.
+migrates:
+  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_context_sources_include_typed_meaning_anchors_from_memory_projection
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: How much did she make yesterday?
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_staff_sales
+        outcome: answered
+        sourceQuestion: Which products did Staff One sell today?
+        sourceAnswer: Staff One sold two products.
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: products Staff One sold today
+                answer_outputs:
+                  - description: product list
+                    requested_value_frame: product list
+        addresses:
+          - address: entity.staff_1
+            kind: entity
+            resource: staff
+            referenceText: Staff One
+            identity: {staff_key: staff-1}
+            evidence: {stepIds: [turn_staff_sales.entity_proof]}
+          - address: relation.answer_rows
+            kind: relation
+            source: {kind: api_read, read_id: staff_sales_read, identityType: sale}
+            grainKeys: [sale_key]
+            fieldCoverage: {sale_key: answer_rows.sale_key}
+            completeness: {status: complete, pagination: all_pages}
+            rowAddresses: [row.answer_1]
+            evidence: {stepIds: [turn_staff_sales.relation_proof]}
+          - address: row.answer_1
+            kind: row
+            relation: relation.answer_rows
+            identity: {sale_key: sale-1}
+            values:
+              amount: {type: decimal, value: "100.00"}
+expect:
+  result_contains:
+    context_sources:
+      - kind: prior_user_question
+        text: Which products did Staff One sell today?
+        meaning_anchors:
+          - memory_id: turn_staff_sales.entity.staff_1
+            text: Staff One
+            occurrence: 1
+            kind: entity_identity
+            label: staff identity
+

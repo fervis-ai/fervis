@@ -1,0 +1,38 @@
+id: row_filter_requires_bound_relation_field
+description: A row filter targeting a field outside the bound relation fails closed.
+migrates:
+  - api/tests/fervis/lookup/fact_planning/test_values.py::test_row_filter_must_target_bound_relation_field
+kind: algorithm
+algorithm: planning.value_uses
+input:
+  catalog:
+    reads:
+      - id: records
+        endpoint_name: list_records
+        fields:
+          - ref: field.data.group_label
+            path: data.group_label
+            type: string
+          - ref: field.data.entity_label
+            path: data.entity_label
+            type: string
+  relations:
+    - id: records_rows
+      source: {kind: api_read, read_id: records}
+      fields:
+        - field_id: data_group_label
+          roles: [output]
+  values:
+    - id: alpha
+      kind: named
+      text: Alpha
+  value_uses:
+    - id: use_alpha_row_filter
+      value_id: alpha
+      target:
+        kind: row_filter
+        relation_id: records_rows
+        field_id: data_entity_label
+        operator: equals
+expect:
+  error_contains: unknown field

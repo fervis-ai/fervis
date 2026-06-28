@@ -1,0 +1,24 @@
+id: row_predicate_parse_unknown_guard_for_all_values_does_not_filter
+description: If all values satisfy the population but a guard test is unknown, source binding keeps all values and adds no row filter.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_row_predicate_with_unknown_guard_for_all_values_does_not_filter_rows
+kind: algorithm
+algorithm: source_binding.row_predicate_parse
+input:
+  row_predicates:
+    is_active:
+      "true":
+        subject_identity: SATISFIES_TEST
+        normal_instance_guard: UNKNOWN_TEST_EFFECT
+      "false":
+        subject_identity: SATISFIES_TEST
+        normal_instance_guard: UNKNOWN_TEST_EFFECT
+expect:
+  result_contains:
+    row_filters: []
+    population_choices:
+      - controller_kind: row_predicate
+        controller_id: rp.source_1.row.root.is_active
+        field_id: is_active
+        included_values: ["true", "false"]
+        excluded_values: []

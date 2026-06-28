@@ -1,0 +1,61 @@
+id: coverage_role_kind_applies_to_projected_relations
+description: Projected relations derive universe/observation role kind used by downstream coverage operations.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_coverage_role_kind_applies_to_derived_role_relations
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  relations:
+    - id: raw_candidates
+      rows:
+        - {row_id: c1, entity_id: a, display: Alpha}
+        - {row_id: c2, entity_id: b, display: Beta}
+      grain_keys: [row_id]
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown}
+    - id: raw_observations
+      rows:
+        - {row_id: o1, observed_id: a}
+      grain_keys: [row_id]
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown}
+  operations:
+    - id: candidate_subjects
+      output_relation: candidate_subjects
+      spec:
+        kind: project_to_identity
+        input_relation: raw_candidates
+        identity_fields: [entity_id]
+        fields:
+          - {source: display}
+    - id: observed_subjects
+      output_relation: observed_subjects
+      spec:
+        kind: project_to_identity
+        input_relation: raw_observations
+        identity_fields: [observed_id]
+    - id: missing
+      output_relation: missing_subjects
+      spec:
+        kind: anti_join
+        candidate:
+          relation_id: candidate_subjects
+          role: anti_join.candidate
+          required_identity_fields: [entity_id]
+        observed:
+          relation_id: observed_subjects
+          role: anti_join.observed
+          required_identity_fields: [observed_id]
+        join_keys: [{left: entity_id, right: observed_id}]
+        output_fields:
+          - {source: display}
+expect:
+  result_contains:
+    candidate_subjects:
+      rows:
+        - {entity_id: a, display: Alpha}
+        - {entity_id: b, display: Beta}
+    observed_subjects:
+      rows:
+        - {observed_id: a}
+    missing_subjects:
+      rows:
+        - {entity_id: b, display: Beta}

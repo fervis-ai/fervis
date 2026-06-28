@@ -1,0 +1,47 @@
+id: time_components_compile_without_plan_value_uses
+description: Grounded time components compile to endpoint params even when no fact-plan value uses are selected.
+migrates:
+  - api/tests/fervis/lookup/fact_planning/test_values.py::test_grounded_time_uses_compile_to_endpoint_params_without_plan_value_uses
+kind: algorithm
+algorithm: planning.value_uses
+input:
+  catalog:
+    reads:
+      - id: records
+        endpoint_name: list_records
+        params:
+          - ref: records.query.start_date
+            name: start_date
+            source: query
+            type: date
+          - ref: records.query.end_date
+            name: end_date
+            source: query
+            type: date
+  relations:
+    - id: records_rows
+      source: {kind: api_read, read_id: records}
+  values:
+    - id: since_jan_13
+      kind: time
+      expression: since Jan 13th
+      resolved_start: "2026-01-13"
+      resolved_end: "2026-05-05"
+  grounded_input_uses:
+    - id: grounded_use_since_jan_13_start_date_start
+      value_id: since_jan_13
+      row_source: {read_id: records, row_path_id: root}
+      param_id: start_date
+      value_component: start
+    - id: grounded_use_since_jan_13_end_date_end
+      value_id: since_jan_13
+      row_source: {read_id: records, row_path_id: root}
+      param_id: end_date
+      value_component: end
+expect:
+  result_contains:
+    endpoint_args:
+      - param_ref: records.query.start_date
+        value: "2026-01-13"
+      - param_ref: records.query.end_date
+        value: "2026-05-05"

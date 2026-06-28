@@ -1,0 +1,24 @@
+id: answer_addresses_derive_scalar_answer_outputs
+description: Scalar answer addresses preserve render-manifest answer-output lineage.
+migrates:
+  - api/tests/fervis/memory/test_fact_memory.py::test_answer_memory_derives_scalar_answer_outputs_from_render_manifest
+kind: algorithm
+algorithm: memory.answer_addresses
+input:
+  fact_result:
+    outcome:
+      kind: answer
+      scalar_outputs:
+        - id: answer_1
+          scalar_id: total_sales
+      scalars:
+        total_sales: "10150.00"
+      proof_refs: [operation:aggregate]
+expect:
+  result_contains:
+    address_count: 1
+    addresses:
+      - address: value.total_sales
+        derivation:
+          answer_output_ids: [answer_1]
+

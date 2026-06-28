@@ -1,0 +1,36 @@
+id: prior_answer_request_projects_output_frame
+description: Prior answer request memory projects requested answer-output frames.
+migrates:
+  - api/tests/fervis/memory/test_answer_output_frames.py::test_memory_public_contract_projects_prior_answer_output_frame
+kind: algorithm
+algorithm: memory.prior_answer_request
+input:
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_sales_total
+        outcome: answered
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: total sales for Staff One
+                answer_outputs:
+                  - id: answer_1
+                    description: sales total
+                    requested_value_frame: total sales amount
+        addresses:
+          - address: value.answer_1
+            kind: value
+            value: {type: decimal, value: "100.00"}
+            evidence:
+              stepIds: [turn_sales_total.answer]
+expect:
+  result_contains:
+    requests:
+      - id: fact_1
+        answer_fact: total sales for Staff One
+        output_frames:
+          - output_id: answer_1
+            description: sales total
+            requested_value_frame: total sales amount
+

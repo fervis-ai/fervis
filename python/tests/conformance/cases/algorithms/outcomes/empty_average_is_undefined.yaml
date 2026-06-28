@@ -1,0 +1,31 @@
+id: empty_average_is_undefined
+description: Average over an empty relation is undefined with empty-average provenance.
+migrates:
+  - api/tests/fervis/lookup/outcomes/test_results.py::test_empty_average_is_undefined_not_none
+kind: algorithm
+algorithm: outcomes.classify
+input:
+  mode: engine
+  relations:
+    - id: rows
+      rows: []
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown, proof_refs: [read:rows]}
+  operations:
+    - id: avg_rows
+      output_relation: result
+      spec:
+        kind: aggregate
+        input_relation: rows
+        group_by: []
+        aggregations:
+          - {function: avg, input_field: amount, output_field: avg_amount}
+  render_outputs:
+    - {id: avg_amount, relation_id: result, field_id: avg_amount}
+expect:
+  result_contains:
+    undefined:
+      operation_id: avg_rows
+      reason_code: empty_average
+      input_refs: [amount]
+      proof_refs: [read:rows, avg_rows]
+    proof_refs: [read:rows, avg_rows]

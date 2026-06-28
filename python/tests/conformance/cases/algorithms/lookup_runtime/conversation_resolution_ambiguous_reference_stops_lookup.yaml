@@ -1,0 +1,58 @@
+id: conversation_resolution_ambiguous_reference_stops_lookup
+description: Lookup runtime stops before question contract when conversation resolution returns multiple plausible meanings.
+migrates:
+  - api/tests/fervis/lookup/test_conversation_resolution_pipeline.py::test_pipeline_stops_before_question_contract_on_ambiguous_resolution
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: How much was that?
+  memory_artifacts:
+    - artifact_id: prior_metric
+      outcome: answered
+      source_question: What was yesterday's metric?
+      source_answer: Yesterday's metric was 10.
+      addresses:
+        - address: value.metric
+          kind: value
+          value: {type: number, value: 10}
+          display: "10"
+  conversation_resolution:
+    kind: conversation_resolution
+    status: needs_clarification
+    current_question_text: How much was that?
+    clause_resolutions: []
+    unresolved:
+      unresolved_kind: multiple_meanings
+      why_unresolved: More than one complete interpretation is plausible.
+      candidate_interpretations:
+        - integrated_question: How much was that? (1)
+          supporting_evidence:
+            - source_id: current_question
+              exact_source_texts: ["How much was that?"]
+        - integrated_question: How much was that? (2)
+          supporting_evidence:
+            - source_id: current_question
+              exact_source_texts: ["How much was that?"]
+  question_contract:
+    fact_description: metric amount
+    subject_text: metric
+    answer_expression_family: scalar_aggregate
+    answer_outputs: [amount]
+  catalog:
+    reads: []
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers: []
+  responses: {}
+expect:
+  result_contains:
+    status: NEEDS_CLARIFICATION
+    outcome_kind: needs_clarification
+    clarifications:
+      - question: Which interpretation should I use?
+        candidate_refs:
+          - How much was that? (1)
+          - How much was that? (2)
+    tool_names: [submit_conversation_resolution]

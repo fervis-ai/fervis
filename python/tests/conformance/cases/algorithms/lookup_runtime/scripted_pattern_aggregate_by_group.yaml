@@ -1,0 +1,69 @@
+id: scripted_pattern_aggregate_by_group
+description: Lookup runtime executes a scripted grouped aggregate and renders the group key plus aggregate metric.
+migrates:
+  - api/tests/fervis/lookup/test_pattern_fact_plan_contract.py::test_pattern_contract_executes_aggregate_by_group_end_to_end
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: How much is the metric total by location?
+  question_contract:
+    fact_description: metric total by location
+    subject_text: location
+    answer_expression_family: grouped_aggregate
+    answer_outputs: [location]
+    resource_terms: [metric]
+    support_role: MEASURED_VALUE
+  catalog:
+    reads:
+      - id: metric_read
+        endpoint_name: metric_read
+        resource_names: [metric]
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - ref: field.location_id
+            path: data.location_id
+            row_path_id: data
+            type: uuid
+            identity: {entity_ref: location, identity_field: location_id, primary_key: true, stable: true}
+          - ref: field.metric_total
+            path: data.metric_total
+            row_path_id: data
+            type: decimal
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers:
+        - requested_fact_id: fact_1
+          pattern: aggregate_by_group
+          source_hint: {kind: read, read_id: metric_read}
+          aggregate_choice:
+            group_field_ids: [location_id]
+            metric_field_id: metric_total
+            metric_function: sum
+  read_eligibility:
+    - requested_fact_id: fact_1
+      read_id: metric_read
+      answer_value_fields: [location_id]
+      measured_value_fields: [metric_total]
+      group_key_fields: [location_id]
+  responses:
+    metric_read:
+      data:
+        - location_id: location_alpha
+          location_name: Location Alpha
+          metric_total: "10.00"
+        - location_id: location_beta
+          location_name: Location Beta
+          metric_total: "20.00"
+expect:
+  result_contains:
+    status: COMPLETED
+    rendered_rows:
+      - location_id: location_alpha
+        metric_total: "10.00"
+      - location_id: location_beta
+        metric_total: "20.00"

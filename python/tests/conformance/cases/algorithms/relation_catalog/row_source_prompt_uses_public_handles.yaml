@@ -1,0 +1,35 @@
+id: row_source_prompt_uses_public_handles
+description: Row-source prompt payload exposes public row-source handles and field evidence, not backend catalog IDs.
+migrates:
+  - api/tests/fervis/lookup/fact_planning/test_row_sources.py::test_row_source_prompt_uses_public_handles_not_backend_catalog_ids
+kind: algorithm
+algorithm: relation_catalog.row_source_projection
+input:
+  catalog:
+    reads:
+      - id: payment_read
+        endpoint_name: list_payments
+        resource_names: [payment]
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - ref: field.data.last_four
+            path: data.last_four
+            type: string
+        facts:
+          - ref: payment.card_last_four
+            field_ref: field.data.last_four
+expect:
+  result_contains:
+    read_id: payment_read
+    row_path_id: data
+    prompt_api_row_sources:
+      - kind: api_read
+        fields:
+          - field_id: last_four
+            label: last_four
+            type: string
+            allowed_roles: [output, predicate]
+        params: []

@@ -1,0 +1,47 @@
+id: required_identity_read_kept_when_identity_value_available
+description: Catalog selection keeps a required-identity detail read when a matching identity value is available.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_keeps_required_identity_read_with_matching_identity_value
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - id: sale_detail
+        endpoint_name: retrieve_sale
+        resource_names: [sale receipt item detail]
+        params:
+          - ref: sale.path.sale_id
+            name: sale_id
+            source: path
+            type: uuid
+            required: true
+            identity: {entity_ref: sale, identity_field: sale_id, primary_key: true, stable: true}
+        facts: [{ref: sale.receipt.item.detail}]
+      - id: sale_list
+        endpoint_name: list_sales
+        resource_names: [sale]
+        facts: [{ref: sale}]
+  requested_facts:
+    - id: fact_1
+      description: sale receipt item detail
+      answer_outputs:
+        - id: fact_1
+  resource_name_matches:
+    - requested_fact_id: fact_1
+      answer_output_resource_lineage:
+        - answer_output_id: answer_1
+          support_role: MEASURED_VALUE
+          source_text: sale receipt item detail
+          matching_resource_names: [sale receipt item detail, sale]
+  available_values:
+    - id: value_sale_1
+      kind: identity
+      identity_type: sale
+      identity_field: sale_id
+      value: sale-1
+  max_reads_per_fact: 4
+expect:
+  result_contains:
+    selected_read_ids: [sale_detail, sale_list]
+

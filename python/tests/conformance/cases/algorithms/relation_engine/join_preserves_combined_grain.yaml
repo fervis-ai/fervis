@@ -1,0 +1,31 @@
+id: join_preserves_combined_grain
+description: Join output grain combines the preserved identity fields from both inputs.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_join_preserves_combined_input_grain
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  scalar_inputs: [{id: zero, value: 0}]
+  relations:
+    - id: parents
+      rows: [{parent_id: p1, name: Parent}]
+      grain_keys: [parent_id]
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown}
+    - id: children
+      rows:
+        - {child_id: c1, parent_id: p1}
+        - {child_id: c2, parent_id: p1}
+      grain_keys: [child_id]
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown}
+  operations:
+    - id: joined
+      output_relation: parent_children
+      spec:
+        kind: join
+        left: parents
+        right: children
+        join_keys: [{left: parent_id, right: parent_id}]
+expect:
+  result_contains:
+    parent_children:
+      grain_keys: [parent_id, child_id]

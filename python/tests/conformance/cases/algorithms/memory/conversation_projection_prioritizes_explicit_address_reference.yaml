@@ -1,0 +1,38 @@
+id: conversation_projection_prioritizes_explicit_address_reference
+description: Conversation memory projection prioritizes explicitly referenced memory addresses inside the budget.
+migrates:
+  - api/tests/fervis/memory/test_fact_memory.py::test_projection_prioritizes_explicit_address_reference_within_budget
+kind: algorithm
+algorithm: memory.project_conversation
+input:
+  current_user_message: How much did Staff 8 sell yesterday?
+  max_index_items: 1
+  conversation_context:
+    factArtifacts:
+      - artifactId: run_7
+        outcome: answered
+        addresses:
+          - address: entity.staff.7
+            kind: entity
+            resource: staff
+            referenceText: Staff 7
+            identity: {staff_id: staff-7}
+      - artifactId: run_8
+        outcome: answered
+        addresses:
+          - address: entity.staff.8
+            kind: entity
+            resource: staff
+            referenceText: Staff 8
+            identity: {staff_id: staff-8}
+expect:
+  result_contains:
+    prompt_context:
+      memoryIndex:
+        items:
+          - artifactId: run_8
+            address: entity.staff.8
+            kind: entity
+            resource: staff
+            referenceText: Staff 8
+            identity: {staff_id: staff-8}

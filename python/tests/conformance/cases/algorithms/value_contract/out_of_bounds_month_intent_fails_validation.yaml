@@ -1,0 +1,18 @@
+id: out_of_bounds_month_intent_fails_validation
+description: Time value validation rejects month values outside the calendar range.
+migrates:
+  - api/tests/fervis/lookup/fact_planning/test_values.py::test_time_value_contract_rejects_out_of_bounds_calendar_intents
+kind: algorithm
+algorithm: planning.value_contract
+input:
+  values:
+    - id: time_value
+      kind: time
+      expression: time
+      intent:
+        kind: period
+        unit: month
+        mode: full
+        named: {value: 13}
+expect:
+  error_contains: invalid time intent

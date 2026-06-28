@@ -1,0 +1,47 @@
+id: distributed_source_texts_are_dependency_evidence
+description: A dependency may be supported by multiple exact source texts from one visible context source.
+migrates:
+  - api/tests/fervis/lookup/conversation_resolution/test_parser.py::test_parser_accepts_distributed_exact_source_texts_for_dependency_evidence
+kind: algorithm
+algorithm: conversation_resolution.parse
+input:
+  current_question: How much is that in total sales?
+  context_sources:
+    - source_id: prior_1
+      kind: prior_fervis_answer
+      text: "Kilimani Beauty Studio: Alice Smith: 4000.00: 2026-05-20T10:00:00Z"
+      meaning_anchors:
+        - {memory_id: mem_staff, text: Alice Smith}
+        - {memory_id: mem_amount, text: "4000.00"}
+        - {memory_id: mem_time, text: "2026-05-20T10:00:00Z"}
+  payload:
+    kind: conversation_resolution
+    status: resolved
+    current_question_text: How much is that in total sales?
+    clause_resolutions:
+      - current_clause_text: How much is that in total sales?
+        occurrence: 1
+        requested_value_frame:
+          current_value_surface: {text: total sales, kind: self_sufficient_current_value}
+          context_frame_choices: []
+        dependencies:
+          - anchor_text: that
+            occurrence: 1
+            kind: reference
+            meaning_components:
+              - {kind: other, source_id: prior_1, source_text: Alice Smith, memory_id: mem_staff, resolved_text: Alice Smith}
+              - {kind: other, source_id: prior_1, source_text: "4000.00", memory_id: mem_amount, resolved_text: "4000.00"}
+              - {kind: other, source_id: prior_1, source_text: "2026-05-20T10:00:00Z", memory_id: mem_time, resolved_text: "2026-05-20T10:00:00Z"}
+            resolved_text: sales previously listed for Alice today
+            must_preserve_terms: [Alice, today]
+        resolved_clause_text: How much is the total sales amount for sales previously listed for Alice today?
+    unresolved: {unresolved_kind: none, why_unresolved: "", candidate_interpretations: []}
+expect:
+  result_contains:
+    clause_resolutions:
+      - dependencies:
+          - meaning_components:
+              - {source_text: Alice Smith}
+              - {source_text: "4000.00"}
+              - {source_text: "2026-05-20T10:00:00Z"}
+

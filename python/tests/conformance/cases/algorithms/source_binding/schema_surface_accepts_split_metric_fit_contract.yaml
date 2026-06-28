@@ -1,0 +1,11 @@
+id: schema_surface_accepts_split_metric_fit_contract
+description: Source-binding schema accepts metric fit bases and separate fit-basis interpretations as the metric-fit output contract.
+kind: algorithm
+algorithm: source_binding.schema_surface
+input:
+  request:
+    mode: choice_param
+  split_metric_fit_contract: true
+expect:
+  result_contains:
+    validation: valid

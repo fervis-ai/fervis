@@ -1,0 +1,32 @@
+id: schema_requires_question_input_inventory_check
+description: Question-contract parsing fails closed when the root input inventory check is missing.
+migrates:
+  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_schema_requires_question_input_inventory_check
+kind: algorithm
+algorithm: question_contract.parse
+input:
+  question_context: How many sales happened today?
+  payload:
+    kind: question_contract
+    answer_requests_count: 1
+    question_inputs: []
+    answer_requests:
+      - answer_fact: sales at ABC Mall
+        answer_expression: {family: scalar_aggregate}
+        answer_subject:
+          subject_text: sales
+          instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
+        input_requirements: {time_requirements: []}
+        answer_population:
+          population_label: sales
+          counted_unit: sales
+          membership_tests:
+            - test_id: pop_test_1
+              kind: SUBJECT_IDENTITY
+              polarity: MUST_PASS
+              test_question: Does the row/value represent sales?
+        answer_outputs:
+          - description: sales total
+        input_decisions: []
+expect:
+  error_contains: question_input_inventory_check

@@ -1,0 +1,145 @@
+id: card_projection_prunes_to_bounded_limit
+description: Memory projection prunes visible cards to the configured bounded limit.
+migrates:
+  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_memory_card_projection_prunes_to_bounded_card_limit
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: How about those?
+  max_cards: 12
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_0
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance: &question_contract
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: money we made yesterday
+                answer_outputs:
+                  - description: total sales amount
+                    requested_value_frame: total sales amount
+        addresses: &answer_addresses
+          - address: value.total
+            kind: value
+            value: {type: decimal, value: "100.00"}
+      - artifactId: turn_1
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance: *question_contract
+        addresses: *answer_addresses
+      - artifactId: turn_2
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance: *question_contract
+        addresses: *answer_addresses
+      - artifactId: turn_3
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance: *question_contract
+        addresses: *answer_addresses
+      - artifactId: turn_4
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance: *question_contract
+        addresses: *answer_addresses
+      - artifactId: turn_5
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance: *question_contract
+        addresses: *answer_addresses
+      - artifactId: turn_6
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance: *question_contract
+        addresses: *answer_addresses
+      - artifactId: turn_7
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance: *question_contract
+        addresses: *answer_addresses
+      - artifactId: turn_8
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance: *question_contract
+        addresses: *answer_addresses
+      - artifactId: turn_9
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance: *question_contract
+        addresses: *answer_addresses
+      - artifactId: turn_10
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance: *question_contract
+        addresses: *answer_addresses
+      - artifactId: turn_11
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance: *question_contract
+        addresses: *answer_addresses
+      - artifactId: turn_12
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance: *question_contract
+        addresses: *answer_addresses
+      - artifactId: turn_13
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance: *question_contract
+        addresses: *answer_addresses
+      - artifactId: turn_14
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance: *question_contract
+        addresses: *answer_addresses
+      - artifactId: turn_15
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance: *question_contract
+        addresses: *answer_addresses
+      - artifactId: turn_16
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance: *question_contract
+        addresses: *answer_addresses
+      - artifactId: turn_17
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance: *question_contract
+        addresses: *answer_addresses
+      - artifactId: turn_18
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance: *question_contract
+        addresses: *answer_addresses
+      - artifactId: turn_19
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance: *question_contract
+        addresses: *answer_addresses
+expect:
+  result_contains:
+    card_count: 12
+

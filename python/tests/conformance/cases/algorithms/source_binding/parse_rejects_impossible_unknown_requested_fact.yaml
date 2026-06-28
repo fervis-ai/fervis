@@ -1,0 +1,13 @@
+id: parse_rejects_impossible_unknown_requested_fact
+kind: algorithm
+algorithm: source_binding.parse
+description: Source-binding impossible outcomes must fail closed when they reference a requested fact that was not in the request.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_impossible_rejects_unknown_requested_fact
+input:
+  invalid_impossible_requested_fact: fact_typo
+expect:
+  result_contains:
+    schema_validation: invalid
+    parser_validation: invalid
+    parser_error: blocked fact references unknown requested fact

@@ -1,0 +1,44 @@
+id: row_predicate_ids_are_scoped_by_row_path
+description: Row predicate IDs include row-path scope so same-named fields on different nested rows do not collide.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_row_predicate_ids_are_scoped_by_row_path
+kind: algorithm
+algorithm: source_binding.row_predicates
+input:
+  catalog:
+    reads:
+      - id: activity
+        endpoint_name: list_activity
+        row_paths:
+          - id: orders
+            path: orders
+            cardinality: many
+          - id: returns
+            path: returns
+            cardinality: many
+        fields:
+          - ref: activity.orders.status
+            path: orders.status
+            row_path_id: orders
+            type: choice
+            choices: [OPEN, CLOSED]
+          - ref: activity.returns.status
+            path: returns.status
+            row_path_id: returns
+            type: choice
+            choices: [OPEN, CLOSED]
+  candidate:
+    source_candidate_id: source_1
+    kind: new_api_read
+    read_id: activity
+    result_grains:
+      - grain_id: orders
+        row_path_id: orders
+        cardinality: many
+      - grain_id: returns
+        row_path_id: returns
+        cardinality: many
+expect:
+  result_contains:
+    predicate_id_count: 2
+    unique_predicate_id_count: 2

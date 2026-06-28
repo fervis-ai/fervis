@@ -1,0 +1,27 @@
+id: lineage_memory_artifacts_reject_missing_outcome
+description: Memory artifact reads fail closed when the canonical outcome field is absent.
+kind: algorithm
+algorithm: memory.lineage_memory_artifacts
+input:
+  conversation_id: conversation_1
+  limit: 5
+  memory_artifacts:
+    - memory_artifact_id: mem_missing_outcome
+      conversation_id: conversation_1
+      run_id: run_1
+      produced_by_step_id: step_execute
+      source_kind: fact_result
+      fact_result_id: fact_result_1
+      payload_schema: fervis.memory_artifact
+      payload_schema_rev: 1
+      payload_json:
+        artifactId: mem_missing_outcome
+        sourceKind: fact_result
+        addresses:
+          - address: value.answer_1
+            kind: value
+            value:
+              type: number
+              value: "1"
+expect:
+  error_contains: requires outcome

@@ -1,0 +1,10 @@
+id: row_predicate_schema_requires_review_for_each_shown_predicate
+description: Source binding must review each shown row predicate instead of silently omitting it.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_schema_requires_review_for_each_shown_row_predicate
+kind: algorithm
+algorithm: source_binding.row_predicate_parse
+input:
+  omit_row_predicate_reviews: true
+expect:
+  error_contains: not valid

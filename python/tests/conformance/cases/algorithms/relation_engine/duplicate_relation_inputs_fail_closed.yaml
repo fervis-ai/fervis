@@ -1,0 +1,16 @@
+id: duplicate_relation_inputs_fail_closed
+description: Relation engine rejects duplicate input relation ids.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_relation_engine_rejects_duplicate_relation_and_scalar_outputs
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  relations:
+    - id: rows
+      rows: []
+      grain_keys: []
+    - id: rows
+      rows: []
+      grain_keys: []
+expect:
+  error_contains: duplicate relation

@@ -1,0 +1,19 @@
+id: unique_binding_candidate_is_not_terminal
+description: A single binding candidate does not produce a terminal outcome.
+migrates:
+  - api/tests/fervis/lookup/outcomes/test_results.py::test_binding_candidate_cardinality_classifies_terminal_results
+kind: algorithm
+algorithm: outcomes.classify
+input:
+  mode: binding_candidates
+  requested_fact_id: rf_staff
+  binding_target_id: staff
+  known_input_id: alice
+  relations:
+    - id: staff_candidates
+      rows:
+        - {staff_id: "1"}
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown, proof_refs: [read:staff_candidates]}
+expect:
+  result_contains:
+    result: null

@@ -1,0 +1,19 @@
+id: standalone_question_has_no_integrated_question
+description: Standalone current questions preserve the current question text.
+migrates:
+  - api/tests/fervis/lookup/conversation_resolution/test_parser.py::test_parser_keeps_standalone_current_question_without_integrated_question
+  - api/tests/fervis/lookup/test_conversation_resolution_outcomes.py::test_self_sufficient_question_keeps_current_question_without_integrated_question
+kind: algorithm
+algorithm: conversation_resolution.parse
+input:
+  current_question: How much did she sell yesterday?
+  payload:
+    kind: conversation_resolution
+    status: standalone
+    current_question_text: How much did she sell yesterday?
+    clause_resolutions: []
+    unresolved: {unresolved_kind: none, why_unresolved: "", candidate_interpretations: []}
+expect:
+  result_contains:
+    resolution: standalone
+    current_question_text: How much did she sell yesterday?

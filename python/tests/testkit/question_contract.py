@@ -1,0 +1,77 @@
+from __future__ import annotations
+
+from typing import Any
+
+from fervis.lookup.question_contract import (
+    KnownInputKind,
+    KnownInputSource,
+    QuestionContract,
+    RequestedFact,
+    RequestedFactAnswerOutput,
+    RequestedFactAnswerSubject,
+    RequestedFactKnownInput,
+)
+
+
+def question_contract_from_payload(payload: dict[str, Any]) -> QuestionContract:
+    return QuestionContract(
+        requested_facts=tuple(
+            requested_fact_from_payload(item)
+            for item in payload.get("requested_facts") or ()
+        )
+    )
+
+
+def requested_fact_from_payload(payload: dict[str, Any]) -> RequestedFact:
+    known_inputs = tuple(
+        known_input_from_payload(item) for item in payload.get("known_inputs") or ()
+    )
+    return RequestedFact(
+        id=str(payload["id"]),
+        description=str(payload.get("description") or payload["id"]),
+        required_for=str(payload.get("required_for") or ""),
+        answer_subject=answer_subject_from_payload(payload.get("answer_subject")),
+        answer_outputs=tuple(
+            answer_output_from_payload(item)
+            for item in payload.get("answer_outputs") or ()
+        ),
+        known_inputs=known_inputs,
+        input_refs=tuple(payload.get("input_refs") or (item.id for item in known_inputs)),
+    )
+
+
+def answer_subject_from_payload(payload: Any) -> RequestedFactAnswerSubject | None:
+    if payload is None:
+        return None
+    if isinstance(payload, str):
+        return RequestedFactAnswerSubject(subject_text=payload)
+    if not isinstance(payload, dict):
+        raise ValueError("answer_subject must be a string or object")
+    return RequestedFactAnswerSubject(
+        subject_text=str(payload["subject_text"]),
+    )
+
+
+def answer_output_from_payload(payload: Any) -> RequestedFactAnswerOutput:
+    if isinstance(payload, str):
+        return RequestedFactAnswerOutput(id=payload)
+    if not isinstance(payload, dict):
+        raise ValueError("answer output must be a string or object")
+    return RequestedFactAnswerOutput(
+        id=str(payload["id"]),
+        description=str(payload.get("description") or ""),
+    )
+
+
+def known_input_from_payload(payload: dict[str, Any]) -> RequestedFactKnownInput:
+    return RequestedFactKnownInput(
+        id=str(payload["id"]),
+        kind=KnownInputKind(str(payload.get("kind") or "named_reference_text")),
+        source=KnownInputSource(str(payload.get("source") or "question_context")),
+        description=str(payload.get("description") or ""),
+        text=str(payload.get("text") or ""),
+        numeric_value=payload.get("numeric_value"),
+        value_source_text=str(payload.get("value_source_text") or ""),
+        lookup_text=str(payload.get("lookup_text") or ""),
+        resolved_input_ref=str(payload.get("resolved_input_ref") or ""),
+    )

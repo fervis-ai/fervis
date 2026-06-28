@@ -1,0 +1,27 @@
+id: project_drops_grain_when_full_grain_not_preserved
+description: Project drops grain metadata when projected fields do not preserve the full input grain.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_project_drops_grain_when_it_does_not_preserve_full_input_grain
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  scalar_inputs: [{id: zero, value: 0}]
+  relations:
+    - id: events
+      rows:
+        - {entity_id: a, event_id: "1", value: 10}
+        - {entity_id: a, event_id: "2", value: 20}
+      grain_keys: [entity_id, event_id]
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown}
+  operations:
+    - id: project_entity
+      output_relation: entity_rows
+      spec:
+        kind: project
+        input_relation: events
+        fields:
+          - {source: entity_id}
+expect:
+  result_contains:
+    entity_rows:
+      grain_keys: []

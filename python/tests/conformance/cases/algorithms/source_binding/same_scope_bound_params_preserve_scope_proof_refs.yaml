@@ -1,0 +1,19 @@
+id: same_scope_bound_params_preserve_scope_proof_refs
+description: Same-scope API-read candidates preserve endpoint-arg proof refs from the prior execution scope.
+kind: algorithm
+algorithm: source_binding.prompt_surface
+input:
+  request:
+    mode: same_scope_memory
+expect:
+  result_contains:
+    source_candidate_ids:
+      - source_1
+    read_ids:
+      - sales
+    bound_params:
+      - param_id: location_id
+        value: loc_westlands
+        source: prior_scope
+        proof_refs:
+          - known_input:location_1

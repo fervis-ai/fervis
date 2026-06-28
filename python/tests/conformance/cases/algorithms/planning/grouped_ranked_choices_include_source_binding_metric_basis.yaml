@@ -1,0 +1,41 @@
+id: grouped_ranked_choices_include_source_binding_metric_basis
+description: Grouped/ranked fact-planning metric candidates carry source-binding metric meaning and fit basis beside the fitting metric option.
+kind: algorithm
+algorithm: planning.grouped_ranked_choices
+input:
+  requested_fact_id: fact_1
+  plan_shape: ranked_aggregate
+  source:
+    id: sb_1
+    requested_fact_id: fact_1
+    read_id: list_shift_compensation_list
+    cardinality: many
+    fields:
+      - field_id: location_id
+        type: uuid
+        row_cardinality: many
+        identity: {entity_ref: location, identity_field: location_id, primary_key: true, stable: true}
+      - field_id: calculated_pay
+        type: decimal
+        row_cardinality: many
+    evidence:
+      - {evidence_id: source_1.data.location_id, field_id: location_id, row_cardinality: many}
+      - {evidence_id: source_1.data.calculated_pay, field_id: calculated_pay, row_cardinality: many}
+    fulfillments:
+      - answer_output_id: answer_1
+        group_key_evidence_ids:
+          - source_1.data.location_id
+        metric_measure_evidence_ids:
+          - source_1.data.calculated_pay
+        metric_fit_bases:
+          - evidence_id: source_1.data.calculated_pay
+            metric_meaning: The calculated pay amount recorded on each shift compensation row.
+            fit_basis: This is the most direct row-level payroll spend measure for aggregating total payroll spend by location.
+expect:
+  result_contains:
+    group_field_ids: [location_id]
+    metric_field_ids: [calculated_pay]
+    metric_source_binding_bases:
+      calculated_pay:
+        metric_meaning: The calculated pay amount recorded on each shift compensation row.
+        fit_basis: This is the most direct row-level payroll spend measure for aggregating total payroll spend by location.

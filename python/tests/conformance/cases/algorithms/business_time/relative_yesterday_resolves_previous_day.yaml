@@ -1,0 +1,20 @@
+id: relative_yesterday_resolves_previous_day
+description: Structured relative yesterday resolves to the previous anchor day.
+migrates:
+  - api/tests/fervis/business_time/test_resolver.py::test_resolve_point_relative_yesterday
+kind: algorithm
+algorithm: business_time.resolve
+input:
+  expression: yesterday
+  anchor_date: "2026-04-11"
+  intent:
+    kind: point
+    precision: day
+    relative:
+      unit: day
+      offset: -1
+expect:
+  result_contains:
+    status: resolved
+    start: "2026-04-10"
+    end: "2026-04-10"

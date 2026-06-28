@@ -1,0 +1,34 @@
+id: lookup_projection_keeps_identity_sets_out_of_prompt
+description: Lookup memory projects complete relation identity sets for execution without adding identity sets to prompt context.
+migrates:
+  - api/tests/fervis/lookup/test_memory_identity_values.py::test_lookup_memory_projects_identity_sets_outside_prompt_payload
+kind: algorithm
+algorithm: memory.lookup_projection
+input:
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_1
+        outcome: answered
+        addresses:
+          - address: relation.stores
+            kind: relation
+            source: {kind: api_read, identityType: store}
+            grainKeys: [store_id]
+            completeness: {status: complete, pagination: all_pages, rowCount: 2}
+            rowAddresses: [row.stores.1, row.stores.2]
+          - address: row.stores.1
+            kind: row
+            relation: relation.stores
+            identity: {store_id: store_1}
+          - address: row.stores.2
+            kind: row
+            relation: relation.stores
+            identity: {store_id: store_2}
+expect:
+  result_contains:
+    identity_sets:
+      - values: [store_1, store_2]
+  text_excludes_from:
+    prompt_context:
+      - identity_sets
+      - identitySets

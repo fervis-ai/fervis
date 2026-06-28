@@ -1,0 +1,19 @@
+id: metric_fit_excludes_nonfitting_unselected_metrics
+description: Source binding excludes nearby metric fields that were reviewed and found not to fit the selected answer.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_parse_source_binding_grouped_ranked_filters_nonfit_unselected_metric_evidence
+kind: algorithm
+algorithm: source_binding.metric_fit_parse
+input:
+  include_secondary_metric: true
+  selected_metric_field: amount
+  choices:
+    OPEN: SATISFIES_TEST
+    CLOSED: CONFLICTS_WITH_TEST
+  metric_decisions:
+    amount: FITS_REQUESTED_ANSWER
+    secondary_amount: DOES_NOT_FIT_REQUESTED_ANSWER
+expect:
+  result_contains:
+    metric_measure_field_ids: [amount]
+    row_count_basis_evidence_ids: []

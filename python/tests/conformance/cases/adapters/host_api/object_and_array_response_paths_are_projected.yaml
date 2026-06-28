@@ -1,0 +1,49 @@
+id: object_and_array_response_paths_are_projected
+description: Object and array response fields project to separate row paths.
+migrates:
+  - api/tests/fervis/host_api/test_relation_catalog_projection.py::test_projection_uses_declared_object_fields_for_one_row_paths
+kind: adapter
+adapter: host_api.endpoint_contract_projection
+input:
+  contracts:
+    - endpoint_name: summary_report
+      url_name: summary-report
+      method: GET
+      path_template: /reports/summary/
+      view_class: tests.SummaryReportView
+      resource_names: [summary report]
+      response_fields:
+        - name: summary
+          type: object
+          path: summary
+        - name: total_amount
+          type: decimal
+          path: summary.total_amount
+        - name: data
+          type: array
+          path: data
+        - name: label
+          type: string
+          path: data.label
+        - name: amount
+          type: decimal
+          path: data.amount
+expect:
+  result_contains:
+    reads:
+      summary_report:
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+          - id: root
+            path: ""
+            cardinality: one
+          - id: summary
+            path: summary
+            cardinality: one
+        fields:
+          summary.total_amount:
+            row_path_id: summary
+          data.label:
+            row_path_id: data

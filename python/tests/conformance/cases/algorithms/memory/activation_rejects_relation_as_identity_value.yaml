@@ -1,0 +1,24 @@
+id: activation_rejects_relation_as_identity_value
+description: Relation addresses cannot be activated as single identity-value bindings.
+migrates:
+  - api/tests/fervis/memory/test_fact_memory.py::test_relation_addresses_are_not_advertised_as_identity_value_inputs
+kind: algorithm
+algorithm: memory.activate
+input:
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_rows
+        outcome: answered
+        addresses:
+          - address: relation.sales_rows
+            kind: relation
+            source: {kind: operation_output}
+  requests:
+    - id: current.rows
+      from_artifact_id: turn_rows
+      from_address: relation.sales_rows
+      use_as: identity_value_binding
+      target_binding_id: sales.rows
+expect:
+  error_contains: uses relation as identity_value_binding
+

@@ -1,0 +1,27 @@
+id: question_run_ask_inline_uses_default_limits
+description: Inline ask applies shared default budget and thinking-token limits when adapters omit them.
+kind: algorithm
+algorithm: questions.lifecycle
+input:
+  scenario: ask
+  execution_mode: inline
+  tenant_id: tenant_1
+  principal_id: user_1
+  question: "How many orders came in today?"
+  model:
+    provider: anthropic
+    model_key: HAIKU
+  lookup_result:
+    status: COMPLETED
+    answer: "42"
+    result_data:
+      value: 42
+expect:
+  result_contains:
+    ask_result:
+      status: COMPLETED
+      answer: "42"
+    lookup:
+      call_count: 1
+      last_max_budget_usd: "0.5"
+      last_max_thinking_tokens: 64

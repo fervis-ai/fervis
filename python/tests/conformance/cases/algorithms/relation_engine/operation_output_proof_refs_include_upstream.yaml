@@ -1,0 +1,28 @@
+id: operation_output_proof_refs_include_upstream
+description: Operation output completeness proof references include upstream proof references and the operation id.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_operation_output_proof_refs_include_upstream_proofs
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  relations:
+    - id: left
+      rows: [{left_id: a}]
+      grain_keys: [left_id]
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown, proof_refs: [read:left]}
+    - id: right
+      rows: [{right_id: a}]
+      grain_keys: [right_id]
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown, proof_refs: [read:right]}
+  operations:
+    - id: joined
+      output_relation: joined_rows
+      spec:
+        kind: join
+        left: left
+        right: right
+        join_keys: [{left: left_id, right: right_id}]
+expect:
+  result_contains:
+    joined_rows:
+      completeness_proof_refs: [read:left, read:right, joined]

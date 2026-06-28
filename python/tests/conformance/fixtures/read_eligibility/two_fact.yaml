@@ -1,0 +1,30 @@
+id: two_fact
+question: How many in-person sales and total payments?
+requested_facts:
+  - id: fact_sales
+    description: count of in-person sales
+    answer_subject: sales
+    answer_outputs:
+      - id: answer_1
+  - id: fact_payments
+    description: total payments
+    answer_subject: payments
+    answer_outputs:
+      - id: answer_2
+catalog:
+  reads:
+    - id: list_sales_summary
+      endpoint_name: list_sales_summary
+      fields:
+        - ref: field.summary.data.count
+          path: data.count
+          type: integer
+    - id: list_payment_list
+      endpoint_name: list_payment_list
+      fields:
+        - ref: field.payment.data.amount
+          path: data.amount
+          type: decimal
+selected_read_ids_by_fact:
+  fact_sales: [list_sales_summary]
+  fact_payments: [list_payment_list]

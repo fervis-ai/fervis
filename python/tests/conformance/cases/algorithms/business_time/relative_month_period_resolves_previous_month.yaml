@@ -1,0 +1,19 @@
+id: relative_month_period_resolves_previous_month
+description: Relative month offset resolves to the requested full calendar month.
+migrates:
+  - api/tests/fervis/business_time/test_resolver.py::test_resolve_period_relative_month
+kind: algorithm
+algorithm: business_time.resolve
+input:
+  anchor_date: "2026-04-11"
+  intent:
+    kind: period
+    unit: month
+    relative:
+      offset: -1
+    mode: full
+expect:
+  result_contains:
+    status: resolved
+    start: "2026-03-01"
+    end: "2026-03-31"

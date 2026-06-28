@@ -1,0 +1,41 @@
+id: lookup_projection_uses_declared_relation_row_addresses
+description: Lookup memory ignores stale row addresses not declared by the relation address.
+migrates:
+  - api/tests/fervis/memory/test_fact_memory.py::test_lookup_memory_projects_only_relation_declared_row_addresses
+kind: algorithm
+algorithm: memory.lookup_projection
+input:
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_bounded_rows
+        outcome: answered
+        addresses:
+          - address: relation.items
+            kind: relation
+            source: {kind: operation_output}
+            grainKeys: [sku]
+            completeness:
+              status: complete
+              setKind: observed
+              pagination: not_paginated
+            rowAddresses: [row.items.keep]
+          - address: row.items.keep
+            kind: row
+            relation: relation.items
+            grain: {sku: SKU-1}
+            values:
+              quantity: {type: number, value: 7}
+          - address: row.items.stale
+            kind: row
+            relation: relation.items
+            grain: {sku: SKU-STALE}
+            values:
+              quantity: {type: number, value: 99}
+expect:
+  result_contains:
+    relations:
+      - id: turn_bounded_rows.relation.items
+        rows:
+          - sku: SKU-1
+            quantity: 7
+

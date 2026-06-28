@@ -1,0 +1,23 @@
+id: grounded_identity_reaches_selected_endpoint_variant
+description: Grounded entity identity reaches the selected endpoint variant and nested item rows render as the answer.
+migrates:
+  - api/tests/fervis/lookup/test_grounded_identity_variant.py::test_lookup_carries_grounded_identity_to_selected_endpoint_variant
+  - api/tests/fervis/lookup/test_grounded_identity_variant.py::test_lookup_compiles_pattern_fact_plan_to_internal_relational_plan
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: grounded_identity_endpoint_variant
+expect:
+  result_contains:
+    status: COMPLETED
+    rendered_rows:
+      - answer_1: Lipstick
+        sale_id: sale-1
+      - answer_1: Mascara
+        sale_id: sale-1
+    endpoint_args:
+      list_sale_list:
+        list_sale_list.query.staff_id: staff-alice
+        list_sale_list.query.include_items: true
+        list_sale_list.query.start_date: "2026-05-09"
+        list_sale_list.query.end_date: "2026-05-09"

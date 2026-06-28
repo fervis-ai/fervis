@@ -1,0 +1,32 @@
+id: question_run_fail_queued_run_terminalizes_without_lookup
+description: Worker-adapter failure terminalizes the leased run through the question-run lifecycle without lookup.
+kind: algorithm
+algorithm: questions.lifecycle
+input:
+  scenario: ask
+  execution_mode: queued
+  tenant_id: tenant_1
+  principal_id: user_1
+  question: "How many orders came in today?"
+  fail_queued_run: true
+  worker_error: worker_crashed
+  model:
+    provider: anthropic
+    model_key: HAIKU
+expect:
+  result_contains:
+    ask_result:
+      status: QUEUED
+      answer: null
+    failed_queued_result:
+      status: FAILED
+      error: worker_crashed
+    lineage:
+      question_count: 1
+      run_count: 1
+      failed_runtime_fallback_count: 1
+    queue:
+      enqueued_count: 1
+      terminal_count: 1
+    lookup:
+      call_count: 0

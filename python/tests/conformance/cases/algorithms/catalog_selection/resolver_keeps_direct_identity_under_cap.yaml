@@ -1,0 +1,38 @@
+id: resolver_keeps_direct_identity_under_cap
+description: Resolver catalog selection keeps a direct identity resolver under a three-read cap.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_resolver_selection_keeps_direct_identity_resolver_under_three_read_cap
+kind: algorithm
+algorithm: catalog_selection.resolver_select
+input:
+  catalog:
+    reads:
+      - id: shade_store_availability
+        endpoint_name: get_merch_shade_store_availability
+        resource_names: [availability]
+        fields: [{ref: shade_store_availability.field.id, type: uuid, identity: {entity_ref: availability, identity_field: availability_id, primary_key: true, stable: true}}]
+      - id: store_list
+        endpoint_name: list_store_list
+        resource_names: [store]
+        fields: [{ref: store_list.field.id, type: uuid, identity: {entity_ref: store, identity_field: store_id, primary_key: true, stable: true}}]
+      - id: deal_location_limits
+        endpoint_name: get_deal_location_limits
+        resource_names: [deal]
+        fields: [{ref: deal_location_limits.field.id, type: uuid, identity: {entity_ref: deal, identity_field: deal_id, primary_key: true, stable: true}}]
+      - id: location_list
+        endpoint_name: list_location_list
+        resource_names: [location]
+        fields: [{ref: location_list.field.id, type: uuid, identity: {entity_ref: location, identity_field: location_id, primary_key: true, stable: true}}]
+      - id: location_deal_limits
+        endpoint_name: get_location_deal_limits
+        resource_names: [deal]
+        fields: [{ref: location_deal_limits.field.id, type: uuid, identity: {entity_ref: deal, identity_field: deal_id, primary_key: true, stable: true}}]
+  entity_targets:
+    - target_id: entity_1
+      catalog_search_terms: [store, location]
+  max_reads_per_target: 3
+expect:
+  result_contains:
+    selected_read_membership:
+      location_list: true
+

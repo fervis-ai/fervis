@@ -1,0 +1,64 @@
+id: card_projection_continued_prior_request_hides_older_request
+description: A continued prior request hides the older prior request from visible cards while retaining private backing memory.
+migrates:
+  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_continued_prior_request_hides_older_prior_request_card
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: How much did she make yesterday?
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_products
+        outcome: answered
+        sourceQuestion: products Staff One sold today
+        sourceAnswer: Staff One answer.
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: products Staff One sold today
+                answer_outputs:
+                  - description: answer
+                    requested_value_frame: answer
+                known_inputs:
+                  - id: fact_1_entity_1
+                    kind: named_reference_text
+                    source: question_context
+                    text: Staff One
+        addresses:
+          - address: entity.grounded_fact_1_entity_1
+            kind: entity
+            resource: staff
+            referenceText: Staff One
+            identity: {staff_key: staff-1}
+      - artifactId: turn_total
+        outcome: answered
+        sourceQuestion: total sales for products Staff One sold today
+        sourceAnswer: Staff One answer.
+        provenance:
+          conversation_resolution_activation:
+            activated_memory_ids: [turn_products.prior_request.fact_1]
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: total sales for products Staff One sold today
+                answer_outputs:
+                  - description: answer
+                    requested_value_frame: answer
+                known_inputs:
+                  - id: fact_1_entity_1
+                    kind: named_reference_text
+                    source: question_context
+                    text: Staff One
+        addresses:
+          - address: entity.grounded_fact_1_entity_1
+            kind: entity
+            resource: staff
+            referenceText: Staff One
+            identity: {staff_key: staff-1}
+expect:
+  result_contains:
+    card_memory_ids: [turn_total.prior_request.fact_1]
+    private_cards:
+      turn_products.prior_request.fact_1:
+        kind: prior_answer_request

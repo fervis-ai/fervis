@@ -1,0 +1,43 @@
+id: lookup_projection_derives_field_answer_outputs
+description: Lookup memory exposes prior answer-output lineage for relation fields.
+migrates:
+  - api/tests/fervis/memory/test_fact_memory.py::test_answer_memory_derives_field_answer_outputs_from_render_manifest
+kind: algorithm
+algorithm: memory.lookup_projection
+input:
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_sales
+        outcome: answered
+        addresses:
+          - address: relation.answer_rows
+            kind: relation
+            source: {kind: operation_output, relationId: answer_rows}
+            grainKeys: [sale_id]
+            fieldCoverage:
+              sale_id: answer_rows.sale_id
+              amount: answer_rows.amount
+              location_name: answer_rows.location_name
+            rowAddresses: [row.answer_rows.1]
+          - address: row.answer_rows.1
+            kind: row
+            relation: relation.answer_rows
+            grain: {sale_id: sale_1}
+            values:
+              sale_id: {type: string, value: sale_1}
+              amount:
+                type: decimal
+                value: "4000.00"
+                answer_output_ids: [answer_1]
+              location_name:
+                type: string
+                value: Kilimani Beauty Studio
+                answer_output_ids: [answer_2]
+expect:
+  result_contains:
+    memory_values_by_field:
+      turn_sales.relation.answer_rows.amount:
+        priorAnswerOutputIds: [answer_1]
+      turn_sales.relation.answer_rows.location_name:
+        priorAnswerOutputIds: [answer_2]
+

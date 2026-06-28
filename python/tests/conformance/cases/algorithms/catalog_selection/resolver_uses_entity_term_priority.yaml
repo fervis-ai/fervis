@@ -1,0 +1,25 @@
+id: resolver_uses_entity_term_priority
+description: Resolver catalog selection orders selected identity reads by entity term priority.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_resolver_selection_uses_entity_term_priority
+kind: algorithm
+algorithm: catalog_selection.resolver_select
+input:
+  catalog:
+    reads:
+      - id: buyer_list
+        endpoint_name: list_buyer_list
+        fields: [{ref: buyer.field.id, type: uuid, identity: {entity_ref: buyer, identity_field: buyer_id, primary_key: true}}]
+      - id: staff_list
+        endpoint_name: list_staff_list
+        fields: [{ref: staff.field.id, type: uuid, identity: {entity_ref: staff, identity_field: staff_id, primary_key: true}}]
+  entity_targets:
+    - target_id: entity_1
+      catalog_search_terms: [staff, buyer]
+  max_reads_per_target: 3
+expect:
+  result_contains:
+    selected_read_ids: [staff_list, buyer_list]
+    entity_target_selections:
+      - target_id: entity_1
+        selected_read_ids: [staff_list, buyer_list]

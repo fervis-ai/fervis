@@ -1,0 +1,33 @@
+id: conversation_projection_ignores_partial_token_reference_matches
+description: Conversation memory projection does not prioritize partial token matches over exact referenced terms.
+migrates:
+  - api/tests/fervis/memory/test_fact_memory.py::test_projection_does_not_prioritize_partial_token_reference_matches
+kind: algorithm
+algorithm: memory.project_conversation
+input:
+  current_user_message: Show annual revenue.
+  max_index_items: 1
+  conversation_context:
+    factArtifacts:
+      - artifactId: run_ann
+        outcome: answered
+        addresses:
+          - address: entity.staff.ann
+            kind: entity
+            resource: staff
+            referenceText: Ann
+            identity: {staff_id: staff-ann}
+      - artifactId: run_revenue
+        outcome: answered
+        addresses:
+          - address: entity.report.annual_revenue
+            kind: entity
+            resource: report
+            referenceText: annual revenue
+            identity: {report_id: annual-revenue}
+expect:
+  result_contains:
+    prompt_context:
+      memoryIndex:
+        items:
+          - artifactId: run_revenue

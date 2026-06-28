@@ -1,0 +1,36 @@
+id: numeric_literal_compiles_to_scalar_input
+description: A numeric literal compiles to a scalar operation input, not a row filter.
+migrates:
+  - api/tests/fervis/lookup/fact_planning/test_values.py::test_numeric_literal_compiles_to_scalar_input_not_row_filter
+kind: algorithm
+algorithm: planning.value_uses
+input:
+  catalog:
+    reads:
+      - id: records
+        endpoint_name: list_records
+  relations:
+    - id: records_rows
+      source:
+        kind: api_read
+        read_id: records
+  values:
+    - id: threshold
+      kind: literal
+      literal_type: number
+      value: "10"
+  value_uses:
+    - id: use_threshold_scalar_input
+      value_id: threshold
+      target:
+        kind: scalar_input
+        operation_id: operation_1
+        input_id: threshold
+expect:
+  result_contains:
+    endpoint_args: []
+    row_filters: []
+    scalar_inputs:
+      - operation_id: operation_1
+        input_id: threshold
+        value: "10"

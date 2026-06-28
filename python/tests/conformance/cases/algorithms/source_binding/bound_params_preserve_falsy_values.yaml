@@ -1,0 +1,31 @@
+id: bound_params_preserve_falsy_values
+description: Bound params preserve valid falsy values instead of treating truthiness as presence.
+kind: algorithm
+algorithm: source_binding.bound_params
+input:
+  candidate_id: source_1
+  candidate_cards:
+    requested_fact_sources:
+      - requested_fact_id: fact_1
+        source_contexts:
+          - source_options:
+              - candidate_id: source_1
+                kind: new_api_read
+                read_id: records
+                row_source_id: records.data
+                bound_params:
+                  - param_id: include_archived
+                    value: false
+                    proof_refs: [known_input:include_archived]
+                  - param_id: offset
+                    value: 0
+                    proof_refs: [known_input:offset]
+expect:
+  result_contains:
+    applied_param_bindings:
+      - param_id: include_archived
+        value: false
+        proof_refs: [known_input:include_archived]
+      - param_id: offset
+        value: 0
+        proof_refs: [known_input:offset]

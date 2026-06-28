@@ -1,0 +1,43 @@
+id: parser_allows_exhaustive_resource_names
+description: Parser allows exhaustive matching resource names from a larger catalog vocabulary.
+migrates:
+  - api/tests/fervis/lookup/query_enrichment/test_query_enrichment.py::test_query_enrichment_parser_allows_exhaustive_matching_resource_names
+kind: algorithm
+algorithm: query_enrichment.parse
+input:
+  request_fixture: booked_money
+  request:
+    question: Which location had the highest total payroll spend this month?
+    reads:
+      - {id: read_1, endpoint_name: list_payroll_summary, resource_names: [payroll summary]}
+      - {id: read_2, endpoint_name: list_compensation, resource_names: [compensation]}
+      - {id: read_3, endpoint_name: list_shift_compensation, resource_names: [shift compensation]}
+      - {id: read_4, endpoint_name: list_shift_record_compensation, resource_names: [shift record compensation]}
+      - {id: read_5, endpoint_name: list_staff_earning, resource_names: [staff earning]}
+      - {id: read_6, endpoint_name: list_payout, resource_names: [payout]}
+  payload:
+    requested_fact_resource_name_matches:
+      - requested_fact_id: fact_1
+        answer_output_resource_lineage:
+          - answer_output_id: answer_1
+            support_role: MEASURED_VALUE
+            source_text: payroll spend
+            matching_resource_names:
+              - payroll summary
+              - compensation
+              - shift compensation
+              - shift record compensation
+              - staff earning
+              - payout
+    entity_target_catalog_search_terms: []
+expect:
+  result_contains:
+    requested_fact_resource_name_matches:
+      - answer_output_resource_lineage:
+          - matching_resource_names:
+              - payroll summary
+              - compensation
+              - shift compensation
+              - shift record compensation
+              - staff earning
+              - payout

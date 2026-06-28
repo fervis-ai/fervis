@@ -1,0 +1,19 @@
+id: answer_outputs_stay_inside_request
+description: Parsed answer outputs remain local to their answer request.
+migrates:
+  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_keeps_answer_outputs_inside_answer_requests
+kind: algorithm
+algorithm: question_contract.parse
+input:
+  question_context: Where did Jane Doe work?
+  answer_fact: where Jane Doe worked
+  answer_subject:
+    subject_text: Jane Doe
+    instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
+  answer_outputs:
+    - description: work location
+expect:
+  result_contains:
+    requested_facts:
+      - answer_outputs:
+          - description: work location

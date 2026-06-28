@@ -1,0 +1,23 @@
+id: window_uses_supplied_anchor_period
+description: Window intents can use a supplied anchor period instead of the request anchor day.
+migrates:
+  - api/tests/fervis/business_time/test_resolver.py::test_resolve_window_uses_anchor_period
+kind: algorithm
+algorithm: business_time.resolve
+input:
+  expression: previous three days
+  anchor_date: "2026-04-11"
+  intent:
+    kind: window
+    unit: day
+    count: 3
+    direction: past
+    anchor_period:
+      unit: day
+      start_date: "2026-03-26"
+      end_date: "2026-03-26"
+expect:
+  result_contains:
+    status: resolved
+    start: "2026-03-24"
+    end: "2026-03-26"

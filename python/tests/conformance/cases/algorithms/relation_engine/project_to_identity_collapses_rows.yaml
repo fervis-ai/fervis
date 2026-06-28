@@ -1,0 +1,31 @@
+id: project_to_identity_collapses_rows
+description: Project-to-identity collapses source rows to the declared identity and preserves stable carried fields.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_project_to_identity_collapses_rows_to_declared_identity
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  relations:
+    - id: source_rows
+      rows:
+        - {row_id: "1", subject_id: red, subject_label: Red}
+        - {row_id: "2", subject_id: red, subject_label: Red}
+        - {row_id: "3", subject_id: pink, subject_label: Pink}
+      grain_keys: [row_id]
+      completeness: {status: complete, source_kind: api_read, set_kind: observation}
+  operations:
+    - id: subject_rows
+      output_relation: subject_rows
+      spec:
+        kind: project_to_identity
+        input_relation: source_rows
+        identity_fields: [subject_id]
+        fields:
+          - {source: subject_label}
+expect:
+  result_contains:
+    subject_rows:
+      grain_keys: [subject_id]
+      rows:
+        - {subject_id: red, subject_label: Red}
+        - {subject_id: pink, subject_label: Pink}

@@ -1,0 +1,38 @@
+id: global_facts_rank_matching_read
+description: Catalog selection uses global catalog facts to rank the matching read.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_ranks_reads_using_global_catalog_facts
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - id: read_alpha
+        endpoint_name: list_records
+        resource_names: [record]
+      - id: read_beta
+        endpoint_name: list_records
+        resource_names: [payment]
+    facts:
+      - ref: payment.card.full_number
+        field_ref: field.full_number
+        read_id: read_beta
+  requested_facts:
+    - id: card_number
+      description: payment card full number
+      answer_outputs:
+        - id: answer_1
+  resource_name_matches:
+    - requested_fact_id: card_number
+      answer_output_resource_lineage:
+        - answer_output_id: answer_1
+          support_role: MEASURED_VALUE
+          source_text: payment card full number
+          matching_resource_names: [payment]
+  max_reads_per_fact: 1
+expect:
+  result_contains:
+    selected_read_ids: [read_beta]
+    requested_fact_selections:
+      - requested_fact_id: card_number
+        selected_read_ids: [read_beta]

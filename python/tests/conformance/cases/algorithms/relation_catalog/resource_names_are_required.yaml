@@ -1,0 +1,13 @@
+id: resource_names_are_required
+description: Relation catalog validation rejects reads without resource names.
+migrates:
+  - api/tests/fervis/host_api/test_relation_catalog_projection.py::test_relation_catalog_validation_requires_read_resource_names
+kind: algorithm
+algorithm: relation_catalog.row_source_projection
+input:
+  catalog:
+    reads:
+      - id: records_read
+        endpoint_name: list_records
+expect:
+  error_contains: resource names

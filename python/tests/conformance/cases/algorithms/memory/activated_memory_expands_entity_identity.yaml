@@ -1,0 +1,30 @@
+id: activated_memory_expands_entity_identity
+description: Selected entity memory cards expand to canonical entity identity.
+migrates:
+  - api/tests/fervis/memory/test_activated_memory.py::test_activated_memory_expands_entity_identity_from_used_memory_id
+kind: algorithm
+algorithm: conversation_memory.expand_activated
+input:
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_1
+        outcome: answered
+        addresses:
+          - address: entity.staff.jane
+            kind: entity
+            resource: staff
+            referenceText: Jane Doe
+            identity: {staff_key: staff-1}
+  memory_cards:
+    mem.entity:
+      kind: entity_identity
+      artifact_id: turn_1
+      address: entity.staff.jane
+  used_memory_ids: [mem.entity]
+expect:
+  result_contains:
+    activatedMemory:
+      mem.entity:
+        kind: entity_identity
+        canonical_id: staff-1
+

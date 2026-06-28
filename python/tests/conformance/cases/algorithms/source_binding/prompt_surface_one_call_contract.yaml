@@ -1,0 +1,45 @@
+id: prompt_surface_one_call_contract
+description: Source-binding prompt exposes the compact one-call candidate contract and omits retired payload keys.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_prompt_uses_one_call_assessment_contract
+kind: algorithm
+algorithm: source_binding.prompt_surface
+input:
+  request:
+    mode: choice_param
+  absent_candidate_keys:
+    - read_contract
+    - binding_surface
+    - available_filters
+    - answer_relevant_outputs
+    - fulfillment_slots
+expect:
+  result_contains:
+    tool_name: submit_source_binding
+    read_id: sales
+    input_param_names: [status]
+    param_ids: [status]
+    finite_choice_review_param_ids: [status]
+    has_fulfillment_support: true
+    absent_candidate_keys:
+      read_contract: true
+      binding_surface: true
+      available_filters: true
+      answer_relevant_outputs: true
+      fulfillment_slots: true
+    schema_property_order:
+      finite_choice_param_review:
+        - controlled_population_role_id
+        - role_selection_basis
+        - population_test_basis
+        - choice_reviews
+      population_test_result:
+        - test_basis
+        - population_consequence
+        - test_effect
+      normal_instance_test_result:
+        - role_match_basis
+        - explicit_user_override_evidence
+        - explicit_user_override_applies
+        - population_consequence
+        - disposition

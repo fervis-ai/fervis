@@ -1,0 +1,52 @@
+id: card_projection_suppresses_duplicate_backing_entity_for_direct_reference
+description: Duplicate prior request backing entities remain suppressed even when current text names the entity.
+migrates:
+  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_duplicate_prior_request_backing_entity_stays_suppressed_for_direct_reference
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: What did Staff One sell yesterday?
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_products
+        outcome: answered
+        sourceQuestion: products Staff One sold today
+        sourceAnswer: Staff One answer.
+        provenance:
+          question_contract: &staff_question_contract
+            answer_requests:
+              - id: fact_1
+                answer_fact: products Staff One sold today
+                answer_outputs:
+                  - description: answer
+                    requested_value_frame: answer
+                known_inputs:
+                  - id: fact_1_entity_1
+                    kind: named_reference_text
+                    source: question_context
+                    text: Staff One
+                    description: staff member
+        addresses:
+          - address: entity.grounded_fact_1_entity_1
+            kind: entity
+            resource: staff
+            referenceText: Staff One
+            identity: {staff_key: staff-1}
+            evidence: {stepIds: [known_input:fact_1_entity_1]}
+      - artifactId: turn_total
+        outcome: answered
+        sourceQuestion: total sales for products Staff One sold today
+        sourceAnswer: Staff One answer.
+        provenance:
+          question_contract: *staff_question_contract
+        addresses:
+          - address: entity.grounded_fact_1_entity_1
+            kind: entity
+            resource: staff
+            referenceText: Staff One
+            identity: {staff_key: staff-1}
+            evidence: {stepIds: [known_input:fact_1_entity_1]}
+expect:
+  result_contains:
+    card_kind_counts:
+      prior_answer_request: 2

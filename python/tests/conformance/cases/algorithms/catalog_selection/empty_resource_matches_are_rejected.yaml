@@ -1,0 +1,27 @@
+id: empty_resource_matches_are_rejected
+description: Catalog selection rejects empty resource match evidence instead of selecting raw query terms.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_rejects_empty_fact_ledger_matches
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - id: sales_read
+        endpoint_name: list_sale_list
+        resource_names: [sale]
+  requested_facts:
+    - id: fact_1
+      description: sales total
+      answer_outputs:
+        - id: answer_1
+  resource_name_matches:
+    - requested_fact_id: fact_1
+      answer_output_resource_lineage: []
+  max_reads_per_fact: 1
+expect:
+  result_contains:
+    selected_read_ids: []
+    requested_fact_selections:
+      - requested_fact_id: fact_1
+        selected_read_ids: []

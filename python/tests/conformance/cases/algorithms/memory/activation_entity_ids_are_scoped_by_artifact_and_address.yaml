@@ -1,0 +1,47 @@
+id: activation_entity_ids_are_scoped_by_artifact_and_address
+description: Entity activation resolves by artifact and address, not by address text alone.
+migrates:
+  - api/tests/fervis/memory/test_fact_memory.py::test_activated_entity_ids_are_scoped_by_artifact_address_pair
+kind: algorithm
+algorithm: memory.activate
+input:
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_1
+        outcome: answered
+        addresses:
+          - address: entity.staff.1
+            kind: entity
+            resource: staff
+            referenceText: Alice
+            identity: {staff_id: staff-1}
+      - artifactId: turn_2
+        outcome: answered
+        addresses:
+          - address: entity.staff.1
+            kind: entity
+            resource: staff
+            referenceText: Florent
+            identity: {staff_id: staff-2}
+  requests:
+    - id: current.staff
+      from_artifact_id: turn_1
+      from_address: entity.staff.1
+      use_as: identity_value_binding
+      target_binding_id: sales.staff
+expect:
+  result_contains:
+    activated:
+      addresses:
+        - artifactId: turn_1
+          address: entity.staff.1
+          kind: entity
+          resource: staff
+          referenceText: Alice
+          identity: {staff_id: staff-1}
+    entity_id_rows:
+      - entityType: staff
+        referenceText: Alice
+        idField: staff_id
+        idValue: staff-1
+

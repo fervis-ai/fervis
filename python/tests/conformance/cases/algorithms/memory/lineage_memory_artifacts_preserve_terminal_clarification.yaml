@@ -1,0 +1,51 @@
+id: lineage_memory_artifacts_preserve_terminal_clarification
+description: Persisted terminal memory keeps actionable clarification details from the live fact result.
+kind: algorithm
+algorithm: memory.lineage_memory_artifacts
+input:
+  conversation_id: conversation_1
+  limit: 5
+  memory_artifacts:
+    - memory_artifact_id: mem_run_1_fact_result_1
+      conversation_id: conversation_1
+      run_id: run_1
+      source_kind: fact_result
+      payload_schema: fervis.memory_artifact
+      payload_schema_rev: 1
+      payload_json:
+        artifactId: mem_run_1_fact_result_1
+        sourceKind: fact_result
+        outcome: needs_clarification
+        sourceQuestion: How much did that store make yesterday?
+        addresses:
+          - address: outcome.needs_clarification
+            kind: outcome
+            terminal: needs_clarification
+            clarificationQuestions:
+              - Which store do you mean?
+            proof:
+              clarifications:
+                - id: clarification_1
+                  question: Which store do you mean?
+                  options:
+                    - id: store_1
+                      label: London CBD
+                    - id: store_2
+                      label: London West
+            evidence:
+              stepIds:
+                - source_binding
+expect:
+  result_contains:
+    artifacts:
+      - artifactId: mem_run_1_fact_result_1
+        outcome: needs_clarification
+        addresses:
+          - address: outcome.needs_clarification
+            kind: outcome
+            terminal: needs_clarification
+            clarificationQuestions:
+              - Which store do you mean?
+            proof:
+              clarifications:
+                - question: Which store do you mean?

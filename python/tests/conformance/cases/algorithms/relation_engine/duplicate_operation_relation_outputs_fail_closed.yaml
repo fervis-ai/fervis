@@ -1,0 +1,26 @@
+id: duplicate_operation_relation_outputs_fail_closed
+description: Relation engine rejects duplicate operation output relation ids.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_relation_engine_rejects_duplicate_operation_relation_outputs
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  relations:
+    - id: rows
+      rows: [{id: a}]
+      grain_keys: []
+  operations:
+    - id: first
+      output_relation: result
+      spec:
+        kind: project
+        input_relation: rows
+        fields: [{source: id}]
+    - id: second
+      output_relation: result
+      spec:
+        kind: project
+        input_relation: rows
+        fields: [{source: id}]
+expect:
+  error_contains: duplicate relation

@@ -1,0 +1,88 @@
+id: answer_addresses_bound_result_rows
+kind: algorithm
+algorithm: memory.answer_addresses
+migrates:
+  - api/tests/fervis/interfaces/django_interface/test_conversation_memory.py::test_prior_run_projection_bounds_result_rows_for_execution_memory
+input:
+  fact_result:
+    outcome:
+      kind: answer
+      relation_outputs:
+        - id: sale_id
+          relation_id: sales_rows
+          field_id: sale_id
+        - id: amount
+          relation_id: sales_rows
+          field_id: amount
+      relations:
+        - id: sales_rows
+          generate_rows:
+            count: 75
+            field_templates:
+              sale_id: sale-{index}
+              amount: "{index}"
+expect:
+  result_contains:
+    address_count: 51
+    addresses:
+      - address: relation.sales_rows
+        kind: relation
+        rowAddresses:
+          - row.sales_rows.1
+          - row.sales_rows.2
+          - row.sales_rows.3
+          - row.sales_rows.4
+          - row.sales_rows.5
+          - row.sales_rows.6
+          - row.sales_rows.7
+          - row.sales_rows.8
+          - row.sales_rows.9
+          - row.sales_rows.10
+          - row.sales_rows.11
+          - row.sales_rows.12
+          - row.sales_rows.13
+          - row.sales_rows.14
+          - row.sales_rows.15
+          - row.sales_rows.16
+          - row.sales_rows.17
+          - row.sales_rows.18
+          - row.sales_rows.19
+          - row.sales_rows.20
+          - row.sales_rows.21
+          - row.sales_rows.22
+          - row.sales_rows.23
+          - row.sales_rows.24
+          - row.sales_rows.25
+          - row.sales_rows.26
+          - row.sales_rows.27
+          - row.sales_rows.28
+          - row.sales_rows.29
+          - row.sales_rows.30
+          - row.sales_rows.31
+          - row.sales_rows.32
+          - row.sales_rows.33
+          - row.sales_rows.34
+          - row.sales_rows.35
+          - row.sales_rows.36
+          - row.sales_rows.37
+          - row.sales_rows.38
+          - row.sales_rows.39
+          - row.sales_rows.40
+          - row.sales_rows.41
+          - row.sales_rows.42
+          - row.sales_rows.43
+          - row.sales_rows.44
+          - row.sales_rows.45
+          - row.sales_rows.46
+          - row.sales_rows.47
+          - row.sales_rows.48
+          - row.sales_rows.49
+          - row.sales_rows.50
+        completeness:
+          truncated: true
+          projectedRowCount: 50
+          rowCount: 75
+          pagination: unknown
+          scopeFingerprint: ""
+          setKind: unknown
+          status: unknown

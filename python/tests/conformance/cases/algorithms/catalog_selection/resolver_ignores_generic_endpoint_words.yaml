@@ -1,0 +1,38 @@
+id: resolver_ignores_generic_endpoint_words
+description: Resolver catalog selection ignores generic endpoint words such as get/detail/list when matching entity terms.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_resolver_selection_ignores_generic_endpoint_words
+kind: algorithm
+algorithm: catalog_selection.resolver_select
+input:
+  catalog:
+    reads:
+      - id: staff_detail
+        endpoint_name: get_staff_detail
+        fields: [{ref: staff_detail.field.id, type: uuid, identity: {entity_ref: staff, identity_field: staff_id, primary_key: true}}]
+      - id: area_detail
+        endpoint_name: get_area_detail
+        fields: [{ref: area_detail.field.id, type: uuid, identity: {entity_ref: area, identity_field: area_id, primary_key: true}}]
+      - id: cash_deposit_detail
+        endpoint_name: get_cash_deposit_detail
+        fields: [{ref: cash_deposit_detail.field.id, type: uuid, identity: {entity_ref: cash_deposit, identity_field: cash_deposit_id, primary_key: true}}]
+      - id: deal_detail
+        endpoint_name: get_deal_detail
+        fields: [{ref: deal_detail.field.id, type: uuid, identity: {entity_ref: deal, identity_field: deal_id, primary_key: true}}]
+      - id: look_detail
+        endpoint_name: get_look_detail
+        fields: [{ref: look_detail.field.id, type: uuid, identity: {entity_ref: look, identity_field: look_id, primary_key: true}}]
+      - id: staff_list
+        endpoint_name: list_staff_list
+        fields: [{ref: staff_list.field.id, type: uuid, identity: {entity_ref: staff, identity_field: staff_id, primary_key: true}}]
+  entity_targets:
+    - target_id: entity_1
+      catalog_search_terms: [staff, staff profile, staff detail]
+  max_reads_per_target: 5
+expect:
+  result_contains:
+    selected_read_ids: [staff_detail, staff_list]
+    entity_target_selections:
+      - target_id: entity_1
+        catalog_search_terms: [staff, staff profile, staff detail]
+        selected_read_ids: [staff_detail, staff_list]

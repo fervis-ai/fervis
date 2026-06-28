@@ -1,0 +1,18 @@
+id: schema_rejects_time_input_named_reference_fields
+description: Time inputs cannot carry named-reference lookup fields.
+migrates:
+  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_schema_rejects_time_input_named_reference_fields
+kind: algorithm
+algorithm: question_contract.schema_validate
+input:
+  question_context: How many sales happened yesterday?
+  question_inputs:
+    - input_ref: period
+      kind: time_text
+      source: question_context
+      reference_text: yesterday
+      lookup_text: yesterday
+      inventory_check: {why_this_is_an_input: yesterday is a time scope}
+  used_input_refs: [period]
+expect:
+  error_contains: not valid

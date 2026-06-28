@@ -1,0 +1,72 @@
+id: scripted_pattern_joined_rows
+description: Lookup runtime executes a scripted joined-rows fact plan and renders fields from both sides.
+migrates:
+  - api/tests/fervis/lookup/test_pattern_fact_plan_contract.py::test_pattern_contract_executes_joined_rows_end_to_end
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: List item quantities with names.
+  question_contract:
+    fact_description: item quantities with names
+    subject_text: item quantities with names
+    answer_expression_family: list_rows
+    answer_outputs: [item_name, quantity]
+    resource_terms: [item, product]
+  catalog:
+    reads:
+      - id: items_read
+        endpoint_name: items_read
+        resource_names: [item]
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - {ref: field.items.item_id, path: data.item_id, row_path_id: data, type: string}
+          - {ref: field.items.quantity, path: data.quantity, row_path_id: data, type: number}
+      - id: products_read
+        endpoint_name: products_read
+        resource_names: [product]
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - {ref: field.products.item_id, path: data.item_id, row_path_id: data, type: string}
+          - {ref: field.products.item_name, path: data.item_name, row_path_id: data, type: string}
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers:
+        - requested_fact_id: fact_1
+          answer_output_ids: [answer_1, answer_2]
+          pattern: joined_rows
+          left:
+            source: {kind: read, read_id: items_read}
+            fields:
+              - {field_id: item_id}
+              - {field_id: quantity}
+          right:
+            source: {kind: read, read_id: products_read}
+            fields:
+              - {field_id: item_id}
+              - {field_id: item_name}
+          join_keys:
+            - {left_field_id: item_id, right_field_id: item_id}
+          output_fields:
+            - {side: right, field_id: item_name}
+            - {side: left, field_id: quantity}
+  responses:
+    items_read:
+      data:
+        - {item_id: item_1, quantity: 3}
+    products_read:
+      data:
+        - {item_id: item_1, item_name: Item One}
+expect:
+  result_contains:
+    status: COMPLETED
+    rendered_rows:
+      - item_name: Item One
+        quantity: 3

@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: fervis-verify
+        name: Fervis verification
+        entry: scripts/verify-fervis-repo.sh
+        language: system
+        pass_filenames: false
+        always_run: true

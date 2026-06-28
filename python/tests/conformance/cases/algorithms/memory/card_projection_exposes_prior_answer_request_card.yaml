@@ -1,0 +1,76 @@
+id: card_projection_exposes_prior_answer_request_card
+description: Prior answer requests are first-class visible memory cards in recency order.
+migrates:
+  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_memory_card_projection_exposes_prior_answer_request_as_first_class_card
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: And how much did she make yesterday?
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_1
+        outcome: answered
+        sourceQuestion: Which products did Staff One sell today?
+        sourceAnswer: Staff One answer.
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: Which products did Staff One sell today?
+                answer_outputs:
+                  - description: answer
+                    requested_value_frame: answer
+        addresses:
+          - address: entity.staff_1
+            kind: entity
+            resource: staff
+            referenceText: Staff One
+            identity: {staff_key: staff-1}
+          - address: relation.answer_rows
+            kind: relation
+            source: {kind: api_read, read_id: staff_sales_read, identityType: sale}
+            grainKeys: [sale_key]
+            completeness: {status: complete, pagination: all_pages}
+            rowAddresses: [row.answer_1]
+          - address: row.answer_1
+            kind: row
+            relation: relation.answer_rows
+            identity: {sale_key: turn_1-sale}
+      - artifactId: turn_2
+        outcome: answered
+        sourceQuestion: How much is that in total sales?
+        sourceAnswer: Staff One answer.
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: How much is that in total sales?
+                answer_outputs:
+                  - description: answer
+                    requested_value_frame: answer
+        addresses:
+          - address: entity.staff_1
+            kind: entity
+            resource: staff
+            referenceText: Staff One
+            identity: {staff_key: staff-1}
+          - address: relation.answer_rows
+            kind: relation
+            source: {kind: api_read, read_id: sales_total_read, identityType: sale}
+            grainKeys: [sale_key]
+            completeness: {status: complete, pagination: all_pages}
+            rowAddresses: [row.answer_1]
+          - address: row.answer_1
+            kind: row
+            relation: relation.answer_rows
+            identity: {sale_key: turn_2-sale}
+expect:
+  result_contains:
+    cards:
+      - kind: prior_answer_request
+        display: How much is that in total sales?
+      - kind: entity_identity
+      - kind: row_set
+      - kind: prior_answer_request
+        display: Which products did Staff One sell today?
+

@@ -1,0 +1,49 @@
+id: conversation_projection_exposes_bounded_index
+description: Conversation memory projection exposes a bounded memory index and matching execution artifacts.
+migrates:
+  - api/tests/fervis/memory/test_fact_memory.py::test_projection_exposes_bounded_fact_index_not_unbounded_context
+kind: algorithm
+algorithm: memory.project_conversation
+input:
+  max_index_items: 2
+  conversation_context:
+    factArtifacts:
+      - artifactId: run_0
+        outcome: answered
+        sourceQuestion: How much did the staff sell?
+        addresses:
+          - address: entity.staff.0
+            kind: entity
+            resource: staff
+            referenceText: Staff 0
+            identity: {staff_id: staff-0}
+      - artifactId: run_1
+        outcome: answered
+        sourceQuestion: How much did the staff sell?
+        addresses:
+          - address: entity.staff.1
+            kind: entity
+            resource: staff
+            referenceText: Staff 1
+            identity: {staff_id: staff-1}
+      - artifactId: run_2
+        outcome: answered
+        sourceQuestion: How much did the staff sell?
+        addresses:
+          - address: entity.staff.2
+            kind: entity
+            resource: staff
+            referenceText: Staff 2
+            identity: {staff_id: staff-2}
+expect:
+  result_contains:
+    prompt_context:
+      memoryIndex:
+        truncated: true
+        items:
+          - artifactId: run_0
+          - artifactId: run_1
+    execution_context:
+      factArtifacts:
+        - artifactId: run_0
+        - artifactId: run_1

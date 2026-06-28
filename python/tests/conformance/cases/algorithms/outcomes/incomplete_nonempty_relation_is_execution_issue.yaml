@@ -1,0 +1,19 @@
+id: incomplete_nonempty_relation_is_execution_issue
+description: Incomplete non-empty final relation fails closed instead of returning an answer.
+migrates:
+  - api/tests/fervis/lookup/outcomes/test_results.py::test_incomplete_nonempty_final_relation_is_execution_issue_not_answer
+kind: algorithm
+algorithm: outcomes.classify
+input:
+  mode: answer
+  final_relation_id: rows
+  relations:
+    - id: rows
+      rows: [{name: Alpha}]
+      completeness: {status: incomplete, source_kind: api_read, set_kind: unknown, proof_refs: [read:rows]}
+  render_outputs:
+    - {id: name, relation_id: rows, field_id: name}
+expect:
+  result_contains:
+    issue_kind: incomplete_evidence
+    relation_id: rows

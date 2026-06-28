@@ -1,0 +1,28 @@
+id: prompt_shows_applicable_known_inputs
+description: Read-eligibility prompt renders grounded inputs that apply to candidate reads.
+kind: algorithm
+algorithm: read_eligibility.prompt
+input:
+  request_fixture: stores_in_grounded_area
+  request:
+    available_values:
+      - id: value_area_nairobi
+        kind: identity
+        identity_type: area
+        identity_field: area_id
+        value: area-london
+        display_value: London
+        proof_refs: [known_input:qi1]
+        applies_to_requested_fact_ids: [fact_1]
+  contains:
+    - "<applicable_known_inputs>"
+    - "known_input_id=\"qi1\""
+    - "display_value=\"London\""
+    - "applies_via_field=\"data.area.area_id\""
+expect:
+  result_contains:
+    contains:
+      "<applicable_known_inputs>": true
+      "known_input_id=\"qi1\"": true
+      "display_value=\"London\"": true
+      "applies_via_field=\"data.area.area_id\"": true

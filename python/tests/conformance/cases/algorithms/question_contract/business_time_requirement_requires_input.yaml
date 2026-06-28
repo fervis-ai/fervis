@@ -1,0 +1,41 @@
+id: time_requirement_requires_input
+description: Question-contract parser rejects a time requirement that no declared input satisfies.
+migrates:
+  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_requires_business_time_requirement_input
+kind: algorithm
+algorithm: question_contract.parse
+input:
+  question_context: How many shifts do we have today?
+  payload:
+    kind: question_contract
+    answer_requests_count: 1
+    answer_requests:
+      - answer_fact: number of shifts today
+        answer_expression: {family: scalar_aggregate}
+        answer_subject:
+          subject_text: shifts
+          instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
+        input_requirements:
+          time_requirements:
+            - requirement_id: time_req_1
+              source_text: today
+              why_required: "'today' constrains which shifts count."
+        answer_population:
+          population_label: shifts today
+          counted_unit: shifts
+          membership_tests:
+            - test_id: pop_test_1
+              kind: SUBJECT_IDENTITY
+              polarity: MUST_PASS
+              test_question: Does the row/value represent shifts?
+            - test_id: pop_test_2
+              kind: EXPLICIT_USER_CONSTRAINT
+              polarity: MUST_PASS
+              test_question: Does the shift fall within today?
+        answer_outputs:
+          - description: number of shifts
+        input_decisions: []
+    question_inputs: []
+    question_input_inventory_check: {all_input_like_phrases_declared: true}
+expect:
+  error_contains: time requirement

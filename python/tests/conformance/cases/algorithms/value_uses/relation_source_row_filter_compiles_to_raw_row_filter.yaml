@@ -1,0 +1,31 @@
+id: relation_source_row_filter_compiles_to_raw_row_filter
+description: Relation-source row filters compile to raw row filters with lineage proof refs.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relations.py::test_relation_source_row_filter_compiles_to_raw_row_filter
+kind: algorithm
+algorithm: planning.value_uses
+input:
+  catalog:
+    reads:
+      - id: list_store_list
+        endpoint_name: list_store_list
+  relations:
+    - id: store_rows
+      source:
+        kind: api_read
+        read_id: list_store_list
+        row_filters:
+          - field_id: is_open
+            operator: in
+            values: ["true"]
+            proof_refs: [row_predicate:rp.source_1.is_open]
+      fields:
+        - {field_id: is_open, roles: [predicate]}
+expect:
+  result_contains:
+    row_filters:
+      - relation_id: store_rows
+        field_id: is_open
+        operator: in
+        value: ["true"]
+        proof_refs: [row_predicate:rp.source_1.is_open]

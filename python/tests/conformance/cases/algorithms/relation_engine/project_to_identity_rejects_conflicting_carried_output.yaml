@@ -1,0 +1,25 @@
+id: project_to_identity_rejects_conflicting_carried_output
+description: Project-to-identity rejects conflicting carried output values for the same identity.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_project_to_identity_rejects_conflicting_carried_output
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  relations:
+    - id: source_rows
+      rows:
+        - {row_id: "1", entity_id: m1, display: Alpha}
+        - {row_id: "2", entity_id: m1, display: Different}
+      grain_keys: [row_id]
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown}
+  operations:
+    - id: entity_rows
+      output_relation: entity_rows
+      spec:
+        kind: project_to_identity
+        input_relation: source_rows
+        identity_fields: [entity_id]
+        fields:
+          - {source: display}
+expect:
+  error_contains: conflicting project_to_identity row

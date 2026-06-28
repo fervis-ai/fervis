@@ -1,0 +1,34 @@
+#!/bin/sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+REPO_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+PYTHON_DIR="$REPO_DIR/python"
+
+export FERVIS_INVOCATION_CWD="${FERVIS_INVOCATION_CWD:-$(pwd)}"
+
+can_run_fervis() {
+  candidate=$1
+  "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] >= (3, 11) else 1)' >/dev/null 2>&1
+}
+
+if [ -n "${FERVIS_PYTHON:-}" ]; then
+  if can_run_fervis "$FERVIS_PYTHON"; then
+    cd "$PYTHON_DIR"
+    exec "$FERVIS_PYTHON" -m fervis.interfaces.cli.main "$@"
+  fi
+  echo "fervis: FERVIS_PYTHON does not provide a Python 3.11+ runtime." >&2
+  exit 127
+fi
+
+if command -v uv >/dev/null 2>&1; then
+  exec uv --directory "$PYTHON_DIR" run fervis "$@"
+fi
+
+if command -v python3 >/dev/null 2>&1 && can_run_fervis "$(command -v python3)"; then
+  cd "$PYTHON_DIR"
+  exec python3 -m fervis.interfaces.cli.main "$@"
+fi
+
+echo "fervis: could not find a Python 3.11+ runtime. Install uv or set FERVIS_PYTHON." >&2
+exit 127

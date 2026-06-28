@@ -1,0 +1,20 @@
+id: compute_rejects_unsupported_expression
+description: Compute fails closed for unsupported expression forms.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_compute_rejects_unsupported_expression_forms
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  scalar_inputs:
+    - {id: a, value: 1}
+    - {id: b, value: 2}
+  operations:
+    - id: invalid
+      output_relation: ""
+      spec:
+        kind: compute
+        expression: max(a, b)
+        scalar_inputs: [a, b]
+        output_scalar: result
+expect:
+  error_contains: unsupported compute expression

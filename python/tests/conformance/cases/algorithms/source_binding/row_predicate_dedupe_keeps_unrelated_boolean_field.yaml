@@ -1,0 +1,41 @@
+id: row_predicate_dedupe_keeps_unrelated_boolean_field
+description: Row predicate projection keeps a response boolean when query params do not cover the same row choice.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_row_predicate_dedupe_does_not_hide_unrelated_boolean_field
+kind: algorithm
+algorithm: source_binding.row_predicates
+input:
+  catalog:
+    reads:
+      - id: stores
+        endpoint_name: list_store_list
+        params:
+          - ref: stores.query.include_archived
+            name: include_archived
+            source: query
+            type: choice
+            choices: ["true", "false"]
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - ref: stores.field.store_id
+            path: data.store_id
+            row_path_id: data
+            type: uuid
+          - ref: stores.field.is_open
+            path: data.is_open
+            row_path_id: data
+            type: boolean
+  candidate:
+    source_candidate_id: source_1
+    kind: new_api_read
+    read_id: stores
+    result_grains:
+      - grain_id: data
+        row_path_id: data
+        cardinality: many
+expect:
+  result_contains:
+    field_ids: [is_open]

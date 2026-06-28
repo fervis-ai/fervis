@@ -1,0 +1,38 @@
+id: private_metadata_does_not_rank_read
+description: Catalog selection does not use private endpoint metadata as ranking evidence.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_ignores_private_endpoint_metadata
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - id: a_internal_metadata_only
+        endpoint_name: list_records
+        resource_names: [record]
+        source_metadata:
+          viewClass: sales
+      - id: z_public_contract
+        endpoint_name: list_records
+        resource_names: [sales]
+        facts:
+          - ref: sales.total
+  requested_facts:
+    - id: sales_total
+      description: sales total
+      answer_outputs:
+        - id: answer_1
+  resource_name_matches:
+    - requested_fact_id: sales_total
+      answer_output_resource_lineage:
+        - answer_output_id: answer_1
+          support_role: MEASURED_VALUE
+          source_text: sales total
+          matching_resource_names: [sales]
+  max_reads_per_fact: 1
+expect:
+  result_contains:
+    selected_read_ids: [z_public_contract]
+    requested_fact_selections:
+      - requested_fact_id: sales_total
+        selected_read_ids: [z_public_contract]

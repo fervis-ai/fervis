@@ -1,0 +1,87 @@
+id: scripted_pattern_count_with_truncated_choice_source_binding
+description: Count-record execution fails closed when source-binding selects a truncated finite-choice endpoint read.
+migrates:
+  - api/tests/fervis/lookup/test_pattern_fact_plan_contract.py::test_pattern_contract_requires_complete_pagination_for_choice_param_decision
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: How many store records happened?
+  question_contract:
+    fact_description: count of store records that happened
+    subject_text: records
+    answer_expression_family: scalar_aggregate
+    answer_outputs: [count]
+    resource_terms: [record]
+  catalog:
+    reads:
+      - id: records_read
+        endpoint_name: records_read
+        resource_names: [record]
+        params:
+          - ref: records_read.query.channel
+            name: channel
+            source: query
+            type: choice
+            choices: [STORE, ONLINE]
+            semantics: population_filter
+          - ref: records_read.query.status
+            name: status
+            source: query
+            type: choice
+            choices: [PLACED, COMPLETED]
+            semantics: population_filter
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - ref: field.record_id
+            path: data.record_id
+            row_path_id: data
+            type: uuid
+            identity: {entity_ref: record, identity_field: record_id, primary_key: true, stable: true}
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers:
+        - requested_fact_id: fact_1
+          answer_output_ids: [answer_1]
+          pattern: aggregate_scalar
+          source: {kind: read, read_id: records_read}
+          metric:
+            kind: count_records
+            count_basis:
+              kind: row_population
+              row_path_id: data
+              row_cardinality: many
+            record_id_field_id: record_id
+            label: count
+  source_binding:
+    - requested_fact_id: fact_1
+      param_value_choices:
+        channel:
+          population_intent: store records that happened
+          basis: Store records use the STORE channel.
+          selected_values: [STORE]
+          all_values: [STORE, ONLINE]
+        status:
+          population_intent: store records that happened
+          basis: Happened records are completed records.
+          selected_values: [COMPLETED]
+          all_values: [PLACED, COMPLETED]
+  responses:
+    records_read:
+      response_body:
+        data:
+          - {record_id: completed_1}
+      truncated: true
+      page_count: 1
+expect:
+  result_contains:
+    status: FAILED
+    error: incomplete_evidence
+    endpoint_args:
+      records_read:
+        records_read.query.channel: STORE
+        records_read.query.status: COMPLETED

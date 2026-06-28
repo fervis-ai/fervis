@@ -1,0 +1,41 @@
+id: list_source_is_executable_without_detail_input
+description: A selected executable list read avoids clarifying for a selected detail read.
+migrates:
+  - api/tests/fervis/lookup/fact_planning/test_fact_requirements.py::test_fact_endpoint_requirements_do_not_need_detail_inputs_when_list_is_executable
+kind: algorithm
+algorithm: planning.fact_endpoint_requirements
+input:
+  catalog:
+    reads:
+      - id: sales
+        endpoint_name: list_sales
+        fields:
+          - ref: field.amount
+            path: amount
+            type: decimal
+      - id: sale_detail
+        endpoint_name: get_sale
+        params:
+          - ref: sale.path.sale_id
+            name: sale_id
+            source: path
+            type: uuid
+            required: true
+        fields:
+          - ref: field.amount
+            path: amount
+            type: decimal
+  catalog_selection:
+    requested_facts:
+      - requested_fact_id: rf_answer
+        query_terms: [sales, amount]
+        selected_read_ids: [sales, sale_detail]
+expect:
+  result_contains:
+    requested_facts:
+      - requested_fact_id: rf_answer
+        executable_sources:
+          - read_id: sales
+            row_path_id: root
+        missing_inputs: []
+    clarifiable_missing_inputs: []

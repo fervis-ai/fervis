@@ -1,0 +1,41 @@
+id: anti_join_returns_unobserved_candidate_rows
+description: Anti-join returns candidate rows without a matching observation.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_anti_join_returns_candidate_rows_without_matching_observation
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  relations:
+    - id: candidates
+      rows:
+        - {entity_id: a, display: Alpha}
+        - {entity_id: b, display: Beta}
+      grain_keys: [entity_id]
+      completeness: {status: complete, source_kind: api_read, set_kind: universe}
+    - id: observed
+      rows:
+        - {observed_id: a}
+      grain_keys: [observed_id]
+      completeness: {status: complete, source_kind: api_read, set_kind: observation}
+  operations:
+    - id: missing
+      output_relation: result
+      spec:
+        kind: anti_join
+        candidate:
+          relation_id: candidates
+          role: anti_join.candidate
+          required_identity_fields: [entity_id]
+        observed:
+          relation_id: observed
+          role: anti_join.observed
+          required_identity_fields: [observed_id]
+        join_keys: [{left: entity_id, right: observed_id}]
+        output_fields:
+          - {source: entity_id}
+          - {source: display}
+expect:
+  result_contains:
+    result:
+      rows:
+        - {entity_id: b, display: Beta}

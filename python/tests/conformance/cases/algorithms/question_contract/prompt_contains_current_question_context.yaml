@@ -1,0 +1,11 @@
+id: prompt_contains_current_question_context
+description: Question-contract prompt includes the current question context.
+migrates:
+  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_prompt_contains_only_current_question_context
+kind: algorithm
+algorithm: question_contract.prompt
+input:
+  current_question: How much money did the prior sales make?
+expect:
+  result_contains:
+    current_question_present: true

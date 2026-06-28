@@ -1,0 +1,99 @@
+id: conversation_explain_view
+kind: algorithm
+algorithm: lineage.explain
+description: Conversation lineage root shows multiple questions in stable hierarchy.
+input:
+  root:
+    kind: conversation
+    id: conversation_1
+  dataset:
+    conversations:
+      - conversation_id: conversation_1
+        tenant_id: tenant_1
+    questions:
+      - question_id: question_1
+        conversation_id: conversation_1
+        conversation_sequence: 1
+        original_question: How many stores are open?
+      - question_id: question_2
+        conversation_id: conversation_1
+        conversation_sequence: 2
+        original_question: What about this month?
+    runs:
+      - run_id: run_1
+        question_id: question_1
+        run_number: 1
+        trigger_kind: initial
+        integrated_question: How many stores are open?
+      - run_id: run_2
+        question_id: question_2
+        run_number: 1
+        trigger_kind: initial
+        integrated_question: What about this month?
+    steps:
+      - step_id: step_fact_1
+        run_id: run_1
+        sequence: 1
+        step_key: question_contract
+        kind: model_turn
+      - step_id: step_fact_2
+        run_id: run_2
+        sequence: 1
+        step_key: question_contract
+        kind: model_turn
+    run_results:
+      - run_result_id: result_1
+        run_id: run_1
+        result_kind: answered
+      - run_result_id: result_2
+        run_id: run_2
+        result_kind: factual_terminal
+    requested_facts:
+      - requested_fact_id: fact_1
+        run_id: run_1
+        produced_by_step_id: step_fact_1
+        fact_key: fact_1
+        description: count of open stores
+        answer_expression_family: scalar_aggregate
+      - requested_fact_id: fact_2
+        run_id: run_2
+        produced_by_step_id: step_fact_2
+        fact_key: fact_1
+        description: unresolved follow-up scope
+        answer_expression_family: scalar_aggregate
+    fact_results:
+      - fact_result_id: fact_result_1
+        run_id: run_1
+        requested_fact_id: fact_1
+        produced_by_step_id: step_fact_1
+        result_kind: answered
+      - fact_result_id: fact_result_2
+        run_id: run_2
+        requested_fact_id: fact_2
+        produced_by_step_id: step_fact_2
+        result_kind: needs_clarification
+    answers:
+      - answer_id: answer_1
+        run_id: run_1
+        run_result_id: result_1
+    answer_outputs:
+      - answer_output_id: output_1
+        run_id: run_1
+        answer_id: answer_1
+        fact_result_id: fact_result_1
+        output_key: count
+        value_kind: number
+        value_json:
+          value: 2
+    source_reads: []
+    proof_graphs: []
+expect:
+  result_contains:
+    lines:
+      - "Question question_1: How many stores are open?"
+      - "Question question_2: What about this month?"
+      - "Run run_1 (#1): answered"
+      - "Run run_2 (#1): factual_terminal"
+      - "Requested fact fact_2: unresolved follow-up scope"
+  text_excludes:
+    - "payload_json"

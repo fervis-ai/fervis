@@ -1,0 +1,14 @@
+id: schema_surface_default_choice_param_decision_valid
+description: Source-binding schema accepts explicit decisions for defaulted choice params.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_keeps_default_choice_params_in_param_decisions
+kind: algorithm
+algorithm: source_binding.schema_surface
+input:
+  request:
+    mode: choice_param
+    default_choice_param: true
+  include_default_decision: true
+expect:
+  result_contains:
+    validation: valid

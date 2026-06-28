@@ -1,0 +1,35 @@
+id: count_support_uses_many_row_population_without_identity
+description: Count support can count a concrete many-row result population even when no canonical identity field is present.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_count_options_use_many_row_population_when_identity_is_unavailable
+kind: algorithm
+algorithm: source_binding.fulfillment_support
+input:
+  requested_fact:
+    description: featured merch count
+    subject_text: featured merch
+  candidate:
+    source_candidate_id: source_1
+    result_grains:
+      - grain_id: data
+        row_path_id: data
+        row_source_id: rs_source_1_data
+        cardinality: many
+      - grain_id: summary
+        row_path_id: summary
+        row_source_id: rs_source_1_summary
+        cardinality: one
+    evidence_items:
+      - evidence_id: row_population.data
+        field_id: data
+        row_path_id: data
+        row_source_id: rs_source_1_data
+        type: row_population
+        roles: [identity]
+      - evidence_id: source_1.data.rank
+        field_id: rank
+        row_path_id: data
+        type: integer
+expect:
+  result_contains:
+    row_count_evidence_ids: [row_population.data]

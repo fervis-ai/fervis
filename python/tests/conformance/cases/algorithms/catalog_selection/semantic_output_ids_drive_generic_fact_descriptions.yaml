@@ -1,0 +1,37 @@
+id: semantic_output_ids_drive_generic_fact_descriptions
+description: Catalog selection uses semantic answer output IDs when requested-fact descriptions are generic.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_uses_semantic_output_ids_when_descriptions_are_generic
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - id: sales_read
+        endpoint_name: list_records
+        resource_names: [sales metric]
+        facts: [{ref: sales.metric_total}]
+      - id: inventory_read
+        endpoint_name: list_records
+        resource_names: [inventory]
+        facts: [{ref: inventory.quantity}]
+  requested_facts:
+    - id: rf_answer
+      description: answer
+      answer_outputs:
+        - id: metric_total
+  resource_name_matches:
+    - requested_fact_id: rf_answer
+      answer_output_resource_lineage:
+        - answer_output_id: metric_total
+          support_role: MEASURED_VALUE
+          source_text: metric total
+          matching_resource_names: [sales metric]
+  max_reads_per_fact: 1
+expect:
+  result_contains:
+    selected_read_ids: [sales_read]
+    requested_fact_selections:
+      - requested_fact_id: rf_answer
+        query_terms: [sale, metric]
+        selected_read_ids: [sales_read]

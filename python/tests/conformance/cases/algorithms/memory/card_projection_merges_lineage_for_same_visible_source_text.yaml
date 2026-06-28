@@ -1,0 +1,45 @@
+id: card_projection_merges_lineage_for_same_visible_source_text
+description: Context source lineage merges prior request and relation memory ids for the same visible prior question.
+migrates:
+  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_context_sources_merge_lineage_for_same_visible_source_text
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: Show sales for those stores.
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_stores
+        outcome: answered
+        sourceQuestion: Which stores are we talking about?
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: stores
+                answer_outputs:
+                  - description: store identity
+                    requested_value_frame: store identity
+        addresses:
+          - address: relation.stores
+            kind: relation
+            source: {kind: api_read}
+            grainKeys: [store_id]
+            completeness: {status: complete, pagination: all_pages, rowCount: 2}
+            rowAddresses: [row.stores.1, row.stores.2]
+          - address: row.stores.1
+            kind: row
+            relation: relation.stores
+            identity: {store_id: store_1}
+          - address: row.stores.2
+            kind: row
+            relation: relation.stores
+            identity: {store_id: store_2}
+expect:
+  result_contains:
+    context_sources:
+      - kind: prior_user_question
+        text: Which stores are we talking about?
+        source_memory_ids:
+          - turn_stores.prior_request.fact_1
+          - turn_stores.relation.stores
+

@@ -1,0 +1,23 @@
+id: paged_api_read_completeness_requires_terminal_page
+description: Paged API reads are complete only after terminal pagination; page-cap reads are incomplete.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relations.py::test_api_read_completeness_requires_terminal_pagination_for_paged_sources
+kind: algorithm
+algorithm: planning.relation_contract
+input:
+  mode: api_read_completeness
+  read:
+    id: rows
+    endpoint_name: list_rows
+    pagination:
+      mode: page_number
+      completeness_policy: all_pages
+  proof_requests:
+    - {id: unknown, row_count: 50}
+    - {id: complete, row_count: 171, reached_terminal_page: true}
+    - {id: capped, row_count: 100, page_cap_reached: true}
+expect:
+  result_contains:
+    unknown: {status: unknown}
+    complete: {status: complete, pagination: terminal}
+    capped: {status: incomplete, pagination: page_cap_reached}

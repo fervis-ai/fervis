@@ -1,0 +1,66 @@
+id: separate_complete_answer_facts
+description: Separate complete answer requests remain separate requested facts.
+migrates:
+  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_keeps_separate_complete_answer_facts
+kind: algorithm
+algorithm: question_contract.parse
+input:
+  question_context: What was the total sales amount for products Alice Smith sold yesterday, and where did Alice Smith work yesterday?
+  answer_requests_count: 2
+  question_inputs:
+    - input_ref: staff
+      source: question_context
+      kind: named_reference_text
+      reference_text: Alice Smith
+      target_meaning: staff member
+      lookup_text: Alice Smith
+      inventory_check: {why_this_is_an_input: Alice Smith is a named reference}
+    - input_ref: period
+      source: question_context
+      kind: time_text
+      reference_text: yesterday
+      inventory_check: {why_this_is_an_input: yesterday is a time scope}
+  answer_requests:
+    - answer_fact: total sales amount for products Alice Smith sold yesterday
+      answer_expression: {family: scalar_aggregate}
+      answer_subject:
+        subject_text: products
+        instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
+      input_requirements: {time_requirements: []}
+      answer_population:
+        population_label: products
+        counted_unit: products
+        membership_tests:
+          - test_id: pop_test_1
+            kind: SUBJECT_IDENTITY
+            polarity: MUST_PASS
+            test_question: Does the row/value represent products?
+      answer_outputs:
+        - description: the total sales amount
+      input_decisions:
+        - {input_ref: staff, use_input: true}
+        - {input_ref: period, use_input: true}
+    - answer_fact: work location where Alice Smith worked yesterday
+      answer_expression: {family: scalar_aggregate}
+      answer_subject:
+        subject_text: Alice Smith
+        instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
+      input_requirements: {time_requirements: []}
+      answer_population:
+        population_label: Alice Smith
+        counted_unit: Alice Smith
+        membership_tests:
+          - test_id: pop_test_1
+            kind: SUBJECT_IDENTITY
+            polarity: MUST_PASS
+            test_question: Does the row/value represent Alice Smith?
+      answer_outputs:
+        - description: the place she worked
+      input_decisions:
+        - {input_ref: staff, use_input: true}
+        - {input_ref: period, use_input: true}
+expect:
+  result_contains:
+    requested_facts:
+      - description: total sales amount for products Alice Smith sold yesterday
+      - description: work location where Alice Smith worked yesterday

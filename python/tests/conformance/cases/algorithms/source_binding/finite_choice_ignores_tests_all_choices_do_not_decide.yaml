@@ -1,0 +1,24 @@
+id: finite_choice_ignores_tests_all_choices_do_not_decide
+description: Population tests where every choice does not decide are ignored when another test still narrows the choice set.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_parse_source_binding_ignores_tests_all_choices_do_not_decide
+kind: algorithm
+algorithm: source_binding.finite_choice_parse
+input:
+  choices:
+    OPEN:
+      subject_identity: DOES_NOT_DECIDE_TEST
+      normal_instance_guard: SATISFIES_TEST
+    CLOSED:
+      subject_identity: DOES_NOT_DECIDE_TEST
+      normal_instance_guard: CONFLICTS_WITH_TEST
+expect:
+  result_contains:
+    source_invocation_param_values:
+      - status: OPEN
+    population_choices:
+      - controller_kind: query_param
+        controller_id: status
+        field_id: status
+        included_values: [OPEN]
+        excluded_values: [CLOSED]

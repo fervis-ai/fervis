@@ -1,0 +1,19 @@
+id: finite_choice_rejects_unknown_controlled_population_role
+description: Finite-choice reviews fail closed when they reference a population role that was not shown.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_parse_source_binding_rejects_unknown_controlled_population_role
+kind: algorithm
+algorithm: source_binding.finite_choice_parse
+input:
+  controlled_population_role_id: unknown_role
+  choices:
+    OPEN:
+      subject_identity: SATISFIES_TEST
+      normal_instance_guard: SATISFIES_TEST
+      include_normal_guard_result: false
+    CLOSED:
+      subject_identity: CONFLICTS_WITH_TEST
+      normal_instance_guard: CONFLICTS_WITH_TEST
+      include_normal_guard_result: false
+expect:
+  error_contains: not valid

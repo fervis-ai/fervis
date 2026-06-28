@@ -1,0 +1,54 @@
+id: open_read_not_starved_by_unbound_identity_reads
+description: Catalog selection keeps an open source when a matching identity-bound source cannot execute without an identity value.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_open_read_not_starved_by_unbound_identity_reads
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - id: shift_revenue_read
+        endpoint_name: get_shift_record_revenue
+        resource_names: [shift record revenue]
+        params:
+          - ref: shift_revenue.shift_record_id
+            name: shift_record_id
+            source: path
+            type: uuid
+            required: true
+            identity: {entity_ref: shift_record, identity_field: shift_record_id, primary_key: true, stable: true}
+        fields:
+          - ref: shift_revenue.total_revenue
+            path: summary.total_revenue
+            type: decimal
+      - id: sales_summary_read
+        endpoint_name: list_sales_summary
+        resource_names: [sales summary]
+        params:
+          - {ref: sales_summary.start_date, name: start_date, source: query, type: date, required: true}
+          - {ref: sales_summary.end_date, name: end_date, source: query, type: date, required: true}
+        fields:
+          - ref: sales_summary.amount
+            path: data.amount
+            type: decimal
+  requested_facts:
+    - id: fact_1
+      description: revenue made
+      answer_outputs:
+        - id: answer_1
+          description: total revenue amount
+  resource_name_matches:
+    - requested_fact_id: fact_1
+      answer_output_resource_lineage:
+        - answer_output_id: answer_1
+          support_role: MEASURED_VALUE
+          source_text: revenue
+          matching_resource_names: [sales summary]
+  max_reads_per_fact: 1
+expect:
+  result_contains:
+    requested_fact_selections:
+      - requested_fact_id: fact_1
+        selected_read_ids: [sales_summary_read]
+        unselected_positive_read_ids: []
+

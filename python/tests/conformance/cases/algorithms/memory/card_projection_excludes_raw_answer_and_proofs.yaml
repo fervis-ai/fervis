@@ -1,0 +1,47 @@
+id: card_projection_excludes_raw_answer_and_proofs
+description: Model-facing memory projection excludes raw answer payloads and proof/source internals.
+migrates:
+  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_memory_card_projection_excludes_raw_answer_payloads_and_proof_refs
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: How about those sales?
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_1
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: money we made yesterday
+                answer_outputs:
+                  - description: total sales amount
+                    requested_value_frame: total sales amount
+        addresses:
+          - address: relation.answer_rows
+            kind: relation
+            source: {kind: api_read}
+            grainKeys: [sale_key]
+            completeness: {status: complete, pagination: all_pages}
+            rowAddresses: [row.answer_1]
+            evidence: {stepIds: [turn_1.proof]}
+          - address: row.answer_1
+            kind: row
+            relation: relation.answer_rows
+            identity: {sale_key: turn_1-sale}
+          - address: value.total
+            kind: value
+            value: {type: decimal, value: "100.00"}
+            display: total for turn_1
+            evidence: {stepIds: [turn_1.value_proof]}
+expect:
+  result_contains:
+    card_kinds: [prior_answer_request, row_set, scalar_value]
+  text_excludes_from:
+    cards:
+      - We made 100.
+      - proof
+      - source

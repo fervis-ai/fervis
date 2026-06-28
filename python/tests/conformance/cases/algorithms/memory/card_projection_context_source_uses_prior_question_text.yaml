@@ -1,0 +1,32 @@
+id: card_projection_context_source_uses_prior_question_text
+description: Context sources use the prior integrated user question rather than internal answer-fact phrasing.
+migrates:
+  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_context_sources_use_prior_integrated_question_not_answer_fact_phrase
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: How much did she make yesterday?
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_sales_total
+        outcome: answered
+        sourceQuestion: What was the total sales amount for products Staff One sold today?
+        sourceAnswer: "2468"
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: products Staff One sold today
+                answer_outputs:
+                  - id: answer_1
+                    description: total sales amount
+        addresses:
+          - address: value.total_sales
+            kind: value
+            value: {type: decimal, value: "2468.00"}
+expect:
+  result_contains:
+    context_sources:
+      - kind: prior_user_question
+        text: What was the total sales amount for products Staff One sold today?
+

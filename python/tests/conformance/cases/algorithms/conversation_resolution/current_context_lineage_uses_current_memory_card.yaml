@@ -1,0 +1,47 @@
+id: current_context_lineage_uses_current_memory_card
+description: Resolution activates the memory id on the current context source, not older lineage hidden behind it.
+migrates:
+  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_context_source_lineage_only_activates_current_memory_cards
+kind: algorithm
+algorithm: conversation_resolution.parse
+input:
+  current_question: How much did she make yesterday?
+  context_sources:
+    - source_id: source_staff_one
+      kind: prior_fervis_answer
+      text: Staff One answer.
+      source_card_ids: [card_staff_one]
+      source_memory_ids: [turn_total.entity.grounded_fact_1_entity_1]
+      meaning_anchors:
+        - memory_id: turn_total.entity.grounded_fact_1_entity_1
+          text: Staff One
+          occurrence: 1
+          kind: entity_identity
+          label: staff
+  payload:
+    kind: conversation_resolution
+    status: resolved
+    current_question_text: How much did she make yesterday?
+    clause_resolutions:
+      - current_clause_text: How much did she make yesterday
+        occurrence: 1
+        requested_value_frame:
+          current_value_surface: {text: How much, kind: self_sufficient_current_value}
+          context_frame_choices: []
+        dependencies:
+          - anchor_text: she
+            occurrence: 1
+            kind: reference
+            meaning_components:
+              - kind: other
+                source_id: source_staff_one
+                source_text: Staff One
+                memory_id: turn_total.entity.grounded_fact_1_entity_1
+                resolved_text: Staff One
+            resolved_text: Staff One
+            must_preserve_terms: [Staff One]
+        resolved_clause_text: How much total sales did Staff One make yesterday?
+    unresolved: {unresolved_kind: none, why_unresolved: "", candidate_interpretations: []}
+expect:
+  result_contains:
+    used_memory_ids: [turn_total.entity.grounded_fact_1_entity_1]

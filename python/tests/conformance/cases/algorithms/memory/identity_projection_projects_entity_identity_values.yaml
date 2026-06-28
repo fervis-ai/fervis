@@ -1,0 +1,33 @@
+id: identity_projection_projects_entity_identity_values
+description: Entity fact addresses project canonical identity values with backend-authored labels.
+migrates:
+  - api/tests/fervis/memory/test_identity_values.py::test_memory_projection_projects_entity_identity_values
+kind: algorithm
+algorithm: memory.identity_projection
+input:
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_1
+        outcome: answered
+        addresses:
+          - address: entity.location.abc
+            kind: entity
+            resource: location
+            referenceText: ABC Mall
+            identity: {location_id: loc-1}
+expect:
+  result_contains:
+    identity_values:
+      - id: mem.turn_1.entity.location.abc.identity.location_id
+        kind: identity
+        identity_type: location
+        identity_field: location_id
+        value: loc-1
+        lookup_text: ABC Mall
+        display_label: ABC Mall
+        display_label_author: backend
+        source:
+          artifact_id: turn_1
+          address: entity.location.abc
+          field_id: location_id
+

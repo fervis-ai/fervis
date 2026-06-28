@@ -1,0 +1,49 @@
+id: card_projection_public_shape_only
+description: Model-facing memory cards expose public fields only.
+migrates:
+  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_memory_card_projection_emits_public_shape_only
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: How about those sales?
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_1
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: money we made yesterday
+                answer_outputs:
+                  - description: total sales amount
+                    requested_value_frame: total sales amount
+        addresses:
+          - address: relation.answer_rows
+            kind: relation
+            source: {kind: api_read}
+            scope: {date: "2026-05-14"}
+            grainKeys: [sale_key]
+            completeness: {status: complete, pagination: all_pages}
+            rowAddresses: [row.answer_1]
+            evidence: {stepIds: [turn_1.proof]}
+          - address: row.answer_1
+            kind: row
+            relation: relation.answer_rows
+            identity: {sale_key: turn_1-sale}
+            values:
+              amount: {type: decimal, value: "100.00"}
+          - address: value.total
+            kind: value
+            value: {type: decimal, value: "100.00"}
+            display: total for turn_1
+            evidence: {stepIds: [turn_1.value_proof]}
+expect:
+  result_contains:
+    public_card_keys:
+      - [card_id, details, display, kind]
+  text_excludes_from:
+    public_cards:
+      - memory_id

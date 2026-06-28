@@ -1,0 +1,99 @@
+.evidence-panel {
+  background: var(--panel);
+  border: 1px solid var(--rule-strong);
+  padding: 0;
+}
+
+.evidence-panel summary {
+  align-items: center;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  list-style: none;
+  padding: 13px 16px;
+}
+
+.evidence-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.evidence-panel summary::before {
+  color: var(--faint);
+  content: "▸";
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.evidence-panel[open] summary {
+  border-bottom: 1px solid var(--rule);
+}
+
+.evidence-panel[open] summary::before {
+  content: "▾";
+}
+
+.evidence-summary-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.evidence-summary-meta {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 11px;
+  margin-left: auto;
+}
+
+.evidence-body {
+  padding: 16px 20px 18px;
+}
+
+.evidence-zone {
+  padding: 12px 0;
+}
+
+.evidence-zone + .evidence-zone {
+  border-top: 1px solid var(--rule);
+}
+
+.evidence-label {
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+}
+
+.evidence-label span {
+  color: var(--ink);
+  font-family: var(--mono);
+  letter-spacing: 0;
+}
+
+.detail-toggle {
+  align-items: center;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--faint);
+  display: inline-flex;
+  font-family: var(--mono);
+  font-size: 11px;
+  gap: 8px;
+  justify-self: start;
+  padding: 2px 0 0;
+}
+
+.detail-toggle span {
+  border: 1px solid var(--rule);
+  color: var(--ink);
+  display: inline-grid;
+  height: 20px;
+  place-items: center;
+  width: 20px;
+}

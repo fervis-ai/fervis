@@ -1,0 +1,41 @@
+id: activated_memory_expands_row_set
+description: Selected row-set memory cards expand to canonical row identities and row refs.
+migrates:
+  - api/tests/fervis/memory/test_activated_memory.py::test_activated_memory_expands_row_set_from_used_memory_id
+kind: algorithm
+algorithm: conversation_memory.expand_activated
+input:
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_1
+        outcome: answered
+        addresses:
+          - address: relation.sales_rows
+            kind: relation
+            source: {kind: api_read}
+            grainKeys: [sale_key]
+            completeness: {status: complete, pagination: all_pages}
+            rowAddresses: [row.sale_1, row.sale_2]
+          - address: row.sale_1
+            kind: row
+            relation: relation.sales_rows
+            identity: {sale_key: sale-1}
+            values: {amount: {type: decimal, value: "100.00"}}
+          - address: row.sale_2
+            kind: row
+            relation: relation.sales_rows
+            identity: {sale_key: sale-2}
+            values: {amount: {type: decimal, value: "150.00"}}
+  memory_cards:
+    mem.rows:
+      kind: row_set
+      artifact_id: turn_1
+      address: relation.sales_rows
+  used_memory_ids: [mem.rows]
+expect:
+  result_contains:
+    activatedMemory:
+      mem.rows:
+        kind: row_set
+        canonical_ids: [sale-1, sale-2]
+

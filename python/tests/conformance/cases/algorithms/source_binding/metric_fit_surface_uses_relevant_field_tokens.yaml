@@ -1,0 +1,14 @@
+id: metric_fit_surface_uses_relevant_field_tokens
+description: Metric-fit review obligations are required only for metric fields cited by read-eligibility relevant_field_tokens.
+kind: algorithm
+algorithm: source_binding.metric_fit_surface
+input:
+  request:
+    mode: multi_row_summary_metric
+expect:
+  result_contains:
+    metric_ids_by_fact:
+      fact_1:
+        - source_1.data.amount
+    metric_id_count_by_fact:
+      fact_1: 1

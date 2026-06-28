@@ -1,0 +1,36 @@
+id: proof_graph_population_choice_scoped_identity
+kind: algorithm
+algorithm: execution.proof_graph
+description: Population-choice proof nodes preserve scoped decision identity when multiple predicates share a display field.
+input:
+  population_choices:
+    - controller_kind: row_predicate
+      controller_id: rp.source_1.root.status
+      field_id: status
+      included_values: [OPEN]
+      excluded_values: [CLOSED]
+      proof_refs:
+        - row_predicate:rp.source_1.root.status
+    - controller_kind: row_predicate
+      controller_id: rp.source_1.items.status
+      field_id: status
+      included_values: [OPEN, CLOSED]
+      excluded_values: []
+      proof_refs:
+        - row_predicate:rp.source_1.items.status
+expect:
+  result_contains:
+    nodes:
+      - id: population_choice:source_1:row_predicate:rp.source_1.root.status
+        kind: population_choice
+        label: "Included status values [OPEN]. Excluded: CLOSED"
+      - id: population_choice:source_1:row_predicate:rp.source_1.items.status
+        kind: population_choice
+        label: "Included status values [OPEN, CLOSED]"
+    edges:
+      - source: population_choice:source_1:row_predicate:rp.source_1.root.status
+        target: relation:source_1
+        role: narrows
+      - source: population_choice:source_1:row_predicate:rp.source_1.items.status
+        target: relation:source_1
+        role: scopes

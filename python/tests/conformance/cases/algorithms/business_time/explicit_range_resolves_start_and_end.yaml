@@ -1,0 +1,23 @@
+id: explicit_range_resolves_start_and_end
+description: Structured explicit date ranges preserve both endpoints.
+migrates:
+  - api/tests/fervis/business_time/test_resolver.py::test_resolve_range_explicit_start_and_end
+kind: algorithm
+algorithm: business_time.resolve
+input:
+  anchor_date: "2026-04-11"
+  intent:
+    kind: range
+    start:
+      year: 2026
+      month: 3
+      day: 1
+    end:
+      year: 2026
+      month: 3
+      day: 15
+expect:
+  result_contains:
+    status: resolved
+    start: "2026-03-01"
+    end: "2026-03-15"

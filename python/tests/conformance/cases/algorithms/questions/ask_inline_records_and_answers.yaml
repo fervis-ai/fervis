@@ -1,0 +1,50 @@
+id: question_run_ask_inline_records_and_answers
+description: Inline ask records the question/run, executes lookup, and returns the terminal answer.
+kind: algorithm
+algorithm: questions.lifecycle
+input:
+  scenario: ask
+  execution_mode: inline
+  tenant_id: tenant_1
+  principal_id: user_1
+  principal_raw: execution-user-1
+  question: "How many orders came in today?"
+  max_budget_usd: "0.25"
+  max_thinking_tokens: 128
+  runtime_context:
+    request_source: cli
+  model:
+    provider: anthropic
+    model_key: HAIKU
+  lookup_result:
+    status: COMPLETED
+    answer: "42"
+    result_data:
+      value: 42
+expect:
+  result_contains:
+    ask_result:
+      status: COMPLETED
+      answer: "42"
+      result_data:
+        value: 42
+    lineage:
+      conversation_count: 1
+      question_count: 1
+      run_count: 1
+      failed_runtime_fallback_count: 0
+      first_question_sequence: 1
+      trigger_kind: initial
+    queue:
+      enqueued_count: 1
+      terminal_count: 1
+    lookup:
+      call_count: 1
+      last_question: "How many orders came in today?"
+      last_principal: execution-user-1
+      last_provider: anthropic
+      last_model_key: HAIKU
+      last_runtime_context:
+        request_source: cli
+      last_max_budget_usd: "0.25"
+      last_max_thinking_tokens: 128

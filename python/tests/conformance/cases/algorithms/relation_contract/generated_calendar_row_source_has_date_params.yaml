@@ -1,0 +1,14 @@
+id: generated_calendar_row_source_has_date_params
+description: Generated calendar row source exposes an authorable date field and required date params.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relations.py::test_generated_calendar_is_a_row_source_with_authorable_date_params
+kind: algorithm
+algorithm: planning.relation_contract
+input:
+  mode: calendar_row_source
+expect:
+  result_contains:
+    id: rs_calendar_days
+    date_field_label: runtime date
+    start_param_required: true
+    end_param_required: true

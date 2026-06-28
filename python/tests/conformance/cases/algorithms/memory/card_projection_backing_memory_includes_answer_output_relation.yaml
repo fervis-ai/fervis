@@ -1,0 +1,41 @@
+id: card_projection_backing_memory_includes_answer_output_relation
+description: Prior request private backing memory includes row sets that carry the requested answer output.
+migrates:
+  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_prior_answer_request_backing_memory_includes_answer_output_relation
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: How much did she make yesterday?
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_sales_total
+        outcome: answered
+        sourceQuestion: How much is that in total sales?
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_sales
+                answer_fact: total sales for referenced products
+                answer_outputs:
+                  - id: answer_output_1
+                    description: total sales amount
+                    requested_value_frame: total sales amount
+            question_inputs: []
+        addresses:
+          - address: relation.sales_rows
+            kind: relation
+            source: {kind: operation_output}
+            grainKeys: [sale_id]
+            rowAddresses: [row.sales.1]
+          - address: row.sales.1
+            kind: row
+            relation: relation.sales_rows
+            identity: {sale_id: sale-1}
+            values:
+              amount: {type: decimal, value: "100.00", answer_output_ids: [answer_output_1]}
+expect:
+  result_contains:
+    private_backing_ids:
+      turn_sales_total.prior_request.fact_sales:
+        - turn_sales_total.relation.sales_rows
+

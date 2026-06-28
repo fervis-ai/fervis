@@ -1,0 +1,16 @@
+id: time_intent_structured_date_requires_object
+description: Time value validation rejects date intents whose date component is not structured.
+migrates:
+  - api/tests/fervis/lookup/fact_planning/test_values.py::test_time_value_contract_requires_structured_date_intent
+kind: algorithm
+algorithm: planning.value_contract
+input:
+  values:
+    - id: since_jan_13
+      kind: time
+      expression: since Jan 13th
+      intent:
+        kind: open_range
+        start: "2026-01-13"
+expect:
+  error_contains: invalid time intent

@@ -1,0 +1,63 @@
+id: card_projection_prior_answer_requests_are_fact_scoped
+description: A prior artifact with multiple answer requests projects one prior-request card per requested fact.
+migrates:
+  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_prior_answer_request_cards_are_fact_scoped_not_artifact_merged
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: What about yesterday?
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_mixed
+        outcome: answered
+        sourceQuestion: How much did Staff One sell and which store had stockouts?
+        sourceAnswer: Staff One sold 100. Westlands had stockouts.
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_sales
+                answer_fact: sales by Staff One
+                answer_outputs:
+                  - description: total sales amount
+                    requested_value_frame: total sales amount
+                known_inputs:
+                  - id: sales_staff
+                    kind: named_reference_text
+                    source: question_context
+                    text: Staff One
+              - id: fact_stockouts
+                answer_fact: stockouts by store
+                answer_outputs:
+                  - description: store name
+                    requested_value_frame: store name
+                known_inputs:
+                  - id: stockout_store
+                    kind: named_reference_text
+                    source: question_context
+                    text: store
+        addresses:
+          - address: value.answer
+            kind: value
+            value: {type: decimal, value: "100.00"}
+            evidence: {stepIds: [turn_mixed.answer]}
+expect:
+  result_contains:
+    card_kind_counts:
+      prior_answer_request: 2
+    cards_by_memory_id:
+      turn_mixed.prior_request.fact_sales:
+        kind: prior_answer_request
+        display: sales by Staff One
+        details:
+          request_shape:
+            answer_fact_template: sales by Staff One
+            slots:
+              - slot_id: sales_staff
+      turn_mixed.prior_request.fact_stockouts:
+        kind: prior_answer_request
+        display: stockouts by store
+        details:
+          request_shape:
+            answer_fact_template: stockouts by store
+            slots:
+              - slot_id: stockout_store

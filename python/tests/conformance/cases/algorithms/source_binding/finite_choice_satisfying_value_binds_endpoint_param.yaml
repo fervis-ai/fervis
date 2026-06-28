@@ -1,0 +1,22 @@
+id: finite_choice_satisfying_value_binds_endpoint_param
+description: Source binding derives a finite-choice endpoint filter from values that satisfy the answer population.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_parse_source_binding_derives_choice_set_from_population_tests
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_parse_source_binding_derives_active_tests_from_choice_effects
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_parse_source_binding_accepts_role_scoped_test_result_keys
+kind: algorithm
+algorithm: source_binding.finite_choice_parse
+input:
+  choices:
+    OPEN: SATISFIES_TEST
+    CLOSED: CONFLICTS_WITH_TEST
+expect:
+  result_contains:
+    source_invocation_param_values:
+      - status: OPEN
+    population_choices:
+      - controller_kind: query_param
+        controller_id: status
+        field_id: status
+        included_values: [OPEN]
+        excluded_values: [CLOSED]

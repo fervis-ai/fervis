@@ -1,0 +1,20 @@
+id: framework_primary_key_metadata_creates_identifier_capability
+description: Framework primary-key metadata creates identifier capability.
+migrates:
+  - api/tests/fervis/core/test_capabilities.py::test_capabilities_use_framework_primary_key_metadata_for_identifiers
+kind: algorithm
+algorithm: core.capabilities_from_schema
+input:
+  path_params:
+    - name: staff_id
+      type: uuid
+  response_fields:
+    - name: staff_id
+      path: staff_id
+      identity:
+        idField: staff_id
+  primary_key_fields: [staff_id]
+expect:
+  result_contains:
+    has:
+      identifier:staff_id: true

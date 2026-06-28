@@ -1,0 +1,74 @@
+id: scripted_pattern_set_difference
+description: Lookup runtime executes a scripted set-difference fact plan and renders missing candidate rows.
+migrates:
+  - api/tests/fervis/lookup/test_pattern_fact_plan_contract.py::test_pattern_contract_executes_set_difference_end_to_end
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: Which variants were not observed?
+  question_contract:
+    fact_description: variants not observed
+    subject_text: variants
+    answer_expression_family: set_difference
+    answer_outputs: [variant_name]
+    resource_terms: [variant]
+  catalog:
+    reads:
+      - id: candidate_read
+        endpoint_name: candidate_read
+        resource_names: [variant]
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - ref: field.candidate.variant_id
+            path: data.variant_id
+            row_path_id: data
+            type: string
+            identity: {entity_ref: variant, identity_field: variant_id, primary_key: true, stable: true}
+          - ref: field.candidate.variant_name
+            path: data.variant_name
+            row_path_id: data
+            type: string
+      - id: observed_read
+        endpoint_name: observed_read
+        resource_names: [variant]
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - ref: field.observed.variant_id
+            path: data.variant_id
+            row_path_id: data
+            type: string
+            identity: {entity_ref: variant, identity_field: variant_id, primary_key: true, stable: true}
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers:
+        - requested_fact_id: fact_1
+          answer_output_ids: [answer_1]
+          pattern: set_difference
+          candidate:
+            source: {kind: read, read_id: candidate_read}
+            identity_fields: [variant_id]
+            output_fields:
+              - {field_id: variant_name}
+          observed:
+            source: {kind: read, read_id: observed_read}
+            identity_fields: [variant_id]
+  responses:
+    candidate_read:
+      data:
+        - {variant_id: variant_1, variant_name: Variant One}
+        - {variant_id: variant_2, variant_name: Variant Two}
+    observed_read:
+      data:
+        - {variant_id: variant_1}
+expect:
+  result_contains:
+    status: COMPLETED
+    answer: Variant Two

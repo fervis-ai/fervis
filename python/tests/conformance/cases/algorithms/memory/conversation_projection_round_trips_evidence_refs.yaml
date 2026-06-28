@@ -1,0 +1,28 @@
+id: conversation_projection_round_trips_evidence_refs
+description: Conversation projection preserves evidence refs on terminal outcome addresses.
+migrates:
+  - api/tests/fervis/memory/test_fact_memory.py::test_memory_projection_round_trips_evidence_refs
+kind: algorithm
+algorithm: memory.project_conversation
+input:
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_policy
+        outcome: impossible
+        addresses:
+          - address: outcome.full_card_numbers
+            kind: outcome
+            terminal: impossible
+            proof: {policy: restricted_field}
+            evidence:
+              stepIds: [restricted_field_check]
+              fieldRefs: [field.card_number]
+expect:
+  result_contains:
+    execution_context:
+      factArtifacts:
+        - addresses:
+            - evidence:
+                stepIds: [restricted_field_check]
+                fieldRefs: [field.card_number]
+

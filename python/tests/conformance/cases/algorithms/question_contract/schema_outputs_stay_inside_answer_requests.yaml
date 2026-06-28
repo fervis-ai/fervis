@@ -1,0 +1,12 @@
+id: schema_outputs_stay_inside_answer_requests
+description: Question-contract schema keeps answer outputs inside answer requests with description-only model output.
+migrates:
+  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_schema_keeps_outputs_inside_answer_requests
+kind: algorithm
+algorithm: question_contract.schema
+input: {}
+expect:
+  result_contains:
+    answer_output_required: [description]
+    answer_output_properties: [description]
+

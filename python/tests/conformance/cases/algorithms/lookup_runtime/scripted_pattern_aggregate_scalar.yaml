@@ -1,0 +1,57 @@
+id: scripted_pattern_aggregate_scalar
+description: Lookup runtime executes a scripted aggregate-scalar fact plan over API rows.
+migrates:
+  - api/tests/fervis/lookup/test_pattern_fact_plan_contract.py::test_pattern_contract_executes_aggregate_scalar_end_to_end
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: How much is the metric total?
+  question_contract:
+    fact_description: total metric amount
+    subject_text: metric total
+    answer_expression_family: scalar_aggregate
+    answer_outputs: [total]
+    resource_terms: [metric]
+    support_role: MEASURED_VALUE
+  catalog:
+    reads:
+      - id: metric_read
+        endpoint_name: metric_read
+        resource_names: [metric]
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - ref: field.location_id
+            path: data.location_id
+            row_path_id: data
+            type: uuid
+          - ref: field.metric_total
+            path: data.metric_total
+            row_path_id: data
+            type: decimal
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers:
+        - requested_fact_id: fact_1
+          answer_output_ids: [answer_1]
+          pattern: aggregate_scalar
+          source: {kind: read, read_id: metric_read}
+          metric:
+            kind: aggregate_field
+            function: sum
+            field_id: metric_total
+            label: total
+  responses:
+    metric_read:
+      data:
+        - {location_id: location_alpha, metric_total: "10.00"}
+        - {location_id: location_beta, metric_total: "20.00"}
+expect:
+  result_contains:
+    status: COMPLETED
+    rendered_rows:
+      - metric_total: "30.00"

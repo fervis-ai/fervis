@@ -1,0 +1,69 @@
+id: support_keeps_summary_scalar_metric_with_detail_rows
+description: Source-binding support keeps a scalar summary metric available even when the same source also has detail rows.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_scalar_metric_choices_include_summary_fields_with_detail_rows
+kind: algorithm
+algorithm: source_binding.fulfillment_support
+input:
+  project_model_visible: true
+  requested_fact:
+    description: total revenue this week
+    subject_text: sales revenue
+  catalog:
+    reads:
+      - id: read_1
+        endpoint_name: read_1
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+          - id: summary
+            path: summary
+            cardinality: one
+        fields:
+          - ref: field.amount
+            path: data.amount
+            row_path_id: data
+            type: decimal
+          - ref: field.total_amount
+            path: summary.total_amount
+            row_path_id: summary
+            type: decimal
+  candidate:
+    source_candidate_id: source_1
+    kind: new_api_read
+    read_id: read_1
+    result_grains:
+      - grain_id: data
+        row_path_id: data
+        row_source_id: rs_source_1_data
+        cardinality: many
+        evidence_items:
+          - evidence_id: source_1.data.amount
+            field_id: amount
+            row_path_id: data
+            type: decimal
+      - grain_id: summary
+        row_path_id: summary
+        row_source_id: rs_source_1_summary
+        cardinality: one
+        evidence_items:
+          - evidence_id: source_1.summary.total_amount
+            field_id: total_amount
+            row_path_id: summary
+            type: decimal
+    evidence_items:
+      - evidence_id: source_1.data.amount
+        field_id: amount
+        row_path_id: data
+        type: decimal
+      - evidence_id: source_1.summary.total_amount
+        field_id: total_amount
+        row_path_id: summary
+        type: decimal
+expect:
+  result_contains:
+    metric_field_ids: [amount, total_amount]
+    metric_evidence_ids:
+      - source_1.data.amount
+      - source_1.summary.total_amount

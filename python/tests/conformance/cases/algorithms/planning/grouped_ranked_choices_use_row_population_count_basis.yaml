@@ -1,0 +1,40 @@
+id: grouped_ranked_choices_use_row_population_count_basis
+description: Grouped/ranked planning can use a many-row population as the count-records metric basis.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_grouped_ranked_choices_use_row_population_count_basis
+kind: algorithm
+algorithm: planning.grouped_ranked_choices
+input:
+  requested_fact_id: fact_1
+  plan_shape: ranked_aggregate
+  source:
+    id: sb_1
+    requested_fact_id: fact_1
+    read_id: list_orders
+    row_source_id: api:list_orders:data
+    cardinality: many
+    fields:
+      - field_id: store_id
+        type: uuid
+        roles: [identity]
+        identity: {entity_ref: store, identity_field: store_id, primary_key: true, stable: true}
+    evidence:
+      - {evidence_id: source_1.data.store_id, field_id: store_id, row_cardinality: many}
+      - {evidence_id: row_population.data, field_id: data, type: row_population, row_cardinality: many, row_source_id: api:list_orders:data}
+    fulfillments:
+      - answer_output_id: answer_1
+        group_key_evidence_ids:
+          - source_1.data.store_id
+        row_count_basis_evidence_ids:
+          - row_population.data
+expect:
+  result_contains:
+    group_field_ids: [store_id]
+    metric_kinds: [count_records]
+    count_basis:
+      - kind: row_population
+        row_source_id: api:list_orders:data
+        row_path_id: data
+        row_cardinality: many
+    metric_allowed_functions:
+      count_records: [count]

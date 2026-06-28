@@ -1,0 +1,32 @@
+id: activation_accepts_identity_value_binding_for_entity
+description: Entity addresses can be activated as identity-value bindings.
+migrates:
+  - api/tests/fervis/memory/test_activation.py::test_activation_accepts_identity_value_binding_for_entity_address
+kind: algorithm
+algorithm: memory.activate
+input:
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_1
+        outcome: answered
+        addresses:
+          - address: entity.location.abc
+            kind: entity
+            resource: location
+            referenceText: ABC Mall
+            identity: {location_id: loc-1}
+  requests:
+    - id: current.location
+      from_artifact_id: turn_1
+      from_address: entity.location.abc
+      use_as: identity_value_binding
+      target_binding_id: location
+expect:
+  result_contains:
+    activated:
+      activatedInputs:
+        - id: current.location
+          useAs: identity_value_binding
+      addresses:
+        - identity: {location_id: loc-1}
+

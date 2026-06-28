@@ -1,0 +1,30 @@
+id: prompt_excludes_selected_prior_reference_context
+description: Query-enrichment prompt does not include stale selected-prior-reference context.
+migrates:
+  - api/tests/fervis/lookup/query_enrichment/test_query_enrichment.py::test_query_enrichment_prompt_does_not_include_selected_prior_reference_context
+kind: algorithm
+algorithm: query_enrichment.prompt
+input:
+  request_fixture: booked_money
+  request:
+    question: How much did she make yesterday?
+    requested_facts:
+      - id: fact_1
+        description: she
+        answer_outputs:
+          - id: answer_1
+            description: how much she made yesterday
+  excludes:
+    - "Selected prior reference context:"
+    - selected prior reference context
+    - "\"related_identity_types\": ["
+    - source_question_text
+    - source_answer_text
+expect:
+  result_contains:
+    excludes:
+      "Selected prior reference context:": true
+      selected prior reference context: true
+      "\"related_identity_types\": [": true
+      source_question_text: true
+      source_answer_text: true

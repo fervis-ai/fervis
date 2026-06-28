@@ -1,0 +1,53 @@
+id: resource_terms_beat_incidental_field_terms
+description: Catalog selection ranks resource-name matches above incidental field-name matches.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_resource_terms_beat_incidental_field_terms
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - id: incidental_read
+        endpoint_name: list_incidental_records
+        resource_names: [incidental record]
+        fields:
+          - ref: field.is_active
+            path: data.is_active
+            type: boolean
+          - ref: field.starting_price
+            path: data.price
+            type: decimal
+          - ref: field.review_count
+            path: data.review_count
+            type: integer
+      - id: resource_read
+        endpoint_name: list_price_lists
+        resource_names: [price list]
+        fields:
+          - ref: field.price_list_id
+            path: data.price_list_id
+            type: uuid
+          - ref: field.is_active
+            path: data.is_active
+            type: boolean
+  requested_facts:
+    - id: fact_1
+      description: count active price lists
+      answer_outputs:
+        - id: active_price_list_count
+  resource_name_matches:
+    - requested_fact_id: fact_1
+      answer_output_resource_lineage:
+        - answer_output_id: active_price_list_count
+          support_role: MEASURED_VALUE
+          source_text: price lists
+          matching_resource_names: [price list]
+  max_reads_per_fact: 2
+expect:
+  result_contains:
+    requested_fact_selections:
+      - requested_fact_id: fact_1
+        query_terms: [price, list]
+        selected_read_ids: [resource_read]
+        rankings:
+          - read_id: resource_read

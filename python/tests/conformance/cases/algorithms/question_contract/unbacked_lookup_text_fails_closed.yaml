@@ -1,0 +1,28 @@
+id: unbacked_lookup_text_fails_closed
+description: Lookup text for a pronoun reference must be backed by supplied context evidence.
+migrates:
+  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_validation_rejects_unbacked_lookup_text
+kind: algorithm
+algorithm: question_contract.parse
+input:
+  question_context: And how much did she make yesterday?
+  question_context_texts: [amount made]
+  answer_fact: amount made by Alice yesterday
+  answer_outputs:
+    - description: amount made
+  question_inputs:
+    - input_ref: staff
+      source: question_context
+      kind: named_reference_text
+      reference_text: she
+      target_meaning: staff member
+      lookup_text: Alice
+      inventory_check: {why_this_is_an_input: she is a named reference}
+    - input_ref: period
+      source: question_context
+      kind: time_text
+      reference_text: yesterday
+      inventory_check: {why_this_is_an_input: yesterday is a time scope}
+  used_input_refs: [staff, period]
+expect:
+  error_contains: reference lookup text must come from question context

@@ -1,0 +1,48 @@
+id: scripted_pattern_precomputed_scalar_field
+description: Lookup runtime reads a precomputed scalar field directly from a one-row summary response.
+migrates:
+  - api/tests/fervis/lookup/test_pattern_fact_plan_contract.py::test_pattern_contract_executes_direct_field_value_for_precomputed_scalar_end_to_end
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: How many records are in the summary?
+  question_contract:
+    fact_description: record count in the summary
+    subject_text: records
+    answer_expression_family: scalar_value
+    answer_outputs: [count]
+    resource_terms: [summary count]
+    support_role: ANSWER_VALUE
+  catalog:
+    reads:
+      - id: summary_count_read
+        endpoint_name: summary_count_read
+        resource_names: [summary count]
+        row_paths:
+          - id: summary
+            path: summary
+            cardinality: one
+        fields:
+          - ref: field.summary.total_count
+            path: summary.total_count
+            row_path_id: summary
+            type: integer
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers:
+        - requested_fact_id: fact_1
+          answer_output_ids: [answer_1]
+          pattern: direct_field_value
+          source: {kind: read, read_id: summary_count_read}
+          output_field: {field_id: total_count}
+  responses:
+    summary_count_read:
+      summary:
+        total_count: 12
+expect:
+  result_contains:
+    status: COMPLETED
+    rendered_rows:
+      - answer_1: 12

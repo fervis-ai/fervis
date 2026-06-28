@@ -1,0 +1,17 @@
+id: metric_fit_parse_uses_narrowed_metric_surface_for_candidate_expansion
+description: Source-binding parser uses the narrowed metric-fit surface, not every numeric field on the candidate, when expanding ranked aggregate metric evidence.
+kind: algorithm
+algorithm: source_binding.metric_fit_parse
+input:
+  request:
+    mode: multi_row_summary_ranked_metric
+  selected_metric_field: amount
+  metric_decisions:
+    amount: FITS_REQUESTED_ANSWER
+    data: DOES_NOT_FIT_REQUESTED_ANSWER
+  raw_metric_evidence_decisions:
+    row_population.summary: DOES_NOT_FIT_REQUESTED_ANSWER
+expect:
+  result_contains:
+    metric_measure_field_ids: [amount]
+    row_count_basis_evidence_ids: []

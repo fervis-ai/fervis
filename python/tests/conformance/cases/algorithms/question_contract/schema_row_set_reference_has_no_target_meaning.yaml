@@ -1,0 +1,26 @@
+id: schema_row_set_reference_has_no_target_meaning
+description: Question-contract schema keeps row_set_reference separate from named-reference target meaning.
+migrates:
+  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_schema_uses_row_set_reference_without_target_meaning
+kind: algorithm
+algorithm: question_contract.schema
+input: {}
+expect:
+  result_contains:
+    row_set_reference_property_membership:
+      input_ref: true
+      source: true
+      reference_text: true
+      occurrence: true
+      resolved_input_ref: true
+      inventory_check: true
+      kind: true
+      target_meaning: false
+    row_set_reference_required:
+      - input_ref
+      - source
+      - reference_text
+      - occurrence
+      - resolved_input_ref
+      - inventory_check
+      - kind

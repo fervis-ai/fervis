@@ -1,0 +1,21 @@
+id: renderer_passively_renders_answer_rows
+description: Renderer passively projects already-computed answer rows.
+migrates:
+  - api/tests/fervis/lookup/outcomes/test_results.py::test_renderer_passively_renders_fact_result
+kind: algorithm
+algorithm: outcomes.classify
+input:
+  mode: answer
+  final_relation_id: rows
+  relations:
+    - id: rows
+      rows:
+        - {name: Alpha}
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown, proof_refs: [read:rows]}
+  render_outputs:
+    - {id: name, relation_id: rows, field_id: name}
+expect:
+  result_contains:
+    outcome_kind: answer
+    rendered_rows:
+      - {name: Alpha}

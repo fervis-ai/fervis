@@ -1,0 +1,983 @@
+import pytest
+from django.urls import path
+from rest_framework import serializers, viewsets
+
+from fervis.host_api.adapters.django.catalog import (
+    _build_contract,
+    get_endpoint_contract as _get_endpoint_contract,
+    get_endpoint_contracts as _get_endpoint_contracts,
+)
+from fervis.host_api.adapters.django import catalog as django_catalog
+from fervis.host_api.adapters.django.schema_introspection import (
+    conditional_response_roots_from_serializer,
+    response_fields_from_serializer,
+)
+from fervis.project.integration import (
+    DjangoAppSource,
+    FervisConfig,
+    HostConfig,
+    ModelConfig,
+    ProviderConfig,
+    RuntimeRoutes,
+)
+from fervis.project.source_scope import (
+    DjangoSourceScope,
+    django_source_scopes,
+)
+
+_DEFAULT_SOURCES = (
+    DjangoSourceScope(
+        name="commerce",
+        app_modules=("apps.retail_ops", "apps.brands"),
+        path_prefixes=("/v1/",),
+    ),
+)
+
+
+def get_endpoint_contract(
+    endpoint_name: str,
+    *,
+    sources: tuple[DjangoSourceScope, ...] = _DEFAULT_SOURCES,
+):
+    return _get_endpoint_contract(
+        endpoint_name,
+        sources=sources,
+    )
+
+
+def get_endpoint_contracts(
+    *,
+    sources: tuple[DjangoSourceScope, ...] = _DEFAULT_SOURCES,
+):
+    return _get_endpoint_contracts(
+        sources=sources,
+    )
+
+
+def test_django_catalog_requires_explicit_source_scope() -> None:
+    with pytest.raises(TypeError):
+        django_catalog.get_endpoint_contracts()
+
+
+def test_django_source_scopes_preserve_source_boundaries() -> None:
+    config = FervisConfig(
+        host=HostConfig(),
+        routes=RuntimeRoutes(prefix="/fervis/"),
+        model=ModelConfig(
+            default_provider="openai",
+            default_model_key="gpt-5.4-mini",
+            providers=[
+                ProviderConfig(
+                    name="openai",
+                    allowed_model_keys=["gpt-5.4-mini"],
+                )
+            ],
+        ),
+        sources=(
+            DjangoAppSource(
+                name="sales",
+                app_modules=("apps.sales",),
+                path_prefixes=("/v1/sales/",),
+            ),
+            DjangoAppSource(
+                name="inventory",
+                app_modules=("apps.inventory",),
+                path_prefixes=("/v1/inventory/",),
+            ),
+        ),
+    )
+
+    assert django_source_scopes(config) == (
+        DjangoSourceScope(
+            name="sales",
+            app_modules=("apps.sales",),
+            path_prefixes=("/v1/sales/",),
+        ),
+        DjangoSourceScope(
+            name="inventory",
+            app_modules=("apps.inventory",),
+            path_prefixes=("/v1/inventory/",),
+        ),
+    )
+
+
+@pytest.mark.django_db
+def test_contract_registry_includes_shift_records_query_and_response_schema(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("list_shift_record_list")
+
+    assert {
+        "path_template": contract.path_template,
+        "has_query_params": {
+            "start_date",
+            "end_date",
+            "location_id",
+            "staff_id",
+            "status",
+            "is_validated",
+            "limit",
+            "offset",
+        }.issubset({item.name for item in contract.query_params}),
+        "has_response_fields": {"is_late", "staff_name"}.issubset(
+            set(contract.response_schema)
+        ),
+        "query_schema_source": contract.query_schema_source != "missing",
+        "response_schema_source": contract.response_schema_source != "missing",
+    } == {
+        "path_template": "/v1/shift-records/",
+        "has_query_params": True,
+        "has_response_fields": True,
+        "query_schema_source": True,
+        "response_schema_source": True,
+    }
+
+
+@pytest.mark.django_db
+def test_contract_registry_includes_location_shift_records_resource_endpoint(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("get_location_shift_records")
+
+    assert {
+        "path_template": contract.path_template,
+        "path_params": [item.name for item in contract.path_params],
+        "has_query_params": {"start_date", "end_date", "staff_id", "status"}.issubset(
+            {item.name for item in contract.query_params}
+        ),
+        "has_response_fields": {"staff_name", "location_id"}.issubset(
+            set(contract.response_schema)
+        ),
+    } == {
+        "path_template": "/v1/locations/{location_id}/shift-records/",
+        "path_params": ["location_id"],
+        "has_query_params": True,
+        "has_response_fields": True,
+    }
+
+
+@pytest.mark.django_db
+def test_contract_registry_includes_shift_compensation_filter_params(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("list_shift_compensation_list")
+
+    query_params = {item.name: item for item in contract.query_params}
+    catalog_endpoint = contract.catalog_endpoint
+    assert catalog_endpoint is not None
+    assert {
+        "has_params": {"start_date", "end_date", "location_id"}.issubset(
+            query_params
+        ),
+        "start_date_type": query_params["start_date"].type,
+        "end_date_type": query_params["end_date"].type,
+        "framework_kind": catalog_endpoint.framework_kind,
+        "namespace_kind": catalog_endpoint.source_namespace_kind,
+        "namespace_path": catalog_endpoint.source_namespace_path,
+        "handler_ref_includes_module": "apps.retail_ops" in catalog_endpoint.handler_ref,
+    } == {
+        "has_params": True,
+        "start_date_type": "date",
+        "end_date_type": "date",
+        "framework_kind": "django_drf",
+        "namespace_kind": "django_app",
+        "namespace_path": ("retail_ops",),
+        "handler_ref_includes_module": True,
+    }
+
+
+@pytest.mark.django_db
+def test_contract_registry_marks_nested_fk_response_fields_as_entity_identities(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("list_shift_compensation_list")
+
+    fields = {item.name: item for item in contract.response_fields}
+
+    assert {
+        name: fields[name].identity
+        for name in ("staff_id", "location_id", "staff_name", "location_name")
+    } == {
+        "staff_id": {
+            "entityRef": "staff",
+            "idField": "staff_id",
+            "primaryKey": True,
+        },
+        "location_id": {
+            "entityRef": "location",
+            "idField": "location_id",
+            "primaryKey": True,
+        },
+        "staff_name": {},
+        "location_name": {},
+    }
+
+
+@pytest.mark.django_db
+def test_staff_shift_records_contract_exposes_start_time_ordering(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("get_staff_shift_records")
+
+    ordering = next(
+        param for param in contract.query_params if param.name == "ordering"
+    )
+    assert (ordering.type, set(ordering.choices), ordering.semantics) == (
+        "choice",
+        {"start_time", "-start_time"},
+        "response_shape",
+    )
+
+
+@pytest.mark.django_db
+def test_shift_assignment_contract_exposes_start_time_ordering(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("list_shift_assignment_list")
+
+    ordering = next(
+        param for param in contract.query_params if param.name == "ordering"
+    )
+    assert (ordering.type, set(ordering.choices), ordering.semantics) == (
+        "choice",
+        {"start_time", "-start_time"},
+        "response_shape",
+    )
+
+
+@pytest.mark.django_db
+def test_contract_registry_does_not_guess_list_query_params(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("list_sale_list")
+
+    assert (
+        contract.query_schema_source.endswith("SaleListQuerySerializer"),
+        {"start_date", "end_date", "status"}.issubset(
+            {item.name for item in contract.query_params}
+        ),
+    ) == (True, True)
+
+
+@pytest.mark.django_db
+def test_contract_registry_exposes_only_declared_query_params(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("list_store_list")
+
+    assert contract.query_schema_source == "missing"
+    assert "fields" not in {item.name for item in contract.query_params}
+
+
+@pytest.mark.django_db
+def test_contract_registry_preserves_nested_response_schema_for_sale_items(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("list_sale_list")
+
+    assert {
+        "item_fields": list(contract.response_schema["items"][0]),
+        "quantity_type": contract.response_schema["items"][0]["quantity"],
+        "unit_sale_price_type": contract.response_schema["items"][0][
+            "unit_sale_price"
+        ],
+    } == {
+        "item_fields": [
+            "sale_item_id",
+            "merch_shade_id",
+            "quantity",
+            "unit_sale_price",
+            "snapshot_merch_name",
+            "snapshot_shade_name",
+        ],
+        "quantity_type": "integer",
+        "unit_sale_price_type": "decimal",
+    }
+
+
+@pytest.mark.django_db
+def test_contract_registry_keeps_conditional_items_when_endpoint_exposes_expansion_param(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("list_sale_list")
+
+    assert contract is not None
+    query_params = {item.name for item in contract.query_params}
+    response_paths = {item.path for item in contract.response_fields}
+    item_field = next(
+        item
+        for item in contract.response_fields
+        if item.path == "items.snapshot_shade_name"
+    )
+
+    assert (
+        "include_items" in query_params,
+        "items.snapshot_shade_name" in response_paths,
+        item_field.to_public_dict()["requires"],
+    ) == (
+        True,
+        True,
+        {"queryParam": "include_items", "value": True},
+    )
+
+
+def test_conditional_response_roots_come_from_explicit_serializer_metadata():
+    class ContractMetadataSerializer(serializers.Serializer):
+        fervis_conditional_response_roots = ("items",)
+
+        items = serializers.ListField()
+
+    assert conditional_response_roots_from_serializer(ContractMetadataSerializer) == (
+        "items",
+    )
+
+
+def test_serializer_introspection_fails_fast_on_initialization_errors():
+    class BrokenSerializer(serializers.Serializer):
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError("requires context")
+
+    with pytest.raises(ValueError, match="Could not instantiate DRF serializer"):
+        response_fields_from_serializer(BrokenSerializer)
+
+
+def test_serializer_method_field_uses_return_annotation_for_response_type():
+    class MethodTypeSerializer(serializers.Serializer):
+        is_open = serializers.SerializerMethodField()
+
+        def get_is_open(self, obj) -> bool:
+            return True
+
+    fields = {
+        field.name: field
+        for field in response_fields_from_serializer(MethodTypeSerializer)
+    }
+
+    assert fields["is_open"].type == "boolean"
+
+
+@pytest.mark.django_db
+def test_contract_registry_removes_unreachable_conditional_items_without_expansion_param(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("get_staff_sales")
+
+    assert contract is not None
+    query_params = {item.name for item in contract.query_params}
+    response_paths = {item.path for item in contract.response_fields}
+
+    assert (
+        "include_items" in query_params,
+        "items" in response_paths,
+        "items.snapshot_shade_name" in response_paths,
+        "items" in contract.response_schema,
+    ) == (False, False, False, False)
+
+
+@pytest.mark.django_db
+def test_path_scoped_list_views_are_collection_contracts(fervis_foundation_reset):
+    contract = get_endpoint_contract("get_staff_sales")
+
+    assert (
+        contract.path_template,
+        contract.is_collection_endpoint(),
+        contract.is_detail_endpoint(),
+    ) == ("/v1/staff/{staff_id}/sales/", True, False)
+
+
+@pytest.mark.django_db
+def test_contract_registry_exposes_sales_summary_query_and_response_schema(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("list_sales_summary")
+
+    query_params = {item.name: item for item in contract.query_params}
+    assert {
+        "has_query_params": {"group_by", "start_date", "end_date", "status"}.issubset(
+            query_params
+        ),
+        "group_by_choices": query_params["group_by"].choices,
+        "query_schema_source": contract.query_schema_source.endswith(
+            "SalesSummaryQuerySerializer"
+        ),
+        "response_data_schema": contract.response_schema["data"],
+    } == {
+        "has_query_params": True,
+        "group_by_choices": ("date", "location"),
+        "query_schema_source": True,
+        "response_data_schema": [
+            {
+                "location_id": "uuid",
+                "label": "string",
+                "amount": "decimal",
+                "count": "integer",
+                "previous_label": "string",
+                "previous_amount": "decimal",
+                "previous_count": "integer",
+            }
+        ],
+    }
+
+
+@pytest.mark.django_db
+def test_endpoint_contract_exposes_dynamic_resource_names_for_query_expansion(
+    fervis_foundation_reset,
+):
+    location_contract = get_endpoint_contract("list_location_list")
+    shift_contract = get_endpoint_contract("get_location_shift_records")
+
+    assert (
+        "location" in location_contract.resource_names,
+        "shift record" in shift_contract.resource_names,
+    ) == (True, True)
+
+
+@pytest.mark.django_db
+def test_plain_serializer_merch_endpoint_exposes_resource_name_from_framework_metadata(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("list_merch_list")
+
+    assert (contract.path_template, "merch" in contract.resource_names) == (
+        "/v1/merch/",
+        True,
+    )
+
+
+@pytest.mark.django_db
+def test_plain_serializer_merch_shade_endpoint_exposes_resource_name_from_framework_metadata(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("list_merch_shade_list_create")
+
+    assert (contract.path_template, "merch shade" in contract.resource_names) == (
+        "/v1/merch-shades/",
+        True,
+    )
+
+
+def test_django_catalog_uses_view_get_serializer_class_for_get_response_schema():
+    class ListSerializer(serializers.Serializer):
+        list_id = serializers.UUIDField()
+
+    class WriteSerializer(serializers.Serializer):
+        write_id = serializers.UUIDField()
+
+    class ListCreateView:
+        serializer_class = WriteSerializer
+        query_serializer_class = None
+        permission_classes = ()
+
+        def get(self):
+            pass
+
+        def post(self):
+            pass
+
+        def get_serializer_class(self):
+            if self.request.method == "GET":
+                return ListSerializer
+            return self.serializer_class
+
+    contract = _build_contract(
+        path="v1/things/",
+        url_name="thing-list",
+        view_class=ListCreateView,
+        converters={},
+    )
+
+    assert (
+        contract.response_schema_source.endswith(".ListSerializer"),
+        {item.path for item in contract.response_fields},
+    ) == (True, {"list_id"})
+
+
+def test_django_catalog_does_not_infer_identity_from_resource_name_suffix():
+    class PlainSerializer(serializers.Serializer):
+        sale_id = serializers.UUIDField()
+        amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+    class PlainView:
+        serializer_class = PlainSerializer
+        query_serializer_class = None
+        permission_classes = ()
+
+        def get(self):
+            pass
+
+    contract = _build_contract(
+        path="v1/sales/",
+        url_name="sale-list",
+        view_class=PlainView,
+        converters={},
+    )
+
+    sale_id = next(item for item in contract.response_fields if item.path == "sale_id")
+    amount = next(item for item in contract.response_fields if item.path == "amount")
+
+    assert (sale_id.identity, amount.identity) == ({}, {})
+
+
+def test_django_catalog_marks_identity_from_serializer_model_primary_key():
+    class RecordPk:
+        name = "record_id"
+        attname = "record_id"
+        primary_key = True
+        remote_field = None
+
+    class RecordMeta:
+        pk = RecordPk()
+        object_name = "InventoryRecord"
+        model_name = "inventory_record"
+        fields = (pk,)
+
+        def get_field(self, name):
+            if name == "record_id":
+                return self.pk
+            raise LookupError(name)
+
+    class InventoryRecord:
+        _meta = RecordMeta()
+
+    class PlainSerializer(serializers.Serializer):
+        record_id = serializers.UUIDField()
+        amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+        class Meta:
+            model = InventoryRecord
+
+    class PlainView:
+        serializer_class = PlainSerializer
+        query_serializer_class = None
+        permission_classes = ()
+
+        def get(self):
+            pass
+
+    contract = _build_contract(
+        path="v1/records/",
+        url_name="record-list",
+        view_class=PlainView,
+        converters={},
+    )
+
+    record_id = next(
+        item for item in contract.response_fields if item.path == "record_id"
+    )
+    amount = next(item for item in contract.response_fields if item.path == "amount")
+
+    assert (record_id.identity, amount.identity) == (
+        {
+            "entityRef": "inventory_record",
+            "idField": "record_id",
+            "primaryKey": True,
+        },
+        {},
+    )
+
+
+def test_django_catalog_uses_declared_source_for_identity_resolution():
+    class RecordPk:
+        name = "record_id"
+        attname = "record_id"
+        primary_key = True
+        remote_field = None
+
+    class ExternalReferenceField:
+        name = "external_reference"
+        attname = "external_reference"
+        primary_key = False
+        remote_field = None
+
+    class RecordMeta:
+        pk = RecordPk()
+        object_name = "InventoryRecord"
+        model_name = "inventory_record"
+        fields = (pk, ExternalReferenceField())
+
+        def get_field(self, name):
+            for field in self.fields:
+                if field.name == name:
+                    return field
+            raise LookupError(name)
+
+    class InventoryRecord:
+        _meta = RecordMeta()
+
+    class PlainSerializer(serializers.Serializer):
+        record_id = serializers.UUIDField(source="external_reference")
+
+        class Meta:
+            model = InventoryRecord
+
+    class PlainView:
+        serializer_class = PlainSerializer
+        query_serializer_class = None
+        permission_classes = ()
+
+        def get(self):
+            pass
+
+    contract = _build_contract(
+        path="v1/records/",
+        url_name="record-list",
+        view_class=PlainView,
+        converters={},
+    )
+
+    record_id = next(
+        item for item in contract.response_fields if item.path == "record_id"
+    )
+
+    assert record_id.identity == {}
+
+
+def test_django_catalog_marks_identity_from_get_queryset_model_primary_key():
+    class RecordPk:
+        name = "record_id"
+        attname = "record_id"
+        primary_key = True
+        remote_field = None
+
+    class RecordMeta:
+        pk = RecordPk()
+        object_name = "InventoryRecord"
+        model_name = "inventory_record"
+        fields = (pk,)
+
+        def get_field(self, name):
+            if name == "record_id":
+                return self.pk
+            raise LookupError(name)
+
+    class InventoryRecord:
+        _meta = RecordMeta()
+
+    class QuerySet:
+        model = InventoryRecord
+
+    class PlainSerializer(serializers.Serializer):
+        record_id = serializers.UUIDField()
+        amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+    class PlainView:
+        serializer_class = PlainSerializer
+        query_serializer_class = None
+        permission_classes = ()
+
+        def get_queryset(self):
+            return QuerySet()
+
+        def get(self):
+            pass
+
+    contract = _build_contract(
+        path="v1/records/",
+        url_name="record-list",
+        view_class=PlainView,
+        converters={},
+    )
+
+    record_id = next(
+        item for item in contract.response_fields if item.path == "record_id"
+    )
+    amount = next(item for item in contract.response_fields if item.path == "amount")
+
+    assert (record_id.identity, amount.identity) == (
+        {
+            "entityRef": "inventory_record",
+            "idField": "record_id",
+            "primaryKey": True,
+        },
+        {},
+    )
+
+
+@pytest.mark.django_db
+def test_plain_report_serializer_fields_do_not_gain_identity_without_model_metadata(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("list_sales_by_item_report")
+
+    fields = {item.path: item for item in contract.response_fields}
+    assert (
+        fields["brands.products.merch_id"].identity,
+        fields["brands.products.name"].identity,
+    ) == ({}, {})
+
+
+@pytest.mark.django_db
+def test_featured_merch_contract_does_not_infer_identity_without_model_metadata(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("list_featured_merch")
+
+    fields = {item.path: item for item in contract.response_fields}
+    assert (
+        fields["data.merch.merch_id"].identity,
+        fields["data.merch.name"].identity,
+    ) == ({}, {})
+
+
+@pytest.mark.django_db
+def test_conditional_response_fields_keep_framework_identity_metadata(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("list_sale_list")
+
+    fields = {item.path: item for item in contract.response_fields}
+    assert (
+        fields["items.merch_shade_id"].requires,
+        fields["items.merch_shade_id"].identity,
+    ) == (
+        {"queryParam": "include_items", "value": True},
+        {
+            "entityRef": "merch_shade",
+            "idField": "merch_shade_id",
+            "primaryKey": True,
+        },
+    )
+
+
+@pytest.mark.django_db
+def test_django_catalog_discovers_framework_api_endpoints_beyond_retail_ops(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("list_external_brand_list")
+
+    assert (
+        contract.path_template,
+        contract.view_class.startswith("apps.retail_ops."),
+    ) == ("/v1/external-brands/", False)
+
+
+@pytest.mark.django_db
+def test_django_catalog_uses_configured_eligible_app_modules(
+    fervis_foundation_reset,
+):
+    brand_source = (
+        DjangoSourceScope(
+            name="brands",
+            app_modules=("apps.brands",),
+            path_prefixes=("/v1/",),
+        ),
+    )
+    assert (
+        get_endpoint_contract(
+            "list_external_brand_list",
+            sources=brand_source,
+        )
+        is not None,
+        get_endpoint_contract(
+            "list_sale_list",
+            sources=brand_source,
+        )
+        is None,
+    ) == (True, True)
+
+
+@pytest.mark.django_db
+def test_django_catalog_uses_explicit_source_path_prefixes(
+    fervis_foundation_reset,
+):
+    contracts = get_endpoint_contracts(
+        sources=(
+            DjangoSourceScope(
+                name="shift_records",
+                app_modules=("apps.retail_ops",),
+                path_prefixes=("/v1/shift-records/",),
+            ),
+        ),
+    )
+
+    paths = {contract.path_template for contract in contracts}
+    assert "/v1/shift-records/" in paths
+    assert all(path.startswith("/v1/shift-records/") for path in paths)
+
+
+@pytest.mark.django_db
+def test_django_catalog_does_not_apply_hidden_v1_prefix(
+    fervis_foundation_reset,
+):
+    contracts = get_endpoint_contracts(
+        sources=(
+            DjangoSourceScope(
+                name="missing",
+                app_modules=("apps.retail_ops",),
+                path_prefixes=("/does-not-match/",),
+            ),
+        ),
+    )
+
+    assert contracts == ()
+
+
+@pytest.mark.django_db
+def test_django_catalog_requires_explicit_eligible_app_modules(
+    fervis_foundation_reset,
+):
+    with pytest.raises(ValueError, match="DjangoAppSource.app_modules"):
+        get_endpoint_contracts(
+            sources=(
+                DjangoSourceScope(
+                    name="empty",
+                    app_modules=(),
+                    path_prefixes=("/v1/",),
+                ),
+            ),
+        )
+
+
+def test_django_catalog_does_not_treat_detail_view_as_collection_for_paginate_method():
+    class DetailView:
+        serializer_class = None
+        query_serializer_class = None
+        permission_classes = ()
+
+        def get(self):
+            pass
+
+        def paginate_queryset(self, queryset):
+            return queryset
+
+    contract = _build_contract(
+        path="v1/widgets/<id>/",
+        url_name="widget-detail",
+        view_class=DetailView,
+        converters={},
+    )
+
+    assert (contract.paginated, contract.is_detail_endpoint()) == (False, True)
+
+
+def test_django_catalog_includes_drf_router_viewset_get_actions():
+    class WidgetSerializer(serializers.Serializer):
+        id = serializers.CharField()
+
+    class WidgetViewSet(viewsets.ViewSet):
+        serializer_class = WidgetSerializer
+        permission_classes = ()
+
+        def list(self, request):
+            raise AssertionError("catalog introspection must not execute the view")
+
+    contracts = []
+
+    django_catalog._walk_patterns(
+        [
+            path(
+                "widgets/",
+                WidgetViewSet.as_view({"get": "list"}),
+                name="widget-list",
+            )
+        ],
+        "",
+        contracts,
+        app_modules=(__name__,),
+        path_prefixes=("/",),
+    )
+
+    assert [contract.endpoint_name for contract in contracts] == ["list_widget_list"]
+
+
+@pytest.mark.django_db
+def test_response_field_introspection_does_not_evaluate_relation_choices():
+    class ExplodingQueryset:
+        model = object
+
+        def all(self):
+            return self
+
+        def __iter__(self):
+            raise AssertionError("relation queryset was evaluated")
+
+        def __bool__(self):
+            return True
+
+    class RelationSerializer(serializers.Serializer):
+        groups = serializers.PrimaryKeyRelatedField(
+            queryset=ExplodingQueryset(),
+            many=True,
+        )
+
+    fields = response_fields_from_serializer(RelationSerializer)
+
+    assert [(field.path, field.choices) for field in fields] == [("groups", ())]
+
+
+def test_django_catalog_uses_explicit_serializer_resource_names():
+    class PlainSerializer(serializers.Serializer):
+        fervis_resource_names = ("activity record",)
+
+        record_id = serializers.UUIDField()
+
+    class PlainView:
+        serializer_class = PlainSerializer
+        query_serializer_class = None
+        permission_classes = ()
+
+        def get(self):
+            pass
+
+    contract = _build_contract(
+        path="v1/activity-records/",
+        url_name="activity-record-list",
+        view_class=PlainView,
+        converters={},
+    )
+
+    assert "activity record" in contract.resource_names
+
+
+@pytest.mark.django_db
+def test_django_catalog_uses_endpoint_model_metadata_for_common_id_primary_keys(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("list_cron_job_list")
+    id_field = next(field for field in contract.response_fields if field.path == "id")
+
+    assert id_field.identity == {
+        "entityRef": "cron_job_run",
+        "idField": "id",
+        "primaryKey": True,
+    }
+
+
+def test_django_catalog_does_not_infer_identity_from_global_field_name():
+    class ExternalIdPk:
+        name = "external_id"
+
+    class ExternalThingMeta:
+        pk = ExternalIdPk()
+        object_name = "ExternalThing"
+        model_name = "external_thing"
+
+    class ExternalThing:
+        _meta = ExternalThingMeta()
+
+    class PlainSerializer(serializers.Serializer):
+        external_id = serializers.UUIDField()
+
+    class PlainView:
+        serializer_class = PlainSerializer
+        query_serializer_class = None
+        permission_classes = ()
+
+        def get(self):
+            pass
+
+    django_catalog.clear_endpoint_contract_cache()
+    try:
+        contract = _build_contract(
+            path="v1/plain-records/",
+            url_name="plain-record-list",
+            view_class=PlainView,
+            converters={},
+        )
+    finally:
+        django_catalog.clear_endpoint_contract_cache()
+
+    field = next(
+        item for item in contract.response_fields if item.path == "external_id"
+    )
+    assert field.identity == {}

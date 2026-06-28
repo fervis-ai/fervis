@@ -1,0 +1,1 @@
+"""Fervis CLI command adapters."""

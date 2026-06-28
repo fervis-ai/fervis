@@ -1,0 +1,27 @@
+id: inferable_field_paths_project_to_declared_row_source
+description: Fields under a declared many-row path project to that row source.
+migrates:
+  - api/tests/fervis/lookup/catalog/test_validation.py::test_catalog_validation_accepts_inferable_field_row_paths
+kind: algorithm
+algorithm: relation_catalog.row_source_projection
+input:
+  catalog:
+    reads:
+      - id: rows_read
+        endpoint_name: list_rows
+        resource_names: [row]
+        row_paths:
+          - id: rows
+            path: data
+            cardinality: many
+        fields:
+          - ref: field.name
+            path: data.name
+            type: string
+expect:
+  result_contains:
+    read_id: rows_read
+    row_path_id: rows
+    fields:
+      name:
+        field_ref: field.name

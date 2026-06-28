@@ -1,0 +1,29 @@
+id: outcome_address_no_data
+kind: algorithm
+algorithm: memory.outcome_address
+migrates:
+  - api/tests/fervis/interfaces/django_interface/test_conversation_memory.py::test_fact_result_terminal_projection_preserves_structured_no_data
+input:
+  fact_result:
+    outcome:
+      kind: no_data
+      empty_relation:
+        kind: answer_rows
+        relation_id: sales_rows
+        grain_keys: [sale_id]
+        scope_ref: today
+        proof_refs: [read:sales]
+      proof_refs: [read:sales]
+expect:
+  result_contains:
+    address:
+      address: outcome.no_data
+      terminal: no_data
+      evidence:
+        stepIds: [read:sales]
+      proof:
+        emptyRelation:
+          relationId: sales_rows
+          grainKeys: [sale_id]
+          scopeRef: today
+

@@ -1,0 +1,17 @@
+id: answer_requests_map_to_internal_fact_ids
+description: Parser assigns stable internal fact and output ids from answer request order.
+migrates:
+  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_maps_answer_requests_to_internal_fact_ids
+kind: algorithm
+algorithm: question_contract.parse
+input:
+  question_context: How much sales at ABC Mall?
+expect:
+  result_contains:
+    requested_facts:
+      - id: fact_1
+        description: sales at ABC Mall
+        answer_expression_family: scalar_aggregate
+        answer_outputs:
+          - id: answer_1
+            description: sales total

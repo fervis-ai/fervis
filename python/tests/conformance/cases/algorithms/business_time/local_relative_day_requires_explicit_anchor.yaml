@@ -1,0 +1,12 @@
+id: local_relative_day_requires_explicit_anchor
+description: Local relative references fail closed unless an anchor period is supplied.
+migrates:
+  - api/tests/fervis/business_time/test_resolver.py::test_resolver_requires_explicit_anchor_for_local_relative_day_expression
+kind: algorithm
+algorithm: business_time.resolve
+input:
+  expression: the day before
+  anchor_date: "2026-04-11"
+expect:
+  result_contains:
+    status: needs_clarification

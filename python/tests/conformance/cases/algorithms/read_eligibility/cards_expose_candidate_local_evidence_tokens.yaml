@@ -1,0 +1,16 @@
+id: cards_expose_candidate_local_evidence_tokens
+description: Read-eligibility cards expose row and field evidence tokens scoped to each candidate.
+migrates:
+  - api/tests/fervis/lookup/test_read_eligibility_contract.py::test_read_eligibility_cards_expose_candidate_local_evidence_tokens
+kind: algorithm
+algorithm: read_eligibility.cards
+input:
+  request_fixture: stores_in_area
+expect:
+  result_contains:
+    first_response_row_evidence_token: source_1.row.data
+    field_evidence_tokens_by_field_id:
+      location_id: source_1.field.data.location_id
+      type: source_1.field.data.type
+      area_id: source_1.field.data.area.area_id
+      name: source_1.field.data.area.name

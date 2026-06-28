@@ -1,0 +1,34 @@
+id: card_projection_private_cards_addressable_by_memory_id
+description: Conversation memory private cards are addressable by durable memory id for each projected card.
+migrates:
+  - api/tests/fervis/lookup/test_memory_identity_values.py::test_conversation_memory_private_cards_are_selected_by_memory_id
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: What about those sales?
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_1
+        outcome: answered
+        sourceQuestion: Which products did Alice sell today?
+        sourceAnswer: Two sales.
+        addresses:
+          - address: entity.staff.alice
+            kind: entity
+            resource: staff
+            referenceText: Alice
+            identity: {staff_id: staff-1}
+          - address: relation.sales
+            kind: relation
+            source: {kind: api_read, read_id: list_sale_list, identityType: sale}
+            grainKeys: [sale_id]
+            fieldCoverage: {sale_id: answer_rows.sale_id}
+            completeness: {status: complete, pagination: not_paginated, rowCount: 0}
+expect:
+  result_contains:
+    private_cards:
+      turn_1.entity.staff.alice:
+        address: entity.staff.alice
+      turn_1.relation.sales:
+        address: relation.sales
+

@@ -1,0 +1,22 @@
+id: renderer_passively_renders_no_data
+description: Renderer passively renders structured no-data details.
+migrates:
+  - api/tests/fervis/lookup/outcomes/test_results.py::test_renderer_passively_renders_no_data_result
+kind: algorithm
+algorithm: outcomes.classify
+input:
+  mode: empty_relation
+  empty_kind: answer_rows
+  relations:
+    - id: answer_rows
+      rows: []
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown, proof_refs: [read:answer_rows]}
+expect:
+  result_contains:
+    outcome_kind: no_data
+    rendered_message: No matching data was found.
+    rendered_details:
+      emptyRelation:
+        kind: answer_rows
+        relationId: answer_rows
+        proofRefs: [read:answer_rows]

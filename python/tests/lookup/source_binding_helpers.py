@@ -1,0 +1,3895 @@
+from __future__ import annotations
+
+import json
+import re
+from typing import Any
+from xml.etree import ElementTree
+
+from fervis.lookup.question_contract import NormalInstanceExcludedStateRole
+from tests.lookup.prompt_sections import prompt_section_payload
+
+
+def source_fulfills_for_candidate(
+    candidate: dict[str, Any],
+    *,
+    field_ids: tuple[str, ...],
+    answer_output_ids: tuple[str, ...] = ("answer_1",),
+) -> dict[str, dict[str, Any]]:
+    evidence_ids = tuple(
+        _candidate_evidence_id(candidate, field_id=field_id) for field_id in field_ids
+    )
+    evidence_text = ", ".join(evidence_ids)
+    output: dict[str, dict[str, Any]] = {}
+    for answer_output_id in answer_output_ids:
+        support_set_id = _candidate_fulfillment_choice_id(
+            candidate,
+            answer_output_id=answer_output_id,
+            evidence_ids=evidence_ids,
+        )
+        output[answer_output_id] = {
+            "match_basis_explanation": (
+                f"{answer_output_id} is fulfilled by {evidence_text} because "
+                "the selected source evidence provides the requested output."
+            ),
+            "fulfillment_choice_id": support_set_id,
+        }
+    return output
+
+
+def source_fulfills_fields_for_candidate(
+    candidate: dict[str, Any],
+    *,
+    field_ids_by_answer_output: dict[str, tuple[str, ...]],
+) -> dict[str, dict[str, Any]]:
+    output: dict[str, dict[str, Any]] = {}
+    for answer_output_id, field_ids in field_ids_by_answer_output.items():
+        evidence_ids = tuple(
+            _candidate_evidence_id(candidate, field_id=field_id)
+            for field_id in field_ids
+        )
+        evidence_text = ", ".join(evidence_ids)
+        support_set_id = _candidate_fulfillment_choice_id(
+            candidate,
+            answer_output_id=answer_output_id,
+            evidence_ids=evidence_ids,
+        )
+        output[answer_output_id] = {
+            "match_basis_explanation": (
+                f"{answer_output_id} is fulfilled by {evidence_text} because "
+                "the selected source evidence provides the requested output."
+            ),
+            "fulfillment_choice_id": support_set_id,
+        }
+    return output
+
+
+def source_fulfills_by_row_population_for_candidate(
+    candidate: dict[str, Any],
+    *,
+    answer_output_ids: tuple[str, ...] = ("answer_1",),
+    row_path_id: str = "",
+) -> dict[str, dict[str, Any]]:
+    output: dict[str, dict[str, Any]] = {}
+    for answer_output_id in answer_output_ids:
+        support_set_id = _candidate_row_population_support_set_id(
+            candidate,
+            answer_output_id=answer_output_id,
+            row_path_id=row_path_id,
+        )
+        output[answer_output_id] = {
+            "match_basis_explanation": (
+                f"{answer_output_id} is fulfilled by the selected row "
+                "population because list-row output fields are projected from "
+                "that returned population."
+            ),
+            "fulfillment_choice_id": support_set_id,
+        }
+    return output
+
+
+def source_candidate_answer_population(
+    prompt: str,
+    *,
+    source_candidate_id: str,
+) -> dict[str, str]:
+    return _answer_population(prompt, source_candidate_id)
+
+
+def source_candidate_with_fields(
+    prompt_or_payload: str | dict[str, Any],
+    *,
+    kind: str | None = None,
+    read_id: str | None = None,
+    required: tuple[str, ...],
+    forbidden: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    payload = (
+        _source_candidate_prompt_payload(prompt_or_payload)
+        if isinstance(prompt_or_payload, str)
+        else prompt_or_payload
+    )
+    for candidate in _all_source_candidates(payload):
+        if kind is not None and candidate.get("kind") != kind:
+            continue
+        if read_id is not None and str(candidate.get("read_id") or "") != read_id:
+            continue
+        field_ids = _source_candidate_field_ids(candidate)
+        if set(required) <= field_ids and not (set(forbidden) & field_ids):
+            return candidate
+    raise AssertionError(
+        f"prompt missing {kind or 'source'} candidate with fields {required} "
+        f"and without fields {forbidden}"
+    )
+
+
+def _source_candidate_field_ids(candidate: dict[str, Any]) -> set[str]:
+    surface = _candidate_binding_surface(candidate)
+    field_ids = {
+        str(item.get("field_id") or item.get("id") or "")
+        for field_source in (
+            surface.get("evidence_items") or (),
+            surface.get("fields") or (),
+            candidate.get("fields") or (),
+        )
+        for item in field_source
+        if isinstance(item, dict)
+    }
+    field_ids |= {
+        str(field.get("field_id") or "")
+        for row in candidate.get("response_rows") or ()
+        if isinstance(row, dict)
+        for field in row.get("fields") or ()
+        if isinstance(field, dict)
+    }
+    field_ids |= _candidate_fulfillment_field_ids(candidate)
+    return {field_id for field_id in field_ids if field_id}
+
+
+def _candidate_fulfillment_field_ids(candidate: dict[str, Any]) -> set[str]:
+    return {
+        str(item.get("field_id") or "")
+        for support_set in (
+            _candidate_binding_surface(candidate).get("fulfillment_support_sets") or ()
+        )
+        if isinstance(support_set, dict)
+        for slot in support_set.get("fulfillment_slots") or ()
+        if isinstance(slot, dict)
+        for item in _slot_evidence_items(slot)
+        if isinstance(item, dict) and str(item.get("field_id") or "")
+    }
+
+
+def _candidate_row_population_support_set_id(
+    candidate: dict[str, Any],
+    *,
+    answer_output_id: str,
+    row_path_id: str,
+) -> str:
+    for support_set in (
+        _candidate_binding_surface(candidate).get("fulfillment_support_sets") or ()
+    ):
+        if not isinstance(support_set, dict):
+            continue
+        if str(support_set.get("answer_output_id") or "") != answer_output_id:
+            continue
+        if _support_set_has_row_population_evidence(
+            support_set,
+            row_path_id=row_path_id,
+        ):
+            return str(support_set.get("fulfillment_choice_id") or "")
+    raise AssertionError(f"row population support set not found for {answer_output_id}")
+
+
+def _support_set_has_row_population_evidence(
+    support_set: dict[str, Any],
+    *,
+    row_path_id: str,
+) -> bool:
+    return any(
+        isinstance(slot, dict)
+        and any(
+            isinstance(item, dict)
+            and (
+                not row_path_id
+                or str(item.get("row_path_id") or "") == row_path_id
+                or f".{row_path_id}." in str(item.get("evidence_id") or "")
+            )
+            for item in slot.get("row_count_basis_evidence") or ()
+        )
+        for slot in support_set.get("fulfillment_slots") or ()
+    )
+
+
+def _candidate_fulfillment_choice_id(
+    candidate: dict[str, Any],
+    *,
+    answer_output_id: str,
+    evidence_ids: tuple[str, ...],
+) -> str:
+    expected = set(evidence_ids)
+    matches: list[dict[str, Any]] = []
+    for support_set in (
+        _candidate_binding_surface(candidate).get("fulfillment_support_sets") or ()
+    ):
+        if not isinstance(support_set, dict):
+            continue
+        if str(support_set.get("answer_output_id") or "") != answer_output_id:
+            continue
+        support_set_evidence_ids = {
+            evidence_id
+            for slot in support_set.get("fulfillment_slots") or ()
+            if isinstance(slot, dict)
+            for evidence_id in _slot_evidence_ids(slot)
+        }
+        if expected <= support_set_evidence_ids:
+            matches.append(support_set)
+    if matches:
+        return str(
+            max(
+                matches,
+                key=lambda item: _support_set_match_score(
+                    item, expected_evidence_ids=expected
+                ),
+            ).get("fulfillment_choice_id")
+            or ""
+        )
+    raise AssertionError(
+        f"fulfillment support set not found for {answer_output_id}:{sorted(expected)}"
+    )
+
+
+def _support_set_match_score(
+    support_set: dict[str, Any],
+    *,
+    expected_evidence_ids: set[str],
+) -> tuple[int, int, int]:
+    slots = tuple(
+        slot
+        for slot in support_set.get("fulfillment_slots") or ()
+        if isinstance(slot, dict)
+    )
+    expected_is_metric = any(
+        item.get("evidence_id") in expected_evidence_ids
+        for slot in slots
+        for item in slot.get("metric_measure_evidence") or ()
+        if isinstance(item, dict)
+    )
+    expected_is_count_basis = any(
+        item.get("evidence_id") in expected_evidence_ids
+        for slot in slots
+        for item in slot.get("row_count_basis_evidence") or ()
+        if isinstance(item, dict)
+    )
+    expected_is_group_key = any(
+        item.get("evidence_id") in expected_evidence_ids
+        for slot in slots
+        for item in slot.get("group_key_evidence") or ()
+        if isinstance(item, dict)
+    )
+    has_count_basis = any(slot.get("row_count_basis_evidence") for slot in slots)
+    has_metric = any(slot.get("metric_measure_evidence") for slot in slots)
+    has_group_key = any(slot.get("group_key_evidence") for slot in slots)
+    if expected_is_metric:
+        return (
+            3,
+            int(has_count_basis),
+            -int(has_group_key),
+        )
+    if expected_is_count_basis:
+        return (3, int(has_count_basis), -int(has_group_key))
+    if expected_is_group_key:
+        return (2, int(has_group_key), -int(has_metric))
+    return (1, 0, -len(slots))
+
+
+def _candidate_evidence_id(candidate: dict[str, Any], *, field_id: str) -> str:
+    for support_set in (
+        _candidate_binding_surface(candidate).get("fulfillment_support_sets") or ()
+    ):
+        if not isinstance(support_set, dict):
+            continue
+        for slot in support_set.get("fulfillment_slots") or ():
+            if not isinstance(slot, dict):
+                continue
+            for item in _slot_evidence_items(slot):
+                if not isinstance(item, dict):
+                    continue
+                candidate_field_id = str(item.get("field_id") or "")
+                evidence_id = str(item.get("evidence_id") or "")
+                if candidate_field_id == field_id or candidate_field_id.endswith(
+                    f".{field_id}"
+                ):
+                    return evidence_id
+    for item in _candidate_binding_surface(candidate).get("evidence_items") or ():
+        if not isinstance(item, dict):
+            continue
+        candidate_field_id = str(item.get("field_id") or "")
+        evidence_id = str(item.get("evidence_id") or "")
+        if candidate_field_id == field_id or candidate_field_id.endswith(
+            f".{field_id}"
+        ):
+            return evidence_id
+    for item in (
+        _candidate_binding_surface(candidate).get("fields")
+        or candidate.get("fields")
+        or candidate.get("columns")
+        or ()
+    ):
+        if not isinstance(item, dict):
+            continue
+        candidate_field_id = str(item.get("field_id") or item.get("id") or "")
+        if candidate_field_id == field_id or candidate_field_id.endswith(
+            f".{field_id}"
+        ):
+            return candidate_field_id
+    value_id = str(candidate.get("value_id") or "")
+    return value_id or field_id
+
+
+def source_binding_payload_from_fact_plan(
+    fact_plan: dict[str, Any],
+    *,
+    prompt: str = "",
+) -> dict[str, Any]:
+    payload = _source_binding_payload_from_fact_plan_raw(fact_plan, prompt=prompt)
+    return source_binding_payload_for_one_call(payload, prompt=prompt)
+
+
+def _source_binding_payload_from_fact_plan_raw(
+    fact_plan: dict[str, Any],
+    *,
+    prompt: str = "",
+) -> dict[str, Any]:
+    outcome = fact_plan.get("outcome")
+    if isinstance(outcome, dict) and outcome.get("kind") != "fact_plan":
+        return _first_source_binding_payload_from_prompt(prompt)
+    bindings, _ = extract_source_bindings(fact_plan, prompt=prompt)
+    return {
+        "outcome": {
+            "kind": "source_bindings",
+            "source_invocations": bindings,
+        }
+    }
+
+
+def source_binding_payload_from_fact_plan_with_invocation_overrides(
+    fact_plan: dict[str, Any],
+    *,
+    prompt: str,
+    invocation_overrides: tuple[dict[str, Any], ...],
+) -> dict[str, Any]:
+    payload = _source_binding_payload_from_fact_plan_raw(fact_plan, prompt=prompt)
+    invocations = payload.get("outcome", {}).get("source_invocations")
+    if not isinstance(invocations, list):
+        raise AssertionError("source binding payload does not contain invocations")
+    for override in invocation_overrides:
+        invocation = _source_binding_invocation_for_override(
+            invocations,
+            override=override,
+        )
+        invocation.update(
+            {
+                field: value
+                for field, value in override.items()
+                if field not in {"requested_fact_id", "source_candidate_id"}
+            }
+        )
+    return source_binding_payload_for_one_call(payload, prompt=prompt)
+
+
+def _source_binding_invocation_for_override(
+    invocations: list[Any],
+    *,
+    override: dict[str, Any],
+) -> dict[str, Any]:
+    requested_fact_id = str(override.get("requested_fact_id") or "")
+    source_candidate_id = str(override.get("source_candidate_id") or "")
+    matches = [
+        invocation
+        for invocation in invocations
+        if isinstance(invocation, dict)
+        and str(invocation.get("requested_fact_id") or "") == requested_fact_id
+        and (
+            not source_candidate_id
+            or str(invocation.get("source_candidate_id") or "") == source_candidate_id
+        )
+    ]
+    if len(matches) != 1:
+        target = (requested_fact_id, source_candidate_id or "<only-source-for-fact>")
+        raise AssertionError(f"source binding invocation not found: {target}")
+    return matches[0]
+
+
+def _first_source_binding_payload_from_prompt(prompt: str) -> dict[str, Any]:
+    payload = _source_candidate_prompt_payload(prompt)
+    source_invocations: list[dict[str, Any]] = []
+    for fact_sources in payload.get("requested_fact_sources") or ():
+        if not isinstance(fact_sources, dict):
+            continue
+        candidate = _first_source_option_with_support_set(fact_sources)
+        if not candidate:
+            continue
+        support_set = _first_fulfillment_support_set(candidate)
+        answer_output_id = str(support_set.get("answer_output_id") or "answer_1")
+        source_invocations.append(
+            {
+                "requested_fact_id": str(
+                    fact_sources.get("requested_fact_id") or "fact_1"
+                ),
+                "source_candidate_id": str(candidate.get("source_candidate_id") or ""),
+                "answer_population": {
+                    "population_binding_id": _first_population_binding_id(candidate),
+                    "intent_text": "fixture-selected source population",
+                    "match_basis_explanation": (
+                        "The fixture selects the first source population exposed "
+                        "for the prompt."
+                    ),
+                },
+                "fulfillment_decisions": {
+                    answer_output_id: {
+                        "match_basis_explanation": (
+                            f"{answer_output_id} is fulfilled by the selected "
+                            "support set."
+                        ),
+                        "fulfillment_choice_id": str(
+                            support_set["fulfillment_choice_id"]
+                        ),
+                    }
+                },
+                "param_decisions": {},
+                "row_predicate_reviews": {},
+            }
+        )
+    return {
+        "outcome": {
+            "kind": "source_bindings",
+            "source_invocations": source_invocations,
+        }
+    }
+
+
+def _first_source_option_with_support_set(
+    fact_sources: dict[str, Any],
+) -> dict[str, Any] | None:
+    for candidate in _source_options_for_fact_sources(fact_sources):
+        if _first_fulfillment_support_set(candidate):
+            return candidate
+    return None
+
+
+def _first_fulfillment_support_set(candidate: dict[str, Any]) -> dict[str, Any]:
+    for support_set in (
+        _candidate_binding_surface(candidate).get("fulfillment_support_sets") or ()
+    ):
+        if isinstance(support_set, dict) and str(
+            support_set.get("fulfillment_choice_id") or ""
+        ):
+            return support_set
+    return {}
+
+
+def _first_population_binding_id(candidate: dict[str, Any]) -> str:
+    for binding in (
+        _candidate_binding_surface(candidate).get("population_bindings") or ()
+    ):
+        if isinstance(binding, dict) and str(
+            binding.get("population_binding_id") or ""
+        ):
+            return str(binding["population_binding_id"])
+    candidate_id = str(candidate.get("source_candidate_id") or "source")
+    return f"pop.{candidate_id}.candidate_population"
+
+
+def source_binding_payload_for_one_call(
+    source_binding_payload: dict[str, Any],
+    *,
+    prompt: str,
+) -> dict[str, Any]:
+    outcome = source_binding_payload.get("outcome")
+    if not isinstance(outcome, dict) or outcome.get("kind") != "source_bindings":
+        return source_binding_payload
+    output = json.loads(json.dumps(source_binding_payload))
+    finite_choice_values = _source_candidate_finite_choice_values(prompt)
+    row_predicate_values = _source_candidate_row_predicate_values(prompt)
+    population_roles = _source_candidate_population_roles(prompt)
+    param_options = _source_candidate_param_decision_options(prompt)
+    membership_tests_by_fact = _requested_fact_membership_tests(prompt)
+    fulfillment_support_sets = _source_candidate_fulfillment_support_sets(prompt)
+    metric_fit_contract = _metric_fit_contract_from_prompt(prompt)
+    if (
+        "metric_fit_bases" in output["outcome"]
+        or "fit_basis_interpretations" in output["outcome"]
+    ) and {
+        "metric_fit_bases": output["outcome"].get("metric_fit_bases"),
+        "fit_basis_interpretations": output["outcome"].get("fit_basis_interpretations"),
+    } != metric_fit_contract:
+        raise AssertionError(
+            "source_binding_payload_for_one_call owns metric fit contract"
+        )
+    output["outcome"].update(metric_fit_contract)
+    for invocation in output["outcome"].get("source_invocations") or ():
+        if not isinstance(invocation, dict):
+            continue
+        candidate_id = str(invocation.get("source_candidate_id") or "")
+        requested_fact_id = _canonical_prompt_requested_fact_id(
+            prompt,
+            requested_fact_id=str(invocation.get("requested_fact_id") or ""),
+        )
+        requested_fact_id = _requested_fact_id_for_source_candidate(
+            prompt,
+            source_candidate_id=candidate_id,
+            default=requested_fact_id,
+        )
+        invocation["requested_fact_id"] = requested_fact_id
+        _canonicalize_invocation_fulfillment_support_sets(
+            invocation,
+            fulfillment_support_sets=fulfillment_support_sets.get(candidate_id, ()),
+        )
+        param_decisions = dict(invocation.get("param_decisions") or {})
+        invocation["row_predicate_reviews"] = {
+            **_row_predicate_reviews_for_candidate(
+                row_predicate_values.get(candidate_id, {}),
+                role=_row_predicate_review_role(
+                    candidate_id,
+                    population_roles.get(candidate_id, ()),
+                ),
+                membership_tests=membership_tests_by_fact.get(
+                    requested_fact_id,
+                    (),
+                ),
+            ),
+            **dict(invocation.get("row_predicate_reviews") or {}),
+        }
+        if "finite_choice_param_reviews" not in invocation:
+            invocation["finite_choice_param_reviews"] = {
+                param_id: _choice_reviews_for_param_decision(
+                    param_id=param_id,
+                    choices=choices,
+                    role=_first_population_role(population_roles.get(candidate_id, ())),
+                    param_decision=param_decisions.pop(param_id, {}),
+                    param_options=param_options.get(candidate_id, {}).get(param_id, {}),
+                    membership_tests=membership_tests_by_fact.get(
+                        requested_fact_id,
+                        (),
+                    ),
+                )
+                for param_id, choices in finite_choice_values.get(
+                    candidate_id,
+                    {},
+                ).items()
+            }
+        invocation["param_decisions"] = param_decisions
+        invocation["source_binding_decision"] = "USE_SOURCE"
+    return output
+
+
+def _canonicalize_invocation_fulfillment_support_sets(
+    invocation: dict[str, Any],
+    *,
+    fulfillment_support_sets: tuple[dict[str, Any], ...],
+) -> None:
+    decisions = invocation.get("fulfillment_decisions")
+    if not isinstance(decisions, dict) or not fulfillment_support_sets:
+        return
+    for answer_output_id, decision in decisions.items():
+        if not isinstance(decision, dict):
+            continue
+        support_set_id = str(decision.get("fulfillment_choice_id") or "")
+        replacement = _canonical_fulfillment_choice_id(
+            support_set_id,
+            answer_output_id=str(answer_output_id),
+            fulfillment_support_sets=fulfillment_support_sets,
+        )
+        if replacement:
+            decision["fulfillment_choice_id"] = replacement
+
+
+def _canonical_fulfillment_choice_id(
+    support_set_id: str,
+    *,
+    answer_output_id: str,
+    fulfillment_support_sets: tuple[dict[str, Any], ...],
+) -> str:
+    support_sets = tuple(
+        support_set
+        for support_set in fulfillment_support_sets
+        if str(support_set.get("answer_output_id") or "") == answer_output_id
+    )
+    valid_ids = {
+        str(support_set.get("fulfillment_choice_id") or "")
+        for support_set in support_sets
+    }
+    if support_set_id in valid_ids:
+        return support_set_id
+    referenced_evidence_ids = _evidence_ids_referenced_by_text(
+        support_set_id,
+        fulfillment_support_sets=support_sets,
+    )
+    if not referenced_evidence_ids:
+        return ""
+    return _fulfillment_choice_id_for_evidence(
+        answer_output_id=answer_output_id,
+        evidence_ids=referenced_evidence_ids,
+        fulfillment_support_sets=support_sets,
+        source_candidate_id="",
+    )
+
+
+def _evidence_ids_referenced_by_text(
+    text: str,
+    *,
+    fulfillment_support_sets: tuple[dict[str, Any], ...],
+) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            evidence_id
+            for support_set in fulfillment_support_sets
+            for slot in support_set.get("fulfillment_slots") or ()
+            if isinstance(slot, dict)
+            for evidence_id in _slot_evidence_ids(slot)
+            if evidence_id and evidence_id in text
+        )
+    )
+
+
+def _choice_reviews_for_param_decision(
+    *,
+    param_id: str,
+    choices: tuple[str, ...],
+    role: dict[str, str],
+    param_decision: dict[str, Any],
+    param_options: dict[str, Any],
+    membership_tests: tuple[dict[str, str], ...],
+) -> dict[str, Any]:
+    choice_set = param_decision.get("population_choice_set")
+    include_values = set(choices)
+    exclude_values: set[str] = set()
+    if isinstance(choice_set, dict):
+        include_values = {
+            str(value) for value in choice_set.get("include_values") or () if str(value)
+        }
+        exclude_values = {
+            str(value) for value in choice_set.get("exclude_values") or () if str(value)
+        }
+    else:
+        decision_id = str(param_decision.get("param_decision_id") or "")
+        bind_decision_ids = dict(param_options.get("bind_decision_ids") or {})
+        matched_values = {
+            value
+            for value, option_decision_id in bind_decision_ids.items()
+            if option_decision_id == decision_id
+        }
+        if matched_values:
+            include_values = matched_values
+            exclude_values = set(choices) - include_values
+    return {
+        "controlled_population_role_id": role["role_id"],
+        "role_selection_basis": f"{param_id} controls {role['role_text']}.",
+        "population_test_basis": _population_test_basis_for_role(
+            role=role,
+            membership_tests=membership_tests,
+        ),
+        "choice_reviews": [
+            {
+                "choice_option_id": choice,
+                "choice_domain_meaning": f"{param_id} value {choice}",
+                "choice_inclusion_basis": f"{choice} is reviewed for inclusion.",
+                "choice_inclusion": (
+                    "INCLUDE"
+                    if choice not in exclude_values or choice in include_values
+                    else "EXCLUDE"
+                ),
+                "population_test_results": _population_test_results_for_choice(
+                    choice=choice,
+                    included=choice not in exclude_values or choice in include_values,
+                    role=role,
+                    membership_tests=membership_tests,
+                ),
+            }
+            for choice in choices
+        ],
+    }
+
+
+def _row_predicate_reviews_for_candidate(
+    predicate_values: dict[str, tuple[str, ...]],
+    *,
+    role: dict[str, str],
+    membership_tests: tuple[dict[str, str], ...],
+) -> dict[str, dict[str, Any]]:
+    return {
+        predicate_id: {
+            "choice_reviews": [
+                {
+                    "choice_option_id": value,
+                    "choice_domain_meaning": f"{predicate_id} value {value}",
+                    "population_test_results": _row_predicate_test_results_for_choice(
+                        choice=value,
+                        included=True,
+                        role=role,
+                        membership_tests=membership_tests,
+                    ),
+                }
+                for value in values
+            ],
+        }
+        for predicate_id, values in predicate_values.items()
+    }
+
+
+def _row_predicate_test_results_for_choice(
+    *,
+    choice: str,
+    included: bool,
+    role: dict[str, str],
+    membership_tests: tuple[dict[str, str], ...],
+) -> dict[str, dict[str, Any]]:
+    tests = membership_tests or (
+        {
+            "test_id": "subject_identity",
+            "test_question": "Does this choice satisfy the requested answer population?",
+        },
+    )
+    return {
+        str(test["test_id"]): {
+            "test_id": str(test["test_id"]),
+            "test_question": test["test_question"],
+            "role_scoped_test_question": (
+                f"For {role['role_text']}, {test['test_question']}"
+            ),
+            "because": (
+                f"{choice} is {'included in' if included else 'excluded from'} "
+                "the requested answer population."
+            ),
+            "test_effect": "SATISFIES_TEST" if included else "CONFLICTS_WITH_TEST",
+        }
+        for test in tests
+    }
+
+
+def _row_predicate_review_role(
+    candidate_id: str,
+    roles: tuple[dict[str, str], ...],
+) -> dict[str, str]:
+    if roles:
+        return roles[0]
+    return {
+        "role_id": f"row_predicate.{candidate_id}.rows",
+        "role_text": f"{candidate_id} response rows",
+    }
+
+
+def _first_population_role(roles: tuple[dict[str, str], ...]) -> dict[str, str]:
+    if not roles:
+        raise AssertionError("source-binding test payload requires population_roles")
+    return roles[0]
+
+
+def _population_test_results_for_choice(
+    *,
+    choice: str,
+    included: bool,
+    role: dict[str, str],
+    membership_tests: tuple[dict[str, str], ...],
+) -> dict[str, dict[str, Any]]:
+    tests = membership_tests or (
+        {
+            "test_id": "subject_identity",
+            "test_question": "Does this choice satisfy the requested answer population?",
+        },
+    )
+    results: dict[str, dict[str, Any]] = {}
+    for test in tests:
+        test_id = str(test["test_id"])
+        result: dict[str, Any] = {
+            "population_consequence": (
+                f"{choice} is {'included in' if included else 'excluded from'} "
+                "the requested answer population."
+            ),
+        }
+        if test.get("kind") == "NORMAL_INSTANCE_GUARD":
+            result.update(_normal_instance_guard_result(included=included))
+        else:
+            result["test_basis"] = (
+                f"{choice} is {'included in' if included else 'excluded from'} "
+                f"the requested population for {test_id}."
+            )
+            result["test_effect"] = (
+                "SATISFIES_TEST" if included else "CONFLICTS_WITH_TEST"
+            )
+        results[test_id] = result
+    return results
+
+
+def _population_test_basis_for_role(
+    *,
+    role: dict[str, str],
+    membership_tests: tuple[dict[str, str], ...],
+) -> dict[str, dict[str, str]]:
+    tests = membership_tests or (
+        {
+            "test_id": "subject_identity",
+            "test_question": "Does this choice satisfy the requested answer population?",
+        },
+    )
+    return {
+        str(test["test_id"]): {
+            "test_question": str(test["test_question"]),
+            "role_scoped_test_question": (
+                f"For {role['role_text']}, {test['test_question']}"
+            ),
+        }
+        for test in tests
+    }
+
+
+def _normal_instance_guard_result(*, included: bool) -> dict[str, object]:
+    if not included:
+        return {
+            "role_match_basis": (
+                "The choice does not decide the normal-instance guard in this "
+                "scripted source-binding payload."
+            ),
+            "explicit_user_override_evidence": [],
+            "explicit_user_override_applies": False,
+            "population_consequence": (
+                "The choice does not decide the normal-instance guard."
+            ),
+            "disposition": {
+                "matched_excluded_role": "NONE",
+                "test_effect": "DOES_NOT_DECIDE_TEST",
+            },
+        }
+    return {
+        "role_match_basis": "The choice was compared to the excluded normal-instance roles.",
+        "explicit_user_override_evidence": [],
+        "explicit_user_override_applies": False,
+        "population_consequence": (
+            "The choice satisfies the normal-instance guard."
+        ),
+        "disposition": {
+            "matched_excluded_role": "NONE",
+            "test_effect": "SATISFIES_TEST",
+        },
+    }
+
+
+def plan_selection_payload_from_fact_plan(
+    fact_plan: dict[str, Any],
+    *,
+    prompt: str = "",
+) -> dict[str, Any]:
+    outcome = fact_plan.get("outcome")
+    if isinstance(outcome, dict) and outcome.get("kind") == "impossible":
+        return _direct_source_alignment_payload_from_prompt(prompt)
+    if not isinstance(outcome, dict) or outcome.get("kind") != "fact_plan":
+        return _direct_source_alignment_payload_from_prompt(prompt)
+    return _source_alignment_payload_from_fact_plan(fact_plan, prompt=prompt)
+
+
+def _plan_selection_shape_for_pattern(pattern: str) -> str:
+    if pattern == "grouped_rows":
+        return "list_rows"
+    return pattern
+
+
+def _plan_selection_source_strategies_for_fact(
+    candidate_groups: Any,
+    *,
+    requested_fact_id: str,
+) -> tuple[dict[str, Any], ...]:
+    for group in candidate_groups:
+        if not isinstance(group, dict):
+            continue
+        if str(group.get("requested_fact_id") or "") != requested_fact_id:
+            continue
+        source_strategies = tuple(
+            source_strategy
+            for source_strategy in group.get("source_strategies") or ()
+            if isinstance(source_strategy, dict)
+            and str(source_strategy.get("source_strategy_id") or "")
+        )
+        if source_strategies:
+            return source_strategies
+    raise AssertionError(f"plan selection candidate missing for {requested_fact_id}")
+
+
+def _plan_selection_source_strategy_for_answer(
+    answer: dict[str, Any],
+    *,
+    plan_shape: str,
+    source_strategies: tuple[dict[str, Any], ...],
+) -> dict[str, Any]:
+    matching_shape = tuple(
+        source_strategy
+        for source_strategy in source_strategies
+        if str(source_strategy.get("plan_shape") or "") == plan_shape
+    )
+    if not matching_shape:
+        raise AssertionError(f"plan selection candidate missing shape: {plan_shape}")
+    answer_value_ids = _answer_value_ids(answer)
+    if answer_value_ids:
+        for source_strategy in matching_shape:
+            member_value_ids = _source_strategy_member_values(
+                source_strategy,
+                key="value_id",
+            )
+            if answer_value_ids <= member_value_ids:
+                return source_strategy
+    answer_relation_ids = _answer_memory_relation_ids(answer)
+    if answer_relation_ids:
+        for source_strategy in matching_shape:
+            if answer_relation_ids <= _source_strategy_member_relation_ids(
+                source_strategy
+            ):
+                return source_strategy
+    answer_calendar_ids = _answer_calendar_ids(answer)
+    if answer_calendar_ids:
+        for source_strategy in matching_shape:
+            if answer_calendar_ids <= _source_strategy_member_values(
+                source_strategy,
+                key="calendar_id",
+            ):
+                return source_strategy
+    answer_read_ids = _answer_read_ids(answer)
+    answer_field_ids = _answer_field_ids(answer)
+    answer_metric_field_id = _answer_metric_field_id(answer)
+    if _answer_uses_aggregate_choice(answer):
+        for source_strategy in matching_shape:
+            if _aggregate_candidate_matches_answer(source_strategy, answer):
+                return source_strategy
+        raise AssertionError(
+            "plan selection fixture has no current-contract aggregate candidate"
+        )
+    if answer_metric_field_id:
+        for source_strategy in matching_shape:
+            if answer_metric_field_id in _source_strategy_role_field_ids(
+                source_strategy
+            ).get("metric_measure", set()):
+                return source_strategy
+    if answer_read_ids:
+        for source_strategy in matching_shape:
+            member_read_ids = _source_strategy_member_values(
+                source_strategy,
+                key="read_id",
+            )
+            if (
+                answer_read_ids <= member_read_ids
+                and _source_strategy_has_member_kind(
+                    source_strategy,
+                    kind="same_scope_api_read",
+                )
+                and (
+                    not answer_field_ids
+                    or answer_field_ids
+                    <= _source_strategy_member_field_ids(source_strategy)
+                )
+            ):
+                return source_strategy
+        for source_strategy in matching_shape:
+            member_read_ids = _source_strategy_member_values(
+                source_strategy,
+                key="read_id",
+            )
+            if answer_read_ids <= member_read_ids and (
+                not answer_field_ids
+                or answer_field_ids
+                <= _source_strategy_member_field_ids(source_strategy)
+            ):
+                return source_strategy
+        read_matches = tuple(
+            source_strategy
+            for source_strategy in matching_shape
+            if answer_read_ids
+            <= _source_strategy_member_values(source_strategy, key="read_id")
+        )
+        if len(read_matches) == 1:
+            return read_matches[0]
+    if answer_field_ids:
+        for source_strategy in matching_shape:
+            if answer_field_ids <= _source_strategy_member_field_ids(source_strategy):
+                return source_strategy
+    raise AssertionError(
+        "plan selection fixture could not prove a source strategy match for "
+        f"shape={plan_shape}, reads={sorted(answer_read_ids)}, "
+        f"fields={sorted(answer_field_ids)}"
+    )
+
+
+def _aggregate_candidate_matches_answer(
+    source_strategy: dict[str, Any],
+    answer: dict[str, Any],
+) -> bool:
+    answer_read_ids = _answer_read_ids(answer)
+    if answer_read_ids and not (
+        answer_read_ids
+        <= _source_strategy_member_values(source_strategy, key="read_id")
+    ):
+        return False
+    role_field_ids = _source_strategy_role_field_ids(source_strategy)
+    metric_key = _aggregate_choice_metric_field_id_for_answer(answer)
+    metric_fields = set(role_field_ids.get("metric_measure") or ())
+    row_count_fields = set(role_field_ids.get("row_count_basis") or ())
+    if metric_key and not (
+        metric_key in metric_fields
+        or _metric_key_matches_row_count_field(
+            metric_key,
+            row_count_fields=row_count_fields,
+        )
+    ):
+        return False
+    group_fields = set(role_field_ids.get("group_key") or ())
+    expected_group_fields = _aggregate_choice_group_field_ids_for_answer(
+        answer,
+        candidate_field_ids=_source_strategy_member_field_ids(source_strategy),
+    )
+    if expected_group_fields and not expected_group_fields <= group_fields:
+        return False
+    return bool(metric_fields or row_count_fields or group_fields)
+
+
+def _source_strategy_role_field_ids(
+    source_strategy: dict[str, Any],
+) -> dict[str, set[str]]:
+    output: dict[str, set[str]] = {}
+    for member in source_strategy.get("source_members") or ():
+        if not isinstance(member, dict):
+            continue
+        field_ids = _source_member_response_field_ids(member)
+        for role_name in ("metric_measure", "group_key", "row_count_basis"):
+            output.setdefault(role_name, set()).update(field_ids)
+    return output
+
+
+def _metric_key_matches_row_count_field(
+    metric_key: str,
+    *,
+    row_count_fields: set[str],
+) -> bool:
+    if metric_key in row_count_fields:
+        return True
+    prefix = "count_records_"
+    return (
+        metric_key.startswith(prefix) and metric_key[len(prefix) :] in row_count_fields
+    )
+
+
+def _first_plan_selection_payload_from_prompt(prompt: str) -> dict[str, Any]:
+    return _direct_source_alignment_payload_from_prompt(prompt)
+
+
+def _direct_source_alignment_payload_from_prompt(prompt: str) -> dict[str, Any]:
+    candidates = _source_alignment_candidates_from_prompt(prompt)
+    return _source_alignment_payload_from_prompt(
+        prompt,
+        aligned_source_candidate_ids=frozenset(
+            candidate["source_candidate_id"]
+            for fact_candidates in candidates.values()
+            for candidate in fact_candidates
+        ),
+    )
+
+
+def _source_alignment_payload_from_prompt(
+    prompt: str,
+    *,
+    aligned_source_candidate_ids: frozenset[str],
+) -> dict[str, Any]:
+    if not prompt:
+        raise AssertionError("source alignment requires prompt")
+    reviews: dict[str, dict[str, dict[str, str]]] = {}
+    for requested_fact_id, candidates in _source_alignment_candidates_from_prompt(
+        prompt
+    ).items():
+        fact_reviews: dict[str, dict[str, str]] = {}
+        for candidate in candidates:
+            source_candidate_id = candidate["source_candidate_id"]
+            if not source_candidate_id:
+                continue
+            aligned = source_candidate_id in aligned_source_candidate_ids
+            fact_reviews[source_candidate_id] = {
+                "source_candidate_id": source_candidate_id,
+                "basis": (
+                    "The fixture marks the shown source candidate as aligned."
+                    if aligned
+                    else "The fixture marks the shown source candidate as not aligned."
+                ),
+                "source_alignment": "DIRECT" if aligned else "NOT_ALIGNED",
+            }
+        if requested_fact_id:
+            reviews[requested_fact_id] = fact_reviews
+    return {
+        "outcome": {
+            "kind": "source_alignment_reviews",
+            "reviews_by_requested_fact": reviews,
+        }
+    }
+
+
+def _source_alignment_payload_from_fact_plan(
+    fact_plan: dict[str, Any],
+    *,
+    prompt: str,
+) -> dict[str, Any]:
+    source_candidates_by_fact = _source_alignment_candidates_from_prompt(prompt)
+    answers = tuple(
+        {
+            **answer,
+            "requested_fact_id": _canonical_prompt_requested_fact_id(
+                prompt,
+                requested_fact_id=str(answer.get("requested_fact_id") or ""),
+            ),
+        }
+        for answer in (fact_plan.get("outcome") or {}).get("answers") or ()
+        if isinstance(answer, dict)
+    )
+    reviews: dict[str, dict[str, dict[str, str]]] = {}
+    for requested_fact_id, candidates in source_candidates_by_fact.items():
+        fact_answers = tuple(
+            answer
+            for answer in answers
+            if str(answer.get("requested_fact_id") or "") == requested_fact_id
+        )
+        direct_ids = {
+            candidate["source_candidate_id"]
+            for candidate in candidates
+            if any(
+                _source_alignment_candidate_matches_answer(candidate, answer)
+                for answer in fact_answers
+            )
+        }
+        if not direct_ids:
+            direct_ids.update(
+                candidate["source_candidate_id"] for candidate in candidates
+            )
+        reviews[requested_fact_id] = {
+            candidate["source_candidate_id"]: {
+                "source_candidate_id": candidate["source_candidate_id"],
+                "basis": (
+                    "The fixture aligns this source with the authored fact plan."
+                    if candidate["source_candidate_id"] in direct_ids
+                    else "The fixture marks this source as not aligned with the authored fact plan."
+                ),
+                "source_alignment": (
+                    "DIRECT"
+                    if candidate["source_candidate_id"] in direct_ids
+                    else "NOT_ALIGNED"
+                ),
+            }
+            for candidate in candidates
+        }
+    if reviews:
+        return {
+            "outcome": {
+                "kind": "source_alignment_reviews",
+                "reviews_by_requested_fact": reviews,
+            }
+        }
+    return _direct_source_alignment_payload_from_prompt(prompt)
+
+
+def _source_alignment_candidates_from_prompt(
+    prompt: str,
+) -> dict[str, tuple[dict[str, str], ...]]:
+    xml_text = _prompt_text_section(prompt, label="Source alignment reviews")
+    root = ElementTree.fromstring(xml_text)
+    output: dict[str, tuple[dict[str, str], ...]] = {}
+    for fact in root.findall("requested_fact"):
+        requested_fact_id = str(fact.attrib.get("id") or "")
+        candidates: list[dict[str, str]] = []
+        for source in fact.findall("./source_candidates/source_candidate"):
+            source_candidate_id = str(source.attrib.get("id") or "")
+            if not source_candidate_id:
+                continue
+            candidate = {"source_candidate_id": source_candidate_id}
+            for key in ("kind", "read"):
+                value = str(source.attrib.get(key) or "")
+                if value:
+                    candidate["read_id" if key == "read" else key] = value
+            field_ids = tuple(
+                dict.fromkeys(
+                    str(field.attrib.get("name") or field.attrib.get("id") or "")
+                    for field in source.findall(".//field")
+                    if str(field.attrib.get("name") or field.attrib.get("id") or "")
+                )
+            )
+            if field_ids:
+                candidate["field_ids"] = " ".join(field_ids)
+            api_read = source.find("api_read")
+            if api_read is not None:
+                candidate.setdefault("read_id", str(api_read.attrib.get("read") or ""))
+            source_node = source.find("source")
+            if source_node is not None:
+                for key, attr in (
+                    ("value_id", "value"),
+                    ("source_relation_id", "relation"),
+                    ("memory_relation_id", "memory_relation"),
+                    ("calendar_id", "calendar"),
+                    ("kind", "kind"),
+                ):
+                    value = str(source_node.attrib.get(attr) or "")
+                    if value:
+                        candidate[key] = value
+            candidates.append(candidate)
+        if requested_fact_id:
+            output[requested_fact_id] = tuple(candidates)
+    return output
+
+
+def _source_alignment_candidate_matches_answer(
+    candidate: dict[str, str],
+    answer: dict[str, Any],
+) -> bool:
+    answer_field_ids = _answer_source_field_ids(answer)
+    candidate_field_ids = set(str(candidate.get("field_ids") or "").split())
+    if (
+        answer_field_ids
+        and candidate_field_ids
+        and not answer_field_ids <= candidate_field_ids
+    ):
+        return False
+    for source in _answer_source_dicts(answer):
+        if source.get("kind") and candidate.get("kind"):
+            if str(source["kind"]) != candidate["kind"]:
+                continue
+            if str(source["kind"]) == "same_scope_api_read":
+                return True
+        if (
+            source.get("source_candidate_id")
+            and source.get("source_candidate_id") == candidate["source_candidate_id"]
+        ):
+            return True
+        if candidate.get("read_id") and source.get("read_id") == candidate["read_id"]:
+            return True
+        if (
+            candidate.get("value_id")
+            and source.get("value_id") == candidate["value_id"]
+        ):
+            return True
+        if candidate.get("source_relation_id") and (
+            source.get("relation_id") == candidate["source_relation_id"]
+            or source.get("source_relation_id") == candidate["source_relation_id"]
+        ):
+            return True
+        if candidate.get("memory_relation_id") and (
+            source.get("relation_id") == candidate["memory_relation_id"]
+            or source.get("memory_relation_id") == candidate["memory_relation_id"]
+        ):
+            return True
+        if (
+            candidate.get("calendar_id")
+            and source.get("calendar_id") == candidate["calendar_id"]
+        ):
+            return True
+    return False
+
+
+def _answer_source_field_ids(answer: dict[str, Any]) -> set[str]:
+    output: set[str] = set()
+    for item in answer.get("output_fields") or ():
+        if isinstance(item, dict) and str(item.get("field_id") or ""):
+            output.add(str(item["field_id"]))
+    output_field = answer.get("output_field")
+    if isinstance(output_field, dict) and str(output_field.get("field_id") or ""):
+        output.add(str(output_field["field_id"]))
+    metric = answer.get("metric")
+    if isinstance(metric, dict):
+        for key in ("field_id", "record_id_field_id"):
+            if str(metric.get(key) or ""):
+                output.add(str(metric[key]))
+    return output
+
+
+def _answer_source_dicts(answer: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    output: list[dict[str, Any]] = []
+    for key in ("source", "source_hint"):
+        value = answer.get(key)
+        if isinstance(value, dict):
+            output.append(value)
+    for key in ("candidate", "observed", "left", "right"):
+        value = answer.get(key)
+        if isinstance(value, dict) and isinstance(value.get("source"), dict):
+            output.append(value["source"])
+    if answer.get("pattern") == "computed_scalar":
+        for scalar_input in answer.get("scalar_inputs") or ():
+            if isinstance(scalar_input, dict):
+                if scalar_input.get("value_id"):
+                    output.append({"value_id": scalar_input.get("value_id")})
+                if scalar_input.get("source"):
+                    output.append(scalar_input["source"])
+    return tuple(output)
+
+
+def _answer_value_ids(answer: dict[str, Any]) -> set[str]:
+    return {
+        str(scalar_input.get("value_id") or "")
+        for scalar_input in answer.get("scalar_inputs") or ()
+        if isinstance(scalar_input, dict) and str(scalar_input.get("value_id") or "")
+    }
+
+
+def _answer_read_ids(answer: Any) -> set[str]:
+    output: set[str] = set()
+    if not isinstance(answer, dict):
+        return output
+    source = answer.get("source") or answer.get("source_hint")
+    if isinstance(source, dict) and str(source.get("read_id") or ""):
+        output.add(str(source["read_id"]))
+    for key in (
+        "candidate",
+        "observed",
+        "left",
+        "right",
+    ):
+        output |= _answer_read_ids(answer.get(key))
+    for key in (
+        "source",
+        "sources",
+        "scalar_inputs",
+        "output_fields",
+        "group_fields",
+    ):
+        value = answer.get(key)
+        if isinstance(value, list):
+            for item in value:
+                output |= _answer_read_ids(item)
+    return output
+
+
+def _answer_memory_relation_ids(answer: Any) -> set[str]:
+    output: set[str] = set()
+    if not isinstance(answer, dict):
+        return output
+    source = answer.get("source")
+    if isinstance(source, dict) and str(source.get("memory_relation_id") or ""):
+        output.add(str(source["memory_relation_id"]))
+    for key in (
+        "candidate",
+        "observed",
+        "left",
+        "right",
+    ):
+        output |= _answer_memory_relation_ids(answer.get(key))
+    for key in (
+        "source",
+        "sources",
+        "scalar_inputs",
+        "output_fields",
+        "group_fields",
+    ):
+        value = answer.get(key)
+        if isinstance(value, list):
+            for item in value:
+                output |= _answer_memory_relation_ids(item)
+    return output
+
+
+def _answer_calendar_ids(answer: Any) -> set[str]:
+    output: set[str] = set()
+    if not isinstance(answer, dict):
+        return output
+    source = answer.get("source")
+    if isinstance(source, dict) and str(source.get("calendar_id") or ""):
+        output.add(str(source["calendar_id"]))
+    for key in (
+        "candidate",
+        "observed",
+        "left",
+        "right",
+    ):
+        output |= _answer_calendar_ids(answer.get(key))
+    for key in (
+        "source",
+        "sources",
+        "scalar_inputs",
+        "output_fields",
+        "group_fields",
+    ):
+        value = answer.get(key)
+        if isinstance(value, list):
+            for item in value:
+                output |= _answer_calendar_ids(item)
+    return output
+
+
+def _source_strategy_member_values(
+    source_strategy: dict[str, Any],
+    *,
+    key: str,
+) -> set[str]:
+    return {
+        str(member.get(key) or "")
+        for member in source_strategy.get("source_members") or ()
+        if isinstance(member, dict) and str(member.get(key) or "")
+    }
+
+
+def _source_strategy_member_field_ids(source_strategy: dict[str, Any]) -> set[str]:
+    return {
+        str(field_id)
+        for member in source_strategy.get("source_members") or ()
+        if isinstance(member, dict)
+        for field_id in (
+            tuple(member.get("field_ids") or ())
+            + tuple(_source_member_response_field_ids(member))
+        )
+        if str(field_id)
+    }
+
+
+def _source_member_response_field_ids(member: dict[str, Any]) -> set[str]:
+    return {
+        str(field.get("field_id") or field.get("name") or "")
+        for row in member.get("response_rows") or ()
+        if isinstance(row, dict)
+        for field in row.get("fields") or ()
+        if isinstance(field, dict)
+        and str(field.get("field_id") or field.get("name") or "")
+    }
+
+
+def _source_strategy_member_relation_ids(source_strategy: dict[str, Any]) -> set[str]:
+    return {
+        relation_id
+        for member in source_strategy.get("source_members") or ()
+        if isinstance(member, dict)
+        for relation_id in (
+            str(member.get("memory_relation_id") or ""),
+            str(member.get("source_relation_id") or ""),
+        )
+        if relation_id
+    }
+
+
+def _source_strategy_has_member_kind(
+    source_strategy: dict[str, Any],
+    *,
+    kind: str,
+) -> bool:
+    return any(
+        isinstance(member, dict) and member.get("kind") == kind
+        for member in source_strategy.get("source_members") or ()
+    )
+
+
+def bound_fact_plan_payload_from_fact_plan(
+    fact_plan: dict[str, Any],
+    *,
+    prompt: str = "",
+    provider_schema: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    outcome = fact_plan.get("outcome")
+    if isinstance(outcome, dict) and outcome.get("kind") != "fact_plan":
+        return json.loads(json.dumps(fact_plan))
+    replacements = _bound_source_replacements_from_prompt(prompt)
+    if not replacements:
+        raise AssertionError("bound fact plan payload requires bound source prompt")
+    output = json.loads(json.dumps(fact_plan))
+    for answer in output["outcome"]["answers"]:
+        replace_answer_sources(answer, replacements=replacements)
+        replace_aggregate_choice_selection(answer, prompt=prompt)
+        replace_answer_metric(answer, prompt=prompt)
+        remove_raw_field_labels(answer)
+        remove_disallowed_fixture_answer_fields(
+            answer,
+            provider_schema=provider_schema,
+        )
+    return output
+
+
+def remove_disallowed_fixture_answer_fields(
+    answer: dict[str, Any],
+    *,
+    provider_schema: dict[str, Any] | None,
+) -> None:
+    """Keep fake model payloads aligned with the current provider schema."""
+
+    allowed_properties = _allowed_answer_properties_for_schema(
+        provider_schema,
+        answer=answer,
+    )
+    answer.pop("aggregate_choice", None)
+    if not allowed_properties:
+        return
+    for field in ("output_fields",):
+        if field not in allowed_properties:
+            answer.pop(field, None)
+
+
+def _allowed_answer_properties_for_schema(
+    provider_schema: dict[str, Any] | None,
+    *,
+    answer: dict[str, Any],
+) -> set[str]:
+    if not isinstance(provider_schema, dict):
+        return set()
+    requested_fact_id = str(answer.get("requested_fact_id") or "")
+    pattern = str(answer.get("pattern") or "")
+    matches: list[set[str]] = []
+    for schema in _iter_json_object_schemas(provider_schema):
+        properties = schema.get("properties")
+        if not isinstance(properties, dict):
+            continue
+        if (
+            "requested_fact_id" not in properties
+            or "answer_output_ids" not in properties
+        ):
+            continue
+        if not _schema_property_accepts(
+            properties.get("requested_fact_id"),
+            requested_fact_id,
+        ):
+            continue
+        if pattern and not _schema_property_accepts(properties.get("pattern"), pattern):
+            continue
+        matches.append(set(properties))
+    allowed: set[str] = set()
+    for match in matches:
+        allowed.update(match)
+    return allowed
+
+
+def _iter_json_object_schemas(schema: Any):
+    if not isinstance(schema, dict):
+        return
+    if isinstance(schema.get("properties"), dict):
+        yield schema
+    for key in ("oneOf", "anyOf", "allOf"):
+        for item in schema.get(key) or ():
+            yield from _iter_json_object_schemas(item)
+    if isinstance(schema.get("items"), dict):
+        yield from _iter_json_object_schemas(schema["items"])
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        for item in properties.values():
+            yield from _iter_json_object_schemas(item)
+
+
+def _schema_property_accepts(schema: Any, value: str) -> bool:
+    if not isinstance(schema, dict):
+        return True
+    enum = schema.get("enum")
+    if isinstance(enum, list):
+        return value in {str(item) for item in enum}
+    const = schema.get("const")
+    if const is not None:
+        return value == str(const)
+    return True
+
+
+def extract_source_bindings(
+    fact_plan: dict[str, Any],
+    *,
+    prompt: str = "",
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    bindings: list[dict[str, Any]] = []
+    replacements: dict[str, str] = {}
+    source_param_decision_options = _source_candidate_param_decision_options(prompt)
+    source_field_ids = _source_candidate_field_ids(prompt)
+    source_evidence_items = _source_candidate_evidence_items(prompt)
+    source_fulfillment_support_sets = _source_candidate_fulfillment_support_sets(prompt)
+
+    def add_source(
+        source: dict[str, Any],
+        *,
+        answer: dict[str, Any],
+    ) -> str:
+        key = json.dumps(source, sort_keys=True)
+        requested_fact_id = _canonical_prompt_requested_fact_id(
+            prompt,
+            requested_fact_id=str(answer["requested_fact_id"]),
+        )
+        source_candidate_id = _source_candidate_id_for_requested_fact(
+            source,
+            prompt=prompt,
+            requested_fact_id=requested_fact_id,
+        )
+        if source_candidate_id not in source_field_ids:
+            raise AssertionError(
+                f"source candidate evidence missing for {source_candidate_id}"
+            )
+        candidate_evidence_ids = source_field_ids[source_candidate_id]
+        selected_evidence_ids = _answer_evidence_ids_for_answer(
+            answer,
+            source=source,
+            candidate_evidence_ids=candidate_evidence_ids,
+            candidate_evidence_items=source_evidence_items.get(
+                source_candidate_id,
+                (),
+            ),
+        )
+        if key in replacements:
+            _append_source_fulfillments(
+                bindings,
+                source_binding_id=replacements[key],
+                answer=answer,
+                source=source,
+                evidence_ids=selected_evidence_ids,
+                fulfillment_support_sets=source_fulfillment_support_sets.get(
+                    source_candidate_id,
+                    (),
+                ),
+                source_candidate_id=source_candidate_id,
+                prompt=prompt,
+            )
+            return replacements[key]
+        binding_id = f"sb_{len(bindings) + 1}"
+        answer_population = _answer_population(prompt, source_candidate_id)
+        item = {
+            "requested_fact_id": requested_fact_id,
+            "source_candidate_id": source_candidate_id,
+            "answer_population": answer_population,
+            "fulfillment_decisions": _source_fulfillments(
+                answer=answer,
+                source=source,
+                evidence_ids=selected_evidence_ids,
+                fulfillment_support_sets=source_fulfillment_support_sets.get(
+                    source_candidate_id,
+                    (),
+                ),
+                source_candidate_id=source_candidate_id,
+                prompt=prompt,
+            ),
+            "param_decisions": _param_decisions_for_prompt(
+                _source_param_decision_items(
+                    source,
+                    param_values=source_param_decision_options.get(
+                        source_candidate_id,
+                        {},
+                    ),
+                    population_intent_text=answer_population["intent_text"],
+                ),
+                prompt=prompt,
+            ),
+            "row_predicate_reviews": dict(source.get("row_predicate_reviews") or {}),
+        }
+        bindings.append(item)
+        replacements[key] = binding_id
+        return binding_id
+
+    for answer in fact_plan["outcome"]["answers"]:
+        for source in _answer_sources(answer):
+            add_source(source, answer=answer)
+        if answer.get("pattern") == "computed_scalar":
+            for scalar_input in answer.get("scalar_inputs") or ():
+                source = _source_for_scalar_value(
+                    str(scalar_input["value_id"]),
+                    prompt=prompt,
+                )
+                add_source(
+                    source,
+                    answer=answer,
+                )
+    return bindings, replacements
+
+
+def _source_candidate_id_for_requested_fact(
+    source: dict[str, Any],
+    *,
+    prompt: str,
+    requested_fact_id: str,
+) -> str:
+    if prompt:
+        payload = _source_candidate_prompt_payload(prompt)
+        for fact_sources in payload.get("requested_fact_sources") or ():
+            if not isinstance(fact_sources, dict):
+                continue
+            if str(fact_sources.get("requested_fact_id") or "") != requested_fact_id:
+                continue
+            for candidate in _source_options_for_fact_sources(fact_sources):
+                matched = _source_candidate_id_for_candidate(source, candidate)
+                if matched:
+                    return matched
+        matched = _source_candidate_id_from_prompt(source, payload=payload)
+        if matched:
+            return matched
+    return source_candidate_id_for_source(source, prompt=prompt)
+
+
+def _source_candidate_id_for_candidate(
+    source: dict[str, Any],
+    candidate: dict[str, Any],
+) -> str:
+    candidate_id = str(candidate.get("source_candidate_id") or "")
+    if not candidate_id:
+        return ""
+    kind = source.get("kind")
+    if kind == "read" and _candidate_read_id(candidate) == source.get("read_id"):
+        return candidate_id
+    if kind == "memory_relation" and candidate.get("memory_relation_id") == source.get(
+        "memory_relation_id"
+    ):
+        return candidate_id
+    if kind == "calendar" and candidate.get("calendar_id") == source.get("calendar_id"):
+        return candidate_id
+    if kind == "value" and candidate.get("value_id") == source.get("value_id"):
+        return candidate_id
+    return ""
+
+
+def _canonical_prompt_requested_fact_id(
+    prompt: str,
+    *,
+    requested_fact_id: str,
+) -> str:
+    if not prompt:
+        return requested_fact_id
+    try:
+        requested_facts = (
+            _prompt_json_section(
+                prompt,
+                label="Requested facts",
+            ).get("requested_facts")
+            or ()
+        )
+    except (AssertionError, ValueError):
+        return requested_fact_id
+    for fact in requested_facts:
+        if not isinstance(fact, dict):
+            continue
+        if str(fact.get("requested_fact_id") or "") == requested_fact_id:
+            return requested_fact_id
+        if str(fact.get("evidence_ref") or "") == f"requested_fact:{requested_fact_id}":
+            return str(fact.get("requested_fact_id") or requested_fact_id)
+    return requested_fact_id
+
+
+def _requested_fact_id_for_source_candidate(
+    prompt: str,
+    *,
+    source_candidate_id: str,
+    default: str,
+) -> str:
+    if not prompt or not source_candidate_id:
+        return default
+    try:
+        payload = _source_candidate_prompt_payload(prompt)
+    except (AssertionError, ValueError):
+        return default
+    for fact_sources in payload.get("requested_fact_sources") or ():
+        if not isinstance(fact_sources, dict):
+            continue
+        for candidate in _source_options_for_fact_sources(fact_sources):
+            if (
+                isinstance(candidate, dict)
+                and str(candidate.get("source_candidate_id") or "")
+                == source_candidate_id
+            ):
+                return str(fact_sources.get("requested_fact_id") or default)
+    return default
+
+
+def _answer_sources(answer: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    output: list[dict[str, Any]] = []
+    source = answer.get("source") or answer.get("source_hint")
+    if isinstance(source, dict) and source.get("kind") != "values":
+        output.append(source)
+    for key in ("candidate", "observed", "left", "right"):
+        nested = answer.get(key)
+        if isinstance(nested, dict) and isinstance(nested.get("source"), dict):
+            output.append(nested["source"])
+    return tuple(output)
+
+
+def _source_for_scalar_value(value_id: str, *, prompt: str) -> dict[str, Any]:
+    if not prompt:
+        return {"kind": "value", "value_id": value_id}
+    payload = _source_candidate_prompt_payload(prompt)
+    for candidate in _all_source_candidates(payload):
+        if candidate.get("kind") == "value" and candidate.get("value_id") == value_id:
+            return {
+                "kind": "value",
+                "source_candidate_id": str(candidate["source_candidate_id"]),
+                "value_id": value_id,
+            }
+    for candidate in _all_source_candidates(payload):
+        relation_id = str(candidate.get("memory_relation_id") or "")
+        if (
+            candidate.get("kind") == "prior_answer_rows"
+            and relation_id
+            and value_id.startswith(f"{relation_id}.value.")
+        ):
+            return {
+                "kind": "memory_relation",
+                "memory_relation_id": relation_id,
+            }
+    return {"kind": "value", "value_id": value_id}
+
+
+def _bound_source_replacements_from_prompt(prompt: str) -> dict[str, str]:
+    if "Bound sources:\n" not in prompt:
+        return {}
+    payload = _prompt_json_section(prompt, label="Bound sources")
+    output: dict[str, str] = {}
+    read_counts: dict[str, int] = {}
+    sources = tuple(
+        source
+        for source in payload.get("bound_sources") or ()
+        if isinstance(source, dict)
+    )
+    for source in sources:
+        read_id = str(source.get("read_id") or "")
+        if read_id:
+            read_counts[read_id] = read_counts.get(read_id, 0) + 1
+    for source in sources:
+        source_binding_id = str(source.get("source_binding_id") or "")
+        if not source_binding_id:
+            continue
+        for key in _bound_source_keys(source, read_counts=read_counts):
+            output.setdefault(json.dumps(key, sort_keys=True), source_binding_id)
+    return output
+
+
+def _bound_source_keys(
+    source: dict[str, Any],
+    *,
+    read_counts: dict[str, int] | None = None,
+) -> tuple[dict[str, Any], ...]:
+    if source.get("value_id"):
+        return ({"kind": "value", "value_id": source["value_id"]},)
+    if source.get("read_id"):
+        key: dict[str, Any] = {"kind": "read", "read_id": source["read_id"]}
+        bound_params = source.get("bound_params") or ()
+        if bound_params:
+            key["param_bindings"] = [
+                {"param_id": item["param_id"], "value": item["value"]}
+                for item in bound_params
+                if isinstance(item, dict)
+                and item.get("param_id")
+                and item.get("value") is not None
+            ]
+        keys = [key]
+        if (
+            read_counts
+            and read_counts.get(str(source["read_id"])) == 1
+            and bound_params
+        ):
+            keys.append({"kind": "read", "read_id": source["read_id"]})
+        return tuple(keys)
+    if source.get("memory_relation_id"):
+        return (
+            {
+                "kind": "memory_relation",
+                "memory_relation_id": source["memory_relation_id"],
+            },
+        )
+    if source.get("calendar_id"):
+        return ({"kind": "calendar", "calendar_id": source["calendar_id"]},)
+    return ()
+
+
+def _append_source_fulfillments(
+    bindings: list[dict[str, Any]],
+    *,
+    source_binding_id: str,
+    answer: dict[str, Any],
+    source: dict[str, Any],
+    evidence_ids: tuple[str, ...],
+    fulfillment_support_sets: tuple[dict[str, Any], ...],
+    source_candidate_id: str,
+    prompt: str,
+) -> None:
+    index = int(source_binding_id.removeprefix("sb_")) - 1
+    item = bindings[index]
+    existing = set((item.get("fulfillment_decisions") or {}).keys())
+    for answer_output_id, fulfillment in _source_fulfillments(
+        answer=answer,
+        source=source,
+        evidence_ids=evidence_ids,
+        fulfillment_support_sets=fulfillment_support_sets,
+        source_candidate_id=source_candidate_id,
+        prompt=prompt,
+    ).items():
+        if answer_output_id in existing:
+            continue
+        item.setdefault("fulfillment_decisions", {})[answer_output_id] = fulfillment
+
+
+def _source_fulfillments(
+    *,
+    answer: dict[str, Any],
+    source: dict[str, Any],
+    evidence_ids: tuple[str, ...],
+    fulfillment_support_sets: tuple[dict[str, Any], ...],
+    source_candidate_id: str,
+    prompt: str,
+) -> dict[str, dict[str, Any]]:
+    answer_output_ids = tuple(
+        str(item) for item in answer.get("answer_output_ids") or ()
+    )
+    if not answer_output_ids and answer.get("answer_output_id"):
+        answer_output_ids = (str(answer["answer_output_id"]),)
+    if not answer_output_ids and _answer_uses_aggregate_choice(answer):
+        answer_output_ids = tuple(
+            dict.fromkeys(
+                str(support_set.get("answer_output_id") or "")
+                for support_set in fulfillment_support_sets
+                if isinstance(support_set, dict)
+                and str(support_set.get("answer_output_id") or "")
+            )
+        )
+    if not answer_output_ids:
+        answer_output_ids = ("answer_1",)
+    answer_output_ids = _answer_output_ids_for_source(
+        answer,
+        source=source,
+        answer_output_ids=answer_output_ids,
+    )
+    answer_output_ids = tuple(
+        _canonical_prompt_answer_output_id(
+            prompt,
+            requested_fact_id=str(answer.get("requested_fact_id") or ""),
+            answer_output_id=answer_output_id,
+        )
+        for answer_output_id in answer_output_ids
+    )
+    output: dict[str, dict[str, Any]] = {}
+    for answer_output_id in answer_output_ids:
+        answer_evidence_ids = _evidence_ids_for_answer_output(
+            answer,
+            answer_output_id=answer_output_id,
+            answer_output_ids=answer_output_ids,
+            evidence_ids=evidence_ids,
+            fulfillment_support_sets=fulfillment_support_sets,
+            prompt=prompt,
+        )
+        evidence_text = ", ".join(answer_evidence_ids)
+        support_set_id = _fulfillment_choice_id_for_evidence(
+            answer_output_id=answer_output_id,
+            evidence_ids=answer_evidence_ids,
+            fulfillment_support_sets=fulfillment_support_sets,
+            source_candidate_id=source_candidate_id,
+        )
+        output[answer_output_id] = {
+            "match_basis_explanation": (
+                f"{answer_output_id} is fulfilled by {evidence_text} because "
+                "the selected source evidence provides the requested output."
+            ),
+            "fulfillment_choice_id": support_set_id,
+        }
+    return output
+
+
+def _answer_output_ids_for_source(
+    answer: dict[str, Any],
+    *,
+    source: dict[str, Any],
+    answer_output_ids: tuple[str, ...],
+) -> tuple[str, ...]:
+    output_fields = tuple(
+        field for field in answer.get("output_fields") or () if isinstance(field, dict)
+    )
+    if not output_fields or not any(field.get("side") for field in output_fields):
+        return answer_output_ids
+    selected: list[str] = []
+    for index, field in enumerate(output_fields):
+        side = str(field.get("side") or "")
+        scoped = answer.get(side)
+        if (
+            isinstance(scoped, dict)
+            and scoped.get("source") == source
+            and index < len(answer_output_ids)
+        ):
+            selected.append(answer_output_ids[index])
+    return tuple(selected)
+
+
+def _evidence_ids_for_answer_output(
+    answer: dict[str, Any],
+    *,
+    answer_output_id: str,
+    answer_output_ids: tuple[str, ...],
+    evidence_ids: tuple[str, ...],
+    fulfillment_support_sets: tuple[dict[str, Any], ...],
+    prompt: str,
+) -> tuple[str, ...]:
+    if _answer_uses_count_record_support(answer):
+        selected = _row_population_evidence_for_answer_output(
+            answer_output_id=answer_output_id,
+            fulfillment_support_sets=fulfillment_support_sets,
+        )
+        if selected:
+            return selected
+    output_fields = _answer_output_field_ids_for_output(
+        answer,
+        answer_output_id=answer_output_id,
+        answer_output_ids=answer_output_ids,
+    )
+    if _answer_uses_aggregate_choice(answer):
+        selected = _aggregate_choice_evidence_for_answer_output(
+            answer,
+            answer_output_id=answer_output_id,
+            answer_output_ids=answer_output_ids,
+            fulfillment_support_sets=fulfillment_support_sets,
+            candidate_evidence_ids=evidence_ids,
+        )
+        if selected:
+            return selected
+    for field_id in output_fields:
+        selected = _support_set_evidence_for_field(
+            field_id,
+            answer_output_id=answer_output_id,
+            fulfillment_support_sets=fulfillment_support_sets,
+            candidate_evidence_ids=evidence_ids,
+        )
+        if selected:
+            return selected
+    if not output_fields:
+        selected = _selected_source_evidence_for_answer_output(
+            answer_output_id=answer_output_id,
+            fulfillment_support_sets=fulfillment_support_sets,
+            candidate_evidence_ids=evidence_ids,
+        )
+        if selected:
+            return selected
+    if _answer_uses_row_population_support(answer):
+        selected = _row_population_evidence_for_answer_output(
+            answer_output_id=answer_output_id,
+            fulfillment_support_sets=fulfillment_support_sets,
+        )
+        if selected:
+            return selected
+    raise AssertionError(
+        f"fixture answer output has no current-contract support set: {answer_output_id}"
+    )
+
+
+def _answer_uses_count_record_support(answer: dict[str, Any]) -> bool:
+    metric = answer.get("metric")
+    return (
+        str(answer.get("pattern") or "") == "aggregate_scalar"
+        and isinstance(metric, dict)
+        and str(metric.get("kind") or "") == "count_records"
+    )
+
+
+def _answer_output_field_ids_for_output(
+    answer: dict[str, Any],
+    *,
+    answer_output_id: str,
+    answer_output_ids: tuple[str, ...],
+) -> list[str]:
+    output_fields = [
+        str(item.get("field_id") or "")
+        for item in answer.get("output_fields") or ()
+        if isinstance(item, dict) and str(item.get("field_id") or "")
+    ]
+    if len(output_fields) == len(answer_output_ids):
+        try:
+            return [output_fields[answer_output_ids.index(answer_output_id)]]
+        except ValueError:
+            return []
+    output_field = answer.get("output_field")
+    if isinstance(output_field, dict) and str(output_field.get("field_id") or ""):
+        return [str(output_field["field_id"])]
+    metric = answer.get("metric")
+    if isinstance(metric, dict) and str(metric.get("field_id") or ""):
+        return [str(metric["field_id"])]
+    if isinstance(metric, dict) and str(metric.get("record_id_field_id") or ""):
+        return [str(metric["record_id_field_id"])]
+    return output_fields
+
+
+def _answer_uses_row_population_support(answer: dict[str, Any]) -> bool:
+    if _answer_uses_count_record_support(answer):
+        return True
+    return str(answer.get("pattern") or "") in {
+        "direct_field_value",
+        "grouped_rows",
+        "joined_rows",
+        "list_rows",
+    }
+
+
+def _row_population_evidence_for_answer_output(
+    *,
+    answer_output_id: str,
+    fulfillment_support_sets: tuple[dict[str, Any], ...],
+) -> tuple[str, ...]:
+    for support_set in fulfillment_support_sets:
+        if str(support_set.get("answer_output_id") or "") != answer_output_id:
+            continue
+        selected = tuple(
+            evidence_id
+            for slot in support_set.get("fulfillment_slots") or ()
+            if isinstance(slot, dict)
+            for item in slot.get("row_count_basis_evidence") or ()
+            if isinstance(item, dict)
+            for evidence_id in (str(item.get("evidence_id") or ""),)
+            if evidence_id
+        )
+        if selected:
+            return selected
+    return ()
+
+
+def _selected_source_evidence_for_answer_output(
+    *,
+    answer_output_id: str,
+    fulfillment_support_sets: tuple[dict[str, Any], ...],
+    candidate_evidence_ids: tuple[str, ...],
+) -> tuple[str, ...]:
+    expected = set(candidate_evidence_ids)
+    if not expected:
+        return ()
+    for support_set in fulfillment_support_sets:
+        if str(support_set.get("answer_output_id") or "") != answer_output_id:
+            continue
+        support_set_evidence_ids = {
+            evidence_id
+            for slot in support_set.get("fulfillment_slots") or ()
+            if isinstance(slot, dict)
+            for evidence_id in _slot_evidence_ids(slot)
+        }
+        if expected <= support_set_evidence_ids:
+            return candidate_evidence_ids
+    return ()
+
+
+def _aggregate_choice_evidence_for_answer_output(
+    answer: dict[str, Any],
+    *,
+    answer_output_id: str,
+    answer_output_ids: tuple[str, ...],
+    fulfillment_support_sets: tuple[dict[str, Any], ...],
+    candidate_evidence_ids: tuple[str, ...],
+) -> tuple[str, ...]:
+    candidate_ids = set(candidate_evidence_ids)
+    metric_key = _aggregate_choice_metric_field_id_for_answer(answer)
+    expected_group_fields = _aggregate_choice_group_field_ids(answer)
+    output_index = (
+        answer_output_ids.index(answer_output_id)
+        if answer_output_id in answer_output_ids
+        else 0
+    )
+    group_output_count = max(1, len(expected_group_fields))
+    if expected_group_fields and output_index < group_output_count:
+        for support_set in fulfillment_support_sets:
+            if str(support_set.get("answer_output_id") or "") != answer_output_id:
+                continue
+            evidence_items = tuple(
+                item
+                for slot in support_set.get("fulfillment_slots") or ()
+                if isinstance(slot, dict)
+                for item in slot.get("group_key_evidence") or ()
+                if isinstance(item, dict)
+            )
+            group_field_ids = {
+                str(item.get("field_id") or "") for item in evidence_items
+            }
+            if not expected_group_fields <= group_field_ids:
+                continue
+            selected = tuple(
+                str(item.get("evidence_id") or "")
+                for item in evidence_items
+                if str(item.get("evidence_id") or "") in candidate_ids
+            )
+            if selected:
+                return selected
+    for support_set in fulfillment_support_sets:
+        if str(support_set.get("answer_output_id") or "") != answer_output_id:
+            continue
+        evidence_items = tuple(
+            item
+            for slot in support_set.get("fulfillment_slots") or ()
+            if isinstance(slot, dict)
+            for item in _slot_evidence_items(slot)
+            if isinstance(item, dict)
+        )
+        metric_field_ids = {
+            str(item.get("field_id") or "")
+            for slot in support_set.get("fulfillment_slots") or ()
+            if isinstance(slot, dict)
+            for item in slot.get("metric_measure_evidence") or ()
+            if isinstance(item, dict)
+        }
+        row_count_field_ids = {
+            str(item.get("field_id") or "")
+            for slot in support_set.get("fulfillment_slots") or ()
+            if isinstance(slot, dict)
+            for item in slot.get("row_count_basis_evidence") or ()
+            if isinstance(item, dict)
+        }
+        has_metric = bool(
+            metric_key
+            and (
+                metric_key in metric_field_ids
+                or _metric_key_matches_row_count_field(
+                    metric_key,
+                    row_count_fields=row_count_field_ids,
+                )
+            )
+        )
+        if not has_metric:
+            continue
+        group_field_ids = {
+            str(item.get("field_id") or "")
+            for slot in support_set.get("fulfillment_slots") or ()
+            if isinstance(slot, dict)
+            for key in ("group_key_evidence",)
+            for item in slot.get(key) or ()
+            if isinstance(item, dict)
+        }
+        selected = tuple(
+            str(item.get("evidence_id") or "")
+            for item in evidence_items
+            if str(item.get("evidence_id") or "") in candidate_ids
+        )
+        if selected:
+            return selected
+    return ()
+
+
+def _support_set_evidence_for_field(
+    field_id: str,
+    *,
+    answer_output_id: str,
+    fulfillment_support_sets: tuple[dict[str, Any], ...],
+    candidate_evidence_ids: tuple[str, ...],
+) -> tuple[str, ...]:
+    for support_set in fulfillment_support_sets:
+        if str(support_set.get("answer_output_id") or "") != answer_output_id:
+            continue
+        selected = tuple(
+            evidence_id
+            for slot in support_set.get("fulfillment_slots") or ()
+            if isinstance(slot, dict)
+            for item in _slot_evidence_items(slot)
+            if isinstance(item, dict)
+            for evidence_id in (str(item.get("evidence_id") or ""),)
+            if evidence_id in candidate_evidence_ids
+            and (
+                str(item.get("field_id") or "") == field_id
+                or str(item.get("field_id") or "").rsplit(".", 1)[-1] == field_id
+                or evidence_id == field_id
+                or evidence_id.rsplit(".", 1)[-1] == field_id
+            )
+        )
+        if selected:
+            return selected
+    return ()
+
+
+def _first_support_set_evidence_subset(
+    *,
+    answer_output_id: str,
+    fulfillment_support_sets: tuple[dict[str, Any], ...],
+    candidate_evidence_ids: tuple[str, ...],
+) -> tuple[str, ...]:
+    candidate_ids = set(candidate_evidence_ids)
+    for support_set in fulfillment_support_sets:
+        if str(support_set.get("answer_output_id") or "") != answer_output_id:
+            continue
+        selected = tuple(
+            evidence_id
+            for slot in support_set.get("fulfillment_slots") or ()
+            if isinstance(slot, dict)
+            for evidence_id in _slot_evidence_ids(slot)
+            if evidence_id in candidate_ids
+        )
+        if selected:
+            return selected
+    return candidate_evidence_ids
+
+
+def _single_support_set_evidence_subset(
+    evidence_ids: tuple[str, ...],
+    *,
+    answer_output_id: str,
+    fulfillment_support_sets: tuple[dict[str, Any], ...],
+) -> tuple[str, ...]:
+    expected = set(evidence_ids)
+    if not expected:
+        return evidence_ids
+    for support_set in fulfillment_support_sets:
+        if str(support_set.get("answer_output_id") or "") != answer_output_id:
+            continue
+        support_set_evidence_ids = {
+            evidence_id
+            for slot in support_set.get("fulfillment_slots") or ()
+            if isinstance(slot, dict)
+            for evidence_id in _slot_evidence_ids(slot)
+        }
+        if expected <= support_set_evidence_ids:
+            return evidence_ids
+    for support_set in fulfillment_support_sets:
+        if str(support_set.get("answer_output_id") or "") != answer_output_id:
+            continue
+        support_set_evidence_ids = {
+            evidence_id
+            for slot in support_set.get("fulfillment_slots") or ()
+            if isinstance(slot, dict)
+            for evidence_id in _slot_evidence_ids(slot)
+        }
+        subset = tuple(
+            evidence_id
+            for evidence_id in evidence_ids
+            if evidence_id in support_set_evidence_ids
+        )
+        if subset:
+            return subset
+    return evidence_ids
+
+
+def _evidence_subset_has_support_set(
+    evidence_ids: tuple[str, ...],
+    *,
+    answer_output_id: str,
+    fulfillment_support_sets: tuple[dict[str, Any], ...],
+) -> bool:
+    expected = set(evidence_ids)
+    return any(
+        expected
+        <= {
+            evidence_id
+            for slot in support_set.get("fulfillment_slots") or ()
+            if isinstance(slot, dict)
+            for evidence_id in _slot_evidence_ids(slot)
+        }
+        for support_set in fulfillment_support_sets
+        if str(support_set.get("answer_output_id") or "") == answer_output_id
+    )
+
+
+def _fulfillment_choice_id_for_evidence(
+    *,
+    answer_output_id: str,
+    evidence_ids: tuple[str, ...],
+    fulfillment_support_sets: tuple[dict[str, Any], ...],
+    source_candidate_id: str,
+) -> str:
+    del source_candidate_id
+    expected = set(evidence_ids)
+    matches: list[dict[str, Any]] = []
+    for support_set in fulfillment_support_sets:
+        if str(support_set.get("answer_output_id") or "") != answer_output_id:
+            continue
+        support_set_evidence_ids = {
+            evidence_id
+            for slot in support_set.get("fulfillment_slots") or ()
+            if isinstance(slot, dict)
+            for evidence_id in _slot_evidence_ids(slot)
+        }
+        if expected <= support_set_evidence_ids:
+            matches.append(support_set)
+    if matches:
+        return str(
+            max(
+                matches,
+                key=lambda item: _support_set_match_score(
+                    item,
+                    expected_evidence_ids=expected,
+                ),
+            ).get("fulfillment_choice_id")
+            or ""
+        )
+    raise AssertionError(
+        f"fulfillment support set not found for {answer_output_id}:{sorted(expected)}"
+    )
+
+
+def _slot_evidence_ids(slot: dict[str, Any]) -> tuple[str, ...]:
+    return tuple(
+        evidence_id
+        for item in _slot_evidence_items(slot)
+        for evidence_id in (str(item.get("evidence_id") or ""),)
+        if evidence_id
+    )
+
+
+def _metric_fit_contract_from_prompt(
+    prompt: str,
+) -> dict[str, dict[str, dict[str, dict[str, str]]]]:
+    bases: dict[str, dict[str, dict[str, str]]] = {}
+    interpretations: dict[str, dict[str, dict[str, str]]] = {}
+    surface = _prompt_json_section(prompt, label="Metric fit candidates")
+    for requested_fact in surface.get("requested_fact_metric_fit_surface") or ():
+        if not isinstance(requested_fact, dict):
+            continue
+        requested_fact_id = str(requested_fact.get("requested_fact_id") or "")
+        if not requested_fact_id:
+            continue
+        for candidate in requested_fact.get("metric_candidates") or ():
+            if not isinstance(candidate, dict):
+                continue
+            evidence_id = str(candidate.get("metric_evidence_id") or "")
+            if not evidence_id:
+                continue
+            bases.setdefault(requested_fact_id, {})[evidence_id] = {
+                "metric_meaning": (
+                    f"{evidence_id} is treated as metric evidence in this test fixture."
+                ),
+                "fit_basis": (
+                    f"{evidence_id} is treated as fitting the requested answer in this "
+                    "test fixture."
+                ),
+            }
+            interpretations.setdefault(requested_fact_id, {})[evidence_id] = {
+                "interpretation": "FITS_REQUESTED_ANSWER",
+            }
+    return {
+        "metric_fit_bases": bases,
+        "fit_basis_interpretations": interpretations,
+    }
+
+
+def _slot_evidence_items(slot: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    return tuple(
+        item
+        for key in (
+            "metric_measure_evidence",
+            "row_count_basis_evidence",
+            "scope_evidence",
+            "group_key_evidence",
+        )
+        for item in slot.get(key) or ()
+        if isinstance(item, dict)
+    )
+
+
+def _canonical_prompt_answer_output_id(
+    prompt: str,
+    *,
+    requested_fact_id: str,
+    answer_output_id: str,
+) -> str:
+    if not prompt:
+        return answer_output_id
+    try:
+        requested_facts = (
+            _prompt_json_section(
+                prompt,
+                label="Requested facts",
+            ).get("requested_facts")
+            or ()
+        )
+    except (AssertionError, ValueError):
+        return answer_output_id
+    matching_facts = [
+        fact
+        for fact in requested_facts
+        if isinstance(fact, dict)
+        and (
+            str(fact.get("evidence_ref") or "") == f"requested_fact:{requested_fact_id}"
+            or str(fact.get("requested_fact_id") or "") == requested_fact_id
+        )
+    ]
+    facts = matching_facts or [
+        fact for fact in requested_facts if isinstance(fact, dict)
+    ]
+    for fact in facts:
+        outputs = [
+            output
+            for output in fact.get("answer_outputs") or ()
+            if isinstance(output, dict)
+        ]
+        if not outputs:
+            continue
+        for output in outputs:
+            if str(output.get("id") or "") == answer_output_id:
+                return answer_output_id
+        if len(outputs) == 1:
+            return str(outputs[0].get("id") or answer_output_id)
+    return answer_output_id
+
+
+def _answer_evidence_ids_for_answer(
+    answer: dict[str, Any],
+    *,
+    source: dict[str, Any],
+    candidate_evidence_ids: tuple[str, ...],
+    candidate_evidence_items: tuple[tuple[str, str], ...] = (),
+) -> tuple[str, ...]:
+    answer_field_ids = _source_scoped_answer_field_ids(
+        answer,
+        source=source,
+    ) or _answer_field_ids(answer)
+    if not answer_field_ids:
+        return candidate_evidence_ids
+    selected_from_items = [
+        evidence_id
+        for evidence_id, field_id in candidate_evidence_items
+        if evidence_id in answer_field_ids
+        or field_id in answer_field_ids
+        or field_id.rsplit(".", 1)[-1] in answer_field_ids
+    ]
+    if selected_from_items:
+        return tuple(selected_from_items)
+    selected: list[str] = []
+    for evidence_id in candidate_evidence_ids:
+        field_id = evidence_id.rsplit(".", 1)[-1]
+        if evidence_id in answer_field_ids or field_id in answer_field_ids:
+            selected.append(evidence_id)
+    return tuple(selected) or candidate_evidence_ids
+
+
+def _source_scoped_answer_field_ids(
+    answer: dict[str, Any],
+    *,
+    source: dict[str, Any],
+) -> set[str]:
+    for key in ("candidate", "observed", "left", "right"):
+        scoped = answer.get(key)
+        if not isinstance(scoped, dict):
+            continue
+        if scoped.get("source") != source:
+            continue
+        field_ids = _field_ids_from_values(scoped.get("identity_fields"))
+        if field_ids:
+            return field_ids
+        field_ids = _field_ids_from_items(scoped.get("output_fields"))
+        if field_ids:
+            return field_ids
+    return set()
+
+
+def _answer_field_ids(answer: dict[str, Any]) -> set[str]:
+    field_ids: set[str] = set()
+    for key in ("output_fields", "group_fields"):
+        field_ids.update(_field_ids_from_items(answer.get(key)))
+    field_ids.update(_aggregate_choice_group_field_ids(answer))
+    output_field = answer.get("output_field")
+    if isinstance(output_field, dict) and output_field.get("field_id"):
+        field_ids.add(str(output_field["field_id"]))
+    metric = answer.get("metric")
+    if isinstance(metric, dict) and metric.get("field_id"):
+        field_ids.add(str(metric["field_id"]))
+    aggregate_metric_field_id = _aggregate_choice_metric_field_id_for_answer(answer)
+    if aggregate_metric_field_id:
+        field_ids.add(aggregate_metric_field_id)
+    for scalar_input in answer.get("scalar_inputs") or ():
+        if not isinstance(scalar_input, dict):
+            continue
+        value_id = str(scalar_input.get("value_id") or "")
+        if value_id:
+            field_ids.add(value_id.rsplit(".", 1)[-1])
+    return field_ids
+
+
+def _answer_metric_field_id(answer: dict[str, Any]) -> str:
+    metric = answer.get("metric")
+    if isinstance(metric, dict) and metric.get("field_id"):
+        return str(metric["field_id"])
+    return _aggregate_choice_metric_field_id_for_answer(answer)
+
+
+def _field_ids_from_items(raw_items: object) -> set[str]:
+    return {
+        str(item["field_id"])
+        for item in raw_items or ()
+        if isinstance(item, dict) and item.get("field_id")
+    }
+
+
+def _field_ids_from_values(raw_items: object) -> set[str]:
+    return {str(item) for item in raw_items or () if str(item)}
+
+
+def _source_param_decision_items(
+    source: dict[str, Any],
+    *,
+    param_values: dict[str, dict[str, Any]],
+    population_intent_text: str,
+) -> dict[str, dict[str, Any]]:
+    bindings = {
+        str(item.get("param_id") or ""): str(item.get("value") or "")
+        for item in source.get("param_bindings") or ()
+        if isinstance(item, dict)
+    }
+    output: dict[str, dict[str, Any]] = {}
+    for param_id, options in param_values.items():
+        value = bindings.get(param_id)
+        if options.get("decision_surface") == "population_choice_set":
+            choices = tuple(str(choice) for choice in options.get("choices") or ())
+            include_values = (value,) if value else choices[:1]
+            output[param_id] = _test_param_decision(
+                options=options,
+                population_intent=population_intent_text,
+                match_basis_explanation=(
+                    f"{param_id} values match {population_intent_text} because they are the selected source argument scope."
+                ),
+                population_choice_set={
+                    "include_values": list(include_values),
+                    "exclude_values": [
+                        choice for choice in choices if choice not in include_values
+                    ],
+                },
+            )
+            continue
+        selected_option = _selected_bind_option(
+            param_id=param_id,
+            value=value,
+            options=options,
+        )
+        if selected_option is not None:
+            output[param_id] = _test_param_decision(
+                options=options,
+                population_intent=population_intent_text,
+                match_basis_explanation=(
+                    f"{selected_option['meaning']} This matches {population_intent_text} because it is the selected source argument scope."
+                ),
+                param_decision_id=selected_option["param_decision_id"],
+            )
+            continue
+        if not value:
+            inferred_option = _single_or_preferred_bind_option(
+                param_id=param_id,
+                options=options,
+            )
+            if inferred_option is None:
+                meaning = str(
+                    options.get("omit_meaning") or f"do not filter {param_id}"
+                )
+                non_bind_decision_id = str(options.get("non_bind_decision_id") or "")
+                if not non_bind_decision_id:
+                    continue
+                output[param_id] = _test_param_decision(
+                    options=options,
+                    population_intent=(
+                        f"{param_id} is not part of the requested population"
+                    ),
+                    match_basis_explanation=(
+                        f"{meaning} This matches {param_id} is not part of the requested population because it is the selected source argument scope."
+                    ),
+                    param_decision_id=non_bind_decision_id,
+                )
+                continue
+            output[param_id] = _test_param_decision(
+                options=options,
+                population_intent=population_intent_text,
+                match_basis_explanation=(
+                    f"{inferred_option['meaning']} This matches {population_intent_text} because it is the grounded value selected for this param."
+                ),
+                param_decision_id=inferred_option["param_decision_id"],
+            )
+            continue
+        meaning = str(options.get("omit_meaning") or f"do not filter {param_id}")
+        non_bind_decision_id = str(options.get("non_bind_decision_id") or "")
+        if not non_bind_decision_id:
+            continue
+        output[param_id] = _test_param_decision(
+            options=options,
+            population_intent=(f"{param_id} is not part of the requested population"),
+            match_basis_explanation=(
+                f"{meaning} This matches {param_id} is not part of the requested population because it is the selected source argument scope."
+            ),
+            param_decision_id=non_bind_decision_id,
+        )
+    return output
+
+
+def _test_param_decision(
+    *,
+    options: dict[str, Any],
+    population_intent: str,
+    match_basis_explanation: str,
+    param_decision_id: str = "",
+    population_choice_set: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    output: dict[str, Any] = {
+        "population_intent": population_intent,
+        "match_basis_explanation": match_basis_explanation,
+    }
+    if population_choice_set is not None:
+        output["population_choice_set"] = population_choice_set
+    if param_decision_id:
+        output["param_decision_id"] = param_decision_id
+    return output
+
+
+def _single_or_preferred_bind_option(
+    *,
+    param_id: str,
+    options: dict[str, Any],
+) -> dict[str, str] | None:
+    candidates = tuple(
+        option
+        for option in options.get("bind_options") or ()
+        if isinstance(option, dict)
+    )
+    if len(candidates) == 1:
+        return {
+            "meaning": str(candidates[0].get("meaning") or ""),
+            "param_decision_id": str(candidates[0].get("param_decision_id") or ""),
+        }
+    grounded_candidates = tuple(
+        candidate
+        for candidate in candidates
+        if str(candidate.get("value") or "").startswith("grounded_input")
+    )
+    if len(grounded_candidates) == 1:
+        return {
+            "meaning": str(grounded_candidates[0].get("meaning") or ""),
+            "param_decision_id": str(
+                grounded_candidates[0].get("param_decision_id") or ""
+            ),
+        }
+    preferred_component = _preferred_time_component_for_test_param(param_id)
+    for candidate in candidates:
+        if str(candidate.get("value_component") or "") == preferred_component:
+            return {
+                "meaning": str(candidate.get("meaning") or ""),
+                "param_decision_id": str(candidate.get("param_decision_id") or ""),
+            }
+    return None
+
+
+def _selected_bind_option(
+    *,
+    param_id: str,
+    value: str,
+    options: dict[str, Any],
+) -> dict[str, str] | None:
+    if not value:
+        return None
+    candidates = tuple(
+        option
+        for option in options.get("bind_options") or ()
+        if isinstance(option, dict) and option.get("value") == value
+    )
+    if len(candidates) == 1:
+        return {
+            "meaning": str(candidates[0].get("meaning") or ""),
+            "param_decision_id": str(candidates[0].get("param_decision_id") or ""),
+        }
+    preferred_component = _preferred_time_component_for_test_param(param_id)
+    for candidate in candidates:
+        if str(candidate.get("value_component") or "") == preferred_component:
+            return {
+                "meaning": str(candidate.get("meaning") or ""),
+                "param_decision_id": str(candidate.get("param_decision_id") or ""),
+            }
+    return None
+
+
+def _preferred_time_component_for_test_param(param_id: str) -> str:
+    if param_id in {"start_date", "start_time", "from"}:
+        return "start"
+    if param_id in {"end_date", "end_time", "to"}:
+        return "end"
+    return "instant"
+
+
+def _param_decisions_for_prompt(
+    param_decisions: dict[str, dict[str, str]],
+    *,
+    prompt: str,
+) -> dict[str, dict[str, str]] | list[dict[str, str]]:
+    if "use param_decisions as an array of decision objects" not in prompt:
+        return param_decisions
+    return [
+        {"param_id": param_id, **decision}
+        for param_id, decision in param_decisions.items()
+    ]
+
+
+def _answer_population(prompt: str, source_candidate_id: str) -> dict[str, str]:
+    intent_text = _current_question_text(prompt) or "sales"
+    return {
+        "population_binding_id": _source_population_binding_id(
+            prompt,
+            source_candidate_id,
+        ),
+        "intent_text": intent_text,
+        "match_basis_explanation": f"{intent_text} defines the source population",
+    }
+
+
+def _source_population_binding_id(prompt: str, source_candidate_id: str) -> str:
+    if not prompt:
+        return f"pop.{source_candidate_id}.candidate_population"
+    payload = _source_candidate_prompt_payload(prompt)
+    for candidate in _all_source_candidates(payload):
+        if str(candidate.get("source_candidate_id") or "") != source_candidate_id:
+            continue
+        for binding in (
+            _candidate_binding_surface(candidate).get("population_bindings") or ()
+        ):
+            if not isinstance(binding, dict):
+                continue
+            binding_id = str(binding.get("population_binding_id") or "")
+            if binding_id:
+                return binding_id
+    return f"pop.{source_candidate_id}.candidate_population"
+
+
+def _current_question_text(prompt: str) -> str:
+    marker = "Current question:\n"
+    if marker not in prompt:
+        return ""
+    return prompt.split(marker, 1)[1].split("\n\n", 1)[0].strip()
+
+
+def _source_candidate_param_decision_options(
+    prompt: str,
+) -> dict[str, dict[str, dict[str, Any]]]:
+    if not prompt:
+        return {}
+    payload = _source_candidate_prompt_payload(prompt)
+    output: dict[str, dict[str, tuple[str, ...]]] = {}
+    for key in (
+        "memory_source_candidates",
+        "utility_source_candidates",
+        "value_source_candidates",
+    ):
+        for candidate in payload.get(key) or ():
+            if isinstance(candidate, dict):
+                _add_candidate_param_options(output, candidate)
+    for fact_sources in payload.get("requested_fact_sources") or ():
+        if not isinstance(fact_sources, dict):
+            continue
+        for candidate in _source_options_for_fact_sources(fact_sources):
+            if isinstance(candidate, dict):
+                _add_candidate_param_options(output, candidate)
+    return output
+
+
+def _source_candidate_field_ids(prompt: str) -> dict[str, tuple[str, ...]]:
+    if not prompt:
+        return {}
+    payload = _source_candidate_prompt_payload(prompt)
+    output: dict[str, tuple[str, ...]] = {}
+    for key in (
+        "memory_source_candidates",
+        "utility_source_candidates",
+        "value_source_candidates",
+    ):
+        for candidate in payload.get(key) or ():
+            if isinstance(candidate, dict):
+                _add_candidate_field_ids(output, candidate)
+    for fact_sources in payload.get("requested_fact_sources") or ():
+        if not isinstance(fact_sources, dict):
+            continue
+        for candidate in _source_options_for_fact_sources(fact_sources):
+            if isinstance(candidate, dict):
+                _add_candidate_field_ids(output, candidate)
+    return output
+
+
+def _source_candidate_optional_param_ids(prompt: str) -> dict[str, tuple[str, ...]]:
+    if not prompt:
+        return {}
+    payload = _source_candidate_prompt_payload(prompt)
+    output: dict[str, tuple[str, ...]] = {}
+    for key in (
+        "memory_source_candidates",
+        "utility_source_candidates",
+        "value_source_candidates",
+    ):
+        for candidate in payload.get(key) or ():
+            if isinstance(candidate, dict):
+                _add_candidate_optional_param_ids(output, candidate)
+    for fact_sources in payload.get("requested_fact_sources") or ():
+        if not isinstance(fact_sources, dict):
+            continue
+        for candidate in _source_options_for_fact_sources(fact_sources):
+            if isinstance(candidate, dict):
+                _add_candidate_optional_param_ids(output, candidate)
+    return output
+
+
+def _source_candidate_finite_choice_values(
+    prompt: str,
+) -> dict[str, dict[str, tuple[str, ...]]]:
+    if not prompt:
+        return {}
+    payload = _source_candidate_prompt_payload(prompt)
+    output: dict[str, dict[str, tuple[str, ...]]] = {}
+    for key in (
+        "memory_source_candidates",
+        "utility_source_candidates",
+        "value_source_candidates",
+    ):
+        for candidate in payload.get(key) or ():
+            if isinstance(candidate, dict):
+                _add_candidate_finite_choice_values(output, candidate)
+    for fact_sources in payload.get("requested_fact_sources") or ():
+        if not isinstance(fact_sources, dict):
+            continue
+        for candidate in _source_options_for_fact_sources(fact_sources):
+            if isinstance(candidate, dict):
+                _add_candidate_finite_choice_values(output, candidate)
+    return output
+
+
+def _source_candidate_row_predicate_values(
+    prompt: str,
+) -> dict[str, dict[str, tuple[str, ...]]]:
+    if not prompt:
+        return {}
+    payload = _source_candidate_prompt_payload(prompt)
+    output: dict[str, dict[str, tuple[str, ...]]] = {}
+    for key in (
+        "memory_source_candidates",
+        "utility_source_candidates",
+        "value_source_candidates",
+    ):
+        for candidate in payload.get(key) or ():
+            if isinstance(candidate, dict):
+                _add_candidate_row_predicate_values(output, candidate)
+    for fact_sources in payload.get("requested_fact_sources") or ():
+        if not isinstance(fact_sources, dict):
+            continue
+        for candidate in _source_options_for_fact_sources(fact_sources):
+            if isinstance(candidate, dict):
+                _add_candidate_row_predicate_values(output, candidate)
+    return output
+
+
+def _source_candidate_population_roles(
+    prompt: str,
+) -> dict[str, tuple[dict[str, str], ...]]:
+    if not prompt:
+        return {}
+    payload = _source_candidate_prompt_payload(prompt)
+    output: dict[str, tuple[dict[str, str], ...]] = {}
+    for key in (
+        "memory_source_candidates",
+        "utility_source_candidates",
+        "value_source_candidates",
+    ):
+        for candidate in payload.get(key) or ():
+            if isinstance(candidate, dict):
+                _add_candidate_population_roles(output, candidate)
+    for fact_sources in payload.get("requested_fact_sources") or ():
+        if not isinstance(fact_sources, dict):
+            continue
+        for candidate in _source_options_for_fact_sources(fact_sources):
+            if isinstance(candidate, dict):
+                _add_candidate_population_roles(output, candidate)
+    return output
+
+
+def _requested_fact_membership_tests(
+    prompt: str,
+) -> dict[str, tuple[dict[str, str], ...]]:
+    if not prompt:
+        return {}
+    payload = _prompt_json_section(prompt, label="Requested facts")
+    output: dict[str, tuple[dict[str, str], ...]] = {}
+    for fact in payload.get("requested_facts") or ():
+        if not isinstance(fact, dict):
+            continue
+        fact_id = str(fact.get("requested_fact_id") or "")
+        answer_request = fact.get("answer_request")
+        if not fact_id or not isinstance(answer_request, dict):
+            continue
+        answer_population = answer_request.get("answer_population")
+        if not isinstance(answer_population, dict):
+            continue
+        tests = tuple(
+            {
+                "test_id": _source_binding_membership_test_key(test),
+                "test_question": str(test.get("test_question") or ""),
+                "kind": str(test.get("kind") or ""),
+            }
+            for test in answer_population.get("membership_tests") or ()
+            if isinstance(test, dict)
+            and str(test.get("test_id") or "")
+            and str(test.get("test_question") or "")
+        )
+        if tests:
+            output[fact_id] = tests
+    return output
+
+
+def _source_binding_membership_test_key(test: dict[str, Any]) -> str:
+    kind = str(test.get("kind") or "")
+    if kind == "EXPLICIT_USER_CONSTRAINT":
+        return f"{kind.lower()}:{str(test.get('test_id') or '')}"
+    if kind in {"SUBJECT_IDENTITY", "NORMAL_INSTANCE_GUARD", "RAW_RECORD_GUARD"}:
+        return kind.lower()
+    return str(test.get("test_id") or "")
+
+
+def _source_candidate_default_included_optional_param_ids(
+    prompt: str,
+) -> dict[str, tuple[str, ...]]:
+    if not prompt:
+        return {}
+    payload = _source_candidate_prompt_payload(prompt)
+    output: dict[str, tuple[str, ...]] = {}
+    for key in (
+        "memory_source_candidates",
+        "utility_source_candidates",
+        "value_source_candidates",
+    ):
+        for candidate in payload.get(key) or ():
+            if isinstance(candidate, dict):
+                _add_candidate_default_included_optional_param_ids(output, candidate)
+    for fact_sources in payload.get("requested_fact_sources") or ():
+        if not isinstance(fact_sources, dict):
+            continue
+        for candidate in _source_options_for_fact_sources(fact_sources):
+            if isinstance(candidate, dict):
+                _add_candidate_default_included_optional_param_ids(output, candidate)
+    return output
+
+
+def _source_candidate_evidence_items(
+    prompt: str,
+) -> dict[str, tuple[tuple[str, str], ...]]:
+    if not prompt:
+        return {}
+    payload = _source_candidate_prompt_payload(prompt)
+    output: dict[str, tuple[tuple[str, str], ...]] = {}
+    for key in (
+        "memory_source_candidates",
+        "utility_source_candidates",
+        "value_source_candidates",
+    ):
+        for candidate in payload.get(key) or ():
+            if isinstance(candidate, dict):
+                _add_candidate_evidence_items(output, candidate)
+    for fact_sources in payload.get("requested_fact_sources") or ():
+        if not isinstance(fact_sources, dict):
+            continue
+        for candidate in _source_options_for_fact_sources(fact_sources):
+            if isinstance(candidate, dict):
+                _add_candidate_evidence_items(output, candidate)
+    return output
+
+
+def _source_candidate_fulfillment_support_sets(
+    prompt: str,
+) -> dict[str, tuple[dict[str, Any], ...]]:
+    if not prompt:
+        return {}
+    payload = _source_candidate_prompt_payload(prompt)
+    output: dict[str, tuple[dict[str, Any], ...]] = {}
+    for key in (
+        "memory_source_candidates",
+        "utility_source_candidates",
+        "value_source_candidates",
+    ):
+        for candidate in payload.get(key) or ():
+            if isinstance(candidate, dict):
+                _add_candidate_fulfillment_support_sets(output, candidate)
+    for fact_sources in payload.get("requested_fact_sources") or ():
+        if not isinstance(fact_sources, dict):
+            continue
+        for candidate in _source_options_for_fact_sources(fact_sources):
+            if isinstance(candidate, dict):
+                _add_candidate_fulfillment_support_sets(output, candidate)
+    return output
+
+
+def _source_candidate_prompt_payload(prompt: str) -> dict[str, Any]:
+    for label in ("Candidate evidence sources", "Chosen evidence sources"):
+        if f"{label}:\n" in prompt:
+            payload = _prompt_json_section(prompt, label=label)
+            if "chosen_source_candidates" in payload:
+                return {
+                    "requested_fact_sources": [
+                        {
+                            "source_contexts": [
+                                {
+                                    "source_options": (
+                                        payload.get("chosen_source_candidates") or []
+                                    )
+                                }
+                            ]
+                        }
+                    ]
+                }
+            return payload
+    if "Selected source invocations:\n" in prompt:
+        payload = _prompt_json_section(prompt, label="Selected source invocations")
+        return {
+            "requested_fact_sources": [
+                {
+                    "source_contexts": [
+                        {"source_options": payload.get("source_invocations") or []}
+                    ]
+                }
+            ]
+        }
+    return {}
+
+
+def _source_options_for_fact_sources(
+    fact_sources: dict[str, Any],
+) -> tuple[dict[str, Any], ...]:
+    return tuple(
+        candidate
+        for context in fact_sources.get("source_contexts") or ()
+        if isinstance(context, dict)
+        for candidate in context.get("source_options") or ()
+        if isinstance(candidate, dict)
+    )
+
+
+def _add_candidate_param_options(
+    output: dict[str, dict[str, dict[str, Any]]],
+    candidate: dict[str, Any],
+) -> None:
+    source_candidate_id = str(candidate.get("source_candidate_id") or "")
+    if not source_candidate_id:
+        return
+    output[source_candidate_id] = {
+        param_id: _param_options(item)
+        for item in _candidate_binding_surface(candidate).get("params") or ()
+        if isinstance(item, dict)
+        for param_id in (str(item.get("param_id") or ""),)
+        if param_id and _param_options(item)
+    }
+
+
+def _param_options(param: dict[str, Any]) -> dict[str, Any]:
+    if param.get("decision_surface") == "population_choice_set":
+        choices = tuple(
+            str(choice or "").strip()
+            for choice in param.get("choices") or ()
+            if str(choice or "").strip()
+        )
+        if choices:
+            return {
+                "required": param.get("required") is True,
+                "decision_surface": "population_choice_set",
+                "choices": choices,
+            }
+    decision_options = param.get("decision_options")
+    bind_options = tuple(
+        item
+        for item in decision_options or ()
+        if isinstance(item, dict)
+        and item.get("decision") == "bind"
+        and str(item.get("value") or "")
+        and str(item.get("param_decision_id") or "")
+    )
+    bind_meanings = {
+        str(item.get("value") or ""): str(item.get("meaning") or "")
+        for item in bind_options
+        if str(item.get("value") or "") and str(item.get("meaning") or "")
+    }
+    bind_decision_ids = {
+        str(item.get("value") or ""): str(item.get("param_decision_id") or "")
+        for item in bind_options
+    }
+    if not bind_meanings:
+        return {}
+    non_bind_options = [
+        item
+        for item in decision_options or ()
+        if isinstance(item, dict) and item.get("decision") != "bind"
+    ]
+    omit_option = non_bind_options[0] if non_bind_options else {}
+    return {
+        "required": param.get("required") is True,
+        "bind_meanings": bind_meanings,
+        "bind_decision_ids": bind_decision_ids,
+        "bind_options": bind_options,
+        "omit_decision": str(omit_option.get("decision") or ""),
+        "omit_meaning": str(omit_option.get("meaning") or ""),
+        "non_bind_decision_id": str(omit_option.get("param_decision_id") or ""),
+        "normal_instance_role_profiles": tuple(
+            item
+            for item in param.get("normal_instance_role_profiles") or ()
+            if isinstance(item, dict)
+        ),
+    }
+
+
+def _add_candidate_field_ids(
+    output: dict[str, tuple[str, ...]],
+    candidate: dict[str, Any],
+) -> None:
+    source_candidate_id = str(candidate.get("source_candidate_id") or "")
+    if not source_candidate_id:
+        return
+    fields = tuple(
+        str(item.get("field_id") or item.get("id") or "")
+        for item in (
+            _candidate_binding_surface(candidate).get("fields")
+            or candidate.get("fields")
+            or candidate.get("columns")
+            or ()
+        )
+        if isinstance(item, dict) and str(item.get("field_id") or item.get("id") or "")
+    )
+    evidence_items = tuple(
+        str(item.get("evidence_id") or "")
+        for item in _candidate_binding_surface(candidate).get("evidence_items") or ()
+        if isinstance(item, dict) and str(item.get("evidence_id") or "")
+    )
+    support_set_evidence_items = tuple(
+        str(item.get("evidence_id") or "")
+        for support_set in _candidate_binding_surface(candidate).get(
+            "fulfillment_support_sets"
+        )
+        or ()
+        if isinstance(support_set, dict)
+        for slot in support_set.get("fulfillment_slots") or ()
+        if isinstance(slot, dict)
+        for key in (
+            "metric_measure_evidence",
+            "row_count_basis_evidence",
+            "scope_evidence",
+            "group_key_evidence",
+        )
+        for item in slot.get(key) or ()
+        if isinstance(item, dict) and str(item.get("evidence_id") or "")
+    )
+    value_id = str(candidate.get("value_id") or "")
+    output[source_candidate_id] = (
+        evidence_items
+        or support_set_evidence_items
+        or fields
+        or ((value_id,) if value_id else ())
+    )
+
+
+def _add_candidate_optional_param_ids(
+    output: dict[str, tuple[str, ...]],
+    candidate: dict[str, Any],
+) -> None:
+    source_candidate_id = str(candidate.get("source_candidate_id") or "")
+    if not source_candidate_id:
+        return
+    output[source_candidate_id] = tuple(
+        str(item.get("param_id") or "")
+        for item in _candidate_binding_surface(candidate).get("params") or ()
+        if isinstance(item, dict)
+        and str(item.get("param_id") or "")
+        and item.get("required") is not True
+    )
+
+
+def _add_candidate_finite_choice_values(
+    output: dict[str, dict[str, tuple[str, ...]]],
+    candidate: dict[str, Any],
+) -> None:
+    source_candidate_id = str(candidate.get("source_candidate_id") or "")
+    if not source_candidate_id:
+        return
+    choice_values = {
+        param_id: tuple(
+            str(choice) for choice in item.get("choices") or () if str(choice)
+        )
+        for item in _candidate_binding_surface(candidate).get("params") or ()
+        if isinstance(item, dict)
+        and item.get("choices")
+        and isinstance(item.get("population_contract"), dict)
+        for param_id in (str(item.get("param_id") or ""),)
+        if param_id
+    }
+    if choice_values:
+        output[source_candidate_id] = choice_values
+
+
+def _add_candidate_row_predicate_values(
+    output: dict[str, dict[str, tuple[str, ...]]],
+    candidate: dict[str, Any],
+) -> None:
+    source_candidate_id = str(candidate.get("source_candidate_id") or "")
+    if not source_candidate_id:
+        return
+    predicate_values = {
+        predicate_id: tuple(
+            str(value) for value in item.get("allowed_values") or () if str(value)
+        )
+        for item in candidate.get("row_predicates") or ()
+        if isinstance(item, dict)
+        for predicate_id in (str(item.get("predicate_id") or ""),)
+        if predicate_id
+    }
+    if predicate_values:
+        output[source_candidate_id] = predicate_values
+
+
+def _add_candidate_population_roles(
+    output: dict[str, tuple[dict[str, str], ...]],
+    candidate: dict[str, Any],
+) -> None:
+    source_candidate_id = str(candidate.get("source_candidate_id") or "")
+    if not source_candidate_id:
+        return
+    binding_surface = _candidate_binding_surface(candidate)
+    roles = tuple(
+        {
+            "role_id": str(item.get("role_id") or ""),
+            "row_path_id": str(item.get("row_path_id") or ""),
+            "role_kind": str(item.get("role_kind") or ""),
+            "role_text": str(item.get("role_text") or ""),
+        }
+        for item in binding_surface.get("population_roles") or ()
+        if isinstance(item, dict)
+        and str(item.get("role_id") or "")
+        and str(item.get("row_path_id") or "")
+        and str(item.get("role_kind") or "")
+        and str(item.get("role_text") or "")
+    )
+    if roles:
+        output[source_candidate_id] = roles
+
+
+def _add_candidate_default_included_optional_param_ids(
+    output: dict[str, tuple[str, ...]],
+    candidate: dict[str, Any],
+) -> None:
+    source_candidate_id = str(candidate.get("source_candidate_id") or "")
+    if not source_candidate_id:
+        return
+    output[source_candidate_id] = tuple(
+        str(item.get("param_id") or "")
+        for item in _candidate_binding_surface(candidate).get("params") or ()
+        if isinstance(item, dict)
+        and str(item.get("param_id") or "")
+        and item.get("required") is not True
+        and str(item.get("type") or "") != "choice"
+    )
+
+
+def _add_candidate_evidence_items(
+    output: dict[str, tuple[tuple[str, str], ...]],
+    candidate: dict[str, Any],
+) -> None:
+    source_candidate_id = str(candidate.get("source_candidate_id") or "")
+    if not source_candidate_id:
+        return
+    evidence_items = tuple(
+        (str(item.get("evidence_id") or ""), str(item.get("field_id") or ""))
+        for item in _candidate_binding_surface(candidate).get("evidence_items") or ()
+        if isinstance(item, dict)
+        and str(item.get("evidence_id") or "")
+        and str(item.get("field_id") or "")
+    )
+    if not evidence_items:
+        evidence_items = tuple(
+            (str(item.get("evidence_id") or ""), str(item.get("field_id") or ""))
+            for support_set in _candidate_binding_surface(candidate).get(
+                "fulfillment_support_sets"
+            )
+            or ()
+            if isinstance(support_set, dict)
+            for slot in support_set.get("fulfillment_slots") or ()
+            if isinstance(slot, dict)
+            for key in (
+                "metric_measure_evidence",
+                "row_count_basis_evidence",
+                "scope_evidence",
+                "group_key_evidence",
+            )
+            for item in slot.get(key) or ()
+            if isinstance(item, dict)
+            and str(item.get("evidence_id") or "")
+            and str(item.get("field_id") or "")
+        )
+    if evidence_items:
+        output[source_candidate_id] = evidence_items
+
+
+def _add_candidate_fulfillment_support_sets(
+    output: dict[str, tuple[dict[str, Any], ...]],
+    candidate: dict[str, Any],
+) -> None:
+    source_candidate_id = str(candidate.get("source_candidate_id") or "")
+    if not source_candidate_id:
+        return
+    support_sets = tuple(
+        support_set
+        for support_set in _candidate_binding_surface(candidate).get(
+            "fulfillment_support_sets"
+        )
+        or ()
+        if isinstance(support_set, dict)
+        and str(support_set.get("fulfillment_choice_id") or "")
+    )
+    if support_sets:
+        output[source_candidate_id] = support_sets
+
+
+def _candidate_binding_surface(candidate: dict[str, Any]) -> dict[str, Any]:
+    surface = candidate.get("binding_surface")
+    if isinstance(surface, dict):
+        return surface
+    if candidate.get("kind") not in {"new_api_read", "same_scope_api_read"}:
+        return candidate
+    output = {
+        key: candidate[key]
+        for key in (
+            "applied_filters",
+            "bound_params",
+            "source_invocations",
+            "population_bindings",
+            "params",
+            "population_roles",
+        )
+        if key in candidate
+    }
+    if "fulfillment_choices" in candidate:
+        output["fulfillment_support_sets"] = candidate["fulfillment_choices"]
+    fields = [
+        field
+        for row in candidate.get("response_rows") or ()
+        if isinstance(row, dict)
+        for field in row.get("fields") or ()
+        if isinstance(field, dict)
+    ]
+    if fields:
+        output["fields"] = fields
+    return output
+
+
+def _prompt_json_section(prompt: str, *, label: str) -> dict[str, Any]:
+    return prompt_section_payload(prompt, label)
+
+
+def _prompt_text_section(prompt: str, *, label: str) -> str:
+    marker = f"{label}:\n"
+    start = prompt.index(marker) + len(marker)
+    next_section = prompt.find("\n\n", start)
+    if next_section < 0:
+        return prompt[start:].strip()
+    return prompt[start:next_section].strip()
+
+
+def replace_answer_sources(
+    answer: dict[str, Any],
+    *,
+    replacements: dict[str, str],
+) -> None:
+    source = answer.pop("source", None) or answer.pop("source_hint", None)
+    if isinstance(source, dict):
+        if source.get("kind") != "values":
+            answer["source_binding_id"] = replacements[
+                json.dumps(source, sort_keys=True)
+            ]
+    for key in ("candidate", "observed", "left", "right"):
+        if isinstance(answer.get(key), dict) and "source" in answer[key]:
+            answer[key]["source_binding_id"] = replacements[
+                json.dumps(answer[key].pop("source"), sort_keys=True)
+            ]
+    if answer.get("pattern") == "computed_scalar":
+        for scalar_input in answer.get("scalar_inputs") or ():
+            source = {"kind": "value", "value_id": scalar_input.pop("value_id")}
+            scalar_input["source_binding_id"] = replacements[
+                json.dumps(source, sort_keys=True)
+            ]
+        answer.pop("source", None)
+
+
+def remove_raw_field_labels(answer: dict[str, Any]) -> None:
+    """Emit the current fact-plan contract from older concise test fixtures."""
+
+    for key in ("group_fields", "output_fields"):
+        if isinstance(answer.get(key), list):
+            _remove_labels(answer[key])
+    if isinstance(answer.get("output_field"), dict):
+        answer["output_field"].pop("label", None)
+    for key in ("candidate", "left", "right"):
+        operand = answer.get(key)
+        if not isinstance(operand, dict):
+            continue
+        if isinstance(operand.get("fields"), list):
+            _remove_labels(operand["fields"])
+        if isinstance(operand.get("output_fields"), list):
+            _remove_labels(operand["output_fields"])
+
+
+def _answer_uses_aggregate_choice(answer: dict[str, Any]) -> bool:
+    if str(answer.get("pattern") or "") not in {
+        "aggregate_by_group",
+        "ranked_aggregate",
+    }:
+        return False
+    return isinstance(answer.get("aggregate_choice"), dict) or (
+        isinstance(answer.get("group"), dict)
+        and isinstance(answer.get("metric"), dict)
+        and isinstance(answer.get("function"), dict)
+    )
+
+
+def _remove_labels(items: list[dict[str, Any]]) -> None:
+    for item in items:
+        if isinstance(item, dict):
+            item.pop("label", None)
+
+
+def replace_answer_metric(answer: dict[str, Any], *, prompt: str = "") -> None:
+    metric = answer.get("metric")
+    if not isinstance(metric, dict):
+        return
+    source_binding_id = str(answer.get("source_binding_id") or "")
+    if str(answer.get("pattern") or "") in {"aggregate_by_group", "ranked_aggregate"}:
+        return
+    if str(answer.get("pattern") or "") == "aggregate_scalar":
+        replacement = _matching_scalar_aggregate_selection(
+            prompt,
+            source_binding_id=source_binding_id,
+            metric=metric,
+        )
+        if replacement:
+            answer.update(replacement)
+            return
+        if "id" in metric and isinstance(answer.get("function"), dict):
+            return
+        raise AssertionError("fact-plan fixture must select exact scalar choices")
+
+
+def _matching_scalar_aggregate_selection(
+    prompt: str,
+    *,
+    source_binding_id: str,
+    metric: dict[str, Any],
+) -> dict[str, Any]:
+    if not prompt:
+        return {}
+    try:
+        choices = _scalar_aggregate_choices_from_prompt(prompt)
+    except ValueError:
+        return {}
+    metric_function = str(metric.get("function") or "")
+    for choice in choices:
+        if source_binding_id and choice["source_binding_id"] != source_binding_id:
+            continue
+        selected_metric = _matching_metric_candidate(choice, _metric_field_id(metric))
+        if not selected_metric and str(metric.get("kind") or "") == "count_records":
+            selected_metric = _matching_metric_candidate(choice, "")
+        selected_function = _matching_function_candidate(
+            choice,
+            metric_function,
+            metric=selected_metric,
+        )
+        if not selected_metric or not selected_function:
+            continue
+        return {
+            "metric": {
+                "selection_basis": "Selected from scalar aggregate operation choices.",
+                "id": selected_metric["id"],
+                "kind": selected_metric["kind"],
+                **(
+                    {"field_id": selected_metric["field"]}
+                    if selected_metric.get("field")
+                    else {}
+                ),
+            },
+            "function": {
+                "selection_basis": "Selected from scalar aggregate operation choices.",
+                "id": selected_function["id"],
+                "value": selected_function["value"],
+            },
+        }
+    return {}
+
+
+def _metric_field_id(metric: dict[str, Any]) -> str:
+    return str(metric.get("field_id") or metric.get("input_field") or "")
+
+
+def replace_aggregate_choice_selection(
+    answer: dict[str, Any],
+    *,
+    prompt: str,
+) -> None:
+    if str(answer.get("pattern") or "") not in {
+        "aggregate_by_group",
+        "ranked_aggregate",
+    }:
+        return
+    aggregate_choice = (
+        answer.get("aggregate_choice")
+        if isinstance(answer.get("aggregate_choice"), dict)
+        else None
+    )
+    if not aggregate_choice:
+        return
+    try:
+        grouped_choices = _grouped_ranked_choices_from_prompt(prompt)
+    except (AssertionError, ValueError):
+        return
+    replacement = _matching_grouped_ranked_selection(
+        grouped_choices,
+        answer=answer,
+        aggregate_choice=aggregate_choice,
+    )
+    if not replacement:
+        return
+    answer.update(replacement)
+    _normalize_grouped_ranked_rank(answer)
+    answer.pop("aggregate_choice", None)
+
+
+def _matching_grouped_ranked_selection(
+    choices: tuple[dict[str, Any], ...],
+    *,
+    answer: dict[str, Any],
+    aggregate_choice: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    metric_field_id = _aggregate_choice_metric_field_id_for_answer(answer)
+    metric_function = ""
+    expected_group_fields = _aggregate_choice_group_field_ids_for_answer(
+        answer,
+        candidate_field_ids=set(),
+    )
+    if aggregate_choice:
+        metric_field_id = str(aggregate_choice.get("metric_field_id") or "")
+        metric_function = str(aggregate_choice.get("metric_function") or "")
+        expected_group_fields = {
+            str(field_id)
+            for field_id in aggregate_choice.get("group_field_ids") or ()
+            if str(field_id)
+        }
+    source_binding_id = str(answer.get("source_binding_id") or "")
+    for choice in choices:
+        if source_binding_id and choice["source_binding_id"] != source_binding_id:
+            continue
+        group = _matching_group_candidate(choice, expected_group_fields)
+        metric = _matching_metric_candidate(choice, metric_field_id)
+        function = _matching_function_candidate(choice, metric_function, metric=metric)
+        if group and metric and function:
+            return {
+                "source_binding_id": choice["source_binding_id"],
+                "group": {
+                    "selection_basis": "Selected from grouped/ranked operation choices.",
+                    "id": group["id"],
+                    "field_id": group["field"],
+                },
+                "metric": {
+                    "selection_basis": "Selected from grouped/ranked operation choices.",
+                    "id": metric["id"],
+                    "kind": metric["kind"],
+                    **({"field_id": metric["field"]} if metric.get("field") else {}),
+                },
+                "function": {
+                    "selection_basis": "Selected from grouped/ranked operation choices.",
+                    "id": function["id"],
+                    "value": function["value"],
+                },
+            }
+    return {}
+
+
+def _normalize_grouped_ranked_rank(answer: dict[str, Any]) -> None:
+    if str(answer.get("pattern") or "") != "ranked_aggregate":
+        return
+    rank = answer.get("rank")
+    if not isinstance(rank, dict):
+        rank = {}
+    rank.setdefault("selection_basis", "Selected from grouped/ranked rank choices.")
+    rank.setdefault("id", "rank_top_1_desc")
+    rank.setdefault("sort", "desc")
+    rank.setdefault("limit", 1)
+    answer["rank"] = rank
+
+
+def _matching_group_candidate(
+    choice: dict[str, Any],
+    expected_group_fields: set[str],
+) -> dict[str, str]:
+    for group in choice["groups"]:
+        if not expected_group_fields or group["field"] in expected_group_fields:
+            return group
+    return {}
+
+
+def _matching_metric_candidate(
+    choice: dict[str, Any],
+    metric_field_id: str,
+) -> dict[str, str]:
+    for metric in choice["metrics"]:
+        if metric["kind"] == "count_records" and not metric_field_id:
+            return metric
+        if metric_field_id and metric.get("field") == metric_field_id:
+            return metric
+    return {}
+
+
+def _matching_function_candidate(
+    choice: dict[str, Any],
+    metric_function: str,
+    *,
+    metric: dict[str, str],
+) -> dict[str, str]:
+    allowed = set(str(metric.get("allowed_functions") or "").split())
+    for function in choice["functions"]:
+        if function["value"] not in allowed:
+            continue
+        if not metric_function or function["value"] == metric_function:
+            return function
+    return {}
+
+
+def _grouped_ranked_choices_from_prompt(prompt: str) -> tuple[dict[str, Any], ...]:
+    section = _prompt_text_section(
+        prompt,
+        label="Grouped/ranked operation choices",
+    )
+    choices: list[dict[str, Any]] = []
+    for source_match in re.finditer(
+        r'<source_binding id="([^"]+)" read="([^"]*)">(.*?)</source_binding>',
+        section,
+        re.S,
+    ):
+        body = source_match.group(3)
+        choices.append(
+            {
+                "source_binding_id": source_match.group(1),
+                "groups": tuple(
+                    {
+                        "id": attrs.get("id", ""),
+                        "field": attrs.get("field", ""),
+                    }
+                    for attrs in _xml_tag_attrs(body, "group")
+                ),
+                "metrics": tuple(
+                    {
+                        "id": attrs.get("id", ""),
+                        "kind": attrs.get("kind", ""),
+                        "field": attrs.get("field", ""),
+                        "allowed_functions": attrs.get("allowed_functions", ""),
+                    }
+                    for attrs in _xml_tag_attrs(body, "metric")
+                ),
+                "functions": tuple(
+                    {
+                        "id": attrs.get("id", ""),
+                        "value": attrs.get("value", ""),
+                    }
+                    for attrs in _xml_tag_attrs(body, "function")
+                ),
+            }
+        )
+    return tuple(choices)
+
+
+def _scalar_aggregate_choices_from_prompt(prompt: str) -> tuple[dict[str, Any], ...]:
+    section = _prompt_text_section(
+        prompt,
+        label="Scalar aggregate operation choices",
+    )
+    choices: list[dict[str, Any]] = []
+    for source_match in re.finditer(
+        r'<source_binding id="([^"]+)" read="([^"]*)">(.*?)</source_binding>',
+        section,
+        re.S,
+    ):
+        body = source_match.group(3)
+        choices.append(
+            {
+                "source_binding_id": source_match.group(1),
+                "metrics": tuple(
+                    {
+                        "id": attrs.get("id", ""),
+                        "kind": attrs.get("kind", ""),
+                        "field": attrs.get("field", ""),
+                        "allowed_functions": attrs.get("allowed_functions", ""),
+                    }
+                    for attrs in _xml_tag_attrs(body, "metric")
+                ),
+                "functions": tuple(
+                    {
+                        "id": attrs.get("id", ""),
+                        "value": attrs.get("value", ""),
+                    }
+                    for attrs in _xml_tag_attrs(body, "function")
+                ),
+            }
+        )
+    return tuple(choices)
+
+
+def _xml_tag_attrs(text: str, tag: str) -> tuple[dict[str, str], ...]:
+    return tuple(
+        {
+            attr_match.group(1): attr_match.group(2)
+            for attr_match in re.finditer(
+                r'([A-Za-z_][A-Za-z0-9_]*)="([^"]*)"', match.group(1)
+            )
+        }
+        for match in re.finditer(rf"<{tag}\s+([^>]*)/?>", text)
+    )
+
+
+def _aggregate_choice_metric_field_id_for_answer(answer: dict[str, Any]) -> str:
+    metric = answer.get("metric")
+    if isinstance(metric, dict) and str(metric.get("field_id") or ""):
+        return str(metric["field_id"])
+    aggregate_choice = answer.get("aggregate_choice")
+    if isinstance(aggregate_choice, dict):
+        return str(aggregate_choice.get("metric_field_id") or "")
+    return ""
+
+
+def _aggregate_choice_group_field_ids(answer: dict[str, Any]) -> set[str]:
+    group = answer.get("group")
+    if isinstance(group, dict) and str(group.get("field_id") or ""):
+        return {str(group["field_id"])}
+    aggregate_choice = answer.get("aggregate_choice")
+    if not isinstance(aggregate_choice, dict):
+        return set()
+    return {
+        str(field_id)
+        for field_id in aggregate_choice.get("group_field_ids") or ()
+        if str(field_id)
+    }
+
+
+def _aggregate_choice_group_field_ids_for_answer(
+    answer: dict[str, Any],
+    *,
+    candidate_field_ids: set[str],
+) -> set[str]:
+    del candidate_field_ids
+    return _aggregate_choice_group_field_ids(answer)
+
+
+def source_candidate_id_for_source(source: dict[str, Any], *, prompt: str = "") -> str:
+    if prompt:
+        payload = _source_candidate_prompt_payload(prompt)
+        matched = _source_candidate_id_from_prompt(source, payload=payload)
+        if matched:
+            return matched
+    kind = source.get("kind")
+    if source.get("source_candidate_id"):
+        return str(source["source_candidate_id"])
+    if kind == "read":
+        return source["read_id"]
+    if kind == "same_scope_api_read":
+        return source["read_id"]
+    if kind == "memory_relation":
+        return source["memory_relation_id"]
+    if kind == "calendar":
+        return source["calendar_id"]
+    if kind == "value":
+        return source["value_id"]
+    raise AssertionError(f"unsupported source kind: {kind}")
+
+
+def _source_candidate_id_from_prompt(
+    source: dict[str, Any],
+    *,
+    payload: dict[str, Any],
+) -> str:
+    for candidate in _all_source_candidates(payload):
+        candidate_id = str(candidate.get("source_candidate_id") or "")
+        if not candidate_id:
+            continue
+        kind = source.get("kind")
+        if kind == "read" and _candidate_read_id(candidate) == source.get("read_id"):
+            return candidate_id
+        if (
+            kind == "same_scope_api_read"
+            and candidate.get("kind") == "same_scope_api_read"
+            and _candidate_read_id(candidate) == source.get("read_id")
+        ):
+            return candidate_id
+        if kind == "memory_relation" and candidate.get(
+            "memory_relation_id"
+        ) == source.get("memory_relation_id"):
+            return candidate_id
+        if kind == "calendar" and candidate.get("calendar_id") == source.get(
+            "calendar_id"
+        ):
+            return candidate_id
+        if kind == "value" and candidate.get("value_id") == source.get("value_id"):
+            return candidate_id
+    return ""
+
+
+def _candidate_read_id(candidate: dict[str, Any]) -> str:
+    read_id = str(candidate.get("read_id") or "")
+    if read_id:
+        return read_id
+    read_contract = candidate.get("read_contract")
+    if isinstance(read_contract, dict):
+        return str(read_contract.get("read_id") or "")
+    return ""
+
+
+def _all_source_candidates(payload: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    output: list[dict[str, Any]] = []
+    for key in (
+        "memory_source_candidates",
+        "utility_source_candidates",
+        "value_source_candidates",
+    ):
+        output.extend(
+            candidate
+            for candidate in payload.get(key) or ()
+            if isinstance(candidate, dict)
+        )
+    for fact_sources in payload.get("requested_fact_sources") or ():
+        if isinstance(fact_sources, dict):
+            output.extend(_source_options_for_fact_sources(fact_sources))
+    return tuple(output)

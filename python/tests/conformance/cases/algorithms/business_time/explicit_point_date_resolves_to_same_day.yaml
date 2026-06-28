@@ -1,0 +1,20 @@
+id: explicit_point_date_resolves_to_same_day
+description: Structured explicit point date resolves without model date guessing.
+migrates:
+  - api/tests/fervis/business_time/test_resolver.py::test_resolve_point_explicit_date
+kind: algorithm
+algorithm: business_time.resolve
+input:
+  anchor_date: "2026-04-11"
+  intent:
+    kind: point
+    precision: day
+    value:
+      year: 2026
+      month: 3
+      day: 10
+expect:
+  result_contains:
+    status: resolved
+    start: "2026-03-10"
+    end: "2026-03-10"

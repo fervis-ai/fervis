@@ -1,0 +1,44 @@
+id: selection_keeps_only_selected_read_facts
+description: Selected catalog keeps facts for selected reads and unscoped global facts.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_keeps_only_facts_for_selected_reads
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - id: sales_read
+        endpoint_name: list_sales
+        resource_names: [sales]
+        source_metadata:
+          description: sales totals
+      - id: inventory_read
+        endpoint_name: list_inventory
+        resource_names: [inventory]
+        source_metadata:
+          description: inventory quantities
+    facts:
+      - ref: sales.total
+        read_id: sales_read
+      - ref: inventory.quantity
+        read_id: inventory_read
+      - ref: global.unscoped_fact
+  requested_facts:
+    - id: sales_total
+      description: sales total
+      answer_outputs:
+        - id: answer_1
+  resource_name_matches:
+    - requested_fact_id: sales_total
+      answer_output_resource_lineage:
+        - answer_output_id: answer_1
+          support_role: MEASURED_VALUE
+          source_text: sales total
+          matching_resource_names: [sales]
+  max_reads_per_fact: 1
+expect:
+  result_contains:
+    selected_read_ids: [sales_read]
+    selected_catalog:
+      read_ids: [sales_read]
+      fact_refs: [sales.total, global.unscoped_fact]

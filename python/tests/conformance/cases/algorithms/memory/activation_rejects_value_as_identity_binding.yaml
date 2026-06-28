@@ -1,0 +1,24 @@
+id: activation_rejects_value_as_identity_binding
+description: Scalar value addresses cannot be activated as identity-value bindings.
+migrates:
+  - api/tests/fervis/memory/test_activation.py::test_activation_rejects_incompatible_memory_use
+kind: algorithm
+algorithm: memory.activate
+input:
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_1
+        outcome: answered
+        addresses:
+          - address: value.total
+            kind: value
+            value: {type: decimal, value: "1200.00"}
+  requests:
+    - id: current.total
+      from_artifact_id: turn_1
+      from_address: value.total
+      use_as: identity_value_binding
+      target_binding_id: total
+expect:
+  error_contains: uses value as identity_value_binding
+

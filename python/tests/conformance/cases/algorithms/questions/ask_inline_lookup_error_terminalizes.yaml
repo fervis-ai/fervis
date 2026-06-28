@@ -1,0 +1,27 @@
+id: question_run_ask_inline_lookup_error_terminalizes
+description: Inline ask terminalizes a lookup exception instead of leaving an active run.
+kind: algorithm
+algorithm: questions.lifecycle
+input:
+  scenario: ask
+  execution_mode: inline
+  tenant_id: tenant_1
+  principal_id: user_1
+  conversation_id: conversation_1
+  question: "How many orders came in today?"
+  model:
+    provider: anthropic
+    model_key: HAIKU
+  lookup_result:
+    raise_error: true
+    error: provider timeout
+expect:
+  result_contains:
+    ask_result:
+      status: FAILED
+      error: provider timeout
+    queue:
+      enqueued_count: 1
+      terminal_count: 1
+    lineage:
+      failed_runtime_fallback_count: 1

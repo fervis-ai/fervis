@@ -1,0 +1,27 @@
+id: lineage_memory_artifacts_reject_requested_fact_addresses
+description: Requested-fact memory preserves request framing and cannot carry reusable fact addresses.
+kind: algorithm
+algorithm: memory.lineage_memory_artifacts
+input:
+  conversation_id: conversation_1
+  limit: 1
+  memory_artifacts:
+    - memory_artifact_id: mem_requested_fact_1
+      conversation_id: conversation_1
+      run_id: run_1
+      source_kind: requested_fact
+      requested_fact_id: fact_1
+      payload_schema: fervis.memory_artifact
+      payload_schema_rev: 1
+      payload_json:
+        artifactId: mem_requested_fact_1
+        sourceKind: requested_fact
+        outcome: answered
+        addresses:
+          - address: entity.input_1
+            kind: entity
+            resource: area
+            identity:
+              area_id: area_1
+expect:
+  error_contains: requested_fact memory artifacts cannot carry addresses

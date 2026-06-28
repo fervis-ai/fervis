@@ -1,0 +1,58 @@
+id: card_projection_coalesced_entity_keeps_private_aliases
+description: Coalesced entity cards keep durable private aliases for every backing memory id.
+migrates:
+  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_coalesced_entity_private_cards_keep_durable_memory_aliases
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: How much did she make?
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_1
+        outcome: answered
+        sourceQuestion: Who is Staff One?
+        sourceAnswer: Staff One answer.
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: Who is Staff One?
+                answer_outputs:
+                  - description: answer
+                    requested_value_frame: answer
+        addresses:
+          - address: entity.staff_1
+            kind: entity
+            resource: staff
+            referenceText: Staff One
+            identity: {staff_key: staff-1}
+      - artifactId: turn_2
+        outcome: answered
+        sourceQuestion: Which products did Staff One sell?
+        sourceAnswer: Staff One answer.
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: Which products did Staff One sell?
+                answer_outputs:
+                  - description: answer
+                    requested_value_frame: answer
+        addresses:
+          - address: entity.staff_1
+            kind: entity
+            resource: staff
+            referenceText: Staff One
+            identity: {staff_key: staff-1}
+expect:
+  result_contains:
+    cards:
+      - kind: prior_answer_request
+      - kind: entity_identity
+        memory_id: turn_2.entity.staff_1
+    private_cards:
+      turn_1.entity.staff_1:
+        kind: entity_identity
+      turn_2.entity.staff_1:
+        kind: entity_identity
+

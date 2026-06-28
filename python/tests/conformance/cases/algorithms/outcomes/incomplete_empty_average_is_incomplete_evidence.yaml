@@ -1,0 +1,27 @@
+id: incomplete_empty_average_is_incomplete_evidence
+description: Incomplete empty average fails closed as incomplete evidence, not undefined.
+migrates:
+  - api/tests/fervis/lookup/outcomes/test_results.py::test_incomplete_empty_average_is_incomplete_evidence_not_undefined
+kind: algorithm
+algorithm: outcomes.classify
+input:
+  mode: answer
+  relations:
+    - id: rows
+      rows: []
+      completeness: {status: incomplete, source_kind: api_read, set_kind: unknown, proof_refs: [read:rows]}
+  operations:
+    - id: avg_rows
+      output_relation: result
+      spec:
+        kind: aggregate
+        input_relation: rows
+        group_by: []
+        aggregations:
+          - {function: avg, input_field: amount, output_field: avg_amount}
+  render_outputs:
+    - {id: avg_amount, relation_id: result, field_id: avg_amount}
+expect:
+  result_contains:
+    issue_kind: incomplete_evidence
+    relation_id: rows

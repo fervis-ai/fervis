@@ -1,0 +1,29 @@
+id: detail_projection_uses_root_row_path
+description: Detail responses without collection fields project to the root row path.
+migrates:
+  - api/tests/fervis/host_api/test_relation_catalog_projection.py::test_projection_uses_declared_array_fields_for_collection_row_paths
+kind: adapter
+adapter: host_api.endpoint_contract_projection
+input:
+  contracts:
+    - endpoint_name: detail_record
+      url_name: record-detail
+      method: GET
+      path_template: /records/{id}/
+      view_class: tests.RecordDetailView
+      resource_names: [record]
+      response_fields:
+        - name: id
+          type: uuid
+          path: data.id
+expect:
+  result_contains:
+    reads:
+      detail_record:
+        row_paths:
+          - id: root
+            path: ""
+            cardinality: one
+        fields:
+          data.id:
+            row_path_id: root

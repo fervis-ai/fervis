@@ -1,0 +1,57 @@
+id: filter_join_project_union_are_deterministic
+description: Filter, join, project, and union compose into deterministic result rows.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_filter_project_join_and_union_return_deterministic_rows
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  scalar_inputs: [{id: is_active, value: true}]
+  relations:
+    - id: left
+      rows:
+        - {id: a, label: Alpha, active: true}
+        - {id: b, label: Beta, active: false}
+      grain_keys: []
+    - id: right
+      rows:
+        - {left_id: a, amount: 10}
+        - {left_id: b, amount: 20}
+      grain_keys: []
+    - id: manual
+      rows:
+        - {name: Manual, amount: 5}
+      grain_keys: []
+  operations:
+    - id: active
+      output_relation: active_left
+      spec:
+        kind: filter
+        input_relation: left
+        predicate: {left: active, operator: equals, right_scalar: is_active}
+    - id: joined
+      output_relation: joined_rows
+      spec:
+        kind: join
+        left: active_left
+        right: right
+        join_keys: [{left: id, right: left_id}]
+    - id: projected
+      output_relation: projected_rows
+      spec:
+        kind: project
+        input_relation: joined_rows
+        fields:
+          - {source: label, output: name}
+          - {source: amount}
+    - id: unioned
+      output_relation: result
+      spec:
+        kind: union
+        inputs: [projected_rows, manual]
+        output_fields: [name, amount]
+expect:
+  result_contains:
+    result:
+      rows:
+        - {name: Alpha, amount: 10}
+        - {name: Manual, amount: 5}

@@ -1,0 +1,25 @@
+id: answer_subject_preserved
+description: Question-contract parsing preserves the answer subject as the answer request subject.
+migrates:
+  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_preserves_answer_subject
+kind: algorithm
+algorithm: question_contract.parse
+input:
+  question_context: How many in-person sales happened this month?
+  answer_fact: count of in-person sales that happened this month
+  answer_subject:
+    subject_text: sales
+    instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
+  answer_outputs:
+    - description: number of in-person sales
+  question_inputs:
+    - input_ref: period
+      source: question_context
+      kind: time_text
+      reference_text: this month
+      inventory_check: {why_this_is_an_input: this month is a time scope}
+  used_input_refs: [period]
+expect:
+  result_contains:
+    requested_facts:
+      - answer_subject_text: sales

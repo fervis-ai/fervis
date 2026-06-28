@@ -1,0 +1,44 @@
+id: normal_instance_guard_materialized
+description: A weak normal-instance guard is materialized into the standard normal-instance profile.
+migrates:
+  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_materializes_normal_instance_profile_from_weak_guard
+kind: algorithm
+algorithm: question_contract.parse
+input:
+  question_context: How many shifts do we have today?
+  answer_fact: count of shifts today
+  answer_subject:
+    subject_text: shifts
+    instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
+  answer_population:
+    population_label: shifts today
+    counted_unit: shifts
+    membership_tests:
+      - test_id: pop_test_1
+        kind: SUBJECT_IDENTITY
+        polarity: MUST_PASS
+        test_question: Does the row/value represent shifts?
+      - test_id: pop_test_2
+        kind: NORMAL_INSTANCE_GUARD
+        polarity: MUST_PASS
+        test_question: Is the shift a normal business instance rather than a non-normal instance?
+  answer_outputs:
+    - description: number of shifts
+  question_inputs:
+    - input_ref: period
+      source: question_context
+      kind: time_text
+      reference_text: today
+      inventory_check: {why_this_is_an_input: today is a time scope}
+  used_input_refs: [period]
+expect:
+  result_contains:
+    requested_facts:
+      - answer_request:
+          answer_population:
+            membership_tests:
+              - test_id: pop_test_1
+              - test_id: pop_test_2
+                kind: NORMAL_INSTANCE_GUARD
+                normal_instance_profile:
+                  profile_id: ORDINARY_BUSINESS_INSTANCE_V1

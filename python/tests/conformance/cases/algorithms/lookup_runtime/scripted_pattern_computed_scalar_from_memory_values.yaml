@@ -1,0 +1,52 @@
+id: scripted_pattern_computed_scalar_from_memory_values
+description: Lookup runtime executes a computed scalar fact plan using prior scalar value addresses.
+migrates:
+  - api/tests/fervis/lookup/test_pattern_fact_plan_contract.py::test_pattern_contract_executes_computed_scalar_from_values_end_to_end
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: What is the increase between the current and previous totals?
+  conversation_resolution:
+    mode: use_visible_memory
+    integrated_question: What is the increase between the prior current and previous totals?
+  memory_artifacts:
+    - artifact_id: prior_totals
+      outcome: answered
+      source_question: What were the prior current and previous totals?
+      source_answer: The prior current total was 150 and the previous total was 100.
+      addresses:
+        - address: value.current
+          kind: value
+          value: {type: number, value: "150"}
+          evidence: {stepIds: [prior_current]}
+        - address: value.previous
+          kind: value
+          value: {type: number, value: "100"}
+          evidence: {stepIds: [prior_previous]}
+  question_contract:
+    fact_description: increase between current and previous totals
+    subject_text: increase
+    answer_expression_family: computed_scalar
+    answer_outputs: [increase]
+  catalog:
+    reads: []
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers:
+        - requested_fact_id: fact_1
+          answer_output_ids: [answer_1]
+          pattern: computed_scalar
+          source: {kind: values}
+          scalar_inputs:
+            - {input_id: current, value_id: prior_totals.value.current}
+            - {input_id: previous, value_id: prior_totals.value.previous}
+          expression: current - previous
+          output: {scalar_id: increase, label: increase}
+  responses: {}
+expect:
+  result_contains:
+    status: COMPLETED
+    rendered_scalars:
+      increase: "50"

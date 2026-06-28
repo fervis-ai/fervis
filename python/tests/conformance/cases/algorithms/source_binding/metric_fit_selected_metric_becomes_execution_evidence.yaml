@@ -1,0 +1,18 @@
+id: metric_fit_selected_metric_becomes_execution_evidence
+description: Source binding preserves the selected metric as executable evidence when it fits the requested answer.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_parse_source_binding_derives_metric_evidence_from_metric_fit_ledger
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_parse_source_binding_keeps_metric_fulfillment_role_pure
+kind: algorithm
+algorithm: source_binding.metric_fit_parse
+input:
+  selected_metric_field: amount
+  choices:
+    OPEN: SATISFIES_TEST
+    CLOSED: CONFLICTS_WITH_TEST
+  metric_decisions:
+    amount: FITS_REQUESTED_ANSWER
+expect:
+  result_contains:
+    metric_measure_field_ids: [amount]
+    row_count_basis_evidence_ids: []

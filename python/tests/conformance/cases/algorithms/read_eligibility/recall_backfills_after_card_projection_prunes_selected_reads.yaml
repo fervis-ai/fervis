@@ -1,0 +1,35 @@
+id: recall_backfills_after_card_projection_prunes_selected_reads
+description: Read-eligibility recall backfills from positive reads when selected reads cannot produce prompt cards.
+kind: algorithm
+algorithm: read_eligibility.prepare_recall
+input:
+  request_fixture: stores_in_area
+  max_reads_per_fact: 1
+  request:
+    catalog:
+      reads:
+        - id: selected_without_rows
+          endpoint_name: get_selected_without_rows
+          resource_names: [selected]
+        - id: backup_with_rows
+          endpoint_name: list_backup_with_rows
+          resource_names: [backup]
+          row_paths:
+            - id: data
+              path: data
+              cardinality: many
+          fields:
+            - ref: field.backup.data.id
+              path: data.id
+              row_path_id: data
+              type: string
+    selected_read_ids_by_fact:
+      fact_1: [selected_without_rows]
+    unselected_positive_read_ids_by_fact:
+      fact_1: [backup_with_rows]
+expect:
+  result_contains:
+    selected_read_ids_by_fact:
+      fact_1: [backup_with_rows]
+    card_read_ids_by_fact:
+      fact_1: [backup_with_rows]

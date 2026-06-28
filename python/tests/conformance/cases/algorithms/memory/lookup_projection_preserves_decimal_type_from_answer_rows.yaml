@@ -1,0 +1,43 @@
+id: lookup_projection_preserves_decimal_type_from_answer_rows
+description: Lookup memory preserves decimal field type for answer relation rows.
+migrates:
+  - api/tests/fervis/memory/test_fact_memory.py::test_answer_memory_preserves_decimal_field_type_for_relation_rows
+kind: algorithm
+algorithm: memory.lookup_projection
+input:
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_sales
+        outcome: answered
+        addresses:
+          - address: relation.answer_rows
+            kind: relation
+            source:
+              kind: operation_output
+              relationId: answer_rows
+              identityType: sale
+            grainKeys: [sale_id]
+            fieldCoverage:
+              sale_id: answer_rows.sale_id
+              amount: answer_rows.amount
+            rowAddresses: [row.answer_rows.1, row.answer_rows.2]
+          - address: row.answer_rows.1
+            kind: row
+            relation: relation.answer_rows
+            grain: {sale_id: sale_1}
+            values:
+              sale_id: {type: string, value: sale_1}
+              amount: {type: decimal, value: "4000.00"}
+          - address: row.answer_rows.2
+            kind: row
+            relation: relation.answer_rows
+            grain: {sale_id: sale_2}
+            values:
+              sale_id: {type: string, value: sale_2}
+              amount: {type: decimal, value: "6150.00"}
+expect:
+  result_contains:
+    relation_field_types:
+      turn_sales.relation.answer_rows:
+        amount: decimal
+

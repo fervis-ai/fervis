@@ -1,0 +1,16 @@
+id: metric_fit_row_count_basis_becomes_execution_evidence
+description: Source binding preserves a selected row-population count basis as executable evidence without turning it into a metric field.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_parse_source_binding_derives_row_count_basis_when_metric_is_not_selected
+kind: algorithm
+algorithm: source_binding.metric_fit_parse
+input:
+  selected_basis: row_count
+  selected_metric_field: data
+  metric_decisions:
+    amount: DOES_NOT_FIT_REQUESTED_ANSWER
+    data: FITS_REQUESTED_ANSWER
+expect:
+  result_contains:
+    metric_measure_field_ids: []
+    row_count_basis_evidence_ids: [row_population.data]

@@ -1,0 +1,17 @@
+id: schema_requires_named_reference_fields
+description: Named-reference inputs must include the fields needed for lookup semantics.
+migrates:
+  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_schema_requires_named_reference_specific_fields
+kind: algorithm
+algorithm: question_contract.schema_validate
+input:
+  question_context: How many sales happened at ABC Mall?
+  question_inputs:
+    - input_ref: store
+      kind: named_reference_text
+      source: question_context
+      reference_text: ABC Mall
+      inventory_check: {why_this_is_an_input: ABC Mall is a named reference}
+  used_input_refs: [store]
+expect:
+  error_contains: target_meaning

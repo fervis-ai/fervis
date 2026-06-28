@@ -1,0 +1,66 @@
+id: support_exposes_staff_group_key_for_compensation_metric
+description: Compensation-row support exposes staff as a legal group key and calculated pay as the metric.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_grouped_ranked_exposes_staff_group_key_for_compensation_metric
+kind: algorithm
+algorithm: source_binding.fulfillment_support
+input:
+  requested_fact:
+    description: staff who earned the most compensation this month
+    subject_text: staff
+  candidate:
+    source_candidate_id: source_1
+    kind: new_api_read
+    read_id: list_shift_compensation_list
+    result_grains:
+      - row_path_id: data
+        row_source_id: rs_source_1_data
+        cardinality: many
+        evidence_items:
+          - evidence_id: source_1.data.shift_compensation_id
+            field_id: shift_compensation_id
+            row_path_id: data
+            type: uuid
+            roles: [identity]
+          - evidence_id: source_1.data.staff_id
+            field_id: staff_id
+            row_path_id: data
+            type: uuid
+            roles: [output, predicate]
+          - evidence_id: source_1.data.staff_name
+            field_id: staff_name
+            row_path_id: data
+            type: string
+            roles: [output, predicate]
+          - evidence_id: source_1.data.calculated_pay
+            field_id: calculated_pay
+            row_path_id: data
+            type: decimal
+            roles: [output, predicate]
+    evidence_items:
+      - evidence_id: source_1.data.shift_compensation_id
+        field_id: shift_compensation_id
+        row_path_id: data
+        type: uuid
+        roles: [identity]
+      - evidence_id: source_1.data.staff_id
+        field_id: staff_id
+        row_path_id: data
+        type: uuid
+        roles: [output, predicate]
+      - evidence_id: source_1.data.staff_name
+        field_id: staff_name
+        row_path_id: data
+        type: string
+        roles: [output, predicate]
+      - evidence_id: source_1.data.calculated_pay
+        field_id: calculated_pay
+        row_path_id: data
+        type: decimal
+        roles: [output, predicate]
+expect:
+  result_contains:
+    group_key_fields:
+      staff_id: true
+    metric_fields:
+      calculated_pay: true

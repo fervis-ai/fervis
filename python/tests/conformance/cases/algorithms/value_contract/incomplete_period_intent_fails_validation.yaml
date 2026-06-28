@@ -1,0 +1,17 @@
+id: incomplete_period_intent_fails_validation
+description: Time value validation rejects period intents missing the concrete period value.
+migrates:
+  - api/tests/fervis/lookup/fact_planning/test_values.py::test_time_value_contract_rejects_incomplete_period_and_window_intents
+kind: algorithm
+algorithm: planning.value_contract
+input:
+  values:
+    - id: time_value
+      kind: time
+      expression: time
+      intent:
+        kind: period
+        unit: month
+        mode: full
+expect:
+  error_contains: invalid time intent

@@ -1,0 +1,14 @@
+id: prompt_surface_projects_slots_for_each_answer_output
+description: Source-binding prompt surface projects fulfillment slots for every requested answer output.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_fact_level_read_eligibility_projects_slots_for_each_answer_output
+kind: algorithm
+algorithm: source_binding.prompt_surface
+input:
+  request:
+    mode: multi_answer_outputs
+expect:
+  result_contains:
+    slot_answer_output_ids:
+      - answer_1
+      - answer_2

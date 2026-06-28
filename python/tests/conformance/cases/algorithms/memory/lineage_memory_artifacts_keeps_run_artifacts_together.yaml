@@ -1,0 +1,65 @@
+id: lineage_memory_artifacts_keeps_run_artifacts_together
+description: Memory lookup limits the recent run window, not individual artifacts within a selected run.
+kind: algorithm
+algorithm: memory.lineage_memory_artifacts
+input:
+  conversation_id: conversation_1
+  limit: 1
+  memory_artifacts:
+    - memory_artifact_id: mem_requested_fact_1
+      conversation_id: conversation_1
+      run_id: run_1
+      source_kind: requested_fact
+      requested_fact_id: fact_1
+      payload_schema: fervis.memory_artifact
+      payload_schema_rev: 1
+      payload_json:
+        artifactId: mem_requested_fact_1
+        sourceKind: requested_fact
+        outcome: answered
+        sourceQuestion: How many stores are open?
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: count open stores
+    - memory_artifact_id: mem_fact_result_1
+      conversation_id: conversation_1
+      run_id: run_1
+      source_kind: fact_result
+      fact_result_id: result_1
+      payload_schema: fervis.memory_artifact
+      payload_schema_rev: 1
+      payload_json:
+        artifactId: mem_fact_result_1
+        sourceKind: fact_result
+        outcome: answered
+        sourceQuestion: How many stores are open?
+        sourceAnswer: "2"
+        addresses:
+          - address: value.answer_1
+            kind: value
+            value:
+              type: decimal
+              value: "2"
+expect:
+  result_equals:
+    artifacts:
+      - artifactId: mem_requested_fact_1
+        outcome: answered
+        sourceQuestion: How many stores are open?
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: count open stores
+      - artifactId: mem_fact_result_1
+        outcome: answered
+        sourceQuestion: How many stores are open?
+        sourceAnswer: "2"
+        addresses:
+          - address: value.answer_1
+            kind: value
+            value:
+              type: decimal
+              value: "2"

@@ -1,0 +1,98 @@
+id: used_known_input_must_be_proven_by_fulfillment
+description: Lookup must fail closed when no eligible read can prove a question input marked use_input=true.
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: How many records are in Target Area?
+  question_contract:
+    fact_description: count of records in Target Area
+    subject_text: records
+    answer_expression_family: scalar_aggregate
+    answer_outputs: [count]
+    resource_terms: [record]
+    support_role: ROW_POPULATION
+    entity_target_catalog_search_terms:
+      - target_id: input_1
+        catalog_search_terms:
+          - basis: area can resolve Target Area to an API identity.
+            term: area
+    known_inputs:
+      - kind: named_reference_text
+        text: Target Area
+        target_meaning: area
+        lookup_text: Target Area
+  catalog:
+    reads:
+      - id: list_record_list
+        endpoint_name: list_record_list
+        resource_names: [record]
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - ref: field.record_id
+            path: data.record_id
+            row_path_id: data
+            type: uuid
+            identity: {entity_ref: record, identity_field: record_id, primary_key: true, stable: true}
+          - ref: field.area_id
+            path: data.area_id
+            row_path_id: data
+            type: uuid
+      - id: list_area_list
+        endpoint_name: list_area_list
+        resource_names: [area]
+        params:
+          - ref: list_area_list.query.name
+            name: name
+            source: query
+            type: string
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - ref: field.area_id
+            path: data.area_id
+            row_path_id: data
+            type: uuid
+            identity: {entity_ref: area, identity_field: area_id, primary_key: true, stable: true}
+          - ref: field.area_name
+            path: data.name
+            row_path_id: data
+            type: string
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers:
+        - requested_fact_id: fact_1
+          answer_output_ids: [answer_1]
+          pattern: aggregate_scalar
+          source: {kind: read, read_id: list_record_list}
+          metric:
+            kind: count_records
+            count_basis:
+              kind: row_population
+              row_path_id: data
+              row_cardinality: many
+            record_id_field_id: record_id
+            label: count
+  read_eligibility:
+    - requested_fact_id: fact_1
+      read_id: list_record_list
+      row_path_ids: [data]
+  responses:
+    list_area_list:
+      data:
+        - {area_id: area_a, name: Target Area}
+    list_record_list:
+      data:
+        - {record_id: record_1, area_id: area_a}
+        - {record_id: record_2, area_id: area_b}
+        - {record_id: record_3, area_id: area_c}
+expect:
+  result_contains:
+    status: FAILED
+    error: plan_validation_failed

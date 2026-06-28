@@ -1,0 +1,29 @@
+id: build_artifact_terminal_outcome_address
+description: Terminal memory artifacts serialize outcome addresses, not answer prose.
+migrates:
+  - api/tests/fervis/memory/test_fact_memory.py::test_terminal_outcome_is_memory_address_not_answer_prose
+kind: algorithm
+algorithm: memory.build_artifact
+input:
+  artifact:
+    artifact_id: turn_card_numbers
+    outcome: impossible
+    provenance: {runId: run_3}
+    addresses:
+      - address: outcome.full_card_numbers
+        kind: outcome
+        terminal: impossible
+        scope: {resource: payments}
+        proof: {policy: restricted_field}
+expect:
+  result_equals:
+    artifactId: turn_card_numbers
+    outcome: impossible
+    addresses:
+      - address: outcome.full_card_numbers
+        kind: outcome
+        scope: {resource: payments}
+        terminal: impossible
+        proof: {policy: restricted_field}
+    provenance: {runId: run_3}
+

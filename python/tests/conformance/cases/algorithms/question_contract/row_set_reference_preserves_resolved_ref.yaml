@@ -1,0 +1,25 @@
+id: row_set_reference_preserves_resolved_ref
+description: Row-set reference inputs preserve resolved input references without requiring target meaning.
+migrates:
+  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_accepts_row_set_reference_without_target_meaning
+kind: algorithm
+algorithm: question_contract.parse
+input:
+  question_context: Show the amount for those sales.
+  question_context_texts: [those sales]
+  question_inputs:
+    - input_ref: sales
+      kind: row_set_reference
+      source: conversation_resolution
+      reference_text: those sales
+      occurrence: 1
+      resolved_input_ref: cr_input_1
+      inventory_check: {why_this_is_an_input: those sales is a resolved row-set reference}
+  used_input_refs: [sales]
+expect:
+  result_contains:
+    question_inputs:
+      - id: sales
+        kind: row_set_reference
+        description: ""
+        resolved_input_ref: cr_input_1

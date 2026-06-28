@@ -1,0 +1,36 @@
+id: conditional_field_requirements_are_projected
+description: Conditional response-field requirements project to catalog field requirements.
+migrates:
+  - api/tests/fervis/host_api/test_relation_catalog_projection.py::test_endpoint_contract_projection_preserves_conditional_field_requirements
+kind: adapter
+adapter: host_api.endpoint_contract_projection
+input:
+  contracts:
+    - endpoint_name: list_records
+      url_name: records
+      method: GET
+      path_template: /records/
+      view_class: tests.RecordView
+      resource_names: [record]
+      query_params:
+        - name: include_items
+          type: boolean
+      response_fields:
+        - name: data
+          type: array
+          path: data
+        - name: item_name
+          type: string
+          path: data.items.name
+          requires:
+            queryParam: include_items
+            value: true
+expect:
+  result_contains:
+    reads:
+      list_records:
+        fields:
+          data.items.name:
+            requirements:
+              - param_ref: list_records.query.include_items
+                value: true

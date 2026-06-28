@@ -1,0 +1,107 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@400;500&family=Unbounded:wght@700&display=swap");
+
+:root {
+  --paper: #ffffff;
+  --ink: #111111;
+  --muted: #6f6f6f;
+  --faint: #9a9a9a;
+  --rule: #e6e6e6;
+  --rule-strong: #cfcfcf;
+  --panel: #f7f7f7;
+  --wrapper: #fcfcfc;
+  --ask: #e8e8e8;
+  --accent: #1f4ed8;
+  --error: #9a2222;
+  --title-ink: var(--ink);
+  --control-ink: var(--ink);
+  --serif: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --mono: "IBM Plex Mono", "SF Mono", Menlo, monospace;
+  --topbar-height: 49px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #151515;
+    --ink: #f3f3f3;
+    --muted: #b9b9b9;
+    --faint: #878787;
+    --rule: #333333;
+    --rule-strong: #4a4a4a;
+    --panel: #1d1d1d;
+    --wrapper: #191919;
+    --ask: #292929;
+    --title-ink: color-mix(in srgb, var(--ink) 90%, var(--paper));
+    --control-ink: color-mix(in srgb, var(--ink) 90%, var(--paper));
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.app-root.theme-light,
+.app-root.theme-dark {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.app-root.theme-dark {
+  --paper: #151515;
+  --ink: #f3f3f3;
+  --muted: #b9b9b9;
+  --faint: #878787;
+  --rule: #333333;
+  --rule-strong: #4a4a4a;
+  --panel: #1d1d1d;
+  --wrapper: #191919;
+  --ask: #292929;
+  --title-ink: color-mix(in srgb, var(--ink) 90%, var(--paper));
+  --control-ink: color-mix(in srgb, var(--ink) 90%, var(--paper));
+}
+
+.app-root.theme-light {
+  --paper: #ffffff;
+  --ink: #111111;
+  --muted: #6f6f6f;
+  --faint: #9a9a9a;
+  --rule: #e6e6e6;
+  --rule-strong: #cfcfcf;
+  --panel: #f7f7f7;
+  --wrapper: #fcfcfc;
+  --ask: #e8e8e8;
+  --title-ink: var(--ink);
+  --control-ink: var(--ink);
+}
+
+.app-root {
+  height: 100vh;
+  background: var(--paper);
+  overflow: hidden;
+}

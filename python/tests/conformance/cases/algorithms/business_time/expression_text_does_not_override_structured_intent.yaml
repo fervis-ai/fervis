@@ -1,0 +1,21 @@
+id: expression_text_does_not_override_structured_intent
+description: Expression text is observability when a structured intent is supplied.
+migrates:
+  - api/tests/fervis/business_time/test_resolver.py::test_expression_text_is_observability_not_parser_input
+kind: algorithm
+algorithm: business_time.resolve
+input:
+  expression: yesterday
+  anchor_date: "2026-04-11"
+  intent:
+    kind: period
+    unit: month
+    relative:
+      offset: 0
+    mode: full
+expect:
+  result_contains:
+    status: resolved
+    expression: yesterday
+    start: "2026-04-01"
+    end: "2026-04-30"

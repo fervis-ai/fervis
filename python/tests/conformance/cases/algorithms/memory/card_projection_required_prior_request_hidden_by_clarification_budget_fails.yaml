@@ -1,0 +1,37 @@
+id: card_projection_required_prior_request_hidden_by_clarification_budget_fails
+description: Projection fails closed when clarification priority would hide a required recent prior request.
+migrates:
+  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_memory_card_projection_fails_if_required_prior_request_hidden_by_clarification_budget
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: Westlands
+  max_cards: 1
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_recent
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: money we made yesterday
+                answer_outputs:
+                  - description: total sales amount
+                    requested_value_frame: total sales amount
+        addresses:
+          - address: value.total
+            kind: value
+            value: {type: decimal, value: "100.00"}
+      - artifactId: turn_clarification
+        outcome: needs_clarification
+        addresses:
+          - address: outcome.clarification
+            kind: outcome
+            terminal: needs_clarification
+            clarificationQuestions: ["Which branch?"]
+expect:
+  error_contains: required conversation memory exceeds projection budget
+

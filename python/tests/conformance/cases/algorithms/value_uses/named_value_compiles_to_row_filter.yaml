@@ -1,0 +1,44 @@
+id: named_value_compiles_to_row_filter
+description: A named value with a row-filter sink compiles to a bound relation field filter.
+migrates:
+  - api/tests/fervis/lookup/fact_planning/test_values.py::test_named_value_compiles_to_row_filter_when_sink_selects_field
+kind: algorithm
+algorithm: planning.value_uses
+input:
+  catalog:
+    reads:
+      - id: records
+        endpoint_name: list_records
+        fields:
+          - ref: field.data.group_label
+            path: data.group_label
+            type: string
+  relations:
+    - id: records_rows
+      source:
+        kind: api_read
+        read_id: records
+      fields:
+        - field_id: data_group_label
+          roles: [output]
+  values:
+    - id: alpha
+      kind: named
+      text: Alpha
+  value_uses:
+    - id: use_alpha_row_filter
+      value_id: alpha
+      target:
+        kind: row_filter
+        relation_id: records_rows
+        field_id: data_group_label
+        operator: equals
+expect:
+  result_contains:
+    endpoint_args: []
+    row_filters:
+      - relation_id: records_rows
+        field_id: data_group_label
+        operator: equals
+        value: Alpha
+    scalar_inputs: []

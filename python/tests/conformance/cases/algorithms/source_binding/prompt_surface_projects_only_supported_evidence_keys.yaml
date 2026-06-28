@@ -1,0 +1,29 @@
+id: prompt_surface_projects_only_supported_evidence_keys
+description: Source-binding prompt projection keeps supported evidence roles and drops unknown evidence keys.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_compact_prompt_projects_only_supported_evidence_keys
+kind: algorithm
+algorithm: source_binding.prompt_surface
+input:
+  request:
+    mode: custom_supported_evidence_projection
+expect:
+  result_contains:
+    response_rows:
+      - path: root
+        cardinality: one
+        fields:
+          - {field_id: name, path: root.name, type: string}
+          - {field_id: label, path: root.label, type: string}
+    prompt_slot_keys:
+      - answer_output_id
+      - fulfillment_slot_id
+      - group_key_evidence
+    prompt_slot_group_key_evidence:
+      - {evidence_id: visible_name, field_id: name}
+    parser_slot_keys:
+      - answer_output_id
+      - fulfillment_slot_id
+      - group_key_evidence
+    parser_slot_group_key_evidence:
+      - {evidence_id: visible_name, field_id: name}

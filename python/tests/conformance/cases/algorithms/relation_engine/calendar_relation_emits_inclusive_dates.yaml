@@ -1,0 +1,20 @@
+id: calendar_relation_emits_inclusive_dates
+description: Generated calendar relation emits a complete inclusive date range.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_coverage_set_algebra.py::test_generated_calendar_relation_source_emits_complete_inclusive_dates
+kind: algorithm
+algorithm: execution.calendar_relation
+input:
+  id: calendar
+  start: "2026-05-01"
+  end: "2026-05-03"
+  output_date_field: runtime_date
+  max_rows: 10
+expect:
+  result_contains:
+    rows:
+      - {runtime_date: "2026-05-01"}
+      - {runtime_date: "2026-05-02"}
+      - {runtime_date: "2026-05-03"}
+    grain_keys: [runtime_date]
+    completeness_status: complete

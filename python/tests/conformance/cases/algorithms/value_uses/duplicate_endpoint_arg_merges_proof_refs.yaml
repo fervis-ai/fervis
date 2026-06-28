@@ -1,0 +1,43 @@
+id: duplicate_endpoint_arg_merges_proof_refs
+description: Duplicate endpoint args with the same value merge proof lineage instead of dropping one source.
+kind: algorithm
+algorithm: planning.value_uses
+input:
+  catalog:
+    reads:
+      - id: stores
+        endpoint_name: list_stores
+        params:
+          - ref: stores.query.area_id
+            name: area_id
+            source: query
+            type: string
+  relations:
+    - id: store_rows
+      source:
+        kind: api_read
+        read_id: stores
+        param_bindings:
+          - param_id: area_id
+            value: area_1
+            proof_refs: [source_binding:area_param]
+  values:
+    - id: area
+      kind: named
+      text: area_1
+      proof_refs: [known_input:area]
+  grounded_input_uses:
+    - id: grounded_area
+      value_id: area
+      row_source: {read_id: stores, row_path_id: root}
+      param_id: area_id
+      value_component: value
+expect:
+  result_contains:
+    endpoint_args:
+      - relation_id: store_rows
+        param_ref: stores.query.area_id
+        value: area_1
+        proof_refs:
+          - known_input:area
+          - source_binding:area_param

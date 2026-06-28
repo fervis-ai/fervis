@@ -1,0 +1,19 @@
+id: parser_rejects_non_resource_terms
+description: Matching resource names must come from catalog resource_names.
+migrates:
+  - api/tests/fervis/lookup/query_enrichment/test_query_enrichment.py::test_query_enrichment_parser_rejects_non_resource_terms
+kind: algorithm
+algorithm: query_enrichment.parse
+input:
+  request_fixture: booked_money
+  payload:
+    requested_fact_resource_name_matches:
+      - requested_fact_id: fact_1
+        answer_output_resource_lineage:
+          - answer_output_id: answer_1
+            support_role: MEASURED_VALUE
+            source_text: booked money
+            matching_resource_names: [amount]
+    entity_target_catalog_search_terms: []
+expect:
+  error_contains: must be resource names

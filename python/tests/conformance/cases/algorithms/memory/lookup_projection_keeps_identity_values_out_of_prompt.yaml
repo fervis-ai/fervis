@@ -1,0 +1,27 @@
+id: lookup_projection_keeps_identity_values_out_of_prompt
+description: Lookup memory projects canonical identity values for execution without adding identity indexes to prompt context.
+migrates:
+  - api/tests/fervis/lookup/test_memory_identity_values.py::test_lookup_memory_available_index_is_not_prompt_payload
+kind: algorithm
+algorithm: memory.lookup_projection
+input:
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_1
+        outcome: answered
+        addresses:
+          - address: entity.location.abc
+            kind: entity
+            resource: location
+            referenceText: ABC Mall
+            identity: {location_id: loc-1}
+expect:
+  result_contains:
+    identity_values:
+      - value: loc-1
+  text_excludes_from:
+    prompt_context:
+      - identity_values
+      - identitySets
+      - availableMemoryIndex
+

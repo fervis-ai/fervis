@@ -1,0 +1,75 @@
+id: scripted_pattern_rejects_repeated_source_invocation_scope
+description: Lookup runtime fails closed when one requested fact tries to bind the same source with different params for separate outputs.
+migrates:
+  - api/tests/fervis/lookup/test_pattern_fact_plan_contract.py::test_pattern_contract_preserves_exact_repeated_source_invocation_scope
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: How much is bucket A and how much is bucket B? Show each separately.
+  question_contract:
+    fact_description: metric totals by requested bucket
+    subject_text: bucket
+    answer_expression_family: scalar_aggregate
+    answer_outputs: [bucket_a_total, bucket_b_total]
+    resource_terms: [metric]
+  catalog:
+    reads:
+      - id: metric_read
+        endpoint_name: metric_read
+        resource_names: [metric]
+        params:
+          - ref: metric_read.query.bucket
+            name: bucket
+            source: query
+            type: choice
+            choices: [A, B]
+            semantics: population_filter
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - ref: field.metric_total
+            path: data.metric_total
+            row_path_id: data
+            type: number
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers:
+        - requested_fact_id: fact_1
+          answer_output_ids: [answer_1]
+          pattern: aggregate_scalar
+          source:
+            kind: read
+            read_id: metric_read
+            param_bindings:
+              - {param_id: bucket, value: A}
+          metric:
+            kind: aggregate_field
+            function: sum
+            field_id: metric_total
+            label: bucket_a_total
+        - requested_fact_id: fact_1
+          answer_output_ids: [answer_2]
+          pattern: aggregate_scalar
+          source:
+            kind: read
+            read_id: metric_read
+            param_bindings:
+              - {param_id: bucket, value: B}
+          metric:
+            kind: aggregate_field
+            function: sum
+            field_id: metric_total
+            label: bucket_b_total
+  responses:
+    metric_read:
+      data:
+        - {metric_total: "10.00"}
+expect:
+  result_contains:
+    status: FAILED
+    error: planning_failed
+    endpoint_args: {}

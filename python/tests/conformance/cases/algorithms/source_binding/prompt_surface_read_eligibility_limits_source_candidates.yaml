@@ -1,0 +1,16 @@
+id: prompt_surface_read_eligibility_limits_source_candidates
+description: Source-binding forwards only read-eligible source candidates even when catalog selection saw additional reads.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_hides_new_api_reads_without_read_eligibility_support
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_signature_projection_preserves_dropped_read_decisions
+kind: algorithm
+algorithm: source_binding.prompt_surface
+input:
+  request:
+    mode: read_eligibility_filter
+expect:
+  result_contains:
+    read_ids:
+      - sales
+    source_candidate_ids:
+      - source_1

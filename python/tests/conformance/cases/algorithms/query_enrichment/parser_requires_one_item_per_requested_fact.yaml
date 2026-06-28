@@ -1,0 +1,13 @@
+id: parser_requires_one_item_per_requested_fact
+description: Parser requires one resource-name match item per requested fact.
+migrates:
+  - api/tests/fervis/lookup/query_enrichment/test_query_enrichment.py::test_query_enrichment_parser_requires_one_item_per_requested_fact
+kind: algorithm
+algorithm: query_enrichment.parse
+input:
+  request_fixture: booked_money
+  payload:
+    requested_fact_resource_name_matches: []
+    entity_target_catalog_search_terms: []
+expect:
+  error_contains: missing requested fact

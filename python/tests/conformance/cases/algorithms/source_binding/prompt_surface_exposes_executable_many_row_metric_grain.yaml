@@ -1,0 +1,24 @@
+id: prompt_surface_exposes_executable_many_row_metric_grain
+kind: algorithm
+algorithm: source_binding.prompt_surface
+description: Source-binding prompt exposes the executable many-row metric grain for a ranked aggregate source.
+migrates:
+  - api/tests/fervis/lookup/test_pattern_fact_plan_contract.py::test_pattern_contract_source_binding_exposes_one_candidate_per_executable_read_end_to_end
+input:
+  request:
+    mode: multi_row_summary_metric
+expect:
+  result_contains:
+    read_ids:
+      - sales_summary_read
+    source_candidate_ids:
+      - source_1
+    response_row_paths:
+      - data
+    response_row_cardinalities:
+      data: many
+    response_row_fields_by_path:
+      data:
+        - location_id
+        - label
+        - amount

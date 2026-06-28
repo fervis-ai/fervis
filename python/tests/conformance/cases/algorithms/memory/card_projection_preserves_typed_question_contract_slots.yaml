@@ -1,0 +1,85 @@
+id: card_projection_preserves_typed_question_contract_slots
+description: Prior answer request cards preserve typed entity and time slots with bindings.
+migrates:
+  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_prior_answer_request_card_preserves_typed_question_contract_slots
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: How about today?
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_sales
+        outcome: answered
+        sourceQuestion: How much did Staff One sell yesterday?
+        sourceAnswer: Staff One sold 100 yesterday.
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: sales by Staff One yesterday
+                answer_outputs:
+                  - description: total sales amount
+                    requested_value_frame: total sales amount
+                known_inputs:
+                  - id: fact_1_entity_1
+                    kind: named_reference_text
+                    source: question_context
+                    text: Staff One
+                    lookup_text: Staff One
+                    description: staff member
+                  - id: fact_1_time_1
+                    kind: time_text
+                    source: question_context
+                    text: yesterday
+        addresses:
+          - address: entity.grounded_fact_1_entity_1
+            kind: entity
+            resource: staff
+            referenceText: Staff One
+            identity: {staff_key: staff-1}
+            evidence: {stepIds: [known_input:fact_1_entity_1]}
+          - address: value.grounded_fact_1_time_1
+            kind: value
+            value:
+              type: time_scope
+              value: yesterday
+              expression: yesterday
+              resolvedStart: "2026-05-14"
+              resolvedEnd: "2026-05-14"
+              granularity: day
+            evidence: {stepIds: [known_input:fact_1_time_1]}
+          - address: value.answer_1
+            kind: value
+            value: {type: decimal, value: "100.00"}
+            evidence: {stepIds: [turn_sales.answer]}
+expect:
+  result_contains:
+    cards:
+      - kind: prior_answer_request
+        details:
+          request_shape:
+            answer_fact_template: sales by Staff One yesterday
+            slots:
+              - slot_id: fact_1_entity_1
+                slot_kind: entity_identity
+                text: Staff One
+                description: staff member
+              - slot_id: fact_1_time_1
+                slot_kind: time_scope
+                text: yesterday
+          prior_slot_bindings:
+            fact_1_entity_1:
+              value_kind: entity_identity
+              identity_type: staff
+              display: Staff One
+              canonical_values: {staff_key: staff-1}
+              source_lineage: [turn_sales.entity.grounded_fact_1_entity_1]
+            fact_1_time_1:
+              value_kind: time_scope
+              value: yesterday
+              expression: yesterday
+              resolved_start: "2026-05-14"
+              resolved_end: "2026-05-14"
+              granularity: day
+              source_lineage: [turn_sales.value.grounded_fact_1_time_1]
+

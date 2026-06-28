@@ -1,0 +1,44 @@
+id: conversation_memory_projection_overflow_fails_before_planning
+description: Lookup runtime fails closed before model planning when conversation memory projection exceeds the required-card budget.
+migrates:
+  - api/tests/fervis/lookup/test_conversation_resolution_pipeline.py::test_conversation_memory_projection_overflow_returns_controlled_lookup_failure
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: What about those?
+  memory_artifacts:
+    - artifact_id: turn_projection_overflow
+      outcome: answered
+      source_question: Show many metrics.
+      addresses:
+        - {address: value.metric_0, kind: value, value: {type: integer, value: "0"}, display: metric 0}
+        - {address: value.metric_1, kind: value, value: {type: integer, value: "1"}, display: metric 1}
+        - {address: value.metric_2, kind: value, value: {type: integer, value: "2"}, display: metric 2}
+        - {address: value.metric_3, kind: value, value: {type: integer, value: "3"}, display: metric 3}
+        - {address: value.metric_4, kind: value, value: {type: integer, value: "4"}, display: metric 4}
+        - {address: value.metric_5, kind: value, value: {type: integer, value: "5"}, display: metric 5}
+        - {address: value.metric_6, kind: value, value: {type: integer, value: "6"}, display: metric 6}
+        - {address: value.metric_7, kind: value, value: {type: integer, value: "7"}, display: metric 7}
+        - {address: value.metric_8, kind: value, value: {type: integer, value: "8"}, display: metric 8}
+        - {address: value.metric_9, kind: value, value: {type: integer, value: "9"}, display: metric 9}
+        - {address: value.metric_10, kind: value, value: {type: integer, value: "10"}, display: metric 10}
+        - {address: value.metric_11, kind: value, value: {type: integer, value: "11"}, display: metric 11}
+        - {address: value.metric_12, kind: value, value: {type: integer, value: "12"}, display: metric 12}
+  question_contract:
+    fact_description: metric amount
+    subject_text: metric
+    answer_expression_family: scalar_aggregate
+    answer_outputs: [amount]
+  catalog:
+    reads: []
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers: []
+  responses: {}
+expect:
+  result_contains:
+    status: FAILED
+    error: planning_failed
+    tool_names: []

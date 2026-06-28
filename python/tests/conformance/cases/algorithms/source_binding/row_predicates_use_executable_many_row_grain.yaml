@@ -1,0 +1,53 @@
+id: row_predicates_use_executable_many_row_grain
+description: Row predicate projection only exposes predicates from executable many-row result grains.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_row_predicates_are_scoped_to_executable_many_row_grain
+kind: algorithm
+algorithm: source_binding.row_predicates
+input:
+  catalog:
+    reads:
+      - id: featured_merch
+        endpoint_name: list_featured_merch
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+          - id: root
+            path: root
+            cardinality: one
+        fields:
+          - ref: featured.field.rank
+            path: data.rank
+            row_path_id: data
+            type: integer
+          - ref: featured.field.merch_active
+            path: data.merch.is_active
+            row_path_id: data
+            type: boolean
+          - ref: featured.field.is_archived
+            path: is_archived
+            row_path_id: root
+            type: boolean
+  candidate:
+    source_candidate_id: source_1
+    kind: new_api_read
+    read_id: featured_merch
+    result_grains:
+      - grain_id: data
+        row_path_id: data
+        cardinality: many
+      - grain_id: root
+        row_path_id: root
+        cardinality: one
+expect:
+  result_contains:
+    row_predicates:
+      - predicate_id: rp.source_1.row.data.merch_is_active
+        field_id: merch_is_active
+        field_path: data.merch.is_active
+        row_path_id: data
+        type: boolean
+        operator: in
+        allowed_values: ["true", "false"]
+        default: all_values

@@ -1,0 +1,22 @@
+id: missing_binding_candidate_needs_clarification
+description: Missing binding candidates produce unsupported-reference clarification.
+migrates:
+  - api/tests/fervis/lookup/outcomes/test_results.py::test_binding_candidate_cardinality_classifies_terminal_results
+kind: algorithm
+algorithm: outcomes.classify
+input:
+  mode: binding_candidates
+  requested_fact_id: rf_staff
+  binding_target_id: staff
+  known_input_id: alice
+  relations:
+    - id: staff_candidates
+      rows: []
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown, proof_refs: [read:staff_candidates]}
+expect:
+  result_contains:
+    outcome_kind: needs_clarification
+    clarifications:
+      - basis: unsupported_reference
+        known_input_id: alice
+        evidence_refs: [known_input:alice, read:staff_candidates]

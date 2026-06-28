@@ -1,0 +1,39 @@
+id: lineage_memory_artifacts_preserve_activation_provenance
+description: Persisted memory artifacts preserve conversation-resolution activation provenance used by card projection.
+kind: algorithm
+algorithm: memory.lineage_memory_artifacts
+input:
+  conversation_id: conversation_1
+  limit: 5
+  memory_artifacts:
+    - memory_artifact_id: mem_run_2_fact_result_1
+      conversation_id: conversation_1
+      run_id: run_2
+      source_kind: fact_result
+      payload_schema: fervis.memory_artifact
+      payload_schema_rev: 1
+      payload_json:
+        artifactId: mem_run_2_fact_result_1
+        sourceKind: fact_result
+        outcome: answered
+        sourceQuestion: How much did she make yesterday?
+        sourceAnswer: "1200.00"
+        provenance:
+          runId: run_2
+          conversation_resolution_activation:
+            activated_memory_ids:
+              - mem_run_1_fact_result_1.prior_request.fact_1
+        addresses:
+          - address: value.answer_1
+            kind: value
+            value:
+              type: decimal
+              value: "1200.00"
+expect:
+  result_contains:
+    artifacts:
+      - artifactId: mem_run_2_fact_result_1
+        provenance:
+          conversation_resolution_activation:
+            activated_memory_ids:
+              - mem_run_1_fact_result_1.prior_request.fact_1

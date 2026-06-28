@@ -1,0 +1,15 @@
+id: parse_rejects_duplicate_source_invocation
+description: Source-binding parse fails closed when one selected source is invoked twice for the same requested fact.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_rejects_duplicate_selected_source_strategy_invocation
+kind: algorithm
+algorithm: source_binding.parse
+input:
+  request:
+    mode: choice_param
+  duplicate_source_invocation: true
+  choices:
+    OPEN: SATISFIES_TEST
+    CLOSED: CONFLICTS_WITH_TEST
+expect:
+  error_contains: duplicate source binding

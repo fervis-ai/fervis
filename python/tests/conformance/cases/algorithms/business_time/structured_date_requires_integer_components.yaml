@@ -1,0 +1,17 @@
+id: structured_date_requires_integer_components
+description: Structured date values fail closed when numeric fields are strings.
+migrates:
+  - api/tests/fervis/business_time/test_resolver.py::test_resolve_structured_date_requires_integer_components
+kind: algorithm
+algorithm: business_time.resolve
+input:
+  expression: since Jan 13th
+  anchor_date: "2026-05-06"
+  intent:
+    kind: open_range
+    start:
+      month: "1"
+      day: 13
+      year_policy: most_recent
+expect:
+  error_contains: integer month

@@ -1,0 +1,27 @@
+id: rank_limit_value_compiles_to_operation_input
+description: Rank-limit value uses compile to operation inputs with proof refs.
+kind: algorithm
+algorithm: planning.value_uses
+input:
+  catalog:
+    reads:
+      - id: records
+        endpoint_name: list_records
+  values:
+    - id: result_limit
+      kind: literal
+      literal_type: number
+      value: "2"
+      proof_refs: [known_input:result_limit]
+  value_uses:
+    - id: use_result_limit
+      value_id: result_limit
+      target:
+        kind: rank_limit
+        operation_id: ranked
+expect:
+  result_contains:
+    rank_limits:
+      - operation_id: ranked
+        value: "2"
+        proof_refs: [known_input:result_limit]

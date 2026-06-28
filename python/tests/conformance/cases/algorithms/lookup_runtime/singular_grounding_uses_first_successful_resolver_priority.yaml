@@ -1,0 +1,114 @@
+id: singular_grounding_uses_first_successful_resolver_priority
+description: Singular lookup uses the first successful resolver priority tier instead of executing lower-priority aliases that would be ambiguous.
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: How many locations are in London?
+  question_contract:
+    fact_description: count of locations in London
+    subject_text: locations
+    answer_expression_family: scalar_aggregate
+    answer_outputs: [count]
+    resource_terms: [location]
+    support_role: ROW_POPULATION
+    entity_target_catalog_search_terms:
+      - target_id: input_1
+        catalog_search_terms:
+          - basis: area can resolve London to the API identity used by location rows.
+            term: area
+          - basis: location is a lower-priority alias for resolver recall.
+            term: location
+    known_inputs:
+      - kind: named_reference_text
+        text: London
+        target_meaning: city
+        lookup_text: London
+  grounding:
+    compatible_resolver_reads:
+      input_1: [list_area_list, list_location_list]
+  catalog:
+    reads:
+      - id: list_location_list
+        endpoint_name: list_location_list
+        resource_names: [location]
+        params:
+          - ref: list_location_list.query.name
+            name: name
+            source: query
+            type: string
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - ref: field.location_id
+            path: data.location_id
+            row_path_id: data
+            type: uuid
+            identity: {entity_ref: location, identity_field: location_id, primary_key: true, stable: true}
+          - ref: field.location_name
+            path: data.name
+            row_path_id: data
+            type: string
+          - ref: field.area_id
+            path: data.area.area_id
+            row_path_id: data
+            type: uuid
+            identity: {entity_ref: area, identity_field: area_id, primary_key: true, stable: true}
+      - id: list_area_list
+        endpoint_name: list_area_list
+        resource_names: [area]
+        params:
+          - ref: list_area_list.query.name
+            name: name
+            source: query
+            type: string
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - ref: field.area_id
+            path: data.area_id
+            row_path_id: data
+            type: uuid
+            identity: {entity_ref: area, identity_field: area_id, primary_key: true, stable: true}
+          - ref: field.area_name
+            path: data.name
+            row_path_id: data
+            type: string
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers:
+        - requested_fact_id: fact_1
+          answer_output_ids: [answer_1]
+          pattern: aggregate_scalar
+          source: {kind: read, read_id: list_location_list}
+          metric:
+            kind: count_records
+            count_basis:
+              kind: row_population
+              row_path_id: data
+              row_cardinality: many
+            record_id_field_id: location_id
+            label: count
+  read_eligibility:
+    - requested_fact_id: fact_1
+      read_id: list_location_list
+      row_path_ids: [data]
+  responses:
+    list_area_list:
+      data:
+        - {area_id: area_nairobi, name: London}
+    list_location_list:
+      data:
+        - {location_id: loc_1, name: London, area: {area_id: area_nairobi}}
+        - {location_id: loc_2, name: London, area: {area_id: area_nairobi}}
+        - {location_id: loc_3, name: Mombasa Store, area: {area_id: area_mombasa}}
+expect:
+  result_contains:
+    status: COMPLETED
+    rendered_rows:
+      - count: 2

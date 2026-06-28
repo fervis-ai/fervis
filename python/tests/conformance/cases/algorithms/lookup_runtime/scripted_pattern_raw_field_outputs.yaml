@@ -1,0 +1,53 @@
+id: scripted_pattern_raw_field_outputs
+description: Lookup runtime maps raw output fields by field id, not by planner-authored labels.
+migrates:
+  - api/tests/fervis/lookup/test_pattern_fact_plan_contract.py::test_pattern_contract_uses_field_ids_for_raw_field_outputs
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: List salespeople and products sold from sales records.
+  question_contract:
+    fact_description: salespeople and products sold from sales records
+    subject_text: salespeople and products
+    answer_expression_family: list_rows
+    answer_outputs: [salesperson, product]
+    resource_terms: [sale]
+  catalog:
+    reads:
+      - id: sales_read
+        endpoint_name: sales_read
+        resource_names: [sale]
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - {ref: field.sale_id, path: data.sale_id, row_path_id: data, type: string}
+          - {ref: field.staff_name, path: data.staff_name, row_path_id: data, type: string}
+          - {ref: field.snapshot_merch_name, path: data.snapshot_merch_name, row_path_id: data, type: string}
+          - {ref: field.amount, path: data.amount, row_path_id: data, type: decimal}
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers:
+        - requested_fact_id: fact_1
+          answer_output_ids: [answer_1, answer_2]
+          pattern: list_rows
+          source: {kind: read, read_id: sales_read}
+          output_fields:
+            - {field_id: snapshot_merch_name}
+            - {field_id: staff_name}
+  responses:
+    sales_read:
+      data:
+        - sale_id: sale_1
+          staff_name: Amani
+          snapshot_merch_name: Lip Tint
+          amount: "100.00"
+expect:
+  result_contains:
+    status: COMPLETED
+    rendered_rows:
+      - answer_1: Lip Tint
+        answer_2: Amani

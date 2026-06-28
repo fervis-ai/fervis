@@ -1,0 +1,139 @@
+.explanation-head {
+  align-items: start;
+  display: flex;
+  justify-content: space-between;
+}
+
+.toggle {
+  border: 1px solid var(--rule);
+  display: flex;
+  font-family: var(--mono);
+}
+
+.toggle button {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 5px 10px;
+}
+
+.toggle button.active {
+  background: var(--control-ink);
+  color: var(--paper);
+}
+
+.proof-step {
+  border-bottom: 1px solid var(--rule);
+  display: grid;
+  gap: 0;
+  grid-template-columns: 28px 1fr;
+  padding: 10px 0;
+}
+
+.proof-insights {
+  border-bottom: 1px solid var(--rule);
+  display: grid;
+  gap: 0;
+  margin-top: 10px;
+}
+
+.proof-insight {
+  align-items: baseline;
+  border-top: 1px solid var(--rule);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(110px, 0.45fr) minmax(160px, 1fr) minmax(120px, 0.5fr);
+  padding: 9px 0;
+}
+
+.proof-insight span,
+.proof-insight small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.proof-insight strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.proof-step.failed {
+  background: color-mix(in srgb, var(--error) 8%, transparent);
+}
+
+.proof-index {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding-top: 3px;
+}
+
+.proof-key {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+}
+
+.proof-key.failed,
+.proof-step.failed .proof-index,
+.source-read .bad {
+  color: var(--error);
+}
+
+.source-read {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  margin-top: 5px;
+}
+
+.proof-notes {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.proof-note {
+  border-left: 1px solid var(--rule-strong);
+  display: grid;
+  gap: 6px 10px;
+  grid-template-columns: 1fr auto;
+  padding-left: 10px;
+}
+
+.proof-note span {
+  color: var(--faint);
+  display: block;
+  font-family: var(--mono);
+  font-size: 11px;
+  grid-column: 1 / -1;
+  letter-spacing: 0;
+  margin-bottom: 2px;
+}
+
+.proof-note p {
+  color: var(--ink);
+  font-size: 12.5px;
+  grid-column: 1;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.proof-note-toggle {
+  align-self: end;
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  height: 22px;
+  line-height: 1;
+  padding: 0;
+  width: 22px;
+}

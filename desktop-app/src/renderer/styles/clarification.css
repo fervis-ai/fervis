@@ -1,0 +1,124 @@
+.clar-basis,
+.clar-mode,
+.error-kind {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.clar-question {
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 1.45;
+  margin-top: 6px;
+}
+
+.clar-mode {
+  margin-top: 12px;
+}
+
+.clarification {
+  max-width: 640px;
+}
+
+.clar-options {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.option {
+  align-items: center;
+  border: 1px solid var(--rule);
+  display: flex;
+  gap: 10px;
+  padding: 9px 12px;
+  position: relative;
+}
+
+.option.selected {
+  background: color-mix(in srgb, var(--paper) 56%, var(--panel));
+  border-color: var(--ink);
+}
+
+.option input {
+  accent-color: var(--ink);
+  flex: 0 0 auto;
+}
+
+.primary-action,
+.clar-text button,
+.askbar button,
+.modal-actions .save {
+  background: var(--control-ink);
+  border: 1px solid var(--control-ink);
+  color: var(--paper);
+}
+
+.primary-action {
+  margin-top: 14px;
+  padding: 9px 18px;
+}
+
+.clarification-pending {
+  border: 1px solid var(--rule-strong);
+  background: color-mix(in srgb, var(--paper) 72%, var(--panel));
+  padding: 16px 18px;
+}
+
+.pending-answer {
+  border-left: 2px solid var(--ink);
+  margin: 14px 0 10px;
+  padding-left: 12px;
+}
+
+.pending-answer span {
+  color: var(--faint);
+  display: block;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.pending-answer strong {
+  display: block;
+  font-family: var(--serif);
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.45;
+  margin-top: 3px;
+}
+
+.clar-text {
+  align-items: stretch;
+  border: 1px solid var(--rule-strong);
+  display: flex;
+  margin-top: 9px;
+}
+
+.clar-text input {
+  background: var(--paper);
+  border: 0;
+  color: var(--ink);
+  flex: 1;
+  font-family: var(--serif);
+  font-size: 14.5px;
+  outline: 0;
+  padding: 9px 12px;
+}
+
+.clar-text button {
+  border-bottom: 0;
+  border-right: 0;
+  border-top: 0;
+  font-size: 13px;
+  padding: 0 16px;
+}
+
+.failure .error-kind {
+  color: var(--error);
+  font-size: 12px;
+  margin-bottom: 6px;
+}

@@ -1,0 +1,31 @@
+id: answer_contract_requires_question_inputs_array
+description: Answer-request contracts must declare question_inputs as an array, even when no question inputs exist.
+kind: algorithm
+algorithm: question_contract.schema_validate
+input:
+  question_context: How many payment items are there?
+  payload:
+    kind: question_contract
+    answer_requests_count: 1
+    answer_requests:
+      - answer_fact: count of payment items
+        answer_expression: {family: scalar_aggregate}
+        answer_subject:
+          subject_text: payment items
+          instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
+        input_requirements: {time_requirements: []}
+        answer_population:
+          population_label: payment items
+          counted_unit: payment item
+          membership_tests:
+            - test_id: subject_identity
+              kind: SUBJECT_IDENTITY
+              polarity: MUST_PASS
+              test_question: Is this a payment item?
+        answer_outputs:
+          - description: number of payment items
+        input_decisions: []
+    question_input_inventory_check:
+      all_input_like_phrases_declared: true
+expect:
+  error_contains: question_inputs

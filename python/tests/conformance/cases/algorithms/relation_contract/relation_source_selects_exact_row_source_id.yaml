@@ -1,0 +1,24 @@
+id: relation_source_selects_exact_row_source_id
+description: Relation source row_source_id selects the exact API row source, not merely the read.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relations.py::test_relation_source_row_source_id_selects_exact_api_row_source
+kind: algorithm
+algorithm: planning.relation_contract
+input:
+  mode: row_source_for_relation
+  catalog:
+    reads:
+      - id: read_rows
+        endpoint_name: list_rows
+        row_paths:
+          - {id: summary, path: summary, cardinality: one}
+          - {id: items, path: items, cardinality: many}
+  relation:
+    id: item_rows
+    source:
+      kind: api_read
+      read_id: read_rows
+      row_path_id: items
+expect:
+  result_contains:
+    row_path_id: items

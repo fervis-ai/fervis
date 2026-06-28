@@ -1,0 +1,9 @@
+id: schema_does_not_reauthor_memory_activation
+description: Question-contract schema does not ask the model to reauthor memory activation.
+migrates:
+  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_schema_does_not_reauthor_memory_activation
+kind: algorithm
+algorithm: question_contract.schema
+input: {}
+expect:
+  text_excludes: [used_memory_ids]

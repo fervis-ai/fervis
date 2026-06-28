@@ -1,0 +1,20 @@
+id: named_weekday_resolves_requested_weekday
+description: Structured weekday intent resolves to the requested weekday relative to anchor.
+migrates:
+  - api/tests/fervis/business_time/test_resolver.py::test_resolve_point_named_weekday
+kind: algorithm
+algorithm: business_time.resolve
+input:
+  expression: monday
+  anchor_date: "2026-04-12"
+  intent:
+    kind: point
+    precision: day
+    named:
+      weekday: 0
+      offset: 0
+expect:
+  result_contains:
+    status: resolved
+    start: "2026-04-06"
+    end: "2026-04-06"

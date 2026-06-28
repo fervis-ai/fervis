@@ -1,0 +1,28 @@
+id: identity_projection_display_label_is_backend_authored
+description: Identity-set display labels are authored by the backend.
+migrates:
+  - api/tests/fervis/memory/test_identity_values.py::test_memory_identity_display_label_is_backend_authored
+kind: algorithm
+algorithm: memory.identity_projection
+input:
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_1
+        outcome: answered
+        addresses:
+          - address: relation.products
+            kind: relation
+            source: {kind: api_read, identityType: product}
+            grainKeys: [product_id]
+            completeness: {status: complete, pagination: not_paginated, rowCount: 1}
+            rowAddresses: [row.products.1]
+          - address: row.products.1
+            kind: row
+            relation: relation.products
+            identity: {product_id: product-1}
+expect:
+  result_contains:
+    identity_sets:
+      - display_label: 1 product identity from prior answer
+        display_label_author: backend
+

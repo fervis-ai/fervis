@@ -1,0 +1,39 @@
+id: point_time_value_component_compiles_to_instant_date
+description: A point time value used as value component compiles to the instant date.
+migrates:
+  - api/tests/fervis/lookup/fact_planning/test_values.py::test_point_time_value_compiles_value_component_to_instant_date
+kind: algorithm
+algorithm: planning.value_uses
+input:
+  catalog:
+    reads:
+      - id: records
+        endpoint_name: list_records
+        params:
+          - ref: records.query.start_date
+            name: start_date
+            source: query
+            type: date
+  relations:
+    - id: records_rows
+      source: {kind: api_read, read_id: records}
+  values:
+    - id: jan_1
+      kind: time
+      expression: January 1, 2030
+      intent:
+        kind: point
+        precision: day
+        value: {year: 2030, month: 1, day: 1}
+      resolved_start: "2030-01-01"
+      resolved_end: "2030-01-01"
+  grounded_input_uses:
+    - id: grounded_use_jan_1_start_date_value
+      value_id: jan_1
+      row_source: {read_id: records, row_path_id: root}
+      param_id: start_date
+      value_component: value
+expect:
+  result_contains:
+    endpoint_args:
+      - value: "2030-01-01"

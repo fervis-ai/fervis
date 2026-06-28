@@ -1,0 +1,20 @@
+id: param_source_is_required
+description: Endpoint projection rejects params without an explicit source.
+migrates:
+  - api/tests/fervis/host_api/test_relation_catalog_projection.py::test_projection_requires_explicit_param_source
+kind: adapter
+adapter: host_api.endpoint_contract_projection
+input:
+  contracts:
+    - endpoint_name: list_records
+      url_name: records
+      method: GET
+      path_template: /records/
+      view_class: tests.RecordView
+      resource_names: [record]
+      query_params:
+        - name: status
+          type: choice
+          source: ""
+expect:
+  error_contains: param source

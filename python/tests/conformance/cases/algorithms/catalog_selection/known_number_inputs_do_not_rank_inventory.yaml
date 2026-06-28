@@ -1,0 +1,39 @@
+id: known_number_inputs_do_not_rank_inventory
+description: Catalog selection ignores numeric known inputs when ranking source reads.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_does_not_rank_by_inventory_only_known_inputs
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - id: sales_read
+        endpoint_name: list_records
+        resource_names: [sales]
+        facts: [{ref: sales.total}]
+      - id: inventory_read
+        endpoint_name: list_records
+        resource_names: [inventory]
+        facts: [{ref: inventory.quantity}]
+  requested_facts:
+    - id: sales_total
+      description: sales total
+      answer_outputs:
+        - id: sales_total
+      known_inputs:
+        - id: context_inventory
+          kind: number_text
+          source: question_context
+          text: "125"
+          numeric_value: 125
+  resource_name_matches:
+    - requested_fact_id: sales_total
+      answer_output_resource_lineage:
+        - answer_output_id: answer_1
+          support_role: MEASURED_VALUE
+          source_text: sales total
+          matching_resource_names: [sales]
+  max_reads_per_fact: 2
+expect:
+  result_contains:
+    selected_read_ids: [sales_read]

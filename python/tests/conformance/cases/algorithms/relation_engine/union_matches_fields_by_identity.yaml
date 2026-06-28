@@ -1,0 +1,27 @@
+id: union_matches_fields_by_identity
+description: Union matches output fields by field identity, not row key order.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_union_matches_fields_by_identity_not_key_order
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  relations:
+    - id: left
+      rows: [{id: a, value: 1}]
+      grain_keys: []
+    - id: right
+      rows: [{value: 2, id: b}]
+      grain_keys: []
+  operations:
+    - id: unioned
+      output_relation: result
+      spec:
+        kind: union
+        inputs: [left, right]
+        output_fields: [id, value]
+expect:
+  result_contains:
+    result:
+      rows:
+        - {id: a, value: 1}
+        - {id: b, value: 2}

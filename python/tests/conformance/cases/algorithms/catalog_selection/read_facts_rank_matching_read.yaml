@@ -1,0 +1,38 @@
+id: read_facts_rank_matching_read
+description: Catalog selection ranks a read with matching read-local facts above a generic read.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_ranks_reads_using_read_catalog_facts
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - id: generic_read
+        endpoint_name: list_records
+        resource_names: [record]
+        source_metadata:
+          description: generic records
+      - id: payment_read
+        endpoint_name: list_records
+        resource_names: [payment]
+        facts:
+          - ref: payment.card.full_number
+  requested_facts:
+    - id: card_number
+      description: payment card full number
+      answer_outputs:
+        - id: answer_1
+  resource_name_matches:
+    - requested_fact_id: card_number
+      answer_output_resource_lineage:
+        - answer_output_id: answer_1
+          support_role: MEASURED_VALUE
+          source_text: payment card full number
+          matching_resource_names: [payment]
+  max_reads_per_fact: 1
+expect:
+  result_contains:
+    selected_read_ids: [payment_read]
+    requested_fact_selections:
+      - requested_fact_id: card_number
+        selected_read_ids: [payment_read]

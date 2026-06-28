@@ -1,0 +1,33 @@
+id: source_invocation_bound_params_preserve_proof_refs
+description: Bound params inside source invocation sets preserve proof lineage.
+kind: algorithm
+algorithm: source_binding.bound_params
+input:
+  candidate_id: source_1
+  candidate_cards:
+    requested_fact_sources:
+      - requested_fact_id: fact_1
+        source_contexts:
+          - source_options:
+              - candidate_id: source_1
+                kind: same_scope_api_read
+                read_id: records
+                row_source_id: records.data
+                source_invocations:
+                  - bound_params:
+                      - param_id: area_id
+                        value: area_1
+                        proof_refs: [known_input:area]
+                  - bound_params:
+                      - param_id: area_id
+                        value: area_2
+                        proof_refs: [known_input:other_area]
+expect:
+  result_contains:
+    applied_param_binding_sets:
+      - - param_id: area_id
+          value: area_1
+          proof_refs: [known_input:area]
+      - - param_id: area_id
+          value: area_2
+          proof_refs: [known_input:other_area]

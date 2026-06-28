@@ -1,0 +1,27 @@
+id: empty_average_classifies_as_no_data_when_complete
+description: Complete empty average renders as no matching data.
+migrates:
+  - api/tests/fervis/lookup/outcomes/test_results.py::test_complete_empty_average_classifies_as_no_data
+kind: algorithm
+algorithm: outcomes.classify
+input:
+  mode: answer
+  relations:
+    - id: rows
+      rows: []
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown, proof_refs: [read:rows]}
+  operations:
+    - id: avg_rows
+      output_relation: result
+      spec:
+        kind: aggregate
+        input_relation: rows
+        group_by: []
+        aggregations:
+          - {function: avg, input_field: amount, output_field: avg_amount}
+  render_outputs:
+    - {id: avg_amount, relation_id: result, field_id: avg_amount}
+expect:
+  result_contains:
+    outcome_kind: no_data
+    rendered_message: No matching data was found.

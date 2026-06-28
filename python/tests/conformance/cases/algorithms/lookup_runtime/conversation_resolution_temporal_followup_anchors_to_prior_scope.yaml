@@ -1,0 +1,93 @@
+id: conversation_resolution_temporal_followup_anchors_to_prior_scope
+description: A temporal follow-up resolves local relative time against the selected prior time scope.
+migrates:
+  - api/tests/fervis/lookup/test_conversation_resolution_pipeline.py::test_temporal_followup_anchors_local_relative_time_to_activated_time_scope
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: How about the day before?
+  runtime_values:
+    runtime_date: "2026-05-15"
+    timezone: Africa/London
+  memory_artifacts:
+    - artifact_id: turn_yesterday
+      outcome: answered
+      source_question: How much money did we make yesterday?
+      addresses:
+        - address: value.grounded_fact_1_time_1
+          kind: value
+          value:
+            type: time_scope
+            value: yesterday
+            expression: yesterday
+            resolvedStart: "2026-05-14"
+            resolvedEnd: "2026-05-14"
+            granularity: day
+          display: yesterday
+          evidence: {stepIds: [known_input:fact_1_time_1]}
+  conversation_resolution:
+    mode: select_visible_memory
+    memory_id: turn_yesterday.value.grounded_fact_1_time_1
+    resolved_text: yesterday
+    integrated_question: How much money did we make the day before?
+  question_contract:
+    fact_description: money made the day before
+    subject_text: the day before
+    answer_expression_family: scalar_aggregate
+    answer_outputs: [total_money]
+    resource_terms: [sales]
+    support_role: MEASURED_VALUE
+    known_inputs:
+      - kind: time_text
+        text: the day before
+  catalog:
+    reads:
+      - id: sales_total_by_date
+        endpoint_name: sales_total_by_date
+        resource_names: [sales]
+        params:
+          - ref: sales_total_by_date.query.start_date
+            name: start_date
+            source: query
+            type: date
+          - ref: sales_total_by_date.query.end_date
+            name: end_date
+            source: query
+            type: date
+        row_paths:
+          - id: root
+            path: ""
+            cardinality: one
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - ref: field.metric_total
+            path: data.metric_total
+            row_path_id: data
+            type: number
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers:
+        - requested_fact_id: fact_1
+          answer_output_ids: [answer_1]
+          pattern: aggregate_scalar
+          source: {kind: read, read_id: sales_total_by_date}
+          metric:
+            kind: aggregate_field
+            function: sum
+            field_id: metric_total
+            label: total_money
+  responses:
+    sales_total_by_date:
+      data:
+        - {metric_total: "12"}
+expect:
+  result_contains:
+    status: COMPLETED
+    endpoint_args:
+      sales_total_by_date:
+        sales_total_by_date.query.start_date: "2026-05-13"
+        sales_total_by_date.query.end_date: "2026-05-13"

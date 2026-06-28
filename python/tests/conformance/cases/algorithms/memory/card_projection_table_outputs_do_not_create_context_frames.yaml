@@ -1,0 +1,54 @@
+id: card_projection_table_outputs_do_not_create_context_frames
+description: Table-style prior outputs produce cards but do not project scalar context frames.
+migrates:
+  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_prior_table_outputs_do_not_project_to_context_frames
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: How much is that in total sales?
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_products_by_sale
+        outcome: answered
+        sourceQuestion: Which products did Alice sell today? Group them by sale.
+        sourceAnswer: "Sale 1: Product One\nSale 2: Product Two"
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: products sold by Alice today, grouped by sale
+                answer_outputs:
+                  - id: answer_output_1
+                    description: the products included in each sale
+                  - id: answer_output_2
+                    description: the sale grouping for each product
+            question_inputs: []
+        addresses:
+          - address: relation.answer_rows
+            kind: relation
+            source: {kind: operation_output}
+            grainKeys: [sale_id]
+            fieldCoverage:
+              product_name: answer_rows.product_name
+              sale_id: answer_rows.sale_id
+            completeness: {status: complete, pagination: all_pages}
+            rowAddresses: [row.answer_1, row.answer_2]
+          - address: row.answer_1
+            kind: row
+            relation: relation.answer_rows
+            identity: {sale_id: sale_1}
+            values:
+              product_name: {type: string, value: Product One, answer_output_ids: [answer_output_1]}
+              sale_id: {type: string, value: sale_1, answer_output_ids: [answer_output_2]}
+          - address: row.answer_2
+            kind: row
+            relation: relation.answer_rows
+            identity: {sale_id: sale_2}
+            values:
+              product_name: {type: string, value: Product Two, answer_output_ids: [answer_output_1]}
+              sale_id: {type: string, value: sale_2, answer_output_ids: [answer_output_2]}
+expect:
+  result_contains:
+    card_kinds: [prior_answer_request, row_set]
+    context_frames: []
+

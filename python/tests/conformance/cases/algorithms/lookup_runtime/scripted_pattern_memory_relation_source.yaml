@@ -1,0 +1,63 @@
+id: scripted_pattern_memory_relation_source
+description: Lookup runtime executes a list-rows fact plan using a prior memory relation source.
+migrates:
+  - api/tests/fervis/lookup/test_pattern_fact_plan_contract.py::test_pattern_contract_executes_memory_relation_source_end_to_end
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: What quantities were those?
+  conversation_resolution:
+    mode: use_visible_memory
+    integrated_question: What quantities were the prior items?
+  memory_artifacts:
+    - artifact_id: prior_items
+      outcome: answered
+      source_question: Which prior items were sold?
+      source_answer: SKU-1 had quantity 7.
+      addresses:
+        - address: relation.items
+          kind: relation
+          source: {kind: operation_output}
+          grainKeys: [sku]
+          fieldCoverage:
+            sku: answer_rows.sku
+            quantity: answer_rows.quantity
+          completeness:
+            status: complete
+            setKind: observed
+            rowCount: 1
+            pagination: not_paginated
+          rowAddresses: [row.items.1]
+        - address: row.items.1
+          kind: row
+          relation: relation.items
+          grain: {sku: SKU-1}
+          values:
+            sku: {type: string, value: SKU-1}
+            quantity: {type: number, value: 7}
+  question_contract:
+    fact_description: prior item quantities
+    subject_text: quantities
+    answer_expression_family: list_rows
+    answer_outputs: [sku, quantity]
+  catalog:
+    reads: []
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers:
+        - requested_fact_id: fact_1
+          answer_output_ids: [answer_1, answer_2]
+          pattern: list_rows
+          source: {kind: memory_relation, memory_relation_id: prior_items.relation.items}
+          output_fields:
+            - {field_id: sku}
+            - {field_id: quantity}
+  responses: {}
+expect:
+  result_contains:
+    status: COMPLETED
+    rendered_rows:
+      - answer_1: SKU-1
+        answer_2: 7

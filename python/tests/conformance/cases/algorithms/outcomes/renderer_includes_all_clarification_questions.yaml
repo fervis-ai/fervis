@@ -1,0 +1,20 @@
+id: renderer_includes_all_clarification_questions
+description: Renderer includes every clarification question in terminal text.
+migrates:
+  - api/tests/fervis/lookup/outcomes/test_results.py::test_renderer_includes_all_clarification_questions
+kind: algorithm
+algorithm: outcomes.classify
+input:
+  mode: clarification
+  clarifications:
+    - id: clarify_location
+      requested_fact_id: rf_answer
+      basis: catalog_requires_choice
+      question: Which location?
+    - id: clarify_metric
+      requested_fact_id: rf_answer
+      basis: catalog_requires_choice
+      question: Which metric?
+expect:
+  result_contains:
+    rendered_message: "Which location?\nWhich metric?"

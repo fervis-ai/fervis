@@ -1,0 +1,24 @@
+id: planner_contract_summarizes_bounded_memory_index
+description: Planner memory contract summarizes availability, count, order, truncation, and address kinds.
+migrates:
+  - api/tests/fervis/memory/test_fact_memory.py::test_planner_memory_contract_uses_bounded_memory_index
+kind: algorithm
+algorithm: memory.planner_contract
+input:
+  memory_frame:
+    memoryIndex:
+      order: explicit_match_then_newest
+      truncated: true
+      items:
+        - artifactId: run_8
+          address: entity.staff.8
+          kind: entity
+          resource: staff
+expect:
+  result_contains:
+    contract:
+      available: true
+      factArtifactCount: 1
+      indexOrder: explicit_match_then_newest
+      indexTruncated: true
+      addressKinds: [entity]

@@ -1,0 +1,26 @@
+id: schema_keeps_evidence_tokens_candidate_local
+description: Schema keeps evidence tokens local to the candidate that exposed them.
+migrates:
+  - api/tests/fervis/lookup/test_read_eligibility_contract.py::test_read_eligibility_schema_keeps_evidence_tokens_candidate_local
+kind: algorithm
+algorithm: read_eligibility.schema_validate
+input:
+  request_fixture: sales_count
+  payload:
+    requested_fact_assessments:
+      - requested_fact_id: fact_1
+        read_candidate_reviews:
+          - source_candidate_id: source_1
+            read_id: list_sales_summary
+            relevant_row_path_tokens: [source_1.row.root]
+            relevant_field_tokens: [source_2.field.data.amount]
+            retention_basis: This invalid payload cites a payment field token on the sales candidate.
+            retention_decision: RETAIN
+          - source_candidate_id: source_2
+            read_id: list_payment_list
+            relevant_row_path_tokens: []
+            relevant_field_tokens: []
+            retention_basis: Payments are not sales evidence for this requested fact.
+            retention_decision: DROP
+expect:
+  error_contains: not valid

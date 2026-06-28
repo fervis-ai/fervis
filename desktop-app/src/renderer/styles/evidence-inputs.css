@@ -1,0 +1,93 @@
+.input-list {
+  display: grid;
+  gap: 8px;
+}
+
+.input-card {
+  background: var(--paper);
+  border: 1px solid var(--rule);
+}
+
+.input-card summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  list-style: none;
+  padding: 10px 12px;
+}
+
+.input-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.input-card summary::before {
+  color: var(--faint);
+  content: "▸";
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.input-card[open] summary {
+  border-bottom: 1px solid var(--rule);
+}
+
+.input-card[open] summary::before {
+  content: "▾";
+}
+
+.input-card summary span:first-child {
+  color: var(--ink);
+  flex: 1;
+  font-family: var(--serif);
+  font-size: 14.5px;
+  line-height: 1.35;
+  min-width: 0;
+}
+
+.input-card summary span:last-child {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.input-card-body {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.input-group {
+  align-items: start;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 92px 1fr;
+}
+
+.input-label {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.input-values {
+  display: grid;
+  gap: 6px;
+}
+
+.input-group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.input-group li {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  padding: 0;
+}

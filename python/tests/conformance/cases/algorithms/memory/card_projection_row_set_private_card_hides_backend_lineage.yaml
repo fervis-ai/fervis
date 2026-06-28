@@ -1,0 +1,42 @@
+id: card_projection_row_set_private_card_hides_backend_lineage
+description: Row-set memory private cards expose the durable relation address without backend read proof details.
+migrates:
+  - api/tests/fervis/lookup/test_memory_identity_values.py::test_lookup_memory_relation_read_ids_include_only_backend_read_lineage
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: What about those sales?
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_1
+        outcome: answered
+        addresses:
+          - address: entity.staff.alice
+            kind: entity
+            resource: staff
+            referenceText: Alice
+            identity: {staff_id: staff-1}
+          - address: relation.sales
+            kind: relation
+            source: {kind: api_read, read_id: list_sale_list, identityType: sale}
+            grainKeys: [sale_id]
+            fieldCoverage: {sale_id: answer_rows.sale_id}
+            completeness:
+              status: complete
+              pagination: not_paginated
+              rowCount: 0
+              proofRefs: [read:list_sale_list, row_source:rs_1:param:staff_id, answer_1_rows_project]
+expect:
+  result_contains:
+    private_cards:
+      turn_1.relation.sales:
+        kind: row_set
+        artifact_id: turn_1
+        address: relation.sales
+        display: relation.sales
+  text_excludes_from:
+    private_cards:
+      - read:list_sale_list
+      - row_source:rs_1:param:staff_id
+      - answer_1_rows_project
+

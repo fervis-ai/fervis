@@ -1,0 +1,31 @@
+id: generic_request_verbs_removed_from_query_terms
+description: Catalog selection removes generic request verbs from query terms.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_removes_generic_request_verbs_from_query_terms
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - id: summary_read
+        endpoint_name: list_records
+        resource_names: [sales]
+        facts: [{ref: sales.total.amount.made}]
+  requested_facts:
+    - id: fact_1
+      description: Find the total amount reported separately during the date
+      answer_outputs:
+        - id: answer_1
+  resource_name_matches:
+    - requested_fact_id: fact_1
+      answer_output_resource_lineage:
+        - answer_output_id: answer_1
+          support_role: MEASURED_VALUE
+          source_text: amount
+          matching_resource_names: [sales]
+  max_reads_per_fact: 1
+expect:
+  result_contains:
+    requested_fact_selections:
+      - requested_fact_id: fact_1
+        query_terms: [sale]

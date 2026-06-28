@@ -1,0 +1,93 @@
+id: card_projection_coalesced_entity_selected_alias_is_must_include
+description: A selected coalesced entity alias remains available when a newer duplicate is visible.
+migrates:
+  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_coalesced_entity_is_must_include_when_backing_card_was_selected
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: Westlands
+  max_cards: 6
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_selected
+        outcome: answered
+        sourceQuestion: Who is Staff One?
+        sourceAnswer: Staff One answer.
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: Who is Staff One?
+                answer_outputs:
+                  - description: answer
+                    requested_value_frame: answer
+        addresses:
+          - address: entity.staff_1
+            kind: entity
+            resource: staff
+            referenceText: Staff One
+            identity: {staff_key: staff-1}
+      - artifactId: turn_duplicate
+        outcome: answered
+        sourceQuestion: Which products did Staff One sell?
+        sourceAnswer: Staff One answer.
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: Which products did Staff One sell?
+                answer_outputs:
+                  - description: answer
+                    requested_value_frame: answer
+        addresses:
+          - address: entity.staff_1
+            kind: entity
+            resource: staff
+            referenceText: Staff One
+            identity: {staff_key: staff-1}
+      - artifactId: turn_unrelated
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: money we made yesterday
+                answer_outputs:
+                  - description: total sales amount
+                    requested_value_frame: total sales amount
+        addresses:
+          - address: value.total
+            kind: value
+            value: {type: decimal, value: "100.00"}
+      - artifactId: turn_clarification_1
+        outcome: needs_clarification
+        provenance:
+          conversation_resolution_activation:
+            activated_memory_ids: [turn_selected.entity.staff_1]
+        addresses:
+          - address: outcome.clarification_1
+            kind: outcome
+            terminal: needs_clarification
+            clarificationQuestions: ["Which period?"]
+      - artifactId: turn_clarification_2
+        outcome: needs_clarification
+        addresses:
+          - address: outcome.clarification_2
+            kind: outcome
+            terminal: needs_clarification
+            clarificationQuestions: ["Which store?"]
+expect:
+  result_contains:
+    cards_by_memory_id:
+      turn_duplicate.entity.staff_1:
+        kind: entity_identity
+        display: Staff One
+    private_backing_ids:
+      turn_duplicate.entity.staff_1:
+        - turn_duplicate.entity.staff_1
+        - turn_selected.entity.staff_1
+    private_cards:
+      turn_selected.entity.staff_1:
+        kind: entity_identity

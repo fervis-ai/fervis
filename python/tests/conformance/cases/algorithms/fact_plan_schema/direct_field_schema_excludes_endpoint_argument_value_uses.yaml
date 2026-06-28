@@ -1,0 +1,27 @@
+id: direct_field_schema_excludes_endpoint_argument_value_uses
+description: Direct field fact-plan schema excludes endpoint argument value-use branches.
+migrates:
+  - api/tests/fervis/lookup/fact_planning/test_grounded_schema.py::test_fact_plan_schema_excludes_endpoint_argument_value_uses
+kind: algorithm
+algorithm: planning.fact_plan_schema
+input:
+  requested_fact_ids: [fact_1]
+  pattern_names: [direct_field_value]
+  selected_plan_shapes_by_requested_fact_id:
+    fact_1: direct_field_value
+  source_binding_ids_by_requested_fact_id:
+    fact_1: [sb_1]
+  answer_output_ids_by_requested_fact_id:
+    fact_1: [answer_1]
+  answer_output_ids_by_source_binding_id:
+    sb_1: [answer_1]
+  source_binding_ids_by_requirement_by_requested_fact_id: {}
+  grouped_ranked_choices_by_requested_fact_id: {}
+  scalar_aggregate_choices_by_requested_fact_id: {}
+  field_ids_by_source_binding_id:
+    sb_1: [amount]
+expect:
+  text_excludes:
+    - grounded_input_use
+    - endpoint_param
+    - enum_param

@@ -1,0 +1,14 @@
+id: prompt_surface_response_shape_params_not_population_reviews
+description: Source-binding prompt does not expose response-shape choice params as finite-choice population reviews.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_keeps_response_shape_choice_params_out_of_finite_choice_reviews
+kind: algorithm
+algorithm: source_binding.prompt_surface
+input:
+  request:
+    mode: choice_param
+    response_shape_choice_param: true
+expect:
+  result_contains:
+    param_ids: [status, ordering]
+    finite_choice_review_param_ids: [status]

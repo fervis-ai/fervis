@@ -1,0 +1,17 @@
+id: nested_row_path_uses_catalog_path
+description: Nested response rows are extracted from the declared catalog row path.
+migrates:
+  - api/tests/fervis/lookup/orchestrator/test_row_extraction.py::test_lookup_cutover_extracts_nested_row_path_by_catalog_id
+kind: algorithm
+algorithm: execution.endpoint_response
+input:
+  row_path: data.items
+  cardinality: many
+  body:
+    data:
+      items:
+        - name: Nested A
+expect:
+  result_contains:
+    rows:
+      - name: Nested A

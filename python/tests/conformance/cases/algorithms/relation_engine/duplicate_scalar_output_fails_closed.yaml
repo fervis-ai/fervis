@@ -1,0 +1,19 @@
+id: duplicate_scalar_output_fails_closed
+description: Relation engine rejects compute output scalar ids that collide with existing scalar inputs.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_relation_engine_rejects_duplicate_relation_and_scalar_outputs
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  scalar_inputs:
+    - {id: input_value, value: 1}
+  operations:
+    - id: compute
+      output_relation: ""
+      spec:
+        kind: compute
+        expression: input_value + 1
+        scalar_inputs: [input_value]
+        output_scalar: input_value
+expect:
+  error_contains: duplicate scalar

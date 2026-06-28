@@ -1,0 +1,30 @@
+id: explicit_enrichment_terms_keep_resource_words
+description: Catalog selection keeps explicit enrichment resource words after stopword removal.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_keeps_explicit_enrichment_terms_without_stopwords
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - id: price_lists_read
+        endpoint_name: list_price_list_list
+        resource_names: [price list]
+  requested_facts:
+    - id: fact_1
+      description: available pricing configuration
+      answer_outputs:
+        - id: answer_1
+  resource_name_matches:
+    - requested_fact_id: fact_1
+      answer_output_resource_lineage:
+        - answer_output_id: answer_1
+          support_role: MEASURED_VALUE
+          source_text: pricing configuration
+          matching_resource_names: [price list]
+  max_reads_per_fact: 1
+expect:
+  result_contains:
+    requested_fact_selections:
+      - requested_fact_id: fact_1
+        query_terms: [price, list]

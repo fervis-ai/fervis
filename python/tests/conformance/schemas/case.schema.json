@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fervis.test/conformance/case.schema.json",
+  "title": "Fervis conformance case",
+  "type": "object",
+  "required": ["id", "kind", "expect"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_]*$"
+    },
+    "description": {
+      "type": "string"
+    },
+    "migrates": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "kind": {
+      "enum": ["algorithm", "adapter"]
+    },
+    "algorithm": {
+      "enum": [
+        "business_time.resolve",
+        "conversation_memory.card_projection",
+        "conversation_memory.expand_activated",
+        "conversation_resolution.parse",
+        "conversation_resolution.schema",
+        "question_contract.parse",
+        "question_contract.schema",
+        "question_contract.schema_validate",
+        "question_contract.prompt",
+        "query_enrichment.parse",
+        "query_enrichment.schema",
+        "query_enrichment.prompt",
+        "read_eligibility.parse",
+        "read_eligibility.schema_validate",
+        "read_eligibility.prompt",
+        "read_eligibility.cards",
+        "read_eligibility.prepare_recall",
+        "source_binding.bound_params",
+        "source_binding.finite_choice_parse",
+        "source_binding.fulfillment_support",
+        "source_binding.metric_fit_parse",
+        "source_binding.metric_fit_surface",
+        "source_binding.parse",
+        "source_binding.prompt_surface",
+        "source_binding.row_predicates",
+        "source_binding.row_predicate_parse",
+        "source_binding.row_predicate_schema",
+        "source_binding.schema_surface",
+        "execution.relation_engine",
+        "execution.calendar_relation",
+        "execution.endpoint_response",
+        "execution.proof_graph",
+        "execution.identity_set_binding",
+        "lineage.explain",
+        "lineage.input_lineage",
+        "lookup.orchestration",
+        "outcomes.classify",
+        "catalog_selection.resolver_select",
+        "catalog_selection.select",
+        "relation_catalog.row_source_projection",
+        "questions.lifecycle",
+        "planning.fact_endpoint_requirements",
+        "planning.fact_plan_schema",
+        "planning.grouped_ranked_choices",
+        "planning.relation_contract",
+        "planning.value_contract",
+        "planning.value_uses",
+        "core.capabilities_from_schema",
+        "memory.activate",
+        "memory.build_artifact",
+        "memory.lineage_memory_artifacts",
+        "memory.lookup_projection",
+        "memory.identity_projection",
+        "memory.planner_contract",
+        "memory.prior_answer_request",
+        "memory.project_conversation",
+        "memory.outcome_address",
+        "memory.answer_addresses",
+        "memory.available_values"
+      ]
+    },
+    "adapter": {
+      "enum": ["host_api.endpoint_contract_projection"]
+    },
+    "input": {
+      "type": "object"
+    },
+    "expect": {
+      "type": "object",
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "required": ["result_contains"]
+        },
+        {
+          "required": ["result_equals"]
+        },
+        {
+          "required": ["error_contains"]
+        },
+        {
+          "required": ["text_excludes"]
+        },
+        {
+          "required": ["text_excludes_from"]
+        }
+      ],
+      "properties": {
+        "result_contains": {
+          "type": "object"
+        },
+        "result_equals": {
+          "type": "object"
+        },
+        "error_contains": {
+          "type": "string"
+        },
+        "text_excludes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "text_excludes_from": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "algorithm"
+          }
+        }
+      },
+      "then": {
+        "required": ["algorithm", "input"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "adapter"
+          }
+        }
+      },
+      "then": {
+        "required": ["adapter", "input"]
+      }
+    }
+  ]
+}

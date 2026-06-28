@@ -1,0 +1,41 @@
+id: card_projection_entity_identity_private_card
+description: Conversation memory exposes entity identity as a compact public card with canonical values only in the private card.
+migrates:
+  - api/tests/fervis/lookup/test_memory_identity_values.py::test_conversation_memory_exposes_entity_identity_as_compact_card
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: What about Alice?
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_1
+        outcome: answered
+        sourceQuestion: Who is Alice?
+        sourceAnswer: Alice is a staff member.
+        addresses:
+          - address: entity.staff.alice
+            kind: entity
+            resource: staff
+            referenceText: Alice
+            identity: {staff_id: staff-1}
+          - address: relation.sales
+            kind: relation
+            source: {kind: api_read, read_id: list_sale_list, identityType: sale}
+            grainKeys: [sale_id]
+            fieldCoverage: {sale_id: answer_rows.sale_id, item_count: answer_rows.item_count}
+            completeness: {status: complete, pagination: not_paginated, rowCount: 0}
+expect:
+  result_contains:
+    cards:
+      - memory_id: turn_1.entity.staff.alice
+        kind: entity_identity
+        display: Alice
+    private_cards:
+      turn_1.entity.staff.alice:
+        kind: entity_identity
+        artifact_id: turn_1
+        address: entity.staff.alice
+        identity_type: staff
+        reference_text: Alice
+        canonical_values: {staff_id: staff-1}
+

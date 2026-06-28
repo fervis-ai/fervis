@@ -1,0 +1,38 @@
+id: question_run_process_queued_run_short_circuits_terminal_run
+description: Re-executing a terminal queued run returns the terminal result without duplicate lookup or lineage.
+kind: algorithm
+algorithm: questions.lifecycle
+input:
+  scenario: ask
+  execution_mode: queued
+  tenant_id: tenant_1
+  principal_id: user_1
+  question: "How many orders came in today?"
+  process_queued_run: true
+  process_queued_run_count: 2
+  model:
+    provider: anthropic
+    model_key: HAIKU
+  lookup_result:
+    status: COMPLETED
+    answer: "42"
+    result_data:
+      value: 42
+expect:
+  result_contains:
+    queued_result:
+      status: COMPLETED
+      answer: "42"
+      result_data:
+        value: 42
+    second_queued_result:
+      status: COMPLETED
+      answer: "42"
+      result_data:
+        value: 42
+    lineage:
+      failed_runtime_fallback_count: 0
+    queue:
+      terminal_count: 1
+    lookup:
+      call_count: 1

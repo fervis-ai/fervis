@@ -1,0 +1,51 @@
+id: response_shape_choice_creates_source_variants
+description: Required response-shape choices become row-source variants rather than clarifiable inputs.
+migrates:
+  - api/tests/fervis/lookup/fact_planning/test_row_sources.py::test_required_response_shape_choice_becomes_source_variants_not_clarifiable_input
+kind: algorithm
+algorithm: relation_catalog.row_source_projection
+input:
+  catalog:
+    reads:
+      - id: sales_summary
+        endpoint_name: list_sales_summary
+        resource_names: [sales summary]
+        params:
+          - ref: sales_summary.query.group_by
+            name: group_by
+            source: query
+            type: choice
+            required: true
+            choices: [date, location]
+            semantics: response_shape
+          - ref: sales_summary.query.start_date
+            name: start_date
+            source: query
+            type: date
+            required: true
+        fields:
+          - ref: field.summary.total_amount
+            path: summary.total_amount
+            type: decimal
+expect:
+  result_contains:
+    read_id: sales_summary
+    row_path_id: root
+    api_sources:
+      - read_id: sales_summary
+        params:
+          - param_id: group_by
+            default: date
+          - param_id: start_date
+      - read_id: sales_summary
+        params:
+          - param_id: group_by
+            default: location
+          - param_id: start_date
+    api_required_inputs:
+      - read_id: sales_summary
+        row_path_id: root
+        param_id: start_date
+      - read_id: sales_summary
+        row_path_id: root
+        param_id: start_date

@@ -1,0 +1,31 @@
+id: outcome_address_impossible
+kind: algorithm
+algorithm: memory.outcome_address
+migrates:
+  - api/tests/fervis/interfaces/django_interface/test_conversation_memory.py::test_fact_result_terminal_projection_preserves_structured_impossible
+input:
+  fact_result:
+    outcome:
+      kind: impossible
+      blocked_requirements:
+        - id: full_card_number
+          kind: policy
+          requested_fact_id: rf_full_card_number
+          fact_ref: payment.card.full_number
+          proof_refs: [policy:restricted]
+expect:
+  result_contains:
+    address:
+      address: outcome.impossible
+      terminal: impossible
+      evidence:
+        stepIds: [policy:restricted]
+      proof:
+        blockedRequirements:
+          - id: full_card_number
+            kind: policy
+            requestedFactId: rf_full_card_number
+            factRef: payment.card.full_number
+            requiredFor: ""
+            proofRefs: [policy:restricted]
+

@@ -1,0 +1,13 @@
+id: schema_disallows_terms_when_vocabulary_empty
+description: Query-enrichment schema disallows lineage and entity search terms when the resource vocabulary is empty.
+migrates:
+  - api/tests/fervis/lookup/query_enrichment/test_query_enrichment.py::test_query_enrichment_schema_disallows_terms_when_resource_vocabulary_is_empty
+kind: algorithm
+algorithm: query_enrichment.schema
+input:
+  request_fixture: booked_money
+  resource_names: []
+expect:
+  result_contains:
+    source_text_matches_max_items: 0
+    entity_terms_max_items: 0

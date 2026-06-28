@@ -1,0 +1,38 @@
+id: support_keeps_count_and_metric_with_explicit_output_fields
+description: Source-binding support keeps row-count and metric choices when a many-row source has explicit output fields.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_keeps_row_population_support_with_explicit_output_fields
+kind: algorithm
+algorithm: source_binding.fulfillment_support
+input:
+  requested_fact:
+    description: order count
+    subject_text: orders
+  candidate:
+    source_candidate_id: source_1
+    result_grains:
+      - grain_id: root
+        row_path_id: root
+        row_source_id: rs_source_1_root
+        cardinality: many
+        evidence_items:
+          - evidence_id: order_id
+            field_id: order_id
+            row_path_id: root
+            type: uuid
+            roles: [identity]
+            identity:
+              entity_ref: order
+              identity_field: order_id
+              primary_key: true
+              stable: true
+          - evidence_id: order_total
+            field_id: order_total
+            row_path_id: root
+            type: decimal
+            answer_output_ids: [answer_1]
+expect:
+  result_contains:
+    row_count_slot_sizes: [1]
+    metric_fields:
+      order_total: true

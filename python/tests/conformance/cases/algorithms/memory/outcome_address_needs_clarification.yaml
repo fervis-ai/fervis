@@ -1,0 +1,27 @@
+id: outcome_address_needs_clarification
+kind: algorithm
+algorithm: memory.outcome_address
+migrates:
+  - api/tests/fervis/interfaces/django_interface/test_conversation_memory.py::test_fact_result_terminal_projection_preserves_structured_clarification
+input:
+  fact_result:
+    outcome:
+      kind: needs_clarification
+      clarifications:
+        - id: which_staff
+          requested_fact_id: rf_staff
+          basis: multiple_matching_entities
+          question: Which staff do you mean?
+          known_input_id: staff_name
+          candidate_refs: [staff:1, staff:2]
+          evidence_refs: [resolve:alice]
+      proof_refs: [resolve:alice]
+expect:
+  result_contains:
+    address:
+      address: outcome.needs_clarification
+      terminal: needs_clarification
+      clarificationQuestions:
+        - Which staff do you mean?
+      evidence:
+        stepIds: [resolve:alice]

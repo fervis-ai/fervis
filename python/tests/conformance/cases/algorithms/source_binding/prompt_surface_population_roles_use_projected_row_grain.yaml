@@ -1,0 +1,18 @@
+id: prompt_surface_population_roles_use_projected_row_grain
+description: Source-binding exposes population roles only for the selected row grain, not nested child rows.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_population_roles_do_not_widen_unprojected_row_grains
+kind: algorithm
+algorithm: source_binding.prompt_surface
+input:
+  request:
+    mode: nested_population_roles
+expect:
+  result_contains:
+    read_id: orders
+    population_roles:
+      - role_id: role_1
+        row_grain_id: orders
+        row_path_id: orders
+        role_kind: SOURCE_RESULT_ROWS
+        role_text: orders rows at row path orders

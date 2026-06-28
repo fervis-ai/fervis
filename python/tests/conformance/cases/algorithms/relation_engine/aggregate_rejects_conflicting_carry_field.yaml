@@ -1,0 +1,27 @@
+id: aggregate_rejects_conflicting_carry_field
+description: Aggregate rejects a carried field that conflicts within the same group.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_aggregate_rejects_conflicting_display_carry_fields
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  relations:
+    - id: items
+      rows:
+        - {location_id: loc_1, label: ABC Mall, amount: "10"}
+        - {location_id: loc_1, label: Other, amount: "5"}
+      grain_keys: [location_id]
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown}
+  operations:
+    - id: totals
+      output_relation: totals_by_location
+      spec:
+        kind: aggregate
+        input_relation: items
+        group_by: [location_id]
+        carry_fields:
+          - {source: label}
+        aggregations:
+          - {function: sum, input_field: amount, output_field: total}
+expect:
+  error_contains: conflicting aggregate carry field

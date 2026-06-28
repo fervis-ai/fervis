@@ -1,0 +1,36 @@
+id: source_phrase_round_robin_not_resource_name_round_robin
+description: Catalog selection round-robins by source phrase, not by every matching resource name.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_round_robins_source_phrases_not_resource_names
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - {id: measure_read_a, endpoint_name: list_measure_a, resource_names: [measure a]}
+      - {id: measure_read_b, endpoint_name: list_measure_b, resource_names: [measure b]}
+      - {id: measure_read_c, endpoint_name: list_measure_c, resource_names: [measure c]}
+      - {id: group_read, endpoint_name: list_group, resource_names: [group entity]}
+  requested_facts:
+    - id: fact_1
+      description: top group by measure
+      answer_outputs:
+        - id: answer_1
+  resource_name_matches:
+    - requested_fact_id: fact_1
+      answer_output_resource_lineage:
+        - answer_output_id: answer_1
+          support_role: MEASURED_VALUE
+          source_text: measure
+          matching_resource_names: [measure a, measure b, measure c]
+        - answer_output_id: answer_1
+          support_role: MEASURED_VALUE
+          source_text: group
+          matching_resource_names: [group entity]
+  max_reads_per_fact: 1
+expect:
+  result_contains:
+    requested_fact_selections:
+      - requested_fact_id: fact_1
+        selected_read_ids: [measure_read_a, group_read, measure_read_b]
+

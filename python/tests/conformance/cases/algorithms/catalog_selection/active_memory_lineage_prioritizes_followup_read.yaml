@@ -1,0 +1,66 @@
+id: active_memory_lineage_prioritizes_followup_read
+description: Catalog selection uses active memory lineage to prefer a follow-up read related to the selected entity.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_uses_active_memory_lineage_for_followup_reads
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - id: staff_earnings_read
+        endpoint_name: list_staff_earnings
+        resource_names: [staff earning]
+        params:
+          - {ref: staff_earnings_read.params.staff_id, name: staff_id, source: query, type: uuid, required: true, identity: {entity_ref: staff, identity_field: staff_id, stable: true}}
+        fields:
+          - {ref: staff_earnings_read.field.compensation, type: decimal}
+          - {ref: staff_earnings_read.field.location_name, type: string}
+      - id: staff_shift_read
+        endpoint_name: list_staff_shift_records
+        resource_names: [staff shift record]
+        params:
+          - {ref: staff_shift_read.params.staff_id, name: staff_id, source: query, type: uuid, required: true, identity: {entity_ref: staff, identity_field: staff_id, stable: true}}
+        fields:
+          - {ref: staff_shift_read.field.compensation, type: decimal}
+          - {ref: staff_shift_read.field.location_name, type: string}
+      - id: sale_read
+        endpoint_name: list_sales
+        resource_names: [sale]
+        params:
+          - {ref: sale_read.params.staff_id, name: staff_id, source: query, type: uuid, required: true, identity: {entity_ref: staff, identity_field: staff_id, stable: true}}
+        fields:
+          - {ref: sale_read.field.sale_id, type: uuid}
+          - {ref: sale_read.field.amount, type: decimal}
+          - {ref: sale_read.field.location_name, type: string}
+  requested_facts:
+    - id: fact_1
+      description: how much she made yesterday and where
+      answer_outputs:
+        - {id: answer_1, description: amount}
+        - {id: answer_2, description: location}
+  resource_name_matches:
+    - requested_fact_id: fact_1
+      answer_output_resource_lineage:
+        - answer_output_id: answer_1
+          support_role: MEASURED_VALUE
+          source_text: staff earnings
+          matching_resource_names: [sale, staff earning, staff shift record]
+  active_memory_signals:
+    - memory_id: turn_1.entity.staff.alice
+      requested_fact_id: fact_1
+      identity_type: staff
+      related_identity_types: [sale]
+      field_names: [sale_id, item_count]
+  available_values:
+    - id: turn_1.entity.staff.alice.identity
+      kind: identity
+      identity_type: staff
+      identity_field: staff_id
+      value: staff-1
+  max_reads_per_fact: 1
+expect:
+  result_contains:
+    requested_fact_selections:
+      - requested_fact_id: fact_1
+        selected_read_ids: [sale_read]
+

@@ -1,0 +1,56 @@
+id: universal_condition_returns_subjects_matching_all_dimensions
+description: Universal condition returns candidate subjects whose observations satisfy the predicate for every required dimension.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_coverage_set_algebra.py::test_universal_condition_uses_candidate_dimension_and_observation_relations
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  scalar_inputs: [{id: zero, value: 0}]
+  relations:
+    - id: candidate_subjects
+      rows:
+        - {subject_id: a, name: Alpha}
+        - {subject_id: b, name: Beta}
+      grain_keys: [subject_id]
+      completeness: {status: complete, source_kind: api_read, set_kind: universe}
+    - id: required_dimensions
+      rows:
+        - {dimension_id: x}
+        - {dimension_id: y}
+      grain_keys: [dimension_id]
+      completeness: {status: complete, source_kind: api_read, set_kind: universe}
+    - id: observations
+      rows:
+        - {obs_subject_id: a, obs_dimension_id: x, qty: 0}
+        - {obs_subject_id: a, obs_dimension_id: y, qty: 0}
+        - {obs_subject_id: b, obs_dimension_id: x, qty: 0}
+        - {obs_subject_id: b, obs_dimension_id: y, qty: 3}
+      grain_keys: [obs_subject_id, obs_dimension_id]
+      completeness: {status: complete, source_kind: api_read, set_kind: observation}
+  operations:
+    - id: all_dimensions_match
+      output_relation: answer_rows
+      spec:
+        kind: universal_condition
+        candidate_subject:
+          relation_id: candidate_subjects
+          role: universal_condition.candidate_subject
+          required_identity_fields: [subject_id]
+        required_dimension:
+          relation_id: required_dimensions
+          role: universal_condition.required_dimension
+          required_identity_fields: [dimension_id]
+        observation:
+          relation_id: observations
+          role: universal_condition.observation
+          required_identity_fields: [obs_subject_id, obs_dimension_id]
+        subject_keys: [{left: subject_id, right: obs_subject_id}]
+        dimension_keys: [{left: dimension_id, right: obs_dimension_id}]
+        predicate: {left: qty, operator: lte, right_scalar: zero}
+        output_fields: [{source: name}]
+expect:
+  result_contains:
+    answer_rows:
+      rows:
+        - {subject_id: a, name: Alpha}
+      grain_keys: [subject_id]

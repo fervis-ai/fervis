@@ -1,0 +1,29 @@
+id: question_run_ask_inline_missing_terminal_lineage_fails_closed
+description: Inline ask fails closed when lookup completes without terminal lineage.
+kind: algorithm
+algorithm: questions.lifecycle
+input:
+  scenario: ask
+  execution_mode: inline
+  tenant_id: tenant_1
+  principal_id: user_1
+  conversation_id: conversation_1
+  question: "How many orders came in today?"
+  model:
+    provider: anthropic
+    model_key: HAIKU
+  lookup_result:
+    status: COMPLETED
+    answer: "42"
+    terminal_lineage_recorded: false
+expect:
+  result_contains:
+    ask_result:
+      status: FAILED
+      answer: null
+      error: "lookup completed without terminal lineage for run_1: COMPLETED"
+    queue:
+      enqueued_count: 1
+      terminal_count: 1
+    lineage:
+      failed_runtime_fallback_count: 1

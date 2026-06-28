@@ -1,0 +1,71 @@
+id: conversation_resolution_row_set_reference_skips_grounding
+description: A resolved prior row-set reference can execute from activated memory without entering grounding.
+migrates:
+  - api/tests/fervis/lookup/test_conversation_resolution_pipeline.py::test_pipeline_uses_cr_resolved_row_set_reference_without_grounding_clarification
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: Show the amount for those sales.
+  memory_artifacts:
+    - artifact_id: turn_sales
+      outcome: answered
+      source_question: For the prior sales, show sale amount.
+      source_answer: Sale sale-1 had amount 10.00.
+      addresses:
+        - address: relation.sales
+          kind: relation
+          source: {kind: operation_output}
+          grainKeys: [sale_id]
+          fieldCoverage:
+            sale_id: answer_rows.sale_id
+            sale_amount: answer_rows.sale_amount
+          completeness:
+            status: complete
+            setKind: observed
+            rowCount: 1
+            pagination: not_paginated
+          rowAddresses: [row.sales.1]
+        - address: row.sales.1
+          kind: row
+          relation: relation.sales
+          grain: {sale_id: sale-1}
+          values:
+            sale_id: {type: string, value: sale-1}
+            sale_amount: {type: decimal, value: "10.00"}
+  conversation_resolution:
+    mode: select_visible_memory
+    memory_id: turn_sales.relation.sales
+    resolved_text: those sales
+    integrated_question: Show the amount for the prior sales.
+  question_contract:
+    fact_description: amount for the prior sales
+    subject_text: sales
+    answer_expression_family: list_rows
+    answer_outputs: [amount]
+  catalog:
+    reads: []
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers:
+        - requested_fact_id: fact_1
+          answer_output_ids: [answer_1]
+          pattern: list_rows
+          source: {kind: memory_relation, memory_relation_id: turn_sales.relation.sales}
+          output_fields:
+            - {field_id: sale_amount}
+  responses: {}
+expect:
+  result_contains:
+    status: COMPLETED
+    rendered_rows:
+      - answer_1: "10.00"
+    tool_names:
+      - submit_conversation_resolution
+      - submit_answer_request_contract
+      - submit_query_enrichment
+      - submit_read_eligibility
+      - submit_source_alignment_reviews
+      - submit_source_binding
+      - submit_pattern_fact_plan

@@ -1,0 +1,28 @@
+id: schema_requires_requested_facts_in_prompt_order
+description: Schema requires requested fact assessments in prompt order.
+migrates:
+  - api/tests/fervis/lookup/test_read_eligibility_contract.py::test_read_eligibility_schema_requires_requested_facts_in_prompt_order
+kind: algorithm
+algorithm: read_eligibility.schema_validate
+input:
+  request_fixture: two_fact
+  payload:
+    requested_fact_assessments:
+      - requested_fact_id: fact_payments
+        read_candidate_reviews:
+          - source_candidate_id: source_2
+            read_id: list_payment_list
+            relevant_row_path_tokens: [source_2.row.root]
+            relevant_field_tokens: [source_2.field.data.amount]
+            retention_basis: The payment read is payment evidence.
+            retention_decision: RETAIN
+      - requested_fact_id: fact_sales
+        read_candidate_reviews:
+          - source_candidate_id: source_1
+            read_id: list_sales_summary
+            relevant_row_path_tokens: [source_1.row.root]
+            relevant_field_tokens: [source_1.field.data.count]
+            retention_basis: The sales read is sales evidence.
+            retention_decision: RETAIN
+expect:
+  error_contains: not valid

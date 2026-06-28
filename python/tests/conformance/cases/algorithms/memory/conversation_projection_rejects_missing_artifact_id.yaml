@@ -1,0 +1,13 @@
+id: conversation_projection_rejects_missing_artifact_id
+description: Conversation memory projection rejects fact artifacts without artifactId.
+migrates:
+  - api/tests/fervis/memory/test_fact_memory.py::test_memory_projection_rejects_malformed_fact_artifact
+kind: algorithm
+algorithm: memory.project_conversation
+input:
+  conversation_context:
+    factArtifacts:
+      - outcome: answered
+        addresses: []
+expect:
+  error_contains: fact artifact requires artifact_id

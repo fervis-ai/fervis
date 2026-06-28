@@ -1,0 +1,19 @@
+id: prompt_surface_does_not_mark_optional_query_params_required
+kind: algorithm
+algorithm: source_binding.prompt_surface
+description: Source-binding prompt keeps optional query params optional in the model-facing parameter surface.
+migrates:
+  - api/tests/fervis/lookup/test_pattern_fact_plan_contract.py::test_pattern_contract_prompt_omits_false_required_params_end_to_end
+input:
+  request:
+    mode: optional_population_params
+expect:
+  result_contains:
+    read_ids:
+      - records_read
+    param_ids:
+      - channel
+      - status
+    param_required_by_id:
+      channel: false
+      status: false

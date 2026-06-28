@@ -1,0 +1,47 @@
+id: row_predicate_dedupes_equivalent_choice_query_param
+description: Row predicate projection hides a response choice field when a query param already exposes the same choice set.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_row_predicate_dedupes_equivalent_choice_query_param
+kind: algorithm
+algorithm: source_binding.row_predicates
+input:
+  catalog:
+    reads:
+      - id: sales
+        endpoint_name: list_sale_list
+        params:
+          - ref: sales.query.sale_type
+            name: sale_type
+            source: query
+            type: choice
+            choices: [STORE, ONLINE]
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - ref: sales.field.sale_id
+            path: data.sale_id
+            row_path_id: data
+            type: uuid
+          - ref: sales.field.channel
+            path: data.channel
+            row_path_id: data
+            type: choice
+            choices: [STORE, ONLINE]
+          - ref: sales.field.status
+            path: data.status
+            row_path_id: data
+            type: choice
+            choices: [COMPLETED, CANCELLED]
+  candidate:
+    source_candidate_id: source_1
+    kind: new_api_read
+    read_id: sales
+    result_grains:
+      - grain_id: data
+        row_path_id: data
+        cardinality: many
+expect:
+  result_contains:
+    field_ids: [status]

@@ -1,0 +1,15 @@
+id: prompt_surface_plan_selection_limits_source_candidates
+description: Source-binding forwards only source candidates selected by plan selection.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_candidates_are_limited_to_selected_source_strategy_members
+kind: algorithm
+algorithm: source_binding.prompt_surface
+input:
+  request:
+    mode: selected_source_members
+expect:
+  result_contains:
+    read_ids:
+      - sales
+    source_candidate_ids:
+      - source_1

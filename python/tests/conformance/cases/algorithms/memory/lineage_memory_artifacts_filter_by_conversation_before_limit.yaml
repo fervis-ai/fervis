@@ -1,0 +1,60 @@
+id: lineage_memory_artifacts_filter_by_conversation_before_limit
+description: Memory lookup filters memory artifacts by conversation before applying the result limit.
+kind: algorithm
+algorithm: memory.lineage_memory_artifacts
+input:
+  conversation_id: conversation_1
+  limit: 1
+  memory_artifacts:
+    - memory_artifact_id: mem_run_1_fact_result_1
+      conversation_id: conversation_1
+      run_id: run_1
+      source_kind: fact_result
+      payload_schema: fervis.memory_artifact
+      payload_schema_rev: 1
+      payload_json:
+        artifactId: mem_run_1_fact_result_1
+        sourceKind: fact_result
+        outcome: answered
+        sourceQuestion: Which store had the most sales?
+        sourceAnswer: London CBD
+        addresses:
+          - address: entity.answer_1
+            kind: entity
+            resource: store
+            referenceText: London CBD
+            identity:
+              store_id: store_1
+    - memory_artifact_id: mem_other_conversation_fact_result_1
+      conversation_id: conversation_2
+      run_id: run_other
+      source_kind: fact_result
+      payload_schema: fervis.memory_artifact
+      payload_schema_rev: 1
+      payload_json:
+        artifactId: mem_other_conversation_fact_result_1
+        sourceKind: fact_result
+        outcome: answered
+        sourceQuestion: Which store had the most sales?
+        sourceAnswer: Other Store
+        addresses:
+          - address: entity.answer_1
+            kind: entity
+            resource: store
+            referenceText: Other Store
+            identity:
+              store_id: store_other
+expect:
+  result_equals:
+    artifacts:
+      - artifactId: mem_run_1_fact_result_1
+        outcome: answered
+        sourceQuestion: Which store had the most sales?
+        sourceAnswer: London CBD
+        addresses:
+          - address: entity.answer_1
+            kind: entity
+            resource: store
+            referenceText: London CBD
+            identity:
+              store_id: store_1

@@ -1,0 +1,41 @@
+id: named_value_compiles_to_memory_row_filter
+description: A named value row-filter sink can target a bound memory relation field.
+migrates:
+  - api/tests/fervis/lookup/fact_planning/test_values.py::test_named_value_compiles_to_memory_row_filter_when_sink_selects_bound_field
+kind: algorithm
+algorithm: planning.value_uses
+input:
+  catalog:
+    reads: []
+  memory_relations:
+    - id: artifact.relation.rows
+      rows:
+        - label: Alpha
+      grain_keys: [label]
+  relations:
+    - id: prior_rows
+      source:
+        kind: memory_read
+        memory_relation_id: artifact.relation.rows
+      fields:
+        - field_id: label
+          roles: [output]
+  values:
+    - id: alpha
+      kind: named
+      text: Alpha
+  value_uses:
+    - id: use_alpha_memory_filter
+      value_id: alpha
+      target:
+        kind: row_filter
+        relation_id: prior_rows
+        field_id: label
+        operator: equals
+expect:
+  result_contains:
+    row_filters:
+      - relation_id: prior_rows
+        field_id: label
+        operator: equals
+        value: Alpha

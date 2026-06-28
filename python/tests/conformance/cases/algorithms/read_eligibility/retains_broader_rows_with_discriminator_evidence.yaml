@@ -1,0 +1,31 @@
+id: retains_broader_rows_with_discriminator_evidence
+description: Read eligibility retains broader rows when discriminator fields can narrow them later.
+migrates:
+  - api/tests/fervis/lookup/test_read_eligibility_contract.py::test_read_eligibility_retains_broader_rows_with_discriminator_evidence
+kind: algorithm
+algorithm: read_eligibility.parse
+input:
+  request_fixture: stores_in_area
+  payload:
+    requested_fact_assessments:
+      - requested_fact_id: fact_1
+        read_candidate_reviews:
+          - source_candidate_id: source_1
+            read_id: list_location_list
+            relevant_row_path_tokens: [source_1.row.data]
+            relevant_field_tokens:
+              - source_1.field.data.type
+              - source_1.field.data.area.area_id
+              - source_1.field.data.area.name
+            retention_basis: Location rows include type and area fields that later turns can use for stores in London.
+            retention_decision: RETAIN
+expect:
+  result_contains:
+    retained_read_ids_by_requested_fact:
+      fact_1: [list_location_list]
+    read_assessments:
+      - relevant_row_path_ids: [data]
+        relevant_field_refs:
+          - field.location.data.type
+          - field.location.data.area.area_id
+          - field.location.data.area.name

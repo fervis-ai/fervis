@@ -1,0 +1,33 @@
+id: schema_root_separates_answer_contract_and_clarification
+description: Question-contract schema keeps answer contracts and missing-input clarifications in separate strict branches.
+migrates:
+  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_schema_is_answer_requests_root
+kind: algorithm
+algorithm: question_contract.schema
+input: {}
+expect:
+  result_contains:
+    has_root_one_of: true
+    branch_kinds: [needs_clarification, question_contract]
+    answer_contract_required:
+      - kind
+      - answer_requests_count
+      - question_inputs
+      - answer_requests
+      - question_input_inventory_check
+    answer_contract_kind_values: [question_contract]
+    answer_contract_has_clarification_fields: false
+    clarification_required:
+      - kind
+      - missing
+      - clarification_question
+    clarification_kind_values: [needs_clarification]
+    clarification_has_answer_fields: false
+    answer_request_required:
+      - answer_fact
+      - answer_expression
+      - answer_subject
+      - input_requirements
+      - answer_population
+      - answer_outputs
+      - input_decisions

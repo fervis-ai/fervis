@@ -1,0 +1,16 @@
+id: finite_choice_all_values_included_records_population_choice
+description: Source binding records a finite-choice population decision even when all values are included and the combined population is not narrowed.
+kind: algorithm
+algorithm: source_binding.finite_choice_parse
+input:
+  choices:
+    OPEN: SATISFIES_TEST
+    CLOSED: SATISFIES_TEST
+expect:
+  result_contains:
+    population_choices:
+      - controller_kind: query_param
+        controller_id: status
+        field_id: status
+        included_values: [OPEN, CLOSED]
+        excluded_values: []

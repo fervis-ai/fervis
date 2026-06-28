@@ -1,0 +1,55 @@
+id: aggregate_rank_compute_are_deterministic
+description: Aggregate, rank, and compute produce deterministic numeric relation and scalar outputs with provenance.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_aggregate_rank_and_compute_handle_numeric_results_deterministically
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  scalar_inputs:
+    - {id: target, value: "100"}
+    - {id: current, value: "35"}
+  relations:
+    - id: items
+      rows:
+        - {group_id: a, amount: "10"}
+        - {group_id: a, amount: "5"}
+        - {group_id: b, amount: "20"}
+      grain_keys: [group_id, amount]
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown}
+  operations:
+    - id: totals
+      output_relation: totals_by_group
+      spec:
+        kind: aggregate
+        input_relation: items
+        group_by: [group_id]
+        aggregations:
+          - {function: sum, input_field: amount, output_field: total}
+          - {function: count, output_field: count}
+    - id: ranked
+      output_relation: top_group
+      spec:
+        kind: rank
+        input_relation: totals_by_group
+        order_by: [{field: total, direction: desc}]
+        tie_policy: field
+        tie_breakers: [{field: group_id, direction: asc}]
+        limit: 1
+    - id: remaining
+      output_relation: ""
+      spec:
+        kind: compute
+        expression: target - current
+        scalar_inputs: [target, current]
+        output_scalar: remaining
+expect:
+  result_contains:
+    top_group:
+      rows:
+        - {group_id: b, total: 20, count: 1}
+    scalars:
+      target: "100"
+      current: "35"
+      remaining: 65
+    scalar_proofs:
+      remaining: [remaining]

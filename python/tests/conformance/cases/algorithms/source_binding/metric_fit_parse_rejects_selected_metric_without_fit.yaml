@@ -1,0 +1,14 @@
+id: metric_fit_parse_rejects_selected_metric_without_fit
+description: Source-binding parser fails closed when the selected metric fulfillment has no fitting metric evidence.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_parse_source_binding_rejects_selected_support_set_when_no_metric_fits_requested_answer
+kind: algorithm
+algorithm: source_binding.metric_fit_parse
+input:
+  choices:
+    OPEN: SATISFIES_TEST
+    CLOSED: CONFLICTS_WITH_TEST
+  metric_decisions:
+    amount: DOES_NOT_FIT_REQUESTED_ANSWER
+expect:
+  error_contains: selected support set metric does not fit

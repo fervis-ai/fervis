@@ -1,0 +1,38 @@
+id: child_row_source_includes_parent_identity_context
+description: Child row sources include parent identity context fields.
+migrates:
+  - api/tests/fervis/lookup/fact_planning/test_row_sources.py::test_child_row_source_includes_parent_identity_context
+kind: algorithm
+algorithm: relation_catalog.row_source_projection
+input:
+  catalog:
+    reads:
+      - id: read_parent_child
+        endpoint_name: list_parent_child
+        resource_names: [parent child]
+        row_paths:
+          - id: parents
+            path: data
+            cardinality: many
+          - id: children
+            path: data.children
+            cardinality: many
+            parent_path: data
+        fields:
+          - ref: field.data.parent_id
+            path: data.parent_id
+            type: string
+          - ref: field.data.children.child_id
+            path: data.children.child_id
+            type: string
+          - ref: field.data.children.name
+            path: data.children.name
+            type: string
+expect:
+  result_contains:
+    read_id: read_parent_child
+    row_path_id: children
+    fields:
+      parent_id: {type: string}
+      child_id: {type: string}
+      name: {type: string}

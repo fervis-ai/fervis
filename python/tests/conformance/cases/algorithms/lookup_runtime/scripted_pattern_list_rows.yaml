@@ -1,0 +1,56 @@
+id: scripted_pattern_list_rows
+description: Lookup runtime executes a scripted list-rows fact plan and renders declared answer outputs.
+migrates:
+  - api/tests/fervis/lookup/test_pattern_fact_plan_contract.py::test_pattern_contract_executes_list_rows_end_to_end
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: List location metric totals.
+  question_contract:
+    fact_description: location metric totals
+    subject_text: location metric totals
+    answer_expression_family: list_rows
+    answer_outputs: [location, metric_total]
+    resource_terms: [metric]
+  catalog:
+    reads:
+      - id: metric_read
+        endpoint_name: metric_read
+        resource_names: [metric]
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - ref: field.location_name
+            path: data.location_name
+            row_path_id: data
+            type: string
+          - ref: field.metric_total
+            path: data.metric_total
+            row_path_id: data
+            type: decimal
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers:
+        - requested_fact_id: fact_1
+          answer_output_ids: [answer_1, answer_2]
+          pattern: list_rows
+          source: {kind: read, read_id: metric_read}
+          output_fields:
+            - {field_id: location_name}
+            - {field_id: metric_total}
+  responses:
+    metric_read:
+      data:
+        - location_id: location_alpha
+          location_name: Location Alpha
+          metric_total: "125.00"
+expect:
+  result_contains:
+    status: COMPLETED
+    rendered_rows:
+      - answer_1: Location Alpha
+        answer_2: "125.00"

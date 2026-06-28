@@ -1,0 +1,27 @@
+id: union_rejects_conflicting_duplicate_rows
+description: Union rejects duplicate grain keys with conflicting projected output.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_coverage_set_algebra.py::test_union_rejects_duplicate_grain_keys_with_conflicting_output
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  scalar_inputs: [{id: zero, value: 0}]
+  relations:
+    - id: left_rows
+      rows: [{entity_id: a, name: Alpha}]
+      grain_keys: [entity_id]
+      completeness: {status: complete, source_kind: api_read, set_kind: universe}
+    - id: right_rows
+      rows: [{entity_id: a, name: Different}]
+      grain_keys: [entity_id]
+      completeness: {status: complete, source_kind: api_read, set_kind: universe}
+  operations:
+    - id: unioned
+      output_relation: answer_rows
+      spec:
+        kind: union
+        inputs: [left_rows, right_rows]
+        output_fields: [entity_id, name]
+        identity_fields: [entity_id]
+expect:
+  error_contains: conflicting union row

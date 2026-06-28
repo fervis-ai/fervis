@@ -1,0 +1,44 @@
+id: broader_source_text_allowed_with_visible_memory_anchor
+description: Broader source text is accepted when the dependency references a visible memory anchor.
+migrates:
+  - api/tests/fervis/lookup/conversation_resolution/test_parser.py::test_parser_accepts_broader_source_text_when_memory_id_references_visible_anchor
+kind: algorithm
+algorithm: conversation_resolution.parse
+input:
+  current_question: Show the shade names too.
+  context_sources:
+    - source_id: prior_1
+      kind: prior_user_question
+      text: List sales at Westlands Beauty Hub on December 3, 2025.
+      meaning_anchors:
+        - {memory_id: mem_time, text: "December 3, 2025", kind: time_scope}
+  payload:
+    kind: conversation_resolution
+    status: resolved
+    current_question_text: Show the shade names too.
+    clause_resolutions:
+      - current_clause_text: Show the shade names too.
+        occurrence: 1
+        requested_value_frame:
+          current_value_surface: {text: shade names, kind: self_sufficient_current_value}
+          context_frame_choices: []
+        dependencies:
+          - anchor_text: too
+            occurrence: 1
+            kind: scope
+            meaning_components:
+              - kind: scope
+                source_id: prior_1
+                source_text: List sales at Westlands Beauty Hub on December 3, 2025.
+                memory_id: mem_time
+                resolved_text: December 3, 2025
+            resolved_text: for sales at Westlands Beauty Hub on December 3, 2025
+            must_preserve_terms: [Westlands Beauty Hub, "December 3, 2025"]
+        resolved_clause_text: Show the shade names too for sales at Westlands Beauty Hub on December 3, 2025.
+    unresolved: {unresolved_kind: none, why_unresolved: "", candidate_interpretations: []}
+expect:
+  result_contains:
+    clause_resolutions:
+      - dependencies:
+          - meaning_components:
+              - memory_id: mem_time

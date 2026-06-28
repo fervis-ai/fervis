@@ -1,0 +1,27 @@
+id: operation_output_deduplicates_matching_scope
+description: Operation output keeps a single shared scope fingerprint when inputs have matching scope.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_operation_output_deduplicates_matching_scope_proofs
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  relations:
+    - id: left
+      rows: [{left_id: a}]
+      grain_keys: [left_id]
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown, scope: scope}
+    - id: right
+      rows: [{right_id: b}]
+      grain_keys: [right_id]
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown, scope: scope}
+  operations:
+    - id: pairs
+      output_relation: paired_rows
+      spec:
+        kind: cross_join
+        left: left
+        right: right
+expect:
+  result_contains:
+    paired_rows:
+      completeness_scope: scope

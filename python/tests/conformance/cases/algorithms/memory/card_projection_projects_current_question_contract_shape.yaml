@@ -1,0 +1,59 @@
+id: card_projection_projects_current_question_contract_shape
+description: Prior answer request cards project current question-contract inputs and answer-output ids.
+migrates:
+  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_prior_answer_request_card_projects_current_contract_shape
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: How about today?
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_sales
+        outcome: answered
+        sourceQuestion: How much did Staff One sell yesterday?
+        sourceAnswer: Staff One sold 100 yesterday.
+        provenance:
+          question_contract:
+            question_inputs:
+              - id: input_period
+                kind: time_text
+                source: question_context
+                text: yesterday
+            answer_requests:
+              - id: fact_1
+                answer_fact: sales by Staff One yesterday
+                answer_outputs:
+                  - id: answer_1
+                    description: total sales amount
+                    requested_value_frame: total sales amount
+                input_decisions:
+                  - input_ref: input_period
+                    use_input: true
+        addresses:
+          - address: value.grounded_fact_1_time_1
+            kind: value
+            value:
+              type: time_scope
+              value: yesterday
+              expression: yesterday
+              resolvedStart: "2026-05-14"
+              resolvedEnd: "2026-05-14"
+              granularity: day
+            evidence: {stepIds: [known_input:input_period]}
+expect:
+  result_contains:
+    cards:
+      - kind: prior_answer_request
+        display: How much did Staff One sell yesterday?
+        details:
+          request_shape:
+            answer_fact_template: sales by Staff One yesterday
+            answer_outputs:
+              - output_id: answer_1
+                description: total sales amount
+                requested_value_frame: total sales amount
+            slots:
+              - slot_id: input_period
+                slot_kind: time_scope
+                text: yesterday
+

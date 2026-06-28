@@ -1,0 +1,22 @@
+id: support_accepts_field_evidence_without_row_path
+description: Source-binding support can use field evidence even when the catalog did not declare an explicit row path.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_keeps_field_evidence_selectable_without_row_path
+kind: algorithm
+algorithm: source_binding.fulfillment_support
+input:
+  requested_fact:
+    description: sales amount
+    subject_text: sales
+  candidate:
+    source_candidate_id: source_1
+    read_id: sales
+    evidence_items:
+      - evidence_id: source_1.amount
+        field_id: amount
+        label: amount
+        type: decimal
+expect:
+  result_contains:
+    metric_fields:
+      amount: true

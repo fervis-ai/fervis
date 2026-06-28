@@ -1,0 +1,110 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fervis"
+version = "0.1.0"
+description = "Factual answer engine for your API."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [
+  { name = "Fervis Labs" }
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+dependencies = [
+  "alembic>=1.18,<2",
+  "anthropic>=0.78,<1",
+  "cryptography>=44,<46",
+  "httpx>=0.28,<1",
+  "jsonschema>=4.26,<5",
+  "openai>=1.59,<2",
+  "requests>=2.32,<3",
+  "SQLAlchemy>=2.0,<3",
+]
+
+[project.optional-dependencies]
+django = [
+  "Django>=4.2,<6",
+  "djangorestframework>=3.15,<4",
+]
+fastapi = [
+  "fastapi>=0.100,<1",
+]
+flask = [
+  "Flask>=1.0,<4",
+  "Flask-Login>=0.6,<1",
+]
+all = [
+  "Django>=4.2,<6",
+  "djangorestframework>=3.15,<4",
+  "fastapi>=0.100,<1",
+  "Flask>=1.0,<4",
+  "Flask-Login>=0.6,<1",
+]
+dev = [
+  "Django>=4.2,<6",
+  "djangorestframework>=3.15,<4",
+  "fastapi>=0.100,<1",
+  "Flask>=1.0,<4",
+  "Flask-Login>=0.6,<1",
+  "pytest>=8,<9",
+  "pytest-django>=4.9,<5",
+  "PyYAML>=6,<7",
+  "ruff>=0.8,<1",
+  "mypy>=1.14,<2",
+  "pre-commit>=4,<5",
+]
+
+[project.scripts]
+fervis = "fervis.interfaces.cli.main:main"
+
+[project.urls]
+Homepage = "https://github.com/fervis-ai/fervis"
+Repository = "https://github.com/fervis-ai/fervis"
+Issues = "https://github.com/fervis-ai/fervis/issues"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src/fervis",
+  "/README.md",
+  "/LICENSE",
+]
+exclude = [
+  "/src/fervis/evaluation/goldsets",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fervis"]
+exclude = [
+  "/src/fervis/evaluation/goldsets",
+]
+
+[tool.hatch.build]
+artifacts = [
+  "src/fervis/**/*.md",
+  "src/fervis/**/*.txt",
+  "src/fervis/**/*.mako",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "src"]
+DJANGO_SETTINGS_MODULE = "tests.django_test_project.settings"
+django_find_project = false
+
+[tool.ruff]
+line-length = 88
+src = ["src", "tests"]
+target-version = "py311"

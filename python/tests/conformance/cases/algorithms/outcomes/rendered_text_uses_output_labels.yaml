@@ -1,0 +1,22 @@
+id: rendered_text_uses_output_labels
+description: Rendered answer text uses render output labels.
+migrates:
+  - api/tests/fervis/lookup/outcomes/test_results.py::test_rendered_text_uses_render_output_labels
+kind: algorithm
+algorithm: outcomes.classify
+input:
+  mode: answer
+  final_relation_id: rows
+  relations:
+    - id: rows
+      rows:
+        - {name: Alpha, total: "125.00"}
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown, proof_refs: [read:rows]}
+  render_outputs:
+    - {id: name, relation_id: rows, field_id: name, label: Location}
+    - {id: total, relation_id: rows, field_id: total, label: Sales total}
+expect:
+  result_contains:
+    rendered_text: "Location: Alpha, Sales total: 125.00"
+    rendered_payload:
+      rowLabels: {name: Location, total: Sales total}

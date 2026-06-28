@@ -1,0 +1,80 @@
+id: conversation_resolution_row_set_reference_aggregate_proves_current_input
+description: Aggregating an activated prior row set carries the current row-set input proof to fulfillment.
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: How much is that in total sales?
+  memory_artifacts:
+    - artifact_id: turn_sales
+      outcome: answered
+      source_question: List sale rows for Alice today.
+      source_answer: Two sale rows for Alice today.
+      addresses:
+        - address: relation.sales
+          kind: relation
+          source: {kind: operation_output}
+          grainKeys: [sale_id]
+          fieldCoverage:
+            sale_id: answer_rows.sale_id
+            unit_sale_price: answer_rows.unit_sale_price
+          completeness:
+            status: complete
+            setKind: observed
+            rowCount: 2
+            pagination: not_paginated
+          rowAddresses: [row.sales.1, row.sales.2]
+        - address: row.sales.1
+          kind: row
+          relation: relation.sales
+          grain: {sale_id: sale-1}
+          values:
+            sale_id: {type: string, value: sale-1}
+            unit_sale_price: {type: decimal, value: "4000.00"}
+        - address: row.sales.2
+          kind: row
+          relation: relation.sales
+          grain: {sale_id: sale-2}
+          values:
+            sale_id: {type: string, value: sale-2}
+            unit_sale_price: {type: decimal, value: "4000.00"}
+  conversation_resolution:
+    mode: select_visible_memory
+    memory_id: turn_sales.relation.sales
+    resolved_text: those sales
+    integrated_question: How much is the total sales for the prior sales rows?
+  question_contract:
+    fact_description: total sales for the prior sales rows
+    subject_text: sales
+    answer_expression_family: scalar_aggregate
+    answer_outputs: [total sales amount]
+    known_inputs:
+      - kind: row_set_reference
+        input_ref: cr_input_1
+        text: that
+        resolved_input_ref: cr_input_1
+  catalog:
+    reads: []
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers:
+        - requested_fact_id: fact_1
+          answer_output_ids: [answer_1]
+          pattern: aggregate_scalar
+          source: {kind: memory_relation, memory_relation_id: turn_sales.relation.sales}
+          metric:
+            kind: aggregate_field
+            function: sum
+            field_id: unit_sale_price
+            label: total_sales
+  responses: {}
+expect:
+    result_contains:
+      status: COMPLETED
+      answer: "8000.00"
+      rendered_rows:
+        - unit_sale_price: "8000.00"
+      proof_refs:
+        - known_input:cr_input_1
+        - answer_1_rows_aggregate

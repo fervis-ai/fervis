@@ -1,0 +1,33 @@
+id: sales_count
+question: How many in-person sales this month?
+requested_facts:
+  - id: fact_1
+    description: count of in-person sales
+    answer_subject: sales
+    answer_outputs:
+      - id: answer_1
+        description: number of in-person sales
+catalog:
+  reads:
+    - id: list_sales_summary
+      endpoint_name: list_sales_summary
+      params:
+        - ref: list_sales_summary.query.sale_type
+          name: sale_type
+          source: query
+          type: choice
+      fields:
+        - ref: field.summary.data.count
+          path: data.count
+          type: integer
+        - ref: field.summary.meta.sale_type
+          path: meta.sale_type
+          type: choice
+    - id: list_payment_list
+      endpoint_name: list_payment_list
+      fields:
+        - ref: field.payment.data.amount
+          path: data.amount
+          type: decimal
+selected_read_ids_by_fact:
+  fact_1: [list_sales_summary, list_payment_list]

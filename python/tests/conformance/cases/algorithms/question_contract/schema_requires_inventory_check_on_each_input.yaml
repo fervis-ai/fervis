@@ -1,0 +1,16 @@
+id: schema_requires_inventory_check_on_each_input
+description: Every declared question input must carry inventory-check evidence.
+migrates:
+  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_schema_requires_inventory_check_on_each_input
+kind: algorithm
+algorithm: question_contract.schema_validate
+input:
+  question_context: How many sales happened today?
+  question_inputs:
+    - input_ref: period
+      kind: time_text
+      source: question_context
+      reference_text: today
+  used_input_refs: [period]
+expect:
+  error_contains: inventory_check

@@ -1,0 +1,74 @@
+{
+  "name": "@fervis/desktop-app",
+  "version": "0.1.0",
+  "description": "Desktop client for Fervis factual answers.",
+  "author": "Fervis Labs",
+  "homepage": "https://www.fervis.ai",
+  "private": true,
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "electron:dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "build": "tsc --noEmit && vite build && tsc --project tsconfig.electron.json",
+    "verify:electron-build": "node scripts/verify-electron-build.mjs",
+    "prepare:mac-icon": "bash scripts/create-mac-icon.sh",
+    "package:mac": "npm run build && npm run verify:electron-build && npm run prepare:mac-icon && electron-builder --mac dmg zip --publish never",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "preview": "vite preview --host 127.0.0.1",
+    "verify:screenshots": "node scripts/capture-screenshots.mjs"
+  },
+  "build": {
+    "appId": "ai.fervis.desktop",
+    "productName": "Fervis",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.icns"
+    },
+    "dmg": {
+      "title": "Fervis",
+      "contents": [
+        {
+          "x": 140,
+          "y": 220,
+          "type": "file"
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    }
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@types/node": "^22.10.7",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "concurrently": "^9.1.2",
+    "electron": "^42.5.0",
+    "electron-builder": "^26.15.3",
+    "jsdom": "^26.0.0",
+    "playwright": "^1.61.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.7.3",
+    "vite": "^8.1.0",
+    "vitest": "^4.1.9",
+    "wait-on": "^8.0.1"
+  }
+}

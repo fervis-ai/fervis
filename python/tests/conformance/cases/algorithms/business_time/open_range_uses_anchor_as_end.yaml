@@ -1,0 +1,19 @@
+id: open_range_uses_anchor_as_end
+description: Open ranges run from the declared start date through the anchor day.
+migrates:
+  - api/tests/fervis/business_time/test_resolver.py::test_resolve_open_range_uses_anchor_as_end
+kind: algorithm
+algorithm: business_time.resolve
+input:
+  anchor_date: "2026-04-11"
+  intent:
+    kind: open_range
+    start:
+      year: 2026
+      month: 3
+      day: 15
+expect:
+  result_contains:
+    status: resolved
+    start: "2026-03-15"
+    end: "2026-04-11"

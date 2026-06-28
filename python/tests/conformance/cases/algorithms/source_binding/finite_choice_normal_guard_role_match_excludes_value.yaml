@@ -1,0 +1,18 @@
+id: finite_choice_normal_guard_role_match_excludes_value
+description: A normal-instance role match excludes a choice even when the broad subject test is satisfied.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_parse_source_binding_derives_normal_guard_effect_from_role_match
+kind: algorithm
+algorithm: source_binding.finite_choice_parse
+input:
+  choices:
+    OPEN:
+      subject_identity: SATISFIES_TEST
+      normal_instance_guard: SATISFIES_TEST
+    CLOSED:
+      subject_identity: SATISFIES_TEST
+      normal_instance_guard: CONFLICTS_WITH_TEST
+expect:
+  result_contains:
+    source_invocation_param_values:
+      - status: OPEN

@@ -1,0 +1,42 @@
+id: stores_in_area
+question: How many stores are in London?
+requested_facts:
+  - id: fact_1
+    description: count of stores in London
+    answer_subject: stores
+    answer_outputs:
+      - id: answer_1
+        description: number of stores in London
+catalog:
+  reads:
+    - id: list_location_list
+      endpoint_name: list_location_list
+      params:
+        - ref: list_location_list.query.type
+          name: type
+          source: query
+          type: choice
+          choices: [STORE, WAREHOUSE]
+      row_paths:
+        - id: data
+          path: data
+          cardinality: many
+      fields:
+        - ref: field.location.data.location_id
+          path: data.location_id
+          row_path_id: data
+          type: string
+        - ref: field.location.data.type
+          path: data.type
+          row_path_id: data
+          type: choice
+        - ref: field.location.data.area.area_id
+          path: data.area.area_id
+          row_path_id: data
+          type: string
+        - ref: field.location.data.area.name
+          path: data.area.name
+          row_path_id: data
+          type: string
+selected_read_ids_by_fact:
+  fact_1: [list_location_list]

@@ -1,0 +1,19 @@
+id: incomplete_empty_relation_is_execution_issue
+description: Incomplete empty final relation fails closed as incomplete evidence.
+migrates:
+  - api/tests/fervis/lookup/outcomes/test_results.py::test_incomplete_empty_relation_is_execution_issue_not_no_data
+kind: algorithm
+algorithm: outcomes.classify
+input:
+  mode: answer
+  final_relation_id: rows
+  relations:
+    - id: rows
+      rows: []
+      completeness: {status: incomplete, source_kind: api_read, set_kind: unknown, proof_refs: [read:rows]}
+  render_outputs:
+    - {id: answer, relation_id: rows, field_id: row_count}
+expect:
+  result_contains:
+    issue_kind: incomplete_evidence
+    relation_id: rows

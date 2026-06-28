@@ -1,0 +1,50 @@
+id: lookup_projection_keeps_relation_rows_first_class
+description: Relation memory projects only its declared row addresses as first-class lookup rows.
+migrates:
+  - api/tests/fervis/memory/test_fact_memory.py::test_relation_memory_keeps_rows_as_first_class_fact_addresses
+kind: algorithm
+algorithm: memory.lookup_projection
+input:
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_bbs_two_dates
+        outcome: answered
+        provenance: {runId: run_2}
+        addresses:
+          - address: relation.sales_by_date
+            kind: relation
+            source:
+              kind: api_read
+              endpointName: list_sale_list
+              rowPath: data
+            scope: {location: ABC, dateRange: ["2026-01-01", "2026-01-02"]}
+            grainKeys: [date]
+            fieldCoverage:
+              date: field.sold_at
+              amount: field.amount
+            completeness: {completeForScope: true, pagination: all_pages}
+            rowAddresses:
+              - row.sales_by_date.2026-01-01
+              - row.sales_by_date.2026-01-02
+          - address: row.sales_by_date.2026-01-01
+            kind: row
+            relation: relation.sales_by_date
+            grain: {date: "2026-01-01"}
+            values:
+              amount: {type: decimal, value: "4000.00"}
+          - address: row.sales_by_date.2026-01-02
+            kind: row
+            relation: relation.sales_by_date
+            grain: {date: "2026-01-02"}
+            values:
+              amount: {type: decimal, value: "5000.00"}
+expect:
+  result_contains:
+    relations:
+      - id: turn_bbs_two_dates.relation.sales_by_date
+        rows:
+          - date: "2026-01-01"
+            amount: "4000.00"
+          - date: "2026-01-02"
+            amount: "5000.00"
+

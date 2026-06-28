@@ -1,0 +1,1 @@
+"""Operation-family deterministic contracts."""

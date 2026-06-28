@@ -1,0 +1,29 @@
+id: interpreted_numeric_limit_value_with_source
+description: Numeric limit values may be interpreted when the source text is present in the reference.
+migrates:
+  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_accepts_model_interpreted_limit_value_with_source
+kind: algorithm
+algorithm: question_contract.parse
+input:
+  question_context: Show top five stores
+  answer_subject:
+    subject_text: stores
+    instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
+  answer_outputs:
+    - description: sales total
+  question_inputs:
+    - input_ref: limit
+      source: question_context
+      kind: explicit_numeric_limit_text
+      reference_text: top five
+      numeric_value: 5
+      value_source_text: five
+      inventory_check: {why_this_is_an_input: top five is a rank limit}
+  used_input_refs: [limit]
+expect:
+  result_contains:
+    requested_facts:
+      - known_inputs:
+          - kind: explicit_numeric_limit_text
+            text: top five
+            numeric_value: 5

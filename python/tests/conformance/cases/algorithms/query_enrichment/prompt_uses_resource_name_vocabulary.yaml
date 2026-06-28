@@ -1,0 +1,48 @@
+id: prompt_uses_resource_name_vocabulary
+description: Query-enrichment prompt exposes resource-name vocabulary and recall-only boundaries.
+migrates:
+  - api/tests/fervis/lookup/query_enrichment/test_query_enrichment.py::test_query_enrichment_prompt_uses_resource_name_vocabulary
+kind: algorithm
+algorithm: query_enrichment.prompt
+input:
+  request_fixture: booked_money
+  contains:
+    - "API catalog vocabulary:"
+    - "\"resource_names\": ["
+    - "\"sale\""
+    - "\"staff\""
+    - "\"endpoint_names\": ["
+    - "\"list_sale_list\""
+    - "\"list_staff_list\""
+    - "\"support_roles\": ["
+    - "\"MEASURED_VALUE\""
+    - "Vocabulary Scope"
+    - "Answer Output Resource Lineage"
+    - "Resource Lineage Matches"
+    - "Boundaries"
+    - "Copying And Validity"
+    - "Output\nReturn the submit_query_enrichment tool call only."
+    - "resource_names are the only strings allowed"
+    - "copy every API catalog resource_name"
+    - "Objective: maximize recall of API resource_names that the next step should inspect."
+    - "Within it, write answer_output_resource_lineage rows."
+    - "Each row says: for this answer_output and support_role, this source_text could be backed by these API resource_names."
+    - "Copy answer_output_id verbatim from requested_facts.answer_outputs."
+    - "Copy support_role from the allowed support_roles."
+    - "Task: create an answer-output resource-name lineage ledger for each requested fact. This is recall only."
+    - "Do not choose final query terms here."
+    - "matching_resource_names must be exact strings copied from API catalog vocabulary.resource_names."
+    - "Do not output endpoint names, fields"
+  ordered_before:
+    - ["Vocabulary Scope", "Answer Output Resource Lineage"]
+    - ["Boundaries", "Copying And Validity"]
+expect:
+  result_contains:
+    contains:
+      "API catalog vocabulary:": true
+      "\"sale\"": true
+      "\"staff\"": true
+      "Do not choose final query terms here.": true
+    ordered_before:
+      "Vocabulary Scope < Answer Output Resource Lineage": true
+      "Boundaries < Copying And Validity": true

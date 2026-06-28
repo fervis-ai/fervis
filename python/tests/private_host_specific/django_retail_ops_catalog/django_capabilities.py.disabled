@@ -1,0 +1,101 @@
+import pytest
+
+from fervis.host_api.contracts.capabilities import CapabilityKind, CapabilitySource
+from fervis.host_api.adapters.django.catalog import (
+    get_endpoint_contract as _get_endpoint_contract,
+)
+from fervis.project.source_scope import DjangoSourceScope
+
+
+_DEFAULT_SOURCES = (
+    DjangoSourceScope(
+        name="commerce",
+        app_modules=("apps.retail_ops", "apps.brands"),
+        path_prefixes=("/v1/",),
+    ),
+)
+
+
+def get_endpoint_contract(endpoint_name: str):
+    return _get_endpoint_contract(
+        endpoint_name,
+        sources=_DEFAULT_SOURCES,
+    )
+
+
+@pytest.mark.django_db
+def test_endpoint_contract_exposes_generated_filter_capabilities(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("list_sales_summary")
+
+    assert _capability_roles(contract, CapabilityKind.FILTER) >= {
+        "group_by",
+        "start_date",
+        "end_date",
+    }
+
+
+@pytest.mark.django_db
+def test_endpoint_contract_exposes_generated_field_capabilities(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("list_sales_summary")
+
+    assert _capability_roles(contract, CapabilityKind.FIELD) >= {
+        "data.amount",
+        "data.label",
+    }
+
+
+@pytest.mark.django_db
+def test_endpoint_contract_marks_generated_capability_source(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("list_sales_summary")
+
+    assert {item.source for item in contract.capabilities.items} == {
+        CapabilitySource.SCHEMA_GENERATED
+    }
+
+
+@pytest.mark.django_db
+def test_endpoint_contract_preserves_public_dict_with_capabilities(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("list_sales_summary")
+
+    payload = contract.to_public_dict()
+
+    assert payload["endpointName"] == "list_sales_summary"
+
+
+@pytest.mark.django_db
+def test_endpoint_contract_public_dict_includes_filter_capability(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("list_sales_summary")
+
+    payload = contract.to_public_dict()
+
+    assert {"kind": "filter", "role": "group_by", "source": "schema_generated"} in (
+        payload["capabilities"]
+    )
+
+
+@pytest.mark.django_db
+def test_endpoint_contract_public_dict_includes_field_capability(
+    fervis_foundation_reset,
+):
+    contract = get_endpoint_contract("list_sales_summary")
+
+    payload = contract.to_public_dict()
+
+    assert {"kind": "field", "role": "data.amount", "source": "schema_generated"} in (
+        payload["capabilities"]
+    )
+
+
+def _capability_roles(contract, kind: CapabilityKind) -> set[str]:
+    assert contract is not None
+    return {item.role for item in contract.capabilities.items if item.kind == kind}

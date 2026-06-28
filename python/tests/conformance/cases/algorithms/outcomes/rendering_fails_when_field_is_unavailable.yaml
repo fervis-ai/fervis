@@ -1,0 +1,18 @@
+id: rendering_fails_when_field_is_unavailable
+description: Rendering fails closed when the selected render field is unavailable.
+migrates:
+  - api/tests/fervis/lookup/outcomes/test_results.py::test_renderer_fails_fast_when_render_field_is_unavailable
+kind: algorithm
+algorithm: outcomes.classify
+input:
+  mode: answer
+  final_relation_id: rows
+  relations:
+    - id: rows
+      rows:
+        - {name: Alpha}
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown, proof_refs: [read:rows]}
+  render_outputs:
+    - {id: answer, relation_id: rows, field_id: missing}
+expect:
+  error_contains: render field

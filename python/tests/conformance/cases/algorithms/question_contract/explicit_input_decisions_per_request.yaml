@@ -1,0 +1,66 @@
+id: explicit_input_decisions_per_request
+description: Each answer request independently declares which shared inputs it uses.
+migrates:
+  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_requires_explicit_input_decisions_per_request
+kind: algorithm
+algorithm: question_contract.parse
+input:
+  question_context: How much was Alice's total sales amount yesterday, and where did Alice work yesterday?
+  answer_requests_count: 2
+  question_inputs:
+    - input_ref: staff
+      source: question_context
+      kind: named_reference_text
+      reference_text: Alice
+      target_meaning: staff member
+      lookup_text: Alice
+      inventory_check: {why_this_is_an_input: Alice is a named reference}
+    - input_ref: period
+      source: question_context
+      kind: time_text
+      reference_text: yesterday
+      inventory_check: {why_this_is_an_input: yesterday is a time scope}
+  answer_requests:
+    - answer_fact: Alice's total sales amount yesterday
+      answer_expression: {family: scalar_aggregate}
+      answer_subject:
+        subject_text: sales amount
+        instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
+      input_requirements: {time_requirements: []}
+      answer_population:
+        population_label: sales amount
+        counted_unit: sales amount
+        membership_tests:
+          - test_id: pop_test_1
+            kind: SUBJECT_IDENTITY
+            polarity: MUST_PASS
+            test_question: Does the row/value represent sales amount?
+      answer_outputs:
+        - description: total sales amount
+      input_decisions:
+        - {input_ref: staff, use_input: true}
+        - {input_ref: period, use_input: true}
+    - answer_fact: where Alice worked yesterday
+      answer_expression: {family: scalar_aggregate}
+      answer_subject:
+        subject_text: Alice
+        instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
+      input_requirements: {time_requirements: []}
+      answer_population:
+        population_label: Alice
+        counted_unit: Alice
+        membership_tests:
+          - test_id: pop_test_1
+            kind: SUBJECT_IDENTITY
+            polarity: MUST_PASS
+            test_question: Does the row/value represent Alice?
+      answer_outputs:
+        - description: work location
+      input_decisions:
+        - {input_ref: staff, use_input: true}
+        - {input_ref: period, use_input: true}
+expect:
+  result_contains:
+    requested_facts:
+      - input_refs: [staff, period]
+      - input_refs: [staff, period]

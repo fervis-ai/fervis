@@ -1,0 +1,79 @@
+id: same_scope_memory_cannot_resurrect_dropped_read
+description: Same-scope memory cannot make a read source-binding eligible after current-turn read eligibility retained a different read.
+kind: algorithm
+algorithm: source_binding.prompt_surface
+input:
+  reads:
+    stores: &stores_read
+      id: stores
+      endpoint_name: list_store_list
+      resource_names: [store]
+      fields:
+        - ref: stores.field.store_id
+          path: store_id
+          type: uuid
+          identity:
+            entity_ref: store
+            identity_field: store_id
+            primary_key: true
+            stable: true
+        - ref: stores.field.status
+          path: status
+          type: choice
+          choices: [OPEN, CLOSED]
+    orders: &orders_read
+      id: orders
+      endpoint_name: list_order_list
+      resource_names: [order]
+      params:
+        - ref: list_order_list.query.store_id
+          name: store_id
+          source: query
+          type: uuid
+      fields:
+        - ref: orders.field.order_id
+          path: order_id
+          type: uuid
+          identity:
+            entity_ref: order
+            identity_field: order_id
+            primary_key: true
+            stable: true
+        - ref: orders.field.amount
+          path: amount
+          type: decimal
+  request:
+    mode: yaml_prompt_surface
+    question: How many stores are currently open?
+    requested_fact:
+      id: fact_1
+      description: currently open stores
+      answer_subject: stores
+      answer_outputs: [answer_1]
+    relation_catalog:
+      reads:
+        - *stores_read
+    same_scope_relation_catalog:
+      reads:
+        - *orders_read
+        - *stores_read
+    selected_read_ids: [stores]
+    retained_read_ids: [stores]
+    selected_source_candidate_count: 2
+    memory_inputs:
+      memoryRelations:
+        - id: mem_bbs_mall_orders_scope
+          fields:
+            - {field_id: order_id, type: uuid}
+            - {field_id: amount, type: decimal}
+          completeness:
+            status: complete
+            proofRefs: [read:list_order_list]
+            scopeFingerprint: >-
+              {"endpointArgProofRefs":{"list_order_list.query.store_id":["known_input:bbs_mall"]},"endpointArgs":{"list_order_list.query.store_id":"bbs_mall"},"rowFilters":[]}
+expect:
+  result_contains:
+    read_ids:
+      - stores
+    read_id_presence:
+      orders: false

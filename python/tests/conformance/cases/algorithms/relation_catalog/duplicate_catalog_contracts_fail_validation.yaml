@@ -1,0 +1,36 @@
+id: duplicate_catalog_contracts_fail_validation
+description: Relation catalog validation rejects duplicate parameter and field refs.
+migrates:
+  - api/tests/fervis/host_api/test_relation_catalog_projection.py::test_relation_catalog_validation_rejects_ambiguous_duplicate_contracts
+kind: algorithm
+algorithm: relation_catalog.row_source_projection
+input:
+  catalog:
+    reads:
+      - id: list_records
+        endpoint_name: list_records
+        resource_names: [record]
+        params:
+          - ref: list_records.query.status
+            name: status
+            source: query
+            type: string
+          - ref: list_records.query.status
+            name: state
+            source: query
+            type: string
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - ref: field.id
+            path: data.id
+            row_path_id: data
+            type: uuid
+          - ref: field.id
+            path: data.uuid
+            row_path_id: data
+            type: uuid
+expect:
+  error_contains: duplicate

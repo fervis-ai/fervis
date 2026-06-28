@@ -1,0 +1,19 @@
+id: parser_rejects_non_string_resource_names
+description: Matching resource names must be strings.
+migrates:
+  - api/tests/fervis/lookup/query_enrichment/test_query_enrichment.py::test_query_enrichment_parser_rejects_non_string_resource_names
+kind: algorithm
+algorithm: query_enrichment.parse
+input:
+  request_fixture: booked_money
+  payload:
+    requested_fact_resource_name_matches:
+      - requested_fact_id: fact_1
+        answer_output_resource_lineage:
+          - answer_output_id: answer_1
+            support_role: MEASURED_VALUE
+            source_text: booked money
+            matching_resource_names: [123]
+    entity_target_catalog_search_terms: []
+expect:
+  error_contains: text values must be strings

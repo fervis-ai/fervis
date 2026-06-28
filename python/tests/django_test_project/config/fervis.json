@@ -1,0 +1,48 @@
+{
+  "schema_version": "v0.1",
+  "default_environment": "local",
+  "environments": {
+    "local": {
+      "models": {
+        "default": {
+          "model_key": "gpt-5.4-mini",
+          "provider": "openai"
+        }
+      },
+      "persistence": {
+        "database": "default",
+        "kind": "django_database"
+      }
+    }
+  },
+  "framework": "django",
+  "host": {
+    "about_api": "The Fervis Django test API exposes generic operational records for adapter contract tests.",
+    "organization_name": "Fervis"
+  },
+  "models": {
+    "providers": [
+      {
+        "allowed_model_keys": [
+          "gpt-5.4-mini"
+        ],
+        "name": "openai"
+      }
+    ]
+  },
+  "routes": {
+    "prefix": "/v1/"
+  },
+  "sources": [
+    {
+      "app_modules": [
+        "tests.django_test_project"
+      ],
+      "kind": "django_app",
+      "name": "test-api",
+      "path_prefixes": [
+        "/"
+      ]
+    }
+  ]
+}

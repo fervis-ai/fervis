@@ -1,0 +1,49 @@
+id: result_set_reference_uses_prior_answer_quote
+description: Result-set references can resolve against a prior answer quote and report the backing memory ids.
+migrates:
+  - api/tests/fervis/lookup/test_conversation_resolution_outcomes.py::test_clause_resolution_result_set_reference_uses_prior_answer_quote
+kind: algorithm
+algorithm: conversation_resolution.parse
+input:
+  current_question: What shades were in those sales?
+  context_sources:
+    - source_id: prior_turn_1_fervis
+      kind: prior_fervis_answer
+      text: prior sales row set
+      source_card_ids: [card_rows]
+      source_memory_ids: [mem_rows]
+      meaning_anchors:
+        - memory_id: mem_rows
+          text: prior sales row set
+          occurrence: 1
+          kind: row_set
+          label: row set
+  payload:
+    kind: conversation_resolution
+    status: resolved
+    current_question_text: What shades were in those sales?
+    clause_resolutions:
+      - current_clause_text: What shades were in those sales
+        occurrence: 1
+        requested_value_frame:
+          current_value_surface: {text: shades, kind: self_sufficient_current_value}
+          context_frame_choices: []
+        dependencies:
+          - anchor_text: those sales
+            occurrence: 1
+            kind: reference
+            meaning_components:
+              - kind: other
+                source_id: prior_turn_1_fervis
+                source_text: prior sales row set
+                memory_id: mem_rows
+                resolved_text: prior sales row set
+            resolved_text: prior sales row set
+            must_preserve_terms: [prior sales row set]
+        resolved_clause_text: What shades were in the prior sales row set?
+    unresolved: {unresolved_kind: none, why_unresolved: "", candidate_interpretations: []}
+expect:
+  result_contains:
+    resolution: resolved
+    used_source_card_ids: [card_rows]
+    used_memory_ids: [mem_rows]

@@ -1,0 +1,20 @@
+id: compute_rejects_undeclared_scalar_input
+description: Compute cannot read scalar inputs that were not declared by the compute operation.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_compute_cannot_read_undeclared_scalar_inputs
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  scalar_inputs:
+    - {id: declared, value: 1}
+    - {id: hidden, value: 2}
+  operations:
+    - id: invalid
+      output_relation: ""
+      spec:
+        kind: compute
+        expression: declared + hidden
+        scalar_inputs: [declared]
+        output_scalar: result
+expect:
+  error_contains: undeclared scalar input

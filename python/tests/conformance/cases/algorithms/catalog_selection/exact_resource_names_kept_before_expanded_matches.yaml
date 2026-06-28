@@ -1,0 +1,34 @@
+id: exact_resource_names_kept_before_expanded_matches
+description: Catalog selection keeps exact resource names before expanded related resource-name matches.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_retains_exact_resource_names_before_expanded_matches
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - {id: location_read, endpoint_name: list_location_list, resource_names: [location]}
+      - {id: store_read, endpoint_name: list_store_list, resource_names: [store]}
+      - {id: location_limit_read, endpoint_name: get_location_deal_limits, resource_names: [location limit]}
+      - {id: location_merch_read, endpoint_name: get_location_merch, resource_names: [location merch]}
+      - {id: location_supply_read, endpoint_name: get_location_supplies, resource_names: [location supply]}
+  requested_facts:
+    - id: fact_1
+      description: How many stores are in London?
+      answer_outputs:
+        - id: answer_1
+  resource_name_matches:
+    - requested_fact_id: fact_1
+      answer_output_resource_lineage:
+        - answer_output_id: answer_1
+          support_role: MEASURED_VALUE
+          source_text: store/location rows
+          matching_resource_names: [store, location, location limit, location merch, location supply]
+  max_reads_per_fact: 3
+expect:
+  result_contains:
+    requested_fact_selections:
+      - requested_fact_id: fact_1
+        selected_read_membership:
+          location_read: true
+          store_read: true

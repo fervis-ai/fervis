@@ -1,0 +1,43 @@
+id: card_projection_required_cards_overflow_fails_closed
+description: Required memory cards fail closed when they cannot fit the projection budget.
+migrates:
+  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_memory_card_projection_fails_when_required_cards_exceed_budget
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: How about that?
+  max_cards: 1
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_latest
+        outcome: answered
+        sourceQuestion: Which products did Staff One sell today?
+        sourceAnswer: Staff One sold two products.
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: products Staff One sold today
+                answer_outputs:
+                  - description: product list
+                    requested_value_frame: product list
+        addresses:
+          - address: entity.staff_1
+            kind: entity
+            resource: staff
+            referenceText: Staff One
+            identity: {staff_key: staff-1}
+          - address: relation.answer_rows
+            kind: relation
+            source: {kind: api_read, read_id: staff_sales_read, identityType: sale}
+            grainKeys: [sale_key]
+            fieldCoverage: {sale_key: answer_rows.sale_key}
+            completeness: {status: complete, pagination: all_pages}
+            rowAddresses: [row.answer_1]
+          - address: row.answer_1
+            kind: row
+            relation: relation.answer_rows
+            identity: {sale_key: sale-1}
+expect:
+  error_contains: required conversation memory exceeds projection budget
+

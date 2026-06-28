@@ -1,0 +1,36 @@
+id: supporting_matches_kept_when_catalog_fits_budget
+description: Catalog selection keeps weak supporting matches when the candidate set fits the read budget.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_keeps_weak_supporting_matches_when_catalog_fits_budget
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - id: sales_read
+        endpoint_name: list_records
+        resource_names: [sales]
+        facts: [{ref: sales.amount}]
+      - id: store_read
+        endpoint_name: list_records
+        resource_names: [store]
+        facts: [{ref: store}]
+  requested_facts:
+    - id: fact_1
+      description: sales amount at store
+      answer_outputs:
+        - id: answer_1
+  resource_name_matches:
+    - requested_fact_id: fact_1
+      answer_output_resource_lineage:
+        - answer_output_id: answer_1
+          support_role: MEASURED_VALUE
+          source_text: sales amount at store
+          matching_resource_names: [sales, store]
+  max_reads_per_fact: 2
+expect:
+  result_contains:
+    selected_read_ids: [sales_read, store_read]
+    requested_fact_selections:
+      - requested_fact_id: fact_1
+        selected_read_ids: [sales_read, store_read]

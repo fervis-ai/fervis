@@ -1,0 +1,37 @@
+id: parser_caps_entity_terms_at_five
+description: Parser rejects more than five entity catalog search terms.
+migrates:
+  - api/tests/fervis/lookup/query_enrichment/test_query_enrichment.py::test_query_enrichment_parser_caps_entity_terms_at_five
+kind: algorithm
+algorithm: query_enrichment.parse
+input:
+  request_fixture: booked_money
+  request:
+    reads:
+      - {id: staff_read, endpoint_name: list_staff_list, resource_names: [staff, staff profile, salesperson, employee, agent, team member]}
+    requested_facts:
+      - id: fact_1
+        description: booked money total
+        answer_outputs: [{id: answer_1}]
+        known_inputs:
+          - id: entity_1
+            kind: named_reference_text
+            source: question_context
+            text: Jane Doe
+            lookup_text: Jane Doe
+            description: staff member named Jane Doe
+  payload:
+    requested_fact_resource_name_matches:
+      - requested_fact_id: fact_1
+        answer_output_resource_lineage: []
+    entity_target_catalog_search_terms:
+      - target_id: entity_1
+        catalog_search_terms:
+          - {basis: "staff can identify Jane Doe because target_meaning is staff member.", term: staff}
+          - {basis: "staff profile can identify Jane Doe because target_meaning is staff member.", term: staff profile}
+          - {basis: "salesperson can identify Jane Doe because target_meaning is staff member.", term: salesperson}
+          - {basis: "employee can identify Jane Doe because target_meaning is staff member.", term: employee}
+          - {basis: "agent can identify Jane Doe because target_meaning is staff member.", term: agent}
+          - {basis: "team member can identify Jane Doe because target_meaning is staff member.", term: team member}
+expect:
+  error_contains: at most 5 terms

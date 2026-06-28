@@ -1,0 +1,14 @@
+id: booked_money
+question: How much booked money do we have?
+requested_facts:
+  - id: fact_1
+    description: booked money total
+    answer_outputs:
+      - id: answer_1
+reads:
+  - id: sales_read
+    endpoint_name: list_sale_list
+    resource_names: [sale]
+  - id: staff_read
+    endpoint_name: list_staff_list
+    resource_names: [staff]

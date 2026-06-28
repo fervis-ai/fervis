@@ -1,0 +1,76 @@
+id: scripted_pattern_joined_rows_duplicate_context
+description: Lookup runtime executes joined rows when both sides carry the same contextual field value.
+migrates:
+  - api/tests/fervis/lookup/test_pattern_fact_plan_contract.py::test_pattern_contract_joined_rows_allows_same_value_duplicate_context_fields_end_to_end
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: List item quantities with staff names.
+  question_contract:
+    fact_description: item quantities with staff names
+    subject_text: item quantities with staff names
+    answer_expression_family: list_rows
+    answer_outputs: [staff_name, quantity]
+    resource_terms: [item, product]
+  catalog:
+    reads:
+      - id: items_read
+        endpoint_name: items_read
+        resource_names: [item]
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - {ref: field.items.item_id, path: data.item_id, row_path_id: data, type: string}
+          - {ref: field.items.staff_id, path: data.staff_id, row_path_id: data, type: string}
+          - {ref: field.items.quantity, path: data.quantity, row_path_id: data, type: number}
+      - id: products_read
+        endpoint_name: products_read
+        resource_names: [product]
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - {ref: field.products.item_id, path: data.item_id, row_path_id: data, type: string}
+          - {ref: field.products.staff_id, path: data.staff_id, row_path_id: data, type: string}
+          - {ref: field.products.staff_name, path: data.staff_name, row_path_id: data, type: string}
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers:
+        - requested_fact_id: fact_1
+          answer_output_ids: [answer_1, answer_2]
+          pattern: joined_rows
+          left:
+            source: {kind: read, read_id: items_read}
+            fields:
+              - {field_id: item_id}
+              - {field_id: staff_id}
+              - {field_id: quantity}
+          right:
+            source: {kind: read, read_id: products_read}
+            fields:
+              - {field_id: item_id}
+              - {field_id: staff_id}
+              - {field_id: staff_name}
+          join_keys:
+            - {left_field_id: item_id, right_field_id: item_id}
+          output_fields:
+            - {side: right, field_id: staff_name}
+            - {side: left, field_id: quantity}
+  responses:
+    items_read:
+      data:
+        - {item_id: item_1, staff_id: staff_1, quantity: 3}
+    products_read:
+      data:
+        - {item_id: item_1, staff_id: staff_1, staff_name: Amani}
+expect:
+  result_contains:
+    status: COMPLETED
+    rendered_rows:
+      - staff_name: Amani
+        quantity: 3

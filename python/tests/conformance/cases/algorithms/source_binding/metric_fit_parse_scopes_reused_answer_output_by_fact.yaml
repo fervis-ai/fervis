@@ -1,0 +1,16 @@
+id: metric_fit_parse_scopes_reused_answer_output_by_fact
+description: Source-binding parser applies metric-fit decisions to the matching requested fact when answer output ids repeat.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_parse_source_binding_scopes_metric_fit_by_requested_fact_when_output_ids_repeat
+kind: algorithm
+algorithm: source_binding.metric_fit_parse
+input:
+  request:
+    mode: reused_answer_output_metric_support
+expect:
+  result_contains:
+    metric_measure_evidence_ids_by_fact:
+      fact_sales:
+        - source_1.data.amount
+      fact_payments:
+        - source_2.data.amount

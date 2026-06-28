@@ -1,0 +1,29 @@
+id: nested_child_rows_merge_parent_context
+description: Nested child row paths extract every child row and preserve non-child parent context.
+migrates:
+  - api/tests/fervis/lookup/orchestrator/test_row_extraction.py::test_lookup_cutover_extracts_nested_array_row_paths
+kind: algorithm
+algorithm: execution.endpoint_response
+input:
+  row_path: orders.items
+  parent_row_path: orders
+  cardinality: many
+  body:
+    orders:
+      - order_id: order_1
+        items:
+          - name: Item A
+          - name: Item B
+      - order_id: order_2
+        items:
+          - name: Item C
+expect:
+  result_contains:
+    rows:
+      - order_id: order_1
+        name: Item A
+      - order_id: order_1
+        name: Item B
+      - order_id: order_2
+        name: Item C
+

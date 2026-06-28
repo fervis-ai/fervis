@@ -1,0 +1,20 @@
+id: parser_rejects_unexpected_top_level_fields
+description: Query-enrichment parser rejects unexpected top-level fields.
+migrates:
+  - api/tests/fervis/lookup/query_enrichment/test_query_enrichment.py::test_query_enrichment_parser_rejects_unexpected_top_level_fields
+kind: algorithm
+algorithm: query_enrichment.parse
+input:
+  request_fixture: booked_money
+  payload:
+    requested_fact_resource_name_matches:
+      - requested_fact_id: fact_1
+        answer_output_resource_lineage:
+          - answer_output_id: answer_1
+            support_role: MEASURED_VALUE
+            source_text: booked money
+            matching_resource_names: [sale]
+    entity_target_catalog_search_terms: []
+    unexpected: value
+expect:
+  error_contains: unexpected field

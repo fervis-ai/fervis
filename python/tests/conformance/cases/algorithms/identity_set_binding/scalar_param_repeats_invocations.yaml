@@ -1,0 +1,22 @@
+id: scalar_param_repeats_invocations
+description: Identity-set bindings invoke singleton-only params once per identity value.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_memory_identity_set_compilation.py::test_identity_set_binding_compiles_to_repeated_invocations_when_singleton_only
+kind: algorithm
+algorithm: execution.identity_set_binding
+input:
+  param_type: uuid
+  identity_values: [store_1, store_2]
+  responses:
+    - param_value: store_1
+      body:
+        results:
+          - {sale_id: sale_1, store_id: store_1}
+    - param_value: store_2
+      body:
+        results:
+          - {sale_id: sale_2, store_id: store_2}
+expect:
+  result_contains:
+    request_param_values: [store_1, store_2]
+    sale_ids: [sale_1, sale_2]

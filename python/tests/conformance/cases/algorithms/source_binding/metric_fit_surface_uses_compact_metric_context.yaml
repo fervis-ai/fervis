@@ -1,0 +1,26 @@
+id: metric_fit_surface_uses_compact_metric_context
+description: Metric-fit prompt surface exposes row context once and keeps metric candidates compact.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_metric_fit_surface_shows_metric_context_without_expanding_review_ids
+kind: algorithm
+algorithm: source_binding.metric_fit_surface
+input:
+  request:
+    mode: filtered_response_shape_variant
+expect:
+  result_contains:
+    surface_keys:
+      - metric_contexts
+      - requested_fact_metric_fit_surface
+    stable_metric_contexts:
+      - read_id: sales_summary
+        row_path_id: data
+        same_row_field_paths:
+          - data.label
+          - data.count
+    stable_metric_candidates:
+      - read_id: sales_summary
+        field_path: data.count
+        field_type: integer
+        resource_names:
+          - sales

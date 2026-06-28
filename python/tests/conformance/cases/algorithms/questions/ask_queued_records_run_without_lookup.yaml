@@ -1,0 +1,31 @@
+id: question_run_ask_queued_records_run_without_lookup
+description: Queued ask submission records the question/run and does not execute lookup.
+kind: algorithm
+algorithm: questions.lifecycle
+input:
+  scenario: ask
+  execution_mode: queued
+  tenant_id: tenant_1
+  principal_id: user_1
+  conversation_id: conversation_existing
+  question: "How many orders came in today?"
+  model:
+    provider: anthropic
+    model_key: HAIKU
+expect:
+  result_contains:
+    ask_result:
+      status: QUEUED
+      answer: null
+      conversation_id: conversation_existing
+    lineage:
+      conversation_count: 1
+      question_count: 1
+      run_count: 1
+      first_question_sequence: 1
+      trigger_kind: initial
+    queue:
+      enqueued_count: 1
+      terminal_count: 0
+    lookup:
+      call_count: 0

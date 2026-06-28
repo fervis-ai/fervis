@@ -1,0 +1,30 @@
+id: identity_projection_rejects_incomplete_pagination_set
+description: Incomplete relation pagination does not project a complete identity set.
+migrates:
+  - api/tests/fervis/memory/test_identity_values.py::test_memory_projection_rejects_identity_set_for_incomplete_pagination
+kind: algorithm
+algorithm: memory.identity_projection
+input:
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_1
+        outcome: answered
+        addresses:
+          - address: relation.sales
+            kind: relation
+            source: {kind: api_read, identityType: sale}
+            grainKeys: [sale_id]
+            completeness: {status: complete, pagination: truncated, rowCount: 2}
+            rowAddresses: [row.sales.1, row.sales.2]
+          - address: row.sales.1
+            kind: row
+            relation: relation.sales
+            identity: {sale_id: sale-1}
+          - address: row.sales.2
+            kind: row
+            relation: relation.sales
+            identity: {sale_id: sale-2}
+expect:
+  result_contains:
+    identity_sets: []
+

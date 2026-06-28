@@ -1,0 +1,20 @@
+id: open_range_month_day_uses_most_recent_year
+description: Month/day open-range starts resolve by most-recent year policy.
+migrates:
+  - api/tests/fervis/business_time/test_resolver.py::test_resolve_open_range_month_day_uses_anchor_year_without_model_date_guess
+kind: algorithm
+algorithm: business_time.resolve
+input:
+  expression: since Jan 13th
+  anchor_date: "2026-05-06"
+  intent:
+    kind: open_range
+    start:
+      month: 1
+      day: 13
+      year_policy: most_recent
+expect:
+  result_contains:
+    status: resolved
+    start: "2026-01-13"
+    end: "2026-05-06"

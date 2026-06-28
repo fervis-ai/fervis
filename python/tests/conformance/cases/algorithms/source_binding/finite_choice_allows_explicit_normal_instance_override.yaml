@@ -1,0 +1,22 @@
+id: finite_choice_allows_explicit_normal_instance_override
+description: Explicit user evidence can include a normally excluded finite-choice state without binding the endpoint param.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_parse_source_binding_allows_explicit_normal_instance_override
+kind: algorithm
+algorithm: source_binding.finite_choice_parse
+input:
+  choices:
+    OPEN: SATISFIES_TEST
+    CLOSED:
+      subject_identity: SATISFIES_TEST
+      normal_instance_guard: SATISFIES_TEST
+      normal_instance_match:
+        matched_excluded_role: CANCELED_OR_VOIDED
+        explicit_user_override_evidence:
+          - source_text: closed sales
+            reason: USER_EXPLICITLY_REQUESTED_STATE
+        explicit_user_override_applies: true
+expect:
+  result_contains:
+    source_invocation_param_names:
+      - []

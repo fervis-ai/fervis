@@ -1,0 +1,49 @@
+id: activated_memory_expands_prior_request
+description: Selected prior-answer request cards expand to prior request shape and source question.
+migrates:
+  - api/tests/fervis/memory/test_activated_memory.py::test_activated_memory_expands_prior_request_from_used_memory_id
+kind: algorithm
+algorithm: conversation_memory.expand_activated
+input:
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_1
+        outcome: answered
+        sourceQuestion: What is the total sales amount for all products Alice Smith sold today?
+        addresses:
+          - address: value.placeholder
+            kind: value
+            value: {type: string, value: present}
+  memory_cards:
+    mem.request:
+      kind: prior_answer_request
+      artifact_id: turn_1
+      address: prior_answer_request
+      request_shape:
+        answer_fact_template: products {staff} sold during {time}
+        answer_outputs:
+          - output_id: answer_output_1
+            description: total sales amount
+        slots:
+          - slot_id: staff
+            slot_kind: entity_identity
+          - slot_id: time
+            slot_kind: time_scope
+      prior_slot_bindings:
+        staff:
+          value_kind: entity_identity
+          display: Alice Smith
+          canonical_values: {record_identity: entity.staff.alice_sm}
+          source_lineage: [turn_1.entity.staff]
+        time: {value: today, value_kind: time_scope}
+  used_memory_ids: [mem.request]
+expect:
+  result_contains:
+    activatedMemory:
+      mem.request:
+        kind: prior_answer_request
+        source_question: What is the total sales amount for all products Alice Smith sold today?
+        request_shape:
+          answer_outputs:
+            - output_id: answer_output_1
+              description: total sales amount

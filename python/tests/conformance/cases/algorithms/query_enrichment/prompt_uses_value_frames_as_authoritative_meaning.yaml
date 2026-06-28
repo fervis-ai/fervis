@@ -1,0 +1,55 @@
+id: prompt_uses_value_frames_as_authoritative_meaning
+description: Conversation value frames, not dependency text, provide authoritative query-enrichment meaning.
+migrates:
+  - api/tests/fervis/lookup/query_enrichment/test_query_enrichment.py::test_query_enrichment_prompt_uses_conversation_value_frames_as_authoritative_meaning
+kind: algorithm
+algorithm: query_enrichment.prompt
+input:
+  request_fixture: booked_money
+  request:
+    question: And how much did she make yesterday?
+    conversation_resolution_overlay:
+      current_question: And how much did she make yesterday?
+      value_frames:
+        - current_clause_text: And how much did she make yesterday?
+          current_value_text: how much did she make yesterday
+          current_value_kind: broad_current_value
+          resolved_frame_text: total sales amount
+          must_preserve_terms: [total sales amount]
+          used_context_frame_ids: [context_frame_1]
+      references:
+        - current_clause_text: And how much did she make yesterday?
+          anchor_text: she
+          occurrence: 1
+          resolved_text: dependency text only
+          must_preserve_terms: [dependency text only]
+          source_ids: [prior_identity]
+    requested_facts:
+      - id: fact_1
+        description: total sales amount for Alice Smith yesterday
+        answer_outputs:
+          - id: answer_1
+            description: the amount she made yesterday
+  contains:
+    - Conversation Resolution Annotations
+    - resolved_frame_text is authoritative
+    - Do not derive source_text entries or matching_resource_names from broad current wording
+  excludes:
+    - dependency text only
+    - prior_identity
+    - references
+expect:
+  result_contains:
+    contains:
+      Conversation Resolution Annotations: true
+      resolved_frame_text is authoritative: true
+      Do not derive source_text entries or matching_resource_names from broad current wording: true
+    excludes:
+      dependency text only: true
+      prior_identity: true
+      references: true
+    requested_facts_payload:
+      requested_facts:
+        - answer_outputs:
+            - answer_output_id: answer_1
+              description: the amount she made yesterday

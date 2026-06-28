@@ -1,0 +1,38 @@
+id: grouped_ranked_choices_exclude_display_fields
+description: Grouped/ranked planning does not expose display labels as group candidates when a canonical identity is available.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_grouped_ranked_choices_do_not_include_display_fields_as_group_candidates
+kind: algorithm
+algorithm: planning.grouped_ranked_choices
+input:
+  requested_fact_id: fact_1
+  plan_shape: ranked_aggregate
+  source:
+    id: sb_1
+    requested_fact_id: fact_1
+    read_id: list_shift_compensation_list
+    cardinality: many
+    fields:
+      - field_id: location_id
+        type: uuid
+        roles: [identity]
+        identity: {entity_ref: location, identity_field: location_id, primary_key: true, stable: true}
+      - field_id: location_name
+        type: string
+      - field_id: calculated_pay
+        type: decimal
+    evidence:
+      - {evidence_id: source_1.data.location_id, field_id: location_id, row_cardinality: many}
+      - {evidence_id: source_1.data.location_name, field_id: location_name, row_cardinality: many}
+      - {evidence_id: source_1.data.calculated_pay, field_id: calculated_pay, row_cardinality: many}
+    fulfillments:
+      - answer_output_id: answer_1
+        group_key_evidence_ids:
+          - source_1.data.location_id
+          - source_1.data.location_name
+        metric_measure_evidence_ids:
+          - source_1.data.calculated_pay
+expect:
+  result_contains:
+    group_field_ids: [location_id]
+    metric_field_ids: [calculated_pay]

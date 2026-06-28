@@ -1,0 +1,25 @@
+id: identity_projection_keeps_identity_value_typed
+description: Canonical identities project as identity values, not as plain scalar strings.
+migrates:
+  - api/tests/fervis/memory/test_identity_values.py::test_memory_projection_does_not_project_plain_string_for_canonical_identity
+kind: algorithm
+algorithm: memory.identity_projection
+input:
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_1
+        outcome: answered
+        addresses:
+          - address: entity.staff.jane
+            kind: entity
+            resource: staff
+            referenceText: Jane Doe
+            identity: {staff_id: staff-1}
+expect:
+  result_contains:
+    identity_values:
+      - kind: identity
+        identity_type: staff
+        identity_field: staff_id
+        value: staff-1
+

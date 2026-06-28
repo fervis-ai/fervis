@@ -1,0 +1,14 @@
+id: metric_fit_parse_rejects_row_count_in_metric_review
+description: Source-binding parser fails closed when metric-fit reviews reference row-count evidence as metric evidence.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_parse_source_binding_rejects_row_count_basis_in_metric_fit_ledger
+kind: algorithm
+algorithm: source_binding.metric_fit_parse
+input:
+  choices:
+    OPEN: SATISFIES_TEST
+    CLOSED: CONFLICTS_WITH_TEST
+  raw_metric_evidence_decisions:
+    row_population.root: FITS_REQUESTED_ANSWER
+expect:
+  error_contains: not valid

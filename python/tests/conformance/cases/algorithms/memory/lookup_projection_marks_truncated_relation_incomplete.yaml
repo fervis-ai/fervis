@@ -1,0 +1,44 @@
+id: lookup_projection_marks_truncated_relation_incomplete
+description: Truncated memory relations project as incomplete with truncated pagination.
+migrates:
+  - api/tests/fervis/memory/test_fact_memory.py::test_lookup_memory_projects_truncated_relation_as_incomplete
+kind: algorithm
+algorithm: memory.lookup_projection
+input:
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_large_relation
+        outcome: answered
+        addresses:
+          - address: relation.sales
+            kind: relation
+            source: {kind: operation_output}
+            grainKeys: [sale_id]
+            fieldCoverage: {sale_id: sales.sale_id}
+            completeness:
+              status: complete
+              rowCount: 51
+              truncated: true
+              projectedRowCount: 50
+            rowAddresses: [row.sales.0, row.sales.1]
+          - address: row.sales.0
+            kind: row
+            relation: relation.sales
+            grain: {sale_id: "0"}
+            values:
+              sale_id: {type: string, value: "0"}
+          - address: row.sales.1
+            kind: row
+            relation: relation.sales
+            grain: {sale_id: "1"}
+            values:
+              sale_id: {type: string, value: "1"}
+expect:
+  result_contains:
+    relations:
+      - id: turn_large_relation.relation.sales
+        completeness:
+          status: incomplete
+          row_count: 51
+          pagination: truncated
+

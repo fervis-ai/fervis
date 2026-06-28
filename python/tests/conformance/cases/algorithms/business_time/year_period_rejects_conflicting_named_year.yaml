@@ -1,0 +1,17 @@
+id: year_period_rejects_conflicting_named_year
+description: Year periods fail validation when named year conflicts with unit semantics.
+migrates:
+  - api/tests/fervis/business_time/test_resolver.py::test_year_period_intent_rejects_conflicting_named_year
+kind: algorithm
+algorithm: business_time.resolve
+input:
+  anchor_date: "2026-04-11"
+  intent:
+    kind: period
+    unit: year
+    mode: full
+    named:
+      value: 2025
+      year: 2026
+expect:
+  error_contains: must not include named.year

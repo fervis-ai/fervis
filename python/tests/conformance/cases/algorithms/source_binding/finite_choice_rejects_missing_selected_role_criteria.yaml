@@ -1,0 +1,17 @@
+id: finite_choice_rejects_missing_selected_role_criteria
+description: Finite-choice reviews fail closed when a choice omits a required selected population test.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_parse_source_binding_rejects_missing_selected_role_criteria
+kind: algorithm
+algorithm: source_binding.finite_choice_parse
+input:
+  choices:
+    OPEN:
+      subject_identity: SATISFIES_TEST
+      normal_instance_guard: SATISFIES_TEST
+      omit_tests: [subject_identity]
+    CLOSED:
+      subject_identity: CONFLICTS_WITH_TEST
+      normal_instance_guard: CONFLICTS_WITH_TEST
+expect:
+  error_contains: not valid

@@ -1,0 +1,39 @@
+id: detail_source_requires_missing_identity_input
+description: A selected required-identity detail read reports the missing input.
+migrates:
+  - api/tests/fervis/lookup/fact_planning/test_fact_requirements.py::test_fact_endpoint_requirements_expose_inputs_when_no_selected_endpoint_is_executable
+kind: algorithm
+algorithm: planning.fact_endpoint_requirements
+input:
+  catalog:
+    reads:
+      - id: sale_detail
+        endpoint_name: get_sale
+        params:
+          - ref: sale.path.sale_id
+            name: sale_id
+            source: path
+            type: uuid
+            required: true
+        fields:
+          - ref: field.amount
+            path: amount
+            type: decimal
+  catalog_selection:
+    requested_facts:
+      - requested_fact_id: rf_answer
+        query_terms: [sales, amount]
+        selected_read_ids: [sale_detail]
+expect:
+  result_contains:
+    requested_facts:
+      - requested_fact_id: rf_answer
+        executable_sources: []
+        missing_inputs:
+          - read_id: sale_detail
+            row_path_id: root
+            param_id: sale_id
+    clarifiable_missing_inputs:
+      - read_id: sale_detail
+        row_path_id: root
+        param_id: sale_id

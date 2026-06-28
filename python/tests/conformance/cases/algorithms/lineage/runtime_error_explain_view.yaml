@@ -1,0 +1,53 @@
+id: runtime_error_explain_view
+kind: algorithm
+algorithm: lineage.explain
+description: Runtime error lineage shows the terminal error kind, message, and failed step.
+input:
+  root:
+    kind: question
+    id: question_1
+  dataset:
+    conversations:
+      - conversation_id: conversation_1
+        tenant_id: tenant_1
+    questions:
+      - question_id: question_1
+        conversation_id: conversation_1
+        conversation_sequence: 1
+        original_question: How many in-person sales happened this month?
+    runs:
+      - run_id: run_1
+        question_id: question_1
+        run_number: 1
+        trigger_kind: initial
+        integrated_question: How many in-person sales happened this month?
+    steps:
+      - step_id: step_source_binding
+        run_id: run_1
+        sequence: 1
+        step_key: source_binding
+        kind: model_turn
+    run_results:
+      - run_result_id: run_result_1
+        run_id: run_1
+        result_kind: runtime_error
+    runtime_errors:
+      - runtime_error_detail_id: runtime_error_1
+        run_id: run_1
+        run_result_id: run_result_1
+        failed_step_id: step_source_binding
+        error_kind: provider_runtime_failed
+        message: provider timed out
+    requested_facts: []
+    fact_results: []
+    answers: []
+    answer_outputs: []
+    source_reads: []
+    proof_graphs: []
+expect:
+  result_contains:
+    lines:
+      - "Question question_1: How many in-person sales happened this month?"
+      - "Run run_1 (#1): runtime_error"
+      - "provider_runtime_failed: provider timed out"
+      - "failed step: source_binding"

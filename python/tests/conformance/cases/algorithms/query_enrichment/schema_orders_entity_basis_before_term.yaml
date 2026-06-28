@@ -1,0 +1,23 @@
+id: schema_orders_entity_basis_before_term
+description: Query-enrichment schema orders model-written basis before term and constrains terms to resource vocabulary.
+migrates:
+  - api/tests/fervis/lookup/query_enrichment/test_query_enrichment.py::test_query_enrichment_schema_orders_entity_basis_before_term
+kind: algorithm
+algorithm: query_enrichment.schema
+input:
+  request_fixture: booked_money
+  resource_names: [sale, staff]
+expect:
+  result_contains:
+    lineage_property_order:
+      - answer_output_id
+      - support_role
+      - source_text
+      - matching_resource_names
+    matching_resource_names_has_max_items: false
+    matching_resource_names_items: {enum: [sale, staff]}
+    entity_terms_max_items: 5
+    entity_term_schema:
+      term: {enum: [sale, staff]}
+      property_order: [basis, term]
+      required: [basis, term]

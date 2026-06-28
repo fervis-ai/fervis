@@ -1,0 +1,18 @@
+id: finite_choice_rejects_normal_instance_override_without_evidence
+description: Normal-instance override decisions fail closed when they claim an override without evidence.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_parse_source_binding_rejects_normal_instance_override_without_evidence
+kind: algorithm
+algorithm: source_binding.finite_choice_parse
+input:
+  choices:
+    OPEN: SATISFIES_TEST
+    CLOSED:
+      subject_identity: SATISFIES_TEST
+      normal_instance_guard: SATISFIES_TEST
+      normal_instance_match:
+        matched_excluded_role: CANCELED_OR_VOIDED
+        explicit_user_override_evidence: []
+        explicit_user_override_applies: true
+expect:
+  error_contains: override evidence

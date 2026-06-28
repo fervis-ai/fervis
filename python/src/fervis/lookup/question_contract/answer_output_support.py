@@ -1,0 +1,26 @@
+"""Shared answer-output support role vocabulary."""
+
+from __future__ import annotations
+
+
+ANSWER_OUTPUT_SUPPORT_ROLE_VALUES = (
+    "ROW_POPULATION",
+    "ANSWER_VALUE",
+    "MEASURED_VALUE",
+    "POPULATION_SCOPE",
+    "GROUP_KEY",
+)
+PRIMARY_ANSWER_OUTPUT_SUPPORT_ROLE_VALUES = (
+    "ROW_POPULATION",
+    "ANSWER_VALUE",
+    "MEASURED_VALUE",
+)
+CONTEXT_ANSWER_OUTPUT_SUPPORT_ROLE_VALUES = tuple(
+    role for role in ("POPULATION_SCOPE", "GROUP_KEY")
+)
+FIELD_ANSWER_OUTPUT_SUPPORT_ROLE_VALUES = tuple(
+    role for role in ANSWER_OUTPUT_SUPPORT_ROLE_VALUES if role != "ROW_POPULATION"
+)
+FIELD_PRIMARY_ANSWER_OUTPUT_SUPPORT_ROLE_VALUES = tuple(
+    role for role in ("ANSWER_VALUE", "MEASURED_VALUE")
+)

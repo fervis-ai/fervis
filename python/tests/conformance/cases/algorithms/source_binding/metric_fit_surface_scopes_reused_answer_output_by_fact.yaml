@@ -1,0 +1,16 @@
+id: metric_fit_surface_scopes_reused_answer_output_by_fact
+description: Metric-fit candidates stay scoped by requested fact even when different facts reuse the same answer output id.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_metric_fit_candidates_are_scoped_by_requested_fact_when_output_ids_repeat
+kind: algorithm
+algorithm: source_binding.metric_fit_surface
+input:
+  request:
+    mode: reused_answer_output_metric_support
+expect:
+  result_contains:
+    metric_ids_by_fact:
+      fact_sales:
+        - source_1.data.amount
+      fact_payments:
+        - source_2.data.amount

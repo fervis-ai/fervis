@@ -1,0 +1,45 @@
+id: model_owned_support_fields_are_preserved
+description: Parser preserves the model-authored resolved clause when dependency support fields are valid.
+migrates:
+  - api/tests/fervis/lookup/conversation_resolution/test_parser.py::test_parser_keeps_quote_and_preserve_terms_as_model_owned_support_fields
+kind: algorithm
+algorithm: conversation_resolution.parse
+input:
+  current_question: Where did she work?
+  context_sources:
+    - source_id: prior_1
+      kind: prior_user_question
+      text: Alice sold products today.
+      source_card_ids: [card_1]
+      source_memory_ids: [mem_1]
+      meaning_anchors:
+        - {memory_id: mem_1, text: Alice}
+  payload:
+    kind: conversation_resolution
+    status: resolved
+    current_question_text: Where did she work?
+    clause_resolutions:
+      - current_clause_text: Where did she work?
+        occurrence: 1
+        requested_value_frame:
+          current_value_surface: {text: Where did she work, kind: self_sufficient_current_value}
+          context_frame_choices: []
+        dependencies:
+          - anchor_text: she
+            occurrence: 1
+            kind: reference
+            meaning_components:
+              - kind: other
+                source_id: prior_1
+                source_text: Alice
+                memory_id: mem_1
+                resolved_text: Alice sold products today?
+            resolved_text: Alice
+            must_preserve_terms: [Alice]
+        resolved_clause_text: Where did Alice work?
+    unresolved: {unresolved_kind: none, why_unresolved: "", candidate_interpretations: []}
+expect:
+  result_contains:
+    used_source_card_ids: [card_1]
+    clause_resolutions:
+      - resolved_clause_text: Where did Alice work?

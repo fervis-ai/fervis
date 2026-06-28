@@ -1,0 +1,115 @@
+id: question_and_run_explain_views
+kind: algorithm
+algorithm: lineage.explain
+description: Question and run lineage roots render the same hierarchy from the same view graph.
+input:
+  root:
+    kind: question
+    id: question_1
+  alternate_roots:
+    - kind: run
+      id: run_2
+  dataset:
+    conversations:
+      - conversation_id: conversation_1
+        tenant_id: tenant_1
+    questions:
+      - question_id: question_1
+        conversation_id: conversation_1
+        conversation_sequence: 1
+        original_question: How many stores are open?
+    runs:
+      - run_id: run_1
+        question_id: question_1
+        run_number: 1
+        trigger_kind: initial
+        integrated_question: How many stores are open?
+      - run_id: run_2
+        question_id: question_1
+        run_number: 2
+        trigger_kind: rerun
+        previous_run_id: run_1
+        integrated_question: How many stores are open?
+    steps:
+      - step_id: step_1
+        run_id: run_1
+        sequence: 1
+        step_key: question_contract
+        kind: model_turn
+      - step_id: step_2
+        run_id: run_2
+        sequence: 1
+        step_key: execute
+        kind: deterministic
+    run_results:
+      - run_result_id: result_1
+        run_id: run_1
+        result_kind: runtime_error
+      - run_result_id: result_2
+        run_id: run_2
+        result_kind: answered
+    requested_facts:
+      - requested_fact_id: fact_2
+        run_id: run_2
+        produced_by_step_id: step_2
+        fact_key: fact_1
+        description: count of open stores
+        answer_expression_family: scalar_aggregate
+    fact_results:
+      - fact_result_id: fact_result_2
+        run_id: run_2
+        requested_fact_id: fact_2
+        produced_by_step_id: step_2
+        result_kind: answered
+    answers:
+      - answer_id: answer_2
+        run_id: run_2
+        run_result_id: result_2
+    answer_outputs:
+      - answer_output_id: output_2
+        run_id: run_2
+        answer_id: answer_2
+        fact_result_id: fact_result_2
+        output_key: count
+        value_kind: number
+        value_json:
+          value: 2
+    catalog_endpoints:
+      - catalog_endpoint_id: 44444444-4444-4444-8444-444444444444
+        run_id: run_2
+        catalog_endpoint_key: django_retail_ops_list_store_list:test
+        endpoint_name: list_store_list
+        framework_kind: django_drf
+        source_namespace_kind: django_app
+        source_namespace_path_json: [retail_ops]
+        route_method: GET
+        route_path_template: /v1/stores/
+        route_name: store-list
+        handler_ref: apps.retail_ops.views.StoreListView
+        domain_resource_names_json: [store]
+    source_reads:
+      - source_read_id: source_read_2
+        run_id: run_2
+        step_id: step_2
+        catalog_endpoint_id: 44444444-4444-4444-8444-444444444444
+        args_json: {}
+        status: succeeded
+        row_count: 2
+        completeness_json:
+          complete: true
+        response_hash: sha256:stores
+expect:
+  result_contains:
+    lines:
+      - "Question question_1: How many stores are open?"
+      - "Run run_1 (#1): runtime_error"
+      - "Run run_2 (#2): answered"
+      - "Requested fact fact_2: count of open stores"
+      - "Answer output count: number 2"
+      - "Source read: retail_ops/list_store_list rows=2"
+    alternate_lines:
+      - "Question question_1: How many stores are open?"
+      - "Run run_2 (#2): answered"
+      - "Answer output count: number 2"
+  text_excludes:
+    - "Run run_3"

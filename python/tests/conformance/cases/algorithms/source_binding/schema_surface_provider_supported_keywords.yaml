@@ -1,0 +1,13 @@
+id: schema_surface_provider_supported_keywords
+description: Source-binding provider schema omits object-size keywords unsupported by providers.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_schema_avoids_provider_unsupported_object_size_keywords
+kind: algorithm
+algorithm: source_binding.schema_surface
+input:
+  request:
+    mode: choice_param
+expect:
+  result_contains:
+    schema_excludes:
+      minProperties: true

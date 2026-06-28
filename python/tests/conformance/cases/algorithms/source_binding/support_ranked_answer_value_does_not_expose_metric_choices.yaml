@@ -1,0 +1,56 @@
+id: support_ranked_answer_value_does_not_expose_metric_choices
+description: Ranked-selection answer-value fulfillment exposes the group answer, while metrics remain fact-level measure evidence.
+kind: algorithm
+algorithm: source_binding.fulfillment_support
+input:
+  project_model_visible: true
+  requested_fact:
+    description: staff who earned the most compensation this month
+    subject_text: staff
+    answer_expression_family: ranked_selection
+  catalog:
+    reads:
+      - id: list_shift_compensation_list
+        endpoint_name: list_shift_compensation_list
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - ref: field.staff_id
+            path: data.staff_id
+            row_path_id: data
+            type: uuid
+            identity:
+              entity_ref: staff
+              identity_field: staff_id
+              primary_key: true
+              stable: true
+          - ref: field.calculated_pay
+            path: data.calculated_pay
+            row_path_id: data
+            type: decimal
+  candidate:
+    source_candidate_id: source_1
+    kind: new_api_read
+    read_id: list_shift_compensation_list
+    result_grains:
+      - row_path_id: data
+        row_source_id: rs_source_1_data
+        cardinality: many
+        evidence_items:
+          - field_id: staff_id
+            type: uuid
+            identity:
+              entity_ref: staff
+              identity_field: staff_id
+              primary_key: true
+              stable: true
+          - field_id: calculated_pay
+            type: decimal
+expect:
+  result_contains:
+    group_key_fields:
+      staff_id: true
+    metric_fields:
+      calculated_pay: false

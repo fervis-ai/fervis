@@ -1,0 +1,33 @@
+id: group_by_without_response_shape_stays_required_input
+description: Required choice params without response-shape semantics remain required inputs.
+migrates:
+  - api/tests/fervis/lookup/fact_planning/test_row_sources.py::test_required_group_by_choice_without_response_shape_metadata_stays_required_input
+kind: algorithm
+algorithm: relation_catalog.row_source_projection
+input:
+  catalog:
+    reads:
+      - id: sales_summary
+        endpoint_name: list_sales_summary
+        resource_names: [sales summary]
+        params:
+          - ref: sales_summary.query.group_by
+            name: group_by
+            source: query
+            type: choice
+            required: true
+            choices: [date, location]
+        fields:
+          - ref: field.summary.total_amount
+            path: summary.total_amount
+            type: decimal
+expect:
+  result_contains:
+    read_id: sales_summary
+    row_path_id: root
+    api_source_id_properties:
+      count: 1
+    api_required_inputs:
+      - read_id: sales_summary
+        row_path_id: root
+        param_id: group_by

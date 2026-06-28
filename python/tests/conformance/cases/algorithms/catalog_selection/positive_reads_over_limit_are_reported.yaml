@@ -1,0 +1,48 @@
+id: positive_reads_over_limit_are_reported
+description: Catalog selection reports positive matching reads dropped by the selected-read limit.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_reports_positive_reads_dropped_by_limit
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - id: sales_a
+        endpoint_name: list_records
+        resource_names: [sales]
+        facts: [{ref: sales.total}]
+      - id: sales_b
+        endpoint_name: list_records
+        resource_names: [sales]
+        facts: [{ref: sales.revenue.total}]
+      - id: sales_c
+        endpoint_name: list_records
+        resource_names: [sales]
+        facts: [{ref: sales.net.total}]
+      - id: sales_d
+        endpoint_name: list_records
+        resource_names: [sales]
+        facts: [{ref: sales.gross.total}]
+      - id: sales_e
+        endpoint_name: list_records
+        resource_names: [sales]
+        facts: [{ref: sales.final.total}]
+  requested_facts:
+    - id: sales_total
+      description: sales total
+      answer_outputs:
+        - id: answer_1
+  resource_name_matches:
+    - requested_fact_id: sales_total
+      answer_output_resource_lineage:
+        - answer_output_id: answer_1
+          support_role: MEASURED_VALUE
+          source_text: sales total
+          matching_resource_names: [sales]
+  max_reads_per_fact: 1
+expect:
+  result_contains:
+    requested_fact_selections:
+      - requested_fact_id: sales_total
+        selected_read_ids: [sales_a, sales_b, sales_c]
+        unselected_positive_read_ids: [sales_d, sales_e]

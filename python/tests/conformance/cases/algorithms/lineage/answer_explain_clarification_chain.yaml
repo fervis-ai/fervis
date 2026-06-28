@@ -1,0 +1,117 @@
+id: answer_explain_clarification_chain
+kind: algorithm
+algorithm: lineage.explain
+description: Answer lineage shows the clarification request and response that triggered the successful run.
+input:
+  root:
+    kind: answer
+    id: answer_2
+  dataset:
+    conversations:
+      - conversation_id: conversation_1
+        tenant_id: tenant_1
+    questions:
+      - question_id: question_1
+        conversation_id: conversation_1
+        conversation_sequence: 1
+        original_question: How many stores are open there?
+    runs:
+      - run_id: run_1
+        question_id: question_1
+        run_number: 1
+        trigger_kind: initial
+        integrated_question: How many stores are open there?
+      - run_id: run_2
+        question_id: question_1
+        run_number: 2
+        trigger_kind: clarification_response
+        trigger_clarification_response_run_id: run_1
+        trigger_clarification_response_id: response_1
+        integrated_question: How many stores are open in London?
+    steps:
+      - step_id: step_contract_1
+        run_id: run_1
+        sequence: 1
+        step_key: question_contract
+        kind: model_turn
+      - step_id: step_contract_2
+        run_id: run_2
+        sequence: 1
+        step_key: question_contract
+        kind: model_turn
+    run_results:
+      - run_result_id: result_1
+        run_id: run_1
+        result_kind: factual_terminal
+      - run_result_id: result_2
+        run_id: run_2
+        result_kind: answered
+    requested_facts:
+      - requested_fact_id: fact_1
+        run_id: run_1
+        produced_by_step_id: step_contract_1
+        fact_key: fact_1
+        description: count of open stores with unresolved location
+        answer_expression_family: scalar_aggregate
+      - requested_fact_id: fact_2
+        run_id: run_2
+        produced_by_step_id: step_contract_2
+        fact_key: fact_1
+        description: count of open stores in London
+        answer_expression_family: scalar_aggregate
+    fact_results:
+      - fact_result_id: fact_result_1
+        run_id: run_1
+        requested_fact_id: fact_1
+        produced_by_step_id: step_contract_1
+        result_kind: needs_clarification
+      - fact_result_id: fact_result_2
+        run_id: run_2
+        requested_fact_id: fact_2
+        produced_by_step_id: step_contract_2
+        result_kind: answered
+    clarification_requests:
+      - clarification_id: clarification_1
+        run_id: run_1
+        basis: unresolved_reference
+        question_text: Which location should I use?
+        fact_result_id: fact_result_1
+        step_id: step_contract_1
+        options_json:
+          - id: area:london
+            label: London
+            description: area_id=area_nairobi
+        evidence_refs_json:
+          - known_input:there
+    clarification_responses:
+      - response_id: response_1
+        run_id: run_1
+        clarification_id: clarification_1
+        selected_option_id: area:london
+        response_text: London
+        evidence_ref: clarification:clarification_1:option:area:london
+    answers:
+      - answer_id: answer_2
+        run_id: run_2
+        run_result_id: result_2
+    answer_outputs:
+      - answer_output_id: output_2
+        run_id: run_2
+        answer_id: answer_2
+        fact_result_id: fact_result_2
+        output_key: count
+        value_kind: number
+        value_json:
+          value: 2
+    source_reads: []
+    proof_graphs: []
+expect:
+  result_contains:
+    lines:
+      - "Question question_1: How many stores are open there?"
+      - "Run run_1 (#1): factual_terminal"
+      - "Clarification request clarification_1: Which location should I use?"
+      - "Clarification response response_1: selected area:london"
+      - "Run run_2 (#2): answered"
+      - "Triggered by clarification response response_1 from run run_1"
+      - "Answer output count: number 2"

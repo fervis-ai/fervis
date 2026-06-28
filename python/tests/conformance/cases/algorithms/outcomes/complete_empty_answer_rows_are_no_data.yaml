@@ -1,0 +1,28 @@
+id: complete_empty_answer_rows_are_no_data
+description: Complete empty final answer rows classify as no data, not an answer.
+migrates:
+  - api/tests/fervis/lookup/outcomes/test_results.py::test_complete_empty_render_relation_classifies_as_no_data
+kind: algorithm
+algorithm: outcomes.classify
+input:
+  mode: answer
+  final_relation_id: rows
+  relations:
+    - id: rows
+      rows: []
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown, proof_refs: [read:rows]}
+  render_outputs:
+    - {id: answer, relation_id: result, field_id: row_count}
+  operations:
+    - id: final_rows
+      output_relation: result
+      spec:
+        kind: aggregate
+        input_relation: rows
+        group_by: []
+        aggregations:
+          - {function: count, output_field: row_count}
+expect:
+  result_contains:
+    outcome_kind: no_data
+    empty_relation: {kind: answer_rows, relation_id: rows}

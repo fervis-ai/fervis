@@ -1,0 +1,39 @@
+id: scripted_pattern_calendar_source
+description: Lookup runtime executes a scripted calendar-source list-rows fact plan.
+migrates:
+  - api/tests/fervis/lookup/test_pattern_fact_plan_contract.py::test_pattern_contract_executes_calendar_source_end_to_end
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: Which days are in the last 2 days?
+  runtime_values:
+    runtime_date: "2026-05-03"
+    timezone: Africa/London
+  question_contract:
+    fact_description: days in the last 2 days
+    subject_text: days
+    answer_expression_family: list_rows
+    answer_outputs: [day]
+    known_inputs:
+      - kind: time_text
+        text: last 2 days
+  catalog:
+    reads: []
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers:
+        - requested_fact_id: fact_1
+          answer_output_ids: [answer_1]
+          pattern: list_rows
+          source: {kind: calendar, calendar_id: calendar_days}
+          output_fields:
+            - {field_id: runtime_date}
+  responses: {}
+expect:
+  result_contains:
+    status: COMPLETED
+    rendered_rows:
+      - answer_1: "2026-05-02"
+      - answer_1: "2026-05-03"

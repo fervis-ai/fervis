@@ -1,0 +1,24 @@
+id: source_binding_keeps_explicit_scalar_literal
+description: Source-binding memory values keep a scalar literal only when that exact value is activated.
+migrates:
+  - api/tests/fervis/lookup/memory/test_available_values.py::test_active_memory_source_binding_values_keep_explicit_scalar_literal
+kind: algorithm
+algorithm: memory.available_values
+input:
+  active_memory_ids: [prior_sales_rows.value.row_1.amount]
+  values:
+    - id: prior_sales_rows.value.row_1.amount
+      value: "2468.00"
+      value_type: decimal
+      source_relation_id: prior_sales_rows
+      source_row_id: row_1
+      source_field_id: amount
+expect:
+  result_contains:
+    source_binding_values:
+      - id: prior_sales_rows.value.row_1.amount
+        kind: literal
+        payload:
+          literal_type: number
+          value: "2468.00"
+

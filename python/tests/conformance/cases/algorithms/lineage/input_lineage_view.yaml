@@ -1,0 +1,218 @@
+id: input_lineage_view
+kind: algorithm
+algorithm: lineage.input_lineage
+description: End-user input lineage groups explicit and contextual proof contributions with applied endpoint args.
+input:
+  root:
+    kind: answer
+    id: answer_1
+  answer_output: count
+  dataset:
+    conversations:
+      - conversation_id: conversation_1
+        tenant_id: tenant_1
+    questions:
+      - question_id: question_1
+        conversation_id: conversation_1
+        conversation_sequence: 1
+        original_question: How many stores are open in London?
+    runs:
+      - run_id: run_1
+        question_id: question_1
+        run_number: 1
+        trigger_kind: initial
+        integrated_question: How many stores are open in London?
+    steps:
+      - step_id: step_execute
+        run_id: run_1
+        sequence: 1
+        step_key: execute
+        kind: deterministic
+    run_results:
+      - run_result_id: run_result_1
+        run_id: run_1
+        result_kind: answered
+    requested_facts:
+      - requested_fact_id: fact_1
+        run_id: run_1
+        produced_by_step_id: step_execute
+        fact_key: fact_1
+        description: count of open stores in London
+        answer_expression_family: scalar_aggregate
+    fact_results:
+      - fact_result_id: fact_result_1
+        run_id: run_1
+        requested_fact_id: fact_1
+        produced_by_step_id: step_execute
+        result_kind: answered
+    answers:
+      - answer_id: answer_1
+        run_id: run_1
+        run_result_id: run_result_1
+    answer_outputs:
+      - answer_output_id: output_1
+        run_id: run_1
+        answer_id: answer_1
+        fact_result_id: fact_result_1
+        output_key: count
+        value_kind: number
+        value_json:
+          value: 2
+        proof_node_refs_json:
+          - answer_output:fact_1:count
+      - answer_output_id: output_2
+        run_id: run_1
+        answer_id: answer_1
+        fact_result_id: fact_result_1
+        output_key: unrelated
+        value_kind: text
+        value_json:
+          value: unrelated
+        proof_node_refs_json:
+          - answer_output:fact_1:unrelated
+    catalog_endpoints:
+      - catalog_endpoint_id: 11111111-1111-4111-8111-111111111111
+        run_id: run_1
+        catalog_endpoint_key: django_retail_ops_list_location_list:test
+        endpoint_name: list_location_list
+        framework_kind: django_drf
+        source_namespace_kind: django_app
+        source_namespace_path_json: [retail_ops]
+        route_method: GET
+        route_path_template: /v1/locations/
+        route_name: location-list
+        handler_ref: apps.retail_ops.views.LocationListView
+        domain_resource_names_json: [location]
+    source_reads:
+      - source_read_id: source_read_1
+        run_id: run_1
+        step_id: step_execute
+        catalog_endpoint_id: 11111111-1111-4111-8111-111111111111
+        args_json:
+          area_id: area_123
+          is_open: true
+        status: succeeded
+        row_count: 2
+        completeness_json:
+          complete: true
+        response_hash: sha256:locations
+    proof_graphs:
+      - proof_graph_id: proof_1
+        run_id: run_1
+        fact_result_id: fact_result_1
+        compile_step_id: step_execute
+        execute_step_id: step_execute
+        payload_schema: fervis.execution_proof_graph
+        payload_schema_rev: 1
+        payload_json:
+          nodes:
+            - id: endpoint_arg:source_1.data.area_id
+              kind: endpoint_arg
+              proof_refs:
+                - known_input:London
+                - source_read:source_read_1
+              label: area_id=area_123
+              value: area_123
+            - id: row_filter:source_1.data.is_open
+              kind: row_filter
+              proof_refs:
+                - source_read:source_read_1
+              label: is_open=true
+              operator: equals
+              value: true
+            - id: relation:source_1
+              kind: relation
+              proof_refs:
+                - source_read:source_read_1
+            - id: operation:op_1
+              kind: operation
+              proof_refs: []
+            - id: answer_output:fact_1:count
+              kind: answer_output
+              proof_refs: []
+            - id: endpoint_arg:source_2.data.month
+              kind: endpoint_arg
+              proof_refs:
+                - known_input:last_month
+              label: month=2026-05
+              value: "2026-05"
+            - id: relation:source_2
+              kind: relation
+              proof_refs:
+                - source_read:unrelated_source_read
+            - id: operation:unrelated
+              kind: operation
+              proof_refs: []
+            - id: answer_output:fact_1:unrelated
+              kind: answer_output
+              proof_refs: []
+          edges:
+            - source: endpoint_arg:source_1.data.area_id
+              target: relation:source_1
+              role: scopes
+            - source: row_filter:source_1.data.is_open
+              target: relation:source_1
+              role: narrows
+            - source: relation:source_1
+              target: operation:op_1
+              role: input
+            - source: operation:op_1
+              target: answer_output:fact_1:count
+              role: produces
+            - source: endpoint_arg:source_2.data.month
+              target: relation:source_2
+              role: scopes
+            - source: relation:source_2
+              target: operation:unrelated
+              role: input
+            - source: operation:unrelated
+              target: answer_output:fact_1:unrelated
+              role: produces
+          contributions:
+            - origin: explicit
+              label: London
+              node_refs:
+                - endpoint_arg:source_1.data.area_id
+              proof_refs:
+                - known_input:London
+            - origin: derived
+              label: area_id=area_123
+              node_refs:
+                - endpoint_arg:source_1.data.area_id
+              proof_refs:
+                - known_input:London
+            - origin: contextual
+              label: is_open=true
+              node_refs:
+                - row_filter:source_1.data.is_open
+              proof_refs:
+                - source_read:source_read_1
+            - origin: explicit
+              label: last month
+              node_refs:
+                - endpoint_arg:source_2.data.month
+              proof_refs:
+                - known_input:last_month
+            - origin: derived
+              label: month=2026-05
+              node_refs:
+                - endpoint_arg:source_2.data.month
+              proof_refs:
+                - known_input:last_month
+expect:
+  result_contains:
+    lines:
+      - "Inputs used for fact_1"
+      - "Fact: count of open stores in London"
+      - "Explicit"
+      - "- London"
+      - "Derived"
+      - "- area_id=area_123"
+      - "Contextual"
+      - "- is_open=true"
+      - "Applied in execution"
+      - "- area_id=area_123 was used as an endpoint argument."
+      - "- is_open=true was applied as a row filter."
+  text_excludes:
+    - "last month"
+    - "month=2026-05"

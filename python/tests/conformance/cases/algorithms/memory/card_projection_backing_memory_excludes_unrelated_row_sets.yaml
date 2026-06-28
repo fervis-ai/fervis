@@ -1,0 +1,54 @@
+id: card_projection_backing_memory_excludes_unrelated_row_sets
+description: Prior request private backing memory excludes row sets unrelated to that answer output.
+migrates:
+  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_prior_answer_request_backing_memory_does_not_include_unrelated_row_sets
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: Tell me more about the sales totals.
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_multi_fact
+        outcome: answered
+        sourceQuestion: Show sales totals and inventory counts.
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_sales
+                answer_fact: sales totals
+                answer_outputs:
+                  - id: answer_output_1
+                    description: sales total
+              - id: fact_inventory
+                answer_fact: inventory counts
+                answer_outputs:
+                  - id: answer_output_2
+                    description: inventory count
+            question_inputs: []
+        addresses:
+          - address: relation.sales_rows
+            kind: relation
+            source: {kind: operation_output}
+            grainKeys: [sale_id]
+            rowAddresses: [row.sales.1]
+          - address: row.sales.1
+            kind: row
+            relation: relation.sales_rows
+            identity: {sale_id: sale-1}
+            values:
+              amount: {type: decimal, value: "100.00"}
+          - address: relation.inventory_rows
+            kind: relation
+            source: {kind: operation_output}
+            grainKeys: [item_id]
+            rowAddresses: [row.inventory.1]
+          - address: row.inventory.1
+            kind: row
+            relation: relation.inventory_rows
+            identity: {item_id: item-1}
+            values:
+              count: {type: integer, value: "7"}
+expect:
+  text_excludes_from:
+    private_backing_ids:
+      - turn_multi_fact.relation.inventory_rows

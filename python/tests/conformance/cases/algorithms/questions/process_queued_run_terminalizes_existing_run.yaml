@@ -1,0 +1,35 @@
+id: question_run_process_queued_run_terminalizes_existing_run
+description: Queued failed execution records failed-runtime fallback and terminalizes the submitted run.
+kind: algorithm
+algorithm: questions.lifecycle
+input:
+  scenario: ask
+  execution_mode: queued
+  tenant_id: tenant_1
+  principal_id: user_1
+  question: "How many orders came in today?"
+  process_queued_run: true
+  model:
+    provider: anthropic
+    model_key: HAIKU
+  lookup_result:
+    status: FAILED
+    error: fervis_failed
+    terminal_lineage_recorded: false
+expect:
+  result_contains:
+    ask_result:
+      status: QUEUED
+      answer: null
+    queued_result:
+      status: FAILED
+      error: fervis_failed
+    lineage:
+      question_count: 1
+      run_count: 1
+      failed_runtime_fallback_count: 1
+    queue:
+      enqueued_count: 1
+      terminal_count: 1
+    lookup:
+      call_count: 1

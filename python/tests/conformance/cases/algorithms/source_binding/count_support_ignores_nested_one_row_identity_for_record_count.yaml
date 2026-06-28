@@ -1,0 +1,51 @@
+id: count_support_ignores_nested_one_row_identity_for_record_count
+description: Record-count support uses the selected many-row population, not a nested one-row identity object.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_count_options_use_many_row_population_not_nested_scalar_identity
+kind: algorithm
+algorithm: source_binding.fulfillment_support
+input:
+  requested_fact:
+    description: featured merch count
+    subject_text: featured merch
+  candidate:
+    source_candidate_id: source_1
+    kind: new_api_read
+    read_id: read_1
+    result_grains:
+      - grain_id: data
+        row_path_id: data
+        row_source_id: rs_source_1_data
+        cardinality: many
+      - grain_id: data.merch
+        row_path_id: data.merch
+        row_source_id: rs_source_1_data_merch
+        cardinality: one
+        parent_path: data
+        evidence_items:
+          - field_id: merch_id
+            type: uuid
+            identity: {entity_ref: merch, identity_field: merch_id, primary_key: true, stable: true}
+      - grain_id: root
+        row_path_id: root
+        row_source_id: rs_source_1_root
+        cardinality: one
+    evidence_items:
+      - evidence_id: row_population.data
+        field_id: data
+        row_path_id: data
+        row_source_id: rs_source_1_data
+        type: row_population
+        roles: [identity]
+      - evidence_id: source_1.data.rank
+        field_id: rank
+        row_path_id: data
+        type: integer
+      - evidence_id: source_1.data.merch.merch_id
+        field_id: merch_id
+        row_path_id: data.merch
+        type: uuid
+        identity: {entity_ref: merch, identity_field: merch_id, primary_key: true, stable: true}
+expect:
+  result_contains:
+    row_count_evidence_ids: [row_population.data]

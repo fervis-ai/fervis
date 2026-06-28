@@ -1,0 +1,24 @@
+id: prompt_frames_retention_as_high_recall
+description: Read-eligibility prompt frames retention as high-recall source evidence selection.
+migrates:
+  - api/tests/fervis/lookup/test_read_eligibility_contract.py::test_read_eligibility_prompt_frames_retention_as_high_recall
+kind: algorithm
+algorithm: read_eligibility.prompt
+input:
+  request_fixture: stores_in_area
+  contains:
+    - Decide only whether each shown API read should remain available
+    - Retain a read when it exposes row or field evidence that could be directly consumed
+    - Drop a read only when it is clearly unrelated
+    - Drop a read when it is only related context
+    - When a direct answer input read is incomplete, retain it
+    - Do not retain reads whose only basis is that they might help validate
+expect:
+  result_contains:
+    contains:
+      Decide only whether each shown API read should remain available: true
+      Retain a read when it exposes row or field evidence that could be directly consumed: true
+      Drop a read only when it is clearly unrelated: true
+      Drop a read when it is only related context: true
+      When a direct answer input read is incomplete, retain it: true
+      Do not retain reads whose only basis is that they might help validate: true

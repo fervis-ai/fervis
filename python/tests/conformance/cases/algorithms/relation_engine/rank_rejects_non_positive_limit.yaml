@@ -1,0 +1,23 @@
+id: rank_rejects_non_positive_limit
+description: Rank fails closed when limit is not positive.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_rank_rejects_non_positive_limit_at_runtime
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  relations:
+    - id: rows
+      rows: [{id: a}]
+      grain_keys: []
+  operations:
+    - id: ranked
+      output_relation: result
+      spec:
+        kind: rank
+        input_relation: rows
+        order_by: [{field: id, direction: asc}]
+        tie_policy: field
+        tie_breakers: [{field: id, direction: asc}]
+        limit: 0
+expect:
+  error_contains: positive limit

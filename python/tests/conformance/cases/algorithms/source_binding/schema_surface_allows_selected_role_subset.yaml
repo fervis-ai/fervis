@@ -1,0 +1,12 @@
+id: schema_surface_allows_selected_role_subset
+description: Source-binding schema accepts finite-choice reviews that answer the selected population-role criteria.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_schema_allows_selected_role_criteria_subset
+kind: algorithm
+algorithm: source_binding.schema_surface
+input:
+  request:
+    mode: choice_param
+expect:
+  result_contains:
+    validation: valid

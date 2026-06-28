@@ -1,0 +1,37 @@
+id: field_requirement_becomes_row_source_default
+description: Field requirements override row-source param defaults for the source that exposes the field.
+migrates:
+  - api/tests/fervis/lookup/fact_planning/test_row_sources.py::test_field_requirement_becomes_row_source_default
+kind: algorithm
+algorithm: relation_catalog.row_source_projection
+input:
+  catalog:
+    reads:
+      - id: sales
+        endpoint_name: list_sales
+        resource_names: [sale]
+        params:
+          - ref: sales.query.include_items
+            name: include_items
+            source: query
+            type: boolean
+            default: false
+        row_paths:
+          - id: data_items
+            path: data.items
+            cardinality: many
+        fields:
+          - ref: field.data.items.quantity
+            path: data.items.quantity
+            row_path_id: data_items
+            type: integer
+            requirements:
+              - param_ref: sales.query.include_items
+                value: true
+expect:
+  result_contains:
+    read_id: sales
+    row_path_id: data_items
+    params:
+      include_items:
+        default: true

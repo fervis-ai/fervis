@@ -1,0 +1,28 @@
+id: relation_catalog_read_preserves_endpoint_name
+description: Relation catalog reads expose the framework-neutral endpoint name.
+migrates:
+  - api/tests/fervis/lookup/catalog/test_ports.py::test_relation_catalog_provider_returns_only_new_catalog_shape
+kind: algorithm
+algorithm: relation_catalog.row_source_projection
+input:
+  catalog:
+    reads:
+      - id: read_records
+        endpoint_name: list_records
+        method: GET
+        path: /records/
+        resource_names: [record]
+        row_paths:
+          - id: rows
+            path: data
+            cardinality: many
+        fields:
+          - ref: field.id
+            path: data.id
+            row_path_id: rows
+            type: string
+expect:
+  result_contains:
+    read_id: read_records
+    endpoint_name: list_records
+    row_path_id: rows

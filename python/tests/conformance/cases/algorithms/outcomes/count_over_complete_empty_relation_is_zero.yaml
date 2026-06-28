@@ -1,0 +1,28 @@
+id: count_over_complete_empty_relation_is_zero
+description: Count over a complete empty relation is a factual zero answer.
+migrates:
+  - api/tests/fervis/lookup/outcomes/test_results.py::test_count_over_complete_empty_relation_is_answer_zero
+kind: algorithm
+algorithm: outcomes.classify
+input:
+  mode: answer
+  relations:
+    - id: rows
+      rows: []
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown, proof_refs: [read:rows]}
+  operations:
+    - id: final_rows
+      output_relation: result
+      spec:
+        kind: aggregate
+        input_relation: rows
+        group_by: []
+        aggregations:
+          - {function: count, output_field: row_count}
+  render_outputs:
+    - {id: answer, relation_id: result, field_id: row_count}
+expect:
+  result_contains:
+    outcome_kind: answer
+    rendered_rows:
+      - {answer: 0}

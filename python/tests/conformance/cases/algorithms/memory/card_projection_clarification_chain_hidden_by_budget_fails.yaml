@@ -1,0 +1,44 @@
+id: card_projection_clarification_chain_hidden_by_budget_fails
+description: Projection fails closed when a clarification chain cannot fit the card budget.
+migrates:
+  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_memory_card_projection_fails_if_clarification_chain_hidden_by_budget
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: Yesterday
+  max_cards: 3
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_answered
+        outcome: answered
+        sourceQuestion: How much money did we make?
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: money we made
+                answer_outputs:
+                  - description: total sales amount
+                    requested_value_frame: total sales amount
+        addresses:
+          - address: value.answer
+            kind: value
+            value: {type: decimal, value: "100.00"}
+            evidence: {stepIds: [turn_answered.answer]}
+      - artifactId: turn_clarification_1
+        outcome: needs_clarification
+        addresses:
+          - address: outcome.clarification_1
+            kind: outcome
+            terminal: needs_clarification
+            clarificationQuestions: ["Which branch?"]
+      - artifactId: turn_clarification_2
+        outcome: needs_clarification
+        addresses:
+          - address: outcome.clarification_2
+            kind: outcome
+            terminal: needs_clarification
+            clarificationQuestions: ["Which day?"]
+expect:
+  error_contains: required conversation memory exceeds projection budget
+

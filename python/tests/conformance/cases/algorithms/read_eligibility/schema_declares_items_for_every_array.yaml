@@ -1,0 +1,11 @@
+id: schema_declares_items_for_every_array
+description: Read-eligibility provider schema declares items for every array schema.
+migrates:
+  - api/tests/fervis/lookup/test_read_eligibility_contract.py::test_read_eligibility_provider_schema_declares_items_for_every_array_schema
+kind: algorithm
+algorithm: read_eligibility.prompt
+input:
+  request_fixture: sales_count
+expect:
+  result_contains:
+    array_schema_paths_missing_items: []

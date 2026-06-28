@@ -1,0 +1,21 @@
+id: id_suffix_does_not_create_identifier_capability
+description: Identifier capability comes from explicit metadata, not field-name suffixes.
+migrates:
+  - api/tests/fervis/core/test_capabilities.py::test_capabilities_do_not_infer_identifier_from_id_suffix
+kind: algorithm
+algorithm: core.capabilities_from_schema
+input:
+  query_params:
+    - name: external_id
+      type: uuid
+  response_fields:
+    - name: external_id
+      path: external_id
+      identity: {}
+  primary_key_fields: []
+expect:
+  result_contains:
+    has:
+      identifier:external_id: false
+      filter:external_id: true
+      field:external_id: true

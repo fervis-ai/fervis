@@ -1,0 +1,27 @@
+id: division_by_zero_is_undefined
+description: Division by zero is an undefined factual outcome, not an engine failure.
+migrates:
+  - api/tests/fervis/lookup/outcomes/test_results.py::test_division_by_zero_is_undefined_not_engine_failure
+kind: algorithm
+algorithm: outcomes.classify
+input:
+  mode: answer
+  scalar_inputs:
+    - {id: current, value: 10}
+    - {id: previous, value: 0}
+  operations:
+    - id: ratio
+      output_relation: ""
+      spec:
+        kind: compute
+        expression: current / previous
+        scalar_inputs: [current, previous]
+        output_scalar: ratio
+  render_outputs: []
+expect:
+  result_contains:
+    outcome_kind: undefined
+    undefined:
+      operation_id: ratio
+      reason_code: division_by_zero
+      input_refs: [current, previous]

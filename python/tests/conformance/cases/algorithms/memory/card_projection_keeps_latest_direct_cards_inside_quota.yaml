@@ -1,0 +1,67 @@
+id: card_projection_keeps_latest_direct_cards_inside_quota
+description: Memory projection keeps latest direct prior request, entity, and row-set cards inside quota.
+migrates:
+  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_memory_card_projection_keeps_latest_direct_cards_and_row_set_inside_quota
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: How about that?
+  max_cards: 3
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_old
+        outcome: answered
+        sourceQuestion: How much money did we make yesterday?
+        sourceAnswer: We made 100.
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: money we made yesterday
+                answer_outputs:
+                  - description: total sales amount
+                    requested_value_frame: total sales amount
+        addresses:
+          - address: value.total
+            kind: value
+            value: {type: decimal, value: "100.00"}
+            display: total for turn_old
+      - artifactId: turn_latest
+        outcome: answered
+        sourceQuestion: Which products did Staff One sell today?
+        sourceAnswer: Staff One sold two products.
+        provenance:
+          question_contract:
+            answer_requests:
+              - id: fact_1
+                answer_fact: products Staff One sold today
+                answer_outputs:
+                  - description: product list
+                    requested_value_frame: product list
+        addresses:
+          - address: entity.staff_1
+            kind: entity
+            resource: staff
+            referenceText: Staff One
+            identity: {staff_key: staff-1}
+          - address: relation.answer_rows
+            kind: relation
+            source: {kind: api_read, read_id: staff_sales_read, identityType: sale}
+            grainKeys: [sale_key]
+            fieldCoverage: {sale_key: answer_rows.sale_key}
+            completeness: {status: complete, pagination: all_pages}
+            rowAddresses: [row.answer_1]
+          - address: row.answer_1
+            kind: row
+            relation: relation.answer_rows
+            identity: {sale_key: sale-1}
+expect:
+  result_contains:
+    card_memory_ids:
+      - turn_latest.prior_request.fact_1
+      - turn_latest.entity.staff_1
+      - turn_latest.relation.answer_rows
+    private_cards:
+      turn_latest.relation.answer_rows:
+        kind: row_set
+

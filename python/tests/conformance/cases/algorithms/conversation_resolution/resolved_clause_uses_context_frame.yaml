@@ -1,0 +1,48 @@
+id: resolved_clause_uses_context_frame
+description: Conversation resolution parser accepts a resolved clause that uses a visible context frame.
+migrates:
+  - api/tests/fervis/lookup/conversation_resolution/test_parser.py::test_parser_accepts_resolved_clause_resolution_payload
+kind: algorithm
+algorithm: conversation_resolution.parse
+input:
+  current_question: How about yesterday?
+  context_sources:
+    - source_id: prior_1
+      kind: prior_user_question
+      text: How much money did we make last week?
+      source_card_ids: [card_1]
+      source_memory_ids: [mem_1]
+  context_frames:
+    - frame_id: context_frame_1
+      source_ids: [prior_1]
+      requested_frame: money did we make
+      prior_answer_fact: money did we make last week
+  payload:
+    kind: conversation_resolution
+    status: resolved
+    current_question_text: How about yesterday?
+    clause_resolutions:
+      - current_clause_text: How about yesterday
+        occurrence: 1
+        requested_value_frame:
+          current_value_surface:
+            text: How about
+            kind: broad_current_value
+          context_frame_choices:
+            - frame_id: context_frame_1
+              choice: use_frame
+              current_conflict_quotes: []
+        dependencies: []
+        resolved_clause_text: How much money did we make yesterday?
+    unresolved:
+      unresolved_kind: none
+      why_unresolved: ""
+      candidate_interpretations: []
+expect:
+  result_contains:
+    resolution: resolved
+    used_source_card_ids: [card_1]
+    used_memory_ids: [mem_1]
+    clause_resolutions:
+      - resolved_clause_text: How much money did we make yesterday?
+        dependencies: []

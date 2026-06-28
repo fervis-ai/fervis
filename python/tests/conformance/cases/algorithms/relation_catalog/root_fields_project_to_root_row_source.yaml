@@ -1,0 +1,23 @@
+id: root_fields_project_to_root_row_source
+description: Root response fields project to an executable root row source.
+migrates:
+  - api/tests/fervis/lookup/catalog/test_validation.py::test_catalog_validation_accepts_root_fields_without_declared_row_paths
+kind: algorithm
+algorithm: relation_catalog.row_source_projection
+input:
+  catalog:
+    reads:
+      - id: root_read
+        endpoint_name: get_root
+        resource_names: [root]
+        fields:
+          - ref: field.name
+            path: name
+            type: string
+expect:
+  result_contains:
+    read_id: root_read
+    row_path_id: root
+    fields:
+      name:
+        field_ref: field.name

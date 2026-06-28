@@ -1,0 +1,29 @@
+id: prompt_surface_population_roles_are_row_scoped
+description: Source-binding prompt exposes row-scoped population roles instead of retired row-population prose.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_pairs_population_tests_with_source_binding_row_role
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_population_roles_do_not_use_read_eligibility_criteria_projection
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_population_roles_use_question_contract_criteria_for_same_row_path
+kind: algorithm
+algorithm: source_binding.prompt_surface
+input:
+  request:
+    mode: choice_param
+  absent_candidate_keys:
+    - row_population_fit
+expect:
+  result_contains:
+    absent_candidate_keys:
+      row_population_fit: true
+    candidate_key_presence:
+      population_roles: true
+    surface_key_presence:
+      fulfillment_support_sets: true
+      params: true
+      population_bindings: true
+    population_roles:
+      - role_id: role_1
+        row_grain_id: root
+        row_path_id: root
+        role_kind: SOURCE_RESULT_ROWS
+        role_text: sales rows at row path root

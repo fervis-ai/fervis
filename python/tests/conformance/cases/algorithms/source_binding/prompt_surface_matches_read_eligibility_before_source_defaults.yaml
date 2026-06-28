@@ -1,0 +1,17 @@
+id: prompt_surface_matches_read_eligibility_before_source_defaults
+description: Source binding matches read eligibility before applying source-default params.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_matches_read_eligibility_before_source_default_bindings
+kind: algorithm
+algorithm: source_binding.prompt_surface
+input:
+  request:
+    mode: source_default_param_after_read_eligibility
+expect:
+  result_contains:
+    read_ids:
+      - sales_summary
+    bound_params:
+      - param_id: group_by
+        value: date
+        source: source_default

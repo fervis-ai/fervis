@@ -1,0 +1,45 @@
+id: matched_fact_and_field_refs_are_reported
+description: Catalog selection reports the fact and field refs that supported a selected read ranking.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_records_matched_fact_and_field_refs_per_requested_fact
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - id: mixed_read
+        endpoint_name: list_records
+        resource_names: [sales]
+        fields:
+          - ref: field.staff_name
+            path: data.staff_name
+            type: string
+          - ref: field.sales_total
+            path: data.sales_total
+            type: number
+        facts:
+          - ref: staff.name
+            field_ref: field.staff_name
+          - ref: sales.total
+            field_ref: field.sales_total
+  requested_facts:
+    - id: sales_total
+      description: sales total
+      answer_outputs:
+        - id: answer_1
+  resource_name_matches:
+    - requested_fact_id: sales_total
+      answer_output_resource_lineage:
+        - answer_output_id: answer_1
+          support_role: MEASURED_VALUE
+          source_text: sales total
+          matching_resource_names: [sales]
+  max_reads_per_fact: 1
+expect:
+  result_contains:
+    requested_fact_selections:
+      - requested_fact_id: sales_total
+        rankings:
+          - read_id: mixed_read
+            matched_fact_refs: [sales.total]
+            matched_field_refs: [field.sales_total]

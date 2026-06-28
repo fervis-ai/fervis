@@ -1,0 +1,1 @@
+"""Scalar-aggregate operation family."""

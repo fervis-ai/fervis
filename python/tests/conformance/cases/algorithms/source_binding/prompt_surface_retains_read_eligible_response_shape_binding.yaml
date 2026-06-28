@@ -1,0 +1,17 @@
+id: prompt_surface_retains_read_eligible_response_shape_binding
+description: Source binding matches read eligibility to the selected response-shape source variant and keeps its bound param.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_projects_read_eligibility_by_stable_candidate_signature_after_read_filtering
+kind: algorithm
+algorithm: source_binding.prompt_surface
+input:
+  request:
+    mode: filtered_response_shape_variant
+expect:
+  result_contains:
+    read_ids:
+      - sales_summary
+    bound_params:
+      - param_id: group_by
+        value: status
+        source: source_default

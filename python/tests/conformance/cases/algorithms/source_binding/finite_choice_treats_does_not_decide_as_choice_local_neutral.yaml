@@ -1,0 +1,18 @@
+id: finite_choice_treats_does_not_decide_as_choice_local_neutral
+description: A does-not-decide effect is neutral for that choice and does not make conflicting choices count.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_parse_source_binding_treats_does_not_decide_as_choice_local_neutral
+kind: algorithm
+algorithm: source_binding.finite_choice_parse
+input:
+  choices:
+    OPEN:
+      subject_identity: DOES_NOT_DECIDE_TEST
+      normal_instance_guard: SATISFIES_TEST
+    CLOSED:
+      subject_identity: CONFLICTS_WITH_TEST
+      normal_instance_guard: SATISFIES_TEST
+expect:
+  result_contains:
+    source_invocation_param_values:
+      - status: OPEN

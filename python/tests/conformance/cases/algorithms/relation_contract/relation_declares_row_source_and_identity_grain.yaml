@@ -1,0 +1,17 @@
+id: relation_declares_row_source_and_identity_grain
+description: Relation source read id and identity field roles define relation grain.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relations.py::test_relation_declares_row_source_and_identity_grain
+kind: algorithm
+algorithm: planning.relation_contract
+input:
+  mode: relation
+  relation:
+    id: rows
+    source: {kind: api_read, read_id: read_rows}
+    fields:
+      - {field_id: row_id, roles: [identity]}
+expect:
+  result_contains:
+    source_read_id: read_rows
+    grain_keys: [row_id]

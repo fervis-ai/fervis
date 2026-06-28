@@ -1,0 +1,41 @@
+id: descriptions_are_projected
+description: Endpoint, param, and field descriptions survive projection.
+migrates:
+  - api/tests/fervis/host_api/test_relation_catalog_projection.py::test_endpoint_contract_projection_preserves_endpoint_and_field_descriptions
+kind: adapter
+adapter: host_api.endpoint_contract_projection
+input:
+  contracts:
+    - endpoint_name: list_payments
+      url_name: payments
+      method: GET
+      path_template: /payments/
+      docstring: Payment records expose card metadata but not full card numbers.
+      view_class: tests.PaymentView
+      resource_names: [payment]
+      query_params:
+        - name: status
+          type: choice
+          description: Payment status filter.
+      response_fields:
+        - name: data
+          type: array
+          path: data
+        - name: card_last_four
+          type: string
+          path: data.card_last_four
+          description: Last four digits only.
+expect:
+  result_contains:
+    reads:
+      list_payments:
+        source_metadata:
+          description: Payment records expose card metadata but not full card numbers.
+        params:
+          status:
+            description: Payment status filter.
+        fields:
+          data.card_last_four:
+            metadata:
+              name: card_last_four
+              description: Last four digits only.

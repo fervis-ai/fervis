@@ -1,0 +1,40 @@
+id: proof_graph_population_choice
+kind: algorithm
+algorithm: execution.proof_graph
+description: Compiled execution emits first-class proof graph nodes for population choices that may or may not narrow execution.
+input:
+  population_choices:
+    - controller_kind: row_predicate
+      controller_id: rp.source_1.root.status
+      field_id: status
+      included_values: [ALLOCATED, IN_TRANSIT, RECEIVED]
+      excluded_values: [CANCELLED, SUPERSEDED]
+      proof_refs:
+        - row_predicate:status
+expect:
+  result_contains:
+    node_kinds:
+      - answer_output
+      - operation
+      - population_choice
+      - relation
+    edge_roles:
+      - input
+      - narrows
+      - produces
+    nodes:
+      - id: population_choice:source_1:row_predicate:rp.source_1.root.status
+        kind: population_choice
+        label: "Included status values [ALLOCATED, IN_TRANSIT, RECEIVED]. Excluded: CANCELLED, SUPERSEDED"
+        value:
+          included_values: [ALLOCATED, IN_TRANSIT, RECEIVED]
+          excluded_values: [CANCELLED, SUPERSEDED]
+    edges:
+      - source: population_choice:source_1:row_predicate:rp.source_1.root.status
+        target: relation:source_1
+        role: narrows
+    contributions:
+      - origin: contextual
+        label: "Included status values [ALLOCATED, IN_TRANSIT, RECEIVED]. Excluded: CANCELLED, SUPERSEDED"
+        node_refs:
+          - population_choice:source_1:row_predicate:rp.source_1.root.status

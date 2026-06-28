@@ -1,0 +1,254 @@
+import { useState } from "react";
+
+import type { FervisApiClient } from "../../fervis-api/client";
+import type { ClarificationOption, ClarificationRequest, RunPayload } from "../../fervis-api/contracts";
+import type { QuestionRefreshPayload } from "../viewTypes";
+import { formatClarificationBasis } from "../textFormat";
+import { failMissingOption, firstClarification } from "../runView";
+
+export function ClarificationForm({
+  apiClient,
+  run,
+  onActionError,
+  onClarificationState
+}: {
+  readonly apiClient: FervisApiClient | null;
+  readonly run: RunPayload;
+  readonly onActionError: (error: unknown) => void;
+  readonly onClarificationState: (
+    question: QuestionRefreshPayload
+  ) => Promise<void>;
+}) {
+  const clarification = firstClarification(run);
+
+  if (clarification === null) {
+    return (
+      <ContractErrorBlock
+        code="invalid_clarification_contract"
+        message="NEEDS_CLARIFICATION did not include a clarification."
+      />
+    );
+  }
+
+  if (clarification.availableOptions.length > 0) {
+    return (
+      <ChoiceClarification
+        apiClient={apiClient}
+        run={run}
+        clarification={clarification}
+        onActionError={onActionError}
+        onClarificationState={onClarificationState}
+      />
+    );
+  }
+
+  return (
+    <TextClarification
+      apiClient={apiClient}
+      run={run}
+      clarification={clarification}
+      onActionError={onActionError}
+      onClarificationState={onClarificationState}
+    />
+  );
+}
+
+function ChoiceClarification({
+  apiClient,
+  run,
+  clarification,
+  onActionError,
+  onClarificationState
+}: {
+  readonly apiClient: FervisApiClient | null;
+  readonly run: RunPayload;
+  readonly clarification: ClarificationRequest;
+  readonly onActionError: (error: unknown) => void;
+  readonly onClarificationState: (
+    question: QuestionRefreshPayload
+  ) => Promise<void>;
+}) {
+  const [selectedOption, setSelectedOption] = useState<ClarificationOption>(
+    clarification.availableOptions[0] ?? failMissingOption()
+  );
+  const [submitting, setSubmitting] = useState(false);
+
+  if (submitting) {
+    return (
+      <ClarificationPending
+        clarification={clarification}
+        selectedAnswer={selectedOption.label}
+      />
+    );
+  }
+
+  return (
+    <div className="clarification">
+      <ClarificationHeader clarification={clarification} />
+      <div className="clar-options">
+        {clarification.availableOptions.map((option) => (
+          <label
+            className={option.id === selectedOption.id ? "option selected" : "option"}
+            key={option.id}
+          >
+            <input
+              checked={option.id === selectedOption.id}
+              name={`clarification-${clarification.id}`}
+              type="radio"
+              value={option.id}
+              onChange={() => setSelectedOption(option)}
+            />
+            <span>{option.label}</span>
+          </label>
+        ))}
+      </div>
+      <button
+        className="primary-action"
+        disabled={apiClient === null || submitting}
+        type="button"
+        onClick={() => {
+          if (apiClient === null) {
+            return;
+          }
+          setSubmitting(true);
+          void apiClient
+            .answerClarification(run.questionId, {
+              clarificationId: clarification.id,
+              question: selectedOption.label,
+              triggerKind: "clarification_response",
+              triggerRunId: run.runId
+            })
+            .then(onClarificationState)
+            .catch(onActionError)
+            .finally(() => setSubmitting(false));
+        }}
+      >
+        {submitting ? "Sending…" : "Send clarification"}
+      </button>
+    </div>
+  );
+}
+
+function TextClarification({
+  apiClient,
+  run,
+  clarification,
+  onActionError,
+  onClarificationState
+}: {
+  readonly apiClient: FervisApiClient | null;
+  readonly run: RunPayload;
+  readonly clarification: ClarificationRequest;
+  readonly onActionError: (error: unknown) => void;
+  readonly onClarificationState: (
+    question: QuestionRefreshPayload
+  ) => Promise<void>;
+}) {
+  const [answer, setAnswer] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  if (submitting) {
+    return (
+      <ClarificationPending
+        clarification={clarification}
+        selectedAnswer={answer.trim()}
+      />
+    );
+  }
+
+  return (
+    <div className="clarification">
+      <ClarificationHeader clarification={clarification} />
+      <form
+        className="clar-text"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (apiClient === null || answer.trim() === "") {
+            return;
+          }
+          setSubmitting(true);
+          void apiClient
+            .answerClarification(run.questionId, {
+              clarificationId: clarification.id,
+              question: answer.trim(),
+              triggerKind: "clarification_response",
+              triggerRunId: run.runId
+            })
+            .then(onClarificationState)
+            .catch(onActionError)
+            .finally(() => setSubmitting(false));
+        }}
+      >
+        <input
+          aria-label="Clarification answer"
+          placeholder="Type your answer…"
+          value={answer}
+          onChange={(event) => setAnswer(event.currentTarget.value)}
+        />
+        <button
+          disabled={apiClient === null || submitting || answer.trim() === ""}
+          type="submit"
+        >
+          {submitting ? "Sending…" : "Send"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function ClarificationPending({
+  clarification,
+  selectedAnswer
+}: {
+  readonly clarification: ClarificationRequest;
+  readonly selectedAnswer: string;
+}) {
+  return (
+    <div className="clarification clarification-pending" role="status">
+      <ClarificationHeader clarification={clarification} />
+      <div className="pending-answer">
+        <span>answer sent</span>
+        <strong>{selectedAnswer}</strong>
+      </div>
+      <p className="quiet">
+        Creating the next run in this question.
+      </p>
+    </div>
+  );
+}
+
+function ClarificationHeader({
+  clarification
+}: {
+  readonly clarification: ClarificationRequest;
+}) {
+  const metadata = [
+    formatClarificationBasis(clarification.basis),
+    clarification.availableOptions.length > 0
+      ? `${clarification.availableOptions.length} choices offered`
+      : "text answer requested"
+  ].filter((value): value is string => value !== null);
+
+  return (
+    <>
+      <div className="clar-basis">{metadata.join(" · ")}</div>
+      <div className="clar-question">{clarification.question}</div>
+    </>
+  );
+}
+
+function ContractErrorBlock({
+  code,
+  message
+}: {
+  readonly code: string;
+  readonly message: string;
+}) {
+  return (
+    <div className="failure">
+      <div className="error-kind">runtime_error · {code}</div>
+      <p>{message}</p>
+    </div>
+  );
+}
+

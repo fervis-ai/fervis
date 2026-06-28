@@ -1,0 +1,23 @@
+id: lookup_text_may_differ_from_reference_text
+description: Named references preserve original reference text alongside normalized lookup text.
+migrates:
+  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_accepts_lookup_text_distinct_from_reference_text
+kind: algorithm
+algorithm: question_contract.parse
+input:
+  question_context: How much sales for Alice's products?
+  question_inputs:
+    - input_ref: staff
+      source: question_context
+      kind: named_reference_text
+      reference_text: Alice's
+      target_meaning: staff member
+      lookup_text: Alice
+      inventory_check: {why_this_is_an_input: Alice's is a named reference}
+  used_input_refs: [staff]
+expect:
+  result_contains:
+    question_inputs:
+      - id: staff
+        text: Alice's
+        lookup_text: Alice

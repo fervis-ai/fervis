@@ -1,0 +1,39 @@
+id: row_source_ids_are_opaque_and_collision_free
+description: Row-source IDs are opaque generated handles and remain collision-free for similar read IDs.
+migrates:
+  - api/tests/fervis/lookup/fact_planning/test_row_sources.py::test_row_source_ids_are_opaque_and_collision_free
+kind: algorithm
+algorithm: relation_catalog.row_source_projection
+input:
+  catalog:
+    reads:
+      - id: read.items
+        endpoint_name: read_dotted
+        resource_names: [item]
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - ref: field.data.id
+            path: data.id
+            type: string
+      - id: read_items
+        endpoint_name: read_underscored
+        resource_names: [item]
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - ref: field.data.id
+            path: data.id
+            type: string
+expect:
+  result_contains:
+    read_id: read.items
+    row_path_id: data
+    api_source_id_properties:
+      count: 2
+      unique_count: 2
+      all_opaque_prefix: true

@@ -1,0 +1,33 @@
+id: question_run_ask_inline_passes_conversation_memory_context
+description: Inline ask passes prior conversation memory into lookup context.
+kind: algorithm
+algorithm: questions.lifecycle
+input:
+  scenario: ask
+  execution_mode: inline
+  tenant_id: tenant_1
+  principal_id: user_1
+  conversation_id: conversation_existing
+  question: "What about yesterday?"
+  conversation_memory_context:
+    prior_answer_id: answer_1
+    resolved_scope: yesterday
+  model:
+    provider: anthropic
+    model_key: HAIKU
+  lookup_result:
+    status: COMPLETED
+    answer: "12"
+    result_data:
+      value: 12
+expect:
+  result_contains:
+    ask_result:
+      status: COMPLETED
+      answer: "12"
+    lookup:
+      call_count: 1
+      last_conversation_id: conversation_existing
+      last_conversation_context:
+        prior_answer_id: answer_1
+        resolved_scope: yesterday

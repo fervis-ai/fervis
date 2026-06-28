@@ -1,0 +1,33 @@
+id: anti_join_requires_complete_observed_relation
+description: Anti-join fails closed when the observed relation lacks completeness proof.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_coverage_set_algebra.py::test_anti_join_rejects_incomplete_observed_relation
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  scalar_inputs: [{id: zero, value: 0}]
+  relations:
+    - id: candidate_rows
+      rows: [{entity_id: a, display: Alpha}]
+      grain_keys: [entity_id]
+      completeness: {status: complete, source_kind: api_read, set_kind: universe}
+    - id: observed_rows
+      rows: []
+      grain_keys: [observed_id]
+  operations:
+    - id: missing_entities
+      output_relation: answer_rows
+      spec:
+        kind: anti_join
+        candidate:
+          relation_id: candidate_rows
+          role: anti_join.candidate
+          required_identity_fields: [entity_id]
+        observed:
+          relation_id: observed_rows
+          role: anti_join.observed
+          required_identity_fields: [observed_id]
+        join_keys: [{left: entity_id, right: observed_id}]
+        output_fields: [{source: display, output: name}]
+expect:
+  error_contains: observed

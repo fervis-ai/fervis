@@ -1,0 +1,14 @@
+id: row_predicate_parse_unknown_values_do_not_filter
+description: Row predicate values with unknown effect do not create a restrictive row filter.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_unknown_row_predicate_review_does_not_filter_rows
+kind: algorithm
+algorithm: source_binding.row_predicate_parse
+input:
+  row_predicates:
+    is_active:
+      "true": UNKNOWN_TEST_EFFECT
+      "false": UNKNOWN_TEST_EFFECT
+expect:
+  result_contains:
+    row_filters: []

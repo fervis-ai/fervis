@@ -1,0 +1,36 @@
+id: complete_empty_operation_rows_are_operation_no_data
+description: Complete empty operation results preserve operation-row no-data kind.
+migrates:
+  - api/tests/fervis/lookup/outcomes/test_results.py::test_complete_empty_coverage_operation_classifies_as_operation_no_data
+  - api/tests/fervis/lookup/outcomes/test_results.py::test_empty_coverage_result_keeps_operation_kind_after_projection
+kind: algorithm
+algorithm: outcomes.classify
+input:
+  mode: answer
+  precomputed: true
+  relations:
+    - id: result
+      rows: []
+      completeness: {status: complete, source_kind: operation_output, set_kind: unknown, proof_refs: [missing]}
+  render_outputs:
+    - {id: answer, relation_id: result, field_id: name}
+  operations:
+    - id: missing
+      output_relation: result
+      spec:
+        kind: anti_join
+        candidate:
+          relation_id: candidates
+          role: anti_join.candidate
+          required_identity_fields: [candidate_id]
+        observed:
+          relation_id: observed
+          role: anti_join.observed
+          required_identity_fields: [observed_id]
+        join_keys:
+          - {left: candidate_id, right: observed_id}
+        output_fields: []
+expect:
+  result_contains:
+    outcome_kind: no_data
+    empty_relation: {kind: operation_rows, relation_id: result}

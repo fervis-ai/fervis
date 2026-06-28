@@ -1,0 +1,11 @@
+id: prompt_surface_not_realized_role_definition
+description: The NOT_REALIZED excluded state role uses the tightened definition that distinguishes pre-effect from in-progress states.
+kind: algorithm
+algorithm: source_binding.prompt_surface
+input:
+  request:
+    mode: choice_param
+expect:
+  result_contains:
+    excluded_state_role_definitions:
+      NOT_REALIZED: "A tentative, draft, planned-only, or provisional representation that has not become an effective instance of the requested subject."

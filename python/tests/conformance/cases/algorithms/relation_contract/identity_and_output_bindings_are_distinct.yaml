@@ -1,0 +1,20 @@
+id: identity_and_output_bindings_are_distinct
+description: Identity and output bindings remain distinct fields on a relation.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relations.py::test_identity_binding_and_output_binding_are_distinct
+kind: algorithm
+algorithm: planning.relation_contract
+input:
+  mode: relation
+  relation:
+    id: candidate_rows
+    source: {kind: api_read, read_id: read_candidates}
+    fields:
+      - {field_id: subject_identity, roles: [identity]}
+      - {field_id: subject_name, roles: [output]}
+expect:
+  result_contains:
+    fields:
+      subject_identity: {roles: [identity]}
+      subject_name: {roles: [output]}
+    grain_keys: [subject_identity]

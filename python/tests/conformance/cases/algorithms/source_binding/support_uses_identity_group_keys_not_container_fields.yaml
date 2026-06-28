@@ -1,0 +1,64 @@
+id: support_uses_identity_group_keys_not_container_fields
+description: Source-binding support uses executable identity fields as group keys and does not infer group keys from JSON/container fields.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_does_not_infer_group_keys_from_collection_fields
+kind: algorithm
+algorithm: source_binding.fulfillment_support
+input:
+  requested_fact:
+    description: store with the highest sales this month
+    subject_text: stores
+  candidate:
+    source_candidate_id: source_1
+    kind: new_api_read
+    read_id: list_store_list
+    result_grains:
+      - row_path_id: data
+        row_source_id: rs_source_1_data
+        cardinality: many
+        evidence_items:
+          - evidence_id: source_1.data.store_id
+            field_id: store_id
+            row_path_id: data
+            type: uuid
+            roles: [identity]
+            identity:
+              entity_ref: store
+              identity_field: store_id
+              primary_key: true
+              stable: true
+          - evidence_id: source_1.data.hours
+            field_id: hours
+            row_path_id: data
+            type: json
+            roles: [identity]
+            answer_output_ids: [answer_1]
+          - evidence_id: source_1.data.amount
+            field_id: amount
+            row_path_id: data
+            type: decimal
+    evidence_items:
+      - evidence_id: source_1.data.store_id
+        field_id: store_id
+        row_path_id: data
+        type: uuid
+        roles: [identity]
+        identity:
+          entity_ref: store
+          identity_field: store_id
+          primary_key: true
+          stable: true
+      - evidence_id: source_1.data.hours
+        field_id: hours
+        row_path_id: data
+        type: json
+        roles: [identity]
+        answer_output_ids: [answer_1]
+      - evidence_id: source_1.data.amount
+        field_id: amount
+        row_path_id: data
+        type: decimal
+expect:
+  result_contains:
+    group_key_fields:
+      store_id: true

@@ -1,0 +1,45 @@
+id: role_expand_cross_join_builds_role_dimension_pairs
+description: Role expansion followed by cross join builds deterministic role-dimension pairs and grains.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_role_expand_and_cross_join_build_all_role_dimension_pairs
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  relations:
+    - id: records
+      rows:
+        - {record_id: r1, owner_id: u1, reviewer_id: u2}
+      grain_keys: [record_id]
+    - id: dimensions
+      rows:
+        - {dimension_id: current}
+        - {dimension_id: prior}
+      grain_keys: [dimension_id]
+  operations:
+    - id: roles
+      output_relation: record_roles
+      spec:
+        kind: role_expand
+        input_relation: records
+        carry_fields: [record_id]
+        mappings:
+          - {role: owner, source_field: owner_id, output_field: person_id}
+          - {role: reviewer, source_field: reviewer_id, output_field: person_id}
+        output_fields: [record_id, role, person_id]
+    - id: pairs
+      output_relation: result
+      spec:
+        kind: cross_join
+        left: record_roles
+        right: dimensions
+expect:
+  result_contains:
+    record_roles:
+      grain_keys: [record_id, role]
+    result:
+      grain_keys: [record_id, role, dimension_id]
+      rows:
+        - {record_id: r1, role: owner, person_id: u1, dimension_id: current}
+        - {record_id: r1, role: owner, person_id: u1, dimension_id: prior}
+        - {record_id: r1, role: reviewer, person_id: u2, dimension_id: current}
+        - {record_id: r1, role: reviewer, person_id: u2, dimension_id: prior}

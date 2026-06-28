@@ -1,0 +1,12 @@
+id: schema_surface_fulfillment_branches_are_strict
+description: Source-binding fulfillment-decision anyOf branches are strict object schemas.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_fulfillment_decision_anyof_branches_are_strict_objects
+kind: algorithm
+algorithm: source_binding.schema_surface
+input:
+  request:
+    mode: choice_param
+expect:
+  result_contains:
+    fulfillment_anyof_branches_are_strict: true

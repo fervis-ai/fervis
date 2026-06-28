@@ -1,0 +1,11 @@
+id: schema_uses_explicit_numeric_limit_kind
+description: Question-contract schema exposes explicit_numeric_limit_text for copied numeric limits.
+migrates:
+  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_schema_uses_explicit_numeric_limit_kind
+kind: algorithm
+algorithm: question_contract.schema
+input: {}
+expect:
+  result_contains:
+    question_input_kind_membership:
+      explicit_numeric_limit_text: true

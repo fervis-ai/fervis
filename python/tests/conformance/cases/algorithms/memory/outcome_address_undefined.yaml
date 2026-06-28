@@ -1,0 +1,28 @@
+id: outcome_address_undefined
+kind: algorithm
+algorithm: memory.outcome_address
+migrates:
+  - api/tests/fervis/interfaces/django_interface/test_conversation_memory.py::test_fact_result_terminal_projection_preserves_structured_undefined
+input:
+  fact_result:
+    outcome:
+      kind: undefined
+      operation:
+        operation_id: percentage
+        reason_code: division_by_zero
+        input_refs: [current, previous]
+        proof_refs: [compute:percentage]
+      proof_refs: [compute:percentage]
+expect:
+  result_contains:
+    address:
+      address: outcome.undefined
+      terminal: undefined
+      evidence:
+        stepIds: [compute:percentage]
+      proof:
+        operation:
+          operationId: percentage
+          reasonCode: division_by_zero
+          inputRefs: [current, previous]
+          proofRefs: [compute:percentage]

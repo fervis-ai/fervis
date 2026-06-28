@@ -1,0 +1,49 @@
+id: open_read_preferred_over_unbound_detail_read
+description: Catalog selection prefers an open list read over a required-identity detail read when no identity value is available.
+migrates:
+  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_prefers_open_reads_over_required_identity_detail_reads
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - id: sale_detail
+        endpoint_name: retrieve_sale
+        resource_names: [sale]
+        params:
+          - ref: sale.path.sale_id
+            name: sale_id
+            source: path
+            type: uuid
+            required: true
+            identity: {entity_ref: sale, identity_field: sale_id, primary_key: true, stable: true}
+        fields:
+          - ref: field.sale_id
+            type: uuid
+          - ref: field.status
+            type: string
+      - id: sale_list
+        endpoint_name: list_sales
+        resource_names: [sale]
+        fields:
+          - ref: field.data.sale_id
+            type: uuid
+          - ref: field.data.status
+            type: string
+  requested_facts:
+    - id: fact_1
+      description: whether completed sales exist
+      answer_outputs:
+        - id: fact_1
+  resource_name_matches:
+    - requested_fact_id: fact_1
+      answer_output_resource_lineage:
+        - answer_output_id: answer_1
+          support_role: MEASURED_VALUE
+          source_text: completed sales
+          matching_resource_names: [sale]
+  max_reads_per_fact: 4
+expect:
+  result_contains:
+    selected_read_ids: [sale_list]
+

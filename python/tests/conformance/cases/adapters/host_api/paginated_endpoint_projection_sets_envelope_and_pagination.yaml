@@ -1,0 +1,29 @@
+id: paginated_endpoint_projection_sets_envelope_and_pagination
+description: Paginated endpoint projection exposes response envelope and all-pages policy.
+migrates:
+  - api/tests/fervis/host_api/test_relation_catalog_projection.py::test_endpoint_contracts_project_to_framework_neutral_relation_catalog
+kind: adapter
+adapter: host_api.endpoint_contract_projection
+input:
+  contracts:
+    - endpoint_name: list_records
+      url_name: records
+      method: GET
+      path_template: /records/
+      view_class: tests.RecordView
+      resource_names: [record, activity record]
+      paginated: true
+      response_fields:
+        - name: data
+          type: array
+          path: data
+expect:
+  result_contains:
+    reads:
+      list_records:
+        response_envelope:
+          results_path: data
+          count_path: count
+        pagination:
+          mode: page_number
+          completeness_policy: all_pages
