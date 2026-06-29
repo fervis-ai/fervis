@@ -94,7 +94,7 @@ describe("Ledger app actions", () => {
     render(<App initialClient={createInteractiveClient({ answerClarification })} />);
 
     fireEvent.click(await screen.findByText("run_clarify"));
-    fireEvent.click(screen.getByRole("radio", { name: "BBS Outlet" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "BBS Outlet" }));
     fireEvent.click(screen.getByRole("button", { name: "Send clarification" }));
 
     expect(await screen.findByText("18 in-person sales happened this month.")).toBeInTheDocument();
@@ -116,7 +116,7 @@ describe("Ledger app actions", () => {
     render(<App initialClient={createInteractiveClient({ answerClarification })} />);
 
     fireEvent.click(await screen.findByText("run_clarify"));
-    fireEvent.click(screen.getByRole("radio", { name: "ABC Mall" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "ABC Mall" }));
     fireEvent.click(screen.getByRole("button", { name: "Send clarification" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent("answer sent");
@@ -129,7 +129,7 @@ describe("Ledger app actions", () => {
 
     fireEvent.click(await screen.findByText("run_clarify"));
 
-    expect(screen.getByText("Which store do you mean?")).toBeInTheDocument();
+    expect(await screen.findByText("Which store do you mean?")).toBeInTheDocument();
     expect(screen.queryByText(/POST \/questions/)).not.toBeInTheDocument();
     expect(screen.queryByText(/triggerKind/)).not.toBeInTheDocument();
   });

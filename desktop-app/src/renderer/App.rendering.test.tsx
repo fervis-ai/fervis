@@ -7,9 +7,11 @@ import {
   httpPayloadFor,
   renderDemoApp
 } from "./appTestSupport";
+import { saveConnectionSettings } from "./connectionSettings";
 
 describe("Ledger app rendering", () => {
   afterEach(() => {
+    window.localStorage.clear();
     vi.unstubAllGlobals();
   });
 
@@ -96,7 +98,7 @@ describe("Ledger app rendering", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /run_clarify/ }));
 
-    expect(screen.getByText("Which store do you mean?")).toBeInTheDocument();
+    expect(await screen.findByText("Which store do you mean?")).toBeInTheDocument();
     expect(
       screen.queryByText("18 in-person sales happened this month.")
     ).not.toBeInTheDocument();
@@ -184,6 +186,24 @@ describe("Ledger app rendering", () => {
     expect(new Headers(firstRequest.headers).get("Authorization")).toBe(
       "Bearer secret-token"
     );
+
+    fireEvent.click(screen.getByLabelText("Open connection settings"));
+    expect(screen.getByLabelText("Base API URL")).toHaveValue(
+      "http://127.0.0.1:9000/fervis"
+    );
+    expect(screen.getByLabelText("Auth token")).toHaveValue("");
+  });
+
+  it("prefills settings with the cached API URL", () => {
+    saveConnectionSettings({ baseUrl: "http://127.0.0.1:9100/v1/" });
+
+    render(<App initialClient={null} />);
+    fireEvent.click(screen.getByLabelText("Open connection settings"));
+
+    expect(screen.getByLabelText("Base API URL")).toHaveValue(
+      "http://127.0.0.1:9100/v1/"
+    );
+    expect(screen.getByLabelText("Auth token")).toHaveValue("");
   });
 
   it("keeps typed follow-up text when the theme changes", async () => {

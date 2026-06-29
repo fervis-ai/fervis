@@ -181,6 +181,35 @@ describe("Fervis API boundary decoder", () => {
     expect(decoded.value.usage).toBeNull();
   });
 
+  it("decodes queued live runs before explanation and steps exist", () => {
+    const decoded = decodeQuestionRunList({
+      questionId: "ee69a71a-2ee9-4609-b083-04dc5c5e4298",
+      runs: [
+        {
+          answer: null,
+          conversationId: "5794c10b-fe5c-4b52-bccd-f233f495c1b6",
+          error: null,
+          modelKey: "openai:gpt-5.4-mini",
+          question: "list the stores",
+          questionId: "ee69a71a-2ee9-4609-b083-04dc5c5e4298",
+          resultData: null,
+          runId: "2f118c8b-c973-47e0-b993-262a07164669",
+          runNumber: 1,
+          status: "QUEUED",
+          tenantId: "default",
+          triggerKind: "initial"
+        }
+      ]
+    });
+
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) {
+      throw new Error(decoded.error.message);
+    }
+    expect(decoded.value.runs[0]?.steps).toEqual([]);
+    expect(decoded.value.runs[0]?.explanation.inputs.results).toEqual([]);
+  });
+
   it("treats absent optional diagnostics as null", () => {
     const { worker: _worker, usage: _usage, ...payload } = completedRunFixture;
     const decoded = decodeRun(payload);

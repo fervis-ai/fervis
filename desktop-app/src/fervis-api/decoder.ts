@@ -4,11 +4,12 @@ import type {
   DecodeResult,
   QuestionRunListPayload,
   QuestionStatePayload,
+  RunStep,
   RunPayload
 } from "./contracts";
 import { decodeNextActions } from "./decoding/actions";
 import { decodeRunStatus, decodeTriggerKind } from "./decoding/enums";
-import { decodeExplanation } from "./decoding/explanation";
+import { decodeExplanation, emptyExplanation } from "./decoding/explanation";
 import { decode, expectArray, expectNumber, expectNullableString, expectObject, expectString } from "./decoding/primitives";
 import { decodeResultData } from "./decoding/resultData";
 import {
@@ -83,8 +84,11 @@ function decodeRunPayload(raw: unknown): RunPayload {
     status: decodeRunStatus(object.status, "status"),
     answer: expectNullableString(object.answer, "answer"),
     resultData: decodeResultData(object.resultData),
-    explanation: decodeExplanation(object.explanation),
-    steps: expectArray(object.steps, "steps").map(decodeRunStep),
+    explanation:
+      object.explanation === undefined || object.explanation === null
+        ? emptyExplanation()
+        : decodeExplanation(object.explanation),
+    steps: decodeRunSteps(object.steps),
     error: object.error === null ? null : decodeRunError(object.error),
     worker:
       object.worker === undefined || object.worker === null
@@ -96,4 +100,11 @@ function decodeRunPayload(raw: unknown): RunPayload {
         : decodeUsage(object.usage),
     nextActions: decodeNextActions(object.nextActions)
   };
+}
+
+function decodeRunSteps(raw: unknown): readonly RunStep[] {
+  if (raw === undefined || raw === null) {
+    return [];
+  }
+  return expectArray(raw, "steps").map(decodeRunStep);
 }

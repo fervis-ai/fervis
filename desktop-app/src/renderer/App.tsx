@@ -16,6 +16,11 @@ import { ConversationSurface } from "./components/ConversationSurface";
 import { ConversationsRail } from "./components/ConversationsRail";
 import { SettingsModal } from "./components/SettingsModal";
 import { TopBar } from "./components/TopBar";
+import {
+  loadConnectionSettings,
+  normalizeConnectionSettings,
+  saveConnectionSettings
+} from "./connectionSettings";
 import type {
   ConversationDetails,
   QuestionRefreshPayload,
@@ -42,6 +47,9 @@ export function App({ initialClient }: AppProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pollingErrorMessage, setPollingErrorMessage] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [connectionSettings, setConnectionSettings] = useState(() =>
+    loadConnectionSettings()
+  );
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
 
   const refreshQuestionState = async (
@@ -186,9 +194,20 @@ export function App({ initialClient }: AppProps) {
       </button>
       {settingsOpen ? (
         <SettingsModal
+          initialBaseUrl={connectionSettings.baseUrl}
           onClose={() => setSettingsOpen(false)}
           onSave={(connection) => {
-            setApiClient(createFervisHttpClient(connection));
+            const nextSettings = normalizeConnectionSettings({
+              baseUrl: connection.baseUrl
+            });
+            saveConnectionSettings(nextSettings);
+            setConnectionSettings(nextSettings);
+            setApiClient(
+              createFervisHttpClient({
+                authToken: connection.authToken,
+                baseUrl: nextSettings.baseUrl
+              })
+            );
             setSettingsOpen(false);
           }}
         />

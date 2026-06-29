@@ -19,6 +19,16 @@ import {
   decodeStepSemantic
 } from "./runDetails";
 
+export function emptyExplanation(): ExplanationPayload {
+  return {
+    inputs: { results: [] },
+    lineage: {
+      compact: { questions: [] },
+      verbose: { questions: [] }
+    }
+  };
+}
+
 export function decodeExplanation(raw: unknown): ExplanationPayload {
   const object = expectObject(raw, "explanation");
   const inputs = expectObject(object.inputs, "explanation.inputs");

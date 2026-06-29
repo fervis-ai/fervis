@@ -1,13 +1,15 @@
 import { useState } from "react";
 
 export function SettingsModal({
+  initialBaseUrl,
   onClose,
   onSave
 }: {
+  readonly initialBaseUrl: string;
   readonly onClose: () => void;
   readonly onSave: (connection: { readonly baseUrl: string; readonly authToken: string }) => void;
 }) {
-  const [baseUrl, setBaseUrl] = useState("http://127.0.0.1:8000/v1");
+  const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
   const [authToken, setAuthToken] = useState("");
 
   return (
