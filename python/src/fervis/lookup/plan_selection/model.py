@@ -46,6 +46,7 @@ class SourceStrategyMember:
     source_relation_id: str = ""
     calendar_id: str = ""
     field_ids: tuple[str, ...] = ()
+    operation_evidence: tuple[dict[str, Any], ...] = ()
     source_interface: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:

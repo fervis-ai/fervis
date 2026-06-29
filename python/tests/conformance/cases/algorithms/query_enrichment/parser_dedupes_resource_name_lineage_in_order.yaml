@@ -1,0 +1,38 @@
+id: parser_dedupes_resource_name_lineage_in_order
+description: Parser canonicalizes duplicate resource-name lineage rows and resource names while preserving first-seen order.
+migrates:
+  - api/tests/fervis/lookup/query_enrichment/test_query_enrichment.py::test_query_enrichment_parser_dedupes_matching_resource_names_in_order
+kind: algorithm
+algorithm: query_enrichment.parse
+input:
+  request_fixture: booked_money
+  request:
+    reads:
+      - id: sales_read
+        endpoint_name: list_sale_list
+        resource_names: [sale]
+      - id: staff_read
+        endpoint_name: list_staff_list
+        resource_names: [staff]
+      - id: payment_read
+        endpoint_name: list_payment_list
+        resource_names: [payment]
+  payload:
+    requested_fact_resource_name_matches:
+      - requested_fact_id: fact_1
+        answer_output_resource_lineage:
+          - answer_output_id: answer_1
+            support_role: MEASURED_VALUE
+            source_text: booked money
+            matching_resource_names: [sale, staff, sale]
+          - answer_output_id: answer_1
+            support_role: MEASURED_VALUE
+            source_text: booked money
+            matching_resource_names: [payment, staff]
+    entity_target_catalog_search_terms: []
+expect:
+  result_contains:
+    requested_fact_resource_name_matches:
+      - answer_output_resource_lineage_count: 1
+        answer_output_resource_lineage:
+          - matching_resource_names: [sale, staff, payment]

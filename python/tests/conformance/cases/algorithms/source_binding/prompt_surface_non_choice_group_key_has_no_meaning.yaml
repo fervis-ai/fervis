@@ -1,0 +1,63 @@
+id: prompt_surface_non_choice_group_key_has_no_meaning
+description: Source-binding prompt renders non-choice group-key evidence without invented meaning.
+kind: algorithm
+algorithm: source_binding.prompt_surface
+input:
+  request:
+    mode: yaml_prompt_surface
+    question: Show sales grouped by sale.
+    requested_fact:
+      id: fact_1
+      description: sales grouped by sale
+      answer_subject: sales
+      answer_outputs: [answer_1, answer_2]
+    relation_catalog:
+      reads:
+        - id: inventory
+          endpoint_name: list_inventory_list
+          resource_names: [inventory]
+          fields:
+            - ref: inventory.field.amount
+              path: amount
+              type: decimal
+        - id: staff
+          endpoint_name: list_staff_list
+          resource_names: [staff]
+          fields:
+            - ref: staff.field.amount
+              path: amount
+              type: decimal
+        - id: sales
+          endpoint_name: list_sale_list
+          resource_names: [sale]
+          row_paths:
+            - id: data
+              path: data
+              cardinality: many
+          fields:
+            - ref: sales.field.sale_id
+              path: data.sale_id
+              row_path_id: data
+              type: uuid
+              identity:
+                entity_ref: sale
+                identity_field: sale_id
+                primary_key: true
+                stable: true
+            - ref: sales.field.sale_type
+              path: data.sale_type
+              row_path_id: data
+              type: choice
+              choices: [STORE, ONLINE]
+    selected_read_ids: [inventory, staff, sales]
+    retained_read_ids: [sales]
+    selected_source_candidate_count: 3
+expect:
+  result_contains:
+    rendered_fulfillment_evidence:
+      - kind: group_key
+        field: sale_id
+        label: Sale ID
+        row_path: data
+        type: uuid
+        evidence_id: source_3.data.sale_id

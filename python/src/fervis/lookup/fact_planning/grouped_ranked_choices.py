@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from fervis.lookup.relation_catalog import primary_stable_identity_field_ids
 from fervis.lookup.fact_planning.aggregate_choice_parts import (
     AGGREGATE_FUNCTIONS,
     COUNT_FUNCTION,
@@ -251,8 +250,6 @@ def _group_candidates(
             for evidence_id in fulfillment.group_key_evidence_ids
         )
     )
-    field_id_by_evidence_id = source_field_id_by_evidence_id(source)
-    identity_field_ids = set(primary_stable_identity_field_ids(source.available_fields))
     compatible = tuple(
         (evidence_id, field_id)
         for evidence_id in evidence_ids
@@ -265,12 +262,6 @@ def _group_candidates(
         )
         if field_id
     )
-    identity_compatible = tuple(
-        item
-        for item in compatible
-        if field_id_by_evidence_id.get(item[0]) in identity_field_ids
-    )
-    selected = identity_compatible or compatible
     fields_by_id = {field.field_id: field for field in source.available_fields}
     return tuple(
         {
@@ -279,7 +270,7 @@ def _group_candidates(
             "type": str(getattr(fields_by_id.get(field_id), "type", "") or ""),
             "evidence_id": evidence_id,
         }
-        for index, (evidence_id, field_id) in enumerate(selected, start=1)
+        for index, (evidence_id, field_id) in enumerate(compatible, start=1)
     )
 
 

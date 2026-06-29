@@ -38,6 +38,9 @@ from fervis.lookup.question_contract import (
     RequestedFactAnswerSubject,
     RequestedFactKnownInput,
 )
+from fervis.lookup.read_eligibility.candidate_identity import (
+    read_candidate_signature,
+)
 from fervis.lookup.read_eligibility import (
     ReadAssessment,
     ReadEligibilityRequest,
@@ -73,6 +76,9 @@ from fervis.lookup.source_binding.candidates.evidence import (
     _candidate_with_evidence_items,
 )
 from fervis.lookup.source_binding.candidates import source_candidate_registry
+from fervis.lookup.source_binding.candidates.registry import (
+    source_candidate_discovery_payload,
+)
 from fervis.lookup.source_binding.parser import (
     _candidate_value_is_used_by_bound_source,
 )
@@ -216,6 +222,56 @@ def test_source_binding_registry_candidates_use_model_visible_support_sets():
     assert all(
         "fulfillment_support_set_id" in item for item in parser_visible_support_sets
     )
+
+
+def test_read_eligibility_relevant_fields_limit_fulfillment_support_sets():
+    initial_request = _request_with_optional_params(
+        include_extra_evidence_field=True,
+        include_secondary_metric_field=True,
+    )
+    initial_payload = source_candidate_discovery_payload(initial_request)
+    initial_candidate = _source_candidate(
+        initial_payload,
+        requested_fact_id="fact_1",
+        read_id="sales",
+    )
+    candidate_signature = read_candidate_signature(
+        initial_candidate,
+        requested_fact_id="fact_1",
+    )
+    retained_request = _request_with_optional_params(
+        include_extra_evidence_field=True,
+        include_secondary_metric_field=True,
+        read_eligibility=ReadEligibilityResult(
+            read_assessments=(
+                _retained_read_assessment(
+                    source_candidate_id=str(initial_candidate["source_candidate_id"]),
+                    source_candidate_signature=candidate_signature,
+                    requested_fact_id="fact_1",
+                    read_id="sales",
+                    relevant_field_refs=("sales.field.amount",),
+                    retention_basis=(
+                        "Only the sale amount is needed for this aggregate answer."
+                    ),
+                ),
+            )
+        ),
+    )
+
+    payload = source_candidate_discovery_payload(retained_request)
+    candidate = _source_candidate(
+        payload,
+        requested_fact_id="fact_1",
+        read_id="sales",
+    )
+
+    assert _candidate_field_refs(candidate) >= {
+        "sales.field.amount",
+        "sales.field.status",
+        "sales.field.unrelated",
+        "sales.field.secondary_amount",
+    }
+    assert _support_set_field_refs(candidate) == {"sales.field.amount"}
 
 
 def test_bound_source_prompt_payload_carries_only_answer_evidence_roles():
@@ -1595,6 +1651,34 @@ def _source_options(payload: dict[str, object]) -> list[dict[str, object]]:
         for candidate in context.get("source_options", ())
         if isinstance(candidate, dict)
     ]
+
+
+def _candidate_field_refs(candidate: dict[str, object]) -> set[str]:
+    return {
+        str(item.get("field_ref") or "")
+        for grain in candidate.get("result_grains") or ()
+        if isinstance(grain, dict)
+        for item in grain.get("evidence_items") or ()
+        if isinstance(item, dict) and str(item.get("field_ref") or "")
+    }
+
+
+def _support_set_field_refs(candidate: dict[str, object]) -> set[str]:
+    return {
+        str(item.get("field_ref") or "")
+        for support_set in candidate.get("fulfillment_support_sets") or ()
+        if isinstance(support_set, dict)
+        for slot in support_set.get("fulfillment_slots") or ()
+        if isinstance(slot, dict)
+        for key in (
+            "group_key_evidence",
+            "metric_measure_evidence",
+            "row_count_basis_evidence",
+            "scope_evidence",
+        )
+        for item in slot.get(key) or ()
+        if isinstance(item, dict) and str(item.get("field_ref") or "")
+    }
 
 
 def _binding_surface(candidate: dict[str, object]) -> dict[str, object]:

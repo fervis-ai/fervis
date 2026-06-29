@@ -1668,8 +1668,8 @@ def test_lookup_cutover_executes_set_difference_without_python_or_old_phases():
                     "kind": "fact_plan",
                     "answers": [
                         {
-                            "requested_fact_id": "rf_variant_name",
-                            "answer_output_ids": ["variant_name"],
+                            "requested_fact_id": "fact_1",
+                            "answer_output_ids": ["answer_1"],
                             "pattern": "set_difference",
                             "candidate": {
                                 "source": {
@@ -1691,10 +1691,10 @@ def test_lookup_cutover_executes_set_difference_without_python_or_old_phases():
                 }
             },
             question_contract=_question_contract_for(
-                "rf_variant_name",
+                "fact_1",
                 description="variant name",
                 subject_text="item variants",
-                binding_target_ids=("variant_name",),
+                binding_target_ids=("answer_1",),
             ),
         ),
     )

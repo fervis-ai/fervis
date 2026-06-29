@@ -17,6 +17,9 @@ from fervis.lookup.source_binding.candidates.plan_selection_filter import (
     filter_prompt_payload_by_plan_selection,
 )
 from fervis.lookup.source_binding.model import SourceBindingRequest
+from fervis.lookup.operation_families.plan_selection_registry import (
+    plan_selection_shape_specs_for_family,
+)
 from fervis.lookup.plan_selection import (
     SelectedSourceStrategy,
     PlanSelectionSet,
@@ -25,6 +28,7 @@ from fervis.lookup.plan_selection import (
     PlanSelectionTurnPrompt,
     parse_plan_selection,
 )
+from fervis.lookup.plan_selection.source_strategies import source_strategies_by_fact
 from fervis.lookup.fact_plan.fact_plan import (
     BlockedFactBasis,
     PlanImpossible,
@@ -354,36 +358,157 @@ def test_grouped_ranked_candidates_project_exact_canonical_operation_bundles():
     payload = PlanSelectionTurnPrompt(request).plan_selection_candidates_payload()
     source_strategies = payload["requested_fact_source_strategies"][0]["source_strategies"]
 
-    assert len(source_strategies) == 1
     source_members = [plan["source_members"][0] for plan in source_strategies]
     assert all("fulfillment_support_set_ids" not in member for member in source_members)
+    assert {
+        _operation_field_ids(member)
+        for member in source_members
+    } == {
+        ("location_id", "amount"),
+        ("location_id", "count"),
+        ("label", "amount"),
+        ("label", "count"),
+    }
     assert [_response_row_field_ids(member) for member in source_members] == [
-        ["location_id", "label", "amount", "count"]
+        ["location_id", "label", "amount", "count"],
+        ["location_id", "label", "amount", "count"],
+        ["location_id", "label", "amount", "count"],
+        ["location_id", "label", "amount", "count"],
     ]
 
 
-def test_plan_selection_projects_one_source_strategy_without_operation_bundle_choices():
+def test_aggregate_operation_plan_selection_surfaces_each_valid_metric_operation():
+    fact = RequestedFact(
+        id="fact_1",
+        description="staff person with the highest sales total",
+        answer_expression=RequestedFactAnswerExpression(
+            family=RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+        ),
+        answer_outputs=(
+            RequestedFactAnswerOutput(
+                id="answer_1",
+                description="staff person who made the most sales",
+            ),
+            RequestedFactAnswerOutput(
+                id="answer_2",
+                description="sales total for that staff person",
+            ),
+        ),
+    )
+    request = PlanSelectionRequest(
+        question="Which staff person made the most sales?",
+        question_contract=QuestionContract(requested_facts=(fact,)),
+        requested_facts=(fact,),
+        relation_catalog=RelationCatalog(reads=()),
+        source_candidate_payload={
+            "requested_fact_sources": [
+                {
+                    "requested_fact_id": "fact_1",
+                    "source_contexts": [
+                        {
+                            "context_id": "fact_1:sources",
+                            "source_options": [
+                                {
+                                    "source_candidate_id": "source_1",
+                                    "kind": "new_api_read",
+                                    "read_id": "list_sale_list",
+                                    "fulfillment_support_sets": [
+                                        _group_key_support_set(
+                                            "support.source_1.answer_1.staff_id",
+                                            answer_output_id="answer_1",
+                                            slot_id="slot.source_1.answer_1.staff_id",
+                                            evidence_id="source_1.data.staff_id",
+                                            field_id="staff_id",
+                                        ),
+                                        _metric_support_set(
+                                            "support.source_1.answer_2.count",
+                                            answer_output_id="answer_2",
+                                            slot_id="slot.source_1.answer_2.count",
+                                            evidence_id="source_1.data.count",
+                                            field_id="count",
+                                        ),
+                                        _metric_support_set(
+                                            "support.source_1.answer_2.amount",
+                                            answer_output_id="answer_2",
+                                            slot_id="slot.source_1.answer_2.amount",
+                                            evidence_id="source_1.data.amount",
+                                            field_id="amount",
+                                        ),
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+        conversation_context={},
+    )
+
+    strategies = source_strategies_by_fact(
+        request.source_candidate_payload,
+        requested_facts=request.requested_facts,
+        relation_catalog=request.relation_catalog,
+        shape_specs_for_family=plan_selection_shape_specs_for_family,
+    )["fact_1"]
+    ranked_strategies = [
+        item for item in strategies if item.plan_shape == "ranked_aggregate"
+    ]
+
+    assert {
+        frozenset(item.source_members[0].fulfillment_support_set_ids)
+        for item in ranked_strategies
+    } == {
+        frozenset(
+            (
+                "support.source_1.answer_1.staff_id",
+                "support.source_1.answer_2.count",
+            )
+        ),
+        frozenset(
+            (
+                "support.source_1.answer_1.staff_id",
+                "support.source_1.answer_2.amount",
+            )
+        ),
+    }
+
+
+def test_plan_selection_projects_operation_evidence_without_operation_bundle_choices():
     request = _ranked_multi_metric_plan_selection_request()
 
     payload = PlanSelectionTurnPrompt(request).plan_selection_candidates_payload()
 
     fact_payload = payload["requested_fact_source_strategies"][0]
     source_strategies = fact_payload["source_strategies"]
-    assert len(source_strategies) == 1
-    strategy = source_strategies[0]
-    assert strategy["source_strategy_id"].startswith(
-        "source_strategy.fact_1.ranked_aggregate."
+    assert len(source_strategies) == 6
+    assert {
+        _operation_field_ids(strategy["source_members"][0])
+        for strategy in source_strategies
+    } == {
+        ("location_id", "amount"),
+        ("location_id", "calculated_pay"),
+        ("location_id", "commission"),
+        ("staff_id", "amount"),
+        ("staff_id", "calculated_pay"),
+        ("staff_id", "commission"),
+    }
+    source_members = [strategy["source_members"][0] for strategy in source_strategies]
+    assert all(
+        strategy["source_strategy_id"].startswith(
+            "source_strategy.fact_1.ranked_aggregate."
+        )
+        for strategy in source_strategies
     )
-    assert strategy["plan_shape"] == "ranked_aggregate"
-    source_member = strategy["source_members"][0]
-    assert source_member["source_candidate_id"] == "source_1"
-    assert "fulfillment_support_sets" not in source_member
-    assert set(_response_row_field_ids(source_member)) >= {
+    assert all(strategy["plan_shape"] == "ranked_aggregate" for strategy in source_strategies)
+    assert all(member["source_candidate_id"] == "source_1" for member in source_members)
+    assert all("fulfillment_support_sets" not in member for member in source_members)
+    assert all({
         "staff_id",
         "amount",
         "calculated_pay",
         "commission",
-    }
+    } <= set(_response_row_field_ids(member)) for member in source_members)
 
 
 def test_source_alignment_filter_preserves_all_support_sets_for_aligned_source():
@@ -2110,6 +2235,14 @@ def _response_row_field_ids(source_member: dict[str, object]) -> list[str]:
         for field in row.get("fields") or ()
         if isinstance(field, dict)
     ]
+
+
+def _operation_field_ids(source_member: dict[str, object]) -> tuple[str, ...]:
+    return tuple(
+        str(item.get("field_id") or "")
+        for item in source_member.get("operation_evidence", ())
+        if isinstance(item, dict) and str(item.get("field_id") or "")
+    )
 
 
 def _source_interface_response_row_field_ids(

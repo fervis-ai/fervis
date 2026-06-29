@@ -5,7 +5,6 @@ import re
 from typing import Any
 from xml.etree import ElementTree
 
-from fervis.lookup.question_contract import NormalInstanceExcludedStateRole
 from tests.lookup.prompt_sections import prompt_section_payload
 
 
@@ -1927,6 +1926,7 @@ def _source_fulfillments(
     for answer_output_id in answer_output_ids:
         answer_evidence_ids = _evidence_ids_for_answer_output(
             answer,
+            source=source,
             answer_output_id=answer_output_id,
             answer_output_ids=answer_output_ids,
             evidence_ids=evidence_ids,
@@ -1977,6 +1977,7 @@ def _answer_output_ids_for_source(
 def _evidence_ids_for_answer_output(
     answer: dict[str, Any],
     *,
+    source: dict[str, Any],
     answer_output_id: str,
     answer_output_ids: tuple[str, ...],
     evidence_ids: tuple[str, ...],
@@ -1990,8 +1991,9 @@ def _evidence_ids_for_answer_output(
         )
         if selected:
             return selected
-    output_fields = _answer_output_field_ids_for_output(
+    output_fields = _answer_output_field_ids_for_source(
         answer,
+        source=source,
         answer_output_id=answer_output_id,
         answer_output_ids=answer_output_ids,
     )
@@ -2068,6 +2070,35 @@ def _answer_output_field_ids_for_output(
     if isinstance(metric, dict) and str(metric.get("record_id_field_id") or ""):
         return [str(metric["record_id_field_id"])]
     return output_fields
+
+
+def _answer_output_field_ids_for_source(
+    answer: dict[str, Any],
+    *,
+    source: dict[str, Any],
+    answer_output_id: str,
+    answer_output_ids: tuple[str, ...],
+) -> list[str]:
+    for scoped_key in ("candidate", "observed", "left", "right"):
+        scoped = answer.get(scoped_key)
+        if not isinstance(scoped, dict) or scoped.get("source") != source:
+            continue
+        output_fields = _field_ids_from_items(scoped.get("output_fields"))
+        if len(output_fields) == len(answer_output_ids):
+            try:
+                return [output_fields[answer_output_ids.index(answer_output_id)]]
+            except ValueError:
+                return []
+        if output_fields:
+            return output_fields
+        identity_fields = _field_ids_from_items(scoped.get("identity_fields"))
+        if identity_fields:
+            return identity_fields
+    return _answer_output_field_ids_for_output(
+        answer,
+        answer_output_id=answer_output_id,
+        answer_output_ids=answer_output_ids,
+    )
 
 
 def _answer_uses_row_population_support(answer: dict[str, Any]) -> bool:
@@ -2517,7 +2548,7 @@ def _source_scoped_answer_field_ids(
         field_ids = _field_ids_from_values(scoped.get("identity_fields"))
         if field_ids:
             return field_ids
-        field_ids = _field_ids_from_items(scoped.get("output_fields"))
+        field_ids = set(_field_ids_from_items(scoped.get("output_fields")))
         if field_ids:
             return field_ids
     return set()
@@ -2553,12 +2584,18 @@ def _answer_metric_field_id(answer: dict[str, Any]) -> str:
     return _aggregate_choice_metric_field_id_for_answer(answer)
 
 
-def _field_ids_from_items(raw_items: object) -> set[str]:
-    return {
-        str(item["field_id"])
-        for item in raw_items or ()
-        if isinstance(item, dict) and item.get("field_id")
-    }
+def _field_ids_from_items(raw_items: object) -> tuple[str, ...]:
+    if not isinstance(raw_items, (list, tuple, set)):
+        return ()
+    field_ids: list[str] = []
+    for item in raw_items:
+        if isinstance(item, dict):
+            field_id = str(item.get("field_id") or "")
+        else:
+            field_id = str(item or "")
+        if field_id:
+            field_ids.append(field_id)
+    return tuple(dict.fromkeys(field_ids))
 
 
 def _field_ids_from_values(raw_items: object) -> set[str]:

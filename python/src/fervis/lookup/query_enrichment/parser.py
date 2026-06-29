@@ -93,8 +93,7 @@ def _answer_output_resource_lineage(
     endpoint_names: set[str],
     resource_names: set[str],
 ) -> tuple[AnswerOutputResourceLineage, ...]:
-    output: list[AnswerOutputResourceLineage] = []
-    seen_rows: set[tuple[str, str, str]] = set()
+    rows: dict[tuple[str, str, str], list[str]] = {}
     for raw in raw_matches:
         if not isinstance(raw, dict):
             raise ValueError("answer_output_resource_lineage items must be objects")
@@ -115,9 +114,6 @@ def _answer_output_resource_lineage(
         if support_role not in ANSWER_OUTPUT_SUPPORT_ROLE_VALUES:
             raise ValueError("query enrichment references unknown support role")
         source_text = _text(raw.get("source_text"))
-        row_key = (answer_output_id, support_role, source_text)
-        if row_key in seen_rows:
-            raise ValueError("duplicate answer output resource lineage row")
         raw_terms = raw.get("matching_resource_names")
         if not isinstance(raw_terms, list):
             raise ValueError("matching_resource_names must be an array")
@@ -130,16 +126,18 @@ def _answer_output_resource_lineage(
             raise ValueError(
                 "answer_output_resource_lineage requires matching_resource_names"
             )
-        output.append(
-            AnswerOutputResourceLineage(
-                answer_output_id=answer_output_id,
-                support_role=support_role,
-                source_text=source_text,
-                matching_resource_names=terms,
-            )
+        row_key = (answer_output_id, support_role, source_text)
+        row_terms = rows.setdefault(row_key, [])
+        row_terms.extend(term for term in terms if term not in row_terms)
+    return tuple(
+        AnswerOutputResourceLineage(
+            answer_output_id=answer_output_id,
+            support_role=support_role,
+            source_text=source_text,
+            matching_resource_names=tuple(terms),
         )
-        seen_rows.add(row_key)
-    return tuple(output)
+        for (answer_output_id, support_role, source_text), terms in rows.items()
+    )
 
 
 def _entity_target_catalog_search_terms(

@@ -20,7 +20,7 @@ echo "==> Python dependencies"
 uv --directory "$PYTHON_DIR" sync --extra dev
 
 echo "==> Ruff"
-uv --directory "$PYTHON_DIR" run ruff check .
+uv --directory "$PYTHON_DIR" run ruff check src
 
 echo "==> Fervis tests"
 uv --directory "$PYTHON_DIR" run pytest

@@ -61,6 +61,7 @@
         "lineage.input_lineage",
         "lookup.orchestration",
         "outcomes.classify",
+        "plan_selection.prompt_surface",
         "catalog_selection.resolver_select",
         "catalog_selection.select",
         "relation_catalog.row_source_projection",

@@ -1,0 +1,70 @@
+id: prompt_surface_fulfillment_evidence_is_semantic
+description: Source-binding prompt renders fulfillment choices as semantic evidence.
+kind: algorithm
+algorithm: source_binding.prompt_surface
+input:
+  request:
+    mode: yaml_prompt_surface
+    question: Show sales grouped by sale.
+    requested_fact:
+      id: fact_1
+      description: sales grouped by sale
+      answer_subject: sales
+      answer_outputs: [answer_1, answer_2]
+    relation_catalog:
+      reads:
+        - id: inventory
+          endpoint_name: list_inventory_list
+          resource_names: [inventory]
+          fields:
+            - ref: inventory.field.amount
+              path: amount
+              type: decimal
+        - id: staff
+          endpoint_name: list_staff_list
+          resource_names: [staff]
+          fields:
+            - ref: staff.field.amount
+              path: amount
+              type: decimal
+        - id: sales
+          endpoint_name: list_sale_list
+          resource_names: [sale]
+          row_paths:
+            - id: data
+              path: data
+              cardinality: many
+          fields:
+            - ref: sales.field.sale_id
+              path: data.sale_id
+              row_path_id: data
+              type: uuid
+              identity:
+                entity_ref: sale
+                identity_field: sale_id
+                primary_key: true
+                stable: true
+            - ref: sales.field.sale_type
+              path: data.sale_type
+              row_path_id: data
+              type: choice
+              choices: [STORE, ONLINE]
+    selected_read_ids: [inventory, staff, sales]
+    retained_read_ids: [sales]
+    selected_source_candidate_count: 3
+expect:
+  result_contains:
+    prompt_text_contains:
+      - '<choice'
+      - 'answer_output="answer_2"'
+      - '<evidence'
+      - 'kind="group_key"'
+      - 'field="sale_id"'
+      - 'label="Sale ID"'
+      - 'row_path="data"'
+      - 'type="uuid"'
+      - 'evidence_id="source_3.data.sale_id"'
+      - 'field="sale_type"'
+      - 'label="Sale Type"'
+      - 'type="choice"'
+      - 'meaning="Choices: STORE, ONLINE."'

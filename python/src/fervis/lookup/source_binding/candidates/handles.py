@@ -92,6 +92,7 @@ def _with_fulfillment_slots(
     payload: dict[str, Any],
     *,
     requested_facts: tuple[Any, ...] = (),
+    support_field_refs_by_candidate_id: dict[str, frozenset[str]] | None = None,
 ) -> dict[str, Any]:
     return map_source_candidate_tree(
         payload,
@@ -99,6 +100,9 @@ def _with_fulfillment_slots(
             candidate,
             context=context,
             requested_facts=requested_facts,
+            support_field_refs_by_candidate_id=(
+                support_field_refs_by_candidate_id or {}
+            ),
         ),
         top_level_keys=("utility_source_candidates", "value_source_candidates"),
     )
@@ -109,6 +113,7 @@ def _candidate_with_fulfillment_slots_for_tree(
     *,
     context: CandidateTreeContext,
     requested_facts: tuple[Any, ...],
+    support_field_refs_by_candidate_id: dict[str, frozenset[str]],
 ) -> dict[str, Any]:
     if context.top_level_key and not _should_project_fulfillment_slots(
         key=context.top_level_key,
@@ -129,6 +134,9 @@ def _candidate_with_fulfillment_slots_for_tree(
     return _candidate_with_fulfillment_slots(
         candidate,
         requested_facts=slot_requested_facts,
+        support_field_refs=support_field_refs_by_candidate_id.get(
+            str(candidate.get("source_candidate_id") or "")
+        ),
     )
 
 

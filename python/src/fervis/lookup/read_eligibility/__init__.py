@@ -20,6 +20,7 @@ from fervis.lookup.read_eligibility.recall import (
 )
 from fervis.lookup.read_eligibility.schema import build_read_eligibility_schema
 from fervis.lookup.read_eligibility.support_projection import (
+    retained_relevant_field_refs_by_candidate_id,
     retained_source_candidate_ids_by_signature,
 )
 from fervis.lookup.read_eligibility.surface import (
@@ -49,5 +50,6 @@ __all__ = [
     "parse_read_eligibility",
     "prepare_catalog_selection_for_read_eligibility",
     "read_eligibility_candidate_surface",
+    "retained_relevant_field_refs_by_candidate_id",
     "retained_source_candidate_ids_by_signature",
 ]

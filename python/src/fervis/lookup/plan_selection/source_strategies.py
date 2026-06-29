@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable
 from itertools import product
 from typing import Any
@@ -123,6 +124,8 @@ def _source_member_payload(member: SourceStrategyMember) -> dict[str, Any]:
             output[key] = value
     if member.field_ids:
         output["field_ids"] = list(member.field_ids)
+    if member.operation_evidence:
+        output["operation_evidence"] = list(member.operation_evidence)
     if member.source_interface:
         input_params = member.source_interface.get("input_params")
         if input_params:
@@ -282,6 +285,7 @@ def _source_strategies_for_fact(
                     (
                         member.source_candidate_id,
                         member.requirement_ids,
+                        member.fulfillment_support_set_ids,
                     )
                     for member in members
                 ),
@@ -509,6 +513,7 @@ def _source_strategy_members(
                     candidate,
                     support_sets=tuple(support_sets),
                 ),
+                operation_evidence=_operation_evidence(tuple(support_sets)),
                 source_interface=_source_interface(
                     candidate,
                     tuple(support_sets),
@@ -517,6 +522,61 @@ def _source_strategy_members(
             )
         )
     return tuple(output)
+
+
+def _operation_evidence(
+    support_sets: tuple[dict[str, Any], ...],
+) -> tuple[dict[str, Any], ...]:
+    output: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for support_set in support_sets:
+        for slot in support_set.get("fulfillment_slots") or ():
+            if not isinstance(slot, dict):
+                continue
+            for kind, key in (
+                ("group_key", "group_key_evidence"),
+                ("metric", "metric_measure_evidence"),
+                ("row_count", "row_count_basis_evidence"),
+            ):
+                for item in slot.get(key) or ():
+                    if not isinstance(item, dict):
+                        continue
+                    evidence_id = str(item.get("evidence_id") or "")
+                    field_id = str(item.get("field_id") or "")
+                    if not evidence_id or not field_id:
+                        continue
+                    dedupe_key = (kind, evidence_id)
+                    if dedupe_key in seen:
+                        continue
+                    seen.add(dedupe_key)
+                    output.append(
+                        _operation_evidence_item(
+                            item,
+                            kind=kind,
+                            evidence_id=evidence_id,
+                            field_id=field_id,
+                        )
+                    )
+    return tuple(output)
+
+
+def _operation_evidence_item(
+    item: dict[str, Any],
+    *,
+    kind: str,
+    evidence_id: str,
+    field_id: str,
+) -> dict[str, Any]:
+    output = {
+        "kind": kind,
+        "evidence_id": evidence_id,
+        "field_id": field_id,
+    }
+    for key in ("row_path_id", "type"):
+        value = str(item.get(key) or "")
+        if value:
+            output[key] = value
+    return output
 
 
 def _candidate_row_path_ids(candidate: dict[str, Any]) -> tuple[str, ...]:
@@ -621,7 +681,16 @@ def _members_cover_required_answer_outputs(
 def _source_strategy_member_id_suffix(
     members: tuple[SourceStrategyMember, ...],
 ) -> str:
-    return "_and_".join(member.source_candidate_id for member in members)
+    return "_and_".join(_source_strategy_member_id_part(member) for member in members)
+
+
+def _source_strategy_member_id_part(member: SourceStrategyMember) -> str:
+    if not member.fulfillment_support_set_ids:
+        return member.source_candidate_id
+    digest = hashlib.sha256(
+        "\n".join(member.fulfillment_support_set_ids).encode("utf-8")
+    ).hexdigest()[:12]
+    return f"{member.source_candidate_id}_{digest}"
 
 
 def _append_unique(output: list[str], value: str) -> None:

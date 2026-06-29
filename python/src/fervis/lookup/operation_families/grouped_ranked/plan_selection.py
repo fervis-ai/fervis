@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from itertools import product
 from typing import Any
 
 from fervis.lookup.operation_families.grouped_ranked.canonical_groups import (
@@ -52,20 +54,24 @@ def grouped_ranked_support_set_groups(
             ]
         )
     )
-    if not _support_sets_cover_required_outputs(
-        aggregate_support_sets,
-        required_answer_output_ids=required_answer_output_ids,
+    selected_groups: list[tuple[dict[str, Any], ...]] = []
+    for operation_support_sets in _aggregate_operation_support_set_groups(
+        aggregate_support_sets
     ):
-        return ()
-    if not _support_sets_are_aggregate_complete(aggregate_support_sets):
-        return ()
-    selected_raw_support_sets = _raw_support_sets_for_aggregate_slots(
-        raw_support_sets,
-        aggregate_support_sets=aggregate_support_sets,
-    )
-    if not selected_raw_support_sets:
-        return ()
-    return (selected_raw_support_sets,)
+        if not _support_sets_cover_required_outputs(
+            operation_support_sets,
+            required_answer_output_ids=required_answer_output_ids,
+        ):
+            continue
+        if not _support_sets_are_aggregate_complete(operation_support_sets):
+            continue
+        selected_raw_support_sets = _raw_support_sets_for_aggregate_slots(
+            raw_support_sets,
+            aggregate_support_sets=operation_support_sets,
+        )
+        if selected_raw_support_sets:
+            selected_groups.append(selected_raw_support_sets)
+    return tuple(selected_groups)
 
 
 def _same_output_aggregate_support_sets(
@@ -116,26 +122,81 @@ def _multi_output_aggregate_support_sets(
         for support_set in support_sets
         if str(support_set.get("answer_output_id") or "") in required
     )
-    slots = _support_set_slots(list(relevant_support_sets))
-    group_slots = prefer_canonical_group_slots(
-        tuple(slot for slot in slots if _slot_has_group_role(slot))
-    )
-    metric_slots = tuple(slot for slot in slots if _slot_has_metric_role(slot))
-    aggregate_slots = (*group_slots, *metric_slots)
-    if not _aggregate_slots_are_complete(aggregate_slots):
-        return ()
+    group_slot_sets = _group_axis_slot_sets(relevant_support_sets)
+    metric_slot_sets = _metric_slot_sets(relevant_support_sets)
     return tuple(
         {
             "fulfillment_support_set_id": _operation_bundle_id(
                 candidate_id=candidate_id,
                 answer_output_id=answer_output_id,
-                slots=aggregate_slots,
+                slots=(*group_slots, *metric_slots),
             ),
             "answer_output_id": answer_output_id,
-            "fulfillment_slots": list(aggregate_slots),
+            "fulfillment_slots": [*group_slots, *metric_slots],
         }
+        for group_slots in group_slot_sets
+        for metric_slots in metric_slot_sets
+        if _aggregate_slots_are_complete([*group_slots, *metric_slots])
         for answer_output_id in required_answer_output_ids
     )
+
+
+def _group_axis_slot_sets(
+    support_sets: tuple[dict[str, Any], ...],
+) -> tuple[tuple[dict[str, Any], ...], ...]:
+    group_slots_by_output = _slots_by_answer_output(
+        support_sets,
+        slot_predicate=_slot_has_group_role,
+    )
+    if not group_slots_by_output:
+        return ()
+    slot_options = tuple(
+        prefer_canonical_group_slots(tuple(slots))
+        for _, slots in group_slots_by_output.items()
+    )
+    if any(not slots for slots in slot_options):
+        return ()
+    return tuple(tuple(slots) for slots in product(*slot_options))
+
+
+def _metric_slot_sets(
+    support_sets: tuple[dict[str, Any], ...],
+) -> tuple[tuple[dict[str, Any], ...], ...]:
+    metric_slots_by_output = _slots_by_answer_output(
+        support_sets,
+        slot_predicate=_slot_has_metric_role,
+    )
+    if not metric_slots_by_output:
+        return ()
+    slot_options = tuple(tuple(slots) for _, slots in metric_slots_by_output.items())
+    if any(not slots for slots in slot_options):
+        return ()
+    return tuple(tuple(slots) for slots in product(*slot_options))
+
+
+def _slots_by_answer_output(
+    support_sets: tuple[dict[str, Any], ...],
+    *,
+    slot_predicate: Callable[[dict[str, Any]], bool],
+) -> dict[str, list[dict[str, Any]]]:
+    output: dict[str, list[dict[str, Any]]] = {}
+    seen_by_output: dict[str, set[str]] = {}
+    for support_set in support_sets:
+        answer_output_id = str(support_set.get("answer_output_id") or "")
+        if not answer_output_id:
+            continue
+        for slot in support_set.get("fulfillment_slots") or ():
+            if not isinstance(slot, dict) or not slot_predicate(slot):
+                continue
+            slot_id = str(slot.get("fulfillment_slot_id") or "")
+            if not slot_id:
+                continue
+            seen = seen_by_output.setdefault(answer_output_id, set())
+            if slot_id in seen:
+                continue
+            seen.add(slot_id)
+            output.setdefault(answer_output_id, []).append(slot)
+    return output
 
 
 def _complete_aggregate_support_sets(
@@ -146,6 +207,59 @@ def _complete_aggregate_support_sets(
         for support_set in support_sets
         if _support_sets_are_aggregate_complete((support_set,))
     )
+
+
+def _aggregate_operation_support_set_groups(
+    support_sets: tuple[dict[str, Any], ...],
+) -> tuple[tuple[dict[str, Any], ...], ...]:
+    groups: dict[
+        tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]],
+        list[dict[str, Any]],
+    ] = {}
+    for support_set in support_sets:
+        key = _aggregate_operation_key(support_set)
+        if key is None:
+            continue
+        groups.setdefault(key, []).append(support_set)
+    return tuple(tuple(items) for items in groups.values())
+
+
+def _aggregate_operation_key(
+    support_set: dict[str, Any],
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]] | None:
+    slots = [
+        slot
+        for slot in support_set.get("fulfillment_slots") or ()
+        if isinstance(slot, dict)
+    ]
+    row_paths = {
+        _evidence_row_path_id(item)
+        for slot in slots
+        for item in _aggregate_evidence_items(slot)
+        if _evidence_row_path_id(item)
+    }
+    if len(row_paths) != 1:
+        return None
+    group_evidence_ids = tuple(
+        sorted(
+            str(item.get("evidence_id") or "")
+            for slot in slots
+            for item in slot.get("group_key_evidence") or ()
+            if isinstance(item, dict) and str(item.get("evidence_id") or "")
+        )
+    )
+    metric_evidence_ids = tuple(
+        sorted(
+            str(item.get("evidence_id") or "")
+            for slot in slots
+            for key in ("metric_measure_evidence", "row_count_basis_evidence")
+            for item in slot.get(key) or ()
+            if isinstance(item, dict) and str(item.get("evidence_id") or "")
+        )
+    )
+    if not group_evidence_ids or not metric_evidence_ids:
+        return None
+    return (tuple(sorted(row_paths)), group_evidence_ids, metric_evidence_ids)
 
 
 def _support_sets_are_aggregate_complete(

@@ -27,14 +27,19 @@ def _candidate_with_fulfillment_slots(
     candidate: dict[str, Any],
     *,
     requested_facts: tuple[RequestedFact, ...],
+    support_field_refs: frozenset[str] | None = None,
 ) -> dict[str, Any]:
     evidence_items = tuple(
         item
         for item in candidate.get("evidence_items") or ()
         if isinstance(item, dict) and str(item.get("evidence_id") or "")
     )
+    support_evidence_items = _support_evidence_items(
+        evidence_items,
+        support_field_refs=support_field_refs,
+    )
     row_population_path_ids = _candidate_row_population_path_ids(candidate)
-    if not requested_facts or not evidence_items:
+    if not requested_facts or not support_evidence_items:
         return candidate
     output = dict(candidate)
     fulfillment_slots = [
@@ -42,7 +47,7 @@ def _candidate_with_fulfillment_slots(
         for fact in requested_facts
         for answer_output in fact.answer_outputs
         for group in _answer_output_evidence_item_groups(
-            evidence_items,
+            support_evidence_items,
             answer_output_id=answer_output.id,
             row_population_path_ids=row_population_path_ids,
         )
@@ -60,6 +65,21 @@ def _candidate_with_fulfillment_slots(
         fulfillment_slots=tuple(fulfillment_slots),
     )
     return output
+
+
+def _support_evidence_items(
+    evidence_items: tuple[dict[str, Any], ...],
+    *,
+    support_field_refs: frozenset[str] | None,
+) -> tuple[dict[str, Any], ...]:
+    if support_field_refs is None:
+        return evidence_items
+    return tuple(
+        item
+        for item in evidence_items
+        if str(item.get("type") or "") == "row_population"
+        or str(item.get("field_ref") or "") in support_field_refs
+    )
 
 
 def _answer_output_evidence_item_groups(

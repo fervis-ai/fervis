@@ -252,6 +252,10 @@ def _compile_grouped_ranked_aggregate_answer(
             group_fields=group_fields,
             carry_fields=aggregate_carry_fields,
             metric=metric,
+            required_group_fields=_answer_rendered_group_fields(
+                selection=selection,
+                group_fields=group_fields,
+            ),
         ),
         relation_outputs=relation_outputs,
         fulfillment_render_ids=_grouped_ranked_fulfillment_render_ids(
@@ -341,6 +345,10 @@ def _compile_grouped_ranked_ranked_aggregate_answer(
             carry_fields=aggregate_carry_fields,
             metric=metric,
             rank=rank,
+            required_group_fields=_answer_rendered_group_fields(
+                selection=selection,
+                group_fields=group_fields,
+            ),
         ),
         relation_outputs=relation_outputs,
         fulfillment_render_ids=_grouped_ranked_fulfillment_render_ids(
@@ -446,6 +454,21 @@ def _grouped_ranked_answer_evidence_ids_by_output(
             answer_output.evidence_id,
         )
     return output
+
+
+def _answer_rendered_group_fields(
+    *,
+    selection: GroupedRankedSelection,
+    group_fields: tuple[dict[str, str], ...],
+) -> tuple[str, ...]:
+    group_field_ids = {item["field_id"] for item in group_fields}
+    return tuple(
+        dict.fromkeys(
+            answer.field_id
+            for answer in selection.answer_outputs
+            if answer.field_id in group_field_ids
+        )
+    )
 
 
 def _metric_render_ids_by_answer_output(

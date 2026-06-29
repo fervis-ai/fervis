@@ -11,7 +11,7 @@ input:
     fact_description: variants not observed
     subject_text: variants
     answer_expression_family: set_difference
-    answer_outputs: [variant_name]
+    answer_outputs: [answer_1]
     resource_terms: [variant]
   catalog:
     reads:

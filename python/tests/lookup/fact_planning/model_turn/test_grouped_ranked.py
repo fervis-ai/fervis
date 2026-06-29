@@ -1,5 +1,13 @@
 from ._helpers import *  # noqa: F403
 
+from fervis.lookup.plan_execution.operation_engine import execute_operations
+from fervis.lookup.plan_execution.operation_runtime import RelationEngineInput
+from fervis.lookup.plan_execution.relations import (
+    CompletenessProof,
+    CompletenessStatus,
+    RelationRows,
+)
+
 
 def _ranked_payload(*, group_id="group_1", group_field_id="location_name", metric_id="metric_1", metric_field_id="metric_total", function_id="function_sum", function_value="sum"):
     return {
@@ -301,6 +309,66 @@ def test_ranked_aggregate_choice_compiles_count_metric():
     }
     assert render_by_id["answer_1"].field_id == "store_id"
     assert render_by_id["answer_2"].field_id == "count"
+
+
+def test_ranked_aggregate_excludes_null_answer_group_keys_before_ranking():
+    plan = compile_pattern_answer_plan(
+        {
+            "answers": [
+                {
+                    "requested_fact_id": "rf_answer",
+                    "pattern": "ranked_aggregate",
+                    "source_binding_id": "sb_1",
+                    "group": {
+                        "selection_basis": "The requested answer is a store.",
+                        "id": "group_1",
+                        "field_id": "store_id",
+                    },
+                    "metric": {
+                        "selection_basis": "Orders are counted as records.",
+                        "id": "metric_1",
+                        "kind": "count_records",
+                    },
+                    "function": {
+                        "selection_basis": "Counting records uses count.",
+                        "id": "function_count",
+                        "value": "count",
+                    },
+                    "rank": {
+                        "selection_basis": "The question asks for the most orders.",
+                        "id": "rank_top_1_desc",
+                        "sort": "desc",
+                        "limit": 1,
+                    },
+                }
+            ]
+        },
+        bound_sources=(_ranked_count_by_store_bound_source(),),
+    )
+
+    result = execute_operations(
+        RelationEngineInput(
+            relations=(
+                RelationRows(
+                    id="answer_1_source",
+                    rows=(
+                        {"store_id": None, "order_id": "order_1"},
+                        {"store_id": None, "order_id": "order_2"},
+                        {"store_id": None, "order_id": "order_3"},
+                        {"store_id": "store_a", "order_id": "order_4"},
+                        {"store_id": "store_a", "order_id": "order_5"},
+                        {"store_id": "store_a", "order_id": "order_6"},
+                    ),
+                    completeness=CompletenessProof(status=CompletenessStatus.COMPLETE),
+                ),
+            ),
+            operations=plan.operations,
+        )
+    )
+
+    assert result.relation("answer_1_rows").rows == (
+        {"store_id": "store_a", "count": 3},
+    )
 
 
 def test_ranked_aggregate_keeps_metric_render_artifact_role_scoped_for_single_output():

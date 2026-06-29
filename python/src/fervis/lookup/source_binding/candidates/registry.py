@@ -26,6 +26,7 @@ from .same_scope import _same_scope_read_scopes
 from .plan_selection_filter import filter_prompt_payload_by_plan_selection
 from .row_predicates import with_row_predicates
 from ..normal_instance_roles import with_normal_instance_role_profiles
+from fervis.lookup.read_eligibility import retained_relevant_field_refs_by_candidate_id
 
 
 def same_scope_read_ids(
@@ -150,6 +151,11 @@ def _source_candidate_payload(
     candidate_payload = _with_fulfillment_slots(
         candidate_payload,
         requested_facts=request.requested_facts,
+        support_field_refs_by_candidate_id=(
+            retained_relevant_field_refs_by_candidate_id(request.read_eligibility)
+            if request.read_eligibility is not None
+            else {}
+        ),
     )
     candidate_payload = _with_population_bindings(candidate_payload, request=request)
     return with_normal_instance_role_profiles(

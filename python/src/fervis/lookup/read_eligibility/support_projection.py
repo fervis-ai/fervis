@@ -9,6 +9,7 @@ class ReadAssessmentLike(Protocol):
     source_candidate_id: str
     source_candidate_signature: str
     is_retained: bool
+    relevant_field_refs: tuple[str, ...]
 
 
 class ReadEligibilityResultLike(Protocol):
@@ -24,4 +25,16 @@ def retained_source_candidate_ids_by_signature(
         item.source_candidate_signature: item.source_candidate_id
         for item in read_eligibility.read_assessments
         if item.is_retained
+    }
+
+
+def retained_relevant_field_refs_by_candidate_id(
+    read_eligibility: ReadEligibilityResultLike,
+) -> dict[str, frozenset[str]]:
+    """Return retained field refs keyed by model-facing candidate id."""
+
+    return {
+        item.source_candidate_id: frozenset(item.relevant_field_refs)
+        for item in read_eligibility.read_assessments
+        if item.is_retained and item.relevant_field_refs
     }

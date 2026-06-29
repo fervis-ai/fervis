@@ -1,0 +1,66 @@
+id: grouped_ranked_choices_preserve_executable_group_keys
+description: Grouped/ranked planning preserves executable source-binding group keys instead of narrowing to the source row primary identity.
+migrates:
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_grouped_ranked_choices_use_single_identity_group_candidates
+kind: algorithm
+algorithm: planning.grouped_ranked_choices
+input:
+  requested_fact_id: fact_1
+  plan_shape: ranked_aggregate
+  source:
+    id: sb_1
+    requested_fact_id: fact_1
+    read_id: list_sale_list
+    fields:
+      - field_id: sale_id
+        type: uuid
+        row_cardinality: many
+        identity: {entity_ref: sale, identity_field: sale_id, primary_key: true, stable: true}
+      - field_id: staff_id
+        type: uuid
+        row_cardinality: many
+        identity: {entity_ref: staff, identity_field: staff_id, primary_key: false, stable: true}
+      - field_id: staff_name
+        type: string
+        row_cardinality: many
+      - field_id: sold_at
+        type: datetime
+        row_cardinality: many
+      - field_id: status
+        type: string
+        row_cardinality: many
+      - field_id: sale_type
+        type: choice
+        row_cardinality: many
+      - field_id: amount
+        type: decimal
+        row_cardinality: many
+    evidence:
+      - {evidence_id: source_1.data.sale_id, field_id: sale_id, row_cardinality: many}
+      - {evidence_id: source_1.data.staff_id, field_id: staff_id, row_cardinality: many}
+      - {evidence_id: source_1.data.staff_name, field_id: staff_name, row_cardinality: many}
+      - {evidence_id: source_1.data.sold_at, field_id: sold_at, row_cardinality: many}
+      - {evidence_id: source_1.data.status, field_id: status, row_cardinality: many}
+      - {evidence_id: source_1.data.sale_type, field_id: sale_type, row_cardinality: many}
+      - {evidence_id: source_1.data.amount, field_id: amount, row_cardinality: many}
+    fulfillments:
+      - answer_output_id: answer_1
+        group_key_evidence_ids:
+          - source_1.data.sale_id
+          - source_1.data.staff_id
+          - source_1.data.sold_at
+          - source_1.data.status
+          - source_1.data.sale_type
+        metric_measure_evidence_ids:
+          - source_1.data.amount
+expect:
+  result_contains:
+    group_field_ids:
+      - sale_id
+      - sale_type
+      - sold_at
+      - staff_id
+      - status
+    metric_field_ids: [amount]
+    metric_allowed_functions:
+      aggregate_field: [sum, min, max, avg]

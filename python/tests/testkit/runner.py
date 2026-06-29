@@ -34,6 +34,9 @@ from tests.testkit.algorithms.lineage import (
 )
 from tests.testkit.algorithms.lookup_runtime import run_lookup_runtime_case
 from tests.testkit.algorithms.outcomes import run_outcomes_classify_case
+from tests.testkit.algorithms.plan_selection import (
+    run_plan_selection_prompt_surface_case,
+)
 from tests.testkit.algorithms.relation_engine import (
     run_calendar_relation_case,
     run_relation_engine_case,
@@ -147,6 +150,9 @@ _RUNNERS: dict[tuple[str, str], CaseRunner] = {
     ("algorithm", "memory.prior_answer_request"): run_memory_prior_answer_request_case,
     ("algorithm", "memory.project_conversation"): run_memory_project_conversation_case,
     ("algorithm", "outcomes.classify"): run_outcomes_classify_case,
+    ("algorithm", "plan_selection.prompt_surface"): (
+        run_plan_selection_prompt_surface_case
+    ),
     ("algorithm", "planning.fact_endpoint_requirements"): run_fact_requirements_case,
     ("algorithm", "planning.fact_plan_schema"): run_fact_plan_schema_case,
     ("algorithm", "planning.grouped_ranked_choices"): run_grouped_ranked_choices_case,

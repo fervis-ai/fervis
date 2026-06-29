@@ -1,0 +1,74 @@
+id: ranked_staff_sales_keeps_parent_row_candidate_with_nested_rows
+description: Ranked aggregate plan selection keeps a valid parent-row sales read when the same endpoint also exposes nested item rows.
+kind: algorithm
+algorithm: plan_selection.prompt_surface
+input:
+  question: which staff person made the most sales this month?
+  query_terms: [staff person, sales, this month]
+  selected_read_ids: [list_sale_list]
+  read_eligibility:
+    - requested_fact_id: fact_1
+      read_id: list_sale_list
+      relevant_row_path_ids: [data]
+      relevant_field_refs:
+        - list_sale_list.field.staff_id
+        - list_sale_list.field.amount
+      retention_basis: Staff identity and sale amount support the ranked sales answer.
+  available_values:
+    - kind: time
+      id: grounded_time_1
+      expression: this month
+      resolved_start: "2026-06-01"
+      resolved_end: "2026-06-30"
+      granularity: month
+      applies_to_requested_fact_ids: [fact_1]
+  requested_fact:
+    id: fact_1
+    description: staff person with the highest sales total for the current month
+    answer_expression_family: ranked_selection
+    subject_text: staff person
+    answer_outputs:
+      - id: answer_1
+        description: staff person who made the most sales
+      - id: answer_2
+        description: sales total for that staff person
+  catalog:
+    reads:
+      - id: list_sale_list
+        endpoint_name: list_sale_list
+        resource_names: [sale]
+        params:
+          - {ref: list_sale_list.query.start_date, name: start_date, source: query, type: date}
+          - {ref: list_sale_list.query.end_date, name: end_date, source: query, type: date}
+          - {ref: list_sale_list.query.status, name: status, source: query, type: string}
+        row_paths:
+          - {id: data, path: data, cardinality: many}
+          - {id: data_items, path: data.items, cardinality: many, parent_path: data}
+        fields:
+          - {ref: list_sale_list.field.sale_id, path: data.sale_id, row_path_id: data, type: uuid}
+          - {ref: list_sale_list.field.staff_id, path: data.staff_id, row_path_id: data, type: uuid}
+          - {ref: list_sale_list.field.staff_name, path: data.staff_name, row_path_id: data, type: string}
+          - {ref: list_sale_list.field.amount, path: data.amount, row_path_id: data, type: decimal}
+          - {ref: list_sale_list.field.sold_at, path: data.sold_at, row_path_id: data, type: datetime}
+          - {ref: list_sale_list.field.status, path: data.status, row_path_id: data, type: string}
+          - {ref: list_sale_list.field.sale_item_id, path: data.items.sale_item_id, row_path_id: data_items, type: uuid}
+          - {ref: list_sale_list.field.quantity, path: data.items.quantity, row_path_id: data_items, type: integer}
+          - {ref: list_sale_list.field.unit_sale_price, path: data.items.unit_sale_price, row_path_id: data_items, type: decimal}
+expect:
+  result_contains:
+    strategy_alternatives_by_read:
+      list_sale_list:
+        staff_id__amount:
+          requested_fact_id: fact_1
+          read_id: list_sale_list
+          plan_shape: ranked_aggregate
+          group_fields_by_field:
+            staff_id:
+              field: staff_id
+              row_path: data
+              type: uuid
+          metric_fields_by_field:
+            amount:
+              field: amount
+              row_path: data
+              type: decimal

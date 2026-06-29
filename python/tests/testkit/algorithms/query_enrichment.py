@@ -46,6 +46,9 @@ def run_query_enrichment_parse_case(payload: dict[str, Any]) -> list[str]:
                     }
                     for row in item.answer_output_resource_lineage
                 ],
+                "answer_output_resource_lineage_count": len(
+                    item.answer_output_resource_lineage
+                ),
             }
             for item in result.requested_fact_resource_name_matches
         ],
