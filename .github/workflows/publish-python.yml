@@ -34,6 +34,8 @@ jobs:
         run: uv sync --extra dev
 
       - name: Run tests
+        env:
+          OPENAI_API_KEY: fervis-ci-placeholder-openai-key
         run: uv run pytest
 
       - name: Build distributions
