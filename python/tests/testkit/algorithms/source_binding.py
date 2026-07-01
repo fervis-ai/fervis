@@ -1311,7 +1311,6 @@ def _nested_population_roles_request() -> SourceBindingRequest:
                         source=ParamSource.QUERY,
                         type="choice",
                         choices=("OPEN", "CLOSED"),
-                        semantics="population_filter",
                     ),
                 ),
                 fields=(
@@ -1753,9 +1752,17 @@ def _choice_param_request(
             type="choice",
             choices=("OPEN", "CLOSED"),
             choice_labels={"OPEN": "Open", "CLOSED": "Closed"},
-            semantics="population_filter",
         ),
     ]
+    if include_boolean_response_field:
+        params.append(
+            CatalogParam(
+                ref="sales.query.is_active",
+                name="is_active",
+                source=ParamSource.QUERY,
+                type="boolean",
+            )
+        )
     if default_choice_param:
         params.append(
             CatalogParam(
@@ -1780,7 +1787,6 @@ def _choice_param_request(
                     "created_at": "Created At",
                     "-created_at": "Created At",
                 },
-                semantics="response_shape",
             )
         )
     catalog = RelationCatalog(
@@ -2395,7 +2401,6 @@ def _optional_population_params_request() -> SourceBindingRequest:
                         source=ParamSource.QUERY,
                         type="choice",
                         choices=("STORE", "ONLINE"),
-                        semantics="population_filter",
                     ),
                     CatalogParam(
                         ref="records_read.query.status",
@@ -2403,7 +2408,6 @@ def _optional_population_params_request() -> SourceBindingRequest:
                         source=ParamSource.QUERY,
                         type="choice",
                         choices=("PLACED", "COMPLETED"),
-                        semantics="population_filter",
                     ),
                     CatalogParam(
                         ref="records_read.query.start_date",
@@ -2511,7 +2515,6 @@ def _grounded_time_filter_request() -> SourceBindingRequest:
                         type="choice",
                         choices=("OPEN", "CLOSED"),
                         choice_labels={"OPEN": "Open", "CLOSED": "Closed"},
-                        semantics="population_filter",
                     ),
                 ),
                 fields=(

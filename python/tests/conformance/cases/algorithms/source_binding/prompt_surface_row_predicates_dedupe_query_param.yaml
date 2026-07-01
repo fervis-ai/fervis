@@ -1,5 +1,5 @@
 id: prompt_surface_row_predicates_dedupe_query_param
-description: Source-binding prompt exposes response-row predicates for uncovered boolean fields and does not repeat equivalent query-param fields.
+description: Source-binding prompt uses declared boolean query params instead of duplicating them as row predicates.
 migrates:
   - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_prompt_exposes_response_row_predicates_without_repeating_query_params
 kind: algorithm
@@ -10,5 +10,5 @@ input:
     include_boolean_response_field: true
 expect:
   result_contains:
-    param_ids: [status]
-    row_predicate_field_ids: [is_active]
+    param_ids: [status, is_active]
+    finite_choice_review_param_ids: [status, is_active]

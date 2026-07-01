@@ -24,7 +24,6 @@ input:
             source: query
             type: choice
             choices: [STORE, ONLINE]
-            semantics: population_filter
         row_paths:
           - id: data
             path: data

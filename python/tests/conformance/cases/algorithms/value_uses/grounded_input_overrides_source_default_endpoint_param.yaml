@@ -16,7 +16,6 @@ input:
             type: choice
             choices: [PLACED, COMPLETED]
             default: COMPLETED
-            semantics: population_filter
   relations:
     - id: records_rows
       source:

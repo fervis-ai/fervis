@@ -491,7 +491,6 @@ def _request_with_optional_params(
             type="choice",
             choices=("OPEN", "CLOSED"),
             choice_labels={"OPEN": "Open", "CLOSED": "Closed"},
-            semantics="population_filter",
         ),
     ]
     row_path_id = "data" if include_many_data_row_path else "root"

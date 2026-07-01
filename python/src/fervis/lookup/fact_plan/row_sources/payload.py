@@ -139,6 +139,7 @@ def row_source_param_prompt_payload(
             param_id=param.id,
         ),
         "label": param.name,
+        "source": _param_source_value(param.source),
         "type": param.type,
         **(_identity_prompt_payload(param.identity)),
     }
@@ -170,6 +171,10 @@ def row_source_param_prompt_payload(
     if param.semantics:
         payload["param_semantics"] = param.semantics.value
     return payload
+
+
+def _param_source_value(source: object) -> str:
+    return str(getattr(source, "value", source) or "")
 
 
 def _identity_prompt_payload(

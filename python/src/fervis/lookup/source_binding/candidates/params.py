@@ -136,7 +136,7 @@ def _param_with_population_contract(
     output = dict(param)
     contract: dict[str, Any] = {
         "axis_kind": "endpoint_param_value",
-        "omission_behavior": _population_filter_omission_behavior(
+        "omission_behavior": _param_omission_behavior(
             output,
             requested_facts=requested_facts,
         ),
@@ -156,20 +156,20 @@ def _param_with_population_contract(
 
 
 def _param_has_population_contract(param: dict[str, Any]) -> bool:
-    param_semantics = str(param.get("param_semantics") or "")
-    if param_semantics == "response_shape":
-        return False
-    if param_semantics == "population_filter":
-        return True
     choices = param.get("choices")
     return bool(
         param.get("required") is not True
-        and isinstance(choices, list)
-        and any(str(choice) for choice in choices)
+        and (
+            (isinstance(choices, list) and any(str(choice) for choice in choices))
+            or (
+                str(param.get("type") or "") == "boolean"
+                and _param_source_is_query(param)
+            )
+        )
     )
 
 
-def _population_filter_omission_behavior(
+def _param_omission_behavior(
     param: dict[str, Any],
     *,
     requested_facts: tuple[Any, ...],
@@ -209,7 +209,7 @@ def _population_filter_omission_behavior(
                 )
             ),
         }
-    effect_prefix = f"Omitting {param_id} does not apply this population filter"
+    effect_prefix = f"Omitting {param_id} does not apply this endpoint constraint"
     return {
         "kind": "unbounded",
         "omission_consequence_by_requested_fact": (
@@ -293,10 +293,12 @@ def _symbol(value: object) -> str:
 
 
 def _param_supports_static_boolean_options(param: dict[str, Any]) -> bool:
-    return str(param.get("param_semantics") or "") in {
-        "population_filter",
-        "response_shape",
-    }
+    return _param_source_is_query(param)
+
+
+def _param_source_is_query(param: dict[str, Any]) -> bool:
+    source = str(param.get("source") or "").strip().lower()
+    return source == "query"
 
 
 def _param_bind_options(param: dict[str, Any]) -> list[dict[str, str]]:

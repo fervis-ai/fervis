@@ -1,0 +1,12 @@
+id: prompt_surface_binds_declared_boolean_query_params
+description: Source-binding prompt treats declared boolean query params as bindable endpoint params.
+kind: algorithm
+algorithm: source_binding.prompt_surface
+input:
+  request:
+    mode: choice_param
+    include_boolean_response_field: true
+expect:
+  result_contains:
+    param_ids: [status, is_active]
+    finite_choice_review_param_ids: [status, is_active]

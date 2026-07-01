@@ -24,7 +24,6 @@ input:
             source: query
             type: choice
             choices: [A, B]
-            semantics: population_filter
         row_paths:
           - id: data
             path: data

@@ -663,7 +663,6 @@ def test_lookup_derives_finite_choice_membership_from_answer_population_tests():
                             source=ParamSource.QUERY,
                             type="string",
                             choices=("DRAFT", "COMPLETED", "CANCELED"),
-                            semantics="population_filter",
                         ),
                     ),
                     fields=(
@@ -3481,7 +3480,6 @@ def test_lookup_cutover_no_data_is_tied_to_fulfilled_requested_fact():
                             source=ParamSource.QUERY,
                             type="string",
                             choices=("P1",),
-                            semantics="population_filter",
                         ),
                     ),
                     facts=(

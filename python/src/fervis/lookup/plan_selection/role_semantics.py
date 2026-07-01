@@ -53,12 +53,12 @@ SUPPORT_KEY_ROLE_SEMANTICS: dict[str, EvidenceRoleSemantics] = {
     ),
     "scope_evidence": EvidenceRoleSemantics(
         role="scope",
-        answers_as="population_filter",
+        answers_as="scope_constraint",
         output_kind="constraint",
         usage=(
-            "Limits the selected row population to the records that match the "
-            "requested time, status, type, identity, category, or other "
-            "constraint."
+            "Limits the selected records to the scope requested by the "
+            "question, such as time, status, type, identity, category, or "
+            "location."
         ),
     ),
 }

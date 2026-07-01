@@ -24,13 +24,11 @@ input:
             source: query
             type: choice
             choices: [STORE, ONLINE]
-            semantics: population_filter
           - ref: records_read.query.status
             name: status
             source: query
             type: choice
             choices: [PLACED, COMPLETED]
-            semantics: population_filter
         row_paths:
           - id: data
             path: data

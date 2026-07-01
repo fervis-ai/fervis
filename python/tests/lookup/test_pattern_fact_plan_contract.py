@@ -869,7 +869,6 @@ def _records_catalog_with_channel_param() -> RelationCatalog:
                             "STORE": "In-person/store checkout records",
                             "ONLINE": "Ecommerce/online records",
                         },
-                        semantics="population_filter",
                     ),
                     CatalogParam(
                         ref="records_read.query.start_date",
@@ -917,7 +916,6 @@ def _records_catalog_with_optional_params() -> RelationCatalog:
                         source=ParamSource.QUERY,
                         type="choice",
                         choices=("STORE", "ONLINE"),
-                        semantics="population_filter",
                     ),
                     CatalogParam(
                         ref="records_read.query.status",
@@ -925,7 +923,6 @@ def _records_catalog_with_optional_params() -> RelationCatalog:
                         source=ParamSource.QUERY,
                         type="choice",
                         choices=("PLACED", "COMPLETED"),
-                        semantics="population_filter",
                     ),
                     CatalogParam(
                         ref="records_read.query.start_date",

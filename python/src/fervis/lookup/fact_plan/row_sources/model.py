@@ -22,7 +22,6 @@ class RowSourceKind(StrEnum):
 
 class RowSourceParamSemantics(StrEnum):
     OPAQUE_QUERY_PARAM = "opaque_query_param"
-    POPULATION_FILTER = "population_filter"
     RESPONSE_SHAPE = "response_shape"
 
 

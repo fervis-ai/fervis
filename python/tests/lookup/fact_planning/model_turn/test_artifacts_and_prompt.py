@@ -127,7 +127,6 @@ def test_fact_plan_prompt_exposes_bound_params_without_available_param_choices()
                                     "STORE": "In-person/store checkout records",
                                     "ONLINE": "Ecommerce/online records",
                                 },
-                                semantics="population_filter",
                             ),
                             CatalogParam(
                                 ref="records.query.status",
@@ -136,7 +135,6 @@ def test_fact_plan_prompt_exposes_bound_params_without_available_param_choices()
                                 type="choice",
                                 choices=("OPEN", "COMPLETED"),
                                 default="COMPLETED",
-                                semantics="population_filter",
                             ),
                         ),
                         fields=(CatalogField(ref="field.record_id", type="uuid"),),
