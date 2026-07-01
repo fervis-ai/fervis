@@ -1,4 +1,4 @@
-# Factual Answer Engine for your API
+# Deterministic LLM Answers over REST APIs
 
 Fervis's goal is to provide a backend-owned deterministic runtime for answering factual questions via framework-native adapters.  
 
