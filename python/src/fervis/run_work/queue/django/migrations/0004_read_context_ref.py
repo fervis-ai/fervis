@@ -11,7 +11,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.AddField(
-            model_name="fervisrunworkitem",
+            model_name="runworkitem",
             name="read_context_ref",
             field=models.JSONField(
                 default=fervis.run_work.queue.django.models.default_read_context_ref

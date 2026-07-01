@@ -94,7 +94,7 @@ class Migration(migrations.Migration):
             },
         ),
         migrations.AddConstraint(
-            model_name="fervisrunworkitem",
+            model_name="runworkitem",
             constraint=models.UniqueConstraint(
                 condition=Q(("idempotency_key__isnull", False)),
                 fields=("tenant_id", "conversation_id", "idempotency_key"),
@@ -102,7 +102,7 @@ class Migration(migrations.Migration):
             ),
         ),
         migrations.AddConstraint(
-            model_name="fervisrunworkitem",
+            model_name="runworkitem",
             constraint=models.UniqueConstraint(
                 condition=Q(("status__in", ["QUEUED", "RUNNING"])),
                 fields=("tenant_id", "conversation_id"),
@@ -110,20 +110,20 @@ class Migration(migrations.Migration):
             ),
         ),
         migrations.AddIndex(
-            model_name="fervisrunworkitem",
+            model_name="runworkitem",
             index=models.Index(
                 fields=["status", "next_attempt_at", "created_at"],
                 name="fervis_work_claim_idx",
             ),
         ),
         migrations.AddIndex(
-            model_name="fervisrunworkitem",
+            model_name="runworkitem",
             index=models.Index(
                 fields=["status", "lease_expires_at"], name="fervis_work_lease_idx"
             ),
         ),
         migrations.AddIndex(
-            model_name="fervisrunworkitem",
+            model_name="runworkitem",
             index=models.Index(
                 fields=["tenant_id", "conversation_id"], name="fervis_work_conv_idx"
             ),

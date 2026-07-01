@@ -8,7 +8,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.RemoveField(
-            model_name="fervisrunworkitem",
+            model_name="runworkitem",
             name="max_turns",
         ),
     ]

@@ -8,7 +8,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.AddField(
-            model_name="fervisrunworkitem",
+            model_name="runworkitem",
             name="runtime_context",
             field=models.JSONField(default=dict),
         ),
