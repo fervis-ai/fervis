@@ -114,6 +114,20 @@ def add_schema_metadata_action(endpoint_name: str) -> dict[str, object]:
     }
 
 
+def fix_schema_cardinality_action(endpoint_name: str) -> dict[str, object]:
+    return {
+        "kind": "fix_schema_cardinality",
+        "endpoint": endpoint_name,
+        "description": (
+            "Update this route's response contract through a supported Flask "
+            "surface: OpenAPI/Swagger, Marshmallow metadata, JSON:API "
+            "resource/schema metadata, or Flask-AppBuilder metadata. The "
+            "declared object-vs-array shape must match the JSON returned by "
+            "the host API."
+        ),
+    }
+
+
 def install_dependencies_action(module: str) -> dict[str, object]:
     return {
         "kind": "install_dependencies",

@@ -73,6 +73,146 @@ def test_fervis_doctor_accepts_openapi_backed_flask_endpoint(
     checks = _checks(json.loads(stdout.getvalue()))
     assert checks["source.catalog"]["status"] == "passed"
     assert checks["source.response_schema"]["status"] == "passed"
+    assert checks["source.response_conformance"]["status"] == "passed"
+
+
+def test_fervis_doctor_rejects_flask_endpoint_when_schema_cardinality_is_wrong(
+    tmp_path: Path,
+) -> None:
+    root = _flask_project(tmp_path)
+    _write_config(root)
+    (root / "app.py").write_text(
+        "from flask import Flask, jsonify\n\n"
+        "app = Flask(__name__)\n"
+        "from fervis.flask import configured_fervis\n"
+        "configured_fervis().init_app(app)\n\n"
+        "@app.get('/api/orders/')\n"
+        "def list_orders():\n"
+        "    return jsonify([{'id': 'order_1'}])\n\n"
+        "@app.get('/openapi.json')\n"
+        "def openapi():\n"
+        "    return jsonify({'paths': {'/api/orders/': {'get': {\n"
+        "        'operationId': 'list_orders',\n"
+        "        'responses': {'200': {'content': {'application/json': {\n"
+        "            'schema': {'type': 'object', 'properties': "
+        "{'id': {'type': 'string'}}}\n"
+        "        }}}}\n"
+        "    }}}})\n",
+        encoding="utf-8",
+    )
+    stdout = StringIO()
+
+    exit_code = run_doctor_command(
+        ("doctor",),
+        project=discover_project(root),
+        stdout=stdout,
+    )
+
+    checks = _checks(json.loads(stdout.getvalue()))
+    assert exit_code == 2
+    assert checks["source.catalog"]["status"] == "passed"
+    assert checks["source.response_schema"]["status"] == "passed"
+    assert checks["source.response_conformance"]["status"] == "failed"
+    assert (
+        "GET /api/orders/ is declared as one object, but returned a JSON array."
+        in checks["source.response_conformance"]["message"]
+    )
+    fix = checks["source.response_conformance"]["fix"]
+    assert isinstance(fix, dict)
+    assert fix["kind"] == "fix_schema_cardinality"
+
+
+def test_fervis_doctor_skips_shape_probe_for_flask_detail_route(
+    tmp_path: Path,
+) -> None:
+    root = _flask_project(tmp_path)
+    _write_config(root)
+    (root / "app.py").write_text(
+        "from flask import Flask, jsonify\n\n"
+        "app = Flask(__name__)\n"
+        "from fervis.flask import configured_fervis\n"
+        "configured_fervis().init_app(app)\n\n"
+        "@app.get('/api/orders/<order_id>')\n"
+        "def get_order(order_id):\n"
+        "    return jsonify({'id': order_id})\n\n"
+        "@app.get('/openapi.json')\n"
+        "def openapi():\n"
+        "    return jsonify({'paths': {'/api/orders/{order_id}': {'get': {\n"
+        "        'operationId': 'get_order',\n"
+        "        'parameters': [{'name': 'order_id', 'in': 'path', "
+        "'required': True, 'schema': {'type': 'string'}}],\n"
+        "        'responses': {'200': {'content': {'application/json': {\n"
+        "            'schema': {'type': 'object', 'properties': "
+        "{'id': {'type': 'string'}}}\n"
+        "        }}}}\n"
+        "    }}}})\n",
+        encoding="utf-8",
+    )
+    stdout = StringIO()
+
+    run_doctor_command(
+        ("doctor",),
+        project=discover_project(root),
+        stdout=stdout,
+    )
+
+    checks = _checks(json.loads(stdout.getvalue()))
+    assert checks["source.catalog"]["status"] == "passed"
+    assert checks["source.response_schema"]["status"] == "passed"
+    assert checks["source.response_conformance"]["status"] == "skipped"
+    assert (
+        "No response shape probes could run"
+        in checks["source.response_conformance"]["message"]
+    )
+
+
+def test_fervis_doctor_marks_shape_probe_skipped_when_flask_auth_blocks_all_probes(
+    tmp_path: Path,
+) -> None:
+    root = _flask_project(tmp_path)
+    _write_config(root)
+    (root / "app.py").write_text(
+        "from flask import Flask, jsonify\n\n"
+        "app = Flask(__name__)\n"
+        "from fervis.flask import configured_fervis\n"
+        "configured_fervis().init_app(app)\n\n"
+        "@app.before_request\n"
+        "def require_auth():\n"
+        "    from flask import request\n"
+        "    if request.path == '/openapi.json':\n"
+        "        return None\n"
+        "    return ('Unauthorized', 401)\n\n"
+        "@app.get('/api/orders/')\n"
+        "def list_orders():\n"
+        "    return jsonify([{'id': 'order_1'}])\n\n"
+        "@app.get('/openapi.json')\n"
+        "def openapi():\n"
+        "    return jsonify({'paths': {'/api/orders/': {'get': {\n"
+        "        'operationId': 'list_orders',\n"
+        "        'responses': {'200': {'content': {'application/json': {\n"
+        "            'schema': {'type': 'array', 'items': {'type': 'object', "
+        "'properties': {'id': {'type': 'string'}}}}\n"
+        "        }}}}\n"
+        "    }}}})\n",
+        encoding="utf-8",
+    )
+    stdout = StringIO()
+
+    run_doctor_command(
+        ("doctor",),
+        project=discover_project(root),
+        stdout=stdout,
+    )
+
+    checks = _checks(json.loads(stdout.getvalue()))
+    assert checks["source.response_conformance"]["status"] == "skipped"
+    assert "requires configured host read credentials" in checks[
+        "source.response_conformance"
+    ]["message"]
+    fix = checks["source.response_conformance"]["fix"]
+    assert isinstance(fix, dict)
+    assert fix["kind"] == "command"
+    assert "fervis auth configure" in str(fix["command"])
 
 
 def test_fervis_doctor_certifies_flask_factory_mount_from_runtime_app(

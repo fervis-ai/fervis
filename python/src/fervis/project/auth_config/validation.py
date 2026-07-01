@@ -8,6 +8,10 @@ from fervis.interfaces.agent.actions import run_doctor_probe_action
 from fervis.host_api.context import HostApiContext
 from fervis.host_api.contracts import EndpointContract
 from fervis.host_api.contracts.authority import ReadAuthority, ReadContextRef
+from fervis.host_api.contracts.probe import (
+    belongs_to_source,
+    is_probeable_get_contract,
+)
 from fervis.host_api.contracts.read import ReadInvocation
 from fervis.project.configuration import LoadedFervisConfig
 from fervis.project.discovery import ProjectInspection
@@ -182,12 +186,7 @@ def _is_executable_probe_contract(
     *,
     source_name: str,
 ) -> bool:
-    return (
-        _belongs_to_source(contract, source_name=source_name)
-        and str(contract.method).upper() == "GET"
-        and not contract.path_params
-        and not any(param.required for param in contract.query_params)
-    )
+    return is_probeable_get_contract(contract, source_name=source_name)
 
 
 def _probe_read_context_ref(
@@ -213,11 +212,7 @@ def _belongs_to_source(
     *,
     source_name: str,
 ) -> bool:
-    catalog_endpoint = contract.catalog_endpoint
-    if catalog_endpoint is None:
-        return False
-    namespace = catalog_endpoint.source_namespace_path
-    return bool(namespace and namespace[0] == source_name)
+    return belongs_to_source(contract, source_name=source_name)
 
 
 def _source_names(loaded_config: LoadedFervisConfig) -> tuple[str, ...]:

@@ -7,6 +7,7 @@ from fervis.interfaces.agent.actions import (
     chmod_action,
     configure_auth_action,
     edit_config_action,
+    fix_schema_cardinality_action,
     inspect_prompt_index_action,
     inspect_question_action,
     inspect_run_action,
@@ -35,6 +36,7 @@ def test_agent_actions_are_self_describing() -> None:
         chmod_action("/tmp/fervis"),
         configure_auth_action(framework="fastapi"),
         configure_auth_action(framework="django"),
+        fix_schema_cardinality_action("list_orders"),
         inspect_question_action("question-1"),
         inspect_run_action("run-1"),
         inspect_prompt_index_action("/tmp/prompts/index.html"),
@@ -70,6 +72,16 @@ def test_probe_doctor_action_names_the_required_key() -> None:
 def test_fervis_actions_use_canonical_installed_command() -> None:
     assert run_doctor_action()["command"] == "fervis doctor"
     assert run_migrate_action()["command"] == "fervis migrate"
+
+
+def test_schema_cardinality_action_names_all_supported_flask_schema_surfaces() -> None:
+    action = fix_schema_cardinality_action("list_orders")
+
+    description = str(action["description"])
+    assert "OpenAPI/Swagger" in description
+    assert "Marshmallow" in description
+    assert "JSON:API" in description
+    assert "Flask-AppBuilder" in description
 
 
 def test_provide_clarification_action_requires_real_clarification_id() -> None:

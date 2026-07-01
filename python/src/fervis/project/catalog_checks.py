@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from fervis.interfaces.agent.actions import edit_config_action
+from fervis.host_api.contracts.response_conformance import ResponseConformanceResult
+from fervis.interfaces.agent.actions import (
+    configure_auth_action,
+    edit_config_action,
+    fix_schema_cardinality_action,
+)
 
 from .configuration import LoadedFervisConfig
 from .django_runtime import django_project_runtime
@@ -88,10 +93,14 @@ def _flask_catalog_checks(
     from fervis.host_api.adapters.flask.catalog import (
         get_flask_endpoint_contracts,
     )
+    from fervis.host_api.adapters.flask.response_conformance import (
+        check_flask_response_conformance,
+    )
 
+    sources = flask_sources(loaded.config)
     try:
         contracts = get_flask_endpoint_contracts(
-            sources=flask_sources(loaded.config),
+            sources=sources,
             project_root=project.root_path,
         )
     except Exception as exc:
@@ -103,11 +112,20 @@ def _flask_catalog_checks(
                 fix=catalog_failure_action(exc, loaded=loaded),
             )
         ]
-    return _catalog_contract_checks(
+    checks = _catalog_contract_checks(
         "Flask",
         contracts,
         require_all_exposed_response_fields=True,
     )
+    if any(check.status == "failed" for check in checks):
+        return checks
+    conformance_results = check_flask_response_conformance(
+        sources=sources,
+        project_root=project.root_path,
+        contracts=contracts,
+    )
+    checks.append(_response_conformance_check(conformance_results))
+    return checks
 
 
 def _catalog_contract_checks(
@@ -174,3 +192,64 @@ def _catalog_contract_checks(
             )
         )
     return checks
+
+
+def _response_conformance_check(
+    results: tuple[ResponseConformanceResult, ...],
+) -> DoctorCheck:
+    failures = tuple(result for result in results if result.status == "failed")
+    if failures:
+        first = failures[0]
+        suffix = "" if len(failures) == 1 else f" {len(failures) - 1} more failed."
+        return DoctorCheck(
+            id="source.response_conformance",
+            status="failed",
+            message=f"{first.message}{suffix}",
+            fix=fix_schema_cardinality_action(first.endpoint_name),
+        )
+    auth_skips = tuple(result for result in results if result.reason == "auth_required")
+    if auth_skips:
+        first = auth_skips[0]
+        suffix = (
+            "" if len(auth_skips) == 1 else f" {len(auth_skips) - 1} more auth-protected."
+        )
+        return DoctorCheck(
+            id="source.response_conformance",
+            status="skipped",
+            message=f"{first.message}{suffix}",
+            fix=configure_auth_action(framework="flask"),
+        )
+    verified_count = sum(1 for result in results if result.status == "passed")
+    skipped = tuple(result for result in results if result.status == "skipped")
+    if skipped:
+        return DoctorCheck(
+            id="source.response_conformance",
+            status="passed" if verified_count else "skipped",
+            message=_response_conformance_skipped_message(
+                verified_count=verified_count,
+                skipped_count=len(skipped),
+            ),
+        )
+    return DoctorCheck(
+        id="source.response_conformance",
+        status="passed",
+        message="Probeable response shapes match declared schemas.",
+    )
+
+
+def _response_conformance_skipped_message(
+    *,
+    verified_count: int,
+    skipped_count: int,
+) -> str:
+    skipped_label = f"{skipped_count} endpoint{'' if skipped_count == 1 else 's'}"
+    if verified_count:
+        return (
+            f"Verified {verified_count} response shape"
+            f"{'' if verified_count == 1 else 's'}; {skipped_label} skipped "
+            "because they require params or host auth."
+        )
+    return (
+        f"No response shape probes could run; {skipped_label} skipped because "
+        "they require params or host auth."
+    )
