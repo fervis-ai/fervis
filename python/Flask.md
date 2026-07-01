@@ -1,6 +1,6 @@
 # Fervis Flask Host API Setup Checklist
 
-Use this file to make a Flask API fully readable by Fervis. Fervis can only answer factual questions reliably when every configured GET route exposes a deterministic route contract: path params, query params, operation identity, and JSON response schema. Follow the steps in order, keep existing OpenAPI/Swagger-style surfaces when they already exist, add schema metadata where routes are plain Flask, then run Fervis doctor until every configured GET route is certified read-eligible.
+Use this file to make a Flask API fully readable by Fervis. Fervis can only answer factual questions reliably when every configured GET route exposes a deterministic route contract: path params, query params, operation identity, JSON response schema, and correct object-vs-array response cardinality. Follow the steps in order, keep existing OpenAPI/Swagger-style surfaces when they already exist, add schema metadata where routes are plain Flask, then run Fervis doctor until every configured GET route is certified read-eligible.
 
 This checklist must not change business logic or host API functionality; its sole purpose is to enrich endpoint contracts with metadata that supports Fervis' factual answer runtime.
 
@@ -61,7 +61,7 @@ This checklist must not change business logic or host API functionality; its sol
 ## Step 7: Fix doctor blockers.
 - [ ] 7.1 Add a response schema when doctor reports missing response fields.
 - [ ] 7.2 Add an argument/query schema when doctor reports missing query parameters.
-- [ ] 7.3 Fix object-vs-array metadata when doctor reports wrong cardinality.
+- [ ] 7.3 Fix object-vs-array metadata when doctor reports that the declared schema cardinality does not match the runtime JSON response.
 - [ ] 7.4 Fix every configured GET route before certifying the app.
 - [ ] 7.5 Pass doctor only when every configured GET route is read-eligible.
 
