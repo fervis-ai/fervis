@@ -6,6 +6,7 @@ from fervis.lookup.question_contract.model import (
     AnswerSubjectInstanceInterpretationKind,
     KnownInputKind,
     KnownInputSource,
+    LiteralInputRole,
     NORMAL_INSTANCE_EXCLUDED_STATE_ROLES,
     NormalInstanceExcludedStateRole,
     NormalInstanceExcludedStateRoleDefinition,
@@ -56,6 +57,7 @@ from fervis.lookup.question_contract.turn import (
 __all__ = [
     "KnownInputKind",
     "KnownInputSource",
+    "LiteralInputRole",
     "NORMAL_INSTANCE_EXCLUDED_STATE_ROLES",
     "NormalInstanceExcludedStateRole",
     "NormalInstanceExcludedStateRoleDefinition",

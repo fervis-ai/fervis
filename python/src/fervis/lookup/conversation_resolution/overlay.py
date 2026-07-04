@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from fervis.memory.conversation_context import ConversationMemoryCardProjection
@@ -15,25 +15,222 @@ from fervis.lookup.conversation_resolution.model import (
 
 
 @dataclass(frozen=True)
+class ResolvedCanonicalValueOverlay:
+    kind: str
+    identity_type: str
+    identity_field: str
+    value: str
+    proof_refs: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.kind.strip():
+            raise ValueError("resolved canonical value requires kind")
+        if not self.identity_type.strip():
+            raise ValueError("resolved canonical value requires identity type")
+        if not self.identity_field.strip():
+            raise ValueError("resolved canonical value requires identity field")
+        if not self.value.strip():
+            raise ValueError("resolved canonical value requires value")
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "identity_type": self.identity_type,
+            "identity_field": self.identity_field,
+            "value": self.value,
+            "proof_refs": list(self.proof_refs),
+        }
+
+
 class ResolvedQuestionInputOverlay:
     kind: str
-    reference_text: str
     occurrence: int
-    target_meaning: str = ""
-    lookup_text: str = ""
-    resolved_input_ref: str = ""
+    resolved_input_ref: str
+    memory_ids: tuple[str, ...]
+    source_text: str
+    reference_text: str
+    lookup_text: str
+    target_meaning: str
+    resolved_value_text: str
+    value_meaning_hint: str
+    field_label_text: str
+    role: str
+
+    def to_prompt_payload(self) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def to_backend_payload(self) -> dict[str, Any]:
+        return self.to_prompt_payload()
+
+
+@dataclass(frozen=True)
+class LiteralQuestionInputOverlay(ResolvedQuestionInputOverlay):
+    source_text: str
+    resolved_input_ref: str
+    resolved_value_text: str
+    role: str
+    occurrence: int = 1
+    value_meaning_hint: str = ""
+    field_label_text: str = ""
+    evidence_refs: tuple[str, ...] = ()
+    resolved_canonical_value: ResolvedCanonicalValueOverlay | None = None
+    kind: str = field(init=False, default="literal_text")
+
+    @property
+    def reference_text(self) -> str:
+        return ""
+
+    @property
+    def lookup_text(self) -> str:
+        return ""
+
+    @property
+    def target_meaning(self) -> str:
+        return ""
+
+    @property
+    def memory_ids(self) -> tuple[str, ...]:
+        return ()
+
+    def __post_init__(self) -> None:
+        if self.occurrence < 1:
+            raise ValueError("resolved question input occurrence must be positive")
+        if not self.source_text.strip():
+            raise ValueError("literal resolved question input requires source text")
+        if not self.resolved_input_ref.strip():
+            raise ValueError("literal resolved question input requires resolved ref")
+        if not self.resolved_value_text.strip():
+            raise ValueError("literal resolved question input requires resolved value")
+        if not self.role.strip():
+            raise ValueError("literal resolved question input requires role")
+
+    def to_prompt_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "kind": self.kind,
+            "occurrence": self.occurrence,
+            "source_text": self.source_text,
+            "resolved_input_ref": self.resolved_input_ref,
+            "resolved_value_text": self.resolved_value_text,
+            "role": self.role,
+        }
+        if self.value_meaning_hint:
+            payload["value_meaning_hint"] = self.value_meaning_hint
+        if self.field_label_text:
+            payload["field_label_text"] = self.field_label_text
+        return payload
+
+    def to_backend_payload(self) -> dict[str, Any]:
+        payload = self.to_prompt_payload()
+        if self.evidence_refs:
+            payload["evidence_refs"] = list(self.evidence_refs)
+        if self.resolved_canonical_value:
+            payload["resolved_canonical_value"] = (
+                self.resolved_canonical_value.to_payload()
+            )
+        return payload
+
+
+@dataclass(frozen=True)
+class RowSetQuestionInputOverlay(ResolvedQuestionInputOverlay):
+    reference_text: str
+    resolved_input_ref: str
+    occurrence: int = 1
     memory_ids: tuple[str, ...] = ()
+    kind: str = field(init=False, default="row_set_reference")
+
+    @property
+    def source_text(self) -> str:
+        return ""
+
+    @property
+    def lookup_text(self) -> str:
+        return ""
+
+    @property
+    def target_meaning(self) -> str:
+        return ""
+
+    @property
+    def resolved_value_text(self) -> str:
+        return ""
+
+    @property
+    def value_meaning_hint(self) -> str:
+        return ""
+
+    @property
+    def field_label_text(self) -> str:
+        return ""
+
+    @property
+    def role(self) -> str:
+        return ""
+
+    def __post_init__(self) -> None:
+        if self.occurrence < 1:
+            raise ValueError("resolved question input occurrence must be positive")
+        if not self.reference_text.strip():
+            raise ValueError("row-set resolved question input requires reference text")
+        if not self.resolved_input_ref.strip():
+            raise ValueError("row-set resolved question input requires resolved ref")
+
+    def to_prompt_payload(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "reference_text": self.reference_text,
+            "occurrence": self.occurrence,
+            "resolved_input_ref": self.resolved_input_ref,
+        }
+
+
+@dataclass(frozen=True)
+class NamedReferenceQuestionInputOverlay(ResolvedQuestionInputOverlay):
+    reference_text: str
+    lookup_text: str
+    target_meaning: str
+    occurrence: int = 1
+    memory_ids: tuple[str, ...] = ()
+    resolved_input_ref: str = ""
+    kind: str = field(init=False, default="named_reference_text")
+
+    @property
+    def source_text(self) -> str:
+        return ""
+
+    @property
+    def resolved_value_text(self) -> str:
+        return ""
+
+    @property
+    def value_meaning_hint(self) -> str:
+        return ""
+
+    @property
+    def field_label_text(self) -> str:
+        return ""
+
+    @property
+    def role(self) -> str:
+        return ""
+
+    def __post_init__(self) -> None:
+        if self.occurrence < 1:
+            raise ValueError("resolved question input occurrence must be positive")
+        if not self.reference_text.strip():
+            raise ValueError("named resolved question input requires reference text")
+        if not self.lookup_text.strip():
+            raise ValueError("named resolved question input requires lookup text")
+        if not self.target_meaning.strip():
+            raise ValueError("named resolved question input requires target meaning")
 
     def to_prompt_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "kind": self.kind,
             "reference_text": self.reference_text,
             "occurrence": self.occurrence,
+            "lookup_text": self.lookup_text,
+            "target_meaning": self.target_meaning,
         }
-        if self.target_meaning:
-            payload["target_meaning"] = self.target_meaning
-        if self.lookup_text:
-            payload["lookup_text"] = self.lookup_text
         if self.resolved_input_ref:
             payload["resolved_input_ref"] = self.resolved_input_ref
         return payload
@@ -103,6 +300,14 @@ class ConversationResolutionOverlay:
         if self.resolved_question_inputs:
             payload["resolved_question_inputs"] = [
                 item.to_prompt_payload() for item in self.resolved_question_inputs
+            ]
+        return payload
+
+    def to_backend_payload(self) -> dict[str, Any]:
+        payload = self.to_prompt_payload()
+        if self.resolved_question_inputs:
+            payload["resolved_question_inputs"] = [
+                item.to_backend_payload() for item in self.resolved_question_inputs
             ]
         return payload
 
@@ -209,6 +414,7 @@ def conversation_resolution_question_contract_context_texts(
     for item in overlay.resolved_question_inputs:
         _append_text(output, item.lookup_text)
         _append_text(output, item.reference_text)
+        _append_text(output, item.source_text)
     return tuple(dict.fromkeys(output))
 
 
@@ -307,8 +513,7 @@ def _resolved_question_inputs(
             if key not in seen:
                 seen.add(key)
                 output.append(
-                    ResolvedQuestionInputOverlay(
-                        kind="row_set_reference",
+                    RowSetQuestionInputOverlay(
                         reference_text=reference.anchor_text,
                         occurrence=reference.occurrence,
                         resolved_input_ref=f"cr_input_{len(output) + 1}",
@@ -330,8 +535,7 @@ def _resolved_question_inputs(
             continue
         seen.add(key)
         output.append(
-            ResolvedQuestionInputOverlay(
-                kind="named_reference_text",
+            NamedReferenceQuestionInputOverlay(
                 reference_text=reference.anchor_text,
                 occurrence=reference.occurrence,
                 lookup_text=_entity_lookup_text(

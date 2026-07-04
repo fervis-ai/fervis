@@ -9,6 +9,7 @@ from tests.testkit.algorithms.catalog_selection import (
 )
 from tests.testkit.algorithms.capabilities import run_capabilities_case
 from tests.testkit.algorithms.conversation_resolution import (
+    run_conversation_resolution_overlay_case,
     run_conversation_resolution_parse_case,
     run_conversation_resolution_schema_case,
 )
@@ -21,6 +22,7 @@ from tests.testkit.algorithms.fact_plan_schema import (
 from tests.testkit.algorithms.grouped_ranked_choices import (
     run_grouped_ranked_choices_case,
 )
+from tests.testkit.algorithms.grounding import run_grounding_contract_case
 from tests.testkit.algorithms.endpoint_response import (
     run_endpoint_response_case,
 )
@@ -121,6 +123,10 @@ _RUNNERS: dict[tuple[str, str], CaseRunner] = {
     ),
     (
         "algorithm",
+        "conversation_resolution.overlay",
+    ): run_conversation_resolution_overlay_case,
+    (
+        "algorithm",
         "conversation_resolution.parse",
     ): run_conversation_resolution_parse_case,
     (
@@ -132,6 +138,7 @@ _RUNNERS: dict[tuple[str, str], CaseRunner] = {
     ("algorithm", "execution.endpoint_response"): run_endpoint_response_case,
     ("algorithm", "execution.proof_graph"): run_execution_proof_graph_case,
     ("algorithm", "execution.identity_set_binding"): run_identity_set_binding_case,
+    ("algorithm", "grounding.contract"): run_grounding_contract_case,
     ("algorithm", "execution.relation_engine"): run_relation_engine_case,
     ("algorithm", "lineage.explain"): run_lineage_explain_case,
     ("algorithm", "lineage.input_lineage"): run_lineage_input_lineage_case,

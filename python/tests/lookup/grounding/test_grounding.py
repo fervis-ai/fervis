@@ -15,7 +15,7 @@ from fervis.lookup.relation_catalog import (
 )
 from fervis.lookup.conversation_resolution.overlay import (
     ConversationResolutionOverlay,
-    ResolvedQuestionInputOverlay,
+    NamedReferenceQuestionInputOverlay,
 )
 from fervis.memory.addresses import FactAddress
 from fervis.memory.artifacts import (
@@ -522,8 +522,7 @@ def test_grounding_task_payload_places_raw_question_and_cr_annotations_next_to_t
             activated_memory_ids=(),
             used_source_card_ids=(),
             resolved_question_inputs=(
-                ResolvedQuestionInputOverlay(
-                    kind="named_reference_text",
+                NamedReferenceQuestionInputOverlay(
                     reference_text="London",
                     occurrence=1,
                     target_meaning="city",

@@ -32,6 +32,37 @@ class GroundingTerminalKind(StrEnum):
     TIME_RESOLUTION_FAILED = "time_resolution_failed"
 
 
+class GroundedValueCertificationMethod(StrEnum):
+    RESOLVER_SOURCE_READ = "resolver_source_read"
+    IMPORTED_PRIOR_IDENTITY = "imported_prior_identity"
+
+
+@dataclass(frozen=True)
+class GroundedValueCertification:
+    value_id: str
+    method: GroundedValueCertificationMethod
+    authority_refs: tuple[str, ...] = ()
+    lineage_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.value_id.strip():
+            raise ValueError("grounded value certification requires value id")
+        if not isinstance(self.method, GroundedValueCertificationMethod):
+            object.__setattr__(
+                self,
+                "method",
+                GroundedValueCertificationMethod(str(self.method)),
+            )
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "value_id": self.value_id,
+            "method": self.method.value,
+            "authority_refs": list(self.authority_refs),
+            "lineage_refs": list(self.lineage_refs),
+        }
+
+
 @dataclass(frozen=True)
 class ResolverQueryParamCard:
     param_ref: str
@@ -210,6 +241,7 @@ class CanonicalInputLedger:
     values: tuple[FactValue, ...] = ()
     uses: tuple[GroundedInputUse, ...] = ()
     issues: tuple[GroundingIssue, ...] = ()
+    certifications: tuple[GroundedValueCertification, ...] = ()
 
     @property
     def ok(self) -> bool:

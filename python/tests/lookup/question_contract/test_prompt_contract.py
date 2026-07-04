@@ -7,7 +7,7 @@ from fervis.lookup.conversation_resolution import (
     ConversationDependencyOverlay,
     ConversationResolutionOverlay,
     ConversationValueFrameOverlay,
-    ResolvedQuestionInputOverlay,
+    LiteralQuestionInputOverlay,
     conversation_resolution_question_contract_prompt_payload,
 )
 from fervis.lookup.question_contract import QuestionContractRequest
@@ -51,12 +51,13 @@ def test_question_contract_prompt_uses_raw_question_with_conversation_overlay():
         activated_memory_ids=("mem_prior_total_sales",),
         used_source_card_ids=("card_prior_total_sales",),
         resolved_question_inputs=(
-            ResolvedQuestionInputOverlay(
-                kind="named_reference_text",
-                reference_text="she",
+            LiteralQuestionInputOverlay(
+                source_text="she",
                 occurrence=1,
-                lookup_text="Alice Smith",
-                target_meaning="staff identity",
+                resolved_input_ref="cr_input_1",
+                resolved_value_text="Alice Smith",
+                value_meaning_hint="staff identity",
+                role="reference_value",
             ),
         ),
     )
@@ -86,7 +87,7 @@ def test_question_contract_prompt_uses_raw_question_with_conversation_overlay():
     assert "And how much did she make yesterday? and where did she work?" in prompt
     assert "Conversation resolution annotations:" in prompt
     assert "resolved_question_inputs" in prompt
-    assert "named_reference_text" in prompt
+    assert "literal_text" in prompt
     assert "Alice Smith" in prompt
     assert "question_context" in prompt
     assert '"value_frames"' in prompt
@@ -95,7 +96,7 @@ def test_question_contract_prompt_uses_raw_question_with_conversation_overlay():
     assert "total sales amount" in prompt
     assert (
         "Conversation resolution can supply the requested value frame, but time "
-        "phrases still require matching time_text question inputs."
+        "phrases still require matching literal_text time_value question inputs."
     ) in prompt
     assert "integrated_question" not in prompt
     assert "Integrated question:" not in prompt

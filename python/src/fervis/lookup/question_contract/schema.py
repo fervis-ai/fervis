@@ -252,6 +252,7 @@ def _answer_output_schema() -> dict[str, object]:
 def _question_input_schema() -> dict[str, object]:
     return {
         "oneOf": [
+            _literal_text_input_schema(),
             _named_reference_input_schema(),
             _row_set_reference_input_schema(),
             _time_input_schema(),
@@ -259,6 +260,39 @@ def _question_input_schema() -> dict[str, object]:
             _numeric_input_schema(kind="explicit_numeric_limit_text"),
         ]
     }
+
+
+def _literal_text_input_schema() -> dict[str, object]:
+    return _strict_object(
+        {
+            "input_ref": {"type": "string", "minLength": 1},
+            "source": {"enum": ["question_context", "conversation_resolution"]},
+            "source_text": {"type": "string", "minLength": 1},
+            "resolved_value_text": {"type": "string", "minLength": 1},
+            "field_label_text": {"type": "string", "minLength": 1},
+            "value_meaning_hint": {"type": "string", "minLength": 1},
+            "role": {
+                "enum": [
+                    "reference_value",
+                    "result_limit",
+                    "time_value",
+                ]
+            },
+            "satisfies_requirement_id": {"type": "string", "minLength": 1},
+            "resolved_input_ref": {"type": "string", "minLength": 1},
+            "inventory_check": _question_input_inventory_check_schema(),
+            "kind": {"enum": ["literal_text"]},
+        },
+        required=(
+            "input_ref",
+            "source",
+            "source_text",
+            "resolved_value_text",
+            "role",
+            "inventory_check",
+            "kind",
+        ),
+    )
 
 
 def _base_question_input_properties(kind: str) -> dict[str, object]:

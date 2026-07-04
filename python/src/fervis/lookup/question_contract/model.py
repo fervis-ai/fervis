@@ -17,11 +17,18 @@ from fervis.lookup.question_contract._normalization import (
 
 
 class KnownInputKind(StrEnum):
+    LITERAL = "literal_text"
     REFERENCE = "named_reference_text"
     ROW_SET_REFERENCE = "row_set_reference"
     TIME = "time_text"
     NUMBER = "number_text"
     LIMIT = "explicit_numeric_limit_text"
+
+
+class LiteralInputRole(StrEnum):
+    REFERENCE_VALUE = "reference_value"
+    TIME_VALUE = "time_value"
+    RESULT_LIMIT = "result_limit"
 
 
 class KnownInputSource(StrEnum):
@@ -245,12 +252,18 @@ class RequestedFactKnownInput:
     lookup_text: str = ""
     occurrence: int = 1
     resolved_input_ref: str = ""
+    resolved_value_text: str = ""
+    field_label_text: str = ""
+    value_meaning_hint: str = ""
+    role: LiteralInputRole | None = None
 
     def __post_init__(self) -> None:
         if not self.id.strip():
             raise ValueError("known input requires id")
         if not self.text.strip():
             raise ValueError("known input requires text")
+        if self.role is not None and not isinstance(self.role, LiteralInputRole):
+            object.__setattr__(self, "role", LiteralInputRole(str(self.role)))
         if self.occurrence < 1:
             raise ValueError("known input occurrence must be positive")
         if self.kind == KnownInputKind.LIMIT and (
@@ -278,6 +291,23 @@ class RequestedFactKnownInput:
             raise ValueError(
                 f"{self.kind.value} known input must not include value source text"
             )
+        if self.kind == KnownInputKind.LITERAL:
+            self._validate_literal_input()
+            return
+        if self.resolved_value_text:
+            raise ValueError(
+                f"{self.kind.value} known input must not include resolved value text"
+            )
+        if self.field_label_text:
+            raise ValueError(
+                f"{self.kind.value} known input must not include field label text"
+            )
+        if self.value_meaning_hint:
+            raise ValueError(
+                f"{self.kind.value} known input must not include value meaning hint"
+            )
+        if self.role is not None:
+            raise ValueError(f"{self.kind.value} known input must not include role")
         if self.kind == KnownInputKind.TIME:
             if self.lookup_text:
                 raise ValueError("time known input must not include lookup text")
@@ -313,6 +343,20 @@ class RequestedFactKnownInput:
                 f"{self.kind.value} known input must not include resolved input ref"
             )
 
+    def _validate_literal_input(self) -> None:
+        if self.role is None:
+            raise ValueError("literal known input requires role")
+        if not self.resolved_value_text.strip():
+            raise ValueError("literal known input requires resolved value text")
+        if self.role == LiteralInputRole.TIME_VALUE:
+            if not self.satisfies_requirement_id.strip():
+                raise ValueError("literal time value requires requirement id")
+        if self.source == KnownInputSource.CONVERSATION_RESOLUTION:
+            if not self.resolved_input_ref.strip():
+                raise ValueError(
+                    "conversation-resolution literal requires resolved input ref"
+                )
+
     def to_model_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
             "id": self.id,
@@ -334,6 +378,14 @@ class RequestedFactKnownInput:
             payload["occurrence"] = self.occurrence
         if self.resolved_input_ref:
             payload["resolved_input_ref"] = self.resolved_input_ref
+        if self.resolved_value_text:
+            payload["resolved_value_text"] = self.resolved_value_text
+        if self.field_label_text:
+            payload["field_label_text"] = self.field_label_text
+        if self.value_meaning_hint:
+            payload["value_meaning_hint"] = self.value_meaning_hint
+        if self.role is not None:
+            payload["role"] = self.role.value
         return payload
 
 

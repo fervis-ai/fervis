@@ -1,0 +1,22 @@
+id: schema_exposes_literal_text_roles
+description: Question-contract schema exposes literal_text with the immediate literal roles.
+kind: algorithm
+algorithm: question_contract.schema
+input: {}
+expect:
+  result_contains:
+    question_input_kind_membership:
+      literal_text: true
+      row_set_reference: true
+    literal_text_role_values: [reference_value, result_limit, time_value]
+    literal_text_property_membership:
+      input_ref: true
+      kind: true
+      source: true
+      source_text: true
+      resolved_value_text: true
+      field_label_text: true
+      value_meaning_hint: true
+      role: true
+      satisfies_requirement_id: true
+      inventory_check: true

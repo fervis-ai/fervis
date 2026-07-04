@@ -1,0 +1,71 @@
+id: unowned_literal_input_fails_closed
+description: Question-contract parser rejects declared literal inputs that no requested fact owns.
+kind: algorithm
+algorithm: question_contract.parse
+input:
+  question_context: How many sales did staff_id 51515151-0000-0000-0002-000000000001 make today at BBS Mall?
+  payload:
+    kind: question_contract
+    answer_requests_count: 1
+    question_inputs:
+      - input_ref: staff
+        kind: literal_text
+        source: question_context
+        source_text: staff_id 51515151-0000-0000-0002-000000000001
+        field_label_text: staff_id
+        resolved_value_text: 51515151-0000-0000-0002-000000000001
+        value_meaning_hint: staff member
+        role: reference_value
+        inventory_check: {why_this_is_an_input: staff_id identifies the staff member whose sales define the population}
+      - input_ref: today
+        kind: literal_text
+        source: question_context
+        source_text: today
+        resolved_value_text: today
+        role: time_value
+        satisfies_requirement_id: time_req_1
+        inventory_check: {why_this_is_an_input: today is the time scope}
+      - input_ref: bbs_mall
+        kind: literal_text
+        source: question_context
+        source_text: BBS Mall
+        resolved_value_text: BBS Mall
+        value_meaning_hint: location
+        role: reference_value
+        inventory_check: {why_this_is_an_input: BBS Mall is a location value}
+    answer_requests:
+      - answer_fact: sales count for the specified staff member today
+        answer_expression: {family: scalar_aggregate}
+        answer_subject:
+          subject_text: sales
+          instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
+        input_requirements:
+          time_requirements:
+            - requirement_id: time_req_1
+              source_text: today
+              why_required: today constrains which sales count
+        answer_population:
+          population_label: sales by specified staff member today
+          counted_unit: sales
+          membership_tests:
+            - test_id: pop_test_1
+              kind: SUBJECT_IDENTITY
+              polarity: MUST_PASS
+              test_question: Does the row represent a sale?
+            - test_id: pop_test_2
+              kind: EXPLICIT_USER_CONSTRAINT
+              polarity: MUST_PASS
+              test_question: Is the sale by the specified staff member?
+            - test_id: pop_test_3
+              kind: EXPLICIT_USER_CONSTRAINT
+              polarity: MUST_PASS
+              test_question: Is the sale today?
+        answer_outputs:
+          - description: number of sales
+        input_decisions:
+          - {input_ref: staff, use_input: true}
+          - {input_ref: today, use_input: true}
+          - {input_ref: bbs_mall, use_input: false}
+    question_input_inventory_check: {all_input_like_phrases_declared: true}
+expect:
+  error_contains: literal_text question inputs must be owned by a requested fact

@@ -693,6 +693,7 @@ def _scripted_conversation_resolution_payload(
         return _conversation_resolution_selecting_visible_memory(
             prompt,
             memory_id=str(payload.get("memory_id") or ""),
+            anchor_text=str(payload.get("anchor_text") or ""),
             integrated_question=str(payload.get("integrated_question") or ""),
             resolved_text=str(payload.get("resolved_text") or ""),
         )
@@ -782,10 +783,12 @@ def _conversation_resolution_selecting_visible_memory(
     prompt: str,
     *,
     memory_id: str,
+    anchor_text: str,
     integrated_question: str,
     resolved_text: str,
 ) -> dict[str, Any]:
     current_question = _current_question_from_prompt(prompt)
+    anchor = anchor_text or current_question
     if not memory_id:
         raise AssertionError("select_visible_memory requires memory_id")
     component = _meaning_component_for_memory_id(
@@ -811,7 +814,7 @@ def _conversation_resolution_selecting_visible_memory(
                 },
                 "dependencies": [
                     {
-                        "anchor_text": current_question,
+                        "anchor_text": anchor,
                         "occurrence": 1,
                         "kind": "reference",
                         "meaning_components": [component],

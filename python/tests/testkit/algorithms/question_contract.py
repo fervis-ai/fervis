@@ -16,11 +16,15 @@ from fervis.lookup.conversation_resolution import (
     ConversationDependencyOverlay,
     ConversationResolutionOverlay,
     ConversationValueFrameOverlay,
+    LiteralQuestionInputOverlay,
+    NamedReferenceQuestionInputOverlay,
+    ResolvedQuestionInputOverlay,
+    RowSetQuestionInputOverlay,
     conversation_resolution_question_contract_prompt_payload,
 )
 from fervis.lookup.turn_prompts import build_turn_prompt_context
 
-from tests.testkit.assertions import subset_mismatches
+from tests.testkit.assertions import exact_mismatches, subset_mismatches
 
 
 def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
@@ -42,6 +46,9 @@ def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
             payload=model_payload,
             question_context=str(input_payload["question_context"]),
             question_context_texts=tuple(input_payload.get("question_context_texts") or ()),
+            conversation_resolution_overlay=_optional_conversation_overlay(
+                input_payload.get("conversation_resolution_overlay")
+            ),
         )
     except ValueError as exc:
         expected_error = payload["expect"].get("error_contains")
@@ -62,6 +69,11 @@ def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
                 "value_source_text": item.value_source_text,
                 "lookup_text": item.lookup_text,
                 "resolved_input_ref": item.resolved_input_ref,
+                "satisfies_requirement_id": item.satisfies_requirement_id,
+                "resolved_value_text": item.resolved_value_text,
+                "field_label_text": item.field_label_text,
+                "value_meaning_hint": item.value_meaning_hint,
+                "role": item.role.value if item.role is not None else "",
             }
             for item in result.outcome.question_inputs
         ],
@@ -87,6 +99,11 @@ def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
                         "text": item.text,
                         "numeric_value": item.numeric_value,
                         "lookup_text": item.lookup_text,
+                        "satisfies_requirement_id": item.satisfies_requirement_id,
+                        "resolved_value_text": item.resolved_value_text,
+                        "field_label_text": item.field_label_text,
+                        "value_meaning_hint": item.value_meaning_hint,
+                        "role": item.role.value if item.role is not None else "",
                     }
                     for item in fact.known_inputs
                 ],
@@ -99,6 +116,11 @@ def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
             for fact in result.outcome.requested_facts
         ],
     }
+    if "result_equals" in payload["expect"]:
+        return exact_mismatches(
+            actual=actual,
+            expected=payload["expect"]["result_equals"],
+        )
     return subset_mismatches(
         actual=actual,
         expected_subset=payload["expect"]["result_contains"],
@@ -160,11 +182,40 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
         ),
         "question_input_kinds": sorted(variants),
         "question_input_kind_membership": {
+            "literal_text": "literal_text" in variants,
             "time_text": "time_text" in variants,
             "explicit_numeric_limit_text": "explicit_numeric_limit_text" in variants,
             "named_reference_text": "named_reference_text" in variants,
             "number_text": "number_text" in variants,
             "row_set_reference": "row_set_reference" in variants,
+        },
+        "literal_text_role_values": (
+            variants["literal_text"]["properties"]["role"]["enum"]
+            if "literal_text" in variants
+            else []
+        ),
+        "literal_text_properties": (
+            sorted(variants["literal_text"]["properties"])
+            if "literal_text" in variants
+            else []
+        ),
+        "literal_text_property_membership": {
+            name: (
+                "literal_text" in variants
+                and name in variants["literal_text"]["properties"]
+            )
+            for name in (
+                "input_ref",
+                "kind",
+                "source",
+                "source_text",
+                "resolved_value_text",
+                "field_label_text",
+                "value_meaning_hint",
+                "role",
+                "satisfies_requirement_id",
+                "inventory_check",
+            )
         },
         "row_set_reference_properties": sorted(
             variants["row_set_reference"]["properties"]
@@ -185,10 +236,16 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
         "row_set_reference_required": variants["row_set_reference"]["required"],
         "schema_text": repr(schema),
     }
-    errors = subset_mismatches(
-        actual=actual,
-        expected_subset=payload["expect"].get("result_contains") or {},
-    )
+    if "result_equals" in payload["expect"]:
+        errors = exact_mismatches(
+            actual=actual,
+            expected=payload["expect"]["result_equals"],
+        )
+    else:
+        errors = subset_mismatches(
+            actual=actual,
+            expected_subset=payload["expect"].get("result_contains") or {},
+        )
     for text in payload["expect"].get("text_excludes") or ():
         if text in actual["schema_text"]:
             errors.append(f"unexpected text present: {text!r}")
@@ -301,6 +358,47 @@ def _conversation_overlay(payload: dict[str, Any]) -> ConversationResolutionOver
         scopes=(),
         activated_memory_ids=(),
         used_source_card_ids=(),
+        resolved_question_inputs=tuple(
+            _resolved_question_input_overlay(item)
+            for item in payload.get("resolved_question_inputs") or ()
+        ),
+    )
+
+
+def _optional_conversation_overlay(raw: object) -> ConversationResolutionOverlay | None:
+    if not isinstance(raw, dict):
+        return None
+    return _conversation_overlay(raw)
+
+
+def _resolved_question_input_overlay(
+    item: dict[str, Any],
+) -> ResolvedQuestionInputOverlay:
+    kind = str(item["kind"])
+    if kind == "literal_text":
+        return LiteralQuestionInputOverlay(
+            source_text=str(item["source_text"]),
+            occurrence=int(item.get("occurrence") or 1),
+            resolved_input_ref=str(item["resolved_input_ref"]),
+            resolved_value_text=str(item["resolved_value_text"]),
+            value_meaning_hint=str(item.get("value_meaning_hint") or ""),
+            field_label_text=str(item.get("field_label_text") or ""),
+            role=str(item["role"]),
+        )
+    if kind == "row_set_reference":
+        return RowSetQuestionInputOverlay(
+            reference_text=str(item["reference_text"]),
+            occurrence=int(item.get("occurrence") or 1),
+            resolved_input_ref=str(item["resolved_input_ref"]),
+            memory_ids=tuple(str(ref) for ref in item.get("memory_ids") or ()),
+        )
+    return NamedReferenceQuestionInputOverlay(
+        reference_text=str(item["reference_text"]),
+        occurrence=int(item.get("occurrence") or 1),
+        target_meaning=str(item["target_meaning"]),
+        lookup_text=str(item["lookup_text"]),
+        resolved_input_ref=str(item.get("resolved_input_ref") or ""),
+        memory_ids=tuple(str(ref) for ref in item.get("memory_ids") or ()),
     )
 
 

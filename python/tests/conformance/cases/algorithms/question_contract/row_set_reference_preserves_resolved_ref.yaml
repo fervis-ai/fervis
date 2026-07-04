@@ -7,6 +7,13 @@ algorithm: question_contract.parse
 input:
   question_context: Show the amount for those sales.
   question_context_texts: [those sales]
+  conversation_resolution_overlay:
+    current_question: Show the amount for those sales.
+    resolved_question_inputs:
+      - kind: row_set_reference
+        reference_text: those sales
+        occurrence: 1
+        resolved_input_ref: cr_input_1
   question_inputs:
     - input_ref: sales
       kind: row_set_reference

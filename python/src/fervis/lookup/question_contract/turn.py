@@ -144,6 +144,7 @@ def generate_question_contract(
             payload=output.arguments,
             question_context=request.current_question,
             question_context_texts=_question_contract_context_texts(request),
+            conversation_resolution_overlay=request.conversation_resolution_overlay,
         )
         if isinstance(result.outcome, QuestionContract):
             validate_question_contract_against_question(

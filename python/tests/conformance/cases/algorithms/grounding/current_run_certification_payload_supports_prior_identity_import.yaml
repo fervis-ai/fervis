@@ -1,0 +1,17 @@
+id: current_run_certification_payload_supports_prior_identity_import
+description: Grounding certification payloads can represent importing a prior grounded identity into the current run.
+kind: algorithm
+algorithm: grounding.contract
+input:
+  certifications:
+    - value_id: value_staff_1
+      method: imported_prior_identity
+      authority_refs: [prior_source_read:staff:list:row_1]
+      lineage_refs: [conversation_resolution:cr_input_1, known_input:input_1]
+expect:
+  result_contains:
+    certifications:
+      - value_id: value_staff_1
+        method: imported_prior_identity
+        authority_refs: [prior_source_read:staff:list:row_1]
+        lineage_refs: [conversation_resolution:cr_input_1, known_input:input_1]

@@ -41,6 +41,7 @@ input:
   conversation_resolution:
     mode: select_visible_memory
     memory_id: turn_sales.relation.sales
+    anchor_text: that
     resolved_text: those sales
     integrated_question: How much is the total sales for the prior sales rows?
   question_contract:

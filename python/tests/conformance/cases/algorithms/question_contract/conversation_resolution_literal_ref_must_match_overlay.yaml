@@ -1,0 +1,73 @@
+id: conversation_resolution_literal_ref_must_match_overlay
+description: Question-contract parser rejects CR-sourced literal inputs whose resolved_input_ref is not in the overlay.
+kind: algorithm
+algorithm: question_contract.parse
+input:
+  question_context: How much did she sell today?
+  question_context_texts: [she, today]
+  conversation_resolution_overlay:
+    current_question: How much did she sell today?
+    resolved_question_inputs:
+      - kind: literal_text
+        source_text: she
+        occurrence: 1
+        resolved_input_ref: cr_input_1
+        resolved_value_text: Alice Smith
+        value_meaning_hint: staff member
+        role: reference_value
+  payload:
+    kind: question_contract
+    answer_requests_count: 1
+    question_inputs:
+      - input_ref: staff
+        kind: literal_text
+        source: conversation_resolution
+        source_text: she
+        resolved_input_ref: cr_input_999
+        resolved_value_text: Alice Smith
+        value_meaning_hint: staff member
+        role: reference_value
+        inventory_check: {why_this_is_an_input: she resolves to a staff member who constrains the sales population}
+      - input_ref: today
+        kind: literal_text
+        source: question_context
+        source_text: today
+        resolved_value_text: today
+        role: time_value
+        satisfies_requirement_id: time_req_1
+        inventory_check: {why_this_is_an_input: today is the time scope}
+    answer_requests:
+      - answer_fact: sales amount for the resolved staff member today
+        answer_expression: {family: scalar_aggregate}
+        answer_subject:
+          subject_text: sales
+          instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
+        input_requirements:
+          time_requirements:
+            - requirement_id: time_req_1
+              source_text: today
+              why_required: today constrains the sales amount
+        answer_population:
+          population_label: sales by resolved staff member today
+          counted_unit: sales
+          membership_tests:
+            - test_id: pop_test_1
+              kind: SUBJECT_IDENTITY
+              polarity: MUST_PASS
+              test_question: Does the row represent a sale?
+            - test_id: pop_test_2
+              kind: EXPLICIT_USER_CONSTRAINT
+              polarity: MUST_PASS
+              test_question: Is the sale by the resolved staff member?
+            - test_id: pop_test_3
+              kind: EXPLICIT_USER_CONSTRAINT
+              polarity: MUST_PASS
+              test_question: Is the sale today?
+        answer_outputs:
+          - description: sales amount
+        input_decisions:
+          - {input_ref: staff, use_input: true}
+          - {input_ref: today, use_input: true}
+    question_input_inventory_check: {all_input_like_phrases_declared: true}
+expect:
+  error_contains: conversation_resolution question input must match resolved_question_inputs

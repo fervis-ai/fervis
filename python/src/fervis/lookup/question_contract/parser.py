@@ -6,6 +6,7 @@ from dataclasses import replace
 import re
 from typing import Any
 
+from fervis.lookup.conversation_resolution import ConversationResolutionOverlay
 from fervis.lookup.question_contract._normalization import (
     number_text,
 )
@@ -15,6 +16,7 @@ from fervis.lookup.question_contract.model import (
     AnswerSubjectInstanceInterpretationKind,
     KnownInputKind,
     KnownInputSource,
+    LiteralInputRole,
     MissingQuestionInput,
     MissingQuestionInputType,
     QuestionContract,
@@ -44,6 +46,7 @@ def parse_question_contract(
     payload: dict[str, Any],
     question_context: str,
     question_context_texts: tuple[str, ...] = (),
+    conversation_resolution_overlay: ConversationResolutionOverlay | None = None,
 ) -> QuestionContractResult:
     question_text = _text(question_context)
     if not question_text:
@@ -91,10 +94,18 @@ def parse_question_contract(
         payload.get("question_inputs"),
         question_context_texts=(question_text, *question_context_texts),
     )
+    _validate_conversation_resolution_question_inputs(
+        question_inputs,
+        conversation_resolution_overlay=conversation_resolution_overlay,
+    )
     requested_facts = _requested_facts(
         payload.get("answer_requests"),
         question_inputs=question_inputs,
         question_context_texts=(question_text, *question_context_texts),
+    )
+    _reject_unowned_literal_inputs(
+        question_inputs,
+        requested_facts=requested_facts,
     )
     question_inputs, requested_facts = _drop_answer_subject_question_inputs(
         question_inputs,
@@ -402,6 +413,77 @@ def _referenced_question_inputs(
     return tuple(known for known in question_inputs if known.id in referenced)
 
 
+def _reject_unowned_literal_inputs(
+    question_inputs: tuple[RequestedFactKnownInput, ...],
+    *,
+    requested_facts: tuple[RequestedFact, ...],
+) -> None:
+    referenced = {
+        input_ref for fact in requested_facts for input_ref in fact.input_refs
+    }
+    unowned = [
+        known.id
+        for known in question_inputs
+        if known.kind == KnownInputKind.LITERAL and known.id not in referenced
+    ]
+    if unowned:
+        raise ValueError(
+            "literal_text question inputs must be owned by a requested fact: "
+            + ", ".join(unowned)
+        )
+
+
+def _validate_conversation_resolution_question_inputs(
+    question_inputs: tuple[RequestedFactKnownInput, ...],
+    *,
+    conversation_resolution_overlay: ConversationResolutionOverlay | None,
+) -> None:
+    resolved_inputs = (
+        conversation_resolution_overlay.resolved_question_inputs
+        if conversation_resolution_overlay is not None
+        else ()
+    )
+    resolved_by_ref = {
+        item.resolved_input_ref: item
+        for item in resolved_inputs
+        if item.resolved_input_ref
+    }
+    for known in question_inputs:
+        if known.source != KnownInputSource.CONVERSATION_RESOLUTION:
+            continue
+        resolved = resolved_by_ref.get(known.resolved_input_ref)
+        if resolved is None or not _conversation_resolution_input_matches(
+            known,
+            resolved,
+        ):
+            raise ValueError(
+                "conversation_resolution question input must match "
+                "resolved_question_inputs"
+            )
+
+
+def _conversation_resolution_input_matches(
+    known: RequestedFactKnownInput,
+    resolved: Any,
+) -> bool:
+    resolved_text = resolved.source_text or resolved.reference_text
+    if known.text != resolved_text:
+        return False
+    if known.kind == KnownInputKind.ROW_SET_REFERENCE:
+        return (
+            resolved.kind == KnownInputKind.ROW_SET_REFERENCE.value
+            and known.occurrence == resolved.occurrence
+        )
+    if known.kind == KnownInputKind.LITERAL:
+        return (
+            resolved.kind == KnownInputKind.LITERAL.value
+            and known.resolved_value_text == resolved.resolved_value_text
+            and known.role is not None
+            and known.role.value == resolved.role
+        )
+    return False
+
+
 def _drop_answer_subject_question_inputs(
     question_inputs: tuple[RequestedFactKnownInput, ...],
     *,
@@ -517,11 +599,16 @@ def _question_inputs(
                 "input_ref",
                 "kind",
                 "source",
+                "source_text",
                 "reference_text",
                 "target_meaning",
                 "lookup_text",
                 "numeric_value",
                 "value_source_text",
+                "resolved_value_text",
+                "field_label_text",
+                "value_meaning_hint",
+                "role",
                 "occurrence",
                 "resolved_input_ref",
                 "satisfies_requirement_id",
@@ -543,10 +630,13 @@ def _question_inputs(
             kind=kind,
             path=f"{path}.source",
         )
+        input_text_key = (
+            "source_text" if kind == KnownInputKind.LITERAL else "reference_text"
+        )
         reference_text = _copied_text(
-            item.get("reference_text"),
+            item.get(input_text_key),
             question_context_texts=question_context_texts,
-            path=f"{path}.reference_text",
+            path=f"{path}.{input_text_key}",
         )
         output.append(
             _question_input(
@@ -594,17 +684,33 @@ def _question_input(
     question_context_texts: tuple[str, ...],
     path: str,
 ) -> RequestedFactKnownInput:
-    if kind == KnownInputKind.REFERENCE:
-        _reject_kind_specific_fields(
-            item,
-            forbidden=(
-                "numeric_value",
-                "occurrence",
-                "resolved_input_ref",
-                "satisfies_requirement_id",
-            ),
-            path=path,
+    if kind == KnownInputKind.LITERAL:
+        role = LiteralInputRole(
+            _required_text(item.get("role"), path=f"{path}.role")
         )
+        field_label_text = _text(item.get("field_label_text"))
+        if field_label_text and not any(
+            _contains_text_span(context, field_label_text)
+            for context in question_context_texts
+        ):
+            raise ValueError("field label text must come from question context")
+        resolved_input_ref = _text(item.get("resolved_input_ref"))
+        return RequestedFactKnownInput(
+            id=input_ref,
+            kind=KnownInputKind.LITERAL,
+            source=source,
+            text=reference_text,
+            resolved_value_text=_required_text(
+                item.get("resolved_value_text"),
+                path=f"{path}.resolved_value_text",
+            ),
+            field_label_text=field_label_text,
+            value_meaning_hint=_text(item.get("value_meaning_hint")),
+            role=role,
+            satisfies_requirement_id=_text(item.get("satisfies_requirement_id")),
+            resolved_input_ref=resolved_input_ref,
+        )
+    if kind == KnownInputKind.REFERENCE:
         lookup_text = _lookup_text(
             item.get("lookup_text"),
             question_context_texts=question_context_texts,
@@ -622,16 +728,6 @@ def _question_input(
             lookup_text=lookup_text,
         )
     if kind == KnownInputKind.ROW_SET_REFERENCE:
-        _reject_kind_specific_fields(
-            item,
-            forbidden=(
-                "lookup_text",
-                "target_meaning",
-                "numeric_value",
-                "satisfies_requirement_id",
-            ),
-            path=path,
-        )
         return RequestedFactKnownInput(
             id=input_ref,
             kind=KnownInputKind.ROW_SET_REFERENCE,
@@ -647,16 +743,6 @@ def _question_input(
             ),
         )
     if kind == KnownInputKind.TIME:
-        _reject_kind_specific_fields(
-            item,
-            forbidden=(
-                "target_meaning",
-                "lookup_text",
-                "numeric_value",
-                "resolved_input_ref",
-            ),
-            path=path,
-        )
         return RequestedFactKnownInput(
             id=input_ref,
             kind=KnownInputKind.TIME,
@@ -665,19 +751,6 @@ def _question_input(
             satisfies_requirement_id=_text(item.get("satisfies_requirement_id")),
         )
     if kind in {KnownInputKind.LIMIT, KnownInputKind.NUMBER}:
-        forbidden = [
-            "target_meaning",
-            "lookup_text",
-            "resolved_input_ref",
-            "satisfies_requirement_id",
-        ]
-        if kind == KnownInputKind.NUMBER:
-            forbidden.append("value_source_text")
-        _reject_kind_specific_fields(
-            item,
-            forbidden=tuple(forbidden),
-            path=path,
-        )
         value_source_text = ""
         if kind == KnownInputKind.LIMIT:
             value_source_text = _limit_value_source_text(
@@ -717,7 +790,13 @@ def _validate_input_requirements(
             matching = [
                 known
                 for known in used_inputs
-                if known.kind == KnownInputKind.TIME
+                if (
+                    known.kind == KnownInputKind.TIME
+                    or (
+                        known.kind == KnownInputKind.LITERAL
+                        and known.role == LiteralInputRole.TIME_VALUE
+                    )
+                )
                 and known.satisfies_requirement_id == requirement.id
                 and known.text == requirement.source_text
             ]
@@ -763,6 +842,8 @@ def _input_decisions(
 
 def _question_input_kind(value: Any, *, path: str) -> KnownInputKind:
     kind = _required_text(value, path=path)
+    if kind == KnownInputKind.LITERAL.value:
+        return KnownInputKind.LITERAL
     if kind == KnownInputKind.REFERENCE.value:
         return KnownInputKind.REFERENCE
     if kind == KnownInputKind.ROW_SET_REFERENCE.value:
@@ -774,17 +855,6 @@ def _question_input_kind(value: Any, *, path: str) -> KnownInputKind:
     if kind == KnownInputKind.NUMBER.value:
         return KnownInputKind.NUMBER
     raise ValueError(f"{path} is invalid")
-
-
-def _reject_kind_specific_fields(
-    item: dict[str, Any],
-    *,
-    forbidden: tuple[str, ...],
-    path: str,
-) -> None:
-    present = sorted(field for field in forbidden if field in item)
-    if present:
-        raise ValueError(f"{path} includes unsupported fields: {', '.join(present)}")
 
 
 def _literal_value(
@@ -838,6 +908,12 @@ def _question_input_source(
     path: str,
 ) -> KnownInputSource:
     source = _required_text(value, path=path)
+    if kind == KnownInputKind.LITERAL:
+        if source == KnownInputSource.CONVERSATION_RESOLUTION.value:
+            return KnownInputSource.CONVERSATION_RESOLUTION
+        if source == KnownInputSource.QUESTION_CONTEXT.value:
+            return KnownInputSource.QUESTION_CONTEXT
+        raise ValueError(f"{path} must be question_context or conversation_resolution")
     if kind == KnownInputKind.ROW_SET_REFERENCE:
         if source != KnownInputSource.CONVERSATION_RESOLUTION.value:
             raise ValueError(f"{path} must be conversation_resolution")
