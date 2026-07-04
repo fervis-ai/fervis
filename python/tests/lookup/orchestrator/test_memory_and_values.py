@@ -595,7 +595,7 @@ def test_lookup_orchestrator_repeated_named_target_does_not_reuse_inactive_memor
                             {
                                 "basis": (
                                     "location can identify ABC Mall because "
-                                    "target_meaning is location."
+                                    "value_meaning_hint is location."
                                 ),
                                 "term": "location",
                             }

@@ -1527,7 +1527,7 @@ def test_lookup_unresolved_named_entity_returns_resource_specific_clarification(
                         "target_id": "fact_1_entity_1",
                         "catalog_search_terms": [
                             {
-                                "basis": "location can identify Nextgen because target_meaning is store.",
+                                "basis": "location can identify Nextgen because value_meaning_hint is store.",
                                 "term": "location",
                             }
                         ],
@@ -1700,7 +1700,7 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
                         "target_id": "fact_1_entity_1",
                         "catalog_search_terms": [
                             {
-                                "basis": "staff can identify Jane Doe because target_meaning is staff member.",
+                                "basis": "staff can identify Jane Doe because value_meaning_hint is staff member.",
                                 "term": "staff",
                             },
                         ],
@@ -1840,7 +1840,7 @@ def test_lookup_grounding_executes_ambiguous_resolver_routes_before_source_bindi
                         "target_id": "fact_1_entity_1",
                         "catalog_search_terms": [
                             {
-                                "basis": "location can identify ABC Mall because target_meaning is store location.",
+                                "basis": "location can identify ABC Mall because value_meaning_hint is store location.",
                                 "term": "location",
                             },
                         ],
@@ -1995,7 +1995,7 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
                         "target_id": "fact_1_entity_1",
                         "catalog_search_terms": [
                             {
-                                "basis": "staff can identify Jane Doe because target_meaning is staff member.",
+                                "basis": "staff can identify Jane Doe because value_meaning_hint is staff member.",
                                 "term": "staff",
                             },
                         ],
@@ -2134,7 +2134,7 @@ def test_lookup_runtime_fails_closed_on_grounding_resolver_source_read_failure()
                         "target_id": "fact_1_entity_1",
                         "catalog_search_terms": [
                             {
-                                "basis": "staff can identify Jane Doe because target_meaning is staff member.",
+                                "basis": "staff can identify Jane Doe because value_meaning_hint is staff member.",
                                 "term": "staff",
                             },
                         ],
@@ -2223,7 +2223,7 @@ def test_lookup_runtime_fails_closed_on_grounding_missing_catalog_endpoint() -> 
                         "target_id": "fact_1_entity_1",
                         "catalog_search_terms": [
                             {
-                                "basis": "staff can identify Jane Doe because target_meaning is staff member.",
+                                "basis": "staff can identify Jane Doe because value_meaning_hint is staff member.",
                                 "term": "staff",
                             },
                         ],

@@ -39,5 +39,5 @@ expect:
       entity_targets:
       - target_id: staff
         reference_text: Jane Doe
-        lookup_text: Jane Doe
-        target_meaning: staff member
+        resolved_value_text: Jane Doe
+        value_meaning_hint: staff member

@@ -1703,8 +1703,10 @@ def _query_enrichment_payload_from_prompt(prompt: str) -> dict[str, Any]:
                 "catalog_search_terms": [
                     {
                         "basis": (
-                            f"{resource_name} can identify {target['lookup_text']} "
-                            f"because target_meaning is {target['target_meaning']}."
+                            f"{resource_name} can identify "
+                            f"{target['resolved_value_text']} because "
+                            "value_meaning_hint is "
+                            f"{target['value_meaning_hint']}."
                         ),
                         "term": resource_name,
                     }

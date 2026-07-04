@@ -1,0 +1,46 @@
+id: reference_value_uuid_does_not_rank_resource_terms
+description: Catalog selection does not turn UUID-like reference values into resource query terms.
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - id: sales_read
+        endpoint_name: list_sales
+        resource_names: [sales]
+        facts:
+          - ref: sales.total
+      - id: uuid_inventory_read
+        endpoint_name: list_uuid_inventory
+        resource_names: [uuid inventory]
+        facts:
+          - ref: uuid.inventory
+  requested_facts:
+    - id: fact_1
+      description: sales for specified staff member
+      answer_outputs:
+        - id: answer_1
+          description: sales total
+      known_inputs:
+        - id: staff_id
+          kind: literal_text
+          source: question_context
+          text: staff_id 51515151-0000-0000-0002-000000000001
+          field_label_text: staff_id
+          resolved_value_text: 51515151-0000-0000-0002-000000000001
+          role: reference_value
+  resource_name_matches:
+    - requested_fact_id: fact_1
+      answer_output_resource_lineage:
+        - answer_output_id: answer_1
+          support_role: MEASURED_VALUE
+          source_text: sales for specified staff member
+          matching_resource_names: [sales]
+  max_reads_per_fact: 2
+expect:
+  result_contains:
+    selected_read_ids: [sales_read]
+    requested_fact_selections:
+      - requested_fact_id: fact_1
+        query_terms: [sale]
+        selected_read_ids: [sales_read]

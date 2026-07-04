@@ -37,17 +37,17 @@ input:
     entity_target_catalog_search_terms:
     - target_id: entity_1
       catalog_search_terms:
-      - basis: staff can identify Jane Doe because target_meaning is staff member.
+      - basis: staff can identify Jane Doe because value_meaning_hint is staff member.
         term: staff
-      - basis: staff profile can identify Jane Doe because target_meaning is staff member.
+      - basis: staff profile can identify Jane Doe because value_meaning_hint is staff member.
         term: staff profile
-      - basis: salesperson can identify Jane Doe because target_meaning is staff member.
+      - basis: salesperson can identify Jane Doe because value_meaning_hint is staff member.
         term: salesperson
-      - basis: employee can identify Jane Doe because target_meaning is staff member.
+      - basis: employee can identify Jane Doe because value_meaning_hint is staff member.
         term: employee
-      - basis: agent can identify Jane Doe because target_meaning is staff member.
+      - basis: agent can identify Jane Doe because value_meaning_hint is staff member.
         term: agent
-      - basis: team member can identify Jane Doe because target_meaning is staff member.
+      - basis: team member can identify Jane Doe because value_meaning_hint is staff member.
         term: team member
 expect:
   error_contains: at most 5 terms

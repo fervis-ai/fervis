@@ -68,7 +68,7 @@ PROMPT_SURFACE_CONTRACTS = {
             "Conversation Resolution Annotations",
             "Answer Output Resource Lineage",
             "Resource Lineage Matches",
-            "Named Entity Resolver Search Terms",
+            "Reference Value Resolver Search Terms",
             "Boundaries",
             "Copying And Validity",
             "Output",
