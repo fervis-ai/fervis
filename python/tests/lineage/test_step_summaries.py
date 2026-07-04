@@ -19,6 +19,7 @@ from fervis.lookup.lineage.step_summaries import (
 from fervis.lookup.question_contract import (
     KnownInputKind,
     KnownInputSource,
+    LiteralInputRole,
     QuestionContract,
     RequestedFact,
     RequestedFactAnswerOutput,
@@ -109,9 +110,7 @@ def test_conversation_resolution_model_turn_summary_projects_clause_semantics() 
         }
     )
 
-    assert [
-        item.to_json() for item in step_semantic_items_from_json(summary)
-    ] == [
+    assert [item.to_json() for item in step_semantic_items_from_json(summary)] == [
         {
             "kind": "conversation_clause",
             "payload": {
@@ -238,7 +237,7 @@ def test_model_turn_summary_projects_generic_explanation_fields() -> None:
             ),
             detail=StepSummaryDetail.VERBOSE,
             is_explanation=True,
-        )
+        ),
     )
 
 
@@ -292,7 +291,9 @@ def test_plan_selection_model_turn_summary_projects_reviewed_candidates() -> Non
     )
 
 
-def test_question_contract_summary_projects_semantic_requested_facts_and_known_inputs() -> None:
+def test_question_contract_summary_projects_semantic_requested_facts_and_known_inputs() -> (
+    None
+):
     summary = model_turn_output_summary(
         {
             EventPayloadKey.PURPOSE: ModelTurnPurpose.QUESTION_CONTRACT,
@@ -301,15 +302,18 @@ def test_question_contract_summary_projects_semantic_requested_facts_and_known_i
                 "question_inputs": [
                     {
                         "input_ref": "fact_1_entity_1",
-                        "kind": "named_reference_text",
-                        "reference_text": "ABC Mall",
-                        "target_meaning": "store",
-                        "lookup_text": "ABC Mall",
+                        "kind": "literal_text",
+                        "role": "reference_value",
+                        "source_text": "ABC Mall",
+                        "value_meaning_hint": "store",
+                        "resolved_value_text": "ABC Mall",
                     },
                     {
                         "input_ref": "fact_1_time_1",
-                        "kind": "time_text",
-                        "reference_text": "this month",
+                        "kind": "literal_text",
+                        "role": "time_value",
+                        "source_text": "this month",
+                        "resolved_value_text": "this month",
                     },
                 ],
                 "answer_requests": [
@@ -334,9 +338,9 @@ def test_question_contract_summary_projects_semantic_requested_facts_and_known_i
             payload={
                 "input_id": "fact_1_entity_1",
                 "text": "ABC Mall",
-                "kind": "named_reference_text",
+                "kind": "literal_text",
                 "description": "store",
-                "lookup_text": "ABC Mall",
+                "resolved_value_text": "ABC Mall",
             },
         ),
         StepSemanticItem(
@@ -344,9 +348,9 @@ def test_question_contract_summary_projects_semantic_requested_facts_and_known_i
             payload={
                 "input_id": "fact_1_time_1",
                 "text": "this month",
-                "kind": "time_text",
+                "kind": "literal_text",
                 "description": "",
-                "lookup_text": "",
+                "resolved_value_text": "this month",
             },
         ),
     )
@@ -449,10 +453,12 @@ def test_grounding_summary_projects_time_interpretations_as_semantic_inputs() ->
                     known_inputs=(
                         RequestedFactKnownInput(
                             id="fact_1_time_1",
-                            kind=KnownInputKind.TIME,
+                            kind=KnownInputKind.LITERAL,
                             source=KnownInputSource.QUESTION_CONTEXT,
                             text="this month",
-                            description="reporting period",
+                            role=LiteralInputRole.TIME_VALUE,
+                            resolved_value_text="this month",
+                            satisfies_requirement_id="time_req_1",
                         ),
                     ),
                 ),
@@ -475,7 +481,9 @@ def test_grounding_summary_projects_time_interpretations_as_semantic_inputs() ->
     )
 
 
-def test_grounding_summary_projects_literal_interpretations_as_semantic_inputs() -> None:
+def test_grounding_summary_projects_literal_interpretations_as_semantic_inputs() -> (
+    None
+):
     summary = add_grounding_result_semantics(
         {},
         ledger=CanonicalInputLedger(
@@ -498,12 +506,12 @@ def test_grounding_summary_projects_literal_interpretations_as_semantic_inputs()
                     known_inputs=(
                         RequestedFactKnownInput(
                             id="fact_1_limit_1",
-                            kind=KnownInputKind.LIMIT,
+                            kind=KnownInputKind.LITERAL,
                             source=KnownInputSource.QUESTION_CONTEXT,
                             text="top 10",
-                            description="rank limit",
-                            numeric_value=10,
-                            value_source_text="10",
+                            role=LiteralInputRole.RESULT_LIMIT,
+                            resolved_value_text="10",
+                            value_meaning_hint="rank limit",
                         ),
                     ),
                 ),

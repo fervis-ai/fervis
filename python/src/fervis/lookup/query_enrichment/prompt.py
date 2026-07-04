@@ -202,15 +202,15 @@ class QueryEnrichmentTurnPrompt(TurnPromptBase):
         targets: dict[str, dict[str, object]] = {}
         for fact in self.request.requested_facts:
             for known in fact.known_inputs:
-                if known.kind.value != "named_reference_text":
+                if not known.is_reference_value:
                     continue
                 targets.setdefault(
                     known.id,
                     {
                         "target_id": known.id,
                         "reference_text": known.text,
-                        "lookup_text": known.lookup_text or known.text,
-                        "target_meaning": known.description or known.text,
+                        "lookup_text": known.resolved_value_text or known.text,
+                        "target_meaning": known.value_meaning_hint or known.text,
                     },
                 )
         return {"entity_targets": list(targets.values())}

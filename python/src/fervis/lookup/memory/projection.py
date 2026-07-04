@@ -1035,13 +1035,9 @@ def _answer_request_known_input_slot_kinds(
 
 def _prior_request_slot(known: PriorAnswerKnownInput) -> dict[str, str] | None:
     slot_id = known.id
-    kind = known.kind
-    slot_kind = {
-        "named_reference_text": "entity_identity",
-        "time_text": "time_scope",
-        "number_text": "number",
-        "explicit_numeric_limit_text": "limit",
-    }.get(kind)
+    slot_kind = (
+        _literal_role_slot_kind(known.role) if known.kind == "literal_text" else ""
+    )
     if not slot_id or not slot_kind:
         return None
     output = {
@@ -1055,6 +1051,14 @@ def _prior_request_slot(known: PriorAnswerKnownInput) -> dict[str, str] | None:
     if description:
         output["description"] = description
     return output
+
+
+def _literal_role_slot_kind(role: str) -> str:
+    return {
+        "reference_value": "entity_identity",
+        "time_value": "time_scope",
+        "result_limit": "limit",
+    }.get(role, "")
 
 
 def _prior_slot_bindings(

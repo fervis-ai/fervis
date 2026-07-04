@@ -54,6 +54,7 @@ from fervis.lookup.fact_planning.required_inputs import required_input_id
 from fervis.lookup.question_contract import (
     KnownInputKind,
     KnownInputSource,
+    LiteralInputRole,
     QuestionContract,
     RequestedFact,
     RequestedFactAnswerOutput,
@@ -198,10 +199,11 @@ def test_requested_fact_output_and_known_input_ids_are_disjoint():
                     known_inputs=(
                         RequestedFactKnownInput(
                             id="answer",
-                            kind=KnownInputKind.REFERENCE,
+                            kind=KnownInputKind.LITERAL,
                             source=KnownInputSource.QUESTION_CONTEXT,
                             text="Alice",
-                            lookup_text="Alice",
+                            role=LiteralInputRole.REFERENCE_VALUE,
+                            resolved_value_text="Alice",
                         ),
                     ),
                 ),
@@ -647,10 +649,11 @@ def _question_contract_with_known_person() -> QuestionContract:
                 known_inputs=(
                     RequestedFactKnownInput(
                         id="person_name",
-                        kind=KnownInputKind.REFERENCE,
+                        kind=KnownInputKind.LITERAL,
                         source=KnownInputSource.QUESTION_CONTEXT,
                         text="Alice",
-                        lookup_text="Alice",
+                        role=LiteralInputRole.REFERENCE_VALUE,
+                        resolved_value_text="Alice",
                     ),
                 ),
             ),

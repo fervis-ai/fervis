@@ -1,7 +1,7 @@
-id: unused_inputs_are_dropped
-description: Inputs not used by any answer request are removed from the parsed contract.
+id: unowned_literal_inputs_fail_closed
+description: Declared literal inputs not owned by any answer request are rejected.
 migrates:
-  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_drops_inputs_unused_by_any_answer_request
+- api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_drops_inputs_unused_by_any_answer_request
 kind: algorithm
 algorithm: question_contract.parse
 input:
@@ -9,27 +9,29 @@ input:
   answer_fact: staff with the highest calculated pay this month
   answer_subject:
     subject_text: staff
-    instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
+    instance_interpretation:
+      kind: NORMAL_BUSINESS_INSTANCE
   answer_outputs:
-    - description: staff with the highest calculated pay
-    - description: calculated pay
+  - description: staff with the highest calculated pay
+  - description: calculated pay
   question_inputs:
-    - input_ref: period
-      source: question_context
-      kind: time_text
-      reference_text: this month
-      inventory_check: {why_this_is_an_input: this month is a time scope}
-    - input_ref: ranking
-      source: question_context
-      kind: time_text
-      reference_text: highest
-      inventory_check: {why_this_is_an_input: highest is a ranking phrase}
-  used_input_refs: [period]
+  - input_ref: period
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: this month is a time scope
+    source_text: this month
+    resolved_value_text: this month
+    role: time_value
+  - input_ref: ranking
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: highest is a ranking phrase
+    source_text: highest
+    resolved_value_text: highest
+    role: time_value
+  used_input_refs:
+  - period
 expect:
-  result_contains:
-    question_inputs:
-      - id: period
-        kind: time_text
-        text: this month
-    requested_facts:
-      - input_refs: [period]
+  error_contains: literal_text question inputs must be owned by a requested fact

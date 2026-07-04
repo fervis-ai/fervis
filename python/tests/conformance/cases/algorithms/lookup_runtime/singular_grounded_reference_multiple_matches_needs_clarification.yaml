@@ -9,97 +9,126 @@ input:
     fact_description: count of locations in London
     subject_text: locations
     answer_expression_family: scalar_aggregate
-    answer_outputs: [count]
-    resource_terms: [location]
+    answer_outputs:
+    - count
+    resource_terms:
+    - location
     support_role: ROW_POPULATION
     entity_target_catalog_search_terms:
-      - target_id: input_1
-        catalog_search_terms:
-          - basis: area can resolve London to the API identity used by location rows.
-            term: area
+    - target_id: input_1
+      catalog_search_terms:
+      - basis: area can resolve London to the API identity used by location rows.
+        term: area
     known_inputs:
-      - kind: named_reference_text
-        text: London
-        target_meaning: area
-        lookup_text: London
+    - kind: literal_text
+      text: London
+      resolved_value_text: London
+      value_meaning_hint: area
+      role: reference_value
   catalog:
     reads:
-      - id: list_location_list
-        endpoint_name: list_location_list
-        resource_names: [location]
-        row_paths:
-          - id: data
-            path: data
-            cardinality: many
-        fields:
-          - ref: field.location_id
-            path: data.location_id
-            row_path_id: data
-            type: uuid
-            identity: {entity_ref: location, identity_field: location_id, primary_key: true, stable: true}
-          - ref: field.area_id
-            path: data.area.area_id
-            row_path_id: data
-            type: uuid
-            identity: {entity_ref: area, identity_field: area_id, primary_key: true, stable: true}
-      - id: list_area_list
-        endpoint_name: list_area_list
-        resource_names: [area]
-        params:
-          - ref: list_area_list.query.name
-            name: name
-            source: query
-            type: string
-        row_paths:
-          - id: data
-            path: data
-            cardinality: many
-        fields:
-          - ref: field.area_resolver_id
-            path: data.area_id
-            row_path_id: data
-            type: uuid
-            identity: {entity_ref: area, identity_field: area_id, primary_key: true, stable: true}
-          - ref: field.area_name
-            path: data.name
-            row_path_id: data
-            type: string
+    - id: list_location_list
+      endpoint_name: list_location_list
+      resource_names:
+      - location
+      row_paths:
+      - id: data
+        path: data
+        cardinality: many
+      fields:
+      - ref: field.location_id
+        path: data.location_id
+        row_path_id: data
+        type: uuid
+        identity:
+          entity_ref: location
+          identity_field: location_id
+          primary_key: true
+          stable: true
+      - ref: field.area_id
+        path: data.area.area_id
+        row_path_id: data
+        type: uuid
+        identity:
+          entity_ref: area
+          identity_field: area_id
+          primary_key: true
+          stable: true
+    - id: list_area_list
+      endpoint_name: list_area_list
+      resource_names:
+      - area
+      params:
+      - ref: list_area_list.query.name
+        name: name
+        source: query
+        type: string
+      row_paths:
+      - id: data
+        path: data
+        cardinality: many
+      fields:
+      - ref: field.area_resolver_id
+        path: data.area_id
+        row_path_id: data
+        type: uuid
+        identity:
+          entity_ref: area
+          identity_field: area_id
+          primary_key: true
+          stable: true
+      - ref: field.area_name
+        path: data.name
+        row_path_id: data
+        type: string
   fact_plan:
     outcome:
       kind: fact_plan
       answers:
-        - requested_fact_id: fact_1
-          answer_output_ids: [answer_1]
-          pattern: aggregate_scalar
-          source: {kind: read, read_id: list_location_list}
-          metric:
-            kind: count_records
-            count_basis:
-              kind: row_population
-              row_path_id: data
-              row_cardinality: many
-            record_id_field_id: location_id
-            label: count
+      - requested_fact_id: fact_1
+        answer_output_ids:
+        - answer_1
+        pattern: aggregate_scalar
+        source:
+          kind: read
+          read_id: list_location_list
+        metric:
+          kind: count_records
+          count_basis:
+            kind: row_population
+            row_path_id: data
+            row_cardinality: many
+          record_id_field_id: location_id
+          label: count
   read_eligibility:
-    - requested_fact_id: fact_1
-      read_id: list_location_list
-      row_path_ids: [data]
+  - requested_fact_id: fact_1
+    read_id: list_location_list
+    row_path_ids:
+    - data
   responses:
     list_area_list:
       data:
-        - {area_id: area_nairobi_1, name: London}
-        - {area_id: area_nairobi_2, name: London}
+      - area_id: area_nairobi_1
+        name: London
+      - area_id: area_nairobi_2
+        name: London
     list_location_list:
       data:
-        - {location_id: loc_1, area: {area_id: area_nairobi_1}}
-        - {location_id: loc_2, area: {area_id: area_nairobi_2}}
-        - {location_id: loc_3, area: {area_id: area_mombasa}}
+      - location_id: loc_1
+        area:
+          area_id: area_nairobi_1
+      - location_id: loc_2
+        area:
+          area_id: area_nairobi_2
+      - location_id: loc_3
+        area:
+          area_id: area_mombasa
 expect:
   result_contains:
     status: NEEDS_CLARIFICATION
     outcome_kind: needs_clarification
     clarifications:
-      - question: Which matching entity should I use?
-        candidate_refs:
-          - area:area_id:area_nairobi_1
-          - area:area_id:area_nairobi_2
+    - question: Which matching entity should I use?
+      candidate_refs:
+      - area:area_id:area_nairobi_1
+      - area:area_id:area_nairobi_2

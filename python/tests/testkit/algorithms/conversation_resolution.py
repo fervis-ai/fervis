@@ -10,7 +10,6 @@ from fervis.memory.conversation_context import (
 from fervis.lookup.conversation_resolution import (
     CONVERSATION_RESOLUTION_TOOL_NAME,
     LiteralQuestionInputOverlay,
-    NamedReferenceQuestionInputOverlay,
     ResolvedCanonicalValueOverlay,
     ResolvedQuestionInputOverlay,
     RowSetQuestionInputOverlay,
@@ -96,9 +95,9 @@ def run_conversation_resolution_schema_case(payload: dict[str, Any]) -> list[str
         "tool_names": sorted(schemas),
         "status_values": schema["properties"]["status"]["enum"],
         "has_clause_resolutions": "clause_resolutions" in schema["properties"],
-        "dependency_source_ids": dependency_schema["properties"][
-            "meaning_components"
-        ]["items"]["properties"]["source_id"]["enum"],
+        "dependency_source_ids": dependency_schema["properties"]["meaning_components"][
+            "items"
+        ]["properties"]["source_id"]["enum"],
         "unresolved_evidence_source_ids": schema["properties"]["unresolved"][
             "properties"
         ]["candidate_interpretations"]["items"]["properties"]["supporting_evidence"][
@@ -169,14 +168,7 @@ def _resolved_question_input_overlay(
             resolved_input_ref=str(item["resolved_input_ref"]),
             memory_ids=tuple(str(ref) for ref in item.get("memory_ids") or ()),
         )
-    return NamedReferenceQuestionInputOverlay(
-        reference_text=str(item["reference_text"]),
-        occurrence=int(item.get("occurrence") or 1),
-        target_meaning=str(item["target_meaning"]),
-        lookup_text=str(item["lookup_text"]),
-        resolved_input_ref=str(item.get("resolved_input_ref") or ""),
-        memory_ids=tuple(str(ref) for ref in item.get("memory_ids") or ()),
-    )
+    raise ValueError(f"unsupported resolved question input kind: {kind}")
 
 
 def _resolved_canonical_value_overlay(

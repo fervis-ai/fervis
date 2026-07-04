@@ -65,9 +65,9 @@ from fervis.memory.artifacts import (
 
 
 _APPROVED_CHARS = {
-    "question contract": (364, 12139, 21044),
+    "question contract": (364, 12139, 18581),
     "query enrichment": (364, 5985, 8214),
-    "grounding": (364, 4949, 6766),
+    "grounding": (364, 4952, 6769),
     "source binding": (364, 13384, 20765),
     "pattern fact planning": (364, 3363, 6093),
 }
@@ -217,7 +217,7 @@ def _turn_invocations():
             KnownInputBindingTask(
                 known_input_id="input_today",
                 known_input_text="today",
-                known_input_kind="time_text",
+                known_input_kind="literal_text",
                 requested_fact_id="fact_1",
                 options=(
                     InputBindingOption(

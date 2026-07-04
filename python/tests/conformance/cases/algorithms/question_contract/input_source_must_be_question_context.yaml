@@ -1,17 +1,21 @@
 id: input_source_must_be_question_context
 description: Parser rejects question-contract inputs that claim a non-question-context source.
 migrates:
-  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_requires_question_context_source
+- api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_requires_question_context_source
 kind: algorithm
 algorithm: question_contract.parse
 input:
   question_context: How much sales yesterday?
   question_inputs:
-    - input_ref: period
-      kind: time_text
-      source: current_question
-      reference_text: yesterday
-      inventory_check: {why_this_is_an_input: yesterday is a time scope}
-  used_input_refs: [period]
+  - input_ref: period
+    kind: literal_text
+    source: current_question
+    inventory_check:
+      why_this_is_an_input: yesterday is a time scope
+    source_text: yesterday
+    resolved_value_text: yesterday
+    role: time_value
+  used_input_refs:
+  - period
 expect:
   error_contains: must be question_context

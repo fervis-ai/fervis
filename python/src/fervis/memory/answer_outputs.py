@@ -28,6 +28,7 @@ class PriorAnswerKnownInput:
     id: str
     kind: str
     text: str
+    role: str = ""
     description: str = ""
 
 
@@ -149,8 +150,9 @@ def _prior_answer_known_inputs(
                 id=input_id,
                 kind=kind,
                 text=text,
+                role=str(item.get("role") or "").strip(),
                 description=str(
-                    item.get("description") or item.get("target_meaning") or ""
+                    item.get("value_meaning_hint") or item.get("description") or ""
                 ).strip(),
             )
         )

@@ -148,9 +148,9 @@ def test_answer_explanation_json_exposes_semantic_step_contract() -> None:
             {
                 "inputId": "fact_1_entity_1",
                 "text": "ABC Mall",
-                "kind": "named_reference_text",
+                "kind": "literal_text",
                 "description": "store",
-                "lookupText": "ABC Mall",
+                "resolvedValueText": "ABC Mall",
             }
         ],
         "resolverCandidates": [],
@@ -441,9 +441,9 @@ def _lineage_rows_with_semantic_step() -> LineageRows:
                             payload={
                                 "input_id": "fact_1_entity_1",
                                 "text": "ABC Mall",
-                                "kind": "named_reference_text",
+                                "kind": "literal_text",
                                 "description": "store",
-                                "lookup_text": "ABC Mall",
+                                "resolved_value_text": "ABC Mall",
                             },
                         ),
                         StepSemanticItem(

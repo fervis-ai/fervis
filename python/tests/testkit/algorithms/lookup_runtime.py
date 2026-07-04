@@ -31,6 +31,7 @@ from fervis.lookup.fact_planning.request import RuntimeValueContext
 from fervis.lookup.question_contract import (
     KnownInputKind,
     KnownInputSource,
+    LiteralInputRole,
     QuestionContract,
     RequestedFact,
     RequestedFactAnswerSubject,
@@ -505,6 +506,15 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
         _scripted_question_input(index=index, payload=item)
         for index, item in enumerate(known_inputs, start=1)
     ]
+    time_requirements = [
+        {
+            "requirement_id": item["satisfies_requirement_id"],
+            "source_text": item["source_text"],
+            "why_required": f"{item['source_text']} constrains the requested fact",
+        }
+        for item in question_inputs
+        if item.get("role") == "time_value" and item.get("satisfies_requirement_id")
+    ]
     return {
         "kind": "question_contract",
         "answer_requests_count": 1,
@@ -518,7 +528,7 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
                     )
                 },
                 "answer_subject": _answer_subject_payload(subject_text),
-                "input_requirements": {"time_requirements": []},
+                "input_requirements": {"time_requirements": time_requirements},
                 "answer_population": default_answer_population(
                     description=fact_description,
                     subject_text=subject_text,
@@ -549,19 +559,25 @@ def _scripted_question_input(*, index: int, payload: dict[str, Any]) -> dict[str
         "input_ref": str(payload.get("input_ref") or f"input_{index}"),
         "source": "question_context",
         "kind": kind,
-        "reference_text": text,
         "inventory_check": {
             "why_this_is_an_input": f"{text} is a declared question input",
         },
     }
-    if kind in {"number_text", "explicit_numeric_limit_text"}:
-        output["numeric_value"] = payload["numeric_value"]
-    if kind == "explicit_numeric_limit_text":
-        output["value_source_text"] = str(payload.get("value_source_text") or text)
-    if kind == "named_reference_text":
-        output["target_meaning"] = str(payload.get("target_meaning") or text)
-        output["lookup_text"] = str(payload.get("lookup_text") or text)
+    if kind == "literal_text":
+        role = str(payload["role"])
+        output["source_text"] = text
+        output["resolved_value_text"] = str(payload.get("resolved_value_text") or text)
+        output["role"] = role
+        if payload.get("value_meaning_hint"):
+            output["value_meaning_hint"] = str(payload["value_meaning_hint"])
+        if payload.get("field_label_text"):
+            output["field_label_text"] = str(payload["field_label_text"])
+        if role == "time_value":
+            output["satisfies_requirement_id"] = str(
+                payload.get("satisfies_requirement_id") or f"input_{index}_time_req"
+            )
     if kind == "row_set_reference":
+        output["reference_text"] = text
         output["source"] = "conversation_resolution"
         output["occurrence"] = int(payload.get("occurrence") or 1)
         output["resolved_input_ref"] = str(
@@ -1151,10 +1167,11 @@ def _question_contract_decisions_payload() -> dict[str, Any]:
             {
                 "input_ref": "input_1",
                 "source": "question_context",
-                "kind": KnownInputKind.REFERENCE.value,
-                "reference_text": "Alice",
-                "target_meaning": "Alice",
-                "lookup_text": "Alice",
+                "kind": KnownInputKind.LITERAL.value,
+                "source_text": "Alice",
+                "resolved_value_text": "Alice",
+                "value_meaning_hint": "staff member",
+                "role": LiteralInputRole.REFERENCE_VALUE.value,
                 "inventory_check": {
                     "why_this_is_an_input": "Alice is a declared question input"
                 },
@@ -1162,8 +1179,11 @@ def _question_contract_decisions_payload() -> dict[str, Any]:
             {
                 "input_ref": "input_2",
                 "source": "question_context",
-                "kind": KnownInputKind.TIME.value,
-                "reference_text": "today",
+                "kind": KnownInputKind.LITERAL.value,
+                "source_text": "today",
+                "resolved_value_text": "today",
+                "role": LiteralInputRole.TIME_VALUE.value,
+                "satisfies_requirement_id": "time_req_1",
                 "inventory_check": {
                     "why_this_is_an_input": "today is a declared question input"
                 },
@@ -1174,7 +1194,15 @@ def _question_contract_decisions_payload() -> dict[str, Any]:
                 "answer_fact": fact.description,
                 "answer_expression": {"family": "list_rows"},
                 "answer_subject": _answer_subject_payload("products"),
-                "input_requirements": {"time_requirements": []},
+                "input_requirements": {
+                    "time_requirements": [
+                        {
+                            "requirement_id": "time_req_1",
+                            "source_text": "today",
+                            "why_required": "today constrains the requested fact",
+                        }
+                    ]
+                },
                 "answer_population": default_answer_population(
                     description=fact.description,
                     subject_text="products",
@@ -1219,16 +1247,21 @@ def _variant_grounding_question_contract() -> QuestionContract:
                 known_inputs=(
                     RequestedFactKnownInput(
                         id="fact_1_input_1",
-                        kind=KnownInputKind.REFERENCE,
+                        kind=KnownInputKind.LITERAL,
                         source=KnownInputSource.QUESTION_CONTEXT,
                         text="Alice",
-                        lookup_text="Alice",
+                        resolved_value_text="Alice",
+                        value_meaning_hint="staff member",
+                        role=LiteralInputRole.REFERENCE_VALUE,
                     ),
                     RequestedFactKnownInput(
                         id="fact_1_input_2",
-                        kind=KnownInputKind.TIME,
+                        kind=KnownInputKind.LITERAL,
                         source=KnownInputSource.QUESTION_CONTEXT,
                         text="today",
+                        resolved_value_text="today",
+                        role=LiteralInputRole.TIME_VALUE,
+                        satisfies_requirement_id="time_req_1",
                     ),
                 ),
             ),

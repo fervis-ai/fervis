@@ -144,6 +144,9 @@ def generate_question_contract(
             payload=output.arguments,
             question_context=request.current_question,
             question_context_texts=_question_contract_context_texts(request),
+            current_question_context_texts=(
+                _question_contract_active_clarification_texts(request)
+            ),
             conversation_resolution_overlay=request.conversation_resolution_overlay,
         )
         if isinstance(result.outcome, QuestionContract):
@@ -194,4 +197,20 @@ def _question_contract_context_texts(
         for exchange in active.exchanges:
             output.extend(exchange.questions)
             output.append(exchange.answer)
+    return tuple(dict.fromkeys(text for text in output if str(text or "").strip()))
+
+
+def _question_contract_active_clarification_texts(
+    request: QuestionContractRequest,
+) -> tuple[str, ...]:
+    active = active_clarification_context(
+        request.conversation_context,
+        current_question=request.current_question,
+    )
+    if active is None:
+        return ()
+    output: list[str] = [active.original_question]
+    for exchange in active.exchanges:
+        output.extend(exchange.questions)
+        output.append(exchange.answer)
     return tuple(dict.fromkeys(text for text in output if str(text or "").strip()))

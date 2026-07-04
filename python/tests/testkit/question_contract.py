@@ -36,7 +36,9 @@ def requested_fact_from_payload(payload: dict[str, Any]) -> RequestedFact:
             for item in payload.get("answer_outputs") or ()
         ),
         known_inputs=known_inputs,
-        input_refs=tuple(payload.get("input_refs") or (item.id for item in known_inputs)),
+        input_refs=tuple(
+            payload.get("input_refs") or (item.id for item in known_inputs)
+        ),
     )
 
 
@@ -66,12 +68,13 @@ def answer_output_from_payload(payload: Any) -> RequestedFactAnswerOutput:
 def known_input_from_payload(payload: dict[str, Any]) -> RequestedFactKnownInput:
     return RequestedFactKnownInput(
         id=str(payload["id"]),
-        kind=KnownInputKind(str(payload.get("kind") or "named_reference_text")),
+        kind=KnownInputKind(str(payload["kind"])),
         source=KnownInputSource(str(payload.get("source") or "question_context")),
-        description=str(payload.get("description") or ""),
         text=str(payload.get("text") or ""),
-        numeric_value=payload.get("numeric_value"),
-        value_source_text=str(payload.get("value_source_text") or ""),
-        lookup_text=str(payload.get("lookup_text") or ""),
         resolved_input_ref=str(payload.get("resolved_input_ref") or ""),
+        resolved_value_text=str(payload.get("resolved_value_text") or ""),
+        field_label_text=str(payload.get("field_label_text") or ""),
+        value_meaning_hint=str(payload.get("value_meaning_hint") or ""),
+        role=payload.get("role"),
+        satisfies_requirement_id=str(payload.get("satisfies_requirement_id") or ""),
     )

@@ -282,9 +282,7 @@ class _CapturingQuestionContractModelPort:
                                         "kind": "NORMAL_BUSINESS_INSTANCE"
                                     },
                                 },
-                                "input_requirements": {
-                                    "time_requirements": []
-                                },
+                                "input_requirements": {"time_requirements": []},
                                 "answer_population": {
                                     "population_label": "money made at ABC Mall yesterday",
                                     "counted_unit": "money",
@@ -328,7 +326,14 @@ class _FollowUpQuestionContractModelPort:
         output_mode=None,
         tool_specs=(),
     ):
-        del provider, prompt, max_thinking_tokens, system_prompt, output_mode, tool_specs
+        del (
+            provider,
+            prompt,
+            max_thinking_tokens,
+            system_prompt,
+            output_mode,
+            tool_specs,
+        )
         return {
             "answer": json.dumps(
                 {
@@ -339,9 +344,11 @@ class _FollowUpQuestionContractModelPort:
                         "question_inputs": [
                             {
                                 "source": "question_context",
-                                "kind": "time_text",
+                                "kind": "literal_text",
                                 "input_ref": "time_1",
-                                "reference_text": "last month",
+                                "source_text": "last month",
+                                "resolved_value_text": "last month",
+                                "role": "time_value",
                                 "inventory_check": {
                                     "why_this_is_an_input": (
                                         "This calendar period constrains the count."
@@ -392,9 +399,7 @@ class _FollowUpQuestionContractModelPort:
                                             "test_id": "test_2",
                                             "kind": "EXPLICIT_USER_CONSTRAINT",
                                             "polarity": "MUST_PASS",
-                                            "test_question": (
-                                                "Is the sale completed?"
-                                            ),
+                                            "test_question": ("Is the sale completed?"),
                                         },
                                         {
                                             "test_id": "test_3",

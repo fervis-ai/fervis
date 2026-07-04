@@ -1,47 +1,47 @@
-id: model_authored_inputs_compile_to_known_inputs
-description: Model-authored named and numeric inputs compile to requested-fact known inputs.
+id: model_authored_literal_inputs_compile_to_known_inputs
+description: Model-authored literal reference and result-limit inputs compile to requested-fact known inputs.
 migrates:
-  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_compiles_model_authored_inputs
+- api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_compiles_model_authored_inputs
 kind: algorithm
 algorithm: question_contract.parse
 input:
-  question_context: Show first 2 stores over 20% at ABC Mall
+  question_context: Show first 2 stores at ABC Mall
   answer_subject:
     subject_text: stores
-    instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
+    instance_interpretation:
+      kind: NORMAL_BUSINESS_INSTANCE
   answer_outputs:
-    - description: sales total
+  - description: sales total
   question_inputs:
-    - input_ref: store
-      source: question_context
-      kind: named_reference_text
-      reference_text: ABC Mall
-      target_meaning: store location
-      lookup_text: ABC Mall
-      inventory_check: {why_this_is_an_input: ABC Mall is a named reference}
-    - input_ref: limit
-      source: question_context
-      kind: explicit_numeric_limit_text
-      reference_text: first 2
-      numeric_value: 2
-      value_source_text: "2"
-      inventory_check: {why_this_is_an_input: first 2 is a literal value}
-    - input_ref: threshold
-      source: question_context
-      kind: number_text
-      reference_text: 20%
-      numeric_value: 20
-      inventory_check: {why_this_is_an_input: 20% is a literal value}
-  used_input_refs: [store, limit, threshold]
+  - input_ref: store
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: ABC Mall is a named reference
+    source_text: ABC Mall
+    resolved_value_text: ABC Mall
+    value_meaning_hint: store location
+    role: reference_value
+  - input_ref: limit
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: first 2 is a literal value
+    source_text: first 2
+    resolved_value_text: '2'
+    role: result_limit
+  used_input_refs:
+  - store
+  - limit
 expect:
   result_contains:
     requested_facts:
-      - known_inputs:
-          - kind: named_reference_text
-            text: ABC Mall
-          - kind: explicit_numeric_limit_text
-            text: first 2
-            numeric_value: 2
-          - kind: number_text
-            text: 20%
-            numeric_value: 20
+    - known_inputs:
+      - kind: literal_text
+        text: ABC Mall
+        resolved_value_text: ABC Mall
+        role: reference_value
+      - kind: literal_text
+        text: first 2
+        resolved_value_text: '2'
+        role: result_limit

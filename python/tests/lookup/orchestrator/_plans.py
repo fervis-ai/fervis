@@ -118,6 +118,57 @@ def _default_question_contract(*, description: str = "answer") -> QuestionContra
     return _question_contract_for("rf_answer", description=description)
 
 
+def _known_reference_input(
+    input_id: str,
+    text: str,
+    *,
+    value_meaning_hint: str = "",
+    resolved_value_text: str | None = None,
+) -> RequestedFactKnownInput:
+    return RequestedFactKnownInput(
+        id=input_id,
+        kind=KnownInputKind.LITERAL,
+        source=KnownInputSource.QUESTION_CONTEXT,
+        text=text,
+        role=LiteralInputRole.REFERENCE_VALUE,
+        resolved_value_text=resolved_value_text or text,
+        value_meaning_hint=value_meaning_hint,
+    )
+
+
+def _known_time_input(
+    input_id: str,
+    text: str,
+    *,
+    requirement_id: str | None = None,
+) -> RequestedFactKnownInput:
+    return RequestedFactKnownInput(
+        id=input_id,
+        kind=KnownInputKind.LITERAL,
+        source=KnownInputSource.QUESTION_CONTEXT,
+        text=text,
+        role=LiteralInputRole.TIME_VALUE,
+        resolved_value_text=text,
+        satisfies_requirement_id=requirement_id or f"{input_id}_requirement",
+    )
+
+
+def _known_result_limit_input(
+    input_id: str,
+    text: str,
+    *,
+    value_text: str,
+) -> RequestedFactKnownInput:
+    return RequestedFactKnownInput(
+        id=input_id,
+        kind=KnownInputKind.LITERAL,
+        source=KnownInputSource.QUESTION_CONTEXT,
+        text=text,
+        role=LiteralInputRole.RESULT_LIMIT,
+        resolved_value_text=value_text,
+    )
+
+
 def _question_contract_for(
     requested_fact_id: str,
     *,

@@ -255,7 +255,7 @@ def test_lookup_runtime_records_source_reads_against_canonical_execute_step():
     execute_steps = [
         step for step in lineage.steps if step.step_key is RunStepKey.EXECUTE
     ]
-    assert result.status == "COMPLETED", (result.error)
+    assert result.status == "COMPLETED", result.error
     assert lineage.model_call_audits
     assert all(
         audit.model_call.run_id == "run_source_read_lineage"
@@ -299,7 +299,9 @@ def test_lookup_runtime_records_source_reads_against_canonical_execute_step():
     assert [
         (item.catalog_endpoint_id, item.step_id, item.row_count)
         for item in lineage.source_reads
-    ] == [(lineage.catalog_endpoints[0].catalog_endpoint_id, execute_steps[0].step_id, 1)]
+    ] == [
+        (lineage.catalog_endpoints[0].catalog_endpoint_id, execute_steps[0].step_id, 1)
+    ]
     assert (
         f"source_read:{lineage.source_reads[0].source_read_id}"
         in result.rendered_fact.proof_refs
@@ -397,7 +399,7 @@ def test_lookup_retains_ambiguous_read_eligibility_candidates_with_docstring_con
         ports,
     )
 
-    assert result.status == "COMPLETED", (result.error)
+    assert result.status == "COMPLETED", result.error
     assert data_access.requests == [{"endpointName": "list_sales_summary", "args": {}}]
     assert read_id in planner.source_binding_selection_prompt
 
@@ -701,7 +703,7 @@ def test_lookup_derives_finite_choice_membership_from_answer_population_tests():
         ports,
     )
 
-    assert result.status == "COMPLETED", (result.error)
+    assert result.status == "COMPLETED", result.error
     assert data_access.requests == [
         {
             "endpointName": "list_sales_summary",
@@ -1008,7 +1010,7 @@ def test_lookup_cutover_runs_single_fact_plan_then_execution_then_response_rende
         ports,
     )
 
-    assert result.status == "COMPLETED", (result)
+    assert result.status == "COMPLETED", result
     assert result.answer == "Location Alpha: 125.00"
     assert ports.planner_model_port.calls == 6
     assert result.rendered_fact.rows == (  # type: ignore[union-attr]
@@ -1074,9 +1076,7 @@ class _LineageRecorder:
     catalog_endpoints: list[CatalogEndpointWrite] = field(default_factory=list)
     source_reads: list[SourceReadWrite] = field(default_factory=list)
     answered_results: list[AnsweredRunResultWrite] = field(default_factory=list)
-    terminal_results: list[FactualTerminalRunResultWrite] = field(
-        default_factory=list
-    )
+    terminal_results: list[FactualTerminalRunResultWrite] = field(default_factory=list)
     runtime_error_results: list[RuntimeErrorResultWrite] = field(default_factory=list)
     model_call_audits: list[object] = field(default_factory=list)
 
@@ -1514,9 +1514,10 @@ def test_lookup_unresolved_named_entity_returns_resource_specific_clarification(
                 question_inputs=(
                     {
                         "source": "question_context",
-                        "reference_text": "Nextgen",
-                        "target_meaning": "store",
-                        "lookup_text": "Nextgen",
+                        "source_text": "Nextgen",
+                        "role": "reference_value",
+                        "value_meaning_hint": "store",
+                        "resolved_value_text": "Nextgen",
                     },
                 ),
             ),
@@ -1685,9 +1686,10 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
                 question_inputs=(
                     {
                         "source": "question_context",
-                        "reference_text": "Jane Doe",
-                        "target_meaning": "staff member",
-                        "lookup_text": "Jane Doe",
+                        "source_text": "Jane Doe",
+                        "role": "reference_value",
+                        "value_meaning_hint": "staff member",
+                        "resolved_value_text": "Jane Doe",
                     },
                 ),
             ),
@@ -1786,7 +1788,7 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
         ports,
     )
 
-    assert result.status == "COMPLETED", (result)
+    assert result.status == "COMPLETED", result
     assert planner.tool_names == [
         "submit_answer_request_contract",
         "submit_query_enrichment",
@@ -1824,9 +1826,10 @@ def test_lookup_grounding_executes_ambiguous_resolver_routes_before_source_bindi
                 question_inputs=(
                     {
                         "source": "question_context",
-                        "reference_text": "ABC Mall",
-                        "target_meaning": "store location",
-                        "lookup_text": "ABC Mall",
+                        "source_text": "ABC Mall",
+                        "role": "reference_value",
+                        "value_meaning_hint": "store location",
+                        "resolved_value_text": "ABC Mall",
                     },
                 ),
             ),
@@ -1946,7 +1949,7 @@ def test_lookup_grounding_executes_ambiguous_resolver_routes_before_source_bindi
         ports,
     )
 
-    assert result.status == "COMPLETED", (result)
+    assert result.status == "COMPLETED", result
     assert planner.tool_names == [
         "submit_answer_request_contract",
         "submit_query_enrichment",
@@ -1978,9 +1981,10 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
                 question_inputs=(
                     {
                         "source": "question_context",
-                        "reference_text": "Jane Doe",
-                        "target_meaning": "staff member",
-                        "lookup_text": "Jane Doe",
+                        "source_text": "Jane Doe",
+                        "role": "reference_value",
+                        "value_meaning_hint": "staff member",
+                        "resolved_value_text": "Jane Doe",
                     },
                 ),
             ),
@@ -2064,9 +2068,7 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
     )
 
     assert result.status == "COMPLETED", (result, result.error)
-    source_reads_by_step_key = {
-        step.step_id: step.step_key for step in lineage.steps
-    }
+    source_reads_by_step_key = {step.step_id: step.step_key for step in lineage.steps}
     assert [
         (
             source_reads_by_step_key[item.step_id],
@@ -2106,7 +2108,9 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
     ]
 
 
-def test_lookup_runtime_fails_closed_on_grounding_resolver_source_read_failure() -> None:
+def test_lookup_runtime_fails_closed_on_grounding_resolver_source_read_failure() -> (
+    None
+):
     planner = _ToolNamePlannerPort(
         responses={
             "submit_answer_request_contract": _question_contract_response(
@@ -2116,9 +2120,10 @@ def test_lookup_runtime_fails_closed_on_grounding_resolver_source_read_failure()
                 question_inputs=(
                     {
                         "source": "question_context",
-                        "reference_text": "Jane Doe",
-                        "target_meaning": "staff member",
-                        "lookup_text": "Jane Doe",
+                        "source_text": "Jane Doe",
+                        "role": "reference_value",
+                        "value_meaning_hint": "staff member",
+                        "resolved_value_text": "Jane Doe",
                     },
                 ),
             ),
@@ -2181,11 +2186,9 @@ def test_lookup_runtime_fails_closed_on_grounding_resolver_source_read_failure()
         ports,
     )
 
-    assert result.status == "FAILED", (result)
+    assert result.status == "FAILED", result
     assert result.error == "framework_adapter_failed"
-    source_reads_by_step_key = {
-        step.step_id: step.step_key for step in lineage.steps
-    }
+    source_reads_by_step_key = {step.step_id: step.step_key for step in lineage.steps}
     assert [
         (source_reads_by_step_key[item.step_id], item.status, item.row_count)
         for item in lineage.source_reads
@@ -2206,9 +2209,10 @@ def test_lookup_runtime_fails_closed_on_grounding_missing_catalog_endpoint() -> 
                 question_inputs=(
                     {
                         "source": "question_context",
-                        "reference_text": "Jane Doe",
-                        "target_meaning": "staff member",
-                        "lookup_text": "Jane Doe",
+                        "source_text": "Jane Doe",
+                        "role": "reference_value",
+                        "value_meaning_hint": "staff member",
+                        "resolved_value_text": "Jane Doe",
                     },
                 ),
             ),
@@ -2265,7 +2269,7 @@ def test_lookup_runtime_fails_closed_on_grounding_missing_catalog_endpoint() -> 
         ports,
     )
 
-    assert result.status == "FAILED", (result)
+    assert result.status == "FAILED", result
     assert result.error == "framework_adapter_failed"
     assert not lineage.source_reads
     assert lineage.runtime_error_results
@@ -2742,7 +2746,7 @@ def test_lookup_rejects_param_distinct_bindings_for_one_selected_plan_member():
         ports,
     )
 
-    assert result.status == "FAILED", (result)
+    assert result.status == "FAILED", result
     assert data_access.requests == []
 
 
@@ -3137,9 +3141,12 @@ def test_lookup_cutover_uses_relation_as_read_instance_and_derives_grain():
                     known_inputs=(
                         RequestedFactKnownInput(
                             id="today",
-                            kind=KnownInputKind.TIME,
+                            kind=KnownInputKind.LITERAL,
                             source=KnownInputSource.QUESTION_CONTEXT,
                             text="today",
+                            role=LiteralInputRole.TIME_VALUE,
+                            resolved_value_text="today",
+                            satisfies_requirement_id="today_requirement",
                         ),
                     ),
                 ),
@@ -3263,7 +3270,7 @@ def test_lookup_model_turns_send_business_system_prompt_and_question_frame():
         ),
     )
 
-    assert result.status == "COMPLETED", (result)
+    assert result.status == "COMPLETED", result
     assert len(planner.system_prompts) == 6
     assert all(
         prompt.startswith("You are an Fervis runtime for Shopify.\n\nAbout the API:\n")
@@ -3510,7 +3517,7 @@ def test_lookup_cutover_no_data_is_tied_to_fulfilled_requested_fact():
         ports,
     )
 
-    assert result.status == "COMPLETED", (result)
+    assert result.status == "COMPLETED", result
     assert result.fact_result.outcome.kind == OutcomeKind.NO_DATA
     details = result.rendered_fact.details  # type: ignore[union-attr]
     empty = details["emptyRelation"]  # type: ignore[index]

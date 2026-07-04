@@ -104,7 +104,7 @@ def _known_input(item: StepSemanticItem) -> SemanticKnownInputView | None:
         text=text,
         kind=_text(item.payload.get("kind")),
         description=_text(item.payload.get("description")),
-        lookup_text=_text(item.payload.get("lookup_text")),
+        resolved_value_text=_text(item.payload.get("resolved_value_text")),
     )
 
 

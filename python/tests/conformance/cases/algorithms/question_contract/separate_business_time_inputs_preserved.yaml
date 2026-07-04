@@ -1,27 +1,35 @@
 id: separate_business_time_inputs_preserved
 description: Distinct business-time inputs remain distinct known inputs when both constrain the answer request.
 migrates:
-  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_keeps_separate_business_time_inputs
+- api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_keeps_separate_business_time_inputs
 kind: algorithm
 algorithm: question_contract.parse
 input:
   question_context: How much sales today and yesterday? Show each separately.
   answer_fact: sales today and yesterday
   question_inputs:
-    - input_ref: today
-      source: question_context
-      kind: time_text
-      reference_text: today
-      inventory_check: {why_this_is_an_input: today is a time scope}
-    - input_ref: yesterday
-      source: question_context
-      kind: time_text
-      reference_text: yesterday
-      inventory_check: {why_this_is_an_input: yesterday is a time scope}
-  used_input_refs: [today, yesterday]
+  - input_ref: today
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: today is a time scope
+    source_text: today
+    resolved_value_text: today
+    role: time_value
+  - input_ref: yesterday
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: yesterday is a time scope
+    source_text: yesterday
+    resolved_value_text: yesterday
+    role: time_value
+  used_input_refs:
+  - today
+  - yesterday
 expect:
   result_contains:
     requested_facts:
-      - known_inputs:
-          - text: today
-          - text: yesterday
+    - known_inputs:
+      - text: today
+      - text: yesterday

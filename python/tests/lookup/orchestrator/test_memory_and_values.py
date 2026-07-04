@@ -89,10 +89,12 @@ def test_lookup_cutover_executes_scalar_memory_values_as_plan_values():
             data_access_port=data_access,
             planner_model_port=_PlannerPort(
                 plan,
-                conversation_resolution=lambda prompt: _conversation_resolution_payload_using_memory(
-                    prompt,
-                    integrated_question="Use the prior sales total as the minimum.",
-                    actual_text="that total",
+                conversation_resolution=lambda prompt: (
+                    _conversation_resolution_payload_using_memory(
+                        prompt,
+                        integrated_question="Use the prior sales total as the minimum.",
+                        actual_text="that total",
+                    )
                 ),
             ),
         ),
@@ -111,17 +113,12 @@ def test_lookup_cutover_executes_rank_limit_value_use_as_proof_link():
                 id="rf_top_totals",
                 description="top metric totals",
                 answer_subject=RequestedFactAnswerSubject(subject_text="metric totals"),
-                answer_outputs=(
-                    RequestedFactAnswerOutput(id="location_name"),
-                ),
+                answer_outputs=(RequestedFactAnswerOutput(id="location_name"),),
                 known_inputs=(
-                    RequestedFactKnownInput(
-                        id="result_limit",
-                        kind=KnownInputKind.LIMIT,
-                        source=KnownInputSource.QUESTION_CONTEXT,
-                        text="top 2",
-                        numeric_value=2,
-                        value_source_text="2",
+                    _known_result_limit_input(
+                        "result_limit",
+                        "top 2",
+                        value_text="2",
                     ),
                 ),
             ),
@@ -427,9 +424,10 @@ def test_lookup_cutover_grounded_named_entity_is_stored_as_memory_identity():
                 question_inputs=(
                     {
                         "source": "question_context",
-                        "reference_text": "ABC Mall",
-                        "target_meaning": "location",
-                        "lookup_text": "ABC Mall",
+                        "source_text": "ABC Mall",
+                        "role": "reference_value",
+                        "value_meaning_hint": "location",
+                        "resolved_value_text": "ABC Mall",
                     },
                 ),
             ),
@@ -581,9 +579,10 @@ def test_lookup_orchestrator_repeated_named_target_does_not_reuse_inactive_memor
                 question_inputs=(
                     {
                         "source": "question_context",
-                        "reference_text": "ABC Mall",
-                        "target_meaning": "location",
-                        "lookup_text": "ABC Mall",
+                        "source_text": "ABC Mall",
+                        "role": "reference_value",
+                        "value_meaning_hint": "location",
+                        "resolved_value_text": "ABC Mall",
                     },
                 ),
             ),
@@ -965,20 +964,22 @@ def test_lookup_cutover_preserves_scalar_memory_proofs_for_undefined_compute():
                     }
                 },
                 question_contract=question_contract,
-                conversation_resolution=lambda prompt: _conversation_resolution_payload_using_memories(
-                    prompt,
-                    integrated_question=(
-                        "What percentage increase is there from the prior current "
-                        "and previous totals?"
-                    ),
-                    memories=(
-                        {
-                            "actual_text": "percentage increase",
-                        },
-                        {
-                            "actual_text": "that",
-                        },
-                    ),
+                conversation_resolution=lambda prompt: (
+                    _conversation_resolution_payload_using_memories(
+                        prompt,
+                        integrated_question=(
+                            "What percentage increase is there from the prior current "
+                            "and previous totals?"
+                        ),
+                        memories=(
+                            {
+                                "actual_text": "percentage increase",
+                            },
+                            {
+                                "actual_text": "that",
+                            },
+                        ),
+                    )
                 ),
             ),
         ),
@@ -1105,17 +1106,19 @@ def test_lookup_cutover_computes_across_single_cell_prior_answer_relations():
                     }
                 },
                 question_contract=question_contract,
-                conversation_resolution=lambda prompt: _conversation_resolution_payload_using_memories(
-                    prompt,
-                    integrated_question="How much are the two prior daily revenue answers in total?",
-                    memories=(
-                        {
-                            "actual_text": "that",
-                        },
-                        {
-                            "actual_text": "total",
-                        },
-                    ),
+                conversation_resolution=lambda prompt: (
+                    _conversation_resolution_payload_using_memories(
+                        prompt,
+                        integrated_question="How much are the two prior daily revenue answers in total?",
+                        memories=(
+                            {
+                                "actual_text": "that",
+                            },
+                            {
+                                "actual_text": "total",
+                            },
+                        ),
+                    )
                 ),
             ),
         ),
@@ -1247,11 +1250,13 @@ def test_lookup_cutover_computes_across_cells_in_multi_row_prior_answer_relation
                     }
                 },
                 question_contract=question_contract,
-                conversation_resolution=lambda prompt: _conversation_resolution_payload_using_memory(
-                    prompt,
-                    integrated_question="What percentage increase is there across the prior daily revenue answers?",
-                    actual_text="that",
-                    source_kind="row_set",
+                conversation_resolution=lambda prompt: (
+                    _conversation_resolution_payload_using_memory(
+                        prompt,
+                        integrated_question="What percentage increase is there across the prior daily revenue answers?",
+                        actual_text="that",
+                        source_kind="row_set",
+                    )
                 ),
             ),
         ),
@@ -1342,14 +1347,16 @@ def test_lookup_cutover_executes_memory_relation_field_bindings():
                     }
                 },
                 question_contract=question_contract,
-                conversation_resolution=lambda prompt: _conversation_resolution_payload_using_memories(
-                    prompt,
-                    integrated_question="What quantities were the prior referenced items?",
-                    memories=(
-                        {
-                            "actual_text": "those",
-                        },
-                    ),
+                conversation_resolution=lambda prompt: (
+                    _conversation_resolution_payload_using_memories(
+                        prompt,
+                        integrated_question="What quantities were the prior referenced items?",
+                        memories=(
+                            {
+                                "actual_text": "those",
+                            },
+                        ),
+                    )
                 ),
             ),
         ),
@@ -1488,7 +1495,11 @@ def test_lookup_cutover_can_fetch_same_prior_scope_for_additional_fields():
             "cardinality": "many",
             "fields": [
                 {"field_id": "staff_name", "path": "data.staff_name", "type": "string"},
-                {"field_id": "product_name", "path": "data.product_name", "type": "string"},
+                {
+                    "field_id": "product_name",
+                    "path": "data.product_name",
+                    "type": "string",
+                },
                 {"field_id": "shade_name", "path": "data.shade_name", "type": "string"},
             ],
         }
@@ -1719,14 +1730,7 @@ def test_lookup_cutover_resolves_generated_calendar_dates_from_time_values():
         description="days in the last 3 days",
         subject_text="days",
         binding_target_ids=("day",),
-        known_inputs=(
-            RequestedFactKnownInput(
-                id="month",
-                kind=KnownInputKind.TIME,
-                source=KnownInputSource.QUESTION_CONTEXT,
-                text="last 3 days",
-            ),
-        ),
+        known_inputs=(_known_time_input("month", "last 3 days"),),
     )
     ports = LookupRuntimePorts(
         relation_catalog_port=_CatalogPort(_catalog()),

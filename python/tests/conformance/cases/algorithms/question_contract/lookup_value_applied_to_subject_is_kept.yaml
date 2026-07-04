@@ -1,7 +1,7 @@
 id: lookup_value_applied_to_subject_is_kept
 description: Question-contract parser keeps lookup inputs that constrain the answer subject.
 migrates:
-  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_keeps_lookup_value_applied_to_answer_subject
+- api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_keeps_lookup_value_applied_to_answer_subject
 kind: algorithm
 algorithm: question_contract.parse
 input:
@@ -9,30 +9,34 @@ input:
   answer_fact: count of stores in London
   answer_subject:
     subject_text: stores
-    instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
+    instance_interpretation:
+      kind: NORMAL_BUSINESS_INSTANCE
   answer_population:
     population_label: stores
     counted_unit: stores
     membership_tests:
-      - test_id: pop_test_1
-        kind: SUBJECT_IDENTITY
-        polarity: MUST_PASS
-        test_question: Does the row/value represent stores?
+    - test_id: pop_test_1
+      kind: SUBJECT_IDENTITY
+      polarity: MUST_PASS
+      test_question: Does the row/value represent stores?
   answer_outputs:
-    - description: number of stores
+  - description: number of stores
   question_inputs:
-    - input_ref: city
-      source: question_context
-      kind: named_reference_text
-      reference_text: London
-      target_meaning: city
-      lookup_text: London
-      inventory_check: {why_this_is_an_input: London is a named reference}
-  used_input_refs: [city]
+  - input_ref: city
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: London is a named reference
+    source_text: London
+    resolved_value_text: London
+    value_meaning_hint: city
+    role: reference_value
+  used_input_refs:
+  - city
 expect:
   result_contains:
     question_inputs:
-      - text: London
+    - text: London
     requested_facts:
-      - input_refs: [city]
-
+    - input_refs:
+      - city

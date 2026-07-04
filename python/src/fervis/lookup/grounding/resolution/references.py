@@ -51,7 +51,6 @@ from fervis.lookup.fact_plan.row_sources import (
 )
 from fervis.lookup.fact_plan.values import FactValue, IdentityValuePayload
 from fervis.lookup.question_contract import (
-    KnownInputKind,
     QuestionContract,
     RequestedFact,
     RequestedFactKnownInput,
@@ -92,7 +91,7 @@ def _reference_binding_tasks(
     tasks: list[KnownInputBindingTask] = []
     facts_by_id = {fact.id: fact for fact in question_contract.requested_facts}
     for known, requested_fact_ids in _reference_known_input_bindings(question_contract):
-        if known.kind != KnownInputKind.REFERENCE:
+        if not known.is_reference_value:
             continue
         requested_fact_id = requested_fact_ids[0] if requested_fact_ids else ""
         requested_facts = tuple(
@@ -113,8 +112,8 @@ def _reference_binding_tasks(
                     known_input_kind=known.kind.value,
                     requested_fact_id=requested_fact_id,
                     options=(),
-                    known_input_description=known.description,
-                    lookup_text=known.lookup_text or known.text,
+                    known_input_description=known.value_meaning_hint,
+                    lookup_text=known.resolved_value_text or known.text,
                     applies_to_requested_fact_ids=requested_fact_ids,
                     requested_facts=requested_fact_cards,
                 )
@@ -126,8 +125,8 @@ def _reference_binding_tasks(
             known_input_kind=known.kind.value,
             requested_fact_id=requested_fact_id,
             options=options,
-            known_input_description=known.description,
-            lookup_text=known.lookup_text or known.text,
+            known_input_description=known.value_meaning_hint,
+            lookup_text=known.resolved_value_text or known.text,
             applies_to_requested_fact_ids=requested_fact_ids,
             requested_facts=requested_fact_cards,
         )

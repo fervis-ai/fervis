@@ -17,7 +17,6 @@ from fervis.lookup.conversation_resolution import (
     ConversationResolutionOverlay,
     ConversationValueFrameOverlay,
     LiteralQuestionInputOverlay,
-    NamedReferenceQuestionInputOverlay,
     ResolvedQuestionInputOverlay,
     RowSetQuestionInputOverlay,
     conversation_resolution_question_contract_prompt_payload,
@@ -30,8 +29,7 @@ from tests.testkit.assertions import exact_mismatches, subset_mismatches
 def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
     input_payload = payload["input"]
     model_payload = dict(
-        input_payload.get("payload")
-        or _model_payload_from_case_input(input_payload)
+        input_payload.get("payload") or _model_payload_from_case_input(input_payload)
     )
     tool_name = str(input_payload.get("tool_name") or "")
     if not tool_name:
@@ -45,7 +43,9 @@ def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
             tool_name=tool_name,
             payload=model_payload,
             question_context=str(input_payload["question_context"]),
-            question_context_texts=tuple(input_payload.get("question_context_texts") or ()),
+            question_context_texts=tuple(
+                input_payload.get("question_context_texts") or ()
+            ),
             conversation_resolution_overlay=_optional_conversation_overlay(
                 input_payload.get("conversation_resolution_overlay")
             ),
@@ -64,10 +64,6 @@ def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
                 "kind": item.kind.value,
                 "source": item.source.value,
                 "text": item.text,
-                "description": item.description,
-                "numeric_value": item.numeric_value,
-                "value_source_text": item.value_source_text,
-                "lookup_text": item.lookup_text,
                 "resolved_input_ref": item.resolved_input_ref,
                 "satisfies_requirement_id": item.satisfies_requirement_id,
                 "resolved_value_text": item.resolved_value_text,
@@ -96,9 +92,9 @@ def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
                     {
                         "id": item.id,
                         "kind": item.kind.value,
+                        "source": item.source.value,
                         "text": item.text,
-                        "numeric_value": item.numeric_value,
-                        "lookup_text": item.lookup_text,
+                        "resolved_input_ref": item.resolved_input_ref,
                         "satisfies_requirement_id": item.satisfies_requirement_id,
                         "resolved_value_text": item.resolved_value_text,
                         "field_label_text": item.field_label_text,
@@ -130,8 +126,7 @@ def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
 def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
     schema = build_question_contract_decisions_schema()
     branches = {
-        branch["properties"]["kind"]["enum"][0]: branch
-        for branch in schema["oneOf"]
+        branch["properties"]["kind"]["enum"][0]: branch for branch in schema["oneOf"]
     }
     answer_contract_schema = branches["question_contract"]
     clarification_schema = branches["needs_clarification"]
@@ -159,9 +154,7 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
         ),
         "clarification_required": list(clarification_schema["required"]),
         "clarification_properties": list(clarification_schema["properties"]),
-        "clarification_kind_values": clarification_schema["properties"]["kind"][
-            "enum"
-        ],
+        "clarification_kind_values": clarification_schema["properties"]["kind"]["enum"],
         "clarification_has_answer_fields": any(
             field in clarification_schema["properties"]
             for field in (
@@ -172,23 +165,13 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
             )
         ),
         "answer_request_required": answer_request_schema["required"],
-        "answer_output_required": answer_request_schema["properties"][
-            "answer_outputs"
-        ]["items"]["required"],
+        "answer_output_required": answer_request_schema["properties"]["answer_outputs"][
+            "items"
+        ]["required"],
         "answer_output_properties": sorted(
-            answer_request_schema["properties"]["answer_outputs"]["items"][
-                "properties"
-            ]
+            answer_request_schema["properties"]["answer_outputs"]["items"]["properties"]
         ),
         "question_input_kinds": sorted(variants),
-        "question_input_kind_membership": {
-            "literal_text": "literal_text" in variants,
-            "time_text": "time_text" in variants,
-            "explicit_numeric_limit_text": "explicit_numeric_limit_text" in variants,
-            "named_reference_text": "named_reference_text" in variants,
-            "number_text": "number_text" in variants,
-            "row_set_reference": "row_set_reference" in variants,
-        },
         "literal_text_role_values": (
             variants["literal_text"]["properties"]["role"]["enum"]
             if "literal_text" in variants
@@ -230,12 +213,19 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
                 "resolved_input_ref",
                 "inventory_check",
                 "kind",
-                "target_meaning",
             )
         },
         "row_set_reference_required": variants["row_set_reference"]["required"],
         "schema_text": repr(schema),
     }
+    if payload.get("input", {}).get("projection") == "question_input_contract":
+        actual = {
+            "question_input_kinds": actual["question_input_kinds"],
+            "literal_text_role_values": actual["literal_text_role_values"],
+            "literal_text_properties": actual["literal_text_properties"],
+            "row_set_reference_properties": actual["row_set_reference_properties"],
+            "row_set_reference_required": actual["row_set_reference_required"],
+        }
     if "result_equals" in payload["expect"]:
         errors = exact_mismatches(
             actual=actual,
@@ -266,7 +256,9 @@ def run_question_contract_schema_validate_case(payload: dict[str, Any]) -> list[
             return []
         return [f"unexpected validation error: {error_text}"]
     if "error_contains" in payload["expect"]:
-        return [f"expected validation error containing {payload['expect']['error_contains']!r}"]
+        return [
+            f"expected validation error containing {payload['expect']['error_contains']!r}"
+        ]
     return []
 
 
@@ -392,21 +384,16 @@ def _resolved_question_input_overlay(
             resolved_input_ref=str(item["resolved_input_ref"]),
             memory_ids=tuple(str(ref) for ref in item.get("memory_ids") or ()),
         )
-    return NamedReferenceQuestionInputOverlay(
-        reference_text=str(item["reference_text"]),
-        occurrence=int(item.get("occurrence") or 1),
-        target_meaning=str(item["target_meaning"]),
-        lookup_text=str(item["lookup_text"]),
-        resolved_input_ref=str(item.get("resolved_input_ref") or ""),
-        memory_ids=tuple(str(ref) for ref in item.get("memory_ids") or ()),
-    )
+    raise ValueError(f"unsupported resolved question input kind: {kind}")
 
 
 def _model_payload_from_case_input(input_payload: dict[str, Any]) -> dict[str, object]:
-    question_inputs = list(input_payload.get("question_inputs") or ())
+    question_inputs = _question_inputs_from_case_input(input_payload)
     answer_requests = list(input_payload.get("answer_requests") or ())
     if not answer_requests:
-        answer_requests = [_answer_request(input_payload)]
+        answer_requests = [
+            _answer_request(input_payload, question_inputs=question_inputs)
+        ]
     return {
         "kind": "question_contract",
         "answer_requests_count": int(
@@ -421,9 +408,42 @@ def _model_payload_from_case_input(input_payload: dict[str, Any]) -> dict[str, o
     }
 
 
-def _answer_request(input_payload: dict[str, Any]) -> dict[str, object]:
-    question_inputs = list(input_payload.get("question_inputs") or ())
+def _question_inputs_from_case_input(
+    input_payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    question_inputs = [
+        dict(item)
+        for item in input_payload.get("question_inputs") or ()
+        if isinstance(item, dict)
+    ]
+    for item in question_inputs:
+        if item.get("kind") == "literal_text" and item.get("role") == "time_value":
+            item.setdefault("satisfies_requirement_id", f"{item['input_ref']}_req")
+    return question_inputs
+
+
+def _answer_request(
+    input_payload: dict[str, Any],
+    *,
+    question_inputs: list[dict[str, Any]],
+) -> dict[str, object]:
     used_input_refs = set(input_payload.get("used_input_refs") or ())
+    input_requirements = dict(
+        input_payload.get("input_requirements") or {"time_requirements": []}
+    )
+    if not input_requirements.get("time_requirements"):
+        input_requirements["time_requirements"] = [
+            {
+                "requirement_id": item["satisfies_requirement_id"],
+                "source_text": item["source_text"],
+                "why_required": f"{item['source_text']} constrains the requested fact",
+            }
+            for item in question_inputs
+            if item.get("kind") == "literal_text"
+            and item.get("role") == "time_value"
+            and item.get("satisfies_requirement_id")
+            and str(item.get("input_ref") or "") in used_input_refs
+        ]
     request = {
         "answer_fact": str(input_payload.get("answer_fact") or "sales at ABC Mall"),
         "answer_expression": dict(
@@ -436,10 +456,7 @@ def _answer_request(input_payload: dict[str, Any]) -> dict[str, object]:
                 "instance_interpretation": {"kind": "NORMAL_BUSINESS_INSTANCE"},
             }
         ),
-        "input_requirements": dict(
-            input_payload.get("input_requirements")
-            or {"time_requirements": []}
-        ),
+        "input_requirements": input_requirements,
         "answer_population": dict(
             input_payload.get("answer_population")
             or {

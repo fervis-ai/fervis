@@ -84,6 +84,7 @@ from fervis.lookup.fact_planning.request import RuntimeValueContext
 from fervis.lookup.question_contract import (
     KnownInputKind,
     KnownInputSource,
+    LiteralInputRole,
     NormalInstanceExcludedStateRole,
     QuestionContract,
     RequestedFact,

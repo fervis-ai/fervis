@@ -81,7 +81,9 @@ def test_question_contract_accepts_semantic_answer_subject_not_copied_from_quest
         context_texts=(question,),
     )
 
-    assert result.outcome.requested_facts[0].answer_subject.subject_text == "staff shift"
+    assert (
+        result.outcome.requested_facts[0].answer_subject.subject_text == "staff shift"
+    )
 
 
 def test_lookup_question_contract_cannot_short_circuit_into_clarification():
@@ -396,7 +398,9 @@ def test_lookup_question_contract_rejects_false_inventory_check():
     payload["question_input_inventory_check"] = {
         "all_input_like_phrases_declared": False,
     }
-    with pytest.raises(ValueError, match="all_input_like_phrases_declared must be true"):
+    with pytest.raises(
+        ValueError, match="all_input_like_phrases_declared must be true"
+    ):
         parse_question_contract(
             tool_name=ANSWER_REQUEST_CONTRACT_TOOL_NAME,
             payload=payload,
@@ -540,20 +544,12 @@ def test_lookup_active_clarification_accepts_known_inputs_from_prior_question():
                     ),
                 ),
                 known_inputs=(
-                    RequestedFactKnownInput(
-                        id="store",
-                        kind=KnownInputKind.REFERENCE,
-                        source=KnownInputSource.QUESTION_CONTEXT,
-                        text="ABC Mall",
-                        lookup_text="ABC Mall",
-                        description="location",
+                    _known_reference_input(
+                        "store",
+                        "ABC Mall",
+                        value_meaning_hint="location",
                     ),
-                    RequestedFactKnownInput(
-                        id="date",
-                        kind=KnownInputKind.TIME,
-                        source=KnownInputSource.QUESTION_CONTEXT,
-                        text="yesterday",
-                    ),
+                    _known_time_input("date", "yesterday"),
                 ),
             ),
         )
@@ -751,7 +747,7 @@ def test_lookup_active_clarification_accepts_known_inputs_from_prior_question():
         ports,
     )
 
-    assert result.status == "COMPLETED", (result)
+    assert result.status == "COMPLETED", result
     assert result.answer == "50000"
 
 
@@ -927,13 +923,13 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_as_raw_question_with
                     {
                         "input_ref": "input_period",
                         "source": "question_context",
-                        "kind": "time_text",
-                        "reference_text": "the day before",
+                        "kind": "literal_text",
+                        "role": "time_value",
+                        "source_text": "the day before",
+                        "resolved_value_text": "the day before",
                         "satisfies_requirement_id": "period_scope",
                         "inventory_check": {
-                            "why_this_is_an_input": (
-                                "the day before is a time scope"
-                            )
+                            "why_this_is_an_input": ("the day before is a time scope")
                         },
                     }
                 ],
@@ -970,8 +966,7 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_as_raw_question_with
                                     "kind": "NORMAL_INSTANCE_GUARD",
                                     "polarity": "MUST_PASS",
                                     "test_question": (
-                                        "Is this an ordinary domain instance "
-                                        "of a sale?"
+                                        "Is this an ordinary domain instance of a sale?"
                                     ),
                                 },
                             ],

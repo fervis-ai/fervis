@@ -180,7 +180,8 @@ class GroundingTurnPrompt(TurnPromptBase):
                 {
                     "known_input_id": task.known_input_id,
                     "known_input_text": task.known_input_text,
-                    "known_input_kind": "time_text",
+                    "known_input_kind": "literal_text",
+                    "known_input_role": "time_value",
                     "question_context": self._time_question_context_payload(task),
                 }
                 for task in self.request.time_tasks

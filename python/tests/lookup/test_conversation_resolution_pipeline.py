@@ -513,9 +513,7 @@ def _memory_context_with_prior_sales_and_location_identity(
                                 "sales_read.query.location_id": "loc_selected"
                             },
                             "endpointArgProofRefs": {
-                                "sales_read.query.location_id": [
-                                    "known_input:location"
-                                ]
+                                "sales_read.query.location_id": ["known_input:location"]
                             },
                         }
                     ),
@@ -572,9 +570,7 @@ def _memory_context_with_selected_and_unselected_memory() -> dict[str, object]:
                                 "sales_read.query.location_id": "loc_selected"
                             },
                             "endpointArgProofRefs": {
-                                "sales_read.query.location_id": [
-                                    "known_input:location"
-                                ]
+                                "sales_read.query.location_id": ["known_input:location"]
                             },
                         }
                     ),
@@ -730,15 +726,21 @@ def _memory_context_with_prior_staff_sales_request() -> dict[str, object]:
                         "known_inputs": [
                             {
                                 "id": "fact_1_entity_1",
-                                "kind": "named_reference_text",
+                                "kind": "literal_text",
                                 "source": "question_context",
                                 "text": "Alice Smith",
+                                "role": "reference_value",
+                                "resolved_value_text": "Alice Smith",
+                                "value_meaning_hint": "staff member",
                             },
                             {
                                 "id": "fact_1_time_1",
-                                "kind": "time_text",
+                                "kind": "literal_text",
                                 "source": "question_context",
                                 "text": "today",
+                                "role": "time_value",
+                                "resolved_value_text": "today",
+                                "satisfies_requirement_id": "time_requirement_1",
                             },
                         ],
                     }
@@ -786,24 +788,20 @@ def _memory_context_with_prior_numeric_slots() -> dict[str, object]:
                         "known_inputs": [
                             {
                                 "id": "fact_1_limit_1",
-                                "kind": "explicit_numeric_limit_text",
+                                "kind": "literal_text",
                                 "source": "question_context",
                                 "text": "top 5",
-                                "numeric_value": 5,
-                                "value_source_text": "5",
-                            },
-                            {
-                                "id": "fact_1_number_1",
-                                "kind": "number_text",
-                                "source": "question_context",
-                                "text": "20",
-                                "numeric_value": 20,
+                                "role": "result_limit",
+                                "resolved_value_text": "5",
                             },
                             {
                                 "id": "fact_1_time_1",
-                                "kind": "time_text",
+                                "kind": "literal_text",
                                 "source": "question_context",
                                 "text": "today",
+                                "role": "time_value",
+                                "resolved_value_text": "today",
+                                "satisfies_requirement_id": "time_requirement_1",
                             },
                         ],
                     }
@@ -2018,17 +2016,21 @@ def test_selected_prior_request_outputs_reach_question_contract():
                 "question_inputs": [
                     {
                         "input_ref": "input_staff",
-                        "kind": "named_reference_text",
+                        "kind": "literal_text",
                         "source": "question_context",
-                        "reference_text": "Alice Smith",
-                        "target_meaning": "staff member",
-                        "lookup_text": "Alice Smith",
+                        "source_text": "Alice Smith",
+                        "role": "reference_value",
+                        "value_meaning_hint": "staff member",
+                        "resolved_value_text": "Alice Smith",
                     },
                     {
                         "input_ref": "input_period",
-                        "kind": "time_text",
+                        "kind": "literal_text",
                         "source": "question_context",
-                        "reference_text": "yesterday",
+                        "source_text": "yesterday",
+                        "role": "time_value",
+                        "resolved_value_text": "yesterday",
+                        "satisfies_requirement_id": "time_requirement_1",
                     },
                 ],
                 "answer_requests": [
@@ -2132,17 +2134,21 @@ def test_clause_resolution_prior_answer_frame_reaches_question_contract():
                 "question_inputs": [
                     {
                         "input_ref": "input_staff",
-                        "kind": "named_reference_text",
+                        "kind": "literal_text",
                         "source": "question_context",
-                        "reference_text": "she",
-                        "target_meaning": "staff member",
-                        "lookup_text": "Alice Smith",
+                        "source_text": "she",
+                        "role": "reference_value",
+                        "value_meaning_hint": "staff member",
+                        "resolved_value_text": "Alice Smith",
                     },
                     {
                         "input_ref": "input_period",
-                        "kind": "time_text",
+                        "kind": "literal_text",
                         "source": "question_context",
-                        "reference_text": "yesterday",
+                        "source_text": "yesterday",
+                        "role": "time_value",
+                        "resolved_value_text": "yesterday",
+                        "satisfies_requirement_id": "time_requirement_1",
                     },
                 ],
                 "answer_requests": [

@@ -1,73 +1,96 @@
 id: shared_inputs_map_to_each_fact
 description: Shared declared inputs are declared once and mapped to each answer request that uses them.
 migrates:
-  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_declares_shared_inputs_once_and_maps_to_facts
+- api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_declares_shared_inputs_once_and_maps_to_facts
 kind: algorithm
 algorithm: question_contract.parse
 input:
   question_context: What was Alice Smith's total sales amount yesterday, and what store was associated with Alice Smith's sales yesterday?
   answer_requests_count: 2
   question_inputs:
-    - input_ref: staff
-      source: question_context
-      kind: named_reference_text
-      reference_text: Alice Smith
-      target_meaning: staff member
-      lookup_text: Alice Smith
-      inventory_check: {why_this_is_an_input: Alice Smith is a named reference}
-    - input_ref: period
-      source: question_context
-      kind: time_text
-      reference_text: yesterday
-      inventory_check: {why_this_is_an_input: yesterday is a time scope}
+  - input_ref: staff
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: Alice Smith is a named reference
+    source_text: Alice Smith
+    resolved_value_text: Alice Smith
+    value_meaning_hint: staff member
+    role: reference_value
+  - input_ref: period
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: yesterday is a time scope
+    source_text: yesterday
+    resolved_value_text: yesterday
+    role: time_value
   answer_requests:
-    - answer_fact: Alice Smith's total sales amount yesterday
-      answer_expression: {family: scalar_aggregate}
-      answer_subject:
-        subject_text: sales amount
-        instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
-      input_requirements: {time_requirements: []}
-      answer_population:
-        population_label: sales amount
-        counted_unit: sales amount
-        membership_tests:
-          - test_id: pop_test_1
-            kind: SUBJECT_IDENTITY
-            polarity: MUST_PASS
-            test_question: Does the row/value represent sales amount?
-      answer_outputs:
-        - description: total sales amount
-      input_decisions:
-        - {input_ref: staff, use_input: true}
-        - {input_ref: period, use_input: true}
-    - answer_fact: store associated with Alice Smith's sales yesterday
-      answer_expression: {family: scalar_value}
-      answer_subject:
-        subject_text: store
-        instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
-      input_requirements: {time_requirements: []}
-      answer_population:
-        population_label: store
-        counted_unit: store
-        membership_tests:
-          - test_id: pop_test_1
-            kind: SUBJECT_IDENTITY
-            polarity: MUST_PASS
-            test_question: Does the row/value represent store?
-      answer_outputs:
-        - description: store
-      input_decisions:
-        - {input_ref: staff, use_input: true}
-        - {input_ref: period, use_input: true}
+  - answer_fact: Alice Smith's total sales amount yesterday
+    answer_expression:
+      family: scalar_aggregate
+    answer_subject:
+      subject_text: sales amount
+      instance_interpretation:
+        kind: NORMAL_BUSINESS_INSTANCE
+    input_requirements:
+      time_requirements: []
+    answer_population:
+      population_label: sales amount
+      counted_unit: sales amount
+      membership_tests:
+      - test_id: pop_test_1
+        kind: SUBJECT_IDENTITY
+        polarity: MUST_PASS
+        test_question: Does the row/value represent sales amount?
+    answer_outputs:
+    - description: total sales amount
+    input_decisions:
+    - input_ref: staff
+      use_input: true
+    - input_ref: period
+      use_input: true
+  - answer_fact: store associated with Alice Smith's sales yesterday
+    answer_expression:
+      family: scalar_value
+    answer_subject:
+      subject_text: store
+      instance_interpretation:
+        kind: NORMAL_BUSINESS_INSTANCE
+    input_requirements:
+      time_requirements: []
+    answer_population:
+      population_label: store
+      counted_unit: store
+      membership_tests:
+      - test_id: pop_test_1
+        kind: SUBJECT_IDENTITY
+        polarity: MUST_PASS
+        test_question: Does the row/value represent store?
+    answer_outputs:
+    - description: store
+    input_decisions:
+    - input_ref: staff
+      use_input: true
+    - input_ref: period
+      use_input: true
 expect:
   result_contains:
     question_inputs:
-      - id: staff
-        kind: named_reference_text
-        text: Alice Smith
-      - id: period
-        kind: time_text
-        text: yesterday
+    - id: staff
+      kind: literal_text
+      text: Alice Smith
+      resolved_value_text: Alice Smith
+      role: reference_value
+    - id: period
+      kind: literal_text
+      text: yesterday
+      resolved_value_text: yesterday
+      role: time_value
     requested_facts:
-      - input_refs: [staff, period]
-      - input_refs: [staff, period]
+    - input_refs:
+      - staff
+      - period
+    - input_refs:
+      - staff
+      - period

@@ -15,7 +15,7 @@ from fervis.lookup.relation_catalog import (
 )
 from fervis.lookup.conversation_resolution.overlay import (
     ConversationResolutionOverlay,
-    NamedReferenceQuestionInputOverlay,
+    LiteralQuestionInputOverlay,
 )
 from fervis.memory.addresses import FactAddress
 from fervis.memory.artifacts import (
@@ -44,6 +44,7 @@ from fervis.lookup.question_contract import (
     AnswerPopulationMembershipTestPolarity,
     KnownInputKind,
     KnownInputSource,
+    LiteralInputRole,
     QuestionContract,
     RequestedFact,
     RequestedFactAnswerPopulation,
@@ -84,6 +85,52 @@ class _GroundingModel:
             ),
             "usage": {},
         }
+
+
+def _reference_input(
+    input_id: str,
+    text: str,
+    *,
+    value_meaning_hint: str = "",
+    resolved_value_text: str | None = None,
+) -> RequestedFactKnownInput:
+    return RequestedFactKnownInput(
+        id=input_id,
+        kind=KnownInputKind.LITERAL,
+        source=KnownInputSource.QUESTION_CONTEXT,
+        text=text,
+        resolved_value_text=resolved_value_text or text,
+        value_meaning_hint=value_meaning_hint,
+        role=LiteralInputRole.REFERENCE_VALUE,
+    )
+
+
+def _time_input(input_id: str, text: str) -> RequestedFactKnownInput:
+    return RequestedFactKnownInput(
+        id=input_id,
+        kind=KnownInputKind.LITERAL,
+        source=KnownInputSource.QUESTION_CONTEXT,
+        text=text,
+        resolved_value_text=text,
+        role=LiteralInputRole.TIME_VALUE,
+        satisfies_requirement_id=f"{input_id}_req",
+    )
+
+
+def _result_limit_input(
+    input_id: str,
+    text: str,
+    *,
+    resolved_value_text: str,
+) -> RequestedFactKnownInput:
+    return RequestedFactKnownInput(
+        id=input_id,
+        kind=KnownInputKind.LITERAL,
+        source=KnownInputSource.QUESTION_CONTEXT,
+        text=text,
+        resolved_value_text=resolved_value_text,
+        role=LiteralInputRole.RESULT_LIMIT,
+    )
 
 
 class _AreaRouteGroundingModel:
@@ -430,7 +477,7 @@ def test_grounding_prompt_instructs_binding_id_copying_verbatim():
             KnownInputBindingTask(
                 known_input_id="input_location",
                 known_input_text="ABC Mall",
-                known_input_kind="named_reference_text",
+                known_input_kind="literal_text",
                 requested_fact_id="fact_1",
                 options=(
                     InputBindingOption(
@@ -522,11 +569,12 @@ def test_grounding_task_payload_places_raw_question_and_cr_annotations_next_to_t
             activated_memory_ids=(),
             used_source_card_ids=(),
             resolved_question_inputs=(
-                NamedReferenceQuestionInputOverlay(
-                    reference_text="London",
+                LiteralQuestionInputOverlay(
+                    source_text="London",
                     occurrence=1,
-                    target_meaning="city",
-                    lookup_text="London",
+                    resolved_value_text="London",
+                    value_meaning_hint="city",
+                    role="reference_value",
                     resolved_input_ref="input_1",
                 ),
             ),
@@ -535,7 +583,7 @@ def test_grounding_task_payload_places_raw_question_and_cr_annotations_next_to_t
             KnownInputBindingTask(
                 known_input_id="input_1",
                 known_input_text="London",
-                known_input_kind="named_reference_text",
+                known_input_kind="literal_text",
                 requested_fact_id="fact_1",
                 known_input_description="city/location",
                 lookup_text="London",
@@ -565,11 +613,12 @@ def test_grounding_task_payload_places_raw_question_and_cr_annotations_next_to_t
             "used_source_card_ids": [],
             "resolved_question_inputs": [
                 {
-                    "kind": "named_reference_text",
-                    "reference_text": "London",
+                    "kind": "literal_text",
+                    "source_text": "London",
                     "occurrence": 1,
-                    "target_meaning": "city",
-                    "lookup_text": "London",
+                    "resolved_value_text": "London",
+                    "value_meaning_hint": "city",
+                    "role": "reference_value",
                     "resolved_input_ref": "input_1",
                 }
             ],
@@ -594,7 +643,7 @@ def test_grounding_parser_accepts_memory_identity_resolver_review():
     task = KnownInputBindingTask(
         known_input_id="input_1",
         known_input_text="ABC Mall",
-        known_input_kind="named_reference_text",
+        known_input_kind="literal_text",
         requested_fact_id="fact_1",
         known_input_description="store",
         lookup_text="ABC Mall",
@@ -628,6 +677,45 @@ def test_grounding_parser_accepts_memory_identity_resolver_review():
     )
 
     assert result.compatibilities[0].binding_option_ids == ("bind_input_1_memory_1",)
+
+
+def test_result_limit_with_non_integer_value_fails_closed():
+    question_contract = QuestionContract(
+        requested_facts=(
+            RequestedFact(
+                id="fact_1",
+                description="top sales",
+                answer_outputs=(RequestedFactAnswerOutput(id="answer_1"),),
+                known_inputs=(
+                    _result_limit_input(
+                        "input_limit",
+                        "top banana",
+                        resolved_value_text="banana",
+                    ),
+                ),
+            ),
+        )
+    )
+
+    with pytest.raises(ValueError, match="result limit"):
+        ground_question_inputs(
+            question="Show top banana sales.",
+            question_contract=question_contract,
+            full_catalog=RelationCatalog(),
+            resolver_catalog=RelationCatalog(),
+            data_access_port=_DataAccess({}),
+            runtime_values=RuntimeValueContext(
+                runtime_date="2026-05-09",
+                timezone="Africa/London",
+            ),
+            model_port=_GroundingModel(
+                known_input_id="unused",
+                binding_option_id="unused",
+            ),
+            provider="test",
+            model_key="test",
+            max_thinking_tokens=0,
+        )
 
 
 def test_reference_grounding_executes_compatible_routes_and_dedupes_identity():
@@ -750,9 +838,7 @@ def test_reference_grounding_city_target_carries_identity_candidates_without_cla
     data_access = _EndpointDataAccess(
         {
             "list_location_list": {"data": locations},
-            "list_area_list": {
-                "data": [{"area_id": "area_nairobi", "name": "London"}]
-            },
+            "list_area_list": {"data": [{"area_id": "area_nairobi", "name": "London"}]},
         }
     )
 
@@ -1120,13 +1206,10 @@ def test_reference_grounding_uses_explicit_identity_display_fields_not_name_heur
                         ),
                     ),
                     known_inputs=(
-                        RequestedFactKnownInput(
-                            id="input_book",
-                            kind=KnownInputKind.REFERENCE,
-                            source=KnownInputSource.QUESTION_CONTEXT,
-                            text="Wealth of Nations",
-                            lookup_text="Wealth of Nations",
-                            description="book",
+                        _reference_input(
+                            "input_book",
+                            "Wealth of Nations",
+                            value_meaning_hint="book",
                         ),
                     ),
                 ),
@@ -1211,13 +1294,10 @@ def test_reference_grounding_does_not_require_identity_display_fields_for_resolv
                         ),
                     ),
                     known_inputs=(
-                        RequestedFactKnownInput(
-                            id="input_staff",
-                            kind=KnownInputKind.REFERENCE,
-                            source=KnownInputSource.QUESTION_CONTEXT,
-                            text="Alice",
-                            lookup_text="Alice",
-                            description="staff",
+                        _reference_input(
+                            "input_staff",
+                            "Alice",
+                            value_meaning_hint="staff",
                         ),
                     ),
                 ),
@@ -1316,13 +1396,10 @@ def test_reference_grounding_excludes_control_params_from_lookup_templates():
                         ),
                     ),
                     known_inputs=(
-                        RequestedFactKnownInput(
-                            id="input_staff",
-                            kind=KnownInputKind.REFERENCE,
-                            source=KnownInputSource.QUESTION_CONTEXT,
-                            text="Alice",
-                            lookup_text="Alice",
-                            description="staff",
+                        _reference_input(
+                            "input_staff",
+                            "Alice",
+                            value_meaning_hint="staff",
                         ),
                     ),
                 ),
@@ -1885,7 +1962,7 @@ def test_time_grounding_treats_explicit_current_week_to_date_wording_as_to_date(
     assert value.payload.intent["mode"] == "to_date"
 
 
-def test_reference_grounding_uses_model_authored_lookup_text():
+def test_reference_grounding_uses_literal_resolved_value_text():
     data_access = _DataAccess(
         _endpoint_result(
             {
@@ -1903,9 +1980,9 @@ def test_reference_grounding_uses_model_authored_lookup_text():
 
     output = ground_question_inputs(
         question="What is Jane Doe's staff ID?",
-        question_contract=_staff_question_contract_with_lookup_text(
+        question_contract=_staff_question_contract_with_resolved_value_text(
             reference_text="Jane Doe",
-            lookup_text="Jane Doe",
+            resolved_value_text="Jane Doe",
         ),
         full_catalog=_staff_catalog(),
         resolver_catalog=RelationCatalog(reads=(_staff_read(),)),
@@ -1950,13 +2027,10 @@ def _question_contract(text: str, *, description: str = "") -> QuestionContract:
                     ),
                 ),
                 known_inputs=(
-                    RequestedFactKnownInput(
-                        id="input_location",
-                        kind=KnownInputKind.REFERENCE,
-                        source=KnownInputSource.QUESTION_CONTEXT,
-                        description=description,
-                        text=text,
-                        lookup_text=text,
+                    _reference_input(
+                        "input_location",
+                        text,
+                        value_meaning_hint=description,
                     ),
                 ),
             ),
@@ -1989,13 +2063,10 @@ def _city_question_contract(text: str) -> QuestionContract:
                     ),
                 ),
                 known_inputs=(
-                    RequestedFactKnownInput(
-                        id="input_city",
-                        kind=KnownInputKind.REFERENCE,
-                        source=KnownInputSource.QUESTION_CONTEXT,
-                        description="city",
-                        text=text,
-                        lookup_text=text,
+                    _reference_input(
+                        "input_city",
+                        text,
+                        value_meaning_hint="city",
                     ),
                 ),
             ),
@@ -2016,13 +2087,10 @@ def _staff_question_contract(text: str, *, description: str = "") -> QuestionCon
                     ),
                 ),
                 known_inputs=(
-                    RequestedFactKnownInput(
-                        id="input_staff",
-                        kind=KnownInputKind.REFERENCE,
-                        source=KnownInputSource.QUESTION_CONTEXT,
-                        description=description,
-                        text=text,
-                        lookup_text=text,
+                    _reference_input(
+                        "input_staff",
+                        text,
+                        value_meaning_hint=description,
                     ),
                 ),
             ),
@@ -2031,13 +2099,7 @@ def _staff_question_contract(text: str, *, description: str = "") -> QuestionCon
 
 
 def _shared_staff_question_contract(text: str) -> QuestionContract:
-    staff = RequestedFactKnownInput(
-        id="input_staff",
-        kind=KnownInputKind.REFERENCE,
-        source=KnownInputSource.QUESTION_CONTEXT,
-        text=text,
-        lookup_text=text,
-    )
+    staff = _reference_input("input_staff", text)
     fact_1 = RequestedFact(
         id="fact_1",
         description="staff sales total",
@@ -2068,10 +2130,10 @@ def _shared_staff_question_contract(text: str) -> QuestionContract:
     )
 
 
-def _staff_question_contract_with_lookup_text(
+def _staff_question_contract_with_resolved_value_text(
     *,
     reference_text: str,
-    lookup_text: str,
+    resolved_value_text: str,
 ) -> QuestionContract:
     return QuestionContract(
         requested_facts=(
@@ -2085,12 +2147,10 @@ def _staff_question_contract_with_lookup_text(
                     ),
                 ),
                 known_inputs=(
-                    RequestedFactKnownInput(
-                        id="input_staff",
-                        kind=KnownInputKind.REFERENCE,
-                        source=KnownInputSource.QUESTION_CONTEXT,
-                        text=reference_text,
-                        lookup_text=lookup_text,
+                    _reference_input(
+                        "input_staff",
+                        reference_text,
+                        resolved_value_text=resolved_value_text,
                     ),
                 ),
             ),
@@ -2110,14 +2170,7 @@ def _time_question_contract(text: str) -> QuestionContract:
                         description="total sales",
                     ),
                 ),
-                known_inputs=(
-                    RequestedFactKnownInput(
-                        id="input_date",
-                        kind=KnownInputKind.TIME,
-                        source=KnownInputSource.QUESTION_CONTEXT,
-                        text=text,
-                    ),
-                ),
+                known_inputs=(_time_input("input_date", text),),
             ),
         )
     )
@@ -2135,14 +2188,7 @@ def _quarter_question_contract(text: str) -> QuestionContract:
                         description="total sales",
                     ),
                 ),
-                known_inputs=(
-                    RequestedFactKnownInput(
-                        id="input_date",
-                        kind=KnownInputKind.TIME,
-                        source=KnownInputSource.QUESTION_CONTEXT,
-                        text=text,
-                    ),
-                ),
+                known_inputs=(_time_input("input_date", text),),
             ),
         )
     )

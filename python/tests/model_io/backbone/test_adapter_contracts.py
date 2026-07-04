@@ -216,18 +216,24 @@ def test_provider_native_question_contract_fixture_matches_current_schema():
     )
 
 
-def test_question_contract_parser_rejects_model_authored_requested_facts():
-    with pytest.raises(ValueError, match="unsupported fields"):
+def test_question_contract_parser_fails_on_model_authored_requested_facts():
+    payload = provider_native_test_arguments(
+        tool_name="submit_answer_request_contract",
+        prompt="",
+        tool_specs=(),
+    )
+    payload["requested_facts"] = [
+        {
+            "id": "model_authored_fact",
+            "description": "model-authored facts must not own the contract",
+        }
+    ]
+
+    with pytest.raises(ValueError, match="unparsed fields: requested_facts"):
         parse_question_contract(
             tool_name="submit_answer_request_contract",
-            payload={
-                "kind": "question_contract",
-                "answer_requests_count": 1,
-                "question_inputs": [],
-                "requested_facts": [],
-                "answer_requests": [],
-            },
-            question_context="How much sales did we make?",
+            payload=payload,
+            question_context="What is the test adapter answer?",
         )
 
     with pytest.raises(ValueError, match="answer_requests"):
@@ -2112,9 +2118,7 @@ def test_opencode_zen_uses_openai_compatible_tool_call_contract():
         "has_tools": "tools" in completion_kwargs,
         "tool_choice": completion_kwargs["tool_choice"],
         "parallel_tool_calls": completion_kwargs["parallel_tool_calls"],
-        "tool_names": [
-            tool["function"]["name"] for tool in completion_kwargs["tools"]
-        ],
+        "tool_names": [tool["function"]["name"] for tool in completion_kwargs["tools"]],
     } == {
         "base_url": "https://opencode.ai/zen/v1",
         "model": "deepseek-v4-pro",

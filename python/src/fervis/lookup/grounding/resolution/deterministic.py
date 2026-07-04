@@ -28,8 +28,8 @@ from fervis.lookup.fact_plan.values import (
     LiteralType,
     TimeComponent,
 )
+from fervis.lookup.question_contract._normalization import number_text
 from fervis.lookup.question_contract import (
-    KnownInputKind,
     QuestionContract,
     RequestedFactKnownInput,
 )
@@ -45,9 +45,9 @@ def _deterministic_known_inputs(
 ) -> CanonicalInputLedger:
     values: list[FactValue] = []
     for known, requested_fact_ids in _known_input_bindings(question_contract):
-        if known.kind == KnownInputKind.TIME:
+        if known.is_time_value:
             continue
-        if known.kind in {KnownInputKind.LIMIT, KnownInputKind.NUMBER}:
+        if known.is_result_limit:
             literal = _literal_value(
                 known,
                 applies_to_requested_fact_ids=requested_fact_ids,
@@ -77,7 +77,7 @@ def time_resolution_tasks(
             ),
         )
         for known, requested_fact_ids in _known_input_bindings(question_contract)
-        if known.kind == KnownInputKind.TIME
+        if known.is_time_value
     )
 
 
@@ -248,8 +248,16 @@ def _literal_value(
     *,
     applies_to_requested_fact_ids: tuple[str, ...],
 ) -> FactValue:
-    value = known.numeric_value if known.numeric_value is not None else known.text
-    if isinstance(value, bool):
+    value = known.resolved_value_text or known.text
+    result_limit_number = (
+        _result_limit_number_text(value) if known.is_result_limit else ""
+    )
+    if known.is_result_limit:
+        if not result_limit_number:
+            raise ValueError("result limit must be a positive integer")
+        literal_type = LiteralType.NUMBER
+        text_value = result_limit_number
+    elif isinstance(value, bool):
         literal_type = LiteralType.BOOLEAN
         text_value = str(value).lower()
     elif isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -266,6 +274,27 @@ def _literal_value(
         proof_refs=(f"known_input:{known.id}",),
         applies_to_requested_fact_ids=applies_to_requested_fact_ids,
     )
+
+
+_RESULT_LIMIT_NUMBER_WORDS = {
+    "one": "1",
+    "two": "2",
+    "three": "3",
+    "four": "4",
+    "five": "5",
+    "six": "6",
+    "seven": "7",
+    "eight": "8",
+    "nine": "9",
+    "ten": "10",
+}
+
+
+def _result_limit_number_text(value: object) -> str:
+    text = number_text(value).casefold()
+    if text.isdigit() and int(text) > 0:
+        return str(int(text))
+    return _RESULT_LIMIT_NUMBER_WORDS.get(text, "")
 
 
 def _known_input_bindings(

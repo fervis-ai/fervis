@@ -6,10 +6,11 @@ requested_facts:
     answer_subject: stores
     known_inputs:
       - id: qi1
-        kind: named_reference_text
-        description: area
+        kind: literal_text
         text: London
-        lookup_text: London
+        resolved_value_text: London
+        value_meaning_hint: area
+        role: reference_value
     answer_outputs:
       - id: answer_1
         description: number of stores in London

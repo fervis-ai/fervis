@@ -419,15 +419,17 @@ def test_pattern_contract_same_scope_candidate_keeps_field_params_together_end_t
                     ],
                 },
                 field_id="shade_name",
-                conversation_resolution=lambda prompt: _conversation_resolution_payload_using_memories(
-                    prompt,
-                    integrated_question="Show shade names for the prior products.",
-                ),
+                conversation_resolution=lambda prompt: (
+                    _conversation_resolution_payload_using_memories(
+                        prompt,
+                        integrated_question="Show shade names for the prior products.",
+                    )
                 ),
             ),
-        )
+        ),
+    )
 
-    assert result.status == "COMPLETED", (result)
+    assert result.status == "COMPLETED", result
     assert data_access.requests == [
         {
             "endpointName": "sales_read",
@@ -484,26 +486,31 @@ def _question_contract(
             "input_ref": f"input_{index}",
             "source": "question_context",
             "kind": item["kind"],
-            "reference_text": item["text"],
+            **(
+                {"reference_text": item["text"]}
+                if item["kind"] == "row_set_reference"
+                else {
+                    "source_text": item["text"],
+                    "role": item["role"],
+                    "resolved_value_text": item["resolved_value_text"],
+                }
+            ),
             "inventory_check": {
                 "why_this_is_an_input": f"{item['text']} is a declared question input"
             },
             **(
-                {"numeric_value": item["numeric_value"]}
-                if item.get("kind") in {"number_text", "explicit_numeric_limit_text"}
+                {"value_meaning_hint": item["value_meaning_hint"]}
+                if item.get("value_meaning_hint")
                 else {}
             ),
             **(
-                {"value_source_text": item["value_source_text"]}
-                if item.get("kind") == "explicit_numeric_limit_text"
+                {"satisfies_requirement_id": item["satisfies_requirement_id"]}
+                if item.get("satisfies_requirement_id")
                 else {}
             ),
             **(
-                {
-                    "target_meaning": item.get("target_meaning") or item["text"],
-                    "lookup_text": item.get("lookup_text") or item["text"],
-                }
-                if item.get("kind") == "named_reference_text"
+                {"resolved_input_ref": item["resolved_input_ref"]}
+                if item.get("resolved_input_ref")
                 else {}
             ),
         }

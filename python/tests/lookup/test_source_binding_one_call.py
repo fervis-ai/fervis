@@ -31,6 +31,7 @@ from fervis.lookup.fact_plan.values import (
 from fervis.lookup.question_contract import (
     KnownInputKind,
     KnownInputSource,
+    LiteralInputRole,
     NormalInstanceExcludedStateRole,
     QuestionContract,
     RequestedFact,
@@ -464,10 +465,12 @@ def _request_with_optional_params(
         known_inputs=(
             RequestedFactKnownInput(
                 id="time_1",
-                kind=KnownInputKind.TIME,
+                kind=KnownInputKind.LITERAL,
                 source=KnownInputSource.QUESTION_CONTEXT,
                 text="today",
-                description="today",
+                role=LiteralInputRole.TIME_VALUE,
+                resolved_value_text="today",
+                satisfies_requirement_id="time_req_1",
             ),
         ),
     )
@@ -735,11 +738,12 @@ def _request_with_identity_field_filter() -> SourceBindingRequest:
         known_inputs=(
             RequestedFactKnownInput(
                 id="area_1",
-                kind=KnownInputKind.REFERENCE,
+                kind=KnownInputKind.LITERAL,
                 source=KnownInputSource.QUESTION_CONTEXT,
                 text="London",
-                description="area",
-                lookup_text="London",
+                role=LiteralInputRole.REFERENCE_VALUE,
+                resolved_value_text="London",
+                value_meaning_hint="area",
             ),
         ),
     )
@@ -1546,11 +1550,7 @@ def _normal_instance_guard_fields(
             "test_effect": (
                 "UNKNOWN_TEST_EFFECT"
                 if unknown_role_match
-                else (
-                    "CONFLICTS_WITH_TEST"
-                    if matching_roles
-                    else "SATISFIES_TEST"
-                )
+                else ("CONFLICTS_WITH_TEST" if matching_roles else "SATISFIES_TEST")
             ),
         },
     }

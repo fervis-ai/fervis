@@ -11,18 +11,11 @@ from fervis.lookup.conversation_resolution.overlay import (
     ConversationResolutionOverlay,
 )
 from fervis.lookup.turn_prompts.context import HostPromptContext
-from fervis.lookup.question_contract._normalization import (
-    number_text,
-)
 
 
 class KnownInputKind(StrEnum):
     LITERAL = "literal_text"
-    REFERENCE = "named_reference_text"
     ROW_SET_REFERENCE = "row_set_reference"
-    TIME = "time_text"
-    NUMBER = "number_text"
-    LIMIT = "explicit_numeric_limit_text"
 
 
 class LiteralInputRole(StrEnum):
@@ -244,12 +237,8 @@ class RequestedFactKnownInput:
     id: str
     kind: KnownInputKind
     source: KnownInputSource
-    description: str = ""
     text: str = ""
     satisfies_requirement_id: str = ""
-    numeric_value: object | None = None
-    value_source_text: str = ""
-    lookup_text: str = ""
     occurrence: int = 1
     resolved_input_ref: str = ""
     resolved_value_text: str = ""
@@ -266,84 +255,15 @@ class RequestedFactKnownInput:
             object.__setattr__(self, "role", LiteralInputRole(str(self.role)))
         if self.occurrence < 1:
             raise ValueError("known input occurrence must be positive")
-        if self.kind == KnownInputKind.LIMIT and (
-            self.numeric_value is None
-            or isinstance(self.numeric_value, bool)
-            or not isinstance(self.numeric_value, int)
-            or self.numeric_value < 1
-        ):
-            raise ValueError("limit known input requires positive integer value")
-        if self.kind == KnownInputKind.LIMIT and not self.value_source_text.strip():
-            raise ValueError("limit known input requires value source text")
-        if self.kind == KnownInputKind.NUMBER and (
-            self.numeric_value is None
-            or isinstance(self.numeric_value, bool)
-            or not isinstance(self.numeric_value, int | float)
-        ):
-            raise ValueError("number known input requires numeric value")
-        if self.kind not in {KnownInputKind.LIMIT, KnownInputKind.NUMBER} and (
-            self.numeric_value is not None
-        ):
-            raise ValueError(
-                f"{self.kind.value} known input must not include numeric value"
-            )
-        if self.kind != KnownInputKind.LIMIT and self.value_source_text:
-            raise ValueError(
-                f"{self.kind.value} known input must not include value source text"
-            )
         if self.kind == KnownInputKind.LITERAL:
             self._validate_literal_input()
             return
-        if self.resolved_value_text:
-            raise ValueError(
-                f"{self.kind.value} known input must not include resolved value text"
-            )
-        if self.field_label_text:
-            raise ValueError(
-                f"{self.kind.value} known input must not include field label text"
-            )
-        if self.value_meaning_hint:
-            raise ValueError(
-                f"{self.kind.value} known input must not include value meaning hint"
-            )
-        if self.role is not None:
-            raise ValueError(f"{self.kind.value} known input must not include role")
-        if self.kind == KnownInputKind.TIME:
-            if self.lookup_text:
-                raise ValueError("time known input must not include lookup text")
-            if self.resolved_input_ref:
-                raise ValueError("time known input must not include resolved input ref")
-            return
-        if self.satisfies_requirement_id:
-            raise ValueError(
-                f"{self.kind.value} known input must not include requirement id"
-            )
-        if self.kind == KnownInputKind.REFERENCE:
-            if not str(self.lookup_text or "").strip():
-                raise ValueError("reference lookup text must not be empty")
-            if self.resolved_input_ref:
-                raise ValueError(
-                    "reference known input must not include resolved input ref"
-                )
-        elif self.kind == KnownInputKind.ROW_SET_REFERENCE:
-            if self.source != KnownInputSource.CONVERSATION_RESOLUTION:
-                raise ValueError(
-                    "row set reference must come from conversation resolution"
-                )
-            if self.lookup_text:
-                raise ValueError("row set reference must not include lookup text")
-            if not self.resolved_input_ref.strip():
-                raise ValueError("row set reference requires resolved input ref")
-        elif self.lookup_text:
-            raise ValueError(
-                f"{self.kind.value} known input must not include lookup text"
-            )
-        elif self.resolved_input_ref:
-            raise ValueError(
-                f"{self.kind.value} known input must not include resolved input ref"
-            )
+        if self.kind == KnownInputKind.ROW_SET_REFERENCE:
+            self._validate_row_set_reference_input()
 
     def _validate_literal_input(self) -> None:
+        if self.occurrence != 1:
+            raise ValueError("literal known input must not include occurrence")
         if self.role is None:
             raise ValueError("literal known input requires role")
         if not self.resolved_value_text.strip():
@@ -351,11 +271,56 @@ class RequestedFactKnownInput:
         if self.role == LiteralInputRole.TIME_VALUE:
             if not self.satisfies_requirement_id.strip():
                 raise ValueError("literal time value requires requirement id")
+        elif self.satisfies_requirement_id:
+            raise ValueError(
+                f"{self.role.value} literal input must not include requirement id"
+            )
         if self.source == KnownInputSource.CONVERSATION_RESOLUTION:
             if not self.resolved_input_ref.strip():
                 raise ValueError(
                     "conversation-resolution literal requires resolved input ref"
                 )
+        elif self.resolved_input_ref:
+            raise ValueError(
+                "question-context literal must not include resolved input ref"
+            )
+
+    def _validate_row_set_reference_input(self) -> None:
+        if self.source != KnownInputSource.CONVERSATION_RESOLUTION:
+            raise ValueError("row set reference must come from conversation resolution")
+        if not self.resolved_input_ref.strip():
+            raise ValueError("row set reference requires resolved input ref")
+        if self.satisfies_requirement_id:
+            raise ValueError("row set reference must not include requirement id")
+        if self.resolved_value_text.strip():
+            raise ValueError("row set reference must not include resolved value text")
+        if self.field_label_text.strip():
+            raise ValueError("row set reference must not include field label text")
+        if self.value_meaning_hint.strip():
+            raise ValueError("row set reference must not include value meaning hint")
+        if self.role is not None:
+            raise ValueError("row set reference must not include role")
+
+    @property
+    def is_reference_value(self) -> bool:
+        return (
+            self.kind == KnownInputKind.LITERAL
+            and self.role == LiteralInputRole.REFERENCE_VALUE
+        )
+
+    @property
+    def is_time_value(self) -> bool:
+        return (
+            self.kind == KnownInputKind.LITERAL
+            and self.role == LiteralInputRole.TIME_VALUE
+        )
+
+    @property
+    def is_result_limit(self) -> bool:
+        return (
+            self.kind == KnownInputKind.LITERAL
+            and self.role == LiteralInputRole.RESULT_LIMIT
+        )
 
     def to_model_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -364,16 +329,8 @@ class RequestedFactKnownInput:
             "source": self.source.value,
             "text": self.text,
         }
-        if self.description:
-            payload["description"] = self.description
         if self.satisfies_requirement_id:
             payload["satisfies_requirement_id"] = self.satisfies_requirement_id
-        if self.numeric_value is not None:
-            payload["numeric_value"] = self.numeric_value
-        if self.value_source_text:
-            payload["value_source_text"] = self.value_source_text
-        if self.lookup_text:
-            payload["lookup_text"] = self.lookup_text
         if self.occurrence != 1 or self.kind == KnownInputKind.ROW_SET_REFERENCE:
             payload["occurrence"] = self.occurrence
         if self.resolved_input_ref:
@@ -941,21 +898,12 @@ def _validate_known_input_value_matches_text(
     *,
     question_context_texts: tuple[str, ...],
 ) -> None:
-    if known.kind == KnownInputKind.LIMIT:
-        if not _text_in_any_context(
-            known.value_source_text,
-            (_normalized_text(known.text),),
-        ):
-            raise ValueError("limit known input value source text must match text")
-        return
-    if known.kind == KnownInputKind.NUMBER:
-        if number_text(known.text) != number_text(known.numeric_value):
-            raise ValueError("number known input value must match text")
-        return
-    if known.kind == KnownInputKind.REFERENCE:
-        if not _text_in_any_context(known.lookup_text, question_context_texts):
-            raise ValueError("reference lookup text must come from question context")
-        return
+    if (
+        known.kind == KnownInputKind.LITERAL
+        and known.field_label_text
+        and not _text_in_any_context(known.field_label_text, question_context_texts)
+    ):
+        raise ValueError("literal field label text must come from question context")
 
 
 def _normalized_text(value: object) -> str:

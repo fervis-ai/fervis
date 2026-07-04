@@ -49,8 +49,6 @@ class ResolvedQuestionInputOverlay:
     memory_ids: tuple[str, ...]
     source_text: str
     reference_text: str
-    lookup_text: str
-    target_meaning: str
     resolved_value_text: str
     value_meaning_hint: str
     field_label_text: str
@@ -78,14 +76,6 @@ class LiteralQuestionInputOverlay(ResolvedQuestionInputOverlay):
 
     @property
     def reference_text(self) -> str:
-        return ""
-
-    @property
-    def lookup_text(self) -> str:
-        return ""
-
-    @property
-    def target_meaning(self) -> str:
         return ""
 
     @property
@@ -143,14 +133,6 @@ class RowSetQuestionInputOverlay(ResolvedQuestionInputOverlay):
         return ""
 
     @property
-    def lookup_text(self) -> str:
-        return ""
-
-    @property
-    def target_meaning(self) -> str:
-        return ""
-
-    @property
     def resolved_value_text(self) -> str:
         return ""
 
@@ -181,59 +163,6 @@ class RowSetQuestionInputOverlay(ResolvedQuestionInputOverlay):
             "occurrence": self.occurrence,
             "resolved_input_ref": self.resolved_input_ref,
         }
-
-
-@dataclass(frozen=True)
-class NamedReferenceQuestionInputOverlay(ResolvedQuestionInputOverlay):
-    reference_text: str
-    lookup_text: str
-    target_meaning: str
-    occurrence: int = 1
-    memory_ids: tuple[str, ...] = ()
-    resolved_input_ref: str = ""
-    kind: str = field(init=False, default="named_reference_text")
-
-    @property
-    def source_text(self) -> str:
-        return ""
-
-    @property
-    def resolved_value_text(self) -> str:
-        return ""
-
-    @property
-    def value_meaning_hint(self) -> str:
-        return ""
-
-    @property
-    def field_label_text(self) -> str:
-        return ""
-
-    @property
-    def role(self) -> str:
-        return ""
-
-    def __post_init__(self) -> None:
-        if self.occurrence < 1:
-            raise ValueError("resolved question input occurrence must be positive")
-        if not self.reference_text.strip():
-            raise ValueError("named resolved question input requires reference text")
-        if not self.lookup_text.strip():
-            raise ValueError("named resolved question input requires lookup text")
-        if not self.target_meaning.strip():
-            raise ValueError("named resolved question input requires target meaning")
-
-    def to_prompt_payload(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "kind": self.kind,
-            "reference_text": self.reference_text,
-            "occurrence": self.occurrence,
-            "lookup_text": self.lookup_text,
-            "target_meaning": self.target_meaning,
-        }
-        if self.resolved_input_ref:
-            payload["resolved_input_ref"] = self.resolved_input_ref
-        return payload
 
 
 @dataclass(frozen=True)
@@ -357,6 +286,7 @@ def conversation_resolution_overlay_from(
         resolved_question_inputs=_resolved_question_inputs(
             dependencies=tuple(dependencies),
             references=tuple(references),
+            scopes=tuple(scopes),
             memory_projection=memory_projection,
         ),
     )
@@ -412,7 +342,7 @@ def conversation_resolution_question_contract_context_texts(
     for item in overlay.value_frames:
         output.extend(_value_frame_evidence_texts(item))
     for item in overlay.resolved_question_inputs:
-        _append_text(output, item.lookup_text)
+        _append_text(output, item.resolved_value_text)
         _append_text(output, item.reference_text)
         _append_text(output, item.source_text)
     return tuple(dict.fromkeys(output))
@@ -496,6 +426,7 @@ def _resolved_question_inputs(
     *,
     dependencies: tuple[ConversationDependencyOverlay, ...],
     references: tuple[ConversationDependencyOverlay, ...],
+    scopes: tuple[ConversationDependencyOverlay, ...],
     memory_projection: ConversationMemoryCardProjection | None,
 ) -> tuple[ResolvedQuestionInputOverlay, ...]:
     if memory_projection is None:
@@ -535,19 +466,50 @@ def _resolved_question_inputs(
             continue
         seen.add(key)
         output.append(
-            NamedReferenceQuestionInputOverlay(
-                reference_text=reference.anchor_text,
+            LiteralQuestionInputOverlay(
+                source_text=reference.anchor_text,
                 occurrence=reference.occurrence,
-                lookup_text=_entity_lookup_text(
+                resolved_input_ref=f"cr_input_{len(output) + 1}",
+                resolved_value_text=_entity_resolved_value_text(
                     entity_memory_id,
                     default_text=reference.resolved_text,
                     memory_projection=memory_projection,
                 ),
-                target_meaning=_entity_target_meaning(
+                value_meaning_hint=_entity_value_meaning_hint(
                     entity_memory_id,
                     memory_projection=memory_projection,
                 ),
-                memory_ids=(entity_memory_id,),
+                role="reference_value",
+                evidence_refs=(entity_memory_id,),
+            )
+        )
+    for scope in scopes:
+        time_scope_memory_id = _single_memory_id_by_kind(
+            scope.memory_ids,
+            kind="time_scope",
+            memory_projection=memory_projection,
+        )
+        if not time_scope_memory_id:
+            continue
+        if scope.resolved_text not in scope.must_preserve_terms:
+            continue
+        key = (scope.anchor_text, scope.occurrence, scope.resolved_text)
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(
+            LiteralQuestionInputOverlay(
+                source_text=scope.anchor_text,
+                occurrence=scope.occurrence,
+                resolved_input_ref=f"cr_input_{len(output) + 1}",
+                resolved_value_text=_time_scope_resolved_value_text(
+                    time_scope_memory_id,
+                    default_text=scope.resolved_text,
+                    memory_projection=memory_projection,
+                ),
+                value_meaning_hint="time scope",
+                role="time_value",
+                evidence_refs=(time_scope_memory_id,),
             )
         )
     return tuple(output)
@@ -582,7 +544,7 @@ def _single_entity_memory_id(
     return matches[0]
 
 
-def _entity_target_meaning(
+def _entity_value_meaning_hint(
     memory_id: str,
     *,
     memory_projection: ConversationMemoryCardProjection,
@@ -605,13 +567,32 @@ def _entity_target_meaning(
     return "entity_identity"
 
 
-def _entity_lookup_text(
+def _entity_resolved_value_text(
     memory_id: str,
     *,
     default_text: str,
     memory_projection: ConversationMemoryCardProjection,
 ) -> str:
     private = _private_card(memory_id, memory_projection=memory_projection)
+    display = str(private.get("display") or "").strip()
+    if display:
+        return display
+    for card in memory_projection.cards:
+        if card.memory_id == memory_id and card.display.strip():
+            return card.display
+    return default_text
+
+
+def _time_scope_resolved_value_text(
+    memory_id: str,
+    *,
+    default_text: str,
+    memory_projection: ConversationMemoryCardProjection,
+) -> str:
+    private = _private_card(memory_id, memory_projection=memory_projection)
+    expression = str(private.get("expression") or "").strip()
+    if expression:
+        return expression
     display = str(private.get("display") or "").strip()
     if display:
         return display

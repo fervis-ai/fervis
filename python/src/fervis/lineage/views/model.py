@@ -97,7 +97,7 @@ class SemanticKnownInputView:
     text: str
     kind: str
     description: str = ""
-    lookup_text: str = ""
+    resolved_value_text: str = ""
 
 
 @dataclass(frozen=True)

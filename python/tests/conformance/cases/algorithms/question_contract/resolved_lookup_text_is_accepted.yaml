@@ -1,35 +1,125 @@
-id: resolved_lookup_text_is_accepted
-description: Lookup text for a pronoun reference is accepted when backed by context evidence.
-migrates:
-  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_validation_accepts_typed_resolved_lookup_text
+id: resolved_literal_reference_text_is_accepted_from_conversation_resolution
+description: Resolved literal reference text is accepted from conversation-resolution overlay evidence.
 kind: algorithm
 algorithm: question_contract.parse
 input:
   question_context: And how much did she make yesterday?
-  question_context_texts: [amount made, Alice Smith]
+  question_context_texts:
+  - amount made
+  - Alice Smith
+  conversation_resolution_overlay:
+    current_question: And how much did she make yesterday?
+    resolved_question_inputs:
+    - kind: literal_text
+      source_text: she
+      resolved_value_text: Alice Smith
+      value_meaning_hint: staff member
+      role: reference_value
+      resolved_input_ref: cr_input_staff
   answer_fact: amount made by Alice yesterday
   answer_subject:
     subject_text: amount
-    instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
+    instance_interpretation:
+      kind: NORMAL_BUSINESS_INSTANCE
   answer_outputs:
-    - description: amount made
+  - description: amount made
   question_inputs:
-    - input_ref: staff
-      source: question_context
-      kind: named_reference_text
-      reference_text: she
-      target_meaning: staff member
-      lookup_text: Alice Smith
-      inventory_check: {why_this_is_an_input: she is a named reference}
-    - input_ref: period
-      source: question_context
-      kind: time_text
-      reference_text: yesterday
-      inventory_check: {why_this_is_an_input: yesterday is a time scope}
-  used_input_refs: [staff, period]
+  - input_ref: staff
+    source: conversation_resolution
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: she is a named reference
+    source_text: she
+    resolved_value_text: Alice Smith
+    value_meaning_hint: staff member
+    role: reference_value
+    resolved_input_ref: cr_input_staff
+  - input_ref: period
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: yesterday is a time scope
+    source_text: yesterday
+    resolved_value_text: yesterday
+    role: time_value
+  used_input_refs:
+  - staff
+  - period
 expect:
-  result_contains:
+  result_equals:
     question_inputs:
+    - id: staff
+      kind: literal_text
+      source: conversation_resolution
+      text: she
+      resolved_value_text: Alice Smith
+      resolved_input_ref: cr_input_staff
+      satisfies_requirement_id: ''
+      field_label_text: ''
+      value_meaning_hint: staff member
+      role: reference_value
+    - id: period
+      kind: literal_text
+      source: question_context
+      text: yesterday
+      resolved_input_ref: ''
+      satisfies_requirement_id: period_req
+      resolved_value_text: yesterday
+      field_label_text: ''
+      value_meaning_hint: ''
+      role: time_value
+    requested_facts:
+    - id: fact_1
+      description: amount made by Alice yesterday
+      answer_expression_family: scalar_aggregate
+      answer_subject_text: amount
+      input_refs: [staff, period]
+      known_inputs:
       - id: staff
+        kind: literal_text
+        source: conversation_resolution
         text: she
-        lookup_text: Alice Smith
+        resolved_input_ref: cr_input_staff
+        satisfies_requirement_id: ''
+        resolved_value_text: Alice Smith
+        field_label_text: ''
+        value_meaning_hint: staff member
+        role: reference_value
+      - id: period
+        kind: literal_text
+        source: question_context
+        text: yesterday
+        resolved_input_ref: ''
+        satisfies_requirement_id: period_req
+        resolved_value_text: yesterday
+        field_label_text: ''
+        value_meaning_hint: ''
+        role: time_value
+      answer_outputs:
+      - id: answer_1
+        description: amount made
+      answer_request:
+        answer_fact: amount made by Alice yesterday
+        answer_expression:
+          family: scalar_aggregate
+        answer_subject:
+          subject_text: amount
+          instance_interpretation:
+            kind: NORMAL_BUSINESS_INSTANCE
+            short_label: ordinary business meaning of amount
+            meaning: Answer over ordinary business instances of 'amount' as they are normally understood in business operations and reporting. Do not assume this includes every persisted representation the host API may expose for 'amount'. Explicit user wording may narrow or override this normal instance interpretation.
+        input_requirements:
+          time_requirements:
+          - requirement_id: period_req
+            source_text: yesterday
+            why_required: yesterday constrains the requested fact
+        answer_population:
+          population_label: sales
+          counted_unit: sales
+          membership_tests:
+          - test_id: pop_test_1
+            kind: SUBJECT_IDENTITY
+            polarity: MUST_PASS
+            test_question: Does the row/value represent sales?
+        answer_outputs:
+        - description: amount made

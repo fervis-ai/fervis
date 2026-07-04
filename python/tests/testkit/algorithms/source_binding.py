@@ -37,6 +37,7 @@ from fervis.lookup.turn_prompts import build_turn_prompt_context
 from fervis.lookup.question_contract import (
     KnownInputKind,
     KnownInputSource,
+    LiteralInputRole,
     NormalInstanceExcludedStateRole,
     QuestionContract,
     RequestedFact,
@@ -466,9 +467,7 @@ def _rendered_fulfillment_evidence(prompt_text: str) -> list[dict[str, str]]:
             meaning = str(child.get("meaning") or "")
             if meaning:
                 item["meaning"] = meaning
-            evidence_items.append(
-                {key: value for key, value in item.items() if value}
-            )
+            evidence_items.append({key: value for key, value in item.items() if value})
     return sorted(
         evidence_items,
         key=lambda item: (
@@ -2482,10 +2481,12 @@ def _grounded_time_filter_request() -> SourceBindingRequest:
         known_inputs=(
             RequestedFactKnownInput(
                 id="time_1",
-                kind=KnownInputKind.TIME,
+                kind=KnownInputKind.LITERAL,
                 source=KnownInputSource.QUESTION_CONTEXT,
                 text="today",
-                description="today",
+                resolved_value_text="today",
+                role=LiteralInputRole.TIME_VALUE,
+                satisfies_requirement_id="time_1_req",
             ),
         ),
     )
@@ -2601,11 +2602,12 @@ def _identity_field_filter_request() -> SourceBindingRequest:
         known_inputs=(
             RequestedFactKnownInput(
                 id="area_1",
-                kind=KnownInputKind.REFERENCE,
+                kind=KnownInputKind.LITERAL,
                 source=KnownInputSource.QUESTION_CONTEXT,
                 text="London",
-                description="area",
-                lookup_text="London",
+                resolved_value_text="London",
+                value_meaning_hint="area",
+                role=LiteralInputRole.REFERENCE_VALUE,
             ),
         ),
     )
@@ -3126,10 +3128,7 @@ def _finite_choice_option_review(
         "choice_inclusion_basis": f"{value} is reviewed for inclusion.",
         "choice_inclusion": (
             "EXCLUDE"
-            if any(
-                v == "CONFLICTS_WITH_TEST"
-                for v in effects.values()
-            )
+            if any(v == "CONFLICTS_WITH_TEST" for v in effects.values())
             else "INCLUDE"
         ),
         "population_test_results": {

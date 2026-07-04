@@ -65,10 +65,6 @@ expect:
         kind: literal_text
         source: question_context
         text: staff_id 51515151-0000-0000-0002-000000000001
-        description: ""
-        numeric_value: null
-        value_source_text: ""
-        lookup_text: ""
         resolved_input_ref: ""
         satisfies_requirement_id: ""
         resolved_value_text: 51515151-0000-0000-0002-000000000001
@@ -79,10 +75,6 @@ expect:
         kind: literal_text
         source: question_context
         text: today
-        description: ""
-        numeric_value: null
-        value_source_text: ""
-        lookup_text: ""
         resolved_input_ref: ""
         satisfies_requirement_id: time_req_1
         resolved_value_text: today
@@ -98,9 +90,9 @@ expect:
         known_inputs:
           - id: staff
             kind: literal_text
+            source: question_context
             text: staff_id 51515151-0000-0000-0002-000000000001
-            numeric_value: null
-            lookup_text: ""
+            resolved_input_ref: ""
             satisfies_requirement_id: ""
             resolved_value_text: 51515151-0000-0000-0002-000000000001
             field_label_text: staff_id
@@ -108,9 +100,9 @@ expect:
             role: reference_value
           - id: today
             kind: literal_text
+            source: question_context
             text: today
-            numeric_value: null
-            lookup_text: ""
+            resolved_input_ref: ""
             satisfies_requirement_id: time_req_1
             resolved_value_text: today
             field_label_text: ""

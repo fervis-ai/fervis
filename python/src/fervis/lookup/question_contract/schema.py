@@ -253,11 +253,7 @@ def _question_input_schema() -> dict[str, object]:
     return {
         "oneOf": [
             _literal_text_input_schema(),
-            _named_reference_input_schema(),
             _row_set_reference_input_schema(),
-            _time_input_schema(),
-            _numeric_input_schema(kind="number_text"),
-            _numeric_input_schema(kind="explicit_numeric_limit_text"),
         ]
     }
 
@@ -295,41 +291,12 @@ def _literal_text_input_schema() -> dict[str, object]:
     )
 
 
-def _base_question_input_properties(kind: str) -> dict[str, object]:
-    return {
-        "input_ref": {"type": "string", "minLength": 1},
-        "source": {"enum": ["question_context"]},
-        "reference_text": {"type": "string", "minLength": 1},
-        "inventory_check": _question_input_inventory_check_schema(),
-    }
-
-
 def _question_input_inventory_check_schema() -> dict[str, object]:
     return _strict_object(
         {
             "why_this_is_an_input": {"type": "string", "minLength": 1},
         },
         required=("why_this_is_an_input",),
-    )
-
-
-def _named_reference_input_schema() -> dict[str, object]:
-    return _strict_object(
-        {
-            **_base_question_input_properties("named_reference_text"),
-            "target_meaning": {"type": "string", "minLength": 1},
-            "lookup_text": {"type": "string", "minLength": 1},
-            "kind": {"enum": ["named_reference_text"]},
-        },
-        required=(
-            "input_ref",
-            "source",
-            "reference_text",
-            "inventory_check",
-            "target_meaning",
-            "lookup_text",
-            "kind",
-        ),
     )
 
 
@@ -353,44 +320,4 @@ def _row_set_reference_input_schema() -> dict[str, object]:
             "inventory_check",
             "kind",
         ),
-    )
-
-
-def _time_input_schema() -> dict[str, object]:
-    return _strict_object(
-        {
-            **_base_question_input_properties("time_text"),
-            "satisfies_requirement_id": {"type": "string", "minLength": 1},
-            "kind": {"enum": ["time_text"]},
-        },
-        required=(
-            "input_ref",
-            "source",
-            "reference_text",
-            "inventory_check",
-            "kind",
-        ),
-    )
-
-
-def _numeric_input_schema(*, kind: str) -> dict[str, object]:
-    properties = {
-        **_base_question_input_properties(kind),
-        "numeric_value": {"type": "number"},
-        "kind": {"enum": [kind]},
-    }
-    required = [
-        "input_ref",
-        "source",
-        "reference_text",
-        "inventory_check",
-        "numeric_value",
-        "kind",
-    ]
-    if kind == "explicit_numeric_limit_text":
-        properties["value_source_text"] = {"type": "string", "minLength": 1}
-        required.append("value_source_text")
-    return _strict_object(
-        properties,
-        required=tuple(required),
     )

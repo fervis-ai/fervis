@@ -62,7 +62,14 @@ class _ConversationResolutionModelPort:
         output_mode: ProviderOutputMode,
         tool_specs: tuple[ToolSpec, ...],
     ) -> dict[str, object]:
-        del provider, system_prompt, prompt, max_thinking_tokens, output_mode, tool_specs
+        del (
+            provider,
+            system_prompt,
+            prompt,
+            max_thinking_tokens,
+            output_mode,
+            tool_specs,
+        )
         return {
             "answer": json.dumps(
                 {
@@ -885,11 +892,13 @@ def test_conversation_resolution_overlay_projects_entity_references_as_question_
     payload = overlay.to_prompt_payload()
     assert payload["resolved_question_inputs"] == [
         {
-            "kind": "named_reference_text",
-            "reference_text": "she",
+            "kind": "literal_text",
+            "source_text": "she",
             "occurrence": 1,
-            "lookup_text": "Alice Smith",
-            "target_meaning": "entity_identity",
+            "resolved_input_ref": "cr_input_1",
+            "resolved_value_text": "Alice Smith",
+            "value_meaning_hint": "entity_identity",
+            "role": "reference_value",
         }
     ]
 
@@ -998,11 +1007,113 @@ def test_conversation_resolution_derives_resolved_input_from_selected_memory_anc
     assert result.used_memory_ids == ("turn_1.entity.staff.alice",)
     assert overlay.to_prompt_payload()["resolved_question_inputs"] == [
         {
-            "kind": "named_reference_text",
-            "reference_text": "she",
+            "kind": "literal_text",
+            "source_text": "she",
             "occurrence": 1,
-            "lookup_text": "Alice Smith",
-            "target_meaning": "staff identity",
+            "resolved_input_ref": "cr_input_1",
+            "resolved_value_text": "Alice Smith",
+            "value_meaning_hint": "staff identity",
+            "role": "reference_value",
+        }
+    ]
+
+
+def test_conversation_resolution_derives_time_value_input_from_scope_memory_anchor():
+    result = parse_conversation_resolution(
+        tool_name=CONVERSATION_RESOLUTION_TOOL_NAME,
+        payload={
+            "kind": "conversation_resolution",
+            "status": "resolved",
+            "current_question_text": "ABC Mall",
+            "clause_resolutions": [
+                {
+                    "current_clause_text": "ABC Mall",
+                    "occurrence": 1,
+                    "requested_value_frame": {
+                        "current_value_surface": {
+                            "text": "ABC Mall",
+                            "kind": "no_value_request",
+                        },
+                        "context_frame_choices": [],
+                    },
+                    "dependencies": [
+                        {
+                            "anchor_text": "ABC Mall",
+                            "occurrence": 1,
+                            "kind": "scope",
+                            "meaning_components": [
+                                {
+                                    "kind": "scope",
+                                    "source_id": "prior_1",
+                                    "source_text": "yesterday",
+                                    "memory_id": "turn_1.scope.time.yesterday",
+                                    "resolved_text": "yesterday",
+                                }
+                            ],
+                            "resolved_text": "yesterday",
+                            "must_preserve_terms": ["yesterday"],
+                        }
+                    ],
+                    "resolved_clause_text": (
+                        "How much sales did we make at ABC Mall yesterday?"
+                    ),
+                }
+            ],
+            "unresolved": {
+                "unresolved_kind": "none",
+                "why_unresolved": "",
+                "candidate_interpretations": [],
+            },
+        },
+        current_question="ABC Mall",
+        context_sources=(
+            ConversationContextSource(
+                source_id="prior_1",
+                kind="prior_user_question",
+                text="How much sales did we make yesterday?",
+                meaning_anchors=(
+                    ConversationMeaningAnchor(
+                        memory_id="turn_1.scope.time.yesterday",
+                        text="yesterday",
+                        occurrence=1,
+                        kind="time_scope",
+                        label="time scope",
+                    ),
+                ),
+            ),
+        ),
+    ).outcome
+
+    overlay = conversation_resolution_overlay_from(
+        result,
+        memory_projection=ConversationMemoryCardProjection(
+            context_sources=(),
+            cards=(
+                ConversationMemoryCard(
+                    card_id="card_time",
+                    memory_id="turn_1.scope.time.yesterday",
+                    kind="time_scope",
+                    display="yesterday",
+                ),
+            ),
+            private_cards={
+                "turn_1.scope.time.yesterday": {
+                    "kind": "time_scope",
+                    "expression": "yesterday",
+                }
+            },
+        ),
+    )
+
+    assert overlay.to_prompt_payload()["resolved_question_inputs"] == [
+        {
+            "kind": "literal_text",
+            "source_text": "ABC Mall",
+            "occurrence": 1,
+            "resolved_input_ref": "cr_input_1",
+            "resolved_value_text": "yesterday",
+            "value_meaning_hint": "time scope",
+            "role": "time_value",
         }
     ]
 
@@ -1067,8 +1178,7 @@ def test_parser_accepts_contextual_frame_when_preserve_terms_are_kept():
                 source_id="prior_question_1",
                 kind="prior_user_question",
                 text=(
-                    "How much total monetary value of completed sale rows for "
-                    "Alice?"
+                    "How much total monetary value of completed sale rows for Alice?"
                 ),
                 meaning_anchors=(
                     _anchor(

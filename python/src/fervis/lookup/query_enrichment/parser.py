@@ -152,7 +152,7 @@ def _entity_target_catalog_search_terms(
         known.id
         for fact in request.requested_facts
         for known in fact.known_inputs
-        if known.kind.value == "named_reference_text"
+        if known.is_reference_value
     }
     endpoint_names = set(query_enrichment_endpoint_names(request))
     resource_names = set(query_enrichment_resource_names(request))

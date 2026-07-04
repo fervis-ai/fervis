@@ -1,26 +1,32 @@
 id: answer_request_can_contain_input_span
 description: An answer output may mention an input span while the span is still modeled as a known input.
 migrates:
-  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_allows_answer_request_to_contain_input_span
+- api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_allows_answer_request_to_contain_input_span
 kind: algorithm
 algorithm: question_contract.parse
 input:
   question_context: How many in-person sales happened this month?
   answer_fact: count of in-person sales in the current month
   answer_outputs:
-    - description: number of in-person sales this month
+  - description: number of in-person sales this month
   question_inputs:
-    - input_ref: period
-      source: question_context
-      kind: time_text
-      reference_text: this month
-      inventory_check: {why_this_is_an_input: this month is a time scope}
-  used_input_refs: [period]
+  - input_ref: period
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: this month is a time scope
+    source_text: this month
+    resolved_value_text: this month
+    role: time_value
+  used_input_refs:
+  - period
 expect:
   result_contains:
     requested_facts:
-      - answer_outputs:
-          - description: number of in-person sales this month
-        known_inputs:
-          - kind: time_text
-            text: this month
+    - answer_outputs:
+      - description: number of in-person sales this month
+      known_inputs:
+      - kind: literal_text
+        text: this month
+        resolved_value_text: this month
+        role: time_value

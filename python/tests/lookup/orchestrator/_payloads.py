@@ -731,27 +731,18 @@ def _question_contract_id_map(contract: QuestionContract) -> _QuestionContractId
         for output_index, output in enumerate(fact.answer_outputs, start=1):
             answer_output_ids[(fact.id, output.id)] = f"answer_{output_index}"
         counters = {
-            "named_reference_text": 0,
-            "time_text": 0,
-            "number_text": 0,
-            "explicit_numeric_limit_text": 0,
-        }
-        labels = {
-            "named_reference_text": "entity",
-            "time_text": "time",
-            "number_text": "number",
-            "explicit_numeric_limit_text": "limit",
+            "entity": 0,
+            "time": 0,
+            "limit": 0,
         }
         for known in fact.known_inputs:
             if known.id in known_input_ids:
                 continue
-            kind = known.kind.value
-            if kind not in counters:
+            label = _known_input_label(known)
+            if not label:
                 continue
-            counters[kind] += 1
-            known_input_ids[known.id] = (
-                f"{canonical_fact_id}_{labels[kind]}_{counters[kind]}"
-            )
+            counters[label] += 1
+            known_input_ids[known.id] = f"{canonical_fact_id}_{label}_{counters[label]}"
     return _QuestionContractIdMap(
         requested_fact_ids=requested_fact_ids,
         answer_output_ids=answer_output_ids,
@@ -955,23 +946,37 @@ def _known_input_payload(
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "input_ref": input_ref,
-        "source": "question_context",
+        "source": known.source.value,
         "kind": known.kind.value,
-        "reference_text": known.text,
         "inventory_check": {
             "why_this_is_an_input": f"{known.text} is a declared question input"
         },
     }
-    if known.kind.value == "named_reference_text":
-        payload["target_meaning"] = known.description or known.text
-        payload["lookup_text"] = known.lookup_text
-    if known.kind.value in {"number_text", "explicit_numeric_limit_text"}:
-        payload["numeric_value"] = known.numeric_value
-    if known.kind.value == "explicit_numeric_limit_text":
-        payload["value_source_text"] = known.value_source_text
-    if known.kind.value == "time_text" and known.satisfies_requirement_id:
+    if known.kind == KnownInputKind.ROW_SET_REFERENCE:
+        payload["reference_text"] = known.text
+        payload["occurrence"] = known.occurrence
+        payload["resolved_input_ref"] = known.resolved_input_ref
+        return payload
+    payload["source_text"] = known.text
+    payload["role"] = known.role.value if known.role else ""
+    payload["resolved_value_text"] = known.resolved_value_text
+    if known.field_label_text:
+        payload["field_label_text"] = known.field_label_text
+    if known.value_meaning_hint:
+        payload["value_meaning_hint"] = known.value_meaning_hint
+    if known.satisfies_requirement_id:
         payload["satisfies_requirement_id"] = known.satisfies_requirement_id
     return payload
+
+
+def _known_input_label(known: RequestedFactKnownInput) -> str:
+    if known.is_reference_value:
+        return "entity"
+    if known.is_time_value:
+        return "time"
+    if known.is_result_limit:
+        return "limit"
+    return ""
 
 
 def _question_contract_response(
@@ -1077,13 +1082,15 @@ def _question_input_ref_for_response_item(
     provided = str(item.get("input_ref") or "").strip()
     if provided:
         return provided
-    resolved_kind = str(item.get("kind") or "named_reference_text")
+    resolved_kind = str(item.get("kind") or "literal_text")
+    resolved_role = str(item.get("role") or "reference_value")
     resolved_label = {
-        "named_reference_text": "entity",
-            "time_text": "time",
-        "number_text": "number",
-        "explicit_numeric_limit_text": "limit",
-    }.get(resolved_kind, "input")
+        "reference_value": "entity",
+        "time_value": "time",
+        "result_limit": "limit",
+    }.get(resolved_role, "input")
+    if resolved_kind == "row_set_reference":
+        resolved_label = "row_set"
     counters[resolved_label] = counters.get(resolved_label, 0) + 1
     index = counters[resolved_label]
     return f"fact_1_{resolved_label}_{index}"
@@ -1093,25 +1100,32 @@ def _question_input_from_response_item(
     item: dict[str, Any],
     input_ref: str,
 ) -> dict[str, Any]:
-    kind = str(item.get("kind") or "named_reference_text")
-    reference_text = str(item.get("reference_text") or "")
+    kind = str(item.get("kind") or "literal_text")
+    source_text = str(item.get("source_text") or item.get("reference_text") or "")
     output: dict[str, Any] = {
         "input_ref": input_ref,
         "kind": kind,
         "source": "question_context",
-        "reference_text": reference_text,
         "inventory_check": {
-            "why_this_is_an_input": f"{reference_text} is a declared question input"
+            "why_this_is_an_input": f"{source_text} is a declared question input"
         },
     }
-    if kind == "named_reference_text":
-        output["target_meaning"] = str(item.get("target_meaning") or reference_text)
-        output["lookup_text"] = str(item.get("lookup_text") or reference_text)
-    if kind in {"number_text", "explicit_numeric_limit_text"}:
-        output["numeric_value"] = item["numeric_value"]
-    if kind == "explicit_numeric_limit_text":
-        output["value_source_text"] = str(item["value_source_text"])
-    if kind == "time_text" and item.get("satisfies_requirement_id"):
+    if kind == "row_set_reference":
+        output["reference_text"] = source_text
+        output["occurrence"] = int(item.get("occurrence") or 1)
+        output["resolved_input_ref"] = str(item["resolved_input_ref"])
+        return output
+    output["source_text"] = source_text
+    role = str(item.get("role") or "reference_value")
+    output["role"] = role
+    output["resolved_value_text"] = str(
+        item.get("resolved_value_text") or item.get("value_text") or source_text
+    )
+    if item.get("field_label_text"):
+        output["field_label_text"] = str(item["field_label_text"])
+    if item.get("value_meaning_hint"):
+        output["value_meaning_hint"] = str(item["value_meaning_hint"])
+    if item.get("satisfies_requirement_id"):
         output["satisfies_requirement_id"] = str(item["satisfies_requirement_id"])
     return output
 

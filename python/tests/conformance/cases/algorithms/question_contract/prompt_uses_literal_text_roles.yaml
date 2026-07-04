@@ -5,22 +5,15 @@ algorithm: question_contract.prompt
 input:
   current_question: How much did staff_id 51515151-0000-0000-0002-000000000001 make today?
   contains:
-    - kind=literal_text with role=reference_value
-    - kind=literal_text with role=time_value
-    - kind=literal_text with role=result_limit
-    - Use source=conversation_resolution only for a resolved_question_inputs item whose kind is literal_text or row_set_reference.
-  excludes:
-    - Use kind=named_reference_text
-    - Use kind=time_text
-    - Use kind=explicit_numeric_limit_text
+  - kind=literal_text with role=reference_value
+  - kind=literal_text with role=time_value
+  - kind=literal_text with role=result_limit
+  - Use source=conversation_resolution only for a resolved_question_inputs item whose kind is literal_text or row_set_reference.
 expect:
   result_contains:
     contains:
       kind=literal_text with role=reference_value: true
       kind=literal_text with role=time_value: true
       kind=literal_text with role=result_limit: true
-      Use source=conversation_resolution only for a resolved_question_inputs item whose kind is literal_text or row_set_reference.: true
-    excludes:
-      Use kind=named_reference_text: true
-      Use kind=time_text: true
-      Use kind=explicit_numeric_limit_text: true
+      ? Use source=conversation_resolution only for a resolved_question_inputs item whose kind is literal_text or row_set_reference.
+      : true
