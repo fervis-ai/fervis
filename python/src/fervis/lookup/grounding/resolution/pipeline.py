@@ -75,6 +75,7 @@ def ground_question_inputs(
     values = []
     uses = []
     issues = []
+    certifications = []
     resolver_row_sources = build_row_source_catalog(resolver_catalog)
 
     active_time_anchor_periods = _active_time_anchor_periods(
@@ -88,6 +89,7 @@ def ground_question_inputs(
     )
     values.extend(deterministic.values)
     issues.extend(deterministic.issues)
+    certifications.extend(deterministic.certifications)
     time_tasks = time_resolution_tasks(question_contract)
 
     reference_tasks = _reference_binding_tasks(
@@ -108,6 +110,7 @@ def ground_question_inputs(
         ),
     )
     values.extend(resolved_references.values)
+    certifications.extend(resolved_references.certifications)
     issues.extend(resolved_references.issues)
     turn: GroundingTurnResult | None = None
     compatibilities = []
@@ -136,6 +139,7 @@ def ground_question_inputs(
         values.extend(time_ledger.values)
         uses.extend(time_ledger.uses)
         issues.extend(time_ledger.issues)
+        certifications.extend(time_ledger.certifications)
         compatibilities.extend(turn.result.compatibilities)
     try:
         reference_ledger = _execute_reference_compatibilities(
@@ -155,12 +159,14 @@ def ground_question_inputs(
     values.extend(reference_ledger.values)
     uses.extend(reference_ledger.uses)
     issues.extend(reference_ledger.issues)
+    certifications.extend(reference_ledger.certifications)
 
     return GroundingOutput(
         ledger=CanonicalInputLedger(
             values=_dedupe_values(tuple(values)),
             uses=tuple(uses),
             issues=tuple(issues),
+            certifications=tuple(certifications),
         ),
         turn=turn,
     )

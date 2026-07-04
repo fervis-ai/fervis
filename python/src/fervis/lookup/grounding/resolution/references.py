@@ -29,6 +29,8 @@ from fervis.lookup.lineage.source_reads import (
 )
 from fervis.lookup.grounding.model import (
     CanonicalInputLedger,
+    GroundedValueCertification,
+    GroundedValueCertificationMethod,
     GroundedInputUse,
     GroundingCandidate,
     GroundingIssue,
@@ -65,6 +67,7 @@ _MISSING = object()
 @dataclass(frozen=True)
 class _ResolvedReferenceTasks:
     values: tuple[FactValue, ...] = ()
+    certifications: tuple[GroundedValueCertification, ...] = ()
     issues: tuple[GroundingIssue, ...] = ()
     model_tasks: tuple[KnownInputBindingTask, ...] = ()
 
@@ -74,6 +77,12 @@ class _ResolvedLookupRow:
     row: dict[str, Any]
     matched_field_ref: str = ""
     matched_field_path: str = ""
+
+
+@dataclass(frozen=True)
+class _MemoryIdentityCandidate:
+    option: InputBindingOption
+    identity: MemoryIdentityValue
 
 
 @dataclass(frozen=True)
@@ -196,6 +205,7 @@ def _reference_binding_options(
             for lookup_param, lookup_fields in _resolver_lookup_groups(
                 resolver_source,
                 return_field=return_field,
+                field_label_text=known.field_label_text,
             ):
                 route = InputBindingRoute(
                     known_input_id=known.id,
@@ -250,6 +260,7 @@ def _resolve_reference_tasks(
 ) -> _ResolvedReferenceTasks:
     values: list[FactValue] = []
     issues: list[GroundingIssue] = []
+    certifications: list[GroundedValueCertification] = []
     model_tasks: list[KnownInputBindingTask] = []
     for task in tasks:
         route_options = tuple(
@@ -261,9 +272,18 @@ def _resolve_reference_tasks(
             memory_identity_values=memory_identity_values,
         )
         if len(memory_candidates) == 1:
-            value = memory_candidates[0].resolved_value
+            memory_candidate = memory_candidates[0]
+            option = memory_candidate.option
+            value = option.resolved_value
             if value is not None:
                 values.append(value)
+                certification = _imported_prior_identity_certification(
+                    value=value,
+                    task=task,
+                    selected_identity=memory_candidate.identity,
+                )
+                if certification is not None:
+                    certifications.append(certification)
             continue
         if len(memory_candidates) > 1:
             issues.append(
@@ -274,7 +294,9 @@ def _resolve_reference_tasks(
                     message="memory contains multiple canonical identity matches",
                     known_input_text=task.lookup_text or task.known_input_text,
                     known_input_description=task.known_input_description,
-                    candidates=tuple(candidate.path for candidate in memory_candidates),
+                    candidates=tuple(
+                        candidate.option.path for candidate in memory_candidates
+                    ),
                     proof_refs=(f"known_input:{task.known_input_id}",),
                 )
             )
@@ -319,6 +341,7 @@ def _resolve_reference_tasks(
         )
     return _ResolvedReferenceTasks(
         values=tuple(values),
+        certifications=tuple(certifications),
         issues=tuple(issues),
         model_tasks=tuple(model_tasks),
     )
@@ -329,7 +352,7 @@ def _memory_identity_candidates(
     *,
     route_options: tuple[InputBindingOption, ...],
     memory_identity_values: tuple[MemoryIdentityValue, ...],
-) -> tuple[InputBindingOption, ...]:
+) -> tuple[_MemoryIdentityCandidate, ...]:
     lookup_text = task.lookup_text or task.known_input_text
     expected = _normalize_lookup_text(lookup_text)
     if not expected:
@@ -355,27 +378,67 @@ def _memory_identity_candidates(
             continue
         seen.add(key)
         output.append(
-            InputBindingOption(
-                id=f"bind_{_symbol(task.known_input_id)}_memory_{len(output) + 1}",
-                known_input_id=task.known_input_id,
-                path=(
-                    f"{identity.display_label} ({identity.identity_type} from memory)"
-                ),
-                resolved_value=FactValue.identity(
-                    id=_grounded_value_id(task.known_input_id),
-                    identity_type=identity.identity_type,
-                    identity_field=identity.identity_field,
-                    value=identity.value,
-                    display_value=identity.display_label or identity.lookup_text,
-                    proof_refs=(
-                        *identity.proof_refs,
-                        f"known_input:{task.known_input_id}",
+            _MemoryIdentityCandidate(
+                option=InputBindingOption(
+                    id=f"bind_{_symbol(task.known_input_id)}_memory_{len(output) + 1}",
+                    known_input_id=task.known_input_id,
+                    path=(
+                        f"{identity.display_label} "
+                        f"({identity.identity_type} from memory)"
                     ),
-                    applies_to_requested_fact_ids=_task_requested_fact_ids(task),
+                    resolved_value=FactValue.identity(
+                        id=_grounded_value_id(task.known_input_id),
+                        identity_type=identity.identity_type,
+                        identity_field=identity.identity_field,
+                        value=identity.value,
+                        display_value=identity.display_label or identity.lookup_text,
+                        proof_refs=(
+                            *identity.proof_refs,
+                            f"known_input:{task.known_input_id}",
+                        ),
+                        applies_to_requested_fact_ids=_task_requested_fact_ids(task),
+                    ),
                 ),
+                identity=identity,
             )
         )
     return tuple(output)
+
+
+def _imported_prior_identity_certification(
+    *,
+    value: FactValue,
+    task: KnownInputBindingTask,
+    selected_identity: MemoryIdentityValue,
+) -> GroundedValueCertification | None:
+    payload = value.payload
+    if not isinstance(payload, IdentityValuePayload):
+        return None
+    if (
+        selected_identity.identity_type != payload.identity_type
+        or selected_identity.identity_field != payload.identity_field
+        or selected_identity.value != str(payload.value)
+    ):
+        return None
+    return GroundedValueCertification(
+        value_id=value.id,
+        method=GroundedValueCertificationMethod.IMPORTED_PRIOR_IDENTITY,
+        authority_refs=_memory_identity_authority_refs(selected_identity),
+        lineage_refs=(
+            *selected_identity.proof_refs,
+            f"known_input:{task.known_input_id}",
+        ),
+    )
+
+
+def _memory_identity_authority_refs(
+    identity: MemoryIdentityValue,
+) -> tuple[str, ...]:
+    artifact_id = str(identity.source.get("artifact_id") or "").strip()
+    address = str(identity.source.get("address") or "").strip()
+    if artifact_id and address:
+        return (f"memory:{artifact_id}.{address}",)
+    return ()
 
 
 def _memory_identity_is_compatible(
@@ -419,9 +482,19 @@ def _resolver_lookup_groups(
     source: RowSource,
     *,
     return_field: RowSourceField,
+    field_label_text: str = "",
 ) -> tuple[tuple[RowSourceParam | None, tuple[RowSourceField, ...]], ...]:
     if any(param.required and param.default is None for param in source.params):
         return ()
+    if _field_label_matches_identity_field(field_label_text, return_field):
+        return (
+            *(
+                (param, (return_field,))
+                for param in _matching_text_params(source, field_label_text)
+            ),
+            (None, (return_field,)),
+        )
+    groups: list[tuple[RowSourceParam | None, tuple[RowSourceField, ...]]] = []
     text_params = tuple(
         param
         for param in source.params
@@ -433,14 +506,61 @@ def _resolver_lookup_groups(
     )
     text_fields = _identity_lookup_fields(source, return_field=return_field)
     if not text_fields:
-        return ()
-    groups: list[tuple[RowSourceParam | None, tuple[RowSourceField, ...]]] = [
+        return tuple(groups)
+    groups.extend(
         (param, fields)
         for param in text_params
         if (fields := _lookup_fields_for_param(param, fields=text_fields))
-    ]
+    )
     groups.append((None, text_fields))
     return tuple(groups)
+
+
+def _matching_text_params(
+    source: RowSource,
+    field_label_text: str,
+) -> tuple[RowSourceParam, ...]:
+    label = _normalize_field_label(field_label_text)
+    if not label:
+        return ()
+    return tuple(
+        param
+        for param in source.params
+        if (
+            not param.required
+            and param.type in {"string", "any"}
+            and param.semantics != RowSourceParamSemantics.RESPONSE_SHAPE
+            and label == _normalize_field_label(param.name)
+        )
+    )
+
+
+def _field_label_matches_identity_field(
+    field_label_text: str,
+    field: RowSourceField,
+) -> bool:
+    label = _normalize_field_label(field_label_text)
+    identity = field.identity
+    if not label or identity is None:
+        return False
+    if label in {"id", "identifier"}:
+        return True
+    candidates = (
+        identity.identity_field,
+        field.id,
+        field.label,
+        field.field_ref.rsplit(".", 1)[-1],
+        field.path.rsplit(".", 1)[-1],
+    )
+    return any(label == _normalize_field_label(candidate) for candidate in candidates)
+
+
+def _normalize_field_label(raw_value: object) -> str:
+    return "".join(
+        char.lower()
+        for char in str(raw_value or "").strip()
+        if char.isalnum()
+    )
 
 
 def _identity_lookup_fields(
@@ -582,6 +702,7 @@ def _execute_reference_compatibilities(
     values: list[FactValue] = []
     uses: list[GroundedInputUse] = []
     issues: list[GroundingIssue] = []
+    certifications: list[GroundedValueCertification] = []
     for task in tasks:
         compatibility = compatibilities_by_input.get(task.known_input_id)
         if compatibility is None:
@@ -609,10 +730,12 @@ def _execute_reference_compatibilities(
         values.extend(task_ledger.values)
         uses.extend(task_ledger.uses)
         issues.extend(task_ledger.issues)
+        certifications.extend(task_ledger.certifications)
     return CanonicalInputLedger(
         values=tuple(values),
         uses=tuple(uses),
         issues=tuple(issues),
+        certifications=tuple(certifications),
     )
 
 
@@ -640,6 +763,9 @@ def _execute_compatible_reference_options(
         )
     values_by_identity: dict[tuple[str, str, str], FactValue] = {}
     uses_by_identity: dict[tuple[str, str, str], GroundedInputUse] = {}
+    certifications_by_identity: dict[
+        tuple[str, str, str], GroundedValueCertification
+    ] = {}
     route_issues: list[GroundingIssue] = []
     for option_id in compatible_option_ids:
         option_task, option = options[option_id]
@@ -663,6 +789,10 @@ def _execute_compatible_reference_options(
             source_read_lineage=source_read_lineage,
         )
         uses_by_value_id = {use.value_id: use for use in ledger.uses}
+        certifications_by_value_id = {
+            certification.value_id: certification
+            for certification in ledger.certifications
+        }
         for value in ledger.values:
             key = _identity_value_key(value)
             if key is None:
@@ -671,6 +801,9 @@ def _execute_compatible_reference_options(
             use = uses_by_value_id.get(value.id)
             if use is not None:
                 uses_by_identity.setdefault(key, use)
+            certification = certifications_by_value_id.get(value.id)
+            if certification is not None:
+                certifications_by_identity.setdefault(key, certification)
         route_issues.extend(ledger.issues)
     ambiguous_route_issues = _dedupe_grounding_issues(
         issue
@@ -700,6 +833,7 @@ def _execute_compatible_reference_options(
     return CanonicalInputLedger(
         values=tuple(values_by_identity.values()),
         uses=tuple(uses_by_identity.values()),
+        certifications=tuple(certifications_by_identity.values()),
     )
 
 
@@ -968,8 +1102,12 @@ def _execute_reference_route(
         )
     values: list[FactValue] = []
     uses: list[GroundedInputUse] = []
+    certifications: list[GroundedValueCertification] = []
     values_by_identity: dict[tuple[str, str, str], FactValue] = {}
     uses_by_identity: dict[tuple[str, str, str], GroundedInputUse] = {}
+    certifications_by_identity: dict[
+        tuple[str, str, str], GroundedValueCertification
+    ] = {}
     for resolved in rows:
         fact_value = _fact_value_from_resolved_row(
             task=task,
@@ -982,10 +1120,16 @@ def _execute_reference_route(
         values.append(fact_value)
         use = _grounded_input_use(task=task, route=route, value=fact_value)
         uses.append(use)
+        certification = _resolver_source_read_certification(
+            value=fact_value,
+            route=route,
+        )
+        certifications.append(certification)
         key = _identity_value_key(fact_value)
         if key is not None:
             values_by_identity.setdefault(key, fact_value)
             uses_by_identity.setdefault(key, use)
+            certifications_by_identity.setdefault(key, certification)
     if not values:
         return CanonicalInputLedger(
             issues=(
@@ -1014,8 +1158,26 @@ def _execute_reference_route(
         return CanonicalInputLedger(
             values=tuple(values_by_identity.values()),
             uses=tuple(uses_by_identity.values()),
+            certifications=tuple(certifications_by_identity.values()),
         )
-    return CanonicalInputLedger(values=tuple(values), uses=tuple(uses))
+    return CanonicalInputLedger(
+        values=tuple(values),
+        uses=tuple(uses),
+        certifications=tuple(certifications),
+    )
+
+
+def _resolver_source_read_certification(
+    *,
+    value: FactValue,
+    route: InputBindingRoute,
+) -> GroundedValueCertification:
+    return GroundedValueCertification(
+        value_id=value.id,
+        method=GroundedValueCertificationMethod.RESOLVER_SOURCE_READ,
+        authority_refs=(route.resolver_read_id,),
+        lineage_refs=tuple(value.proof_refs),
+    )
 
 
 def _grounded_input_use(
