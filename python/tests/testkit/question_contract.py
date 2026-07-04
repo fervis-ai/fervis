@@ -5,11 +5,14 @@ from typing import Any
 from fervis.lookup.question_contract import (
     KnownInputKind,
     KnownInputSource,
+    LiteralInputRole,
     QuestionContract,
     RequestedFact,
     RequestedFactAnswerOutput,
     RequestedFactAnswerSubject,
     RequestedFactKnownInput,
+    RequestedFactLiteralInput,
+    RequestedFactRowSetReferenceInput,
 )
 
 
@@ -66,15 +69,22 @@ def answer_output_from_payload(payload: Any) -> RequestedFactAnswerOutput:
 
 
 def known_input_from_payload(payload: dict[str, Any]) -> RequestedFactKnownInput:
-    return RequestedFactKnownInput(
+    kind = KnownInputKind(str(payload["kind"]))
+    if kind == KnownInputKind.LITERAL:
+        return RequestedFactLiteralInput(
+            id=str(payload["id"]),
+            source=KnownInputSource(str(payload.get("source") or "question_context")),
+            text=str(payload.get("text") or ""),
+            resolved_input_ref=str(payload.get("resolved_input_ref") or ""),
+            resolved_value_text=str(payload.get("resolved_value_text") or ""),
+            field_label_text=str(payload.get("field_label_text") or ""),
+            value_meaning_hint=str(payload.get("value_meaning_hint") or ""),
+            role=LiteralInputRole(str(payload["role"])),
+            satisfies_requirement_id=str(payload.get("satisfies_requirement_id") or ""),
+        )
+    return RequestedFactRowSetReferenceInput(
         id=str(payload["id"]),
-        kind=KnownInputKind(str(payload["kind"])),
-        source=KnownInputSource(str(payload.get("source") or "question_context")),
         text=str(payload.get("text") or ""),
+        occurrence=int(payload.get("occurrence") or 1),
         resolved_input_ref=str(payload.get("resolved_input_ref") or ""),
-        resolved_value_text=str(payload.get("resolved_value_text") or ""),
-        field_label_text=str(payload.get("field_label_text") or ""),
-        value_meaning_hint=str(payload.get("value_meaning_hint") or ""),
-        role=payload.get("role"),
-        satisfies_requirement_id=str(payload.get("satisfies_requirement_id") or ""),
     )

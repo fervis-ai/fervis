@@ -13,6 +13,7 @@ from fervis.lookup.plan_execution.relations import (
     RelationRows,
     RelationSetKind,
 )
+from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 from fervis.memory.answer_outputs import (
     prior_answer_request_artifacts,
     PriorAnswerKnownInput,
@@ -1036,7 +1037,9 @@ def _answer_request_known_input_slot_kinds(
 def _prior_request_slot(known: PriorAnswerKnownInput) -> dict[str, str] | None:
     slot_id = known.id
     slot_kind = (
-        _literal_role_slot_kind(known.role) if known.kind == "literal_text" else ""
+        _literal_role_slot_kind(known.role)
+        if known.kind == KnownInputKind.LITERAL.value
+        else ""
     )
     if not slot_id or not slot_kind:
         return None
@@ -1055,9 +1058,9 @@ def _prior_request_slot(known: PriorAnswerKnownInput) -> dict[str, str] | None:
 
 def _literal_role_slot_kind(role: str) -> str:
     return {
-        "reference_value": "entity_identity",
-        "time_value": "time_scope",
-        "result_limit": "limit",
+        LiteralInputRole.REFERENCE_VALUE.value: "entity_identity",
+        LiteralInputRole.TIME_VALUE.value: "time_scope",
+        LiteralInputRole.RESULT_LIMIT.value: "limit",
     }.get(role, "")
 
 

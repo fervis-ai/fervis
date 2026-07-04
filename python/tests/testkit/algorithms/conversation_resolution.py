@@ -18,6 +18,7 @@ from fervis.lookup.conversation_resolution import (
 from fervis.lookup.conversation_resolution.schema import (
     build_conversation_resolution_tool_schemas,
 )
+from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 
 from tests.testkit.assertions import exact_mismatches, subset_mismatches
 
@@ -146,8 +147,8 @@ def run_conversation_resolution_overlay_case(payload: dict[str, Any]) -> list[st
 def _resolved_question_input_overlay(
     item: dict[str, Any],
 ) -> ResolvedQuestionInputOverlay:
-    kind = str(item["kind"])
-    if kind == "literal_text":
+    kind = KnownInputKind(str(item["kind"]))
+    if kind == KnownInputKind.LITERAL:
         return LiteralQuestionInputOverlay(
             source_text=str(item["source_text"]),
             occurrence=int(item.get("occurrence") or 1),
@@ -155,13 +156,13 @@ def _resolved_question_input_overlay(
             resolved_value_text=str(item["resolved_value_text"]),
             value_meaning_hint=str(item.get("value_meaning_hint") or ""),
             field_label_text=str(item.get("field_label_text") or ""),
-            role=str(item["role"]),
+            role=LiteralInputRole(str(item["role"])),
             evidence_refs=tuple(str(ref) for ref in item.get("evidence_refs") or ()),
             resolved_canonical_value=_resolved_canonical_value_overlay(
                 item.get("resolved_canonical_value")
             ),
         )
-    if kind == "row_set_reference":
+    if kind == KnownInputKind.ROW_SET_REFERENCE:
         return RowSetQuestionInputOverlay(
             reference_text=str(item["reference_text"]),
             occurrence=int(item.get("occurrence") or 1),
@@ -174,7 +175,7 @@ def _resolved_question_input_overlay(
 def _resolved_canonical_value_overlay(
     raw: object,
 ) -> ResolvedCanonicalValueOverlay | None:
-    if not isinstance(raw, dict):
+    if raw is None:
         return None
     return ResolvedCanonicalValueOverlay(
         kind=str(raw["kind"]),

@@ -16,6 +16,7 @@ from fervis.lookup.relation_catalog import (
 from fervis.lookup.conversation_resolution.overlay import (
     ConversationResolutionOverlay,
     LiteralQuestionInputOverlay,
+    ResolvedCanonicalValueOverlay,
 )
 from fervis.memory.addresses import FactAddress
 from fervis.memory.artifacts import (
@@ -54,6 +55,7 @@ from fervis.lookup.question_contract import (
     RequestedFactAnswerPopulationMembershipTest,
     RequestedFactAnswerOutput,
     RequestedFactKnownInput,
+    RequestedFactLiteralInput,
 )
 
 
@@ -98,9 +100,8 @@ def _reference_input(
     resolved_value_text: str | None = None,
     field_label_text: str = "",
 ) -> RequestedFactKnownInput:
-    return RequestedFactKnownInput(
+    return RequestedFactLiteralInput(
         id=input_id,
-        kind=KnownInputKind.LITERAL,
         source=KnownInputSource.QUESTION_CONTEXT,
         text=text,
         resolved_value_text=resolved_value_text or text,
@@ -111,9 +112,8 @@ def _reference_input(
 
 
 def _time_input(input_id: str, text: str) -> RequestedFactKnownInput:
-    return RequestedFactKnownInput(
+    return RequestedFactLiteralInput(
         id=input_id,
-        kind=KnownInputKind.LITERAL,
         source=KnownInputSource.QUESTION_CONTEXT,
         text=text,
         resolved_value_text=text,
@@ -128,9 +128,8 @@ def _result_limit_input(
     *,
     resolved_value_text: str,
 ) -> RequestedFactKnownInput:
-    return RequestedFactKnownInput(
+    return RequestedFactLiteralInput(
         id=input_id,
-        kind=KnownInputKind.LITERAL,
         source=KnownInputSource.QUESTION_CONTEXT,
         text=text,
         resolved_value_text=resolved_value_text,
@@ -563,7 +562,7 @@ def test_grounding_time_schema_rejects_relative_word_as_yearless_point_date():
         validate(instance=payload, schema=schema)
 
 
-def test_grounding_task_payload_places_raw_question_and_cr_annotations_next_to_target_meaning():
+def test_grounding_task_payload_places_raw_question_and_cr_annotations_next_to_value_meaning_hint():
     request = GroundingRequest(
         question="How many stores are in London?",
         conversation_resolution_overlay=ConversationResolutionOverlay(
@@ -579,7 +578,7 @@ def test_grounding_task_payload_places_raw_question_and_cr_annotations_next_to_t
                     occurrence=1,
                     resolved_value_text="London",
                     value_meaning_hint="city",
-                    role="reference_value",
+                    role=LiteralInputRole.REFERENCE_VALUE,
                     resolved_input_ref="input_1",
                 ),
             ),
@@ -588,7 +587,7 @@ def test_grounding_task_payload_places_raw_question_and_cr_annotations_next_to_t
             KnownInputBindingTask(
                 known_input_id="input_1",
                 known_input_text="London",
-                known_input_kind="literal_text",
+                known_input_kind=KnownInputKind.LITERAL.value,
                 requested_fact_id="fact_1",
                 known_input_description="city/location",
                 lookup_text="London",
@@ -606,7 +605,7 @@ def test_grounding_task_payload_places_raw_question_and_cr_annotations_next_to_t
     known_inputs = GroundingTurnPrompt(request).known_inputs_payload()
 
     task = known_inputs["known_input_binding_tasks"][0]
-    assert task["target_meaning"] == "city/location"
+    assert task["value_meaning_hint"] == "city/location"
     assert task["question_context"] == {
         "raw_question": "How many stores are in London?",
         "conversation_resolution_annotations": {
@@ -629,6 +628,90 @@ def test_grounding_task_payload_places_raw_question_and_cr_annotations_next_to_t
             ],
         },
     }
+
+
+def test_grounding_imports_overlay_canonical_identity_without_resolver():
+    known = RequestedFactLiteralInput(
+        id="input_staff",
+        source=KnownInputSource.CONVERSATION_RESOLUTION,
+        text="her",
+        resolved_value_text="Alice Smith",
+        value_meaning_hint="staff member",
+        role=LiteralInputRole.REFERENCE_VALUE,
+        resolved_input_ref="cr_input_1",
+    )
+    output = ground_question_inputs(
+        question="What were her sales?",
+        question_contract=QuestionContract(
+            requested_facts=(
+                RequestedFact(
+                    id="fact_1",
+                    description="sales for Alice Smith",
+                    answer_outputs=(RequestedFactAnswerOutput(id="sales_total"),),
+                    known_inputs=(known,),
+                ),
+            )
+        ),
+        full_catalog=RelationCatalog(),
+        resolver_catalog=RelationCatalog(),
+        data_access_port=_DataAccess({}),
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-05-09",
+            timezone="Africa/London",
+        ),
+        model_port=_NoGroundingModel(),
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+        conversation_resolution_overlay=ConversationResolutionOverlay(
+            current_question="What were her sales?",
+            value_frames=(),
+            references=(),
+            scopes=(),
+            activated_memory_ids=("turn_1.entity.staff.alice",),
+            used_source_card_ids=("card_staff_alice",),
+            resolved_question_inputs=(
+                LiteralQuestionInputOverlay(
+                    source_text="her",
+                    occurrence=1,
+                    resolved_input_ref="cr_input_1",
+                    resolved_value_text="Alice Smith",
+                    value_meaning_hint="staff member",
+                    role=LiteralInputRole.REFERENCE_VALUE,
+                    evidence_refs=("turn_1.entity.staff.alice",),
+                    resolved_canonical_value=ResolvedCanonicalValueOverlay(
+                        kind="identity",
+                        identity_type="staff",
+                        identity_field="staff_id",
+                        value="51515151-0000-0000-0002-000000000001",
+                        proof_refs=("prior_source_read:staff:list:row_1",),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    assert not output.ledger.issues
+    value = output.ledger.values[0]
+    assert value.payload.identity_type == "staff"
+    assert value.payload.identity_field == "staff_id"
+    assert value.payload.value == "51515151-0000-0000-0002-000000000001"
+    assert value.proof_refs == (
+        "known_input:input_staff",
+        "resolved_question_input:cr_input_1",
+        "prior_source_read:staff:list:row_1",
+    )
+    assert output.ledger.certifications[0].method == (
+        GroundedValueCertificationMethod.IMPORTED_PRIOR_IDENTITY
+    )
+    assert output.ledger.certifications[0].authority_refs == (
+        "prior_source_read:staff:list:row_1",
+    )
+    assert output.ledger.certifications[0].lineage_refs == (
+        "known_input:input_staff",
+        "resolved_question_input:cr_input_1",
+        "conversation_resolution_evidence:turn_1.entity.staff.alice",
+    )
 
 
 def test_grounding_parser_accepts_memory_identity_resolver_review():
@@ -682,45 +765,6 @@ def test_grounding_parser_accepts_memory_identity_resolver_review():
     )
 
     assert result.compatibilities[0].binding_option_ids == ("bind_input_1_memory_1",)
-
-
-def test_result_limit_with_non_integer_value_fails_closed():
-    question_contract = QuestionContract(
-        requested_facts=(
-            RequestedFact(
-                id="fact_1",
-                description="top sales",
-                answer_outputs=(RequestedFactAnswerOutput(id="answer_1"),),
-                known_inputs=(
-                    _result_limit_input(
-                        "input_limit",
-                        "top banana",
-                        resolved_value_text="banana",
-                    ),
-                ),
-            ),
-        )
-    )
-
-    with pytest.raises(ValueError, match="result limit"):
-        ground_question_inputs(
-            question="Show top banana sales.",
-            question_contract=question_contract,
-            full_catalog=RelationCatalog(),
-            resolver_catalog=RelationCatalog(),
-            data_access_port=_DataAccess({}),
-            runtime_values=RuntimeValueContext(
-                runtime_date="2026-05-09",
-                timezone="Africa/London",
-            ),
-            model_port=_GroundingModel(
-                known_input_id="unused",
-                binding_option_id="unused",
-            ),
-            provider="test",
-            model_key="test",
-            max_thinking_tokens=0,
-        )
 
 
 def test_reference_grounding_executes_compatible_routes_and_dedupes_identity():

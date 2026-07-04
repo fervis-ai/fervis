@@ -11,8 +11,11 @@ from fervis.lookup.relation_catalog.selection import (
 from fervis.lookup.conversation_resolution.overlay import (
     ConversationResolutionOverlay,
 )
+from fervis.lookup.fact_plan.values import FactValue
 from fervis.lookup.grounding.model import (
     CanonicalInputLedger,
+    GroundedValueCertification,
+    GroundedValueCertificationMethod,
     GroundingRequest,
 )
 from fervis.lookup.turn_prompts.context import HostPromptContext
@@ -21,7 +24,12 @@ from fervis.lookup.lineage.source_reads import SourceReadLineageScope
 from fervis.lookup.source_reads.response import SourceReadFailedError
 from fervis.lookup.fact_planning.request import RuntimeValueContext
 from fervis.lookup.fact_plan.row_sources import build_row_source_catalog
-from fervis.lookup.question_contract import QuestionContract
+from fervis.lookup.question_contract import (
+    KnownInputSource,
+    QuestionContract,
+    RequestedFactKnownInput,
+)
+from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 from fervis.memory.identities import project_memory_identity_values
 from fervis.memory.projection import fact_artifacts_from_context
 
@@ -35,9 +43,10 @@ from .model import GroundingOutput
 from .references import (
     _execute_reference_compatibilities,
     _reference_binding_tasks,
+    _reference_known_input_bindings,
     _resolve_reference_tasks,
 )
-from .values import _dedupe_values
+from .values import _dedupe_values, _grounded_value_id
 
 
 class GroundingSourceReadError(RuntimeError):
@@ -96,6 +105,25 @@ def ground_question_inputs(
         question_contract,
         resolver_row_sources=resolver_row_sources,
     )
+    overlay_imports = _overlay_canonical_identity_imports(
+        question_contract=question_contract,
+        conversation_resolution_overlay=conversation_resolution_overlay,
+        active_memory_ids=active_memory_ids or frozenset(),
+    )
+    values.extend(overlay_imports.values)
+    certifications.extend(overlay_imports.certifications)
+    imported_known_input_ids = frozenset(
+        _known_input_id_from_proof_ref(proof_ref)
+        for value in overlay_imports.values
+        for proof_ref in value.proof_refs
+        if proof_ref.startswith("known_input:")
+    )
+    if imported_known_input_ids:
+        reference_tasks = tuple(
+            task
+            for task in reference_tasks
+            if task.known_input_id not in imported_known_input_ids
+        )
     memory_identity_projection = project_memory_identity_values(
         fact_artifacts_from_context(dict(conversation_context or {}))
     )
@@ -193,6 +221,97 @@ def _memory_identity_id(identity: Any) -> str:
     if not artifact_id or not address:
         return ""
     return f"{artifact_id}.{address}"
+
+
+def _overlay_canonical_identity_imports(
+    *,
+    question_contract: QuestionContract,
+    conversation_resolution_overlay: ConversationResolutionOverlay | None,
+    active_memory_ids: frozenset[str],
+) -> CanonicalInputLedger:
+    if conversation_resolution_overlay is None:
+        return CanonicalInputLedger()
+    effective_active_memory_ids = active_memory_ids or frozenset(
+        conversation_resolution_overlay.activated_memory_ids
+    )
+    overlay_by_ref = {
+        item.resolved_input_ref: item
+        for item in conversation_resolution_overlay.resolved_question_inputs
+        if item.kind == KnownInputKind.LITERAL
+        and item.resolved_input_ref
+        and item.resolved_canonical_value is not None
+    }
+    if not overlay_by_ref:
+        return CanonicalInputLedger()
+    values: list[FactValue] = []
+    certifications: list[GroundedValueCertification] = []
+    for known, requested_fact_ids in _reference_known_input_bindings(question_contract):
+        if not _can_import_overlay_identity(known):
+            continue
+        overlay = overlay_by_ref.get(known.resolved_input_ref)
+        if overlay is None:
+            continue
+        if (
+            known.text != overlay.source_text
+            or known.resolved_value_text != overlay.resolved_value_text
+            or known.role != overlay.role
+        ):
+            continue
+        canonical = overlay.resolved_canonical_value
+        if canonical is None or canonical.kind != "identity":
+            continue
+        evidence_refs = tuple(
+            ref for ref in overlay.evidence_refs if ref in effective_active_memory_ids
+        )
+        if not evidence_refs:
+            continue
+        proof_refs = (
+            f"known_input:{known.id}",
+            f"resolved_question_input:{overlay.resolved_input_ref}",
+            *canonical.proof_refs,
+        )
+        value = FactValue.identity(
+            id=_grounded_value_id(known.id),
+            identity_type=canonical.identity_type,
+            identity_field=canonical.identity_field,
+            value=canonical.value,
+            display_value=known.resolved_value_text,
+            proof_refs=proof_refs,
+            applies_to_requested_fact_ids=requested_fact_ids,
+        )
+        values.append(value)
+        certifications.append(
+            GroundedValueCertification(
+                value_id=value.id,
+                method=GroundedValueCertificationMethod.IMPORTED_PRIOR_IDENTITY,
+                authority_refs=canonical.proof_refs,
+                lineage_refs=(
+                    f"known_input:{known.id}",
+                    f"resolved_question_input:{overlay.resolved_input_ref}",
+                    *(
+                        f"conversation_resolution_evidence:{ref}"
+                        for ref in evidence_refs
+                    ),
+                ),
+            )
+        )
+    return CanonicalInputLedger(
+        values=tuple(values),
+        certifications=tuple(certifications),
+    )
+
+
+def _can_import_overlay_identity(known: RequestedFactKnownInput) -> bool:
+    return (
+        known.kind == KnownInputKind.LITERAL
+        and known.source == KnownInputSource.CONVERSATION_RESOLUTION
+        and known.role == LiteralInputRole.REFERENCE_VALUE
+        and bool(known.resolved_input_ref)
+    )
+
+
+def _known_input_id_from_proof_ref(proof_ref: str) -> str:
+    return proof_ref.removeprefix("known_input:")
 
 
 def _active_time_anchor_periods(

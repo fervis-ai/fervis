@@ -99,7 +99,6 @@ from fervis.lookup.source_binding import (
 from fervis.lookup.memory.available_values import (
     active_memory_operation_values,
     active_memory_reference_values,
-    active_memory_source_binding_values,
 )
 from fervis.lookup.memory.projection import (
     ConversationMemoryProjectionOverflow,
@@ -1445,15 +1444,7 @@ def _source_binding_available_values_for_state(
     grounded_values = (
         tuple(state.grounding.ledger.values) if state.grounding is not None else ()
     )
-    return _dedupe_fact_values(
-        (
-            *grounded_values,
-            *active_memory_source_binding_values(
-                memory=state.memory,
-                active_memory_ids=_active_memory_ids(state),
-            ),
-        )
-    )
+    return _dedupe_fact_values(grounded_values)
 
 
 def _catalog_available_values_for_state(

@@ -7,13 +7,12 @@ import re
 from typing import Any
 
 from fervis.lookup.conversation_resolution import ConversationResolutionOverlay
+from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 from fervis.lookup.question_contract.model import (
     AnswerPopulationMembershipTestKind,
     AnswerPopulationMembershipTestPolarity,
     AnswerSubjectInstanceInterpretationKind,
-    KnownInputKind,
     KnownInputSource,
-    LiteralInputRole,
     MissingQuestionInput,
     MissingQuestionInputType,
     QuestionContract,
@@ -30,6 +29,8 @@ from fervis.lookup.question_contract.model import (
     RequestedFactTimeRequirement,
     RequestedFactInputRequirements,
     RequestedFactKnownInput,
+    RequestedFactLiteralInput,
+    RequestedFactRowSetReferenceInput,
 )
 from fervis.lookup.question_contract.tools import (
     ANSWER_REQUEST_CONTRACT_TOOL_NAME,
@@ -444,20 +445,24 @@ def _conversation_resolution_input_matches(
     known: RequestedFactKnownInput,
     resolved: Any,
 ) -> bool:
-    resolved_text = resolved.source_text or resolved.reference_text
+    resolved_text = (
+        resolved.source_text
+        if resolved.kind == KnownInputKind.LITERAL
+        else resolved.reference_text
+    )
     if known.text != resolved_text:
         return False
     if known.kind == KnownInputKind.ROW_SET_REFERENCE:
         return (
-            resolved.kind == KnownInputKind.ROW_SET_REFERENCE.value
+            resolved.kind == KnownInputKind.ROW_SET_REFERENCE
             and known.occurrence == resolved.occurrence
         )
     if known.kind == KnownInputKind.LITERAL:
         return (
-            resolved.kind == KnownInputKind.LITERAL.value
+            resolved.kind == KnownInputKind.LITERAL
             and known.resolved_value_text == resolved.resolved_value_text
             and known.role is not None
-            and known.role.value == resolved.role
+            and known.role == resolved.role
         )
     return False
 
@@ -650,15 +655,20 @@ def _question_input(
         ):
             raise ValueError("field label text must come from question context")
         resolved_input_ref = _text(item.take("resolved_input_ref"))
-        return RequestedFactKnownInput(
+        resolved_value_text = _required_text(
+            item.take("resolved_value_text"),
+            path=f"{path}.resolved_value_text",
+        )
+        if role == LiteralInputRole.RESULT_LIMIT:
+            resolved_value_text = _result_limit_value_text(
+                resolved_value_text,
+                path=f"{path}.resolved_value_text",
+            )
+        return RequestedFactLiteralInput(
             id=input_ref,
-            kind=KnownInputKind.LITERAL,
             source=source,
             text=reference_text,
-            resolved_value_text=_required_text(
-                item.take("resolved_value_text"),
-                path=f"{path}.resolved_value_text",
-            ),
+            resolved_value_text=resolved_value_text,
             field_label_text=field_label_text,
             value_meaning_hint=_text(item.take("value_meaning_hint")),
             role=role,
@@ -666,10 +676,8 @@ def _question_input(
             resolved_input_ref=resolved_input_ref,
         )
     if kind == KnownInputKind.ROW_SET_REFERENCE:
-        return RequestedFactKnownInput(
+        return RequestedFactRowSetReferenceInput(
             id=input_ref,
-            kind=KnownInputKind.ROW_SET_REFERENCE,
-            source=source,
             text=reference_text,
             occurrence=_positive_int(
                 item.take("occurrence"),
@@ -779,6 +787,13 @@ def _positive_int(value: Any, *, path: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise ValueError(f"{path} must be a positive integer")
     return value
+
+
+def _result_limit_value_text(value: str, *, path: str) -> str:
+    text = value.strip()
+    if not text.isdigit() or int(text) < 1:
+        raise ValueError(f"{path} must be canonical positive integer digits")
+    return str(int(text))
 
 
 def _copied_text(

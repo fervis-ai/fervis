@@ -16,6 +16,7 @@ from fervis.lookup.question_contract.tools import (
     ANSWER_REQUEST_CONTRACT_TOOL_NAME,
 )
 from fervis.lookup.question_contract.turn import generate_question_contract
+from fervis.lookup.question_inputs import LiteralInputRole
 from fervis.memory.addresses import FactAddress
 from fervis.memory.artifacts import (
     build_fact_artifact,
@@ -57,7 +58,7 @@ def test_question_contract_prompt_uses_raw_question_with_conversation_overlay():
                 resolved_input_ref="cr_input_1",
                 resolved_value_text="Alice Smith",
                 value_meaning_hint="staff identity",
-                role="reference_value",
+                role=LiteralInputRole.REFERENCE_VALUE,
             ),
         ),
     )

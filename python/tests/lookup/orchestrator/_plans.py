@@ -125,9 +125,8 @@ def _known_reference_input(
     value_meaning_hint: str = "",
     resolved_value_text: str | None = None,
 ) -> RequestedFactKnownInput:
-    return RequestedFactKnownInput(
+    return RequestedFactLiteralInput(
         id=input_id,
-        kind=KnownInputKind.LITERAL,
         source=KnownInputSource.QUESTION_CONTEXT,
         text=text,
         role=LiteralInputRole.REFERENCE_VALUE,
@@ -142,9 +141,8 @@ def _known_time_input(
     *,
     requirement_id: str | None = None,
 ) -> RequestedFactKnownInput:
-    return RequestedFactKnownInput(
+    return RequestedFactLiteralInput(
         id=input_id,
-        kind=KnownInputKind.LITERAL,
         source=KnownInputSource.QUESTION_CONTEXT,
         text=text,
         role=LiteralInputRole.TIME_VALUE,
@@ -159,9 +157,8 @@ def _known_result_limit_input(
     *,
     value_text: str,
 ) -> RequestedFactKnownInput:
-    return RequestedFactKnownInput(
+    return RequestedFactLiteralInput(
         id=input_id,
-        kind=KnownInputKind.LITERAL,
         source=KnownInputSource.QUESTION_CONTEXT,
         text=text,
         role=LiteralInputRole.RESULT_LIMIT,

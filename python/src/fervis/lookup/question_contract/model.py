@@ -5,23 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 import re
-from typing import Any
+from typing import Any, TypeAlias
 
 from fervis.lookup.conversation_resolution.overlay import (
     ConversationResolutionOverlay,
 )
+from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 from fervis.lookup.turn_prompts.context import HostPromptContext
-
-
-class KnownInputKind(StrEnum):
-    LITERAL = "literal_text"
-    ROW_SET_REFERENCE = "row_set_reference"
-
-
-class LiteralInputRole(StrEnum):
-    REFERENCE_VALUE = "reference_value"
-    TIME_VALUE = "time_value"
-    RESULT_LIMIT = "result_limit"
 
 
 class KnownInputSource(StrEnum):
@@ -233,39 +223,22 @@ class RequestedFactAnswerExpression:
 
 
 @dataclass(frozen=True)
-class RequestedFactKnownInput:
+class RequestedFactLiteralInput:
     id: str
-    kind: KnownInputKind
     source: KnownInputSource
+    role: LiteralInputRole
     text: str = ""
-    satisfies_requirement_id: str = ""
-    occurrence: int = 1
-    resolved_input_ref: str = ""
     resolved_value_text: str = ""
     field_label_text: str = ""
     value_meaning_hint: str = ""
-    role: LiteralInputRole | None = None
+    satisfies_requirement_id: str = ""
+    resolved_input_ref: str = ""
 
     def __post_init__(self) -> None:
         if not self.id.strip():
             raise ValueError("known input requires id")
         if not self.text.strip():
             raise ValueError("known input requires text")
-        if self.role is not None and not isinstance(self.role, LiteralInputRole):
-            object.__setattr__(self, "role", LiteralInputRole(str(self.role)))
-        if self.occurrence < 1:
-            raise ValueError("known input occurrence must be positive")
-        if self.kind == KnownInputKind.LITERAL:
-            self._validate_literal_input()
-            return
-        if self.kind == KnownInputKind.ROW_SET_REFERENCE:
-            self._validate_row_set_reference_input()
-
-    def _validate_literal_input(self) -> None:
-        if self.occurrence != 1:
-            raise ValueError("literal known input must not include occurrence")
-        if self.role is None:
-            raise ValueError("literal known input requires role")
         if not self.resolved_value_text.strip():
             raise ValueError("literal known input requires resolved value text")
         if self.role == LiteralInputRole.TIME_VALUE:
@@ -285,65 +258,97 @@ class RequestedFactKnownInput:
                 "question-context literal must not include resolved input ref"
             )
 
-    def _validate_row_set_reference_input(self) -> None:
-        if self.source != KnownInputSource.CONVERSATION_RESOLUTION:
-            raise ValueError("row set reference must come from conversation resolution")
-        if not self.resolved_input_ref.strip():
-            raise ValueError("row set reference requires resolved input ref")
-        if self.satisfies_requirement_id:
-            raise ValueError("row set reference must not include requirement id")
-        if self.resolved_value_text.strip():
-            raise ValueError("row set reference must not include resolved value text")
-        if self.field_label_text.strip():
-            raise ValueError("row set reference must not include field label text")
-        if self.value_meaning_hint.strip():
-            raise ValueError("row set reference must not include value meaning hint")
-        if self.role is not None:
-            raise ValueError("row set reference must not include role")
+    @property
+    def kind(self) -> KnownInputKind:
+        return KnownInputKind.LITERAL
+
+    @property
+    def occurrence(self) -> int:
+        return 1
 
     @property
     def is_reference_value(self) -> bool:
-        return (
-            self.kind == KnownInputKind.LITERAL
-            and self.role == LiteralInputRole.REFERENCE_VALUE
-        )
+        return self.role == LiteralInputRole.REFERENCE_VALUE
 
     @property
     def is_time_value(self) -> bool:
-        return (
-            self.kind == KnownInputKind.LITERAL
-            and self.role == LiteralInputRole.TIME_VALUE
-        )
+        return self.role == LiteralInputRole.TIME_VALUE
 
     @property
     def is_result_limit(self) -> bool:
-        return (
-            self.kind == KnownInputKind.LITERAL
-            and self.role == LiteralInputRole.RESULT_LIMIT
-        )
+        return self.role == LiteralInputRole.RESULT_LIMIT
 
     def to_model_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
             "id": self.id,
-            "kind": self.kind.value,
+            "kind": KnownInputKind.LITERAL.value,
             "source": self.source.value,
             "text": self.text,
         }
         if self.satisfies_requirement_id:
             payload["satisfies_requirement_id"] = self.satisfies_requirement_id
-        if self.occurrence != 1 or self.kind == KnownInputKind.ROW_SET_REFERENCE:
-            payload["occurrence"] = self.occurrence
         if self.resolved_input_ref:
             payload["resolved_input_ref"] = self.resolved_input_ref
-        if self.resolved_value_text:
-            payload["resolved_value_text"] = self.resolved_value_text
+        payload["resolved_value_text"] = self.resolved_value_text
         if self.field_label_text:
             payload["field_label_text"] = self.field_label_text
         if self.value_meaning_hint:
             payload["value_meaning_hint"] = self.value_meaning_hint
-        if self.role is not None:
-            payload["role"] = self.role.value
+        payload["role"] = self.role.value
         return payload
+
+
+@dataclass(frozen=True)
+class RequestedFactRowSetReferenceInput:
+    id: str
+    text: str
+    resolved_input_ref: str
+    occurrence: int = 1
+
+    def __post_init__(self) -> None:
+        if not self.id.strip():
+            raise ValueError("known input requires id")
+        if not self.text.strip():
+            raise ValueError("known input requires text")
+        if self.occurrence < 1:
+            raise ValueError("known input occurrence must be positive")
+        if not self.resolved_input_ref.strip():
+            raise ValueError("row set reference requires resolved input ref")
+
+    @property
+    def kind(self) -> KnownInputKind:
+        return KnownInputKind.ROW_SET_REFERENCE
+
+    @property
+    def source(self) -> KnownInputSource:
+        return KnownInputSource.CONVERSATION_RESOLUTION
+
+    @property
+    def is_reference_value(self) -> bool:
+        return False
+
+    @property
+    def is_time_value(self) -> bool:
+        return False
+
+    @property
+    def is_result_limit(self) -> bool:
+        return False
+
+    def to_model_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "kind": KnownInputKind.ROW_SET_REFERENCE.value,
+            "source": KnownInputSource.CONVERSATION_RESOLUTION.value,
+            "text": self.text,
+            "occurrence": self.occurrence,
+            "resolved_input_ref": self.resolved_input_ref,
+        }
+
+
+RequestedFactKnownInput: TypeAlias = (
+    RequestedFactLiteralInput | RequestedFactRowSetReferenceInput
+)
 
 
 @dataclass(frozen=True)

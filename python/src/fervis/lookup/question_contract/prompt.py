@@ -189,7 +189,7 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                 "Literal Limits",
                 (
                     "Use kind=literal_text with role=result_limit only for explicit rank or row limits with a copied number expression, such as Top 5, top five, first 10, or bottom three.",
-                    "Set source_text to the verbatim copied limit phrase and resolved_value_text to the limit number text, such as 5, five, 10, or three.",
+                    "Set source_text to the verbatim copied limit phrase and resolved_value_text to canonical positive integer digits, such as 5, 10, or 3.",
                     "Do not use a question input for ranking words without an explicit number, such as most, highest, least, best, or top item.",
                 ),
             ),

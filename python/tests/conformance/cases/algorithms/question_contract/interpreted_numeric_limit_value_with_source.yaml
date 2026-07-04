@@ -1,5 +1,5 @@
 id: interpreted_numeric_limit_value_with_source
-description: Numeric limit values may be interpreted when the source text is present in the reference.
+description: Numeric limit values use copied source text plus canonical digit text.
 migrates:
 - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_accepts_model_interpreted_limit_value_with_source
 kind: algorithm
@@ -19,7 +19,7 @@ input:
     inventory_check:
       why_this_is_an_input: top five is a rank limit
     source_text: top five
-    resolved_value_text: five
+    resolved_value_text: '5'
     role: result_limit
   used_input_refs:
   - limit
@@ -32,7 +32,7 @@ expect:
       text: top five
       resolved_input_ref: ''
       satisfies_requirement_id: ''
-      resolved_value_text: five
+      resolved_value_text: '5'
       field_label_text: ''
       value_meaning_hint: ''
       role: result_limit
@@ -49,7 +49,7 @@ expect:
         text: top five
         resolved_input_ref: ''
         satisfies_requirement_id: ''
-        resolved_value_text: five
+        resolved_value_text: '5'
         field_label_text: ''
         value_meaning_hint: ''
         role: result_limit

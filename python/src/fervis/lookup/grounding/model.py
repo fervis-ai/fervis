@@ -47,12 +47,6 @@ class GroundedValueCertification:
     def __post_init__(self) -> None:
         if not self.value_id.strip():
             raise ValueError("grounded value certification requires value id")
-        if not isinstance(self.method, GroundedValueCertificationMethod):
-            object.__setattr__(
-                self,
-                "method",
-                GroundedValueCertificationMethod(str(self.method)),
-            )
 
     def to_payload(self) -> dict[str, object]:
         return {

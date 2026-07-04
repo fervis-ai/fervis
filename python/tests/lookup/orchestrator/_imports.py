@@ -93,6 +93,7 @@ from fervis.lookup.question_contract import (
     RequestedFactAnswerOutput,
     RequestedFactAnswerSubject,
     RequestedFactKnownInput,
+    RequestedFactLiteralInput,
     default_answer_population,
     requested_fact_evidence_ref,
 )

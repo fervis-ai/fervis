@@ -24,6 +24,7 @@ from fervis.lookup.question_contract import (
     RequestedFact,
     RequestedFactAnswerOutput,
     RequestedFactKnownInput,
+    RequestedFactLiteralInput,
 )
 from fervis.model_io.turns import ModelTurnPurpose
 from fervis.observability.event_contracts import EventPayloadKey
@@ -451,9 +452,8 @@ def test_grounding_summary_projects_time_interpretations_as_semantic_inputs() ->
                     description="sales at ABC Mall this month",
                     answer_outputs=(RequestedFactAnswerOutput("answer_1"),),
                     known_inputs=(
-                        RequestedFactKnownInput(
+                        RequestedFactLiteralInput(
                             id="fact_1_time_1",
-                            kind=KnownInputKind.LITERAL,
                             source=KnownInputSource.QUESTION_CONTEXT,
                             text="this month",
                             role=LiteralInputRole.TIME_VALUE,
@@ -504,9 +504,8 @@ def test_grounding_summary_projects_literal_interpretations_as_semantic_inputs()
                     description="top 10 salespeople this month",
                     answer_outputs=(RequestedFactAnswerOutput("answer_1"),),
                     known_inputs=(
-                        RequestedFactKnownInput(
+                        RequestedFactLiteralInput(
                             id="fact_1_limit_1",
-                            kind=KnownInputKind.LITERAL,
                             source=KnownInputSource.QUESTION_CONTEXT,
                             text="top 10",
                             role=LiteralInputRole.RESULT_LIMIT,

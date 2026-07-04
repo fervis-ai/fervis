@@ -25,7 +25,6 @@ from fervis.lookup.memory.projection import project_lookup_memory
 from fervis.lookup.memory.projection import project_conversation_memory_cards
 from fervis.lookup.memory.available_values import (
     active_memory_operation_values,
-    active_memory_source_binding_values,
 )
 from fervis.lookup.memory.projection import LookupMemory, MemoryValue
 from fervis.lookup.outcomes.clarifications import Clarification, ClarificationBasis
@@ -335,17 +334,12 @@ def run_memory_available_values_case(payload: dict[str, Any]) -> list[str]:
     active_memory_ids = frozenset(
         str(item) for item in payload["input"].get("active_memory_ids") or ()
     )
-    source_binding_values = active_memory_source_binding_values(
-        memory=memory,
-        active_memory_ids=active_memory_ids,
-    )
     operation_values = active_memory_operation_values(
         memory=memory,
         active_memory_ids=active_memory_ids,
     )
     return subset_mismatches(
         actual={
-            "source_binding_values": _fact_values(source_binding_values),
             "operation_values": _fact_values(operation_values),
         },
         expected_subset=payload["expect"]["result_contains"],

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, TypeAlias
 
 from fervis.memory.conversation_context import ConversationMemoryCardProjection
 from fervis.lookup.conversation_resolution.model import (
@@ -12,6 +12,7 @@ from fervis.lookup.conversation_resolution.model import (
     ContextFrameChoiceKind,
     DependencyKind,
 )
+from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 
 
 @dataclass(frozen=True)
@@ -42,45 +43,21 @@ class ResolvedCanonicalValueOverlay:
         }
 
 
-class ResolvedQuestionInputOverlay:
-    kind: str
-    occurrence: int
-    resolved_input_ref: str
-    memory_ids: tuple[str, ...]
-    source_text: str
-    reference_text: str
-    resolved_value_text: str
-    value_meaning_hint: str
-    field_label_text: str
-    role: str
-
-    def to_prompt_payload(self) -> dict[str, Any]:
-        raise NotImplementedError
-
-    def to_backend_payload(self) -> dict[str, Any]:
-        return self.to_prompt_payload()
-
-
 @dataclass(frozen=True)
-class LiteralQuestionInputOverlay(ResolvedQuestionInputOverlay):
+class LiteralQuestionInputOverlay:
     source_text: str
     resolved_input_ref: str
     resolved_value_text: str
-    role: str
+    role: LiteralInputRole
     occurrence: int = 1
     value_meaning_hint: str = ""
     field_label_text: str = ""
     evidence_refs: tuple[str, ...] = ()
     resolved_canonical_value: ResolvedCanonicalValueOverlay | None = None
-    kind: str = field(init=False, default="literal_text")
 
     @property
-    def reference_text(self) -> str:
-        return ""
-
-    @property
-    def memory_ids(self) -> tuple[str, ...]:
-        return ()
+    def kind(self) -> KnownInputKind:
+        return KnownInputKind.LITERAL
 
     def __post_init__(self) -> None:
         if self.occurrence < 1:
@@ -91,17 +68,15 @@ class LiteralQuestionInputOverlay(ResolvedQuestionInputOverlay):
             raise ValueError("literal resolved question input requires resolved ref")
         if not self.resolved_value_text.strip():
             raise ValueError("literal resolved question input requires resolved value")
-        if not self.role.strip():
-            raise ValueError("literal resolved question input requires role")
 
     def to_prompt_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
-            "kind": self.kind,
+            "kind": self.kind.value,
             "occurrence": self.occurrence,
             "source_text": self.source_text,
             "resolved_input_ref": self.resolved_input_ref,
             "resolved_value_text": self.resolved_value_text,
-            "role": self.role,
+            "role": self.role.value,
         }
         if self.value_meaning_hint:
             payload["value_meaning_hint"] = self.value_meaning_hint
@@ -121,32 +96,15 @@ class LiteralQuestionInputOverlay(ResolvedQuestionInputOverlay):
 
 
 @dataclass(frozen=True)
-class RowSetQuestionInputOverlay(ResolvedQuestionInputOverlay):
+class RowSetQuestionInputOverlay:
     reference_text: str
     resolved_input_ref: str
     occurrence: int = 1
     memory_ids: tuple[str, ...] = ()
-    kind: str = field(init=False, default="row_set_reference")
 
     @property
-    def source_text(self) -> str:
-        return ""
-
-    @property
-    def resolved_value_text(self) -> str:
-        return ""
-
-    @property
-    def value_meaning_hint(self) -> str:
-        return ""
-
-    @property
-    def field_label_text(self) -> str:
-        return ""
-
-    @property
-    def role(self) -> str:
-        return ""
+    def kind(self) -> KnownInputKind:
+        return KnownInputKind.ROW_SET_REFERENCE
 
     def __post_init__(self) -> None:
         if self.occurrence < 1:
@@ -158,11 +116,16 @@ class RowSetQuestionInputOverlay(ResolvedQuestionInputOverlay):
 
     def to_prompt_payload(self) -> dict[str, Any]:
         return {
-            "kind": self.kind,
+            "kind": self.kind.value,
             "reference_text": self.reference_text,
             "occurrence": self.occurrence,
             "resolved_input_ref": self.resolved_input_ref,
         }
+
+
+ResolvedQuestionInputOverlay: TypeAlias = (
+    LiteralQuestionInputOverlay | RowSetQuestionInputOverlay
+)
 
 
 @dataclass(frozen=True)
@@ -342,9 +305,8 @@ def conversation_resolution_question_contract_context_texts(
     for item in overlay.value_frames:
         output.extend(_value_frame_evidence_texts(item))
     for item in overlay.resolved_question_inputs:
-        _append_text(output, item.resolved_value_text)
-        _append_text(output, item.reference_text)
-        _append_text(output, item.source_text)
+        for text in _resolved_question_input_context_texts(item):
+            _append_text(output, text)
     return tuple(dict.fromkeys(output))
 
 
@@ -396,6 +358,14 @@ def _append_text(output: list[str], value: str) -> None:
     text = str(value or "").strip()
     if text:
         output.append(text)
+
+
+def _resolved_question_input_context_texts(
+    item: ResolvedQuestionInputOverlay,
+) -> tuple[str, ...]:
+    if item.kind == KnownInputKind.LITERAL:
+        return (item.resolved_value_text, item.source_text)
+    return (item.reference_text,)
 
 
 def _dependency_overlay(
@@ -479,7 +449,7 @@ def _resolved_question_inputs(
                     entity_memory_id,
                     memory_projection=memory_projection,
                 ),
-                role="reference_value",
+                role=LiteralInputRole.REFERENCE_VALUE,
                 evidence_refs=(entity_memory_id,),
             )
         )
@@ -508,7 +478,7 @@ def _resolved_question_inputs(
                     memory_projection=memory_projection,
                 ),
                 value_meaning_hint="time scope",
-                role="time_value",
+                role=LiteralInputRole.TIME_VALUE,
                 evidence_refs=(time_scope_memory_id,),
             )
         )

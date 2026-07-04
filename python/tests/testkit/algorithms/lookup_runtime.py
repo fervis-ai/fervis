@@ -36,7 +36,7 @@ from fervis.lookup.question_contract import (
     RequestedFact,
     RequestedFactAnswerSubject,
     RequestedFactAnswerOutput,
-    RequestedFactKnownInput,
+    RequestedFactLiteralInput,
     default_answer_population,
 )
 from fervis.memory.addresses import fact_address_from_payload
@@ -513,7 +513,8 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
             "why_required": f"{item['source_text']} constrains the requested fact",
         }
         for item in question_inputs
-        if item.get("role") == "time_value" and item.get("satisfies_requirement_id")
+        if item.get("role") == LiteralInputRole.TIME_VALUE.value
+        and item.get("satisfies_requirement_id")
     ]
     return {
         "kind": "question_contract",
@@ -553,30 +554,30 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
 
 
 def _scripted_question_input(*, index: int, payload: dict[str, Any]) -> dict[str, Any]:
-    kind = str(payload["kind"])
+    kind = KnownInputKind(str(payload["kind"]))
     text = str(payload["text"])
     output: dict[str, Any] = {
         "input_ref": str(payload.get("input_ref") or f"input_{index}"),
         "source": "question_context",
-        "kind": kind,
+        "kind": kind.value,
         "inventory_check": {
             "why_this_is_an_input": f"{text} is a declared question input",
         },
     }
-    if kind == "literal_text":
-        role = str(payload["role"])
+    if kind == KnownInputKind.LITERAL:
+        role = LiteralInputRole(str(payload["role"]))
         output["source_text"] = text
         output["resolved_value_text"] = str(payload.get("resolved_value_text") or text)
-        output["role"] = role
+        output["role"] = role.value
         if payload.get("value_meaning_hint"):
             output["value_meaning_hint"] = str(payload["value_meaning_hint"])
         if payload.get("field_label_text"):
             output["field_label_text"] = str(payload["field_label_text"])
-        if role == "time_value":
+        if role == LiteralInputRole.TIME_VALUE:
             output["satisfies_requirement_id"] = str(
                 payload.get("satisfies_requirement_id") or f"input_{index}_time_req"
             )
-    if kind == "row_set_reference":
+    if kind == KnownInputKind.ROW_SET_REFERENCE:
         output["reference_text"] = text
         output["source"] = "conversation_resolution"
         output["occurrence"] = int(payload.get("occurrence") or 1)
@@ -1245,18 +1246,16 @@ def _variant_grounding_question_contract() -> QuestionContract:
                     ),
                 ),
                 known_inputs=(
-                    RequestedFactKnownInput(
+                    RequestedFactLiteralInput(
                         id="fact_1_input_1",
-                        kind=KnownInputKind.LITERAL,
                         source=KnownInputSource.QUESTION_CONTEXT,
                         text="Alice",
                         resolved_value_text="Alice",
                         value_meaning_hint="staff member",
                         role=LiteralInputRole.REFERENCE_VALUE,
                     ),
-                    RequestedFactKnownInput(
+                    RequestedFactLiteralInput(
                         id="fact_1_input_2",
-                        kind=KnownInputKind.LITERAL,
                         source=KnownInputSource.QUESTION_CONTEXT,
                         text="today",
                         resolved_value_text="today",

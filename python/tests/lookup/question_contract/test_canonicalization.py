@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 from fervis.lookup.question_contract import (
-    KnownInputKind,
     KnownInputSource,
     LiteralInputRole,
     QuestionContract,
@@ -12,14 +11,14 @@ from fervis.lookup.question_contract import (
     RequestedFactAnswerExpressionFamily,
     RequestedFactAnswerOutput,
     RequestedFactKnownInput,
+    RequestedFactLiteralInput,
     parse_question_contract,
 )
 
 
 def _time_input(input_id: str, text: str) -> RequestedFactKnownInput:
-    return RequestedFactKnownInput(
+    return RequestedFactLiteralInput(
         id=input_id,
-        kind=KnownInputKind.LITERAL,
         source=KnownInputSource.QUESTION_CONTEXT,
         text=text,
         resolved_value_text=text,
@@ -50,10 +49,19 @@ def test_requested_fact_answer_output_serializes_description_only():
     ]
 
 
+def test_literal_input_requires_explicit_role():
+    with pytest.raises(TypeError):
+        RequestedFactLiteralInput(
+            id="store",
+            source=KnownInputSource.QUESTION_CONTEXT,
+            text="BBS Mall",
+            resolved_value_text="BBS Mall",
+        )
+
+
 def test_question_contract_model_materializes_input_refs_as_fact_known_inputs():
-    period = RequestedFactKnownInput(
+    period = RequestedFactLiteralInput(
         id="period",
-        kind=KnownInputKind.LITERAL,
         source=KnownInputSource.QUESTION_CONTEXT,
         text="yesterday",
         resolved_value_text="yesterday",
@@ -184,20 +192,6 @@ def test_question_contract_parser_fails_closed_on_unparsed_fields():
         )
 
 
-def test_row_set_reference_known_input_cannot_carry_literal_fields():
-    with pytest.raises(ValueError, match="row set reference"):
-        RequestedFactKnownInput(
-            id="prior_rows",
-            kind=KnownInputKind.ROW_SET_REFERENCE,
-            source=KnownInputSource.CONVERSATION_RESOLUTION,
-            text="those sales",
-            occurrence=1,
-            resolved_input_ref="cr_input_1",
-            role=LiteralInputRole.TIME_VALUE,
-            resolved_value_text="today",
-        )
-
-
 def test_conversation_resolution_resolved_text_requires_conversation_source():
     payload = {
         "kind": "question_contract",
@@ -258,4 +252,66 @@ def test_conversation_resolution_resolved_text_requires_conversation_source():
             payload=payload,
             question_context="What were her sales?",
             question_context_texts=("Alice Smith",),
+        )
+
+
+def test_result_limit_requires_canonical_digit_text_at_parse_boundary():
+    payload = {
+        "kind": "question_contract",
+        "answer_requests_count": 1,
+        "question_inputs": [
+            {
+                "input_ref": "input_limit",
+                "kind": "literal_text",
+                "source": "question_context",
+                "source_text": "top five",
+                "resolved_value_text": "five",
+                "role": "result_limit",
+                "inventory_check": {
+                    "why_this_is_an_input": "top five supplies the result limit"
+                },
+            }
+        ],
+        "question_input_inventory_check": {
+            "all_input_like_phrases_declared": True,
+        },
+        "answer_requests": [
+            {
+                "answer_fact": "top five sales",
+                "answer_expression": {"family": "ranked_list"},
+                "answer_subject": {
+                    "subject_text": "sales",
+                    "instance_interpretation": {
+                        "kind": "NORMAL_BUSINESS_INSTANCE",
+                    },
+                },
+                "input_requirements": {"time_requirements": []},
+                "answer_population": {
+                    "population_label": "sales",
+                    "counted_unit": "sale",
+                    "membership_tests": [
+                        {
+                            "test_id": "test_1",
+                            "kind": "SUBJECT_IDENTITY",
+                            "polarity": "MUST_PASS",
+                            "test_question": "Is this a sale?",
+                        }
+                    ],
+                },
+                "answer_outputs": [{"description": "top sales"}],
+                "input_decisions": [
+                    {
+                        "input_ref": "input_limit",
+                        "use_input": True,
+                    }
+                ],
+            }
+        ],
+    }
+
+    with pytest.raises(ValueError, match="canonical positive integer digits"):
+        parse_question_contract(
+            tool_name="submit_answer_request_contract",
+            payload=payload,
+            question_context="Show top five sales.",
         )

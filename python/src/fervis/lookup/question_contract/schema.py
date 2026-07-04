@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
+
 
 def _strict_object(
     properties: dict[str, object],
@@ -269,15 +271,15 @@ def _literal_text_input_schema() -> dict[str, object]:
             "value_meaning_hint": {"type": "string", "minLength": 1},
             "role": {
                 "enum": [
-                    "reference_value",
-                    "result_limit",
-                    "time_value",
+                    LiteralInputRole.REFERENCE_VALUE.value,
+                    LiteralInputRole.RESULT_LIMIT.value,
+                    LiteralInputRole.TIME_VALUE.value,
                 ]
             },
             "satisfies_requirement_id": {"type": "string", "minLength": 1},
             "resolved_input_ref": {"type": "string", "minLength": 1},
             "inventory_check": _question_input_inventory_check_schema(),
-            "kind": {"enum": ["literal_text"]},
+            "kind": {"enum": [KnownInputKind.LITERAL.value]},
         },
         required=(
             "input_ref",
@@ -309,7 +311,7 @@ def _row_set_reference_input_schema() -> dict[str, object]:
             "occurrence": {"type": "integer", "minimum": 1},
             "resolved_input_ref": {"type": "string", "minLength": 1},
             "inventory_check": _question_input_inventory_check_schema(),
-            "kind": {"enum": ["row_set_reference"]},
+            "kind": {"enum": [KnownInputKind.ROW_SET_REFERENCE.value]},
         },
         required=(
             "input_ref",

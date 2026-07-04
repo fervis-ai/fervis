@@ -9,6 +9,7 @@ from fervis.lookup.question_contract import (
     MISSING_INPUT_CLARIFICATION_TOOL_NAME,
     QuestionContractRequest,
     QuestionContractTurnPrompt,
+    RequestedFactKnownInput,
     build_question_contract_decisions_schema,
     parse_question_contract,
 )
@@ -21,6 +22,7 @@ from fervis.lookup.conversation_resolution import (
     RowSetQuestionInputOverlay,
     conversation_resolution_question_contract_prompt_payload,
 )
+from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 from fervis.lookup.turn_prompts import build_turn_prompt_context
 
 from tests.testkit.assertions import exact_mismatches, subset_mismatches
@@ -59,18 +61,7 @@ def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
         return [f"expected error containing {payload['expect']['error_contains']!r}"]
     actual = {
         "question_inputs": [
-            {
-                "id": item.id,
-                "kind": item.kind.value,
-                "source": item.source.value,
-                "text": item.text,
-                "resolved_input_ref": item.resolved_input_ref,
-                "satisfies_requirement_id": item.satisfies_requirement_id,
-                "resolved_value_text": item.resolved_value_text,
-                "field_label_text": item.field_label_text,
-                "value_meaning_hint": item.value_meaning_hint,
-                "role": item.role.value if item.role is not None else "",
-            }
+            _known_input_actual(item)
             for item in result.outcome.question_inputs
         ],
         "requested_facts": [
@@ -89,18 +80,7 @@ def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
                 ),
                 "input_refs": list(fact.input_refs),
                 "known_inputs": [
-                    {
-                        "id": item.id,
-                        "kind": item.kind.value,
-                        "source": item.source.value,
-                        "text": item.text,
-                        "resolved_input_ref": item.resolved_input_ref,
-                        "satisfies_requirement_id": item.satisfies_requirement_id,
-                        "resolved_value_text": item.resolved_value_text,
-                        "field_label_text": item.field_label_text,
-                        "value_meaning_hint": item.value_meaning_hint,
-                        "role": item.role.value if item.role is not None else "",
-                    }
+                    _known_input_actual(item)
                     for item in fact.known_inputs
                 ],
                 "answer_outputs": [
@@ -121,6 +101,25 @@ def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
         actual=actual,
         expected_subset=payload["expect"]["result_contains"],
     )
+
+
+def _known_input_actual(item: RequestedFactKnownInput) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "id": item.id,
+        "kind": item.kind.value,
+        "source": item.source.value,
+        "text": item.text,
+        "resolved_input_ref": item.resolved_input_ref,
+    }
+    if item.kind == KnownInputKind.ROW_SET_REFERENCE:
+        payload["occurrence"] = item.occurrence
+        return payload
+    payload["satisfies_requirement_id"] = item.satisfies_requirement_id
+    payload["resolved_value_text"] = item.resolved_value_text
+    payload["field_label_text"] = item.field_label_text
+    payload["value_meaning_hint"] = item.value_meaning_hint
+    payload["role"] = item.role.value
+    return payload
 
 
 def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
@@ -173,19 +172,19 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
         ),
         "question_input_kinds": sorted(variants),
         "literal_text_role_values": (
-            variants["literal_text"]["properties"]["role"]["enum"]
-            if "literal_text" in variants
+            variants[KnownInputKind.LITERAL.value]["properties"]["role"]["enum"]
+            if KnownInputKind.LITERAL.value in variants
             else []
         ),
         "literal_text_properties": (
-            sorted(variants["literal_text"]["properties"])
-            if "literal_text" in variants
+            sorted(variants[KnownInputKind.LITERAL.value]["properties"])
+            if KnownInputKind.LITERAL.value in variants
             else []
         ),
         "literal_text_property_membership": {
             name: (
-                "literal_text" in variants
-                and name in variants["literal_text"]["properties"]
+                KnownInputKind.LITERAL.value in variants
+                and name in variants[KnownInputKind.LITERAL.value]["properties"]
             )
             for name in (
                 "input_ref",
@@ -201,10 +200,10 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
             )
         },
         "row_set_reference_properties": sorted(
-            variants["row_set_reference"]["properties"]
+            variants[KnownInputKind.ROW_SET_REFERENCE.value]["properties"]
         ),
         "row_set_reference_property_membership": {
-            name: name in variants["row_set_reference"]["properties"]
+            name: name in variants[KnownInputKind.ROW_SET_REFERENCE.value]["properties"]
             for name in (
                 "input_ref",
                 "source",
@@ -215,7 +214,9 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
                 "kind",
             )
         },
-        "row_set_reference_required": variants["row_set_reference"]["required"],
+        "row_set_reference_required": variants[
+            KnownInputKind.ROW_SET_REFERENCE.value
+        ]["required"],
         "schema_text": repr(schema),
     }
     if payload.get("input", {}).get("projection") == "question_input_contract":
@@ -358,7 +359,7 @@ def _conversation_overlay(payload: dict[str, Any]) -> ConversationResolutionOver
 
 
 def _optional_conversation_overlay(raw: object) -> ConversationResolutionOverlay | None:
-    if not isinstance(raw, dict):
+    if raw is None:
         return None
     return _conversation_overlay(raw)
 
@@ -366,8 +367,8 @@ def _optional_conversation_overlay(raw: object) -> ConversationResolutionOverlay
 def _resolved_question_input_overlay(
     item: dict[str, Any],
 ) -> ResolvedQuestionInputOverlay:
-    kind = str(item["kind"])
-    if kind == "literal_text":
+    kind = KnownInputKind(str(item["kind"]))
+    if kind == KnownInputKind.LITERAL:
         return LiteralQuestionInputOverlay(
             source_text=str(item["source_text"]),
             occurrence=int(item.get("occurrence") or 1),
@@ -375,9 +376,9 @@ def _resolved_question_input_overlay(
             resolved_value_text=str(item["resolved_value_text"]),
             value_meaning_hint=str(item.get("value_meaning_hint") or ""),
             field_label_text=str(item.get("field_label_text") or ""),
-            role=str(item["role"]),
+            role=LiteralInputRole(str(item["role"])),
         )
-    if kind == "row_set_reference":
+    if kind == KnownInputKind.ROW_SET_REFERENCE:
         return RowSetQuestionInputOverlay(
             reference_text=str(item["reference_text"]),
             occurrence=int(item.get("occurrence") or 1),
@@ -414,10 +415,12 @@ def _question_inputs_from_case_input(
     question_inputs = [
         dict(item)
         for item in input_payload.get("question_inputs") or ()
-        if isinstance(item, dict)
     ]
     for item in question_inputs:
-        if item.get("kind") == "literal_text" and item.get("role") == "time_value":
+        if (
+            item.get("kind") == KnownInputKind.LITERAL.value
+            and item.get("role") == LiteralInputRole.TIME_VALUE.value
+        ):
             item.setdefault("satisfies_requirement_id", f"{item['input_ref']}_req")
     return question_inputs
 
@@ -439,8 +442,8 @@ def _answer_request(
                 "why_required": f"{item['source_text']} constrains the requested fact",
             }
             for item in question_inputs
-            if item.get("kind") == "literal_text"
-            and item.get("role") == "time_value"
+            if item.get("kind") == KnownInputKind.LITERAL.value
+            and item.get("role") == LiteralInputRole.TIME_VALUE.value
             and item.get("satisfies_requirement_id")
             and str(item.get("input_ref") or "") in used_input_refs
         ]

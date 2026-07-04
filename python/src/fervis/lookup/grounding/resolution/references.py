@@ -278,12 +278,11 @@ def _resolve_reference_tasks(
             if value is not None:
                 values.append(value)
                 certification = _imported_prior_identity_certification(
-                    value=value,
+                    value_id=value.id,
                     task=task,
                     selected_identity=memory_candidate.identity,
                 )
-                if certification is not None:
-                    certifications.append(certification)
+                certifications.append(certification)
             continue
         if len(memory_candidates) > 1:
             issues.append(
@@ -407,21 +406,12 @@ def _memory_identity_candidates(
 
 def _imported_prior_identity_certification(
     *,
-    value: FactValue,
+    value_id: str,
     task: KnownInputBindingTask,
     selected_identity: MemoryIdentityValue,
-) -> GroundedValueCertification | None:
-    payload = value.payload
-    if not isinstance(payload, IdentityValuePayload):
-        return None
-    if (
-        selected_identity.identity_type != payload.identity_type
-        or selected_identity.identity_field != payload.identity_field
-        or selected_identity.value != str(payload.value)
-    ):
-        return None
+) -> GroundedValueCertification:
     return GroundedValueCertification(
-        value_id=value.id,
+        value_id=value_id,
         method=GroundedValueCertificationMethod.IMPORTED_PRIOR_IDENTITY,
         authority_refs=_memory_identity_authority_refs(selected_identity),
         lineage_refs=(

@@ -59,6 +59,7 @@ from fervis.lookup.question_contract import (
     RequestedFact,
     RequestedFactAnswerOutput,
     RequestedFactKnownInput,
+    RequestedFactLiteralInput,
 )
 from fervis.lookup.fact_plan.render_spec import (
     RenderRelationOutput,
@@ -197,9 +198,8 @@ def test_requested_fact_output_and_known_input_ids_are_disjoint():
                     description="name",
                     answer_outputs=(RequestedFactAnswerOutput(id="answer"),),
                     known_inputs=(
-                        RequestedFactKnownInput(
+                        RequestedFactLiteralInput(
                             id="answer",
-                            kind=KnownInputKind.LITERAL,
                             source=KnownInputSource.QUESTION_CONTEXT,
                             text="Alice",
                             role=LiteralInputRole.REFERENCE_VALUE,
@@ -647,9 +647,8 @@ def _question_contract_with_known_person() -> QuestionContract:
                 description="name",
                 answer_outputs=(RequestedFactAnswerOutput(id="answer"),),
                 known_inputs=(
-                    RequestedFactKnownInput(
+                    RequestedFactLiteralInput(
                         id="person_name",
-                        kind=KnownInputKind.LITERAL,
                         source=KnownInputSource.QUESTION_CONTEXT,
                         text="Alice",
                         role=LiteralInputRole.REFERENCE_VALUE,

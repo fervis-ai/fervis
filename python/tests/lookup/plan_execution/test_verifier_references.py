@@ -106,6 +106,7 @@ from fervis.lookup.question_contract import (
     RequestedFact,
     RequestedFactAnswerOutput,
     RequestedFactKnownInput,
+    RequestedFactLiteralInput,
 )
 from fervis.lookup.fact_plan.render_spec import (
     RenderRelationOutput,
@@ -153,9 +154,8 @@ def _known_reference(
     *,
     value_meaning_hint: str = "",
 ) -> RequestedFactKnownInput:
-    return RequestedFactKnownInput(
+    return RequestedFactLiteralInput(
         id=input_id,
-        kind=KnownInputKind.LITERAL,
         source=KnownInputSource.QUESTION_CONTEXT,
         text=text,
         resolved_value_text=text,
@@ -165,9 +165,8 @@ def _known_reference(
 
 
 def _known_time(input_id: str, text: str) -> RequestedFactKnownInput:
-    return RequestedFactKnownInput(
+    return RequestedFactLiteralInput(
         id=input_id,
-        kind=KnownInputKind.LITERAL,
         source=KnownInputSource.QUESTION_CONTEXT,
         text=text,
         resolved_value_text=text,
@@ -179,9 +178,8 @@ def _known_time(input_id: str, text: str) -> RequestedFactKnownInput:
 def _known_result_limit(
     input_id: str, text: str, value: int
 ) -> RequestedFactKnownInput:
-    return RequestedFactKnownInput(
+    return RequestedFactLiteralInput(
         id=input_id,
-        kind=KnownInputKind.LITERAL,
         source=KnownInputSource.QUESTION_CONTEXT,
         text=text,
         resolved_value_text=str(value),

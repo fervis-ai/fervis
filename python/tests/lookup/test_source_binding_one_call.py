@@ -38,6 +38,7 @@ from fervis.lookup.question_contract import (
     RequestedFactAnswerOutput,
     RequestedFactAnswerSubject,
     RequestedFactKnownInput,
+    RequestedFactLiteralInput,
 )
 from fervis.lookup.read_eligibility.candidate_identity import (
     read_candidate_signature,
@@ -463,9 +464,8 @@ def _request_with_optional_params(
         answer_subject=RequestedFactAnswerSubject(subject_text="sales"),
         answer_outputs=answer_outputs,
         known_inputs=(
-            RequestedFactKnownInput(
+            RequestedFactLiteralInput(
                 id="time_1",
-                kind=KnownInputKind.LITERAL,
                 source=KnownInputSource.QUESTION_CONTEXT,
                 text="today",
                 role=LiteralInputRole.TIME_VALUE,
@@ -736,9 +736,8 @@ def _request_with_identity_field_filter() -> SourceBindingRequest:
         answer_subject=RequestedFactAnswerSubject(subject_text="locations"),
         answer_outputs=(RequestedFactAnswerOutput(id="answer_1"),),
         known_inputs=(
-            RequestedFactKnownInput(
+            RequestedFactLiteralInput(
                 id="area_1",
-                kind=KnownInputKind.LITERAL,
                 source=KnownInputSource.QUESTION_CONTEXT,
                 text="London",
                 role=LiteralInputRole.REFERENCE_VALUE,

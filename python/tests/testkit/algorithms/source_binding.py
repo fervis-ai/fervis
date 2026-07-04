@@ -46,6 +46,7 @@ from fervis.lookup.question_contract import (
     RequestedFactAnswerOutput,
     RequestedFactAnswerSubject,
     RequestedFactKnownInput,
+    RequestedFactLiteralInput,
 )
 from fervis.lookup.read_eligibility import (
     ReadAssessment,
@@ -2479,9 +2480,8 @@ def _grounded_time_filter_request() -> SourceBindingRequest:
         answer_subject=RequestedFactAnswerSubject(subject_text="sales"),
         answer_outputs=(RequestedFactAnswerOutput(id="answer_1"),),
         known_inputs=(
-            RequestedFactKnownInput(
+            RequestedFactLiteralInput(
                 id="time_1",
-                kind=KnownInputKind.LITERAL,
                 source=KnownInputSource.QUESTION_CONTEXT,
                 text="today",
                 resolved_value_text="today",
@@ -2600,9 +2600,8 @@ def _identity_field_filter_request() -> SourceBindingRequest:
         answer_subject=RequestedFactAnswerSubject(subject_text="locations"),
         answer_outputs=(RequestedFactAnswerOutput(id="answer_1"),),
         known_inputs=(
-            RequestedFactKnownInput(
+            RequestedFactLiteralInput(
                 id="area_1",
-                kind=KnownInputKind.LITERAL,
                 source=KnownInputSource.QUESTION_CONTEXT,
                 text="London",
                 resolved_value_text="London",

@@ -1,12 +1,11 @@
 """Catalog-blind requested-fact contract public boundary."""
 
+from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 from fervis.lookup.question_contract.model import (
     AnswerPopulationMembershipTestKind,
     AnswerPopulationMembershipTestPolarity,
     AnswerSubjectInstanceInterpretationKind,
-    KnownInputKind,
     KnownInputSource,
-    LiteralInputRole,
     NORMAL_INSTANCE_EXCLUDED_STATE_ROLES,
     NormalInstanceExcludedStateRole,
     NormalInstanceExcludedStateRoleDefinition,
@@ -31,6 +30,8 @@ from fervis.lookup.question_contract.model import (
     RequestedFactTimeRequirement,
     RequestedFactInputRequirements,
     RequestedFactKnownInput,
+    RequestedFactLiteralInput,
+    RequestedFactRowSetReferenceInput,
     default_answer_population,
     normal_instance_guard_question,
     normal_instance_profile,
@@ -91,6 +92,8 @@ __all__ = [
     "RequestedFactTimeRequirement",
     "RequestedFactInputRequirements",
     "RequestedFactKnownInput",
+    "RequestedFactLiteralInput",
+    "RequestedFactRowSetReferenceInput",
     "default_answer_population",
     "normal_instance_guard_question",
     "normal_instance_profile",

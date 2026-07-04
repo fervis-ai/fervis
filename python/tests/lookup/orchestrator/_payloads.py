@@ -2,6 +2,8 @@ from dataclasses import replace
 import re
 from typing import Iterable
 
+from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
+
 from tests.lookup.orchestrator._plans import *  # noqa: F403
 from tests.lookup.prompt_sections import prompt_section_payload
 
@@ -1082,14 +1084,18 @@ def _question_input_ref_for_response_item(
     provided = str(item.get("input_ref") or "").strip()
     if provided:
         return provided
-    resolved_kind = str(item.get("kind") or "literal_text")
-    resolved_role = str(item.get("role") or "reference_value")
+    resolved_kind = KnownInputKind(str(item["kind"]))
+    resolved_role = (
+        LiteralInputRole(str(item["role"]))
+        if resolved_kind == KnownInputKind.LITERAL
+        else None
+    )
     resolved_label = {
-        "reference_value": "entity",
-        "time_value": "time",
-        "result_limit": "limit",
+        LiteralInputRole.REFERENCE_VALUE: "entity",
+        LiteralInputRole.TIME_VALUE: "time",
+        LiteralInputRole.RESULT_LIMIT: "limit",
     }.get(resolved_role, "input")
-    if resolved_kind == "row_set_reference":
+    if resolved_kind == KnownInputKind.ROW_SET_REFERENCE:
         resolved_label = "row_set"
     counters[resolved_label] = counters.get(resolved_label, 0) + 1
     index = counters[resolved_label]
@@ -1100,24 +1106,31 @@ def _question_input_from_response_item(
     item: dict[str, Any],
     input_ref: str,
 ) -> dict[str, Any]:
-    kind = str(item.get("kind") or "literal_text")
+    kind = KnownInputKind(str(item["kind"]))
     source_text = str(item.get("source_text") or item.get("reference_text") or "")
     output: dict[str, Any] = {
         "input_ref": input_ref,
-        "kind": kind,
-        "source": "question_context",
+        "kind": kind.value,
+        "source": str(
+            item.get("source")
+            or (
+                "conversation_resolution"
+                if kind == KnownInputKind.ROW_SET_REFERENCE
+                else "question_context"
+            )
+        ),
         "inventory_check": {
             "why_this_is_an_input": f"{source_text} is a declared question input"
         },
     }
-    if kind == "row_set_reference":
+    if kind == KnownInputKind.ROW_SET_REFERENCE:
         output["reference_text"] = source_text
         output["occurrence"] = int(item.get("occurrence") or 1)
         output["resolved_input_ref"] = str(item["resolved_input_ref"])
         return output
     output["source_text"] = source_text
-    role = str(item.get("role") or "reference_value")
-    output["role"] = role
+    role = LiteralInputRole(str(item["role"]))
+    output["role"] = role.value
     output["resolved_value_text"] = str(
         item.get("resolved_value_text") or item.get("value_text") or source_text
     )

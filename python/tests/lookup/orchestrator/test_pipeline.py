@@ -18,6 +18,7 @@ from fervis.lineage.step_summary import step_semantic_items_from_json
 from fervis.lookup.lineage.steps import LineageRuntimeStepSink
 from fervis.lookup.lineage.errors import LineagePersistenceUnavailable
 from fervis.lookup.relation_catalog import CatalogEndpointMetadata
+from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 from fervis.lookup.turn_prompts import HostPromptContext
 from fervis.run_work.events import CollectingQuestionRunEventSink
 
@@ -1513,9 +1514,10 @@ def test_lookup_unresolved_named_entity_returns_resource_specific_clarification(
                 parts=("buyer feedback reasons",),
                 question_inputs=(
                     {
+                        "kind": KnownInputKind.LITERAL.value,
                         "source": "question_context",
                         "source_text": "Nextgen",
-                        "role": "reference_value",
+                        "role": LiteralInputRole.REFERENCE_VALUE.value,
                         "value_meaning_hint": "store",
                         "resolved_value_text": "Nextgen",
                     },
@@ -1685,9 +1687,10 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
                 parts=("staff ID",),
                 question_inputs=(
                     {
+                        "kind": KnownInputKind.LITERAL.value,
                         "source": "question_context",
                         "source_text": "Jane Doe",
-                        "role": "reference_value",
+                        "role": LiteralInputRole.REFERENCE_VALUE.value,
                         "value_meaning_hint": "staff member",
                         "resolved_value_text": "Jane Doe",
                     },
@@ -1825,9 +1828,10 @@ def test_lookup_grounding_executes_ambiguous_resolver_routes_before_source_bindi
                 parts=("sales",),
                 question_inputs=(
                     {
+                        "kind": KnownInputKind.LITERAL.value,
                         "source": "question_context",
                         "source_text": "ABC Mall",
-                        "role": "reference_value",
+                        "role": LiteralInputRole.REFERENCE_VALUE.value,
                         "value_meaning_hint": "store location",
                         "resolved_value_text": "ABC Mall",
                     },
@@ -1980,9 +1984,10 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
                 parts=("staff ID",),
                 question_inputs=(
                     {
+                        "kind": KnownInputKind.LITERAL.value,
                         "source": "question_context",
                         "source_text": "Jane Doe",
-                        "role": "reference_value",
+                        "role": LiteralInputRole.REFERENCE_VALUE.value,
                         "value_meaning_hint": "staff member",
                         "resolved_value_text": "Jane Doe",
                     },
@@ -2119,9 +2124,10 @@ def test_lookup_runtime_fails_closed_on_grounding_resolver_source_read_failure()
                 parts=("staff ID",),
                 question_inputs=(
                     {
+                        "kind": KnownInputKind.LITERAL.value,
                         "source": "question_context",
                         "source_text": "Jane Doe",
-                        "role": "reference_value",
+                        "role": LiteralInputRole.REFERENCE_VALUE.value,
                         "value_meaning_hint": "staff member",
                         "resolved_value_text": "Jane Doe",
                     },
@@ -2208,9 +2214,10 @@ def test_lookup_runtime_fails_closed_on_grounding_missing_catalog_endpoint() -> 
                 parts=("staff ID",),
                 question_inputs=(
                     {
+                        "kind": KnownInputKind.LITERAL.value,
                         "source": "question_context",
                         "source_text": "Jane Doe",
-                        "role": "reference_value",
+                        "role": LiteralInputRole.REFERENCE_VALUE.value,
                         "value_meaning_hint": "staff member",
                         "resolved_value_text": "Jane Doe",
                     },
@@ -3139,9 +3146,8 @@ def test_lookup_cutover_uses_relation_as_read_instance_and_derives_grain():
                     subject_text="sales",
                     binding_target_ids=("amount",),
                     known_inputs=(
-                        RequestedFactKnownInput(
+                        RequestedFactLiteralInput(
                             id="today",
-                            kind=KnownInputKind.LITERAL,
                             source=KnownInputSource.QUESTION_CONTEXT,
                             text="today",
                             role=LiteralInputRole.TIME_VALUE,

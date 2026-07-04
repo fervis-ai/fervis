@@ -1,13 +1,9 @@
 from __future__ import annotations
 
 import pytest
-from types import SimpleNamespace
 
 from tests.lookup.orchestrator._helpers import *  # noqa: F403
 
-from fervis.lookup.grounding.model import CanonicalInputLedger
-from fervis.lookup.fact_plan.values import FactValue
-from fervis.lookup.question_contract import parse_question_contract
 from fervis.memory.addresses import (
     EvidenceRef,
     FactAddress,
@@ -24,9 +20,6 @@ from fervis.model_io.providers.bootstrap import (
 )
 from fervis.lookup.orchestration import pipeline as lookup_pipeline
 from fervis.lookup.memory.projection import project_conversation_memory_cards
-from fervis.lookup.conversation_resolution.clarifications import (
-    active_clarification_contract,
-)
 from fervis.lookup.turn_prompts.context import active_clarification_context
 
 
@@ -1305,6 +1298,34 @@ def _required_output_fields_from_prompt(
     return [{"field_id": field_id} for field_id in field_ids]
 
 
+def _computed_scalar_from_bound_value_payload(
+    *,
+    requested_fact_id: str,
+    answer_output_ids: tuple[str, ...],
+    source_binding_id: str,
+) -> dict[str, Any]:
+    return {
+        "outcome": {
+            "kind": "fact_plan",
+            "answers": [
+                {
+                    "requested_fact_id": requested_fact_id,
+                    "answer_output_ids": list(answer_output_ids),
+                    "pattern": "computed_scalar",
+                    "scalar_inputs": [
+                        {
+                            "input_id": "value",
+                            "source_binding_id": source_binding_id,
+                        }
+                    ],
+                    "expression": "value",
+                    "output": {"scalar_id": "answer", "label": "answer"},
+                }
+            ],
+        }
+    }
+
+
 def _bound_source_field_ids_from_prompt(
     prompt: str,
     *,
@@ -1847,7 +1868,7 @@ def test_source_binding_prompt_excludes_unactivated_memory_context():
     assert "999.00" not in plan_prompt
 
 
-def test_source_binding_prompt_exposes_active_scalar_memory_for_param_binding():
+def test_source_binding_prompt_uses_only_current_run_grounded_values():
     planner = _ToolNamePlannerPort(
         read_eligibility_retention_specs=(
             ReadEligibilityRetentionSpec(
@@ -1919,21 +1940,8 @@ def test_source_binding_prompt_exposes_active_scalar_memory_for_param_binding():
     source_binding_prompt = planner.prompts[
         planner.tool_names.index("submit_source_binding")
     ]
-    candidates_by_fact = _source_options_by_fact(source_binding_prompt)
-    candidate = _candidate_with_read(
-        candidates_by_fact["fact_1"],
-        read_id="orders_above_amount_read",
-    )
-    amount_param = next(
-        param
-        for param in _candidate_binding_surface(candidate)["params"]
-        if param["param_id"] == "minimum_amount"
-    )
-    binding_value_ids = {
-        item["value"] for item in amount_param.get("binding_values") or ()
-    }
-    assert "turn_selected_threshold.value.threshold" in binding_value_ids
-    assert "turn_unselected_threshold.value.threshold" not in binding_value_ids
+    grounded_values = _prompt_json_section(source_binding_prompt, "Grounded values")
+    assert grounded_values == {"values": []}
 
 
 def test_runtime_expands_selected_memory_through_activation_chokepoint(monkeypatch):
@@ -2061,11 +2069,10 @@ def test_selected_prior_request_outputs_reach_question_contract():
                     }
                 ],
             ),
-            "submit_pattern_fact_plan": _pattern_fact_plan_payload(
+            "submit_pattern_fact_plan": _computed_scalar_from_bound_value_payload(
                 requested_fact_id="fact_1",
                 answer_output_ids=("answer_1",),
-                read_id="staff_sales_read",
-                output_fields=({"field_id": "amount", "label": "answer_1"},),
+                source_binding_id="sb_1",
             ),
         }
     )
@@ -2181,11 +2188,10 @@ def test_clause_resolution_prior_answer_frame_reaches_question_contract():
                     }
                 ],
             ),
-            "submit_pattern_fact_plan": _pattern_fact_plan_payload(
+            "submit_pattern_fact_plan": _computed_scalar_from_bound_value_payload(
                 requested_fact_id="fact_1",
                 answer_output_ids=("answer_1",),
-                read_id="staff_sales_read",
-                output_fields=({"field_id": "amount", "label": "answer_1"},),
+                source_binding_id="sb_1",
             ),
         }
     )
