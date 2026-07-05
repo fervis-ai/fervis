@@ -1,7 +1,7 @@
 id: unowned_literal_inputs_fail_closed
 description: Declared literal inputs not owned by any answer request are rejected.
 migrates:
-- api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_drops_inputs_unused_by_any_answer_request
+- api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_rejects_unowned_literal_input
 kind: algorithm
 algorithm: question_contract.parse
 input:
@@ -34,4 +34,4 @@ input:
   used_input_refs:
   - period
 expect:
-  error_contains: literal_text question inputs must be owned by a requested fact
+  error_contains: question inputs must be owned by a requested fact

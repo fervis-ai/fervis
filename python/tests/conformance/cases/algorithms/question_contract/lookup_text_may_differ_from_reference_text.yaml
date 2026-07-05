@@ -24,7 +24,6 @@ expect:
       source: question_context
       text: Alice's
       resolved_input_ref: ''
-      satisfies_requirement_id: ''
       resolved_value_text: Alice
       field_label_text: ''
       value_meaning_hint: staff member
@@ -41,7 +40,6 @@ expect:
         source: question_context
         text: Alice's
         resolved_input_ref: ''
-        satisfies_requirement_id: ''
         resolved_value_text: Alice
         field_label_text: ''
         value_meaning_hint: staff member
@@ -59,8 +57,6 @@ expect:
             kind: NORMAL_BUSINESS_INSTANCE
             short_label: ordinary business meaning of sales
             meaning: Answer over ordinary business instances of 'sales' as they are normally understood in business operations and reporting. Do not assume this includes every persisted representation the host API may expose for 'sales'. Explicit user wording may narrow or override this normal instance interpretation.
-        input_requirements:
-          time_requirements: []
         answer_population:
           population_label: sales
           counted_unit: sales

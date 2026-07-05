@@ -89,11 +89,6 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                     "answer_subject.instance_interpretation.kind is required.",
                     "Use NORMAL_BUSINESS_INSTANCE for ordinary business reporting questions over the subject as business users normally understand it.",
                     "Use RAW_DATA_RECORD only when the user explicitly asks for persisted records, rows, logs, audit entries, raw data, database entries, or another data artifact.",
-                    "input_requirements is required and comes before answer_population.",
-                    "input_requirements.time_requirements must have one item for each time word or phrase that constrains this answer_request.",
-                    "Use an empty time_requirements array only when no time word or phrase constrains this answer_request.",
-                    "Copy each time_requirements.source_text exactly from the current question or conversation resolution annotations.",
-                    "Write why_required to explain how that copied time word or phrase constrains this answer_request.",
                     "answer_population is required and defines the final answer population as testable membership rules.",
                     "answer_population.population_label is a concise phrase for the exact population being counted, listed, ranked, grouped, totaled, or described.",
                     "answer_population.counted_unit names one business unit in that population.",
@@ -106,9 +101,8 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                     "answer_outputs contain the values or facts the user asked to receive for that answer_fact.",
                     "Conversation resolution resolved_question_inputs clarify referenced inputs, not answer outputs.",
                     "answer_requests_count must equal the number of answer_requests.",
-                    "input_decisions contains one true/false decision for every already-declared question_inputs item.",
-                    "Set use_input=true when that question input constrains the answer_request.",
-                    "Set use_input=false when that question input does not constrain the answer_request.",
+                    "used_question_inputs lists only the question_inputs that constrain this answer_request.",
+                    "Do not list question_inputs that do not constrain this answer_request.",
                     "For list or table questions with multiple requested columns about the same rows or groups, use one answer_request and put each requested column in answer_outputs.",
                     "Do not put API details, endpoint names, field names, params, enum values, or execution operations in answer_subject.",
                     "Do not include caveats, proof, data availability checks, endpoint/API terms, execution instructions, or underlying calculation support unless the user explicitly asks for that support as an answer part.",
@@ -131,8 +125,12 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                     "Declare exactly one question_inputs item for every inventoried phrase.",
                     "Each question_inputs item must represent exactly one input span from the current question or conversation resolution annotations.",
                     "Each question_inputs item must include inventory_check.why_this_is_an_input explaining which input category it belongs to and why it constrains an answer request or supplies a value.",
-                    "When one input constrains multiple requested facts, declare it once in question_inputs and set use_input=true for that input on each applicable answer_request.",
-                    "After declaring question_inputs and input_decisions, set question_input_inventory_check.all_input_like_phrases_declared=true only when every input-like word or phrase has a question_inputs item.",
+                    "Predicates and their concrete operands have separate owners.",
+                    "answer_population.membership_tests declares predicates that narrow the requested subject instances.",
+                    "question_inputs declares concrete user/context values that those predicates, time predicates, result limits, or requested computations depend on and that downstream stages must ground, compile, verify, or bind.",
+                    "Do not use answer_fact, population_label, or membership-test prose as the only carrier for a concrete value that affects the requested fact.",
+                    "When one input constrains multiple requested facts, declare it once in question_inputs and include its input_ref in used_question_inputs on each applicable answer_request.",
+                    "After declaring question_inputs and used_question_inputs, set question_input_inventory_check.all_input_like_phrases_declared=true only when every input-like word or phrase has a question_inputs item.",
                 ),
             ),
             builder.instruction_block(
@@ -153,25 +151,21 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                 ),
             ),
             builder.instruction_block(
-                "Question Input Time Requirements",
-                (
-                    "Conversation resolution can supply the requested value frame, but time phrases still require matching literal_text time_value question inputs.",
-                    "For every time_requirements item, declare one matching literal_text input with role=time_value and copy its requirement_id into satisfies_requirement_id.",
-                    "A time_value question input satisfies a requirement only when source_text exactly matches the requirement source_text.",
-                ),
-            ),
-            builder.instruction_block(
                 "Literal Reference Inputs",
                 (
-                    "Use kind=literal_text with role=reference_value for a proper name, code, identifier, or other specific value that refers to an entity or business value.",
+                    "Use kind=literal_text with role=reference_value for each separately addressable user/context value that identifies, names, keys, codes, or otherwise refers to a concrete entity or business value.",
+                    "A reference_value is required when the requested fact depends on that concrete value being grounded or directly verified before compilation.",
                     "Do not use reference_value for answer_subject.subject_text, a generic resource class, answer category, grouping label, pronoun, or question word unless conversation resolution emits that pronoun as a resolved literal_text input.",
                     "If the phrase is the same as answer_subject.subject_text, answer_population.counted_unit, or answer_population.population_label, it is not a reference_value.",
-                    "Use one literal_text reference_value item per referenced value.",
-                    "source_text is the verbatim copied phrase from the current question or resolved_question_inputs.",
-                    "resolved_value_text is the resolved display/value text, not a compiled API identity.",
-                    "field_label_text is optional and only preserves a user-supplied field label such as staff_id when that label scopes over the value.",
+                    "Use one literal_text reference_value item per separately addressable value, even when multiple values appear in one coordinated phrase.",
+                    "source_text is the verbatim copied question span that supplies the value and may include surrounding qualifier text.",
+                    "resolved_value_text is the question-level value after language/context resolution, not a Fervis-verified canonical identity.",
+                    "When source_text includes a qualifier, punctuation, or grammar that is not part of the value, keep that context out of resolved_value_text.",
+                    "For user-supplied names, codes, UUIDs, IDs, or other identifiers, copy the supplied value itself; grounding decides whether it is a verified canonical identity, resolver lookup, direct binding, or clarification.",
+                    "When the question or conversation-resolution context gives an attribute-like qualifier for the value, set field_label_text to the closest catalog-blind approximation of that attribute name; omit it only when no such qualifier exists.",
+                    "field_label_text helps grounding choose or verify the intended attribute; it is not a catalog field decision.",
                     "value_meaning_hint briefly describes what kind of value this is, such as staff member, location, or customer.",
-                    "Do not replace resolved_value_text with an entity ID, resolver result, API value, synonym, or different business object.",
+                    "Do not replace resolved_value_text with a resolver result, API value, synonym, or different business object that was not supplied by the user or conversation context.",
                 ),
             ),
             builder.instruction_block(
@@ -180,7 +174,7 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                     "Use kind=literal_text with role=time_value for calendar dates, calendar date ranges, relative time, calendar periods, quarters, months, years, rolling windows, and open calendar ranges.",
                     "For each time input, copy only the exact source_text from the question context or resolved_question_inputs.",
                     "Set resolved_value_text to the copied time phrase or resolved conversation text, without compiling it into dates.",
-                    "Set satisfies_requirement_id to the matching input_requirements.time_requirements requirement_id.",
+                    "When a time input constrains an answer_request, include its input_ref in that answer_request's used_question_inputs.",
                     "Do not compile date ranges, calendar dates, relative offsets, or time shapes in this turn.",
                     "Use separate time inputs when the user asks for separate dates or periods. Use one range input when the user asks for one combined range.",
                 ),
@@ -204,11 +198,10 @@ class QuestionContractTurnPrompt(TurnPromptBase):
         )
 
     def response_contract(self) -> ProviderResponseContract:
+        answer_contract_schema = self._answer_request_contract_schema()
         return ProviderResponseContract(
             provider_schema={
-                ANSWER_REQUEST_CONTRACT_TOOL_NAME: (
-                    build_answer_request_contract_schema()
-                ),
+                ANSWER_REQUEST_CONTRACT_TOOL_NAME: answer_contract_schema,
                 MISSING_INPUT_CLARIFICATION_TOOL_NAME: (
                     build_missing_input_clarification_schema()
                 ),
@@ -216,12 +209,13 @@ class QuestionContractTurnPrompt(TurnPromptBase):
         )
 
     def tool_contract(self) -> ProviderToolContract:
+        answer_contract_schema = self._answer_request_contract_schema()
         return ProviderToolContract(
             tool_specs=(
                 required_tool_spec(
                     tool_name=ANSWER_REQUEST_CONTRACT_TOOL_NAME,
                     tool_description="Submit complete catalog-blind answer request contracts.",
-                    input_schema=build_answer_request_contract_schema(),
+                    input_schema=answer_contract_schema,
                 ),
                 required_tool_spec(
                     tool_name=MISSING_INPUT_CLARIFICATION_TOOL_NAME,
@@ -230,5 +224,15 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                     ),
                     input_schema=build_missing_input_clarification_schema(),
                 ),
+            )
+        )
+
+    def _answer_request_contract_schema(self) -> dict[str, object]:
+        return build_answer_request_contract_schema(
+            include_conversation_resolution_inputs=(
+                self.request.conversation_resolution_overlay is not None
+                and bool(
+                    self.request.conversation_resolution_overlay.resolved_question_inputs
+                )
             )
         )

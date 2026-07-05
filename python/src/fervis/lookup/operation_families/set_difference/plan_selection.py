@@ -12,5 +12,6 @@ PLAN_SELECTION_SHAPES = (
         "set_difference",
         ("candidate_set", "observed_set"),
         distinct_members=True,
+        answer_fulfillment_requirements=frozenset(("candidate_set",)),
     ),
 )

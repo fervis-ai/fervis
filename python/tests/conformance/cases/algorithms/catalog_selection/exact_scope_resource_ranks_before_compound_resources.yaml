@@ -1,0 +1,53 @@
+id: exact_scope_resource_ranks_before_compound_resources
+description: Catalog selection ranks exact scope/group resources first while retaining compound resources as positive candidates.
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - {id: staff_read, endpoint_name: list_staff_list, resource_names: [staff]}
+      - {id: staff_cash_deposit_read, endpoint_name: get_staff_cash_deposits, resource_names: [staff cash deposit]}
+      - {id: staff_sales_read, endpoint_name: get_staff_sales, resource_names: [staff sale]}
+  requested_facts:
+    - id: fact_1
+      description: How many sales did the specified staff member sell today?
+      answer_outputs:
+        - id: answer_1
+  resource_name_matches:
+    - requested_fact_id: fact_1
+      answer_output_resource_lineage:
+        - answer_output_id: answer_1
+          support_role: POPULATION_SCOPE
+          source_text: staff member
+          matching_resource_names: [staff]
+  max_reads_per_fact: 3
+expect:
+  result_contains:
+    selected_read_ids: [staff_read]
+    selected_read_membership:
+      staff_read: true
+      staff_cash_deposit_read: true
+      staff_sales_read: true
+    requested_fact_selections:
+      - requested_fact_id: fact_1
+        query_terms: [staff]
+        selected_read_membership:
+          staff_read: true
+          staff_cash_deposit_read: true
+          staff_sales_read: true
+        rankings:
+          - read_id: staff_read
+            score: 2
+            matched_terms: [staff]
+            matched_fact_refs: []
+            matched_field_refs: []
+          - read_id: staff_cash_deposit_read
+            score: 1
+            matched_terms: [staff]
+            matched_fact_refs: []
+            matched_field_refs: []
+          - read_id: staff_sales_read
+            score: 1
+            matched_terms: [staff]
+            matched_fact_refs: []
+            matched_field_refs: []

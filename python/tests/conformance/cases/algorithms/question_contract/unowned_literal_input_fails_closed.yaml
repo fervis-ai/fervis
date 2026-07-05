@@ -23,7 +23,6 @@ input:
         source_text: today
         resolved_value_text: today
         role: time_value
-        satisfies_requirement_id: time_req_1
         inventory_check: {why_this_is_an_input: today is the time scope}
       - input_ref: bbs_mall
         kind: literal_text
@@ -39,11 +38,6 @@ input:
         answer_subject:
           subject_text: sales
           instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
-        input_requirements:
-          time_requirements:
-            - requirement_id: time_req_1
-              source_text: today
-              why_required: today constrains which sales count
         answer_population:
           population_label: sales by specified staff member today
           counted_unit: sales
@@ -62,10 +56,7 @@ input:
               test_question: Is the sale today?
         answer_outputs:
           - description: number of sales
-        input_decisions:
-          - {input_ref: staff, use_input: true}
-          - {input_ref: today, use_input: true}
-          - {input_ref: bbs_mall, use_input: false}
+        used_question_inputs: [staff, today]
     question_input_inventory_check: {all_input_like_phrases_declared: true}
 expect:
-  error_contains: literal_text question inputs must be owned by a requested fact
+  error_contains: question inputs must be owned by a requested fact

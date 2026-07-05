@@ -90,7 +90,7 @@ def _time_resolutions_from_payload(
             path=f"known_time_resolutions.{task.known_input_id}.date_intent",
         )
         expression = str(date_intent.get("expression") or "").strip()
-        if expression != task.known_input_text:
+        if expression != task.time_expression:
             raise ValueError("grounding date_intent expression mismatch")
         output.append(
             TimeResolutionIntent(

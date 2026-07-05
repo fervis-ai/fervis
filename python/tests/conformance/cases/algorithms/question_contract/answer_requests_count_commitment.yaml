@@ -33,8 +33,6 @@ input:
       subject_text: sales amount
       instance_interpretation:
         kind: NORMAL_BUSINESS_INSTANCE
-    input_requirements:
-      time_requirements: []
     answer_population:
       population_label: sales amount
       counted_unit: sales amount
@@ -45,11 +43,9 @@ input:
         test_question: Does the row/value represent sales amount?
     answer_outputs:
     - description: total sales amount
-    input_decisions:
-    - input_ref: staff
-      use_input: true
-    - input_ref: period
-      use_input: true
+    used_question_inputs:
+    - staff
+    - period
   - answer_fact: store associated with Alice sales yesterday
     answer_expression:
       family: scalar_aggregate
@@ -57,8 +53,6 @@ input:
       subject_text: store
       instance_interpretation:
         kind: NORMAL_BUSINESS_INSTANCE
-    input_requirements:
-      time_requirements: []
     answer_population:
       population_label: store
       counted_unit: store
@@ -69,11 +63,9 @@ input:
         test_question: Does the row/value represent store?
     answer_outputs:
     - description: store
-    input_decisions:
-    - input_ref: staff
-      use_input: true
-    - input_ref: period
-      use_input: true
+    used_question_inputs:
+    - staff
+    - period
 expect:
   result_contains:
     question_inputs:

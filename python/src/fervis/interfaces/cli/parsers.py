@@ -343,7 +343,7 @@ def _add_goldset_parser(subparsers) -> None:
     run.add_argument("--case-ids")
     run.add_argument("--limit", type=int)
     run.add_argument("--tenant-id", required=True)
-    run.add_argument("--principal-id", required=True)
+    run.add_argument("--principal-id")
     run.add_argument("--model", dest="model_key")
     run.add_argument("--ledger-file")
     run.add_argument("--wait-seconds", type=float, default=60.0)

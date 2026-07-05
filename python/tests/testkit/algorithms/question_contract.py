@@ -114,7 +114,6 @@ def _known_input_actual(item: RequestedFactKnownInput) -> dict[str, object]:
     if item.kind == KnownInputKind.ROW_SET_REFERENCE:
         payload["occurrence"] = item.occurrence
         return payload
-    payload["satisfies_requirement_id"] = item.satisfies_requirement_id
     payload["resolved_value_text"] = item.resolved_value_text
     payload["field_label_text"] = item.field_label_text
     payload["value_meaning_hint"] = item.value_meaning_hint
@@ -135,10 +134,31 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
     question_input_item = answer_contract_schema["properties"]["question_inputs"][
         "items"
     ]
+    question_input_variants = tuple(question_input_item["oneOf"])
     variants = {
         variant["properties"]["kind"]["enum"][0]: variant
-        for variant in question_input_item["oneOf"]
+        for variant in question_input_variants
+        if variant["properties"]["kind"]["enum"][0] != KnownInputKind.LITERAL.value
     }
+    literal_variants = tuple(
+        variant
+        for variant in question_input_variants
+        if variant["properties"]["kind"]["enum"][0] == KnownInputKind.LITERAL.value
+    )
+    literal_properties = sorted(
+        {
+            property_name
+            for variant in literal_variants
+            for property_name in variant["properties"]
+        }
+    )
+    literal_role_values = sorted(
+        {
+            role
+            for variant in literal_variants
+            for role in variant["properties"]["role"]["enum"]
+        }
+    )
     actual = {
         "has_root_one_of": "oneOf" in schema,
         "branch_kinds": sorted(branches),
@@ -170,22 +190,16 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
         "answer_output_properties": sorted(
             answer_request_schema["properties"]["answer_outputs"]["items"]["properties"]
         ),
-        "question_input_kinds": sorted(variants),
-        "literal_text_role_values": (
-            variants[KnownInputKind.LITERAL.value]["properties"]["role"]["enum"]
-            if KnownInputKind.LITERAL.value in variants
-            else []
+        "question_input_kinds": sorted(
+            {
+                variant["properties"]["kind"]["enum"][0]
+                for variant in question_input_variants
+            }
         ),
-        "literal_text_properties": (
-            sorted(variants[KnownInputKind.LITERAL.value]["properties"])
-            if KnownInputKind.LITERAL.value in variants
-            else []
-        ),
+        "literal_text_role_values": literal_role_values,
+        "literal_text_properties": literal_properties,
         "literal_text_property_membership": {
-            name: (
-                KnownInputKind.LITERAL.value in variants
-                and name in variants[KnownInputKind.LITERAL.value]["properties"]
-            )
+            name: name in literal_properties
             for name in (
                 "input_ref",
                 "kind",
@@ -195,7 +209,6 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
                 "field_label_text",
                 "value_meaning_hint",
                 "role",
-                "satisfies_requirement_id",
                 "inventory_check",
             )
         },
@@ -412,17 +425,7 @@ def _model_payload_from_case_input(input_payload: dict[str, Any]) -> dict[str, o
 def _question_inputs_from_case_input(
     input_payload: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    question_inputs = [
-        dict(item)
-        for item in input_payload.get("question_inputs") or ()
-    ]
-    for item in question_inputs:
-        if (
-            item.get("kind") == KnownInputKind.LITERAL.value
-            and item.get("role") == LiteralInputRole.TIME_VALUE.value
-        ):
-            item.setdefault("satisfies_requirement_id", f"{item['input_ref']}_req")
-    return question_inputs
+    return [dict(item) for item in input_payload.get("question_inputs") or ()]
 
 
 def _answer_request(
@@ -431,22 +434,6 @@ def _answer_request(
     question_inputs: list[dict[str, Any]],
 ) -> dict[str, object]:
     used_input_refs = set(input_payload.get("used_input_refs") or ())
-    input_requirements = dict(
-        input_payload.get("input_requirements") or {"time_requirements": []}
-    )
-    if not input_requirements.get("time_requirements"):
-        input_requirements["time_requirements"] = [
-            {
-                "requirement_id": item["satisfies_requirement_id"],
-                "source_text": item["source_text"],
-                "why_required": f"{item['source_text']} constrains the requested fact",
-            }
-            for item in question_inputs
-            if item.get("kind") == KnownInputKind.LITERAL.value
-            and item.get("role") == LiteralInputRole.TIME_VALUE.value
-            and item.get("satisfies_requirement_id")
-            and str(item.get("input_ref") or "") in used_input_refs
-        ]
     request = {
         "answer_fact": str(input_payload.get("answer_fact") or "sales at ABC Mall"),
         "answer_expression": dict(
@@ -459,7 +446,6 @@ def _answer_request(
                 "instance_interpretation": {"kind": "NORMAL_BUSINESS_INSTANCE"},
             }
         ),
-        "input_requirements": input_requirements,
         "answer_population": dict(
             input_payload.get("answer_population")
             or {
@@ -478,13 +464,12 @@ def _answer_request(
         "answer_outputs": list(
             input_payload.get("answer_outputs") or [{"description": "sales total"}]
         ),
-        "input_decisions": [
-            {
-                "input_ref": str(item["input_ref"]),
-                "use_input": str(item["input_ref"]) in used_input_refs,
-            }
+        "used_question_inputs": [
+            input_ref
             for item in question_inputs
-            if isinstance(item, dict) and str(item.get("input_ref") or "").strip()
+            if isinstance(item, dict)
+            and (input_ref := str(item.get("input_ref") or "").strip())
+            and input_ref in used_input_refs
         ],
     }
     request.update(dict(input_payload.get("answer_request_overrides") or {}))

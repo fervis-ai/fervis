@@ -27,7 +27,6 @@ expect:
       - answer_fact
       - answer_expression
       - answer_subject
-      - input_requirements
       - answer_population
       - answer_outputs
-      - input_decisions
+      - used_question_inputs

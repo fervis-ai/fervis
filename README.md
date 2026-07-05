@@ -125,6 +125,65 @@ npm ci
 npm test
 ```
 
+## Project Contributions
+
+Fervis is an architecture/runtime, not a typical application codebase. Changes
+must preserve deterministic execution, typed contracts, current-run proof, and
+clear ownership across parser, grounding, source binding, planning, runtime, and
+lineage boundaries.
+
+### Bug Reports
+
+Report bugs in the independent review format:
+
+- **Severity:** High, Medium, or Low.
+- **Category:** Bug, regression, architecture boundary, proof/lineage, test gap,
+  or maintainability.
+- **Description:** State the incorrect behavior precisely.
+- **Impact:** Explain how the bug can produce a wrong answer, wrong proof,
+  silent fallback, lost clarification, or hard-to-maintain code path.
+- **Evidence:** Link concrete files, line numbers, tests, fixtures, or runtime
+  output.
+- **How to reproduce:** Provide the smallest question, contract payload,
+  fixture, or command that shows the issue.
+- **Structural cause:** Identify the owning boundary where the issue belongs.
+  Do not stop at a downstream symptom.
+- **Recommended solution:** Describe the root fix at the correct layer.
+- **Required tests:** Name the conformance or behavior coverage that should
+  prove the fix.
+- **Checks run:** List commands run and results.
+
+### Changes And PRs
+
+Before opening a PR, make sure the change satisfies this bar:
+
+- Replace obsolete behavior; do not add legacy support, parallel
+  implementations, or compatibility shims.
+- Keep the backend deterministic. It should parse declared contracts, verify
+  ownership and lineage, ground values through explicit authority, and bind only
+  current-run grounded values.
+- Do not make the parser or backend a semantic oracle. Do not infer business
+  meaning, catalog fields, params, endpoints, resolver choices, or language
+  intent from raw text outside the owning contract/model boundary.
+- Avoid brittle heuristics. If a rule is needed, make it bounded, typed, and
+  owned by the correct layer.
+- Keep public/private package boundaries clear. Prefer a few stable public
+  interfaces over broad exposed internals.
+- Use proper encapsulation. A future change to one concept should not require
+  edits across many unrelated files.
+- Follow **One logic, one home**. Do not duplicate business rules across parser,
+  grounding, source binding, planning, runtime, testkit, or lineage.
+- Avoid overengineering and bloat. Use the smallest implementation that is easy
+  to read, prove, and maintain.
+- Cover non-trivial behavior with tests that assert outcomes at the right
+  boundary. Prefer conformance tests for architecture-level behavior and focused
+  behavior tests for runtime boundaries. Tests should prove what Fervis must do,
+  not lock in incidental implementation details.
+- Do not rely on negative assertions as broad compatibility tests. Use exact
+  expected contracts for migration-critical behavior.
+- Run the relevant focused tests and the full repository verification before
+  merge.
+
 ## License
 
 Fervis is licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).

@@ -38,7 +38,7 @@ def _question_contract_payload(
                     ).instance_interpretation,
                 ).to_question_contract_dict(),
                 "answer_outputs": [{"description": part} for part in parts],
-                "input_decisions": [],
+                "used_question_inputs": [],
             }
         ],
         "question_input_inventory_check": {
@@ -67,7 +67,6 @@ def test_question_contract_accepts_semantic_answer_subject_not_copied_from_quest
     )
     request_payload = payload["answer_requests"][0]
     assert isinstance(request_payload, dict)
-    request_payload["input_requirements"] = {"time_requirements": []}
 
     result = parse_question_contract(
         tool_name=ANSWER_REQUEST_CONTRACT_TOOL_NAME,
@@ -195,7 +194,7 @@ def test_lookup_carries_answer_subject_instance_interpretation_to_source_binding
                             },
                         },
                         "answer_outputs": [{"description": "amount"}],
-                        "input_decisions": [],
+                        "used_question_inputs": [],
                     }
                 ],
                 "question_input_inventory_check": {
@@ -392,9 +391,6 @@ def test_lookup_question_contract_rejects_false_inventory_check():
     payload = _question_contract_payload()
     answer_request = payload["answer_requests"][0]
     assert isinstance(answer_request, dict)
-    answer_request["input_requirements"] = {
-        "time_requirements": [],
-    }
     payload["question_input_inventory_check"] = {
         "all_input_like_phrases_declared": False,
     }
@@ -876,7 +872,7 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_as_raw_question_with
                                 "requested_value_frame": "total sales amount",
                             }
                         ],
-                        "input_decisions": [],
+                        "used_question_inputs": [],
                     }
                 ],
                 "question_input_inventory_check": {
@@ -927,7 +923,6 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_as_raw_question_with
                         "role": "time_value",
                         "source_text": "the day before",
                         "resolved_value_text": "the day before",
-                        "satisfies_requirement_id": "period_scope",
                         "inventory_check": {
                             "why_this_is_an_input": ("the day before is a time scope")
                         },
@@ -938,17 +933,6 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_as_raw_question_with
                         "answer_fact": "total sales amount for the day before",
                         "answer_expression": {"family": "scalar_aggregate"},
                         "answer_subject": _answer_subject_payload("the day before"),
-                        "input_requirements": {
-                            "time_requirements": [
-                                {
-                                    "requirement_id": "period_scope",
-                                    "source_text": "the day before",
-                                    "why_required": (
-                                        "the day before constrains the sales period"
-                                    ),
-                                }
-                            ]
-                        },
                         "answer_population": {
                             "population_label": "sales for the day before",
                             "counted_unit": "sale",
@@ -976,9 +960,7 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_as_raw_question_with
                                 "description": "total sales amount",
                             }
                         ],
-                        "input_decisions": [
-                            {"input_ref": "input_period", "use_input": True}
-                        ],
+                        "used_question_inputs": ["input_period"],
                     }
                 ],
                 "question_input_inventory_check": {

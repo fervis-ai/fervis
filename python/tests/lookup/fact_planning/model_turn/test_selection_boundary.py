@@ -85,7 +85,13 @@ def test_pattern_fact_plan_uses_selected_candidate_member_fields():
                 source_members=(
                     BoundSourceStrategyMember(
                         source_candidate_id="source_1",
-                        source_binding_ids=("sb_1",),
+                        role_targets=(
+                            BoundRoleTarget(
+                                requirement_id="source",
+                                source_candidate_id="source_1",
+                                source_binding_ids=("sb_1",),
+                            ),
+                        ),
                         field_ids=("location_name", "amount"),
                     ),
                 ),

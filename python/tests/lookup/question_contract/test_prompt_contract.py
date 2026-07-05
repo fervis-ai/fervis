@@ -96,8 +96,8 @@ def test_question_contract_prompt_uses_raw_question_with_conversation_overlay():
     assert '"must_preserve_terms"' in prompt
     assert "total sales amount" in prompt
     assert (
-        "Conversation resolution can supply the requested value frame, but time "
-        "phrases still require matching literal_text time_value question inputs."
+        "When a time input constrains an answer_request, include its input_ref "
+        "in that answer_request's used_question_inputs."
     ) in prompt
     assert "integrated_question" not in prompt
     assert "Integrated question:" not in prompt
@@ -283,7 +283,6 @@ class _CapturingQuestionContractModelPort:
                                         "kind": "NORMAL_BUSINESS_INSTANCE"
                                     },
                                 },
-                                "input_requirements": {"time_requirements": []},
                                 "answer_population": {
                                     "population_label": "money made at ABC Mall yesterday",
                                     "counted_unit": "money",
@@ -303,7 +302,7 @@ class _CapturingQuestionContractModelPort:
                                         "description": "total money",
                                     }
                                 ],
-                                "input_decisions": [],
+                                "used_question_inputs": [],
                             }
                         ],
                         "question_input_inventory_check": {
@@ -355,7 +354,6 @@ class _FollowUpQuestionContractModelPort:
                                         "This calendar period constrains the count."
                                     )
                                 },
-                                "satisfies_requirement_id": "time_requirement_1",
                             }
                         ],
                         "answer_requests": [
@@ -369,18 +367,6 @@ class _FollowUpQuestionContractModelPort:
                                     "instance_interpretation": {
                                         "kind": "NORMAL_BUSINESS_INSTANCE"
                                     },
-                                },
-                                "input_requirements": {
-                                    "time_requirements": [
-                                        {
-                                            "requirement_id": "time_requirement_1",
-                                            "source_text": "last month",
-                                            "why_required": (
-                                                "This period limits which sales are "
-                                                "included in the count."
-                                            ),
-                                        }
-                                    ]
                                 },
                                 "answer_population": {
                                     "population_label": (
@@ -419,12 +405,7 @@ class _FollowUpQuestionContractModelPort:
                                         )
                                     }
                                 ],
-                                "input_decisions": [
-                                    {
-                                        "input_ref": "time_1",
-                                        "use_input": True,
-                                    }
-                                ],
+                                "used_question_inputs": ["time_1"],
                             }
                         ],
                         "question_input_inventory_check": {

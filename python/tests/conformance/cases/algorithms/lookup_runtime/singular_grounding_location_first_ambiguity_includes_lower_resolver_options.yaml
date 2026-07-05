@@ -57,6 +57,7 @@ input:
           identity_field: location_id
           primary_key: true
           stable: true
+          display_fields: [field.location_name]
       - ref: field.location_name
         path: data.name
         row_path_id: data
@@ -70,6 +71,7 @@ input:
           identity_field: area_id
           primary_key: true
           stable: true
+          display_fields: [field.area_name]
     - id: list_area_list
       endpoint_name: list_area_list
       resource_names:
@@ -93,6 +95,7 @@ input:
           identity_field: area_id
           primary_key: true
           stable: true
+          display_fields: [field.area_name]
       - ref: field.area_name
         path: data.name
         row_path_id: data

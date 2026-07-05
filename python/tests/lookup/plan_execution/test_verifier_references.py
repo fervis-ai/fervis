@@ -171,7 +171,6 @@ def _known_time(input_id: str, text: str) -> RequestedFactKnownInput:
         text=text,
         resolved_value_text=text,
         role=LiteralInputRole.TIME_VALUE,
-        satisfies_requirement_id=f"{input_id}_req",
     )
 
 

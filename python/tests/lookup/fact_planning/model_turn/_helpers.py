@@ -69,6 +69,7 @@ from fervis.lookup.source_binding.candidates import source_candidates
 from fervis.lookup.source_binding.model import SourceBindingRequest
 from fervis.lookup.plan_selection import (
     SourceStrategyMember,
+    BoundRoleTarget,
     BoundSourceStrategyMember,
     BoundSelectedSourceStrategy,
     BoundPlanSelectionSet,
@@ -201,7 +202,13 @@ def _bound_plan_member(
                 field_ids.append(field_id)
     return BoundSourceStrategyMember(
         source_candidate_id=source_candidate_id,
-        source_binding_ids=source_binding_ids,
+        role_targets=(
+            BoundRoleTarget(
+                requirement_id="source",
+                source_candidate_id=source_candidate_id,
+                source_binding_ids=source_binding_ids,
+            ),
+        ),
         field_ids=tuple(field_ids),
     )
 

@@ -560,7 +560,6 @@ def test_worker_fails_before_answer_synthesis_when_budget_is_exceeded(
                                                 "kind": "NORMAL_BUSINESS_INSTANCE"
                                             },
                                         },
-                                        "input_requirements": {"time_requirements": []},
                                         "answer_population": {
                                             "population_label": "restricted fact",
                                             "counted_unit": "restricted fact",
@@ -580,7 +579,7 @@ def test_worker_fails_before_answer_synthesis_when_budget_is_exceeded(
                                                 "description": "restricted fact",
                                             }
                                         ],
-                                        "input_decisions": [],
+                                        "used_question_inputs": [],
                                     }
                                 ],
                                 "question_input_inventory_check": {

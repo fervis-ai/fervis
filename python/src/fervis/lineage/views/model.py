@@ -96,6 +96,7 @@ class SemanticKnownInputView:
     input_id: str
     text: str
     kind: str
+    role: str = ""
     description: str = ""
     resolved_value_text: str = ""
 

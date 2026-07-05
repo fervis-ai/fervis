@@ -28,9 +28,8 @@ input:
                   - id: answer_1
                     description: total sales amount
                     requested_value_frame: total sales amount
-                input_decisions:
-                  - input_ref: input_period
-                    use_input: true
+                used_question_inputs:
+                  - input_period
         addresses:
           - address: value.grounded_fact_1_time_1
             kind: value

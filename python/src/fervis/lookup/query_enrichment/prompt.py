@@ -209,9 +209,7 @@ class QueryEnrichmentTurnPrompt(TurnPromptBase):
                     {
                         "target_id": known.id,
                         "reference_text": known.text,
-                        "resolved_value_text": (
-                            known.resolved_value_text or known.text
-                        ),
+                        "resolved_value_text": known.resolved_value_text,
                         "value_meaning_hint": known.value_meaning_hint,
                     },
                 )

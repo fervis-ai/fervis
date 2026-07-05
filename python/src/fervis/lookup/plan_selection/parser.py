@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import Any
 
 from fervis.lookup.relation_catalog.selection import (
@@ -100,10 +99,7 @@ def parse_plan_selection(
                     required_answer_output_ids=(
                         source_strategy.required_answer_output_ids
                     ),
-                    source_members=tuple(
-                        replace(member, fulfillment_support_set_ids=())
-                        for member in source_strategy.source_members
-                    ),
+                    source_members=source_strategy.source_members,
                     basis=" | ".join(
                         basis_by_source_id.get(member.source_candidate_id, "")
                         for member in source_strategy.source_members

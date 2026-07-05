@@ -80,7 +80,6 @@ def known_input_from_payload(payload: dict[str, Any]) -> RequestedFactKnownInput
             field_label_text=str(payload.get("field_label_text") or ""),
             value_meaning_hint=str(payload.get("value_meaning_hint") or ""),
             role=LiteralInputRole(str(payload["role"])),
-            satisfies_requirement_id=str(payload.get("satisfies_requirement_id") or ""),
         )
     return RequestedFactRowSetReferenceInput(
         id=str(payload["id"]),

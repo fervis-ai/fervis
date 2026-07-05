@@ -35,7 +35,6 @@ from fervis.lookup.fact_plan.values import (
 )
 from fervis.lookup.turn_prompts import build_turn_prompt_context
 from fervis.lookup.question_contract import (
-    KnownInputKind,
     KnownInputSource,
     LiteralInputRole,
     NormalInstanceExcludedStateRole,
@@ -45,7 +44,6 @@ from fervis.lookup.question_contract import (
     RequestedFactAnswerExpressionFamily,
     RequestedFactAnswerOutput,
     RequestedFactAnswerSubject,
-    RequestedFactKnownInput,
     RequestedFactLiteralInput,
 )
 from fervis.lookup.read_eligibility import (
@@ -60,6 +58,9 @@ from fervis.lookup.source_binding import (
     SourceBindingRequest,
     SourceBindingTurnPrompt,
     parse_source_binding,
+)
+from fervis.lookup.source_binding.plan_targets import (
+    source_binding_targets_for_plan_selection,
 )
 from fervis.lookup.source_binding.candidates.compact import (
     _compact_prompt_payload,
@@ -662,6 +663,7 @@ def run_source_binding_schema_surface_case(payload: dict[str, Any]) -> list[str]
     candidate = _only_candidate(prompt.source_invocation_candidate_payload())
     schema = prompt.response_contract().provider_schema
     outcome = _schema_surface_outcome(
+        request,
         candidate,
         include_default_decision=bool(payload["input"].get("include_default_decision")),
         include_response_shape_decision=bool(
@@ -699,6 +701,7 @@ def run_source_binding_schema_surface_case(payload: dict[str, Any]) -> list[str]
                 and branch.get("additionalProperties") is False
                 for branch in fulfillment_schema.get("anyOf") or ()
             ),
+            "compact_invocation_shape": not bool(fulfillment_schema.get("anyOf")),
         },
         expected_subset=payload["expect"]["result_contains"],
     )
@@ -709,6 +712,7 @@ def run_source_binding_row_predicate_parse_case(payload: dict[str, Any]) -> list
     prompt = SourceBindingTurnPrompt(request)
     candidate = _only_candidate(prompt.source_invocation_candidate_payload())
     outcome = _source_binding_outcome(
+        request,
         candidate,
         row_predicate_reviews=(
             {}
@@ -757,6 +761,7 @@ def run_source_binding_row_predicate_schema_case(payload: dict[str, Any]) -> lis
     prompt = SourceBindingTurnPrompt(request)
     candidate = _only_candidate(prompt.source_invocation_candidate_payload())
     outcome = _source_binding_outcome(
+        request,
         candidate,
         row_predicate_reviews=(
             {}
@@ -791,6 +796,7 @@ def run_source_binding_finite_choice_parse_case(payload: dict[str, Any]) -> list
     prompt = SourceBindingTurnPrompt(request)
     candidate = _only_candidate(prompt.source_invocation_candidate_payload())
     outcome = _source_binding_outcome(
+        request,
         candidate,
         finite_choice_param_reviews={
             "status": _finite_choice_review_from_case(
@@ -871,6 +877,7 @@ def run_source_binding_metric_fit_parse_case(payload: dict[str, Any]) -> list[st
         payload["input"].get("selected_metric_field") or "amount"
     )
     outcome = _source_binding_outcome(
+        request,
         candidate,
         fulfillment_decisions=_fulfillment_decisions(
             candidate,
@@ -941,6 +948,7 @@ def run_source_binding_parse_case(payload: dict[str, Any]) -> list[str]:
         )
     model_payload = {
         "outcome": _source_binding_outcome(
+            request,
             candidate,
             fulfillment_decisions=_fulfillment_decisions(
                 candidate,
@@ -1082,10 +1090,12 @@ def _run_reused_answer_output_metric_fit_parse(
         },
         "source_invocations": [
             _source_invocation_for_metric_candidate(
+                request,
                 sales_candidate,
                 requested_fact_id="fact_sales",
             ),
             _source_invocation_for_metric_candidate(
+                request,
                 payments_candidate,
                 requested_fact_id="fact_payments",
             ),
@@ -1117,13 +1127,17 @@ def _run_reused_answer_output_metric_fit_parse(
 
 
 def _source_invocation_for_metric_candidate(
+    request: SourceBindingRequest,
     candidate: dict[str, Any],
     *,
     requested_fact_id: str,
 ) -> dict[str, Any]:
     return {
-        "requested_fact_id": requested_fact_id,
-        "source_candidate_id": candidate["source_candidate_id"],
+        "binding_target_id": _binding_target_id_for_candidate(
+            request,
+            requested_fact_id=requested_fact_id,
+            source_candidate_id=str(candidate["source_candidate_id"]),
+        ),
         "answer_population": {
             "population_binding_id": _binding_surface(candidate)["population_bindings"][
                 0
@@ -1135,7 +1149,6 @@ def _source_invocation_for_metric_candidate(
         "param_decisions": {},
         "row_predicate_reviews": {},
         "finite_choice_param_reviews": {},
-        "source_binding_decision": "USE_SOURCE",
     }
 
 
@@ -1490,6 +1503,22 @@ def _yaml_prompt_surface_request(payload: dict[str, Any]) -> SourceBindingReques
         ).candidate_scopes
     }
     retained_read_ids = tuple(payload.get("retained_read_ids") or ())
+    retained_field_refs_by_read_id = {
+        str(read_id): tuple(str(ref) for ref in refs if str(ref))
+        for read_id, refs in (
+            payload.get("retained_field_refs_by_read_id") or {}
+        ).items()
+        if isinstance(refs, list)
+    }
+    retained_row_path_ids_by_read_id = {
+        str(read_id): tuple(
+            str(row_path_id) for row_path_id in row_path_ids if str(row_path_id)
+        )
+        for read_id, row_path_ids in (
+            payload.get("retained_row_path_ids_by_read_id") or {}
+        ).items()
+        if isinstance(row_path_ids, list)
+    }
     return SourceBindingRequest(
         question=str(payload["question"]),
         question_contract=QuestionContract(requested_facts=(fact,)),
@@ -1513,6 +1542,11 @@ def _yaml_prompt_surface_request(payload: dict[str, Any]) -> SourceBindingReques
                     scope=scopes_by_read_id[read_id],
                     requested_fact_id=fact.id,
                     read_id=read_id,
+                    relevant_row_path_ids=retained_row_path_ids_by_read_id.get(
+                        read_id,
+                        ("root",),
+                    ),
+                    relevant_field_refs=retained_field_refs_by_read_id.get(read_id),
                 )
                 for read_id in retained_read_ids
             )
@@ -2486,7 +2520,6 @@ def _grounded_time_filter_request() -> SourceBindingRequest:
                 text="today",
                 resolved_value_text="today",
                 role=LiteralInputRole.TIME_VALUE,
-                satisfies_requirement_id="time_1_req",
             ),
         ),
     )
@@ -2757,6 +2790,7 @@ def _schema_property_order(
 
 
 def _schema_surface_outcome(
+    request: SourceBindingRequest,
     candidate: dict[str, Any],
     *,
     include_default_decision: bool,
@@ -2772,6 +2806,7 @@ def _schema_surface_outcome(
             _first_param_decision(candidate, "ordering")
         )
     return _source_binding_outcome(
+        request,
         candidate,
         param_decisions=param_decisions,
         finite_choice_param_reviews=_finite_choice_reviews_for_candidate(
@@ -2815,6 +2850,7 @@ def _find_fulfillment_decisions_schema(
 
 
 def _source_binding_outcome(
+    request: SourceBindingRequest,
     candidate: dict[str, Any],
     *,
     fulfillment_decisions: dict[str, Any] | None = None,
@@ -2835,8 +2871,11 @@ def _source_binding_outcome(
         **metric_fit_contract,
         "source_invocations": [
             {
-                "requested_fact_id": "fact_1",
-                "source_candidate_id": candidate["source_candidate_id"],
+                "binding_target_id": _binding_target_id_for_candidate(
+                    request,
+                    requested_fact_id="fact_1",
+                    source_candidate_id=str(candidate["source_candidate_id"]),
+                ),
                 "answer_population": {
                     "population_binding_id": _binding_surface(candidate)[
                         "population_bindings"
@@ -2848,10 +2887,32 @@ def _source_binding_outcome(
                 "param_decisions": param_decisions or {},
                 "row_predicate_reviews": row_predicate_reviews or {},
                 "finite_choice_param_reviews": finite_choice_param_reviews or {},
-                "source_binding_decision": "USE_SOURCE",
             }
         ],
     }
+
+
+def _binding_target_id_for_candidate(
+    request: SourceBindingRequest,
+    *,
+    requested_fact_id: str,
+    source_candidate_id: str,
+) -> str:
+    targets = tuple(
+        target
+        for target in source_binding_targets_for_plan_selection(
+            request.plan_selection,
+            requested_facts=request.requested_facts,
+        )
+        if target.requested_fact_id == requested_fact_id
+        and target.source_candidate_id == source_candidate_id
+    )
+    if len(targets) != 1:
+        raise AssertionError(
+            "source binding conformance fixture must identify exactly one "
+            f"binding target for {(requested_fact_id, source_candidate_id)}"
+        )
+    return targets[0].binding_target_id
 
 
 def _fulfillment_decisions(

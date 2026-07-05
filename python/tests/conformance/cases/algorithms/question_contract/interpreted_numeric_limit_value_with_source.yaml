@@ -31,7 +31,6 @@ expect:
       source: question_context
       text: top five
       resolved_input_ref: ''
-      satisfies_requirement_id: ''
       resolved_value_text: '5'
       field_label_text: ''
       value_meaning_hint: ''
@@ -48,7 +47,6 @@ expect:
         source: question_context
         text: top five
         resolved_input_ref: ''
-        satisfies_requirement_id: ''
         resolved_value_text: '5'
         field_label_text: ''
         value_meaning_hint: ''
@@ -66,8 +64,6 @@ expect:
             kind: NORMAL_BUSINESS_INSTANCE
             short_label: ordinary business meaning of stores
             meaning: Answer over ordinary business instances of 'stores' as they are normally understood in business operations and reporting. Do not assume this includes every persisted representation the host API may expose for 'stores'. Explicit user wording may narrow or override this normal instance interpretation.
-        input_requirements:
-          time_requirements: []
         answer_population:
           population_label: sales
           counted_unit: sales

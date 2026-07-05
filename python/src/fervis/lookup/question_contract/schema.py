@@ -27,14 +27,21 @@ def build_question_contract_decisions_schema() -> dict[str, object]:
     }
 
 
-def build_answer_request_contract_schema() -> dict[str, object]:
+def build_answer_request_contract_schema(
+    *,
+    include_conversation_resolution_inputs: bool = True,
+) -> dict[str, object]:
     return _strict_object(
         {
             "kind": {"enum": ["question_contract"]},
             "answer_requests_count": {"type": "integer", "minimum": 1},
             "question_inputs": {
                 "type": "array",
-                "items": _question_input_schema(),
+                "items": _question_input_schema(
+                    include_conversation_resolution_inputs=(
+                        include_conversation_resolution_inputs
+                    ),
+                ),
             },
             "answer_requests": {
                 "type": "array",
@@ -104,26 +111,24 @@ def _answer_request_schema() -> dict[str, object]:
         "answer_fact": {"type": "string", "minLength": 1},
         "answer_expression": _answer_expression_schema(),
         "answer_subject": _answer_subject_schema(),
-        "input_requirements": _input_requirements_schema(),
         "answer_population": _answer_population_schema(),
         "answer_outputs": {
             "type": "array",
             "minItems": 1,
             "items": _answer_output_schema(),
         },
-        "input_decisions": {
+        "used_question_inputs": {
             "type": "array",
-            "items": _input_decision_schema(),
+            "items": {"type": "string", "minLength": 1},
         },
     }
     required = [
         "answer_fact",
         "answer_expression",
         "answer_subject",
-        "input_requirements",
         "answer_population",
         "answer_outputs",
-        "input_decisions",
+        "used_question_inputs",
     ]
     return _strict_object(
         properties,
@@ -150,29 +155,6 @@ def _answer_expression_schema() -> dict[str, object]:
             },
         },
         required=("family",),
-    )
-
-
-def _input_requirements_schema() -> dict[str, object]:
-    return _strict_object(
-        {
-            "time_requirements": {
-                "type": "array",
-                "items": _time_requirement_schema(),
-            },
-        },
-        required=("time_requirements",),
-    )
-
-
-def _time_requirement_schema() -> dict[str, object]:
-    return _strict_object(
-        {
-            "requirement_id": {"type": "string", "minLength": 1},
-            "source_text": {"type": "string", "minLength": 1},
-            "why_required": {"type": "string", "minLength": 1},
-        },
-        required=("requirement_id", "source_text", "why_required"),
     )
 
 
@@ -230,16 +212,6 @@ def _answer_population_membership_test_schema() -> dict[str, object]:
     )
 
 
-def _input_decision_schema() -> dict[str, object]:
-    return _strict_object(
-        {
-            "input_ref": {"type": "string", "minLength": 1},
-            "use_input": {"type": "boolean"},
-        },
-        required=("input_ref", "use_input"),
-    )
-
-
 def _answer_output_schema() -> dict[str, object]:
     properties: dict[str, object] = {
         "description": {"type": "string", "minLength": 1},
@@ -251,36 +223,62 @@ def _answer_output_schema() -> dict[str, object]:
     )
 
 
-def _question_input_schema() -> dict[str, object]:
-    return {
-        "oneOf": [
-            _literal_text_input_schema(),
-            _row_set_reference_input_schema(),
-        ]
-    }
+def _question_input_schema(
+    *,
+    include_conversation_resolution_inputs: bool,
+) -> dict[str, object]:
+    branches = [
+        _literal_text_input_role_schema(
+            role=LiteralInputRole.REFERENCE_VALUE,
+            include_conversation_resolution_inputs=(
+                include_conversation_resolution_inputs
+            ),
+        ),
+        _literal_text_input_role_schema(
+            role=LiteralInputRole.RESULT_LIMIT,
+            include_conversation_resolution_inputs=(
+                include_conversation_resolution_inputs
+            ),
+        ),
+        _literal_text_input_role_schema(
+            role=LiteralInputRole.TIME_VALUE,
+            include_conversation_resolution_inputs=(
+                include_conversation_resolution_inputs
+            ),
+        ),
+    ]
+    if include_conversation_resolution_inputs:
+        branches.append(_row_set_reference_input_schema())
+    return {"oneOf": branches}
 
 
-def _literal_text_input_schema() -> dict[str, object]:
-    return _strict_object(
-        {
-            "input_ref": {"type": "string", "minLength": 1},
-            "source": {"enum": ["question_context", "conversation_resolution"]},
-            "source_text": {"type": "string", "minLength": 1},
-            "resolved_value_text": {"type": "string", "minLength": 1},
-            "field_label_text": {"type": "string", "minLength": 1},
-            "value_meaning_hint": {"type": "string", "minLength": 1},
-            "role": {
-                "enum": [
-                    LiteralInputRole.REFERENCE_VALUE.value,
-                    LiteralInputRole.RESULT_LIMIT.value,
-                    LiteralInputRole.TIME_VALUE.value,
-                ]
-            },
-            "satisfies_requirement_id": {"type": "string", "minLength": 1},
-            "resolved_input_ref": {"type": "string", "minLength": 1},
-            "inventory_check": _question_input_inventory_check_schema(),
-            "kind": {"enum": [KnownInputKind.LITERAL.value]},
+def _literal_text_input_role_schema(
+    *,
+    role: LiteralInputRole,
+    include_conversation_resolution_inputs: bool,
+) -> dict[str, object]:
+    properties: dict[str, object] = {
+        "input_ref": {"type": "string", "minLength": 1},
+        "source": {
+            "enum": (
+                ["question_context", "conversation_resolution"]
+                if include_conversation_resolution_inputs
+                else ["question_context"]
+            )
         },
+        "source_text": {"type": "string", "minLength": 1},
+        "resolved_value_text": {"type": "string", "minLength": 1},
+        "field_label_text": {"type": "string", "minLength": 1},
+        "value_meaning_hint": {"type": "string", "minLength": 1},
+        "role": {"enum": [role.value]},
+        "occurrence": {"type": "integer", "minimum": 1},
+        "inventory_check": _question_input_inventory_check_schema(),
+        "kind": {"enum": [KnownInputKind.LITERAL.value]},
+    }
+    if include_conversation_resolution_inputs:
+        properties["resolved_input_ref"] = {"type": "string", "minLength": 1}
+    return _strict_object(
+        properties,
         required=(
             "input_ref",
             "source",

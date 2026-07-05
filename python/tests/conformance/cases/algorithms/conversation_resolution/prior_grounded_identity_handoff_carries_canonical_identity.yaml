@@ -1,4 +1,4 @@
-id: prior_grounded_identity_handoff_carries_canonical_value
+id: prior_grounded_identity_handoff_carries_canonical_identity
 description: Conversation-resolution overlay can carry a backend-authored prior canonical identity.
 kind: algorithm
 algorithm: conversation_resolution.overlay
@@ -12,12 +12,13 @@ input:
       value_meaning_hint: staff member
       role: reference_value
       evidence_refs: [memory:staff-alice]
-      resolved_canonical_value:
+      resolved_canonical_identity:
         kind: identity
         identity_type: staff
         identity_field: staff_id
         value: 51515151-0000-0000-0002-000000000001
-        proof_refs: [prior_source_read:staff:list:row_1]
+        authority_refs: [prior_source_read:staff:list:row_1]
+        lineage_refs: [memory:staff-alice]
 expect:
   result_equals:
     prompt_resolved_question_inputs:
@@ -37,9 +38,10 @@ expect:
         value_meaning_hint: staff member
         role: reference_value
         evidence_refs: [memory:staff-alice]
-        resolved_canonical_value:
+        resolved_canonical_identity:
           kind: identity
           identity_type: staff
           identity_field: staff_id
           value: 51515151-0000-0000-0002-000000000001
-          proof_refs: [prior_source_read:staff:list:row_1]
+          authority_refs: [prior_source_read:staff:list:row_1]
+          lineage_refs: [memory:staff-alice]

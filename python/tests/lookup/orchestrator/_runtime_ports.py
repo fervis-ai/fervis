@@ -276,7 +276,7 @@ def _time_resolution_payload_from_prompt(prompt: str) -> dict[str, Any]:
     ]
     return {
         task["known_input_id"]: {
-            "date_intent": _date_intent_payload(str(task["known_input_text"]))
+            "date_intent": _date_intent_payload(str(task["time_expression"]))
         }
         for task in time_tasks
     }

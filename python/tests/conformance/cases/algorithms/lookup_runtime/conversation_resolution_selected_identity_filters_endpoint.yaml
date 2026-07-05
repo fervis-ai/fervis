@@ -21,6 +21,8 @@ input:
       referenceText: Alice Smith
       identity:
         staff_id: staff_alice
+      evidence:
+        stepIds: [prior_source_read:staff:list:row_1]
   - artifact_id: turn_jane
     outcome: answered
     source_question: Who is Jane Doe?
@@ -31,9 +33,12 @@ input:
       referenceText: Jane Doe
       identity:
         staff_id: staff_jane
+      evidence:
+        stepIds: [prior_source_read:staff:list:row_2]
   conversation_resolution:
     mode: select_visible_memory
     memory_id: turn_alice.entity.staff.alice
+    anchor_text: she
     resolved_text: Alice Smith
     integrated_question: How much did Alice Smith sell yesterday?
   question_contract:
@@ -53,8 +58,10 @@ input:
     known_inputs:
     - kind: literal_text
       text: she
+      source: conversation_resolution
+      resolved_input_ref: cr_input_1
       resolved_value_text: Alice Smith
-      value_meaning_hint: staff member
+      value_meaning_hint: staff identity
       role: reference_value
     - kind: literal_text
       text: yesterday

@@ -62,6 +62,7 @@ from tests.lookup.source_binding_helpers import (
     source_binding_payload_from_fact_plan,
     source_binding_payload_from_fact_plan_with_invocation_overrides,
     source_binding_payload_for_one_call,
+    source_binding_target_id_for_candidate,
     source_fulfills_for_candidate,
 )
 from tests.testkit.assertions import subset_mismatches
@@ -328,8 +329,12 @@ class _VariantGroundingPlannerPort:
                 "kind": "source_bindings",
                 "source_invocations": [
                     {
-                        "requested_fact_id": "fact_1",
-                        "source_candidate_id": relation["source_candidate_id"],
+                        "binding_target_id": source_binding_target_id_for_candidate(
+                            prompt,
+                            requested_fact_id="fact_1",
+                            source_candidate_id=str(relation["source_candidate_id"]),
+                            plan_shape="list_rows",
+                        ),
                         "answer_population": {
                             "population_binding_id": _candidate_binding_surface(
                                 relation
@@ -353,7 +358,6 @@ class _VariantGroundingPlannerPort:
                         ),
                         "row_predicate_reviews": {},
                         "finite_choice_param_reviews": {},
-                        "source_binding_decision": "USE_SOURCE",
                     }
                 ],
             }
@@ -506,16 +510,6 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
         _scripted_question_input(index=index, payload=item)
         for index, item in enumerate(known_inputs, start=1)
     ]
-    time_requirements = [
-        {
-            "requirement_id": item["satisfies_requirement_id"],
-            "source_text": item["source_text"],
-            "why_required": f"{item['source_text']} constrains the requested fact",
-        }
-        for item in question_inputs
-        if item.get("role") == LiteralInputRole.TIME_VALUE.value
-        and item.get("satisfies_requirement_id")
-    ]
     return {
         "kind": "question_contract",
         "answer_requests_count": 1,
@@ -529,7 +523,6 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
                     )
                 },
                 "answer_subject": _answer_subject_payload(subject_text),
-                "input_requirements": {"time_requirements": time_requirements},
                 "answer_population": default_answer_population(
                     description=fact_description,
                     subject_text=subject_text,
@@ -541,9 +534,8 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
                     {"description": str(answer_output)}
                     for answer_output in answer_outputs
                 ],
-                "input_decisions": [
-                    {"input_ref": item["input_ref"], "use_input": True}
-                    for item in question_inputs
+                "used_question_inputs": [
+                    str(item["input_ref"]) for item in question_inputs
                 ],
             }
         ],
@@ -556,9 +548,10 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
 def _scripted_question_input(*, index: int, payload: dict[str, Any]) -> dict[str, Any]:
     kind = KnownInputKind(str(payload["kind"]))
     text = str(payload["text"])
+    source = str(payload.get("source") or "question_context")
     output: dict[str, Any] = {
         "input_ref": str(payload.get("input_ref") or f"input_{index}"),
-        "source": "question_context",
+        "source": source,
         "kind": kind.value,
         "inventory_check": {
             "why_this_is_an_input": f"{text} is a declared question input",
@@ -573,9 +566,10 @@ def _scripted_question_input(*, index: int, payload: dict[str, Any]) -> dict[str
             output["value_meaning_hint"] = str(payload["value_meaning_hint"])
         if payload.get("field_label_text"):
             output["field_label_text"] = str(payload["field_label_text"])
-        if role == LiteralInputRole.TIME_VALUE:
-            output["satisfies_requirement_id"] = str(
-                payload.get("satisfies_requirement_id") or f"input_{index}_time_req"
+        if source == KnownInputSource.CONVERSATION_RESOLUTION.value:
+            output["occurrence"] = int(payload.get("occurrence") or 1)
+            output["resolved_input_ref"] = str(
+                payload.get("resolved_input_ref") or f"cr_input_{index}"
             )
     if kind == KnownInputKind.ROW_SET_REFERENCE:
         output["reference_text"] = text
@@ -1184,7 +1178,6 @@ def _question_contract_decisions_payload() -> dict[str, Any]:
                 "source_text": "today",
                 "resolved_value_text": "today",
                 "role": LiteralInputRole.TIME_VALUE.value,
-                "satisfies_requirement_id": "time_req_1",
                 "inventory_check": {
                     "why_this_is_an_input": "today is a declared question input"
                 },
@@ -1195,15 +1188,6 @@ def _question_contract_decisions_payload() -> dict[str, Any]:
                 "answer_fact": fact.description,
                 "answer_expression": {"family": "list_rows"},
                 "answer_subject": _answer_subject_payload("products"),
-                "input_requirements": {
-                    "time_requirements": [
-                        {
-                            "requirement_id": "time_req_1",
-                            "source_text": "today",
-                            "why_required": "today constrains the requested fact",
-                        }
-                    ]
-                },
                 "answer_population": default_answer_population(
                     description=fact.description,
                     subject_text="products",
@@ -1214,10 +1198,7 @@ def _question_contract_decisions_payload() -> dict[str, Any]:
                 "answer_outputs": [
                     {"description": "products sold by sale, sale grouping"}
                 ],
-                "input_decisions": [
-                    {"input_ref": "input_1", "use_input": True},
-                    {"input_ref": "input_2", "use_input": True},
-                ],
+                "used_question_inputs": ["input_1", "input_2"],
             }
         ],
         "question_input_inventory_check": {
@@ -1260,7 +1241,6 @@ def _variant_grounding_question_contract() -> QuestionContract:
                         text="today",
                         resolved_value_text="today",
                         role=LiteralInputRole.TIME_VALUE,
-                        satisfies_requirement_id="time_req_1",
                     ),
                 ),
             ),

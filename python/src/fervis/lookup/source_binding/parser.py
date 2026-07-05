@@ -66,8 +66,14 @@ from fervis.lookup.source_binding.param_surface import (
     param_requires_finite_choice_review,
 )
 from fervis.lookup.source_binding.param_values import canonical_param_value
+from fervis.lookup.source_binding.plan_targets import (
+    source_binding_target_index,
+)
 from fervis.lookup.source_binding.population_bindings import (
     PopulationBindingIndex,
+)
+from fervis.lookup.source_binding.role_selection import (
+    bound_plan_selection_for_source_binding,
 )
 from fervis.lookup.source_binding.parser_common import (
     _dict,
@@ -103,6 +109,16 @@ class _PopulationChoiceSet:
 class _DerivedFiniteChoiceParamDecisions:
     param_decisions: dict[str, dict[str, Any]]
     population_choices: tuple[RelationSourcePopulationChoice, ...]
+
+
+_SOURCE_INVOCATION_FIELDS = {
+    "binding_target_id",
+    "answer_population",
+    "fulfillment_decisions",
+    "param_decisions",
+    "row_predicate_reviews",
+    "finite_choice_param_reviews",
+}
 
 
 def parse_source_binding(
@@ -147,24 +163,26 @@ def _source_binding_payload_with_derived_finite_choices(
     population_choices_by_index: dict[
         int, tuple[RelationSourcePopulationChoice, ...]
     ] = {}
+    target_index = source_binding_target_index(request)
     for index, raw in enumerate(
         _required_dicts(payload.get("source_invocations"), "source_invocations"),
         start=1,
     ):
         invocation = dict(raw)
-        candidate_id = _text(invocation.get("source_candidate_id"))
-        candidate = candidates.get(candidate_id)
+        unsupported = set(invocation) - _SOURCE_INVOCATION_FIELDS
+        if unsupported:
+            raise ValueError("unsupported source binding invocation field")
+        target = target_index.require(_text(invocation.get("binding_target_id")))
+        candidate = candidates.get(target.source_candidate_id)
         if candidate is None:
             raise ValueError("source binding references unknown source candidate")
-        if _text(invocation.get("source_binding_decision")) != "USE_SOURCE":
-            raise ValueError("unsupported source binding decision")
         raw_param_decisions = _normalized_param_decisions(
             invocation.get("param_decisions")
         )
         derived = _derived_finite_choice_param_decisions(
             invocation.get("finite_choice_param_reviews"),
             candidate=candidate,
-            requested_fact_id=_text(invocation.get("requested_fact_id")),
+            requested_fact_id=target.requested_fact_id,
             request=request,
             answer_population=_dict(
                 invocation.get("answer_population"),
@@ -175,7 +193,6 @@ def _source_binding_payload_with_derived_finite_choices(
         combined_decisions = {**raw_param_decisions, **derived.param_decisions}
         invocation["param_decisions"] = combined_decisions
         invocation.pop("finite_choice_param_reviews", None)
-        invocation.pop("source_binding_decision", None)
         normalized_invocations.append(invocation)
         population_choices_by_index[index] = derived.population_choices
         effective_param_ids_by_index[index] = tuple(
@@ -754,6 +771,7 @@ def _source_binding_plan(
     ) = None,
 ) -> SourceBindingPlan:
     candidates = source_candidates(request)
+    target_index = source_binding_target_index(request)
     value_candidates_by_relation_id = _value_candidates_by_source_relation_id(
         candidates.values()
     )
@@ -765,26 +783,20 @@ def _source_binding_plan(
         payload,
         request=request,
     )
-    expected_plan_selection_members = _expected_plan_selection_members(request)
-    plan_shape_by_binding = _plan_shape_by_selection_binding(request)
-    expected_plan_selection_bindings = set(expected_plan_selection_members)
-    seen_plan_selection_bindings: set[tuple[str, str]] = set()
-    seen_plan_selection_binding_scopes: set[
-        tuple[str, str, tuple[tuple[tuple[str, str], ...], ...]]
-    ] = set()
+    seen_binding_target_ids: set[str] = set()
     output: list[BoundSource] = []
-    source_index_by_key: dict[
-        tuple[str, str, tuple[tuple[tuple[str, str], ...], ...]],
-        int,
-    ] = {}
     for index, raw in enumerate(
         _required_dicts(payload.get("source_invocations"), "source_invocations"),
         start=1,
     ):
-        requested_fact_id = _text(raw.get("requested_fact_id"))
+        target = target_index.require(_text(raw.get("binding_target_id")))
+        if target.binding_target_id in seen_binding_target_ids:
+            raise ValueError("duplicate source binding target")
+        seen_binding_target_ids.add(target.binding_target_id)
+        requested_fact_id = target.requested_fact_id
         if requested_fact_id not in requested_fact_output_ids:
             raise ValueError("source binding references unknown requested fact")
-        candidate_id = _text(raw.get("source_candidate_id"))
+        candidate_id = target.source_candidate_id
         candidate = candidates.get(candidate_id)
         if candidate is None:
             raise ValueError("source binding references unknown source candidate")
@@ -798,15 +810,6 @@ def _source_binding_plan(
             and candidate.requested_fact_id != requested_fact_id
         ):
             raise ValueError("source candidate does not belong to requested fact")
-        binding_key = (requested_fact_id, candidate_id)
-        if binding_key not in expected_plan_selection_bindings:
-            raise ValueError(
-                "source binding references unselected plan selection member"
-            )
-        if binding_key in seen_plan_selection_bindings:
-            raise ValueError(
-                "duplicate source binding for selected plan selection member"
-            )
         answer_population, population_binding = _answer_population(
             raw.get("answer_population"),
             request=request,
@@ -842,36 +845,14 @@ def _source_binding_plan(
             *row_predicates.population_choices,
         )
         row_filters = row_predicates.filters
-        key = (
-            requested_fact_id,
-            candidate_id,
-            tuple(
-                _param_binding_signature(bindings) for bindings in param_binding_sets
-            ),
-        )
-        if key in seen_plan_selection_binding_scopes:
-            raise ValueError(
-                "duplicate source binding for selected plan selection member"
-            )
-        seen_plan_selection_binding_scopes.add(key)
-        seen_plan_selection_bindings.add((requested_fact_id, candidate_id))
         fulfillments = _source_fulfillments(
             raw.get("fulfillment_decisions"),
             requested_fact_id=requested_fact_id,
-            answer_output_ids=requested_fact_output_ids[requested_fact_id],
+            answer_output_ids=set(target.answer_output_ids),
             candidate=candidate,
-            plan_shape=plan_shape_by_binding.get(binding_key, ""),
+            plan_shape=target.plan_shape,
             metric_fit_reviews_by_requested_output=metric_fit_reviews,
         )
-        existing_index = source_index_by_key.get(key)
-        if existing_index is not None:
-            merged = replace(
-                output[existing_index],
-                fulfillments=(*output[existing_index].fulfillments, *fulfillments),
-            )
-            output[existing_index] = merged
-            continue
-        source_index_by_key[key] = len(output)
         source, source_invocations = _bound_relation_source(
             candidate=candidate,
             population_binding=population_binding,
@@ -894,6 +875,8 @@ def _source_binding_plan(
         bound = BoundSource(
             id=f"sb_{len(output) + 1}",
             requested_fact_id=requested_fact_id,
+            binding_target_id=target.binding_target_id,
+            requirement_id=target.requirement_id,
             answer_population=answer_population,
             fulfillments=fulfillments,
             source=source,
@@ -920,30 +903,25 @@ def _source_binding_plan(
         output,
         requested_fact_output_ids=requested_fact_output_ids,
     )
-    return SourceBindingPlan(bound_sources=tuple(output))
+    plan = SourceBindingPlan(bound_sources=tuple(output))
+    _require_complete_role_target_coverage(plan, request=request)
+    return plan
 
 
-def _expected_plan_selection_members(
+def _require_complete_role_target_coverage(
+    plan: SourceBindingPlan,
+    *,
     request: SourceBindingRequest,
-) -> dict[tuple[str, str], tuple[Any, ...]]:
-    output: dict[tuple[str, str], list[Any]] = {}
-    for plan in request.plan_selection.plan_selections:
-        for member in plan.source_members:
-            output.setdefault(
-                (plan.requested_fact_id, member.source_candidate_id),
-                [],
-            ).append(member)
-    return {key: tuple(value) for key, value in output.items()}
-
-
-def _plan_shape_by_selection_binding(
-    request: SourceBindingRequest,
-) -> dict[tuple[str, str], str]:
-    return {
-        (plan.requested_fact_id, member.source_candidate_id): plan.plan_shape
-        for plan in request.plan_selection.plan_selections
-        for member in plan.source_members
-    }
+) -> None:
+    if (
+        bound_plan_selection_for_source_binding(
+            request.plan_selection,
+            plan,
+            requested_facts=request.requested_facts,
+        )
+        is None
+    ):
+        raise ValueError("source binding must cover one complete source binding role set")
 
 
 def _value_candidates_by_source_relation_id(
@@ -1017,20 +995,6 @@ def _candidate_value_is_used_by_bound_source(
         and item.field_id
     }
     return not answer_field_ids or source_field_id in answer_field_ids
-
-
-def _param_binding_signature(
-    param_bindings: tuple[EndpointParamBinding, ...],
-) -> tuple[tuple[str, str], ...]:
-    return tuple(
-        sorted(
-            (
-                binding.param_id,
-                canonical_param_value(binding.value),
-            )
-            for binding in param_bindings
-        )
-    )
 
 
 def _answer_population(
@@ -1132,6 +1096,10 @@ def _source_fulfillments(
     output: list[SourceFulfillment] = []
     seen_support_set_ids: set[str] = set()
     raw_decisions = _dict(raw_fulfillment_decisions, "fulfillment_decisions")
+    if not answer_output_ids:
+        if raw_decisions:
+            raise ValueError("binding target does not allow answer fulfillment")
+        return ()
     if not raw_decisions:
         raise ValueError("fulfillment_decisions must contain at least one value")
     for answer_output_id, raw_value in raw_decisions.items():
@@ -1175,16 +1143,19 @@ def _source_fulfillments(
                 metric_fit_reviews_by_requested_output
             ),
         )
-        selected_row_count_basis_evidence_ids = _fitting_row_count_basis_evidence_ids(
-            requested_fact_id=requested_fact_id,
-            answer_output_id=answer_output_id,
-            selected_row_count_basis_evidence_ids=(
-                selected_row_count_basis_evidence_ids
-            ),
-            metric_fit_reviews_by_requested_output=(
-                metric_fit_reviews_by_requested_output
-            ),
-        )
+        if _plan_shape_uses_row_count_as_metric(plan_shape):
+            selected_row_count_basis_evidence_ids = (
+                _fitting_row_count_basis_evidence_ids(
+                    requested_fact_id=requested_fact_id,
+                    answer_output_id=answer_output_id,
+                    selected_row_count_basis_evidence_ids=(
+                        selected_row_count_basis_evidence_ids
+                    ),
+                    metric_fit_reviews_by_requested_output=(
+                        metric_fit_reviews_by_requested_output
+                    ),
+                )
+            )
         if plan_shape in {"aggregate_by_group", "ranked_aggregate"}:
             selected_metric_measure_evidence_ids = tuple(
                 dict.fromkeys(
@@ -1302,6 +1273,10 @@ def _candidate_metric_measure_evidence_ids(candidate: Any) -> tuple[str, ...]:
             if evidence_id and evidence_id in available
         )
     )
+
+
+def _plan_shape_uses_row_count_as_metric(plan_shape: str) -> bool:
+    return plan_shape in {"aggregate_scalar", "aggregate_by_group", "ranked_aggregate"}
 
 
 def _candidate_row_count_basis_evidence_ids(candidate: Any) -> tuple[str, ...]:

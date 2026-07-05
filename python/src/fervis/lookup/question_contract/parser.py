@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 import re
 from typing import Any
 
 from fervis.lookup.conversation_resolution import ConversationResolutionOverlay
+from fervis.lookup.question_contract._text_spans import copied_span
 from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 from fervis.lookup.question_contract.model import (
     AnswerPopulationMembershipTestKind,
@@ -26,8 +26,6 @@ from fervis.lookup.question_contract.model import (
     RequestedFactAnswerOutput,
     RequestedFactAnswerSubject,
     RequestedFactAnswerSubjectInstanceInterpretation,
-    RequestedFactTimeRequirement,
-    RequestedFactInputRequirements,
     RequestedFactKnownInput,
     RequestedFactLiteralInput,
     RequestedFactRowSetReferenceInput,
@@ -94,21 +92,17 @@ def parse_question_contract(
         question_inputs=question_inputs,
         question_context_texts=context_texts,
     )
-    _reject_unowned_literal_inputs(
+    _reject_unowned_question_inputs(
         question_inputs,
         requested_facts=requested_facts,
     )
-    question_inputs, requested_facts = _drop_answer_subject_question_inputs(
+    _reject_answer_subject_question_inputs(
         question_inputs,
         requested_facts=requested_facts,
     )
     question_inputs = _referenced_question_inputs(
         question_inputs,
         requested_facts=requested_facts,
-    )
-    _validate_input_requirements(
-        requested_facts=requested_facts,
-        question_inputs=question_inputs,
     )
     _validate_answer_requests_count(
         parsed.take("answer_requests_count"),
@@ -185,7 +179,6 @@ def _requested_facts(
 ) -> tuple[RequestedFact, ...]:
     output: list[RequestedFact] = []
     inputs_by_id = {item.id: item for item in question_inputs}
-    input_ids = tuple(inputs_by_id)
     for fact_index, item in enumerate(_required_dicts(raw, "answer_requests"), start=1):
         path = f"answer_requests[{fact_index - 1}]"
         parsed = _ParsedObject(item, path)
@@ -194,21 +187,15 @@ def _requested_facts(
             parsed.take("answer_outputs"),
             path=f"{path}.answer_outputs",
         )
-        input_refs = _input_decisions(
-            parsed.take("input_decisions"),
+        input_refs = _used_question_inputs(
+            parsed.take("used_question_inputs"),
             inputs_by_id=inputs_by_id,
-            input_ids=input_ids,
-            path=f"{path}.input_decisions",
+            path=f"{path}.used_question_inputs",
         )
         answer_subject = _answer_subject(
             parsed.take("answer_subject"),
             question_context_texts=question_context_texts,
             path=f"{path}.answer_subject",
-        )
-        input_requirements = _input_requirements(
-            parsed.take("input_requirements"),
-            question_context_texts=question_context_texts,
-            path=f"{path}.input_requirements",
         )
         answer_population = _answer_population(
             parsed.take("answer_population"),
@@ -226,7 +213,6 @@ def _requested_facts(
                     path=f"{path}.answer_expression",
                 ),
                 answer_subject=answer_subject,
-                input_requirements=input_requirements,
                 answer_population=answer_population,
                 answer_outputs=answer_outputs,
                 known_inputs=tuple(inputs_by_id[input_ref] for input_ref in input_refs),
@@ -282,47 +268,6 @@ def _instance_interpretation(
     return RequestedFactAnswerSubjectInstanceInterpretation(
         kind=AnswerSubjectInstanceInterpretationKind(_text(kind))
     )
-
-
-def _input_requirements(
-    raw: Any,
-    *,
-    question_context_texts: tuple[str, ...],
-    path: str,
-) -> RequestedFactInputRequirements:
-    item = _ParsedObject(raw, path)
-    time_requirements = item.take("time_requirements")
-    item.finish()
-    requirements: list[RequestedFactTimeRequirement] = []
-    seen_ids: set[str] = set()
-    for index, requirement in enumerate(
-        _optional_dicts(time_requirements, f"{path}.time_requirements")
-    ):
-        requirement_path = f"{path}.time_requirements[{index}]"
-        parsed_requirement = _ParsedObject(requirement, requirement_path)
-        requirement_id = _required_text(
-            parsed_requirement.take("requirement_id"),
-            path=f"{requirement_path}.requirement_id",
-        )
-        if requirement_id in seen_ids:
-            raise ValueError("duplicate time requirement")
-        seen_ids.add(requirement_id)
-        requirements.append(
-            RequestedFactTimeRequirement(
-                id=requirement_id,
-                source_text=_copied_text(
-                    parsed_requirement.take("source_text"),
-                    question_context_texts=question_context_texts,
-                    path=f"{requirement_path}.source_text",
-                ),
-                why_required=_required_text(
-                    parsed_requirement.take("why_required"),
-                    path=f"{requirement_path}.why_required",
-                ),
-            )
-        )
-        parsed_requirement.finish()
-    return RequestedFactInputRequirements(time_requirements=tuple(requirements))
 
 
 def _answer_population(
@@ -392,7 +337,7 @@ def _referenced_question_inputs(
     return tuple(known for known in question_inputs if known.id in referenced)
 
 
-def _reject_unowned_literal_inputs(
+def _reject_unowned_question_inputs(
     question_inputs: tuple[RequestedFactKnownInput, ...],
     *,
     requested_facts: tuple[RequestedFact, ...],
@@ -403,11 +348,11 @@ def _reject_unowned_literal_inputs(
     unowned = [
         known.id
         for known in question_inputs
-        if known.kind == KnownInputKind.LITERAL and known.id not in referenced
+        if known.id not in referenced
     ]
     if unowned:
         raise ValueError(
-            "literal_text question inputs must be owned by a requested fact: "
+            "question inputs must be owned by a requested fact: "
             + ", ".join(unowned)
         )
 
@@ -460,18 +405,21 @@ def _conversation_resolution_input_matches(
     if known.kind == KnownInputKind.LITERAL:
         return (
             resolved.kind == KnownInputKind.LITERAL
+            and known.occurrence == resolved.occurrence
             and known.resolved_value_text == resolved.resolved_value_text
+            and known.field_label_text == resolved.field_label_text
+            and known.value_meaning_hint == resolved.value_meaning_hint
             and known.role is not None
             and known.role == resolved.role
         )
     return False
 
 
-def _drop_answer_subject_question_inputs(
+def _reject_answer_subject_question_inputs(
     question_inputs: tuple[RequestedFactKnownInput, ...],
     *,
     requested_facts: tuple[RequestedFact, ...],
-) -> tuple[tuple[RequestedFactKnownInput, ...], tuple[RequestedFact, ...]]:
+) -> None:
     duplicate_input_ids = {
         known.id
         for known in question_inputs
@@ -483,16 +431,11 @@ def _drop_answer_subject_question_inputs(
             for text in _answer_subject_input_exclusion_texts(fact)
         )
     }
-    if not duplicate_input_ids:
-        return question_inputs, requested_facts
-    kept_inputs = tuple(
-        known for known in question_inputs if known.id not in duplicate_input_ids
-    )
-    kept_facts = tuple(
-        _without_question_input_refs(fact, duplicate_input_ids)
-        for fact in requested_facts
-    )
-    return kept_inputs, kept_facts
+    if duplicate_input_ids:
+        raise ValueError(
+            "answer subject must not be declared as a question input: "
+            + ", ".join(sorted(duplicate_input_ids))
+        )
 
 
 def _answer_subject_input_exclusion_texts(fact: RequestedFact) -> tuple[str, ...]:
@@ -507,19 +450,6 @@ def _answer_subject_input_exclusion_texts(fact: RequestedFact) -> tuple[str, ...
             )
         )
     return tuple(text for text in texts if text.strip())
-
-
-def _without_question_input_refs(
-    fact: RequestedFact,
-    input_ids: set[str],
-) -> RequestedFact:
-    input_refs = tuple(
-        input_ref for input_ref in fact.input_refs if input_ref not in input_ids
-    )
-    known_inputs = tuple(
-        known for known in fact.known_inputs if known.id not in input_ids
-    )
-    return replace(fact, input_refs=input_refs, known_inputs=known_inputs)
 
 
 def _same_question_text(left: str, right: str) -> bool:
@@ -649,21 +579,12 @@ def _question_input(
     if kind == KnownInputKind.LITERAL:
         role = LiteralInputRole(_required_text(item.take("role"), path=f"{path}.role"))
         field_label_text = _text(item.take("field_label_text"))
-        if field_label_text and not any(
-            _contains_text_span(context, field_label_text)
-            for context in question_context_texts
-        ):
-            raise ValueError("field label text must come from question context")
         resolved_input_ref = _text(item.take("resolved_input_ref"))
         resolved_value_text = _required_text(
             item.take("resolved_value_text"),
             path=f"{path}.resolved_value_text",
         )
-        if role == LiteralInputRole.RESULT_LIMIT:
-            resolved_value_text = _result_limit_value_text(
-                resolved_value_text,
-                path=f"{path}.resolved_value_text",
-            )
+        raw_occurrence = item.take("occurrence")
         return RequestedFactLiteralInput(
             id=input_ref,
             source=source,
@@ -672,8 +593,12 @@ def _question_input(
             field_label_text=field_label_text,
             value_meaning_hint=_text(item.take("value_meaning_hint")),
             role=role,
-            satisfies_requirement_id=_text(item.take("satisfies_requirement_id")),
             resolved_input_ref=resolved_input_ref,
+            occurrence=(
+                1
+                if raw_occurrence is None
+                else _positive_int(raw_occurrence, path=f"{path}.occurrence")
+            ),
         )
     if kind == KnownInputKind.ROW_SET_REFERENCE:
         return RequestedFactRowSetReferenceInput(
@@ -691,65 +616,27 @@ def _question_input(
     raise ValueError("unsupported question input kind")
 
 
-def _validate_input_requirements(
-    *,
-    requested_facts: tuple[RequestedFact, ...],
-    question_inputs: tuple[RequestedFactKnownInput, ...],
-) -> None:
-    inputs_by_id = {known.id: known for known in question_inputs}
-    for fact in requested_facts:
-        used_inputs = tuple(
-            inputs_by_id[input_ref]
-            for input_ref in fact.input_refs
-            if input_ref in inputs_by_id
-        )
-        for requirement in fact.input_requirements.time_requirements:
-            matching = [
-                known
-                for known in used_inputs
-                if (known.is_time_value)
-                and known.satisfies_requirement_id == requirement.id
-                and known.text == requirement.source_text
-            ]
-            if not matching:
-                raise ValueError(
-                    "time requirement requires matching used question input"
-                )
-
-
-def _input_decisions(
+def _used_question_inputs(
     raw: Any,
     *,
     inputs_by_id: dict[str, RequestedFactKnownInput],
-    input_ids: tuple[str, ...],
     path: str,
 ) -> tuple[str, ...]:
     if not isinstance(raw, list):
         raise ValueError(f"{path} must be a list")
-    decisions: dict[str, bool] = {}
+    used_input_refs: list[str] = []
+    seen: set[str] = set()
     for index, item in enumerate(raw):
-        if not isinstance(item, dict):
-            raise ValueError(f"{path}[{index}] must be an object")
-        parsed = _ParsedObject(item, f"{path}[{index}]")
-        input_ref = _required_text(
-            parsed.take("input_ref"),
-            path=f"{path}[{index}].input_ref",
-        )
+        input_ref = _required_text(item, path=f"{path}[{index}]")
         if input_ref not in inputs_by_id:
             raise ValueError(
-                f"{path}[{index}].input_ref references unknown question input"
+                f"{path}[{index}] references unknown question input"
             )
-        if input_ref in decisions:
-            raise ValueError(f"{path}[{index}].input_ref duplicates question input")
-        use_input = parsed.take("use_input")
-        if not isinstance(use_input, bool):
-            raise ValueError(f"{path}[{index}].use_input must be boolean")
-        decisions[input_ref] = use_input
-        parsed.finish()
-    missing = [input_id for input_id in input_ids if input_id not in decisions]
-    if missing:
-        raise ValueError(f"{path} must decide every question input")
-    return tuple(input_id for input_id in input_ids if decisions[input_id])
+        if input_ref in seen:
+            raise ValueError(f"{path}[{index}] duplicates question input")
+        seen.add(input_ref)
+        used_input_refs.append(input_ref)
+    return tuple(used_input_refs)
 
 
 def _question_input_kind(value: Any, *, path: str) -> KnownInputKind:
@@ -789,13 +676,6 @@ def _positive_int(value: Any, *, path: str) -> int:
     return value
 
 
-def _result_limit_value_text(value: str, *, path: str) -> str:
-    text = value.strip()
-    if not text.isdigit() or int(text) < 1:
-        raise ValueError(f"{path} must be canonical positive integer digits")
-    return str(int(text))
-
-
 def _copied_text(
     value: Any,
     *,
@@ -803,33 +683,11 @@ def _copied_text(
     path: str,
 ) -> str:
     text = _required_text(value, path=path)
-    if not any(
-        _contains_text_span(context, text) for context in question_context_texts
-    ):
-        raise ValueError(f"{path} must come from question context")
+    try:
+        copied_span(text, question_context_texts=question_context_texts)
+    except ValueError as exc:
+        raise ValueError(f"{path} must come from question context") from exc
     return text
-
-
-def _contains_text_span(container: str, text: str) -> bool:
-    for match in re.finditer(re.escape(text), container):
-        start = match.start()
-        end = match.end()
-        if _has_alnum_edge(text, at_start=True) and start > 0:
-            if container[start - 1].isalnum():
-                continue
-        if _has_alnum_edge(text, at_start=False) and end < len(container):
-            if container[end].isalnum():
-                continue
-        return True
-    return False
-
-
-def _has_alnum_edge(text: str, *, at_start: bool) -> bool:
-    value = text.strip()
-    if not value:
-        return False
-    char = value[0] if at_start else value[-1]
-    return char.isalnum()
 
 
 def _generated_unique_id(value: str, *, seen_ids: set[str]) -> str:

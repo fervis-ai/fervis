@@ -6,7 +6,9 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from fervis.lookup.relation_catalog import (
+    EndpointRead,
     RelationCatalog,
+    RelationDataAccessPort,
     source_field_has_primary_stable_identity,
 )
 from fervis.lookup.relation_catalog.selection import (
@@ -57,7 +59,6 @@ from fervis.lookup.question_contract import (
     RequestedFact,
     RequestedFactKnownInput,
 )
-from fervis.memory.identities import MemoryIdentityValue
 
 from .values import _grounded_value_id, _normalize_lookup_text, _symbol
 
@@ -80,16 +81,20 @@ class _ResolvedLookupRow:
 
 
 @dataclass(frozen=True)
-class _MemoryIdentityCandidate:
-    option: InputBindingOption
-    identity: MemoryIdentityValue
-
-
-@dataclass(frozen=True)
 class _LookupField:
     ref: str
     path: str
     relative_path: str
+
+
+@dataclass
+class _ExecutedReferenceRoutes:
+    values_by_identity: dict[tuple[str, str, str], FactValue]
+    uses_by_identity: dict[tuple[str, str, str], GroundedInputUse]
+    certifications_by_identity: dict[
+        tuple[str, str, str], GroundedValueCertification
+    ]
+    route_issues: list[GroundingIssue]
 
 
 def _reference_binding_tasks(
@@ -122,7 +127,7 @@ def _reference_binding_tasks(
                     requested_fact_id=requested_fact_id,
                     options=(),
                     known_input_description=known.value_meaning_hint,
-                    lookup_text=known.resolved_value_text or known.text,
+                    lookup_text=known.resolved_value_text,
                     applies_to_requested_fact_ids=requested_fact_ids,
                     requested_facts=requested_fact_cards,
                 )
@@ -135,7 +140,7 @@ def _reference_binding_tasks(
             requested_fact_id=requested_fact_id,
             options=options,
             known_input_description=known.value_meaning_hint,
-            lookup_text=known.resolved_value_text or known.text,
+            lookup_text=known.resolved_value_text,
             applies_to_requested_fact_ids=requested_fact_ids,
             requested_facts=requested_fact_cards,
         )
@@ -205,7 +210,6 @@ def _reference_binding_options(
             for lookup_param, lookup_fields in _resolver_lookup_groups(
                 resolver_source,
                 return_field=return_field,
-                field_label_text=known.field_label_text,
             ):
                 route = InputBindingRoute(
                     known_input_id=known.id,
@@ -255,8 +259,8 @@ def _resolve_reference_tasks(
     *,
     full_catalog: RelationCatalog,
     resolver_row_sources: RowSourceCatalog,
-    data_access_port: Any,
-    memory_identity_values: tuple[MemoryIdentityValue, ...] = (),
+    data_access_port: RelationDataAccessPort,
+    source_read_lineage: SourceReadLineageScope | None = None,
 ) -> _ResolvedReferenceTasks:
     values: list[FactValue] = []
     issues: list[GroundingIssue] = []
@@ -266,40 +270,6 @@ def _resolve_reference_tasks(
         route_options = tuple(
             option for option in task.options if option.route is not None
         )
-        memory_candidates = _memory_identity_candidates(
-            task,
-            route_options=route_options,
-            memory_identity_values=memory_identity_values,
-        )
-        if len(memory_candidates) == 1:
-            memory_candidate = memory_candidates[0]
-            option = memory_candidate.option
-            value = option.resolved_value
-            if value is not None:
-                values.append(value)
-                certification = _imported_prior_identity_certification(
-                    value_id=value.id,
-                    task=task,
-                    selected_identity=memory_candidate.identity,
-                )
-                certifications.append(certification)
-            continue
-        if len(memory_candidates) > 1:
-            issues.append(
-                GroundingIssue(
-                    kind=GroundingTerminalKind.AMBIGUOUS_REFERENCE,
-                    known_input_id=task.known_input_id,
-                    requested_fact_id=task.requested_fact_id,
-                    message="memory contains multiple canonical identity matches",
-                    known_input_text=task.lookup_text or task.known_input_text,
-                    known_input_description=task.known_input_description,
-                    candidates=tuple(
-                        candidate.option.path for candidate in memory_candidates
-                    ),
-                    proof_refs=(f"known_input:{task.known_input_id}",),
-                )
-            )
-            continue
         if not route_options:
             issues.append(
                 GroundingIssue(
@@ -307,7 +277,7 @@ def _resolve_reference_tasks(
                     known_input_id=task.known_input_id,
                     requested_fact_id=task.requested_fact_id,
                     message="no catalog binding route was available for known input",
-                    known_input_text=task.lookup_text or task.known_input_text,
+                    known_input_text=task.lookup_text,
                     known_input_description=task.known_input_description,
                     proof_refs=(f"known_input:{task.known_input_id}",),
                 )
@@ -333,7 +303,7 @@ def _resolve_reference_tasks(
                 known_input_id=task.known_input_id,
                 requested_fact_id=task.requested_fact_id,
                 message="resolver returned no canonical identity match",
-                known_input_text=task.lookup_text or task.known_input_text,
+                known_input_text=task.lookup_text,
                 known_input_description=task.known_input_description,
                 proof_refs=(f"known_input:{task.known_input_id}",),
             )
@@ -344,107 +314,6 @@ def _resolve_reference_tasks(
         issues=tuple(issues),
         model_tasks=tuple(model_tasks),
     )
-
-
-def _memory_identity_candidates(
-    task: KnownInputBindingTask,
-    *,
-    route_options: tuple[InputBindingOption, ...],
-    memory_identity_values: tuple[MemoryIdentityValue, ...],
-) -> tuple[_MemoryIdentityCandidate, ...]:
-    lookup_text = task.lookup_text or task.known_input_text
-    expected = _normalize_lookup_text(lookup_text)
-    if not expected:
-        return ()
-    compatible_routes = tuple(
-        route
-        for option in route_options
-        for route in (option.route,)
-        if route is not None
-    )
-    output: list[InputBindingOption] = []
-    seen: set[tuple[str, str, str]] = set()
-    for identity in memory_identity_values:
-        if _normalize_lookup_text(identity.lookup_text) != expected:
-            continue
-        if not _memory_identity_is_compatible(
-            identity,
-            route_options=compatible_routes,
-        ):
-            continue
-        key = (identity.identity_type, identity.identity_field, identity.value)
-        if key in seen:
-            continue
-        seen.add(key)
-        output.append(
-            _MemoryIdentityCandidate(
-                option=InputBindingOption(
-                    id=f"bind_{_symbol(task.known_input_id)}_memory_{len(output) + 1}",
-                    known_input_id=task.known_input_id,
-                    path=(
-                        f"{identity.display_label} "
-                        f"({identity.identity_type} from memory)"
-                    ),
-                    resolved_value=FactValue.identity(
-                        id=_grounded_value_id(task.known_input_id),
-                        identity_type=identity.identity_type,
-                        identity_field=identity.identity_field,
-                        value=identity.value,
-                        display_value=identity.display_label or identity.lookup_text,
-                        proof_refs=(
-                            *identity.proof_refs,
-                            f"known_input:{task.known_input_id}",
-                        ),
-                        applies_to_requested_fact_ids=_task_requested_fact_ids(task),
-                    ),
-                ),
-                identity=identity,
-            )
-        )
-    return tuple(output)
-
-
-def _imported_prior_identity_certification(
-    *,
-    value_id: str,
-    task: KnownInputBindingTask,
-    selected_identity: MemoryIdentityValue,
-) -> GroundedValueCertification:
-    return GroundedValueCertification(
-        value_id=value_id,
-        method=GroundedValueCertificationMethod.IMPORTED_PRIOR_IDENTITY,
-        authority_refs=_memory_identity_authority_refs(selected_identity),
-        lineage_refs=(
-            *selected_identity.proof_refs,
-            f"known_input:{task.known_input_id}",
-        ),
-    )
-
-
-def _memory_identity_authority_refs(
-    identity: MemoryIdentityValue,
-) -> tuple[str, ...]:
-    artifact_id = str(identity.source.get("artifact_id") or "").strip()
-    address = str(identity.source.get("address") or "").strip()
-    if artifact_id and address:
-        return (f"memory:{artifact_id}.{address}",)
-    return ()
-
-
-def _memory_identity_is_compatible(
-    identity: MemoryIdentityValue,
-    *,
-    route_options: tuple[InputBindingRoute, ...],
-) -> bool:
-    if not route_options:
-        return True
-    for route in route_options:
-        if (
-            route.identity_type == identity.identity_type
-            and route.identity_field == identity.identity_field
-        ):
-            return True
-    return False
 
 
 def _resolver_identity_fields(source: RowSource) -> tuple[RowSourceField, ...]:
@@ -472,25 +341,21 @@ def _resolver_lookup_groups(
     source: RowSource,
     *,
     return_field: RowSourceField,
-    field_label_text: str = "",
 ) -> tuple[tuple[RowSourceParam | None, tuple[RowSourceField, ...]], ...]:
-    if any(param.required and param.default is None for param in source.params):
-        return ()
-    if _field_label_matches_identity_field(field_label_text, return_field):
-        return (
-            *(
-                (param, (return_field,))
-                for param in _matching_text_params(source, field_label_text)
-            ),
-            (None, (return_field,)),
+    groups: list[tuple[RowSourceParam | None, tuple[RowSourceField, ...]]] = list(
+        _identity_param_lookup_groups(
+            source,
+            return_field=return_field,
         )
-    groups: list[tuple[RowSourceParam | None, tuple[RowSourceField, ...]]] = []
+    )
+    if any(param.required and param.default is None for param in source.params):
+        return tuple(groups)
     text_params = tuple(
         param
         for param in source.params
         if (
             not param.required
-            and param.type in {"string", "any"}
+            and param.accepts_lookup_text
             and param.semantics != RowSourceParamSemantics.RESPONSE_SHAPE
         )
     )
@@ -506,50 +371,30 @@ def _resolver_lookup_groups(
     return tuple(groups)
 
 
-def _matching_text_params(
+def _identity_param_lookup_groups(
     source: RowSource,
-    field_label_text: str,
-) -> tuple[RowSourceParam, ...]:
-    label = _normalize_field_label(field_label_text)
-    if not label:
-        return ()
+    *,
+    return_field: RowSourceField,
+) -> tuple[tuple[RowSourceParam, tuple[RowSourceField, ...]], ...]:
     return tuple(
-        param
+        (param, (return_field,))
         for param in source.params
-        if (
-            not param.required
-            and param.type in {"string", "any"}
-            and param.semantics != RowSourceParamSemantics.RESPONSE_SHAPE
-            and label == _normalize_field_label(param.name)
-        )
+        if _param_carries_same_identity(param, return_field)
+        and param.semantics != RowSourceParamSemantics.RESPONSE_SHAPE
     )
 
 
-def _field_label_matches_identity_field(
-    field_label_text: str,
+def _param_carries_same_identity(
+    param: RowSourceParam,
     field: RowSourceField,
 ) -> bool:
-    label = _normalize_field_label(field_label_text)
-    identity = field.identity
-    if not label or identity is None:
-        return False
-    if label in {"id", "identifier"}:
-        return True
-    candidates = (
-        identity.identity_field,
-        field.id,
-        field.label,
-        field.field_ref.rsplit(".", 1)[-1],
-        field.path.rsplit(".", 1)[-1],
-    )
-    return any(label == _normalize_field_label(candidate) for candidate in candidates)
-
-
-def _normalize_field_label(raw_value: object) -> str:
-    return "".join(
-        char.lower()
-        for char in str(raw_value or "").strip()
-        if char.isalnum()
+    param_identity = param.identity
+    field_identity = field.identity
+    return (
+        param_identity is not None
+        and field_identity is not None
+        and param_identity.entity_ref == field_identity.entity_ref
+        and param_identity.identity_field == field_identity.identity_field
     )
 
 
@@ -561,26 +406,34 @@ def _identity_lookup_fields(
     identity = return_field.identity
     if identity is None:
         return ()
+    fields: list[RowSourceField] = [return_field]
+    seen = {return_field.id}
     display_fields = set(identity.display_fields)
     if display_fields:
-        return tuple(
-            field
-            for field in source.fields
-            if _field_can_carry_lookup_text(field)
-            and (field.id in display_fields or field.field_ref in display_fields)
-        )
-    return tuple(
-        field
-        for field in source.fields
-        if _field_can_carry_lookup_text(field)
-        and _same_identity_object(field.path, return_field.path)
-    )
+        for field in source.fields:
+            if field.id in seen:
+                continue
+            if not _field_can_carry_lookup_text(field):
+                continue
+            if field.id not in display_fields and field.field_ref not in display_fields:
+                continue
+            seen.add(field.id)
+            fields.append(field)
+        return tuple(fields)
+    for field in source.fields:
+        if field.id in seen:
+            continue
+        if not _field_can_carry_lookup_text(field):
+            continue
+        if not _same_identity_object(field.path, return_field.path):
+            continue
+        seen.add(field.id)
+        fields.append(field)
+    return tuple(fields)
 
 
 def _field_can_carry_lookup_text(field: RowSourceField) -> bool:
-    return field.type in {"string", "any"} and not (
-        field.identity is not None and field.identity.primary_key
-    )
+    return field.can_carry_lookup_text
 
 
 def _same_identity_object(field_path: str, return_field_path: str) -> bool:
@@ -634,7 +487,7 @@ def _resolver_query_param_cards(
             ResolverQueryParamCard(
                 param_ref=param.param_ref,
                 name=param.name,
-                type=param.type,
+                type=param.type.value,
                 choices=param.choices,
             )
         )
@@ -667,7 +520,7 @@ def _resolver_selected_output_field_cards(
             ResolverOutputFieldCard(
                 field_ref=field.field_ref,
                 field_path=field.path,
-                type=field.type,
+                type=field.type.value,
                 choices=field.choices,
                 identity=field.identity,
             )
@@ -682,7 +535,7 @@ def _execute_reference_compatibilities(
     resolver_selections: tuple[EntityTargetResolverSelection, ...] = (),
     full_catalog: RelationCatalog,
     resolver_row_sources: RowSourceCatalog,
-    data_access_port: Any,
+    data_access_port: RelationDataAccessPort,
     source_read_lineage: SourceReadLineageScope | None = None,
 ) -> CanonicalInputLedger:
     options = {option.id: (task, option) for task in tasks for option in task.options}
@@ -737,7 +590,7 @@ def _execute_compatible_reference_options(
     resolver_selections: tuple[EntityTargetResolverSelection, ...] = (),
     full_catalog: RelationCatalog,
     resolver_row_sources: RowSourceCatalog,
-    data_access_port: Any,
+    data_access_port: RelationDataAccessPort,
     source_read_lineage: SourceReadLineageScope | None = None,
 ) -> CanonicalInputLedger:
     if resolver_selections:
@@ -751,23 +604,35 @@ def _execute_compatible_reference_options(
             data_access_port=data_access_port,
             source_read_lineage=source_read_lineage,
         )
-    values_by_identity: dict[tuple[str, str, str], FactValue] = {}
-    uses_by_identity: dict[tuple[str, str, str], GroundedInputUse] = {}
-    certifications_by_identity: dict[
-        tuple[str, str, str], GroundedValueCertification
-    ] = {}
-    route_issues: list[GroundingIssue] = []
+    executed = _execute_reference_route_options(
+        task=task,
+        compatible_option_ids=compatible_option_ids,
+        options=options,
+        full_catalog=full_catalog,
+        resolver_row_sources=resolver_row_sources,
+        data_access_port=data_access_port,
+        source_read_lineage=source_read_lineage,
+    )
+    return _single_identity_reference_ledger(task=task, executed=executed)
+
+
+def _execute_reference_route_options(
+    *,
+    task: KnownInputBindingTask,
+    compatible_option_ids: tuple[str, ...],
+    options: dict[str, tuple[KnownInputBindingTask, InputBindingOption]],
+    full_catalog: RelationCatalog,
+    resolver_row_sources: RowSourceCatalog,
+    data_access_port: RelationDataAccessPort,
+    source_read_lineage: SourceReadLineageScope | None,
+) -> _ExecutedReferenceRoutes:
+    executed = _empty_executed_reference_routes()
     for option_id in compatible_option_ids:
         option_task, option = options[option_id]
         if option_task.known_input_id != task.known_input_id:
             raise ValueError("compatible grounding option references wrong input")
-        if option.resolved_value is not None:
-            key = _identity_value_key(option.resolved_value)
-            if key is not None:
-                values_by_identity.setdefault(key, option.resolved_value)
-            continue
         if option.route is None:
-            route_issues.append(_unsupported_reference_issue(task))
+            executed.route_issues.append(_unsupported_reference_issue(task))
             continue
         ledger = _execute_reference_route(
             task=task,
@@ -778,52 +643,75 @@ def _execute_compatible_reference_options(
             data_access_port=data_access_port,
             source_read_lineage=source_read_lineage,
         )
-        uses_by_value_id = {use.value_id: use for use in ledger.uses}
-        certifications_by_value_id = {
-            certification.value_id: certification
-            for certification in ledger.certifications
-        }
-        for value in ledger.values:
-            key = _identity_value_key(value)
-            if key is None:
-                continue
-            values_by_identity.setdefault(key, value)
-            use = uses_by_value_id.get(value.id)
-            if use is not None:
-                uses_by_identity.setdefault(key, use)
-            certification = certifications_by_value_id.get(value.id)
-            if certification is not None:
-                certifications_by_identity.setdefault(key, certification)
-        route_issues.extend(ledger.issues)
+        _merge_reference_route_ledger(executed, ledger)
+    return executed
+
+
+def _empty_executed_reference_routes() -> _ExecutedReferenceRoutes:
+    return _ExecutedReferenceRoutes(
+        values_by_identity={},
+        uses_by_identity={},
+        certifications_by_identity={},
+        route_issues=[],
+    )
+
+
+def _merge_reference_route_ledger(
+    executed: _ExecutedReferenceRoutes,
+    ledger: CanonicalInputLedger,
+) -> None:
+    uses_by_value_id = {use.value_id: use for use in ledger.uses}
+    certifications_by_value_id = {
+        certification.value_id: certification for certification in ledger.certifications
+    }
+    for value in ledger.values:
+        key = _identity_value_key(value)
+        if key is None:
+            continue
+        executed.values_by_identity.setdefault(key, value)
+        use = uses_by_value_id.get(value.id)
+        if use is not None:
+            executed.uses_by_identity.setdefault(key, use)
+        certification = certifications_by_value_id.get(value.id)
+        if certification is not None:
+            executed.certifications_by_identity.setdefault(key, certification)
+    executed.route_issues.extend(ledger.issues)
+
+
+def _single_identity_reference_ledger(
+    *,
+    task: KnownInputBindingTask,
+    executed: _ExecutedReferenceRoutes,
+) -> CanonicalInputLedger:
     ambiguous_route_issues = _dedupe_grounding_issues(
         issue
-        for issue in route_issues
+        for issue in executed.route_issues
         if issue.kind == GroundingTerminalKind.AMBIGUOUS_REFERENCE
     )
     if ambiguous_route_issues:
         return CanonicalInputLedger(issues=ambiguous_route_issues)
-    if not values_by_identity:
+    if not executed.values_by_identity:
         return CanonicalInputLedger(
             issues=(
-                tuple(route_issues)
-                if route_issues
+                tuple(executed.route_issues)
+                if executed.route_issues
                 else (_unsupported_reference_issue(task),)
             )
         )
-    if len(values_by_identity) > 1:
+    if len(executed.values_by_identity) > 1:
         return CanonicalInputLedger(
             issues=(
                 _ambiguous_reference_issue(
                     task,
-                    values=tuple(values_by_identity.values()),
+                    values=tuple(executed.values_by_identity.values()),
                     message="resolver returned multiple canonical identity matches",
                 ),
             )
         )
     return CanonicalInputLedger(
-        values=tuple(values_by_identity.values()),
-        uses=tuple(uses_by_identity.values()),
-        certifications=tuple(certifications_by_identity.values()),
+        values=tuple(executed.values_by_identity.values()),
+        uses=tuple(executed.uses_by_identity.values()),
+        certifications=tuple(executed.certifications_by_identity.values()),
     )
 
 
@@ -835,7 +723,7 @@ def _execute_compatible_reference_options_by_resolver_priority(
     resolver_selections: tuple[EntityTargetResolverSelection, ...],
     full_catalog: RelationCatalog,
     resolver_row_sources: RowSourceCatalog,
-    data_access_port: Any,
+    data_access_port: RelationDataAccessPort,
     source_read_lineage: SourceReadLineageScope | None = None,
 ) -> CanonicalInputLedger:
     route_options = _compatible_route_options(
@@ -987,7 +875,7 @@ def _unsupported_reference_issue(
         known_input_id=task.known_input_id,
         requested_fact_id=task.requested_fact_id,
         message=message,
-        known_input_text=task.lookup_text or task.known_input_text,
+        known_input_text=task.lookup_text,
         known_input_description=task.known_input_description,
         proof_refs=(f"known_input:{task.known_input_id}",),
     )
@@ -1024,7 +912,7 @@ def _ambiguous_reference_issue(
         known_input_id=task.known_input_id,
         requested_fact_id=task.requested_fact_id,
         message=message,
-        known_input_text=task.lookup_text or task.known_input_text,
+        known_input_text=task.lookup_text,
         known_input_description=task.known_input_description,
         candidates=tuple(option.id for option in options),
         candidate_options=options,
@@ -1062,7 +950,7 @@ def _execute_reference_route(
     source_read_key: str,
     full_catalog: RelationCatalog,
     resolver_row_sources: RowSourceCatalog,
-    data_access_port: Any,
+    data_access_port: RelationDataAccessPort,
     source_read_lineage: SourceReadLineageScope | None = None,
 ) -> CanonicalInputLedger:
     resolver_source = resolver_row_sources.source(route.resolver_row_source_id)
@@ -1084,7 +972,7 @@ def _execute_reference_route(
                     known_input_id=task.known_input_id,
                     requested_fact_id=task.requested_fact_id,
                     message="resolver returned no canonical identity match",
-                    known_input_text=task.lookup_text or task.known_input_text,
+                    known_input_text=task.lookup_text,
                     known_input_description=task.known_input_description,
                     proof_refs=(f"known_input:{task.known_input_id}",),
                 ),
@@ -1128,7 +1016,7 @@ def _execute_reference_route(
                     known_input_id=task.known_input_id,
                     requested_fact_id=task.requested_fact_id,
                     message="resolver row did not include canonical identity",
-                    known_input_text=task.lookup_text or task.known_input_text,
+                    known_input_text=task.lookup_text,
                     known_input_description=task.known_input_description,
                     proof_refs=(f"known_input:{task.known_input_id}",),
                 ),
@@ -1214,8 +1102,11 @@ def _fact_value_from_resolved_row(
         identity_type=route.identity_type,
         identity_field=route.identity_field,
         value=str(value),
-        display_value=_display_value(row, resolver_source=resolver_source)
-        or task.known_input_text,
+        display_value=_display_value(
+            row,
+            route=route,
+            resolver_source=resolver_source,
+        ),
         matched_field_ref=resolved.matched_field_ref,
         matched_field_path=resolved.matched_field_path,
         proof_refs=(f"known_input:{task.known_input_id}",),
@@ -1255,15 +1146,15 @@ def _resolved_lookup_rows(
     *,
     task: KnownInputBindingTask,
     route: InputBindingRoute,
-    resolver_read: Any,
+    resolver_read: EndpointRead,
     resolver_source: RowSource,
-    data_access_port: Any,
+    data_access_port: RelationDataAccessPort,
     source_read_lineage: SourceReadLineageScope | None,
     source_read_key: str,
 ) -> tuple[_ResolvedLookupRow, ...]:
     output: list[_ResolvedLookupRow] = []
     seen_rows: set[str] = set()
-    lookup_text = task.lookup_text or task.known_input_text
+    lookup_text = task.lookup_text
     args = {route.lookup_param_ref: lookup_text} if route.lookup_param_ref else {}
     require_catalog_endpoint_for_lineage(
         source_read_lineage=source_read_lineage,
@@ -1388,19 +1279,21 @@ def _lookup_field_matches(
     )
 
 
-def _display_value(row: dict[str, Any], *, resolver_source: RowSource) -> str:
-    display_fields = tuple(
-        display_field
-        for field in resolver_source.fields
-        if field.identity is not None
-        for display_field in field.identity.display_fields
-    )
+def _display_value(
+    row: dict[str, Any],
+    *,
+    route: InputBindingRoute,
+    resolver_source: RowSource,
+) -> str:
+    return_field = resolver_source.field(route.return_field_id)
+    if return_field.identity is None:
+        return ""
     parts: list[str] = []
-    for display_field in display_fields:
-        try:
-            field = resolver_source.field(display_field)
-        except KeyError:
-            continue
+    for display_field in return_field.identity.display_fields:
+        field = _field_by_id_or_ref(
+            display_field,
+            resolver_source=resolver_source,
+        )
         value = path_value(
             row,
             relative_response_path(field.path, resolver_source.row_path),
@@ -1409,3 +1302,14 @@ def _display_value(row: dict[str, Any], *, resolver_source: RowSource) -> str:
         if value not in ("", None):
             parts.append(str(value))
     return " ".join(parts).strip()
+
+
+def _field_by_id_or_ref(
+    field_id_or_ref: str,
+    *,
+    resolver_source: RowSource,
+) -> RowSourceField:
+    for field in resolver_source.fields:
+        if field.id == field_id_or_ref or field.field_ref == field_id_or_ref:
+            return field
+    raise ValueError(f"resolver display field is unavailable: {field_id_or_ref}")

@@ -10,6 +10,7 @@ from .bound_payload import _bound_sources_prompt_payload
 from .candidate_tree import map_source_candidate_tree
 from .compact import _compact_prompt_payload, _visible_fulfillment_support_sets
 from .handles import _with_fulfillment_slots, _with_stable_source_candidate_handles
+from .field_scope import SourceBindingFieldScope
 from .indexes import (
     _candidate_fulfillment_answer_output_ids,
     _candidate_fulfillment_support_set_ids_by_answer_output,
@@ -26,7 +27,6 @@ from .same_scope import _same_scope_read_scopes
 from .plan_selection_filter import filter_prompt_payload_by_plan_selection
 from .row_predicates import with_row_predicates
 from ..normal_instance_roles import with_normal_instance_role_profiles
-from fervis.lookup.read_eligibility import retained_relevant_field_refs_by_candidate_id
 
 
 def same_scope_read_ids(
@@ -52,7 +52,12 @@ def source_binding_candidate_payload(
 def source_candidate_discovery_payload(
     request: SourceCandidateDiscoveryRequest,
 ) -> dict[str, object]:
-    return _source_candidate_payload(request)
+    return _source_candidate_payload(
+        request,
+        field_scope=SourceBindingFieldScope.from_read_eligibility(
+            getattr(request, "read_eligibility", None)
+        ),
+    )
 
 
 def source_binding_prompt_candidate_requested_fact_ids(
@@ -106,7 +111,10 @@ def source_candidates(request: SourceBindingRequest) -> dict[str, SourceCandidat
 
 
 def source_candidate_registry(request: SourceBindingRequest) -> SourceCandidateRegistry:
-    candidate_payload = _source_candidate_payload(request)
+    field_scope = SourceBindingFieldScope.from_read_eligibility(
+        request.read_eligibility
+    )
+    candidate_payload = _source_candidate_payload(request, field_scope=field_scope)
     selected_candidate_payload = filter_prompt_payload_by_plan_selection(
         candidate_payload,
         request,
@@ -118,6 +126,7 @@ def source_candidate_registry(request: SourceBindingRequest) -> SourceCandidateR
     selected_candidate_payload = with_row_predicates(
         selected_candidate_payload,
         relation_catalog=request.relation_catalog,
+        field_scope=field_scope,
     )
     prompt_payload = _compact_prompt_payload(
         selected_candidate_payload,
@@ -137,6 +146,8 @@ def source_candidate_registry(request: SourceBindingRequest) -> SourceCandidateR
 
 def _source_candidate_payload(
     request: SourceCandidateDiscoveryRequest | SourceBindingRequest,
+    *,
+    field_scope: SourceBindingFieldScope,
 ) -> dict[str, object]:
     payload = _raw_source_binding_candidate_payload(request)
     candidate_payload = _with_stable_source_candidate_handles(
@@ -151,11 +162,7 @@ def _source_candidate_payload(
     candidate_payload = _with_fulfillment_slots(
         candidate_payload,
         requested_facts=request.requested_facts,
-        support_field_refs_by_candidate_id=(
-            retained_relevant_field_refs_by_candidate_id(request.read_eligibility)
-            if request.read_eligibility is not None
-            else {}
-        ),
+        field_scope=field_scope,
     )
     candidate_payload = _with_population_bindings(candidate_payload, request=request)
     return with_normal_instance_role_profiles(

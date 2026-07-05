@@ -10,6 +10,7 @@ from typing import Any, TypeAlias
 from fervis.lookup.conversation_resolution.overlay import (
     ConversationResolutionOverlay,
 )
+from fervis.lookup.question_contract._text_spans import contains_copied_span
 from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 from fervis.lookup.turn_prompts.context import HostPromptContext
 
@@ -231,22 +232,30 @@ class RequestedFactLiteralInput:
     resolved_value_text: str = ""
     field_label_text: str = ""
     value_meaning_hint: str = ""
-    satisfies_requirement_id: str = ""
     resolved_input_ref: str = ""
+    occurrence: int = 1
 
     def __post_init__(self) -> None:
         if not self.id.strip():
             raise ValueError("known input requires id")
+        if self.occurrence < 1:
+            raise ValueError("known input occurrence must be positive")
         if not self.text.strip():
             raise ValueError("known input requires text")
         if not self.resolved_value_text.strip():
             raise ValueError("literal known input requires resolved value text")
-        if self.role == LiteralInputRole.TIME_VALUE:
-            if not self.satisfies_requirement_id.strip():
-                raise ValueError("literal time value requires requirement id")
-        elif self.satisfies_requirement_id:
-            raise ValueError(
-                f"{self.role.value} literal input must not include requirement id"
+        if self.role == LiteralInputRole.RESULT_LIMIT:
+            if (
+                not self.resolved_value_text.isdigit()
+                or int(self.resolved_value_text) < 1
+            ):
+                raise ValueError(
+                    "result_limit literal requires canonical positive integer digits"
+                )
+            object.__setattr__(
+                self,
+                "resolved_value_text",
+                str(int(self.resolved_value_text)),
             )
         if self.source == KnownInputSource.CONVERSATION_RESOLUTION:
             if not self.resolved_input_ref.strip():
@@ -261,10 +270,6 @@ class RequestedFactLiteralInput:
     @property
     def kind(self) -> KnownInputKind:
         return KnownInputKind.LITERAL
-
-    @property
-    def occurrence(self) -> int:
-        return 1
 
     @property
     def is_reference_value(self) -> bool:
@@ -285,10 +290,10 @@ class RequestedFactLiteralInput:
             "source": self.source.value,
             "text": self.text,
         }
-        if self.satisfies_requirement_id:
-            payload["satisfies_requirement_id"] = self.satisfies_requirement_id
         if self.resolved_input_ref:
             payload["resolved_input_ref"] = self.resolved_input_ref
+        if self.occurrence != 1:
+            payload["occurrence"] = self.occurrence
         payload["resolved_value_text"] = self.resolved_value_text
         if self.field_label_text:
             payload["field_label_text"] = self.field_label_text
@@ -349,48 +354,6 @@ class RequestedFactRowSetReferenceInput:
 RequestedFactKnownInput: TypeAlias = (
     RequestedFactLiteralInput | RequestedFactRowSetReferenceInput
 )
-
-
-@dataclass(frozen=True)
-class RequestedFactTimeRequirement:
-    id: str
-    source_text: str
-    why_required: str
-
-    def __post_init__(self) -> None:
-        if not self.id.strip():
-            raise ValueError("time requirement requires id")
-        if not self.source_text.strip():
-            raise ValueError("time requirement requires source text")
-        if not self.why_required.strip():
-            raise ValueError("time requirement requires reason")
-
-    def to_answer_request_dict(self) -> dict[str, object]:
-        return {
-            "requirement_id": self.id,
-            "source_text": self.source_text,
-            "why_required": self.why_required,
-        }
-
-
-@dataclass(frozen=True)
-class RequestedFactInputRequirements:
-    time_requirements: tuple[RequestedFactTimeRequirement, ...] = ()
-
-    def __post_init__(self) -> None:
-        seen: set[str] = set()
-        for requirement in self.time_requirements:
-            if requirement.id in seen:
-                raise ValueError("duplicate time requirement")
-            seen.add(requirement.id)
-
-    def to_answer_request_dict(self) -> dict[str, object]:
-        return {
-            "time_requirements": [
-                requirement.to_answer_request_dict()
-                for requirement in self.time_requirements
-            ],
-        }
 
 
 @dataclass(frozen=True)
@@ -619,9 +582,6 @@ class RequestedFact:
     description: str
     answer_expression: RequestedFactAnswerExpression | None = None
     answer_subject: RequestedFactAnswerSubject | None = None
-    input_requirements: RequestedFactInputRequirements = field(
-        default_factory=RequestedFactInputRequirements
-    )
     answer_population: RequestedFactAnswerPopulation | None = None
     answer_outputs: tuple[RequestedFactAnswerOutput, ...] = ()
     known_inputs: tuple[RequestedFactKnownInput, ...] = ()
@@ -661,7 +621,6 @@ class RequestedFact:
             )
         if self.answer_subject is not None:
             payload["answer_subject"] = self.answer_subject.to_answer_request_dict()
-        payload["input_requirements"] = self.input_requirements.to_answer_request_dict()
         if self.answer_population is not None:
             payload["answer_population"] = (
                 self.answer_population.to_answer_request_dict()
@@ -778,15 +737,15 @@ class QuestionContract:
         return {
             "kind": "question_contract",
             "answer_requests_count": len(self.requested_facts),
+            "question_inputs": [
+                known.to_model_dict() for known in self.question_inputs
+            ],
             "answer_requests": [
                 _answer_request_contract_dict(
                     fact,
                     question_input_ids=question_input_ids,
                 )
                 for fact in self.requested_facts
-            ],
-            "question_inputs": [
-                known.to_model_dict() for known in self.question_inputs
             ],
         }
 
@@ -858,12 +817,8 @@ def _answer_request_contract_dict(
     return {
         "id": fact.id,
         **fact.answer_request_model_dict(),
-        "input_decisions": [
-            {
-                "input_ref": input_id,
-                "use_input": input_id in fact.input_refs,
-            }
-            for input_id in question_input_ids
+        "used_question_inputs": [
+            input_id for input_id in question_input_ids if input_id in fact.input_refs
         ],
     }
 
@@ -892,23 +847,6 @@ def validate_question_contract_against_question(
     for known in known_inputs:
         if not _text_in_any_context(known.text, known_input_texts):
             raise ValueError("known input text must come from question context")
-        _validate_known_input_value_matches_text(
-            known,
-            question_context_texts=known_input_texts,
-        )
-
-
-def _validate_known_input_value_matches_text(
-    known: RequestedFactKnownInput,
-    *,
-    question_context_texts: tuple[str, ...],
-) -> None:
-    if (
-        known.kind == KnownInputKind.LITERAL
-        and known.field_label_text
-        and not _text_in_any_context(known.field_label_text, question_context_texts)
-    ):
-        raise ValueError("literal field label text must come from question context")
 
 
 def _normalized_text(value: object) -> str:
@@ -919,27 +857,5 @@ def _text_in_any_context(text: object, contexts: tuple[str, ...]) -> bool:
     normalized = _normalized_text(text)
     return bool(
         normalized
-        and any(_contains_text_span(context, normalized) for context in contexts)
+        and any(contains_copied_span(context, normalized) for context in contexts)
     )
-
-
-def _contains_text_span(container: str, text: str) -> bool:
-    for match in re.finditer(re.escape(text), container):
-        start = match.start()
-        end = match.end()
-        if _has_alnum_edge(text, at_start=True) and start > 0:
-            if container[start - 1].isalnum():
-                continue
-        if _has_alnum_edge(text, at_start=False) and end < len(container):
-            if container[end].isalnum():
-                continue
-        return True
-    return False
-
-
-def _has_alnum_edge(text: str, *, at_start: bool) -> bool:
-    value = text.strip()
-    if not value:
-        return False
-    char = value[0] if at_start else value[-1]
-    return char.isalnum()

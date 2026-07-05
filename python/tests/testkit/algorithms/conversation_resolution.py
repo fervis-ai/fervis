@@ -10,7 +10,7 @@ from fervis.memory.conversation_context import (
 from fervis.lookup.conversation_resolution import (
     CONVERSATION_RESOLUTION_TOOL_NAME,
     LiteralQuestionInputOverlay,
-    ResolvedCanonicalValueOverlay,
+    ResolvedCanonicalIdentityOverlay,
     ResolvedQuestionInputOverlay,
     RowSetQuestionInputOverlay,
     parse_conversation_resolution,
@@ -158,8 +158,8 @@ def _resolved_question_input_overlay(
             field_label_text=str(item.get("field_label_text") or ""),
             role=LiteralInputRole(str(item["role"])),
             evidence_refs=tuple(str(ref) for ref in item.get("evidence_refs") or ()),
-            resolved_canonical_value=_resolved_canonical_value_overlay(
-                item.get("resolved_canonical_value")
+            resolved_canonical_identity=_resolved_canonical_identity_overlay(
+                item.get("resolved_canonical_identity")
             ),
         )
     if kind == KnownInputKind.ROW_SET_REFERENCE:
@@ -172,17 +172,19 @@ def _resolved_question_input_overlay(
     raise ValueError(f"unsupported resolved question input kind: {kind}")
 
 
-def _resolved_canonical_value_overlay(
+def _resolved_canonical_identity_overlay(
     raw: object,
-) -> ResolvedCanonicalValueOverlay | None:
+) -> ResolvedCanonicalIdentityOverlay | None:
     if raw is None:
         return None
-    return ResolvedCanonicalValueOverlay(
-        kind=str(raw["kind"]),
+    if str(raw["kind"]) != "identity":
+        raise ValueError("resolved canonical identity kind must be identity")
+    return ResolvedCanonicalIdentityOverlay(
         identity_type=str(raw["identity_type"]),
         identity_field=str(raw["identity_field"]),
         value=str(raw["value"]),
-        proof_refs=tuple(str(ref) for ref in raw.get("proof_refs") or ()),
+        authority_refs=tuple(str(ref) for ref in raw.get("authority_refs") or ()),
+        lineage_refs=tuple(str(ref) for ref in raw.get("lineage_refs") or ()),
     )
 
 

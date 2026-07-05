@@ -45,8 +45,6 @@ from fervis.lookup.outcomes.clarifications import (
 )
 from fervis.lookup.plan_selection import (
     BoundPlanSelectionSet,
-    BoundSelectedSourceStrategy,
-    BoundSourceStrategyMember,
     PlanSelectionGenerationError,
     PlanSelectionRequest,
     PlanSelectionSet,
@@ -96,6 +94,11 @@ from fervis.lookup.source_binding import (
     generate_source_binding,
     source_candidate_discovery_payload,
 )
+from fervis.lookup.source_binding.role_selection import (
+    bound_plan_selection_for_source_binding,
+    plan_selection_uses_only_values,
+    value_only_source_binding_plan,
+)
 from fervis.lookup.memory.available_values import (
     active_memory_operation_values,
     active_memory_reference_values,
@@ -106,7 +109,6 @@ from fervis.lookup.memory.projection import (
 )
 from fervis.memory.conversation_context import expand_activated_memory_cards
 from fervis.memory.projection import fact_artifacts_from_context
-from fervis.lookup.source_binding import AnswerPopulation, BoundSource
 from fervis.lookup.lineage.source_reads import SourceReadLineageScope
 from fervis.lineage.recorder import (
     CatalogEndpointWrite,
@@ -710,7 +712,11 @@ def _run_source_binding_phase(state: _LookupPipelineState) -> LookupResult | Non
         return limit_failure
     state.source_binding_turn_number = state.plan_selection_turn_number + 1
     if _selected_plan_uses_only_values(state):
-        state.source_binding_outcome = _value_only_source_binding_plan(state)
+        assert isinstance(state.plan_selection_outcome, PlanSelectionSet)
+        state.source_binding_outcome = value_only_source_binding_plan(
+            state.plan_selection_outcome,
+            requested_facts=state.question_contract.requested_facts,
+        )
         _set_fact_plan_request_from_source_binding(state)
         return None
     if not isinstance(state.plan_selection_outcome, PlanSelectionSet):
@@ -787,39 +793,7 @@ def _set_fact_plan_request_from_source_binding(state: _LookupPipelineState) -> N
 def _selected_plan_uses_only_values(state: _LookupPipelineState) -> bool:
     if not isinstance(state.plan_selection_outcome, PlanSelectionSet):
         return False
-    return all(
-        member.value_id
-        and not member.read_id
-        and not member.memory_relation_id
-        and not member.source_relation_id
-        for plan in state.plan_selection_outcome.plan_selections
-        for member in plan.source_members
-    )
-
-
-def _value_only_source_binding_plan(state: _LookupPipelineState) -> SourceBindingPlan:
-    assert isinstance(state.plan_selection_outcome, PlanSelectionSet)
-    bound_sources: list[BoundSource] = []
-    for plan in state.plan_selection_outcome.plan_selections:
-        for member in plan.source_members:
-            bound_sources.append(
-                BoundSource(
-                    id=f"sb_{len(bound_sources) + 1}",
-                    requested_fact_id=plan.requested_fact_id,
-                    answer_population=AnswerPopulation(
-                        population_binding_id=f"pop.{member.source_candidate_id}.value",
-                        intent_text="selected known value",
-                        match_basis_explanation=(
-                            "The selected source strategy uses an already-known value "
-                            "as an operation operand."
-                        ),
-                    ),
-                    value_id=member.value_id,
-                    source_candidate_id=member.source_candidate_id,
-                    evidence_items=(),
-                )
-            )
-    return SourceBindingPlan(bound_sources=tuple(bound_sources))
+    return plan_selection_uses_only_values(state.plan_selection_outcome)
 
 
 def _run_plan_selection_phase(state: _LookupPipelineState) -> LookupResult | None:
@@ -993,139 +967,16 @@ def _bound_plan_selection_from_plan_selection(
         return None
     if not isinstance(state.source_binding_outcome, SourceBindingPlan):
         return None
-    bound_plans: list[BoundSelectedSourceStrategy] = []
-    bound_sources_by_fact_candidate: dict[tuple[str, str], list[str]] = {}
-    bound_sources_by_id = {
-        source.id: source for source in state.source_binding_outcome.bound_sources
-    }
-    for source in state.source_binding_outcome.bound_sources:
-        if not source.requested_fact_id or not source.source_candidate_id:
-            continue
-        bound_sources_by_fact_candidate.setdefault(
-            (source.requested_fact_id, source.source_candidate_id),
-            [],
-        ).append(source.id)
-    for plan in state.plan_selection_outcome.plan_selections:
-        missing_source = False
-        for member in plan.source_members:
-            member_matches = bound_sources_by_fact_candidate.get(
-                (plan.requested_fact_id, member.source_candidate_id),
-                [],
-            )
-            if not member_matches:
-                missing_source = True
-                break
-        if missing_source:
-            continue
-        bound_plans.append(
-            BoundSelectedSourceStrategy(
-                plan_selection_id=plan.plan_selection_id,
-                requested_fact_id=plan.requested_fact_id,
-                source_strategy_id=plan.source_strategy_id,
-                plan_shape=plan.plan_shape,
-                required_answer_output_ids=plan.required_answer_output_ids,
-                source_members=tuple(
-                    BoundSourceStrategyMember(
-                        source_candidate_id=member.source_candidate_id,
-                        requirement_ids=member.requirement_ids,
-                        source_binding_ids=tuple(
-                            dict.fromkeys(
-                                bound_sources_by_fact_candidate.get(
-                                    (
-                                        plan.requested_fact_id,
-                                        member.source_candidate_id,
-                                    ),
-                                    (),
-                                )
-                            )
-                        ),
-                        field_ids=_bound_plan_member_field_ids(
-                            plan_shape=plan.plan_shape,
-                            member=member,
-                            requested_fact_id=plan.requested_fact_id,
-                            required_answer_output_ids=(
-                                plan.required_answer_output_ids
-                            ),
-                            bound_sources_by_id=bound_sources_by_id,
-                            source_binding_ids=tuple(
-                                dict.fromkeys(
-                                    bound_sources_by_fact_candidate.get(
-                                        (
-                                            plan.requested_fact_id,
-                                            member.source_candidate_id,
-                                        ),
-                                        (),
-                                    )
-                                )
-                            ),
-                        ),
-                    )
-                    for member in plan.source_members
-                ),
-            )
-        )
-    if not bound_plans:
-        return None
-    return BoundPlanSelectionSet(plan_selections=tuple(bound_plans))
-
-
-def _bound_plan_member_field_ids(
-    *,
-    plan_shape: str,
-    member: Any,
-    requested_fact_id: str,
-    required_answer_output_ids: tuple[str, ...],
-    bound_sources_by_id: dict[str, Any],
-    source_binding_ids: tuple[str, ...],
-) -> tuple[str, ...]:
-    if plan_shape != "list_rows":
-        return member.field_ids
-    if len(required_answer_output_ids) <= 1:
-        return member.field_ids
-    bound_field_ids = _list_rows_bound_fulfillment_field_ids(
-        requested_fact_id=requested_fact_id,
-        required_answer_output_ids=required_answer_output_ids,
-        bound_sources_by_id=bound_sources_by_id,
-        source_binding_ids=source_binding_ids,
+    requested_facts = tuple(
+        getattr(getattr(state, "question_contract", None), "requested_facts", ())
     )
-    if bound_field_ids:
-        return bound_field_ids
-    return _list_rows_member_support_field_ids(member) or member.field_ids
-
-
-def _list_rows_member_support_field_ids(member: Any) -> tuple[str, ...]:
-    return tuple(member.field_ids)
-
-
-def _list_rows_bound_fulfillment_field_ids(
-    *,
-    requested_fact_id: str,
-    required_answer_output_ids: tuple[str, ...],
-    bound_sources_by_id: dict[str, Any],
-    source_binding_ids: tuple[str, ...],
-) -> tuple[str, ...]:
-    selected: list[str] = []
-    for answer_output_id in required_answer_output_ids:
-        for source_binding_id in source_binding_ids:
-            bound = bound_sources_by_id.get(source_binding_id)
-            if bound is None:
-                continue
-            field_id_by_evidence_id = {
-                item.evidence_id: item.field_id for item in bound.evidence_items
-            }
-            for fulfillment in bound.fulfillments:
-                if fulfillment.requested_fact_id != requested_fact_id:
-                    continue
-                if fulfillment.answer_output_id != answer_output_id:
-                    continue
-                for evidence_id in (
-                    *fulfillment.metric_measure_evidence_ids,
-                    *fulfillment.group_key_evidence_ids,
-                ):
-                    field_id = field_id_by_evidence_id.get(evidence_id, "")
-                    if field_id and field_id not in selected:
-                        selected.append(field_id)
-    return tuple(selected)
+    if not requested_facts:
+        return None
+    return bound_plan_selection_for_source_binding(
+        state.plan_selection_outcome,
+        state.source_binding_outcome,
+        requested_facts=requested_facts,
+    )
 
 
 def _run_execution_phase(state: _LookupPipelineState) -> LookupResult:

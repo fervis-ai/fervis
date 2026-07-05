@@ -145,13 +145,14 @@ def test_answer_explanation_json_exposes_semantic_step_contract() -> None:
             }
         ],
         "knownInputs": [
-            {
-                "inputId": "fact_1_entity_1",
-                "text": "ABC Mall",
-                "kind": "literal_text",
-                "description": "store",
-                "resolvedValueText": "ABC Mall",
-            }
+                {
+                    "inputId": "fact_1_entity_1",
+                    "text": "ABC Mall",
+                    "kind": "literal_text",
+                    "role": "reference_value",
+                    "description": "store",
+                    "resolvedValueText": "ABC Mall",
+                }
         ],
         "resolverCandidates": [],
         "groundingResults": [],
@@ -442,6 +443,7 @@ def _lineage_rows_with_semantic_step() -> LineageRows:
                                 "input_id": "fact_1_entity_1",
                                 "text": "ABC Mall",
                                 "kind": "literal_text",
+                                "role": "reference_value",
                                 "description": "store",
                                 "resolved_value_text": "ABC Mall",
                             },

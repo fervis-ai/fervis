@@ -126,6 +126,7 @@ from tests.lookup.source_binding_helpers import (
     source_fulfills_for_candidate,
     source_binding_payload_for_one_call,
     source_binding_payload_from_fact_plan,
+    source_binding_target_id_for_candidate,
 )
 
 __all__ = tuple(name for name in globals() if not name.startswith("__"))

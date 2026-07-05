@@ -148,6 +148,48 @@ def test_fervis_goldset_run_accepts_comma_separated_case_ids_and_model_override(
     )
 
 
+def test_fervis_goldset_run_uses_env_principal_id(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    suite_path = _write_suite(tmp_path)
+    questions = _AnsweringQuestions(
+        AskResult(
+            status="COMPLETED",
+            conversation_id="conversation_1",
+            question_id="question_1",
+            run_id="run_1",
+            answer="42",
+            result_data={},
+        )
+    )
+    monkeypatch.setenv("FERVIS_GOLDSET_PRINCIPAL_ID", "principal_from_env")
+    stdout = StringIO()
+
+    exit_code = run_fervis(
+        (
+            "goldset",
+            "run",
+            "--suite-path",
+            str(suite_path),
+            "--case-ids",
+            "sales_count",
+            "--tenant-id",
+            "tenant_1",
+        ),
+        ports=_ports(questions=questions, question_run_follower=_Follower()),
+        stdout=stdout,
+        stderr=StringIO(),
+    )
+
+    assert exit_code == 0
+    assert questions.requests[0].principal.principal_id == "principal_from_env"
+    assert questions.requests[0].principal.read_context_ref == ReadContextRef(
+        scheme="django_principal",
+        key="principal_from_env",
+    )
+
+
 def test_fervis_goldset_run_submits_setup_questions_in_same_conversation(
     tmp_path: Path,
 ) -> None:

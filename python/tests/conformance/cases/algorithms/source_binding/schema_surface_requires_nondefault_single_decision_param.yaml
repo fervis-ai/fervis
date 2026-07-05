@@ -1,5 +1,5 @@
 id: schema_surface_requires_nondefault_single_decision_param
-description: Source-binding schema requires non-default single-decision choice params to be decided.
+description: Source-binding parser requires non-default single-decision choice params to be decided for the selected target.
 migrates:
   - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_schema_requires_optional_single_decision_choice_params_without_default
 kind: algorithm

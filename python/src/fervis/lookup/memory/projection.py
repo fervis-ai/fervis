@@ -1272,6 +1272,13 @@ def _memory_card_pair(
         "artifact_id": artifact.artifact_id,
         "address": address.address,
     }
+    proof_refs = tuple(
+        str(item).strip()
+        for item in getattr(getattr(address, "evidence", None), "step_ids", ()) or ()
+        if str(item).strip()
+    )
+    if proof_refs:
+        private["proof_refs"] = proof_refs
     if details:
         private.update(details)
     card_kwargs: dict[str, Any] = {

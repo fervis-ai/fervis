@@ -33,8 +33,6 @@ input:
       subject_text: products
       instance_interpretation:
         kind: NORMAL_BUSINESS_INSTANCE
-    input_requirements:
-      time_requirements: []
     answer_population:
       population_label: products
       counted_unit: products
@@ -45,11 +43,9 @@ input:
         test_question: Does the row/value represent products?
     answer_outputs:
     - description: the total sales amount
-    input_decisions:
-    - input_ref: staff
-      use_input: true
-    - input_ref: period
-      use_input: true
+    used_question_inputs:
+    - staff
+    - period
   - answer_fact: work location where Alice Smith worked yesterday
     answer_expression:
       family: scalar_aggregate
@@ -57,8 +53,6 @@ input:
       subject_text: Alice Smith
       instance_interpretation:
         kind: NORMAL_BUSINESS_INSTANCE
-    input_requirements:
-      time_requirements: []
     answer_population:
       population_label: Alice Smith
       counted_unit: Alice Smith
@@ -69,11 +63,9 @@ input:
         test_question: Does the row/value represent Alice Smith?
     answer_outputs:
     - description: the place she worked
-    input_decisions:
-    - input_ref: staff
-      use_input: true
-    - input_ref: period
-      use_input: true
+    used_question_inputs:
+    - staff
+    - period
 expect:
   result_contains:
     requested_facts:

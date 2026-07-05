@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 
-import pytest
-
 from fervis.memory.conversation_context import (
     ConversationContextFrame,
     ConversationMemoryCard,
@@ -886,18 +884,33 @@ def test_conversation_resolution_overlay_projects_entity_references_as_question_
                     display="sale rows",
                 ),
             ),
+            private_cards={
+                "memory_entity": {
+                    "kind": "entity_identity",
+                    "identity_type": "staff",
+                    "canonical_values": {"staff_id": "staff_alice"},
+                    "proof_refs": ("prior_source_read:staff:alice",),
+                    "display": "Alice Smith",
+                }
+            },
         ),
     )
 
     payload = overlay.to_prompt_payload()
     assert payload["resolved_question_inputs"] == [
         {
+            "kind": "row_set_reference",
+            "reference_text": "that",
+            "occurrence": 1,
+            "resolved_input_ref": "cr_input_1",
+        },
+        {
             "kind": "literal_text",
             "source_text": "she",
             "occurrence": 1,
-            "resolved_input_ref": "cr_input_1",
+            "resolved_input_ref": "cr_input_2",
             "resolved_value_text": "Alice Smith",
-            "value_meaning_hint": "entity_identity",
+            "value_meaning_hint": "staff identity",
             "role": "reference_value",
         }
     ]
@@ -998,6 +1011,10 @@ def test_conversation_resolution_derives_resolved_input_from_selected_memory_anc
                 "turn_1.entity.staff.alice": {
                     "kind": "entity_identity",
                     "identity_type": "staff",
+                    "canonical_values": {
+                        "staff_id": "51515151-0000-0000-0002-000000000001",
+                    },
+                    "proof_refs": ("prior_source_read:staff:alice",),
                     "display": "Alice Smith",
                 }
             },
@@ -1014,6 +1031,269 @@ def test_conversation_resolution_derives_resolved_input_from_selected_memory_anc
             "resolved_value_text": "Alice Smith",
             "value_meaning_hint": "staff identity",
             "role": "reference_value",
+        }
+    ]
+
+
+def test_conversation_resolution_handoff_uses_selected_memory_not_preserve_terms():
+    result = parse_conversation_resolution(
+        tool_name=CONVERSATION_RESOLUTION_TOOL_NAME,
+        payload={
+            "kind": "conversation_resolution",
+            "status": "resolved",
+            "current_question_text": "What about her for then?",
+            "clause_resolutions": [
+                {
+                    "current_clause_text": "What about her for then",
+                    "occurrence": 1,
+                    "requested_value_frame": {
+                        "current_value_surface": {
+                            "text": "What about her",
+                            "kind": "broad_current_value",
+                        },
+                        "context_frame_choices": [],
+                    },
+                    "dependencies": [
+                        {
+                            "anchor_text": "her",
+                            "occurrence": 1,
+                            "kind": "reference",
+                            "meaning_components": [
+                                {
+                                    "kind": "entity",
+                                    "source_id": "prior_entity",
+                                    "source_text": "Alice",
+                                    "memory_id": "turn_1.entity.staff.alice",
+                                    "resolved_text": "Alice",
+                                }
+                            ],
+                            "resolved_text": "Alice Smith",
+                            "must_preserve_terms": ["Alice"],
+                        },
+                        {
+                            "anchor_text": "then",
+                            "occurrence": 1,
+                            "kind": "scope",
+                            "meaning_components": [
+                                {
+                                    "kind": "scope",
+                                    "source_id": "prior_time",
+                                    "source_text": "last month",
+                                    "memory_id": "turn_1.scope.time.last_month",
+                                    "resolved_text": "last month",
+                                }
+                            ],
+                            "resolved_text": "last month",
+                            "must_preserve_terms": ["month"],
+                        },
+                    ],
+                    "resolved_clause_text": "What about Alice for last month?",
+                }
+            ],
+            "unresolved": {
+                "unresolved_kind": "none",
+                "why_unresolved": "",
+                "candidate_interpretations": [],
+            },
+        },
+        current_question="What about her for then?",
+        context_sources=(
+            ConversationContextSource(
+                source_id="prior_entity",
+                kind="prior_user_question",
+                text="How much did Alice sell?",
+                meaning_anchors=(
+                    ConversationMeaningAnchor(
+                        memory_id="turn_1.entity.staff.alice",
+                        text="Alice",
+                        occurrence=1,
+                        kind="entity_identity",
+                        label="staff identity",
+                    ),
+                ),
+            ),
+            ConversationContextSource(
+                source_id="prior_time",
+                kind="prior_user_question",
+                text="How much did we sell last month?",
+                meaning_anchors=(
+                    ConversationMeaningAnchor(
+                        memory_id="turn_1.scope.time.last_month",
+                        text="last month",
+                        occurrence=1,
+                        kind="time_scope",
+                        label="time scope",
+                    ),
+                ),
+            ),
+        ),
+    ).outcome
+
+    overlay = conversation_resolution_overlay_from(
+        result,
+        memory_projection=ConversationMemoryCardProjection(
+            cards=(
+                ConversationMemoryCard(
+                    card_id="card_entity",
+                    memory_id="turn_1.entity.staff.alice",
+                    kind="entity_identity",
+                    display="Alice Smith",
+                ),
+                ConversationMemoryCard(
+                    card_id="card_time",
+                    memory_id="turn_1.scope.time.last_month",
+                    kind="time_scope",
+                    display="last month",
+                ),
+            ),
+            private_cards={
+                "turn_1.entity.staff.alice": {
+                    "kind": "entity_identity",
+                    "identity_type": "staff",
+                    "canonical_values": {"staff_id": "staff_alice"},
+                    "proof_refs": ("prior_source_read:staff:alice",),
+                    "display": "Alice Smith",
+                },
+                "turn_1.scope.time.last_month": {
+                    "kind": "time_scope",
+                    "expression": "last month",
+                },
+            },
+        ),
+    )
+
+    assert overlay.to_prompt_payload()["resolved_question_inputs"] == [
+        {
+            "kind": "literal_text",
+            "source_text": "her",
+            "occurrence": 1,
+            "resolved_input_ref": "cr_input_1",
+            "resolved_value_text": "Alice Smith",
+            "value_meaning_hint": "staff identity",
+            "role": "reference_value",
+        },
+        {
+            "kind": "literal_text",
+            "source_text": "then",
+            "occurrence": 1,
+            "resolved_input_ref": "cr_input_2",
+            "resolved_value_text": "last month",
+            "value_meaning_hint": "time scope",
+            "role": "time_value",
+        },
+    ]
+
+
+def test_conversation_resolution_entity_handoff_is_text_only_without_authority():
+    result = parse_conversation_resolution(
+        tool_name=CONVERSATION_RESOLUTION_TOOL_NAME,
+        payload={
+            "kind": "conversation_resolution",
+            "status": "resolved",
+            "current_question_text": "How much did she make yesterday?",
+            "clause_resolutions": [
+                {
+                    "current_clause_text": "How much did she make yesterday",
+                    "occurrence": 1,
+                    "requested_value_frame": {
+                        "current_value_surface": {
+                            "text": "How much did she make",
+                            "kind": "broad_current_value",
+                        },
+                        "context_frame_choices": [],
+                    },
+                    "dependencies": [
+                        {
+                            "anchor_text": "she",
+                            "occurrence": 1,
+                            "kind": "reference",
+                            "meaning_components": [
+                                {
+                                    "kind": "entity",
+                                    "source_id": "prior_1",
+                                    "source_text": "Alice",
+                                    "memory_id": "turn_1.entity.staff.alice",
+                                    "resolved_text": "Alice",
+                                }
+                            ],
+                            "resolved_text": "Alice Smith",
+                            "must_preserve_terms": ["Alice Smith"],
+                        }
+                    ],
+                    "resolved_clause_text": "How much did Alice Smith make yesterday?",
+                }
+            ],
+            "unresolved": {
+                "unresolved_kind": "none",
+                "why_unresolved": "",
+                "candidate_interpretations": [],
+            },
+        },
+        current_question="How much did she make yesterday?",
+        context_sources=(
+            ConversationContextSource(
+                source_id="prior_1",
+                kind="prior_user_question",
+                text="Which products did Alice sell today?",
+                meaning_anchors=(
+                    ConversationMeaningAnchor(
+                        memory_id="turn_1.entity.staff.alice",
+                        text="Alice",
+                        occurrence=1,
+                        kind="entity_identity",
+                        label="staff identity",
+                    ),
+                ),
+            ),
+        ),
+    ).outcome
+
+    overlay = conversation_resolution_overlay_from(
+        result,
+        memory_projection=ConversationMemoryCardProjection(
+            cards=(
+                ConversationMemoryCard(
+                    card_id="card_entity",
+                    memory_id="turn_1.entity.staff.alice",
+                    kind="entity_identity",
+                    display="Alice Smith",
+                ),
+            ),
+            private_cards={
+                "turn_1.entity.staff.alice": {
+                    "kind": "entity_identity",
+                    "identity_type": "staff",
+                    "canonical_values": {
+                        "staff_id": "51515151-0000-0000-0002-000000000001",
+                    },
+                    "proof_refs": ("known_input:prior_staff",),
+                    "display": "Alice Smith",
+                }
+            },
+        ),
+    )
+
+    assert overlay.to_prompt_payload()["resolved_question_inputs"] == [
+        {
+            "kind": "literal_text",
+            "source_text": "she",
+            "occurrence": 1,
+            "resolved_input_ref": "cr_input_1",
+            "resolved_value_text": "Alice Smith",
+            "value_meaning_hint": "staff identity",
+            "role": "reference_value",
+        }
+    ]
+    assert overlay.to_backend_payload()["resolved_question_inputs"] == [
+        {
+            "kind": "literal_text",
+            "source_text": "she",
+            "occurrence": 1,
+            "resolved_input_ref": "cr_input_1",
+            "resolved_value_text": "Alice Smith",
+            "value_meaning_hint": "staff identity",
+            "role": "reference_value",
+            "evidence_refs": ["turn_1.entity.staff.alice"],
         }
     ]
 

@@ -29,6 +29,7 @@ from tests.lookup.source_binding_helpers import (
     _source_candidate_param_decision_options,
     plan_selection_payload_from_fact_plan,
     source_binding_payload_from_fact_plan_with_invocation_overrides,
+    source_binding_target_id_for_candidate,
 )
 
 
@@ -561,7 +562,7 @@ def test_lookup_derives_finite_choice_membership_from_answer_population_tests():
                     ],
                 },
                 "answer_outputs": [{"description": "count"}],
-                "input_decisions": [],
+                "used_question_inputs": [],
             }
         ],
         "question_input_inventory_check": {
@@ -1457,8 +1458,12 @@ class _OmitOptionalDefaultChoicePlannerPort(_ReadEligibilityPlannerPort):
                     "kind": "source_bindings",
                     "source_invocations": [
                         {
-                            "requested_fact_id": "fact_1",
-                            "source_candidate_id": "source_1",
+                            "binding_target_id": source_binding_target_id_for_candidate(
+                                prompt,
+                                requested_fact_id="fact_1",
+                                source_candidate_id="source_1",
+                                plan_shape="list_rows",
+                            ),
                             "answer_population": {
                                 "population_binding_id": (
                                     "pop.source_1.candidate_population"
@@ -1481,7 +1486,6 @@ class _OmitOptionalDefaultChoicePlannerPort(_ReadEligibilityPlannerPort):
                             "param_decisions": {},
                             "row_predicate_reviews": {},
                             "finite_choice_param_reviews": {},
-                            "source_binding_decision": "USE_SOURCE",
                         }
                     ],
                 }
@@ -1618,35 +1622,34 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
             tool_name = tool_specs[0].name if tool_specs else ""
             if tool_name == "submit_source_binding":
                 from tests.lookup.source_binding_helpers import (
+                    source_candidate_answer_population,
+                    source_candidate_with_fields,
                     source_fulfills_for_candidate,
+                    source_binding_target_id_for_candidate,
                 )
 
                 prompt = str(kwargs.get("prompt") or "")
-                payload = _planner_prompt_json_section(
+                candidate = source_candidate_with_fields(
                     prompt,
-                    label="Candidate evidence sources",
+                    required=("staff_id",),
                 )
-                candidate = payload["requested_fact_sources"][0]["source_contexts"][0][
-                    "source_options"
-                ][0]
                 arguments = {
                     "outcome": {
                         "kind": "source_bindings",
-                        "metric_fit_bases": {},
-                        "fit_basis_interpretations": {},
                         "source_invocations": [
                             {
-                                "requested_fact_id": "fact_1",
-                                "source_candidate_id": candidate["source_candidate_id"],
-                                "answer_population": {
-                                    "population_binding_id": candidate[
-                                        "population_bindings"
-                                    ][0]["population_binding_id"],
-                                    "intent_text": "Jane Doe staff ID",
-                                    "match_basis_explanation": (
-                                        "Jane Doe staff ID defines the source population"
+                                "binding_target_id": source_binding_target_id_for_candidate(
+                                    prompt,
+                                    requested_fact_id="fact_1",
+                                    source_candidate_id=str(
+                                        candidate["source_candidate_id"]
                                     ),
-                                },
+                                    plan_shape="list_rows",
+                                ),
+                                "answer_population": source_candidate_answer_population(
+                                    prompt,
+                                    source_candidate_id=candidate["source_candidate_id"],
+                                ),
                                 "fulfillment_decisions": source_fulfills_for_candidate(
                                     candidate,
                                     field_ids=("staff_id",),
@@ -1717,7 +1720,12 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
                         "option_reviews": {
                             "bind_fact_1_entity_1_1": {
                                 "resolver_fit_question": "Can this resolver search lookup text 'Jane Doe' and return canonical API identity 'staff' for target meaning 'staff member'?",
-                                "because": "The staff resolver returns the staff identity named by Jane Doe.",
+                                "because": "The detail route requires a canonical staff identity value, not a display name.",
+                                "decision": "CANNOT_RESOLVE_LOOKUP_TEXT",
+                            },
+                            "bind_fact_1_entity_1_2": {
+                                "resolver_fit_question": "Can this resolver search lookup text 'Jane Doe' and return canonical API identity 'staff' for target meaning 'staff member'?",
+                                "because": "The staff list resolver can match Jane Doe against returned staff identity rows.",
                                 "decision": "CAN_RESOLVE_LOOKUP_TEXT",
                             },
                         }
@@ -2436,26 +2444,21 @@ def test_lookup_cutover_runs_combined_source_and_split_planning_turns():
         ),
         responses={"list_sale_list": {"data": [{"amount": "50000"}]}},
     )
-    planner = _ToolNamePlannerPort(
-        read_eligibility_retention_specs=(
-            ReadEligibilityRetentionSpec(
-                requested_fact_id="fact_1",
-                read_id="sales",
-                answer_value_fields=("amount",),
-            ),
-        ),
-        responses={
-            "submit_answer_request_contract": _question_contract_response(
-                subject="sales",
-                parts=("sales",),
-            ),
-            "submit_source_binding": {
+
+    def source_binding_payload(*, prompt, tool_specs):
+        del tool_specs
+        return source_binding_payload_for_one_call(
+            {
                 "outcome": {
                     "kind": "source_bindings",
                     "source_invocations": [
                         {
-                            "requested_fact_id": "fact_1",
-                            "source_candidate_id": "source_1",
+                            "binding_target_id": source_binding_target_id_for_candidate(
+                                prompt,
+                                requested_fact_id="fact_1",
+                                source_candidate_id="source_1",
+                                plan_shape="list_rows",
+                            ),
                             "answer_population": {
                                 "population_binding_id": "pop.source_1.candidate_population",
                                 "intent_text": "sales",
@@ -2476,6 +2479,23 @@ def test_lookup_cutover_runs_combined_source_and_split_planning_turns():
                     ],
                 }
             },
+            prompt=prompt,
+        )
+
+    planner = _ToolNamePlannerPort(
+        read_eligibility_retention_specs=(
+            ReadEligibilityRetentionSpec(
+                requested_fact_id="fact_1",
+                read_id="sales",
+                answer_value_fields=("amount",),
+            ),
+        ),
+        responses={
+            "submit_answer_request_contract": _question_contract_response(
+                subject="sales",
+                parts=("sales",),
+            ),
+            "submit_source_binding": source_binding_payload,
             "submit_source_alignment_reviews": {
                 "outcome": {
                     "kind": "fact_plan",
@@ -2621,32 +2641,21 @@ def test_lookup_source_binding_uses_first_class_fulfillment_usage():
             binding_target_ids=("answer_1", "answer_2"),
         ),
     )
-    planner = _ToolNamePlannerPort(
-        read_eligibility_retention_specs=(
-            ReadEligibilityRetentionSpec(
-                requested_fact_id="fact_1",
-                read_id="sales",
-                answer_value_fields=("staff_name",),
-            ),
-            ReadEligibilityRetentionSpec(
-                requested_fact_id="fact_1",
-                read_id="sales",
-                measured_value_fields=("amount",),
-            ),
-        ),
-        responses={
-            "submit_answer_request_contract": _question_contract_response(
-                subject="staff and sales amount",
-                answer_subject="staff",
-                parts=("staff", "sales amount"),
-            ),
-            "submit_source_binding": {
+
+    def source_binding_payload(*, prompt, tool_specs):
+        del tool_specs
+        return source_binding_payload_for_one_call(
+            {
                 "outcome": {
                     "kind": "source_bindings",
                     "source_invocations": [
                         {
-                            "requested_fact_id": "fact_1",
-                            "source_candidate_id": "source_1",
+                            "binding_target_id": source_binding_target_id_for_candidate(
+                                prompt,
+                                requested_fact_id="fact_1",
+                                source_candidate_id="source_1",
+                                plan_shape="list_rows",
+                            ),
                             "answer_population": {
                                 "population_binding_id": "pop.source_1.candidate_population",
                                 "intent_text": "staff and sales amount",
@@ -2667,6 +2676,29 @@ def test_lookup_source_binding_uses_first_class_fulfillment_usage():
                     ],
                 }
             },
+            prompt=prompt,
+        )
+
+    planner = _ToolNamePlannerPort(
+        read_eligibility_retention_specs=(
+            ReadEligibilityRetentionSpec(
+                requested_fact_id="fact_1",
+                read_id="sales",
+                answer_value_fields=("staff_name",),
+            ),
+            ReadEligibilityRetentionSpec(
+                requested_fact_id="fact_1",
+                read_id="sales",
+                measured_value_fields=("amount",),
+            ),
+        ),
+        responses={
+            "submit_answer_request_contract": _question_contract_response(
+                subject="staff and sales amount",
+                answer_subject="staff",
+                parts=("staff", "sales amount"),
+            ),
+            "submit_source_binding": source_binding_payload,
             "submit_pattern_fact_plan": {
                 "outcome": {
                     "kind": "fact_plan",
@@ -2990,8 +3022,12 @@ def test_lookup_plan_selection_uses_backend_projected_candidates():
                         "kind": "source_bindings",
                         "source_invocations": [
                             {
-                                "requested_fact_id": "fact_1",
-                                "source_candidate_id": "source_1",
+                                "binding_target_id": source_binding_target_id_for_candidate(
+                                    prompt,
+                                    requested_fact_id="fact_1",
+                                    source_candidate_id="source_1",
+                                    plan_shape="direct_field_value",
+                                ),
                                 "answer_population": {
                                     "population_binding_id": "pop.source_1.candidate_population",
                                     "intent_text": "total sales",
@@ -3152,7 +3188,6 @@ def test_lookup_cutover_uses_relation_as_read_instance_and_derives_grain():
                             text="today",
                             role=LiteralInputRole.TIME_VALUE,
                             resolved_value_text="today",
-                            satisfies_requirement_id="today_requirement",
                         ),
                     ),
                 ),

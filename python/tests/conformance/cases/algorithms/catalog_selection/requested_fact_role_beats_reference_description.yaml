@@ -28,9 +28,9 @@ input:
     - id: person_name
       kind: literal_text
       source: question_context
-      description: location
       text: Alice
       resolved_value_text: Alice
+      value_meaning_hint: location
       role: reference_value
   resource_name_matches:
   - requested_fact_id: sales_total

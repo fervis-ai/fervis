@@ -68,7 +68,7 @@ def build_grounding_schema(request: GroundingRequest) -> dict[str, object]:
                     "properties": {
                         "expression": {
                             "type": "string",
-                            "enum": [task.known_input_text],
+                            "enum": [task.time_expression],
                         },
                         "intent": _time_intent_schema(),
                     },

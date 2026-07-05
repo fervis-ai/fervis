@@ -107,7 +107,6 @@ def _clause_resolution_conversation_response(
     prior_request_memory_id: str,
     entity_memory_id: str,
 ) -> dict[str, object]:
-    del entity_memory_id
     projection = project_conversation_memory_cards(
         conversation_context,
         current_question=question,
@@ -124,6 +123,27 @@ def _clause_resolution_conversation_response(
         integrated_question=integrated_question,
         current_clause_text=question,
     )
+    entity_selected = _selected_prior_source_for_memory_id(
+        projection=projection,
+        memory_id=entity_memory_id,
+        containing="Alice Smith",
+    )
+    entity_component = _meaning_component_for_source_evidence(
+        _source_evidence_for_context_source(entity_selected),
+        resolved_text="Alice Smith",
+    )
+    dependencies: list[dict[str, object]] = []
+    if entity_component:
+        dependencies.append(
+            {
+                "anchor_text": "Alice Smith",
+                "occurrence": 1,
+                "kind": "reference",
+                "meaning_components": [entity_component],
+                "resolved_text": "Alice Smith",
+                "must_preserve_terms": ["Alice Smith"],
+            }
+        )
     return {
         "kind": "conversation_resolution",
         "status": "resolved",
@@ -133,12 +153,7 @@ def _clause_resolution_conversation_response(
                 "current_clause_text": question,
                 "occurrence": 1,
                 "requested_value_frame": value_frame,
-                "dependencies": _dependencies_from_source_evidence(
-                    current_text=question,
-                    source_evidence_items=(source_evidence,),
-                    integrated_question=integrated_question,
-                    excluded_phrases=_value_frame_excluded_phrases(value_frame),
-                ),
+                "dependencies": dependencies,
                 "resolved_clause_text": integrated_question,
             }
         ],
@@ -733,7 +748,6 @@ def _memory_context_with_prior_staff_sales_request() -> dict[str, object]:
                                 "text": "today",
                                 "role": "time_value",
                                 "resolved_value_text": "today",
-                                "satisfies_requirement_id": "time_requirement_1",
                             },
                         ],
                     }
@@ -746,7 +760,12 @@ def _memory_context_with_prior_staff_sales_request() -> dict[str, object]:
                 resource="staff",
                 reference_text="Alice Smith",
                 identity={"staff_id": "staff_alice"},
-                evidence=EvidenceRef(step_ids=("known_input:fact_1_entity_1",)),
+                evidence=EvidenceRef(
+                    step_ids=(
+                        "known_input:fact_1_entity_1",
+                        "source_read:staff_list_read:row_1",
+                    )
+                ),
             ),
             FactAddress.value(
                 address="value.answer_output_1",
@@ -794,7 +813,6 @@ def _memory_context_with_prior_numeric_slots() -> dict[str, object]:
                                 "text": "today",
                                 "role": "time_value",
                                 "resolved_value_text": "today",
-                                "satisfies_requirement_id": "time_requirement_1",
                             },
                         ],
                     }
@@ -2025,10 +2043,11 @@ def test_selected_prior_request_outputs_reach_question_contract():
                     {
                         "input_ref": "input_staff",
                         "kind": "literal_text",
-                        "source": "question_context",
+                        "source": "conversation_resolution",
                         "source_text": "Alice Smith",
+                        "resolved_input_ref": "cr_input_1",
                         "role": "reference_value",
-                        "value_meaning_hint": "staff member",
+                        "value_meaning_hint": "staff identity",
                         "resolved_value_text": "Alice Smith",
                     },
                     {
@@ -2038,7 +2057,6 @@ def test_selected_prior_request_outputs_reach_question_contract():
                         "source_text": "yesterday",
                         "role": "time_value",
                         "resolved_value_text": "yesterday",
-                        "satisfies_requirement_id": "time_requirement_1",
                     },
                 ],
                 "answer_requests": [
@@ -2051,10 +2069,7 @@ def test_selected_prior_request_outputs_reach_question_contract():
                                 "requested_value_frame": "total sales amount",
                             }
                         ],
-                        "input_decisions": [
-                            {"input_ref": "input_staff", "use_input": True},
-                            {"input_ref": "input_period", "use_input": True},
-                        ],
+                        "used_question_inputs": ["input_staff", "input_period"],
                     }
                 ],
             },
@@ -2142,10 +2157,11 @@ def test_clause_resolution_prior_answer_frame_reaches_question_contract():
                     {
                         "input_ref": "input_staff",
                         "kind": "literal_text",
-                        "source": "question_context",
+                        "source": "conversation_resolution",
                         "source_text": "she",
+                        "resolved_input_ref": "cr_input_1",
                         "role": "reference_value",
-                        "value_meaning_hint": "staff member",
+                        "value_meaning_hint": "staff identity",
                         "resolved_value_text": "Alice Smith",
                     },
                     {
@@ -2155,7 +2171,6 @@ def test_clause_resolution_prior_answer_frame_reaches_question_contract():
                         "source_text": "yesterday",
                         "role": "time_value",
                         "resolved_value_text": "yesterday",
-                        "satisfies_requirement_id": "time_requirement_1",
                     },
                 ],
                 "answer_requests": [
@@ -2170,10 +2185,7 @@ def test_clause_resolution_prior_answer_frame_reaches_question_contract():
                                 "requested_value_frame": "total sales amount",
                             }
                         ],
-                        "input_decisions": [
-                            {"input_ref": "input_staff", "use_input": True},
-                            {"input_ref": "input_period", "use_input": True},
-                        ],
+                        "used_question_inputs": ["input_staff", "input_period"],
                     }
                 ],
             },
@@ -2418,7 +2430,7 @@ class _TwoFactActiveMemoryPlannerPort:
                                         "description": "sale amount",
                                     }
                                 ],
-                                "input_decisions": [],
+                                "used_question_inputs": [],
                             },
                             {
                                 "answer_fact": "current inventory",
@@ -2430,7 +2442,7 @@ class _TwoFactActiveMemoryPlannerPort:
                                         "requested_value_frame": "inventory count",
                                     }
                                 ],
-                                "input_decisions": [],
+                                "used_question_inputs": [],
                             },
                         ],
                     }
@@ -2484,53 +2496,60 @@ class _TwoFactActiveMemoryPlannerPort:
                 ),
             )
         if tool_name == "submit_source_binding":
-            candidates_by_fact = _source_options_by_fact(prompt)
-            prior_sales = _candidate_with_field(
-                candidates_by_fact.get("fact_1", []),
-                field_id="sale_amount",
+            prior_sales = source_candidate_with_fields(
+                prompt,
+                requested_fact_id="fact_1",
+                required=("sale_amount",),
             )
-            inventory = _candidate_with_read_and_field(
-                candidates_by_fact.get("fact_2", []),
+            inventory = source_candidate_with_fields(
+                prompt,
+                requested_fact_id="fact_2",
                 read_id="inventory_read",
-                field_id="inventory_count",
+                required=("inventory_count",),
             )
             self.source_binding_payload = {
                 "outcome": {
                     "kind": "source_bindings",
                     "source_invocations": [
                         {
-                            "requested_fact_id": "fact_1",
-                            "source_candidate_id": prior_sales["source_candidate_id"],
-                            "answer_population": {
-                                "population_binding_id": _candidate_binding_surface(
-                                    prior_sales
-                                )["population_bindings"][0]["population_binding_id"],
-                                "intent_text": "the prior sales",
-                                "match_basis_explanation": (
-                                    "the prior sales define the answer population"
+                            "binding_target_id": source_binding_target_id_for_candidate(
+                                prompt,
+                                requested_fact_id="fact_1",
+                                source_candidate_id=str(
+                                    prior_sales["source_candidate_id"]
                                 ),
-                            },
-                            "fulfillment_decisions": _source_fulfillment(
+                                plan_shape="list_rows",
+                            ),
+                            "answer_population": source_candidate_answer_population(
+                                prompt,
+                                source_candidate_id=str(
+                                    prior_sales["source_candidate_id"]
+                                ),
+                            ),
+                            "fulfillment_decisions": source_fulfills_for_candidate(
                                 prior_sales,
-                                field_id="sale_amount",
+                                field_ids=("sale_amount",),
                             ),
                             "param_decisions": {},
                         },
                         {
-                            "requested_fact_id": "fact_2",
-                            "source_candidate_id": inventory["source_candidate_id"],
-                            "answer_population": {
-                                "population_binding_id": _candidate_binding_surface(
-                                    inventory
-                                )["population_bindings"][0]["population_binding_id"],
-                                "intent_text": "current inventory",
-                                "match_basis_explanation": (
-                                    "current inventory defines the answer population"
+                            "binding_target_id": source_binding_target_id_for_candidate(
+                                prompt,
+                                requested_fact_id="fact_2",
+                                source_candidate_id=str(
+                                    inventory["source_candidate_id"]
                                 ),
-                            },
-                            "fulfillment_decisions": _source_fulfillment(
+                                plan_shape="list_rows",
+                            ),
+                            "answer_population": source_candidate_answer_population(
+                                prompt,
+                                source_candidate_id=str(
+                                    inventory["source_candidate_id"]
+                                ),
+                            ),
+                            "fulfillment_decisions": source_fulfills_for_candidate(
                                 inventory,
-                                field_id="inventory_count",
+                                field_ids=("inventory_count",),
                             ),
                             "param_decisions": {},
                         },
@@ -2702,7 +2721,7 @@ class _TwoSalesFactActiveMemoryPlannerPort:
                                         "description": "sale amount",
                                     }
                                 ],
-                                "input_decisions": [],
+                                "used_question_inputs": [],
                             },
                             {
                                 "answer_fact": "sale id",
@@ -2714,7 +2733,7 @@ class _TwoSalesFactActiveMemoryPlannerPort:
                                         "requested_value_frame": "sale id",
                                     }
                                 ],
-                                "input_decisions": [],
+                                "used_question_inputs": [],
                             },
                         ],
                     }
@@ -2768,54 +2787,55 @@ class _TwoSalesFactActiveMemoryPlannerPort:
                 ),
             )
         if tool_name == "submit_source_binding":
-            candidates_by_fact = _source_options_by_fact(prompt)
-            prior_sales = _candidate_with_field(
-                candidates_by_fact.get("fact_1", []),
-                field_id="sale_amount",
+            prior_sales = source_candidate_with_fields(
+                prompt,
+                requested_fact_id="fact_1",
+                required=("sale_amount",),
             )
-            sale_id = _candidate_with_field(
-                candidates_by_fact.get("fact_2", []),
-                field_id="sale_id",
+            sale_id = source_candidate_with_fields(
+                prompt,
+                requested_fact_id="fact_2",
+                required=("sale_id",),
             )
-            prior_sales_surface = _candidate_binding_surface(prior_sales)
-            sale_id_surface = _candidate_binding_surface(sale_id)
             self.source_binding_payload = {
                 "outcome": {
                     "kind": "source_bindings",
                     "source_invocations": [
                         {
-                            "requested_fact_id": "fact_1",
-                            "source_candidate_id": prior_sales["source_candidate_id"],
-                            "answer_population": {
-                                "population_binding_id": prior_sales_surface[
-                                    "population_bindings"
-                                ][0]["population_binding_id"],
-                                "intent_text": "the prior sales",
-                                "match_basis_explanation": (
-                                    "the prior sales define the answer population"
+                            "binding_target_id": source_binding_target_id_for_candidate(
+                                prompt,
+                                requested_fact_id="fact_1",
+                                source_candidate_id=str(
+                                    prior_sales["source_candidate_id"]
                                 ),
-                            },
-                            "fulfillment_decisions": _source_fulfillment(
+                                plan_shape="list_rows",
+                            ),
+                            "answer_population": source_candidate_answer_population(
+                                prompt,
+                                source_candidate_id=str(
+                                    prior_sales["source_candidate_id"]
+                                ),
+                            ),
+                            "fulfillment_decisions": source_fulfills_for_candidate(
                                 prior_sales,
-                                field_id="sale_amount",
+                                field_ids=("sale_amount",),
                             ),
                             "param_decisions": {},
                         },
                         {
-                            "requested_fact_id": "fact_2",
-                            "source_candidate_id": sale_id["source_candidate_id"],
-                            "answer_population": {
-                                "population_binding_id": sale_id_surface[
-                                    "population_bindings"
-                                ][0]["population_binding_id"],
-                                "intent_text": "sale id",
-                                "match_basis_explanation": (
-                                    "sale id defines the answer population"
-                                ),
-                            },
-                            "fulfillment_decisions": _source_fulfillment(
+                            "binding_target_id": source_binding_target_id_for_candidate(
+                                prompt,
+                                requested_fact_id="fact_2",
+                                source_candidate_id=str(sale_id["source_candidate_id"]),
+                                plan_shape="list_rows",
+                            ),
+                            "answer_population": source_candidate_answer_population(
+                                prompt,
+                                source_candidate_id=str(sale_id["source_candidate_id"]),
+                            ),
+                            "fulfillment_decisions": source_fulfills_for_candidate(
                                 sale_id,
-                                field_id="sale_id",
+                                field_ids=("sale_id",),
                             ),
                             "param_decisions": {},
                         },
@@ -2951,7 +2971,6 @@ def _question_contract_answer_request_for_current_contract(
         return item
     output = dict(item)
     output.setdefault("answer_expression", {"family": "scalar_aggregate"})
-    output.setdefault("input_requirements", {"time_requirements": []})
     if "answer_population" not in output:
         subject = output.get("answer_subject")
         subject_text = (

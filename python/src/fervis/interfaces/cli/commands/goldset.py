@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 from fervis.evaluation.goldsets.loader import load_goldset_suite
@@ -23,6 +24,7 @@ def goldset_result(
     ports: FervisCliPorts,
 ) -> FervisCommandResult:
     suite = load_goldset_suite(args.suite_path)
+    principal_id = _principal_id(args)
     result = run_goldset_suite(
         suite,
         questions=ports.questions,
@@ -31,7 +33,7 @@ def goldset_result(
         model_policy=ports.model_policy,
         principal=cli_question_principal(
             tenant_id=args.tenant_id,
-            principal_id=args.principal_id,
+            principal_id=principal_id,
             project=ports.project,
         ),
         case_ids=_case_ids(args.case_ids),
@@ -55,3 +57,14 @@ def _case_ids(value: str | None) -> tuple[str, ...]:
     if not value:
         return ()
     return tuple(case_id.strip() for case_id in value.split(",") if case_id.strip())
+
+
+def _principal_id(args: argparse.Namespace) -> str:
+    value = str(
+        args.principal_id or os.environ.get("FERVIS_GOLDSET_PRINCIPAL_ID") or ""
+    ).strip()
+    if not value:
+        raise ValueError(
+            "goldset run requires --principal-id or FERVIS_GOLDSET_PRINCIPAL_ID"
+        )
+    return value

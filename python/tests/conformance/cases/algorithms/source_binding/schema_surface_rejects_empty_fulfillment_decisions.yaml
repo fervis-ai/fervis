@@ -1,5 +1,5 @@
 id: schema_surface_rejects_empty_fulfillment_decisions
-description: Source-binding schema rejects source invocations without fulfillment decisions.
+description: Source-binding parser rejects empty fulfillment decisions for targets that require answer fulfillment.
 migrates:
   - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_schema_rejects_empty_fulfillment_decisions
 kind: algorithm
@@ -10,4 +10,5 @@ input:
   empty_fulfillment_decisions: true
 expect:
   result_contains:
-    validation: invalid
+    validation: valid
+    parser_validation: invalid

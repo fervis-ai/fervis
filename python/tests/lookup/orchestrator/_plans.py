@@ -138,8 +138,6 @@ def _known_reference_input(
 def _known_time_input(
     input_id: str,
     text: str,
-    *,
-    requirement_id: str | None = None,
 ) -> RequestedFactKnownInput:
     return RequestedFactLiteralInput(
         id=input_id,
@@ -147,7 +145,6 @@ def _known_time_input(
         text=text,
         role=LiteralInputRole.TIME_VALUE,
         resolved_value_text=text,
-        satisfies_requirement_id=requirement_id or f"{input_id}_requirement",
     )
 
 

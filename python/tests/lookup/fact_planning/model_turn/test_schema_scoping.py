@@ -247,14 +247,24 @@ def test_set_difference_schema_respects_selected_member_roles():
                         required_answer_output_ids=("answer_1",),
                         source_members=(
                             BoundSourceStrategyMember(
-                                requirement_ids=("candidate_set",),
                                 source_candidate_id="source_products",
-                                source_binding_ids=("sb_products",),
+                                role_targets=(
+                                    BoundRoleTarget(
+                                        requirement_id="candidate_set",
+                                        source_candidate_id="source_products",
+                                        source_binding_ids=("sb_products",),
+                                    ),
+                                ),
                             ),
                             BoundSourceStrategyMember(
-                                requirement_ids=("observed_set",),
                                 source_candidate_id="source_sales",
-                                source_binding_ids=("sb_sales",),
+                                role_targets=(
+                                    BoundRoleTarget(
+                                        requirement_id="observed_set",
+                                        source_candidate_id="source_sales",
+                                        source_binding_ids=("sb_sales",),
+                                    ),
+                                ),
                             ),
                         ),
                     ),
@@ -383,14 +393,24 @@ def test_set_difference_schema_limits_identity_fields_to_primary_identity_metada
                         required_answer_output_ids=("answer_1",),
                         source_members=(
                             BoundSourceStrategyMember(
-                                requirement_ids=("candidate_set",),
                                 source_candidate_id="source_products",
-                                source_binding_ids=("sb_products",),
+                                role_targets=(
+                                    BoundRoleTarget(
+                                        requirement_id="candidate_set",
+                                        source_candidate_id="source_products",
+                                        source_binding_ids=("sb_products",),
+                                    ),
+                                ),
                             ),
                             BoundSourceStrategyMember(
-                                requirement_ids=("observed_set",),
                                 source_candidate_id="source_sales",
-                                source_binding_ids=("sb_sales",),
+                                role_targets=(
+                                    BoundRoleTarget(
+                                        requirement_id="observed_set",
+                                        source_candidate_id="source_sales",
+                                        source_binding_ids=("sb_sales",),
+                                    ),
+                                ),
                             ),
                         ),
                     ),
@@ -500,15 +520,25 @@ def test_joined_rows_schema_keeps_join_keys_outside_support_fields():
                         required_answer_output_ids=("answer_1",),
                         source_members=(
                             BoundSourceStrategyMember(
-                                requirement_ids=("left",),
                                 source_candidate_id="source_products",
-                                source_binding_ids=("sb_products",),
+                                role_targets=(
+                                    BoundRoleTarget(
+                                        requirement_id="left",
+                                        source_candidate_id="source_products",
+                                        source_binding_ids=("sb_products",),
+                                    ),
+                                ),
                                 field_ids=("name",),
                             ),
                             BoundSourceStrategyMember(
-                                requirement_ids=("right",),
                                 source_candidate_id="source_sales",
-                                source_binding_ids=("sb_sales",),
+                                role_targets=(
+                                    BoundRoleTarget(
+                                        requirement_id="right",
+                                        source_candidate_id="source_sales",
+                                        source_binding_ids=("sb_sales",),
+                                    ),
+                                ),
                                 field_ids=("amount",),
                             ),
                         ),

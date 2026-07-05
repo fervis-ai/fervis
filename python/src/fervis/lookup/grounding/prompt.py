@@ -12,7 +12,6 @@ from fervis.lookup.grounding.model import (
     resolver_fit_question_for_option,
 )
 from fervis.lookup.grounding.schema import build_grounding_schema
-from fervis.lookup.fact_plan.values import IdentityValuePayload
 from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 from fervis.lookup.turn_prompts import (
     ProviderResponseContract,
@@ -66,7 +65,7 @@ class GroundingTurnPrompt(TurnPromptBase):
                 "For named reference inputs, review every resolver option and mark whether it can resolve the lookup text into its returned API identity.",
                 "Do not decide how the identity will be used by the final answer source.",
                 "Do not force one selected resolver. The backend executes compatible resolver routes and later phases decide source use.",
-                "known_input_text is the original question span; lookup_text is the text value to search or match.",
+                "known_input_text is the original question span; lookup_text and time_expression are the resolved values to search, match, or compile.",
             ),
         )
 
@@ -77,7 +76,7 @@ class GroundingTurnPrompt(TurnPromptBase):
         return builder.instruction_block(
             "Time Resolution",
             (
-                "For each time input, copy known_input_text into date_intent.expression.",
+                "For each time input, copy time_expression into date_intent.expression.",
                 "date_intent.intent is flat: choose one time_shape, then fill every intent field.",
                 "Use time_shape=point_date for exact dates, point_relative for relative dates, period_relative for relative periods, period_named for named periods, range for closed ranges, open_range for open ranges, and window for rolling windows.",
                 "Use point_relative for today, yesterday, tomorrow, or any relative day word.",
@@ -181,6 +180,7 @@ class GroundingTurnPrompt(TurnPromptBase):
                 {
                     "known_input_id": task.known_input_id,
                     "known_input_text": task.known_input_text,
+                    "time_expression": task.time_expression,
                     "known_input_kind": KnownInputKind.LITERAL.value,
                     "known_input_role": LiteralInputRole.TIME_VALUE.value,
                     "question_context": self._time_question_context_payload(task),
@@ -268,15 +268,6 @@ class GroundingTurnPrompt(TurnPromptBase):
                 option=option,
             ),
         }
-        if option.resolved_value is not None and isinstance(
-            option.resolved_value.payload, IdentityValuePayload
-        ):
-            payload["returned_identity"] = {
-                "identity_type": option.resolved_value.payload.identity_type,
-                "identity_field": option.resolved_value.payload.identity_field,
-                "field_ref": "",
-            }
-            return payload
         route = option.route
         if route is None:
             return payload

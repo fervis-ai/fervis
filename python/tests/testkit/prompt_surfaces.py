@@ -85,7 +85,6 @@ PROMPT_SURFACE_CONTRACTS = {
             "Question Input Inventory",
             "Question Input Sources",
             "Conversation Resolution Inputs",
-            "Question Input Time Requirements",
             "Literal Reference Inputs",
             "Literal Time Inputs",
             "Literal Limits",

@@ -54,7 +54,6 @@ expect:
       text: she
       resolved_value_text: Alice Smith
       resolved_input_ref: cr_input_staff
-      satisfies_requirement_id: ''
       field_label_text: ''
       value_meaning_hint: staff member
       role: reference_value
@@ -63,7 +62,6 @@ expect:
       source: question_context
       text: yesterday
       resolved_input_ref: ''
-      satisfies_requirement_id: period_req
       resolved_value_text: yesterday
       field_label_text: ''
       value_meaning_hint: ''
@@ -80,7 +78,6 @@ expect:
         source: conversation_resolution
         text: she
         resolved_input_ref: cr_input_staff
-        satisfies_requirement_id: ''
         resolved_value_text: Alice Smith
         field_label_text: ''
         value_meaning_hint: staff member
@@ -90,7 +87,6 @@ expect:
         source: question_context
         text: yesterday
         resolved_input_ref: ''
-        satisfies_requirement_id: period_req
         resolved_value_text: yesterday
         field_label_text: ''
         value_meaning_hint: ''
@@ -108,11 +104,6 @@ expect:
             kind: NORMAL_BUSINESS_INSTANCE
             short_label: ordinary business meaning of amount
             meaning: Answer over ordinary business instances of 'amount' as they are normally understood in business operations and reporting. Do not assume this includes every persisted representation the host API may expose for 'amount'. Explicit user wording may narrow or override this normal instance interpretation.
-        input_requirements:
-          time_requirements:
-          - requirement_id: period_req
-            source_text: yesterday
-            why_required: yesterday constrains the requested fact
         answer_population:
           population_label: sales
           counted_unit: sales

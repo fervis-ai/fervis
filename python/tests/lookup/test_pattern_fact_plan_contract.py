@@ -42,10 +42,14 @@ from fervis.memory.artifacts import (
 from tests.lookup.source_binding_helpers import (
     bound_fact_plan_payload_from_fact_plan,
     plan_selection_payload_from_fact_plan,
+    source_candidate_answer_population,
+    source_candidate_with_fields,
+    source_candidate_with_kind,
     source_fulfills_fields_for_candidate,
     source_fulfills_for_candidate,
     source_binding_payload_for_one_call,
     source_binding_payload_from_fact_plan,
+    source_binding_target_id_for_candidate,
 )
 from tests.lookup.orchestrator._payloads import (
     ReadEligibilityRetentionSpec,
@@ -405,7 +409,6 @@ def test_pattern_contract_same_scope_candidate_keeps_field_params_together_end_t
                             "answer_fact": "shade names",
                             "answer_expression": {"family": "list_rows"},
                             "answer_subject": _answer_subject_payload("shade names"),
-                            "input_requirements": {"time_requirements": []},
                             "answer_population": default_answer_population(
                                 description="shade names",
                                 subject_text="shade names",
@@ -414,7 +417,7 @@ def test_pattern_contract_same_scope_candidate_keeps_field_params_together_end_t
                                 ).instance_interpretation,
                             ).to_question_contract_dict(),
                             "answer_outputs": [{"description": "shade names"}],
-                            "input_decisions": [],
+                            "used_question_inputs": [],
                         }
                     ],
                 },
@@ -504,11 +507,6 @@ def _question_contract(
                 else {}
             ),
             **(
-                {"satisfies_requirement_id": item["satisfies_requirement_id"]}
-                if item.get("satisfies_requirement_id")
-                else {}
-            ),
-            **(
                 {"resolved_input_ref": item["resolved_input_ref"]}
                 if item.get("resolved_input_ref")
                 else {}
@@ -526,7 +524,6 @@ def _question_contract(
                 "answer_subject": _answer_subject_payload(
                     subject_text or fact_description
                 ),
-                "input_requirements": {"time_requirements": []},
                 "answer_population": _answer_population_payload(
                     description=fact_description,
                     subject_text=subject_text or fact_description,
@@ -534,12 +531,8 @@ def _question_contract(
                 "answer_outputs": [
                     {"description": description} for description in output_descriptions
                 ],
-                "input_decisions": [
-                    {
-                        "input_ref": f"input_{index}",
-                        "use_input": True,
-                    }
-                    for index, _item in enumerate(known_inputs, start=1)
+                "used_question_inputs": [
+                    f"input_{index}" for index, _item in enumerate(known_inputs, start=1)
                 ],
             }
         ],
@@ -680,7 +673,6 @@ def _question_contract_answer_request_with_prompt_memory(
             )
         )
     updated.setdefault("answer_expression", {"family": "scalar_aggregate"})
-    updated.setdefault("input_requirements", {"time_requirements": []})
     if "answer_population" not in updated:
         subject_text = (
             str(updated["answer_subject"].get("subject_text") or "")
@@ -1448,12 +1440,8 @@ class _OpaqueSourceHandlePlannerPort(_PlannerPort):
             return read_eligibility_response_from_fact_plan(prompt, self.fact_plan)
         if tool_name == "submit_source_binding":
             self.source_binding_selection_prompt = prompt
-            payload = _prompt_json_section(
+            candidate = source_candidate_with_fields(
                 prompt,
-                label="Candidate evidence sources",
-            )
-            candidate = _source_candidate_with_fields(
-                payload,
                 required=("location_name", "metric_total"),
                 forbidden=(),
             )
@@ -1464,9 +1452,16 @@ class _OpaqueSourceHandlePlannerPort(_PlannerPort):
                     "kind": "source_bindings",
                     "source_invocations": [
                         {
-                            "requested_fact_id": "fact_1",
-                            "source_candidate_id": candidate_id,
-                            "answer_population": _answer_population_from_prompt(prompt),
+                            "binding_target_id": source_binding_target_id_for_candidate(
+                                prompt,
+                                requested_fact_id="fact_1",
+                                source_candidate_id=candidate_id,
+                                plan_shape="list_rows",
+                            ),
+                            "answer_population": source_candidate_answer_population(
+                                prompt,
+                                source_candidate_id=candidate_id,
+                            ),
                             "fulfillment_decisions": (
                                 source_fulfills_fields_for_candidate(
                                     candidate,
@@ -1650,12 +1645,8 @@ class _TwoAnswerOutputPlannerPort(_PlannerPort):
             )
         if tool_name == "submit_source_binding":
             self.source_binding_selection_prompt = prompt
-            payload = _prompt_json_section(
+            candidate = source_candidate_with_fields(
                 prompt,
-                label="Candidate evidence sources",
-            )
-            candidate = _source_candidate_with_fields(
-                payload,
                 required=("snapshot_merch_name", "snapshot_shade_name"),
                 forbidden=(),
             )
@@ -1665,9 +1656,16 @@ class _TwoAnswerOutputPlannerPort(_PlannerPort):
                     "kind": "source_bindings",
                     "source_invocations": [
                         {
-                            "requested_fact_id": "fact_1",
-                            "source_candidate_id": candidate_id,
-                            "answer_population": _answer_population_from_prompt(prompt),
+                            "binding_target_id": source_binding_target_id_for_candidate(
+                                prompt,
+                                requested_fact_id="fact_1",
+                                source_candidate_id=candidate_id,
+                                plan_shape="list_rows",
+                            ),
+                            "answer_population": source_candidate_answer_population(
+                                prompt,
+                                source_candidate_id=candidate_id,
+                            ),
                             "fulfillment_decisions": {
                                 **source_fulfills_for_candidate(
                                     candidate,
@@ -1822,20 +1820,16 @@ class _SameScopeFieldPlannerPort:
             )
         if tool_name == "submit_source_binding":
             self.source_binding_selection_prompt = prompt
-            payload = _prompt_json_section(
-                prompt,
-                label="Candidate evidence sources",
-            )
             try:
-                candidate = _source_candidate_with_fields(
-                    payload,
+                candidate = source_candidate_with_fields(
+                    prompt,
                     kind="same_scope_api_read",
                     required=(self.field_id,),
                     forbidden=(),
                 )
             except AssertionError:
-                candidate = _source_candidate_with_kind(
-                    payload,
+                candidate = source_candidate_with_kind(
+                    prompt,
                     kind="same_scope_api_read",
                 )
             candidate_id = str(candidate["source_candidate_id"])
@@ -1856,9 +1850,13 @@ class _SameScopeFieldPlannerPort:
                     "kind": "source_bindings",
                     "source_invocations": [
                         {
-                            "requested_fact_id": "fact_1",
-                            "source_candidate_id": candidate_id,
-                            "answer_population": _answer_population_from_prompt(
+                            "binding_target_id": source_binding_target_id_for_candidate(
+                                prompt,
+                                requested_fact_id="fact_1",
+                                source_candidate_id=candidate_id,
+                                plan_shape="list_rows",
+                            ),
+                            "answer_population": source_candidate_answer_population(
                                 prompt,
                                 source_candidate_id=candidate_id,
                             ),

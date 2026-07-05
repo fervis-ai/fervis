@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from types import NoneType, UnionType
+from typing import Any, Union, get_args, get_origin, get_type_hints
 
 from rest_framework import serializers
 
@@ -30,7 +31,9 @@ _FIELD_TYPE_MAP = {
     "PrimaryKeyRelatedField": "pk",
     "ReadOnlyField": "any",
     "SerializerMethodField": "any",
+    "SlugField": "string",
     "TimeField": "time",
+    "URLField": "string",
     "UUIDField": "uuid",
 }
 
@@ -200,11 +203,24 @@ def _serializer_method_field_type(field: serializers.SerializerMethodField) -> s
         getattr(field, "method_name", "") or f"get_{getattr(field, 'field_name', '')}"
     )
     method = getattr(parent, method_name, None)
-    annotation = getattr(method, "__annotations__", {}).get("return")
+    annotation = _return_annotation(method)
     return _python_type_name(annotation)
 
 
+def _return_annotation(method: Any) -> Any:
+    try:
+        return get_type_hints(method).get("return")
+    except Exception:
+        return getattr(method, "__annotations__", {}).get("return")
+
+
 def _python_type_name(annotation: Any) -> str:
+    origin = get_origin(annotation)
+    if origin in {Union, UnionType}:
+        members = tuple(item for item in get_args(annotation) if item is not NoneType)
+        if len(members) == 1:
+            return _python_type_name(members[0])
+        return ""
     if annotation is bool:
         return "boolean"
     if annotation is str:
@@ -213,6 +229,10 @@ def _python_type_name(annotation: Any) -> str:
         return "integer"
     if annotation is float:
         return "float"
+    if annotation is dict:
+        return "object"
+    if annotation in {list, tuple}:
+        return "array"
     return ""
 
 

@@ -51,6 +51,7 @@ from fervis.lookup.source_binding import (
 )
 from fervis.lookup.plan_selection import (
     SourceStrategyMember,
+    BoundRoleTarget,
     BoundSourceStrategyMember,
     BoundSelectedSourceStrategy,
     BoundPlanSelectionSet,
@@ -65,11 +66,11 @@ from fervis.memory.artifacts import (
 
 
 _APPROVED_CHARS = {
-    "question contract": (364, 12141, 18583),
+    "question contract": (364, 12565, 19171),
     "query enrichment": (364, 6026, 8255),
-    "grounding": (364, 4968, 6785),
-    "source binding": (364, 13384, 20765),
-    "pattern fact planning": (364, 3363, 6093),
+    "grounding": (364, 5008, 6825),
+    "source binding": (364, 13850, 20248),
+    "pattern fact planning": (364, 3497, 6241),
 }
 
 
@@ -219,6 +220,7 @@ def _turn_invocations():
                 known_input_text="today",
                 known_input_kind="literal_text",
                 requested_fact_id="fact_1",
+                lookup_text="today",
                 options=(
                     InputBindingOption(
                         id="bind_input_today_1",
@@ -300,7 +302,13 @@ def _turn_invocations():
                 source_members=(
                     BoundSourceStrategyMember(
                         source_candidate_id="source_fact_1",
-                        source_binding_ids=("source_fact_1",),
+                        role_targets=(
+                            BoundRoleTarget(
+                                requirement_id="source",
+                                source_candidate_id="source_fact_1",
+                                source_binding_ids=("source_fact_1",),
+                            ),
+                        ),
                         field_ids=("amount",),
                     ),
                 ),

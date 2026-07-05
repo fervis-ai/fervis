@@ -16,7 +16,6 @@ input:
         answer_subject:
           subject_text: sales
           instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
-        input_requirements: {time_requirements: []}
         answer_population:
           population_label: sales
           counted_unit: sales
@@ -27,6 +26,6 @@ input:
               test_question: Does the row/value represent sales?
         answer_outputs:
           - description: sales total
-        input_decisions: []
+        used_question_inputs: []
 expect:
   error_contains: question_input_inventory_check

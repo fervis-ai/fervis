@@ -68,6 +68,7 @@ class ApiReadResponseShapeProjector:
         *,
         row_path_ids: Iterable[str] = (),
         source_candidate_id: str = "",
+        field_refs: frozenset[str] | None = None,
     ) -> list[dict[str, Any]]:
         selected_row_path_ids = tuple(
             dict.fromkeys(str(item) for item in row_path_ids if str(item))
@@ -82,6 +83,8 @@ class ApiReadResponseShapeProjector:
         blocked_field_refs = _blocked_field_refs(self.read)
         output: list[dict[str, Any]] = []
         for field in self.read.fields:
+            if field_refs is not None and field.ref not in field_refs:
+                continue
             if field.ref in blocked_field_refs:
                 continue
             if (field.row_path_id or "root") not in selected_paths:

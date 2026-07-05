@@ -207,6 +207,7 @@ def _question_contract_semantic_items(
                     "input_id": input_id,
                     "text": text,
                     "kind": _text(raw_input.get("kind")),
+                    "role": _text(raw_input.get("role")),
                     "description": _text(
                         raw_input.get("value_meaning_hint")
                         or raw_input.get("description")

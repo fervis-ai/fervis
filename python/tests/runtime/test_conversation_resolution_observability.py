@@ -57,7 +57,7 @@ def test_question_contract_failure_includes_conversation_resolution_usage():
                                 "requested_value_frame": "total money",
                             }
                         ],
-                        "input_decisions": [],
+                        "used_question_inputs": [],
                     }
                 ],
             },

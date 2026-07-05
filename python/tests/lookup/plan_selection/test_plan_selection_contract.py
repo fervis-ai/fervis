@@ -21,6 +21,10 @@ from fervis.lookup.operation_families.plan_selection_registry import (
     plan_selection_shape_specs_for_family,
 )
 from fervis.lookup.plan_selection import (
+    BoundPlanSelectionSet,
+    BoundRoleTarget,
+    BoundSelectedSourceStrategy,
+    BoundSourceStrategyMember,
     SelectedSourceStrategy,
     PlanSelectionSet,
     SourceStrategyMember,
@@ -47,6 +51,46 @@ def PlanSelectionRequest(**kwargs) -> _PlanSelectionRequest:
             source_candidate_payload
         )
     return _PlanSelectionRequest(**kwargs)
+
+
+def test_bound_plan_requirement_binding_uses_role_targets_without_member_flattening():
+    plan_selection = BoundPlanSelectionSet(
+        plan_selections=(
+            BoundSelectedSourceStrategy(
+                plan_selection_id="plan.fact_1.set_difference",
+                requested_fact_id="fact_1",
+                source_strategy_id="source_strategy.fact_1.set_difference",
+                plan_shape="set_difference",
+                required_answer_output_ids=("answer_1",),
+                source_members=(
+                    BoundSourceStrategyMember(
+                        source_candidate_id="source_1",
+                        role_targets=(
+                            BoundRoleTarget(
+                                requirement_id="candidate_set",
+                                source_candidate_id="source_1",
+                                source_binding_ids=("sb_candidates",),
+                            ),
+                            BoundRoleTarget(
+                                requirement_id="observed_set",
+                                source_candidate_id="source_1",
+                                source_binding_ids=("sb_observed",),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    assert (
+        plan_selection.source_binding_ids_by_requirement_by_requested_fact_id()
+    ) == {
+        "fact_1": {
+            "candidate_set": ("sb_candidates",),
+            "observed_set": ("sb_observed",),
+        }
+    }
 
 
 def test_source_alignment_prompt_groups_sources_inside_requested_fact():
@@ -249,7 +293,10 @@ def test_source_alignment_parser_derives_aligned_source_strategy():
     assert tuple(member.source_candidate_id for member in plan.source_members) == (
         "source_3",
     )
-    assert plan.source_members[0].fulfillment_support_set_ids == ()
+    assert set(plan.source_members[0].fulfillment_support_set_ids) == {
+        "support.source_3.answer_1.slot.metric",
+        "support.source_3.answer_1.slot.group",
+    }
     assert plan.source_members[0].source_interface["answer_output_ids"] == ["answer_1"]
     assert set(
         _source_interface_response_row_field_ids(plan.source_members[0].source_interface)
@@ -1134,10 +1181,8 @@ def test_source_binding_preserves_support_sets_for_aligned_source_candidate():
         for support_set in source_option["binding_surface"]["fulfillment_support_sets"]
     }
     assert support_set_ids == {
-        "support.source_3.fact_1.row",
         "support.source_3.answer_1.slot.metric",
         "support.source_3.answer_1.slot.group",
-        "support.source_3.fact_1.scope",
     }
 
 

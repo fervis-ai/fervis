@@ -1,17 +1,53 @@
 id: current_run_certification_payload_supports_prior_identity_import
-description: Grounding certification payloads can represent importing a prior grounded identity into the current run.
+description: Grounding imports a conversation-resolved canonical identity into the current run with current input proof and prior source-read authority.
 kind: algorithm
 algorithm: grounding.contract
 input:
-  certifications:
-    - value_id: value_staff_1
-      method: imported_prior_identity
+  question: Which store did she work at?
+  requested_fact:
+    id: fact_1
+    description: store where Alice worked
+    answer_output_id: store
+  known_input:
+    id: input_staff
+    source: conversation_resolution
+    text: she
+    resolved_input_ref: cr_input_1
+    resolved_value_text: Alice Smith
+    value_meaning_hint: staff member
+    role: reference_value
+  resolved_question_input:
+    source_text: she
+    occurrence: 1
+    resolved_input_ref: cr_input_1
+    resolved_value_text: Alice Smith
+    value_meaning_hint: staff member
+    role: reference_value
+    resolved_canonical_identity:
+      identity_type: staff
+      identity_field: staff_id
+      value: staff_abc
       authority_refs: [prior_source_read:staff:list:row_1]
-      lineage_refs: [conversation_resolution:cr_input_1, known_input:input_1]
+      lineage_refs: [memory:turn_1.entity.staff.alice]
 expect:
-  result_contains:
+  result_equals:
+    values:
+      - id: grounded_input_staff
+        kind: identity
+        identity_type: staff
+        identity_field: staff_id
+        value: staff_abc
+        display_value: Alice Smith
+        proof_refs:
+          - known_input:input_staff
+          - resolved_question_input:cr_input_1
+          - prior_source_read:staff:list:row_1
+        applies_to_requested_fact_ids: [fact_1]
     certifications:
-      - value_id: value_staff_1
+      - value_id: grounded_input_staff
         method: imported_prior_identity
         authority_refs: [prior_source_read:staff:list:row_1]
-        lineage_refs: [conversation_resolution:cr_input_1, known_input:input_1]
+        lineage_refs:
+          - known_input:input_staff
+          - resolved_question_input:cr_input_1
+          - memory:turn_1.entity.staff.alice

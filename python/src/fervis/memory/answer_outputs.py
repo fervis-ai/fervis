@@ -120,17 +120,10 @@ def _answer_request_with_question_inputs(
 
 
 def _answer_request_used_input_refs(item: dict[str, Any]) -> tuple[str, ...]:
-    raw = item.get("input_decisions")
+    raw = item.get("used_question_inputs")
     if not isinstance(raw, list):
         return ()
-    output: list[str] = []
-    for decision in raw:
-        if not isinstance(decision, dict) or decision.get("use_input") is not True:
-            continue
-        input_ref = str(decision.get("input_ref") or "").strip()
-        if input_ref:
-            output.append(input_ref)
-    return tuple(output)
+    return tuple(input_ref for item in raw if (input_ref := str(item or "").strip()))
 
 
 def _prior_answer_known_inputs(

@@ -411,11 +411,12 @@ def _read_eligibility_retention_specs_from_set_difference_answer(
     observed_source = observed.get("source") or {}
     specs: list[ReadEligibilityRetentionSpec] = []
     if isinstance(candidate_source, dict) and candidate_source.get("kind") == "read":
+        candidate_identity_fields = tuple(candidate.get("identity_fields") or ())
         specs.append(
             ReadEligibilityRetentionSpec(
                 requested_fact_id=requested_fact_id,
                 read_id=str(candidate_source.get("read_id") or ""),
-                row_path_ids=tuple(candidate.get("identity_fields") or ()),
+                population_scope_fields=candidate_identity_fields,
                 answer_value_fields=tuple(
                     str(field.get("field_id") or "")
                     for field in candidate.get("output_fields") or ()
@@ -424,11 +425,12 @@ def _read_eligibility_retention_specs_from_set_difference_answer(
             )
         )
     if isinstance(observed_source, dict) and observed_source.get("kind") == "read":
+        observed_identity_fields = tuple(observed.get("identity_fields") or ())
         specs.append(
             ReadEligibilityRetentionSpec(
                 requested_fact_id=requested_fact_id,
                 read_id=str(observed_source.get("read_id") or ""),
-                row_path_ids=tuple(observed.get("identity_fields") or ()),
+                population_scope_fields=observed_identity_fields,
             )
         )
     return tuple(specs)
@@ -902,7 +904,6 @@ def _question_contract_answer_request_payload(
             else {"family": "scalar_aggregate"}
         ),
         "answer_subject": _answer_subject_payload(subject_text),
-        "input_requirements": fact.input_requirements.to_answer_request_dict(),
         "answer_population": _answer_population_payload(
             fact,
             subject_text=subject_text,
@@ -913,12 +914,10 @@ def _question_contract_answer_request_payload(
             }
             for output in fact.answer_outputs
         ],
-        "input_decisions": [
-            {
-                "input_ref": input_ref,
-                "use_input": input_ref in used_input_refs,
-            }
+        "used_question_inputs": [
+            input_ref
             for input_ref in id_map.known_input_ids.values()
+            if input_ref in used_input_refs
         ],
     }
     return payload
@@ -966,8 +965,6 @@ def _known_input_payload(
         payload["field_label_text"] = known.field_label_text
     if known.value_meaning_hint:
         payload["value_meaning_hint"] = known.value_meaning_hint
-    if known.satisfies_requirement_id:
-        payload["satisfies_requirement_id"] = known.satisfies_requirement_id
     return payload
 
 
@@ -1016,19 +1013,12 @@ def _question_contract_response(
         "answer_fact": subject,
         "answer_expression": {"family": answer_expression_family},
         "answer_subject": _answer_subject_payload(answer_subject or subject),
-        "input_requirements": {"time_requirements": []},
         "answer_population": _answer_population_payload_from_text(
             description=subject,
             subject_text=answer_subject or subject,
         ),
         "answer_outputs": [{"description": part} for part in parts],
-        "input_decisions": [
-            {
-                "input_ref": input_ref,
-                "use_input": True,
-            }
-            for input_ref in input_refs
-        ],
+        "used_question_inputs": input_refs,
     }
     return {
         "kind": "question_contract",
@@ -1138,8 +1128,6 @@ def _question_input_from_response_item(
         output["field_label_text"] = str(item["field_label_text"])
     if item.get("value_meaning_hint"):
         output["value_meaning_hint"] = str(item["value_meaning_hint"])
-    if item.get("satisfies_requirement_id"):
-        output["satisfies_requirement_id"] = str(item["satisfies_requirement_id"])
     return output
 
 
@@ -1209,7 +1197,6 @@ def _question_contract_answer_request_for_current_contract(
                 output.get("answer_subject"),
             )
         )
-    output.setdefault("input_requirements", {"time_requirements": []})
     if "answer_population" not in output:
         subject_text = str(
             (output.get("answer_subject") or {}).get("subject_text")

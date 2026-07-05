@@ -29,7 +29,6 @@ from fervis.lookup.fact_plan.values import (
     TimeComponent,
 )
 from fervis.lookup.question_contract import (
-    KnownInputKind,
     KnownInputSource,
     LiteralInputRole,
     NormalInstanceExcludedStateRole,
@@ -37,7 +36,6 @@ from fervis.lookup.question_contract import (
     RequestedFact,
     RequestedFactAnswerOutput,
     RequestedFactAnswerSubject,
-    RequestedFactKnownInput,
     RequestedFactLiteralInput,
 )
 from fervis.lookup.read_eligibility.candidate_identity import (
@@ -226,6 +224,86 @@ def test_source_binding_registry_candidates_use_model_visible_support_sets():
     )
 
 
+def test_source_binding_targets_are_compact_role_targets_not_private_plan_variants():
+    request = replace(
+        _request_with_optional_params(),
+        plan_selection=PlanSelectionSet(
+            plan_selections=(
+                SelectedSourceStrategy(
+                    plan_selection_id="plan.fact_1.direct_field_value.1",
+                    requested_fact_id="fact_1",
+                    source_strategy_id="source_strategy.fact_1.direct_field_value.1",
+                    plan_shape="direct_field_value",
+                    required_answer_output_ids=("answer_1",),
+                    source_members=(SourceStrategyMember(source_candidate_id="source_1"),),
+                    basis="First private strategy.",
+                ),
+                SelectedSourceStrategy(
+                    plan_selection_id="plan.fact_1.direct_field_value.2",
+                    requested_fact_id="fact_1",
+                    source_strategy_id="source_strategy.fact_1.direct_field_value.2",
+                    plan_shape="direct_field_value",
+                    required_answer_output_ids=("answer_1",),
+                    source_members=(SourceStrategyMember(source_candidate_id="source_1"),),
+                    basis="Equivalent private strategy.",
+                ),
+            )
+        ),
+    )
+
+    targets = SourceBindingTurnPrompt(request).binding_targets_payload()[
+        "binding_targets"
+    ]
+
+    assert targets == [
+        {
+            "binding_target_id": "target.fact_1.direct_field_value.source_1.source",
+            "requested_fact_id": "fact_1",
+            "plan_shape": "direct_field_value",
+            "source_candidate_id": "source_1",
+            "requirement_id": "source",
+            "answer_output_ids": ["answer_1"],
+        }
+    ]
+
+
+def test_source_binding_schema_uses_one_compact_invocation_shape():
+    request = replace(
+        _request_with_optional_params(),
+        plan_selection=PlanSelectionSet(
+            plan_selections=(
+                SelectedSourceStrategy(
+                    plan_selection_id="plan.fact_1.direct_field_value.1",
+                    requested_fact_id="fact_1",
+                    source_strategy_id="source_strategy.fact_1.direct_field_value.1",
+                    plan_shape="direct_field_value",
+                    required_answer_output_ids=("answer_1",),
+                    source_members=(SourceStrategyMember(source_candidate_id="source_1"),),
+                    basis="First private strategy.",
+                ),
+                SelectedSourceStrategy(
+                    plan_selection_id="plan.fact_1.direct_field_value.2",
+                    requested_fact_id="fact_1",
+                    source_strategy_id="source_strategy.fact_1.direct_field_value.2",
+                    plan_shape="direct_field_value",
+                    required_answer_output_ids=("answer_1",),
+                    source_members=(SourceStrategyMember(source_candidate_id="source_1"),),
+                    basis="Equivalent private strategy.",
+                ),
+            )
+        ),
+    )
+    tool_schema = SourceBindingTurnPrompt(request).tool_contract().tool_specs[
+        0
+    ].input_schema
+    invocation_items = _source_invocation_items_schema(tool_schema)
+
+    assert "oneOf" not in invocation_items
+    assert invocation_items["properties"]["binding_target_id"] == {
+        "enum": ["target.fact_1.direct_field_value.source_1.source"]
+    }
+
+
 def test_read_eligibility_relevant_fields_limit_fulfillment_support_sets():
     initial_request = _request_with_optional_params(
         include_extra_evidence_field=True,
@@ -358,13 +436,13 @@ def test_source_linked_value_usage_checks_metric_evidence():
 
 def test_generate_source_binding_runs_one_model_turn():
     request = _request_with_optional_params()
-    candidate = _only_source_candidate(
-        SourceBindingTurnPrompt(request).source_invocation_candidate_payload()
-    )
+    prompt = SourceBindingTurnPrompt(request)
+    candidate = _only_source_candidate(prompt.source_invocation_candidate_payload())
     model_port = _SourceBindingModelPort(
         arguments={
             "outcome": _source_binding_outcome(
                 candidate,
+                binding_target_id=_only_binding_target_id(prompt),
                 param_decisions={
                     "start_date": _first_param_decision(candidate, "start_date"),
                     "end_date": _first_param_decision(candidate, "end_date"),
@@ -470,7 +548,6 @@ def _request_with_optional_params(
                 text="today",
                 role=LiteralInputRole.TIME_VALUE,
                 resolved_value_text="today",
-                satisfies_requirement_id="time_req_1",
             ),
         ),
     )
@@ -1266,6 +1343,7 @@ def _read_eligibility_with_candidate_signatures(
 def _source_binding_outcome(
     candidate: dict[str, object],
     *,
+    binding_target_id: str,
     param_decisions: dict[str, dict[str, object]],
     finite_choice_param_reviews: dict[str, dict[str, object]],
     row_predicate_reviews: dict[str, dict[str, object]] | None = None,
@@ -1285,8 +1363,7 @@ def _source_binding_outcome(
         **metric_fit_contract,
         "source_invocations": [
             {
-                "requested_fact_id": "fact_1",
-                "source_candidate_id": candidate["source_candidate_id"],
+                "binding_target_id": binding_target_id,
                 "answer_population": {
                     "population_binding_id": _binding_surface(candidate)[
                         "population_bindings"
@@ -1301,7 +1378,6 @@ def _source_binding_outcome(
                 },
                 "row_predicate_reviews": dict(row_predicate_reviews or {}),
                 "finite_choice_param_reviews": finite_choice_param_reviews,
-                "source_binding_decision": "USE_SOURCE",
             }
         ],
     }
@@ -1617,10 +1693,10 @@ def _source_invocation_for_metric_candidate(
     candidate: dict[str, object],
     *,
     requested_fact_id: str,
+    binding_target_id: str,
 ) -> dict[str, object]:
     return {
-        "requested_fact_id": requested_fact_id,
-        "source_candidate_id": candidate["source_candidate_id"],
+        "binding_target_id": binding_target_id,
         "answer_population": {
             "population_binding_id": _binding_surface(candidate)["population_bindings"][
                 0
@@ -1635,8 +1711,14 @@ def _source_invocation_for_metric_candidate(
         "param_decisions": {},
         "row_predicate_reviews": {},
         "finite_choice_param_reviews": {},
-        "source_binding_decision": "USE_SOURCE",
     }
+
+
+def _only_binding_target_id(prompt: SourceBindingTurnPrompt) -> str:
+    targets = prompt.transport_context_payload()["binding_targets"]
+    assert isinstance(targets, list)
+    assert len(targets) == 1
+    return str(targets[0]["binding_target_id"])
 
 
 def _source_options(payload: dict[str, object]) -> list[dict[str, object]]:
@@ -1731,6 +1813,31 @@ def _retained_read_assessment(
         retention_basis=retention_basis,
         retention_decision="RETAIN",
     )
+
+
+def _source_invocation_items_schema(schema: dict[str, object]) -> dict[str, object]:
+    if isinstance(schema, dict):
+        properties = schema.get("properties")
+        if isinstance(properties, dict):
+            source_invocations = properties.get("source_invocations")
+            if isinstance(source_invocations, dict):
+                items = source_invocations.get("items")
+                if isinstance(items, dict):
+                    return items
+        for value in schema.values():
+            if isinstance(value, dict):
+                try:
+                    return _source_invocation_items_schema(value)
+                except AssertionError:
+                    pass
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, dict):
+                        try:
+                            return _source_invocation_items_schema(item)
+                        except AssertionError:
+                            pass
+    raise AssertionError("missing source_invocations items schema")
 
 
 def _first_fulfillment_decisions_schema(schema: dict[str, object]) -> dict[str, object]:

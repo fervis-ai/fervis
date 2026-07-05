@@ -13,10 +13,10 @@ expect:
       - input_ref
       - inventory_check
       - kind
+      - occurrence
       - resolved_input_ref
       - resolved_value_text
       - role
-      - satisfies_requirement_id
       - source
       - source_text
       - value_meaning_hint

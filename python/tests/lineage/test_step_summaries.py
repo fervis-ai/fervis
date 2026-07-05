@@ -17,13 +17,11 @@ from fervis.lookup.lineage.step_summaries import (
     model_turn_output_summary,
 )
 from fervis.lookup.question_contract import (
-    KnownInputKind,
     KnownInputSource,
     LiteralInputRole,
     QuestionContract,
     RequestedFact,
     RequestedFactAnswerOutput,
-    RequestedFactKnownInput,
     RequestedFactLiteralInput,
 )
 from fervis.model_io.turns import ModelTurnPurpose
@@ -133,14 +131,12 @@ def test_source_binding_model_turn_summary_projects_decision_basis() -> None:
                     "kind": "source_bindings",
                     "metric_fit_bases": {},
                     "fit_basis_interpretations": {},
-                    "source_invocations": [
-                        {
-                            "requested_fact_id": "fact_1",
-                            "source_candidate_id": "source_5",
-                            "source_binding_decision": "USE_SOURCE",
-                            "answer_population": {
-                                "match_basis_explanation": (
-                                    "Payroll summary rows match the requested "
+                        "source_invocations": [
+                            {
+                                "binding_target_id": "target.source_5",
+                                "answer_population": {
+                                    "match_basis_explanation": (
+                                        "Payroll summary rows match the requested "
                                     "staff population."
                                 )
                             },
@@ -169,7 +165,7 @@ def test_source_binding_model_turn_summary_projects_decision_basis() -> None:
 
     assert summary == step_summary_json(
         StepSummaryItem(
-            text="Source binding source_5: USE_SOURCE for fact_1",
+            text="Source binding target.source_5",
             detail=StepSummaryDetail.VERBOSE,
         ),
         StepSummaryItem(
@@ -340,6 +336,7 @@ def test_question_contract_summary_projects_semantic_requested_facts_and_known_i
                 "input_id": "fact_1_entity_1",
                 "text": "ABC Mall",
                 "kind": "literal_text",
+                "role": "reference_value",
                 "description": "store",
                 "resolved_value_text": "ABC Mall",
             },
@@ -350,6 +347,7 @@ def test_question_contract_summary_projects_semantic_requested_facts_and_known_i
                 "input_id": "fact_1_time_1",
                 "text": "this month",
                 "kind": "literal_text",
+                "role": "time_value",
                 "description": "",
                 "resolved_value_text": "this month",
             },
@@ -458,7 +456,6 @@ def test_grounding_summary_projects_time_interpretations_as_semantic_inputs() ->
                             text="this month",
                             role=LiteralInputRole.TIME_VALUE,
                             resolved_value_text="this month",
-                            satisfies_requirement_id="time_req_1",
                         ),
                     ),
                 ),

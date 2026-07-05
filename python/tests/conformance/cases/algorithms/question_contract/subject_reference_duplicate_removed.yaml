@@ -1,7 +1,7 @@
-id: read_context_reference_duplicate_removed
-description: Question-contract parser removes a named-reference input that duplicates the answer subject.
+id: answer_subject_literal_input_fails_closed
+description: Question-contract parser rejects a declared literal input that duplicates the answer subject.
 migrates:
-- api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_removes_answer_subject_named_reference_duplicate
+- api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_rejects_answer_subject_literal_input
 kind: algorithm
 algorithm: question_contract.parse
 input:
@@ -34,8 +34,4 @@ input:
   used_input_refs:
   - subject
 expect:
-  result_contains:
-    question_inputs: []
-    requested_facts:
-    - input_refs: []
-      known_inputs: []
+  error_contains: answer subject

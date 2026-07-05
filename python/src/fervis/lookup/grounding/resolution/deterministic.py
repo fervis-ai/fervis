@@ -68,6 +68,7 @@ def time_resolution_tasks(
             known_input_id=known.id,
             known_input_text=known.text,
             requested_fact_id=requested_fact_ids[0] if requested_fact_ids else "",
+            time_expression=_time_expression(known),
             applies_to_requested_fact_ids=requested_fact_ids,
             requested_facts=tuple(
                 _requested_fact_card(facts_by_id[fact_id])
@@ -173,7 +174,7 @@ def _ground_time_value(
         )
     return FactValue.time(
         id=_grounded_value_id(known.id),
-        expression=known.text,
+        expression=_time_expression(known),
         intent=dict(resolved.get(TimeField.INTENT) or {}),
         resolved_start=str(resolved.get(TimeField.START) or ""),
         resolved_end=str(resolved.get(TimeField.END) or ""),
@@ -192,7 +193,7 @@ def _resolve_time(
 ) -> dict[str, Any]:
     try:
         resolved = resolve_time(
-            known.text,
+            _time_expression(known),
             intent=date_intent,
             anchor_date=runtime_values.runtime_date,
             timezone=runtime_values.timezone,
@@ -203,7 +204,7 @@ def _resolve_time(
         ):
             return resolved
         return resolve_time(
-            known.text,
+            _time_expression(known),
             anchor_date=runtime_values.runtime_date,
             timezone=runtime_values.timezone,
             intent={
@@ -213,6 +214,10 @@ def _resolve_time(
         )
     except ValueError:
         return {}
+
+
+def _time_expression(known: RequestedFactKnownInput) -> str:
+    return known.resolved_value_text
 
 
 def time_anchor_period_from_memory_address(address: Any) -> dict[str, str] | None:

@@ -16,7 +16,7 @@ from fervis.lookup.relation_catalog import (
 from fervis.lookup.conversation_resolution.overlay import (
     ConversationResolutionOverlay,
     LiteralQuestionInputOverlay,
-    ResolvedCanonicalValueOverlay,
+    ResolvedCanonicalIdentityOverlay,
 )
 from fervis.memory.addresses import FactAddress
 from fervis.memory.artifacts import (
@@ -34,14 +34,13 @@ from fervis.lookup.grounding.model import (
     KnownInputBindingTask,
     KnownTimeResolutionTask,
 )
-from fervis.lookup.grounding.parser import parse_grounding_compatibility
 from fervis.lookup.grounding.prompt import GroundingTurnPrompt
 from fervis.lookup.fact_planning.request import RuntimeValueContext
 from fervis.lookup.fact_plan.row_sources import (
     CALENDAR_END_PARAM_ID,
     CALENDAR_START_PARAM_ID,
 )
-from fervis.lookup.fact_plan.values import FactValue, IdentityValuePayload
+from fervis.lookup.fact_plan.values import IdentityValuePayload
 from fervis.lookup.turn_prompts import build_turn_prompt_context
 from fervis.lookup.question_contract import (
     AnswerPopulationMembershipTestKind,
@@ -118,7 +117,6 @@ def _time_input(input_id: str, text: str) -> RequestedFactKnownInput:
         text=text,
         resolved_value_text=text,
         role=LiteralInputRole.TIME_VALUE,
-        satisfies_requirement_id=f"{input_id}_req",
     )
 
 
@@ -249,7 +247,7 @@ class _BusinessTimeGroundingModel:
             self.prompt,
             "Time inputs to resolve:",
         )["known_time_resolution_tasks"]:
-            text = task["known_input_text"]
+            text = task["time_expression"]
             time_resolutions[task["known_input_id"]] = {
                 "date_intent": self.intents_by_text[text]
             }
@@ -278,7 +276,7 @@ class _CurrentPeriodBusinessResultGroundingModel:
             self.prompt,
             "Time inputs to resolve:",
         )["known_time_resolution_tasks"]:
-            text = task["known_input_text"]
+            text = task["time_expression"]
             lowered = text.lower()
             use_to_date = "so far" in lowered or "to date" in lowered
             time_resolutions[task["known_input_id"]] = {
@@ -361,7 +359,7 @@ def _grounding_review_arguments(
         "Time inputs to resolve:",
     )["known_time_resolution_tasks"]:
         time_resolutions[task["known_input_id"]] = {
-            "date_intent": _full_period_time_intent(task["known_input_text"])
+            "date_intent": _full_period_time_intent(task["time_expression"])
         }
     reviews = {}
     for task in _json_payload_from_prompt_section(
@@ -483,6 +481,7 @@ def test_grounding_prompt_instructs_binding_id_copying_verbatim():
                 known_input_text="ABC Mall",
                 known_input_kind="literal_text",
                 requested_fact_id="fact_1",
+                lookup_text="ABC Mall",
                 options=(
                     InputBindingOption(
                         id="bind_input_location_1",
@@ -526,6 +525,7 @@ def test_grounding_time_schema_rejects_relative_word_as_yearless_point_date():
                 known_input_id="input_date",
                 known_input_text="today",
                 requested_fact_id="fact_1",
+                time_expression="today",
             ),
         ),
     )
@@ -679,12 +679,12 @@ def test_grounding_imports_overlay_canonical_identity_without_resolver():
                     value_meaning_hint="staff member",
                     role=LiteralInputRole.REFERENCE_VALUE,
                     evidence_refs=("turn_1.entity.staff.alice",),
-                    resolved_canonical_value=ResolvedCanonicalValueOverlay(
-                        kind="identity",
+                    resolved_canonical_identity=ResolvedCanonicalIdentityOverlay(
                         identity_type="staff",
                         identity_field="staff_id",
                         value="51515151-0000-0000-0002-000000000001",
-                        proof_refs=("prior_source_read:staff:list:row_1",),
+                        authority_refs=("prior_source_read:staff:list:row_1",),
+                        lineage_refs=("memory:turn_1.entity.staff.alice",),
                     ),
                 ),
             ),
@@ -710,61 +710,200 @@ def test_grounding_imports_overlay_canonical_identity_without_resolver():
     assert output.ledger.certifications[0].lineage_refs == (
         "known_input:input_staff",
         "resolved_question_input:cr_input_1",
-        "conversation_resolution_evidence:turn_1.entity.staff.alice",
+        "memory:turn_1.entity.staff.alice",
     )
 
 
-def test_grounding_parser_accepts_memory_identity_resolver_review():
-    value = FactValue.identity(
-        id="grounded_input_1",
-        identity_type="location",
-        identity_field="location_id",
-        value="loc_bbs",
-        display_value="ABC Mall",
+def test_resolved_canonical_identity_requires_authority_refs():
+    with pytest.raises(ValueError, match="authority"):
+        ResolvedCanonicalIdentityOverlay(
+            identity_type="staff",
+            identity_field="staff_id",
+            value="51515151-0000-0000-0002-000000000001",
+            authority_refs=(),
+            lineage_refs=("memory:turn_1.entity.staff.alice",),
+        )
+
+
+def test_resolved_canonical_identity_rejects_known_input_as_authority():
+    with pytest.raises(ValueError, match="authority"):
+        ResolvedCanonicalIdentityOverlay(
+            identity_type="staff",
+            identity_field="staff_id",
+            value="51515151-0000-0000-0002-000000000001",
+            authority_refs=("known_input:prior_staff",),
+            lineage_refs=("memory:turn_1.entity.staff.alice",),
+        )
+
+
+def test_grounding_imports_canonical_handoff_without_active_memory_check():
+    known = RequestedFactLiteralInput(
+        id="input_staff",
+        source=KnownInputSource.CONVERSATION_RESOLUTION,
+        text="her",
+        resolved_value_text="Alice Smith",
+        value_meaning_hint="staff member",
+        role=LiteralInputRole.REFERENCE_VALUE,
+        resolved_input_ref="cr_input_1",
     )
-    option = InputBindingOption(
-        id="bind_input_1_memory_1",
-        known_input_id="input_1",
-        path="ABC Mall (location from memory)",
-        resolved_value=value,
-    )
-    task = KnownInputBindingTask(
-        known_input_id="input_1",
-        known_input_text="ABC Mall",
-        known_input_kind="literal_text",
-        requested_fact_id="fact_1",
-        known_input_description="store",
-        lookup_text="ABC Mall",
-        options=(option,),
-    )
-    request = GroundingRequest(
-        question="What were sales at ABC Mall?",
-        tasks=(task,),
+    output = ground_question_inputs(
+        question="What were her sales?",
+        question_contract=QuestionContract(
+            requested_facts=(
+                RequestedFact(
+                    id="fact_1",
+                    description="sales for Alice Smith",
+                    answer_outputs=(RequestedFactAnswerOutput(id="sales_total"),),
+                    known_inputs=(known,),
+                ),
+            )
+        ),
+        full_catalog=RelationCatalog(),
+        resolver_catalog=RelationCatalog(),
+        data_access_port=_DataAccess({}),
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-05-09",
+            timezone="Africa/London",
+        ),
+        model_port=_NoGroundingModel(),
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+        conversation_resolution_overlay=ConversationResolutionOverlay(
+            current_question="What were her sales?",
+            value_frames=(),
+            references=(),
+            scopes=(),
+            activated_memory_ids=(),
+            used_source_card_ids=("card_staff_alice",),
+            resolved_question_inputs=(
+                LiteralQuestionInputOverlay(
+                    source_text="her",
+                    occurrence=1,
+                    resolved_input_ref="cr_input_1",
+                    resolved_value_text="Alice Smith",
+                    value_meaning_hint="staff member",
+                    role=LiteralInputRole.REFERENCE_VALUE,
+                    resolved_canonical_identity=ResolvedCanonicalIdentityOverlay(
+                        identity_type="staff",
+                        identity_field="staff_id",
+                        value="51515151-0000-0000-0002-000000000001",
+                        authority_refs=("prior_source_read:staff:list:row_1",),
+                        lineage_refs=("memory:turn_1.entity.staff.alice",),
+                    ),
+                ),
+            ),
+        ),
     )
 
-    result = parse_grounding_compatibility(
-        {
-            "known_time_resolutions": {},
-            "known_input_binding_reviews": {
-                "input_1": {
-                    "option_reviews": {
-                        option.id: {
-                            "resolver_fit_question": (
-                                "Can this resolver search lookup text "
-                                "'ABC Mall' and return canonical API identity "
-                                "'location' for target meaning 'store'?"
-                            ),
-                            "because": "The memory identity resolves the store.",
-                            "decision": "CAN_RESOLVE_LOOKUP_TEXT",
-                        }
+    assert not output.ledger.issues
+    assert output.ledger.values[0].payload.value == (
+        "51515151-0000-0000-0002-000000000001"
+    )
+    assert output.ledger.certifications[0].lineage_refs == (
+        "known_input:input_staff",
+        "resolved_question_input:cr_input_1",
+        "memory:turn_1.entity.staff.alice",
+    )
+
+
+def test_grounding_certifies_separate_current_input_when_prior_lineage_mentions_same_id():
+    imported = RequestedFactLiteralInput(
+        id="input_staff",
+        source=KnownInputSource.CONVERSATION_RESOLUTION,
+        text="her",
+        resolved_value_text="Alice Smith",
+        value_meaning_hint="staff member",
+        role=LiteralInputRole.REFERENCE_VALUE,
+        resolved_input_ref="cr_input_1",
+    )
+    current = _reference_input(
+        "old_id",
+        "Jane Doe",
+        value_meaning_hint="staff member",
+    )
+    data_access = _DataAccess(
+        _endpoint_result(
+            {
+                "data": [
+                    {
+                        "staff_id": "staff_jane",
+                        "full_name": "Jane Doe",
+                        "first_name": "Jane",
+                        "last_name": "Doe",
                     }
-                }
-            },
-        },
-        request=request,
+                ]
+            }
+        )
     )
 
-    assert result.compatibilities[0].binding_option_ids == ("bind_input_1_memory_1",)
+    output = ground_question_inputs(
+        question="Compare her sales with Jane Doe.",
+        question_contract=QuestionContract(
+            requested_facts=(
+                RequestedFact(
+                    id="fact_1",
+                    description="sales comparison",
+                    answer_outputs=(RequestedFactAnswerOutput(id="sales_total"),),
+                    known_inputs=(imported, current),
+                    input_refs=("input_staff", "old_id"),
+                ),
+            )
+        ),
+        full_catalog=_staff_catalog(),
+        resolver_catalog=RelationCatalog(reads=(_staff_read(),)),
+        data_access_port=data_access,
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-05-09",
+            timezone="Africa/London",
+        ),
+        model_port=_GroundingModel(
+            known_input_id="old_id",
+            binding_option_id="bind_old_id_1",
+        ),
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+        conversation_resolution_overlay=ConversationResolutionOverlay(
+            current_question="Compare her sales with Jane Doe.",
+            value_frames=(),
+            references=(),
+            scopes=(),
+            activated_memory_ids=(),
+            used_source_card_ids=("card_staff_alice",),
+            resolved_question_inputs=(
+                LiteralQuestionInputOverlay(
+                    source_text="her",
+                    occurrence=1,
+                    resolved_input_ref="cr_input_1",
+                    resolved_value_text="Alice Smith",
+                    value_meaning_hint="staff member",
+                    role=LiteralInputRole.REFERENCE_VALUE,
+                    resolved_canonical_identity=ResolvedCanonicalIdentityOverlay(
+                        identity_type="staff",
+                        identity_field="staff_id",
+                        value="staff_alice",
+                        authority_refs=("prior_source_read:staff:list:row_1",),
+                        lineage_refs=("known_input:old_id",),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    assert not output.ledger.issues
+    values_by_id = {value.id: value for value in output.ledger.values}
+    assert values_by_id["grounded_input_staff"].payload.value == "staff_alice"
+    jane_values = [
+        value
+        for value in output.ledger.values
+        if value.proof_refs == ("known_input:old_id",)
+    ]
+    assert len(jane_values) == 1
+    assert jane_values[0].payload.value == "staff_jane"
+    assert data_access.calls == [
+        ("list_staff_list", {"list_staff_list.query.name": "Jane Doe"}),
+    ]
 
 
 def test_reference_grounding_executes_compatible_routes_and_dedupes_identity():
@@ -1209,7 +1348,6 @@ def test_reference_grounding_uses_resolver_catalog_selected_for_declared_entity_
     ("field_label_text", "returned_staff_id", "expect_grounded"),
     (
         ("staff_id", "51515151-0000-0000-0002-000000000001", True),
-        ("id", "51515151-0000-0000-0002-000000000001", True),
         ("staff_id", "staff_other", False),
     ),
 )
@@ -1269,10 +1407,12 @@ def test_reference_grounding_validates_field_labeled_identity_value(
         assert (
             output.ledger.issues[0].kind == GroundingTerminalKind.UNRESOLVED_REFERENCE
         )
-    assert data_access.calls == [("list_staff_list", {})]
+    assert data_access.calls == [
+        ("list_staff_list", {"list_staff_list.query.name": staff_id})
+    ]
 
 
-def test_reference_grounding_exact_field_label_route_wins_over_display_match():
+def test_reference_grounding_exact_qualifier_does_not_override_ambiguous_evidence():
     staff_id = "51515151-0000-0000-0002-000000000001"
     data_access = _DataAccess(
         _endpoint_result(
@@ -1318,9 +1458,288 @@ def test_reference_grounding_exact_field_label_route_wins_over_display_match():
         max_thinking_tokens=0,
     )
 
+    assert not output.ledger.values
+    assert output.ledger.issues[0].kind == GroundingTerminalKind.AMBIGUOUS_REFERENCE
+    assert output.ledger.issues[0].candidates == (
+        "staff:staff_id:51515151-0000-0000-0002-000000000001",
+        "staff:staff_id:staff_other",
+    )
+    assert data_access.calls == [
+        ("list_staff_list", {"list_staff_list.query.name": staff_id}),
+        ("list_staff_list", {}),
+    ]
+
+
+def test_reference_grounding_verifies_natural_id_qualifier_against_identity_field():
+    staff_id = "51515151-0000-0000-0002-000000000001"
+    data_access = _EndpointDataAccess(
+        {
+            "list_staff_list": {
+                "data": [
+                    {
+                        "staff_id": staff_id,
+                        "full_name": "Alice Smith",
+                        "first_name": "Alice",
+                        "last_name": "Smith",
+                    },
+                ]
+            }
+        }
+    )
+
+    output = ground_question_inputs(
+        question=f"How much did the staff member id {staff_id} make today?",
+        question_contract=_staff_question_contract(
+            staff_id,
+            description="staff member",
+            resolved_value_text=staff_id,
+            field_label_text="staff member id",
+        ),
+        full_catalog=_staff_catalog(),
+        resolver_catalog=RelationCatalog(reads=(_staff_read(),)),
+        data_access_port=data_access,
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-05-09",
+            timezone="Africa/London",
+        ),
+        model_port=_CompatibilityGroundingModel(
+            compatible_read_ids={"list_staff_list"}
+        ),
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+    )
+
+    assert not output.ledger.issues
+    value = output.ledger.values[0]
+    assert value.payload.identity_type == "staff"
+    assert value.payload.identity_field == "staff_id"
+    assert value.payload.value == staff_id
+    assert data_access.calls == [
+        ("list_staff_list", {"list_staff_list.query.name": staff_id}),
+        ("list_staff_list", {}),
+    ]
+
+
+def test_reference_grounding_proves_field_labeled_id_through_required_detail_read():
+    staff_id = "51515151-0000-0000-0002-000000000001"
+    data_access = _EndpointDataAccess(
+        {
+            "get_staff_detail": {
+                "data": {
+                    "staff_id": staff_id,
+                    "full_name": "Alice Smith",
+                }
+            }
+        }
+    )
+
+    output = ground_question_inputs(
+        question=f"How much did staff_id {staff_id} make today?",
+        question_contract=_staff_question_contract(
+            f"staff_id {staff_id}",
+            description="staff member",
+            resolved_value_text=staff_id,
+            field_label_text="staff_id",
+        ),
+        full_catalog=RelationCatalog(reads=(_staff_detail_read(),)),
+        resolver_catalog=RelationCatalog(reads=(_staff_detail_read(),)),
+        data_access_port=data_access,
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-05-09",
+            timezone="Africa/London",
+        ),
+        model_port=_ReadRouteGroundingModel(read_id="get_staff_detail"),
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+    )
+
+    assert output.turn is not None
+    assert not output.ledger.issues
+    value = output.ledger.values[0]
+    assert value.payload.identity_type == "staff"
+    assert value.payload.identity_field == "staff_id"
+    assert value.payload.value == staff_id
+    assert output.ledger.certifications[0].method == (
+        GroundedValueCertificationMethod.RESOLVER_SOURCE_READ
+    )
+    assert data_access.calls == [
+        ("get_staff_detail", {"get_staff_detail.path.staff_id": staff_id})
+    ]
+
+
+def test_reference_grounding_natural_id_qualifier_can_use_identity_param_route():
+    staff_id = "51515151-0000-0000-0002-000000000001"
+    data_access = _EndpointDataAccess(
+        {
+            "get_staff_detail": {
+                "data": {
+                    "staff_id": staff_id,
+                    "full_name": "Alice Smith",
+                }
+            }
+        }
+    )
+
+    output = ground_question_inputs(
+        question=f"How much did staff member id {staff_id} make today?",
+        question_contract=_staff_question_contract(
+            f"staff member id {staff_id}",
+            description="staff member",
+            resolved_value_text=staff_id,
+            field_label_text="staff member id",
+        ),
+        full_catalog=RelationCatalog(reads=(_staff_detail_read(),)),
+        resolver_catalog=RelationCatalog(reads=(_staff_detail_read(),)),
+        data_access_port=data_access,
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-05-09",
+            timezone="Africa/London",
+        ),
+        model_port=_ReadRouteGroundingModel(read_id="get_staff_detail"),
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+    )
+
+    assert output.turn is not None
     assert not output.ledger.issues
     assert output.ledger.values[0].payload.value == staff_id
-    assert data_access.calls == [("list_staff_list", {})]
+    assert data_access.calls == [
+        ("get_staff_detail", {"get_staff_detail.path.staff_id": staff_id})
+    ]
+
+
+def test_reference_grounding_direct_identity_route_uses_catalog_identity_metadata():
+    staff_id = "staff-5151"
+    staff_read = EndpointRead(
+        id="get_staff_detail",
+        endpoint_name="get_staff_detail",
+        resource_names=("staff",),
+        params=(
+            CatalogParam(
+                ref="get_staff_detail.path.staff_id",
+                name="staff_id",
+                source=ParamSource.PATH,
+                type="pk",
+                required=True,
+                identity=IdentityMetadata(
+                    entity_ref="staff",
+                    identity_field="staff_id",
+                    primary_key=True,
+                    stable=True,
+                ),
+            ),
+        ),
+        row_paths=(RowPath(id="data", path="data", cardinality=RowCardinality.ONE),),
+        fields=(
+            CatalogField(
+                ref="field.data.staff_id",
+                path="data.staff_id",
+                row_path_id="data",
+                type="pk",
+                identity=IdentityMetadata(
+                    entity_ref="staff",
+                    identity_field="staff_id",
+                    primary_key=True,
+                    stable=True,
+                    display_fields=("field.data.full_name",),
+                ),
+            ),
+            CatalogField(
+                ref="field.data.full_name",
+                path="data.full_name",
+                row_path_id="data",
+                type="string",
+            ),
+        ),
+    )
+    data_access = _EndpointDataAccess(
+        {
+            "get_staff_detail": {
+                "data": {
+                    "staff_id": staff_id,
+                    "full_name": "Alice Smith",
+                }
+            }
+        }
+    )
+
+    output = ground_question_inputs(
+        question=f"How much did staff_id {staff_id} make today?",
+        question_contract=_staff_question_contract(
+            f"staff_id {staff_id}",
+            description="staff member",
+            resolved_value_text=staff_id,
+            field_label_text="staff_id",
+        ),
+        full_catalog=RelationCatalog(reads=(staff_read,)),
+        resolver_catalog=RelationCatalog(reads=(staff_read,)),
+        data_access_port=data_access,
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-05-09",
+            timezone="Africa/London",
+        ),
+        model_port=_ReadRouteGroundingModel(read_id="get_staff_detail"),
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+    )
+
+    assert output.turn is not None
+    assert not output.ledger.issues
+    assert output.ledger.values[0].payload.value == staff_id
+    assert data_access.calls == [
+        ("get_staff_detail", {"get_staff_detail.path.staff_id": staff_id})
+    ]
+
+
+def test_reference_grounding_generic_id_does_not_auto_execute_wrong_identity_type():
+    staff_id = "51515151-0000-0000-0002-000000000001"
+    data_access = _EndpointDataAccess(
+        {
+            "get_staff_detail": {"data": {}},
+            "get_location_detail": {
+                "data": {
+                    "location_id": staff_id,
+                    "name": "Wrong Location",
+                }
+            },
+        }
+    )
+
+    output = ground_question_inputs(
+        question=f"How much did the sales person with id {staff_id} make today?",
+        question_contract=_staff_question_contract(
+            f"id {staff_id}",
+            description="staff member",
+            resolved_value_text=staff_id,
+            field_label_text="id",
+        ),
+        full_catalog=RelationCatalog(
+            reads=(_staff_detail_read(), _location_detail_read())
+        ),
+        resolver_catalog=RelationCatalog(
+            reads=(_staff_detail_read(), _location_detail_read())
+        ),
+        data_access_port=data_access,
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-05-09",
+            timezone="Africa/London",
+        ),
+        model_port=_ReadRouteGroundingModel(read_id="get_staff_detail"),
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+    )
+
+    assert output.turn is not None
+    assert not output.ledger.values
+    assert output.ledger.issues[0].kind == GroundingTerminalKind.UNRESOLVED_REFERENCE
+    assert data_access.calls == [
+        ("get_staff_detail", {"get_staff_detail.path.staff_id": staff_id})
+    ]
 
 
 def test_reference_grounding_uses_explicit_identity_display_fields_not_name_heuristics():
@@ -1655,9 +2074,9 @@ def test_reference_grounding_exposes_field_only_route_alongside_lookup_param():
     assert output.turn is not None
     assert {
         "param_ref": "list_location_list.query.name",
-        "field_refs": ["field.data.name"],
+        "field_refs": ["field.data.location_id", "field.data.name"],
     } in surfaces
-    assert {"field_refs": ["field.data.name"]} in surfaces
+    assert {"field_refs": ["field.data.location_id", "field.data.name"]} in surfaces
 
 
 def test_reference_grounding_resolves_store_target_from_location_rows_without_lookup_param():
@@ -1736,7 +2155,7 @@ def test_reference_grounding_skips_resolver_when_declared_row_path_is_unavailabl
     ]
 
 
-def test_reference_grounding_reuses_memory_identity_for_repeated_concrete_target():
+def test_reference_grounding_uses_live_resolver_for_active_memory_without_cr_handoff():
     artifact = build_fact_artifact(
         artifact_id="turn_1",
         outcome=FactOutcome.ANSWERED,
@@ -1752,7 +2171,7 @@ def test_reference_grounding_reuses_memory_identity_for_repeated_concrete_target
     data_access = _EndpointDataAccess(
         {
             "list_location_list": {
-                "data": [{"location_id": "loc_other", "name": "Other Mall"}]
+                "data": [{"location_id": "loc_live_catalog", "name": "ABC Mall"}]
             },
         }
     )
@@ -1769,29 +2188,24 @@ def test_reference_grounding_reuses_memory_identity_for_repeated_concrete_target
         ),
         conversation_context={"factArtifacts": [artifact.to_dict()]},
         active_memory_ids=frozenset({"turn_1.entity.location.abc"}),
-        model_port=_NoGroundingModel(),
+        model_port=_ReadRouteGroundingModel(read_id="list_location_list"),
         provider="test",
         model_key="test",
         max_thinking_tokens=0,
     )
 
-    assert output.turn is None
+    assert output.turn is not None
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "loc_1"
-    assert [
-        certification.to_payload() for certification in output.ledger.certifications
-    ] == [
-        {
-            "value_id": output.ledger.values[0].id,
-            "method": GroundedValueCertificationMethod.IMPORTED_PRIOR_IDENTITY.value,
-            "authority_refs": ["memory:turn_1.entity.location.abc"],
-            "lineage_refs": ["known_input:input_location"],
-        }
+    assert output.ledger.values[0].payload.value == "loc_live_catalog"
+    assert output.ledger.certifications[0].method == (
+        GroundedValueCertificationMethod.RESOLVER_SOURCE_READ
+    )
+    assert data_access.calls == [
+        ("list_location_list", {"list_location_list.query.name": "ABC Mall"})
     ]
-    assert data_access.calls == []
 
 
-def test_reference_grounding_certifies_selected_memory_identity_authority():
+def test_reference_grounding_does_not_import_selected_active_memory_without_cr_handoff():
     other_artifact = build_fact_artifact(
         artifact_id="turn_0",
         outcome=FactOutcome.ANSWERED,
@@ -1819,7 +2233,7 @@ def test_reference_grounding_certifies_selected_memory_identity_authority():
     data_access = _EndpointDataAccess(
         {
             "list_location_list": {
-                "data": [{"location_id": "loc_other", "name": "Other Mall"}]
+                "data": [{"location_id": "loc_live_catalog", "name": "ABC Mall"}]
             },
         }
     )
@@ -1843,19 +2257,22 @@ def test_reference_grounding_certifies_selected_memory_identity_authority():
                 "turn_1.entity.location.abc",
             }
         ),
-        model_port=_NoGroundingModel(),
+        model_port=_ReadRouteGroundingModel(read_id="list_location_list"),
         provider="test",
         model_key="test",
         max_thinking_tokens=0,
     )
 
-    assert output.turn is None
+    assert output.turn is not None
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "loc_1"
-    assert output.ledger.certifications[0].authority_refs == (
-        "memory:turn_1.entity.location.abc",
+    assert output.ledger.values[0].payload.value == "loc_live_catalog"
+    assert output.ledger.certifications[0].method == (
+        GroundedValueCertificationMethod.RESOLVER_SOURCE_READ
     )
-    assert data_access.calls == []
+    assert output.ledger.certifications[0].authority_refs == ("list_location_list",)
+    assert data_access.calls == [
+        ("list_location_list", {"list_location_list.query.name": "ABC Mall"})
+    ]
 
 
 def test_reference_grounding_uses_live_resolver_when_memory_identity_is_not_active():
@@ -1903,7 +2320,7 @@ def test_reference_grounding_uses_live_resolver_when_memory_identity_is_not_acti
     ]
 
 
-def test_grounding_reuse_does_not_activate_source_binding_memory():
+def test_reference_grounding_active_memory_without_cr_handoff_does_not_certify():
     artifact = build_fact_artifact(
         artifact_id="turn_1",
         outcome=FactOutcome.ANSWERED,
@@ -1941,8 +2358,8 @@ def test_grounding_reuse_does_not_activate_source_binding_memory():
         max_thinking_tokens=0,
     )
 
-    assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "loc_1"
+    assert not output.ledger.values
+    assert output.ledger.issues[0].kind == GroundingTerminalKind.UNRESOLVED_REFERENCE
     assert output.ledger.uses == ()
 
 
@@ -2130,6 +2547,79 @@ def test_time_grounding_records_known_input_proof_ref():
         ("rs_calendar_days", CALENDAR_START_PARAM_ID, "start"),
         ("rs_calendar_days", CALENDAR_END_PARAM_ID, "end"),
     }
+
+
+def test_time_grounding_uses_conversation_resolved_value_text():
+    time_input = RequestedFactLiteralInput(
+        id="input_date",
+        source=KnownInputSource.CONVERSATION_RESOLUTION,
+        text="that same period",
+        resolved_value_text="yesterday",
+        role=LiteralInputRole.TIME_VALUE,
+        resolved_input_ref="cr_input_time_1",
+    )
+    contract = QuestionContract(
+        question_inputs=(time_input,),
+        requested_facts=(
+            RequestedFact(
+                id="fact_1",
+                description="sales total for the resolved period",
+                answer_outputs=(RequestedFactAnswerOutput(id="total_sales"),),
+                known_inputs=(time_input,),
+                input_refs=("input_date",),
+            ),
+        ),
+    )
+
+    output = ground_question_inputs(
+        question="What about that same period?",
+        question_contract=contract,
+        full_catalog=_date_sales_catalog(),
+        resolver_catalog=RelationCatalog(),
+        data_access_port=_DataAccess({}),
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-05-09",
+            timezone="Africa/London",
+        ),
+        model_port=_BusinessTimeGroundingModel(
+            intents_by_text={
+                "yesterday": _point_date_time_intent(
+                    "yesterday",
+                    year=2026,
+                    month=5,
+                    day=8,
+                )
+            }
+        ),
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+        conversation_resolution_overlay=ConversationResolutionOverlay(
+            current_question="What about that same period?",
+            value_frames=(),
+            references=(),
+            scopes=(),
+            activated_memory_ids=("turn_1.time_scope.yesterday",),
+            used_source_card_ids=("card_time_yesterday",),
+            resolved_question_inputs=(
+                LiteralQuestionInputOverlay(
+                    source_text="that same period",
+                    occurrence=1,
+                    resolved_input_ref="cr_input_time_1",
+                    resolved_value_text="yesterday",
+                    value_meaning_hint="time scope",
+                    role=LiteralInputRole.TIME_VALUE,
+                    evidence_refs=("turn_1.time_scope.yesterday",),
+                ),
+            ),
+        ),
+    )
+
+    assert not output.ledger.issues
+    value = output.ledger.values[0]
+    assert value.payload.expression == "yesterday"
+    assert value.payload.resolved_start == "2026-05-08"
+    assert value.payload.resolved_end == "2026-05-08"
 
 
 def test_time_grounding_uses_model_authored_quarter_intent_without_year():
@@ -2877,6 +3367,108 @@ def _staff_read() -> EndpointRead:
             CatalogField(
                 ref="field.data.last_name",
                 path="data.last_name",
+                row_path_id="data",
+                type="string",
+            ),
+        ),
+    )
+
+
+def _staff_detail_read() -> EndpointRead:
+    return EndpointRead(
+        id="get_staff_detail",
+        endpoint_name="get_staff_detail",
+        resource_names=("staff",),
+        params=(
+            CatalogParam(
+                ref="get_staff_detail.path.staff_id",
+                name="staff_id",
+                source=ParamSource.PATH,
+                type="string",
+                required=True,
+                identity=IdentityMetadata(
+                    entity_ref="staff",
+                    identity_field="staff_id",
+                    primary_key=True,
+                    stable=True,
+                ),
+            ),
+        ),
+        row_paths=(
+            RowPath(
+                id="data",
+                path="data",
+                cardinality=RowCardinality.ONE,
+            ),
+        ),
+        fields=(
+            CatalogField(
+                ref="field.data.staff_id",
+                path="data.staff_id",
+                row_path_id="data",
+                type="string",
+                identity=IdentityMetadata(
+                    entity_ref="staff",
+                    identity_field="staff_id",
+                    primary_key=True,
+                    stable=True,
+                    display_fields=("field.data.full_name",),
+                ),
+            ),
+            CatalogField(
+                ref="field.data.full_name",
+                path="data.full_name",
+                row_path_id="data",
+                type="string",
+            ),
+        ),
+    )
+
+
+def _location_detail_read() -> EndpointRead:
+    return EndpointRead(
+        id="get_location_detail",
+        endpoint_name="get_location_detail",
+        resource_names=("location",),
+        params=(
+            CatalogParam(
+                ref="get_location_detail.path.location_id",
+                name="location_id",
+                source=ParamSource.PATH,
+                type="string",
+                required=True,
+                identity=IdentityMetadata(
+                    entity_ref="location",
+                    identity_field="location_id",
+                    primary_key=True,
+                    stable=True,
+                ),
+            ),
+        ),
+        row_paths=(
+            RowPath(
+                id="data",
+                path="data",
+                cardinality=RowCardinality.ONE,
+            ),
+        ),
+        fields=(
+            CatalogField(
+                ref="field.data.location_id",
+                path="data.location_id",
+                row_path_id="data",
+                type="string",
+                identity=IdentityMetadata(
+                    entity_ref="location",
+                    identity_field="location_id",
+                    primary_key=True,
+                    stable=True,
+                    display_fields=("field.data.name",),
+                ),
+            ),
+            CatalogField(
+                ref="field.data.name",
+                path="data.name",
                 row_path_id="data",
                 type="string",
             ),
