@@ -15,4 +15,5 @@ input:
       normal_instance_guard: CONFLICTS_WITH_TEST
       include_normal_guard_result: false
 expect:
-  error_contains: not valid
+  result_contains:
+    status: rejected

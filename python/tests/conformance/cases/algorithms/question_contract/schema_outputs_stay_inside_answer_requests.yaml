@@ -9,4 +9,6 @@ expect:
   result_contains:
     answer_output_required: [description]
     answer_output_properties: [description]
-
+  result_exact_fields:
+    answer_output_required: [description]
+    answer_output_properties: [description]

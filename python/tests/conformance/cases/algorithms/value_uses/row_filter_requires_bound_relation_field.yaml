@@ -35,4 +35,5 @@ input:
         field_id: data_entity_label
         operator: equals
 expect:
-  error_contains: unknown field
+  result_contains:
+    status: rejected

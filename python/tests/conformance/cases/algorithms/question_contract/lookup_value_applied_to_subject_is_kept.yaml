@@ -41,3 +41,20 @@ expect:
     requested_facts:
     - input_refs:
       - city
+  result_exact_fields:
+    question_inputs:
+    - id: city
+      kind: literal_text
+      source: question_context
+      text: London
+      resolved_input_ref: ''
+      resolved_value_text: London
+      field_label_text: ''
+      value_meaning_hint: city
+      role: reference_value
+    requested_fact_input_handoff:
+    - id: fact_1
+      input_refs:
+      - city
+      known_input_refs:
+      - city

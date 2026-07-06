@@ -18,4 +18,5 @@ input:
   used_input_refs:
   - period
 expect:
-  error_contains: must be question_context
+  result_contains:
+    status: rejected

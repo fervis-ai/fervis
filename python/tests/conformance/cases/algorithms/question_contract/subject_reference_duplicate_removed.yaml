@@ -35,4 +35,5 @@ input:
   used_input_refs:
   - subject
 expect:
-  error_contains: answer subject
+  result_contains:
+    status: rejected

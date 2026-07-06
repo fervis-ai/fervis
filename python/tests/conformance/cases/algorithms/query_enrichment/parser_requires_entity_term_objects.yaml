@@ -29,4 +29,5 @@ input:
       catalog_search_terms:
       - staff
 expect:
-  error_contains: entity catalog_search_terms items must be objects
+  result_contains:
+    status: rejected

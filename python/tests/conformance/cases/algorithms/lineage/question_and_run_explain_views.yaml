@@ -111,5 +111,5 @@ expect:
       - "Question question_1: How many stores are open?"
       - "Run run_2 (#2): answered"
       - "Answer output count: number 2"
-  text_excludes:
-    - "Run run_3"
+    excludes:
+      Run run_3: true

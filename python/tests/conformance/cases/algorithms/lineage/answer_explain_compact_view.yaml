@@ -260,6 +260,6 @@ expect:
       - "Binding: group=staff_id metric=calculated_pay function=sum"
       - "Explicit inputs: June 2026"
       - "Derived inputs: month=2026-06"
-  text_excludes:
-    - "{"
-    - "payload_json"
+    excludes:
+      "{": true
+      payload_json: true

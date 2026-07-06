@@ -39,3 +39,31 @@ expect:
       - description: salespeople
       - description: products they sold
       - description: total sales per person
+  result_exact_fields:
+    question_inputs:
+    - id: store
+      kind: literal_text
+      source: question_context
+      text: Westlands Beauty Hub
+      resolved_input_ref: ''
+      resolved_value_text: Westlands Beauty Hub
+      field_label_text: ''
+      value_meaning_hint: store location
+      role: reference_value
+    - id: period
+      kind: literal_text
+      source: question_context
+      text: December 3, 2025
+      resolved_input_ref: ''
+      resolved_value_text: December 3, 2025
+      field_label_text: ''
+      value_meaning_hint: ''
+      role: time_value
+    requested_fact_input_handoff:
+    - id: fact_1
+      input_refs:
+      - store
+      - period
+      known_input_refs:
+      - store
+      - period

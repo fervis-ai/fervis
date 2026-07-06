@@ -37,7 +37,11 @@ from fervis.lookup.answer_rendering import (
 from tests.testkit.algorithms.relation_engine import (
     engine_input_from_payload,
 )
-from tests.testkit.assertions import subset_mismatches
+from tests.testkit.assertions import (
+    expects_rejection,
+    status_mismatches,
+    subset_mismatches,
+)
 from tests.testkit.question_contract import question_contract_from_payload
 
 
@@ -104,12 +108,14 @@ def run_outcomes_classify_case(payload: dict[str, Any]) -> list[str]:
             return [f"unsupported outcomes mode: {mode}"]
         rendered = render_fact_result(result) if isinstance(result, FactResult) else None
     except Exception as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error and expected_error in str(exc):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {exc}"]
-    if "error_contains" in payload["expect"]:
-        return [f"expected error containing {payload['expect']['error_contains']!r}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     actual = _result_payload(result, rendered)
     return subset_mismatches(
         actual=actual,

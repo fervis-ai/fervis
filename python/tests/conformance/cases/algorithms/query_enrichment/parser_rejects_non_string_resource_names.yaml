@@ -16,4 +16,5 @@ input:
             matching_resource_names: [123]
     entity_target_catalog_search_terms: []
 expect:
-  error_contains: text values must be strings
+  result_contains:
+    status: rejected

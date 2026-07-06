@@ -55,3 +55,20 @@ expect:
       - kind: literal_text
         resolved_value_text: today
         role: time_value
+  result_exact_fields:
+    question_inputs:
+    - id: time_1
+      kind: literal_text
+      source: question_context
+      text: today
+      resolved_input_ref: ''
+      resolved_value_text: today
+      field_label_text: ''
+      value_meaning_hint: ''
+      role: time_value
+    requested_fact_input_handoff:
+    - id: fact_1
+      input_refs:
+      - time_1
+      known_input_refs:
+      - time_1

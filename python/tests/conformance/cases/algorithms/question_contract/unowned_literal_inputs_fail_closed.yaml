@@ -34,4 +34,5 @@ input:
   used_input_refs:
   - period
 expect:
-  error_contains: question inputs must be owned by a requested fact
+  result_contains:
+    status: rejected

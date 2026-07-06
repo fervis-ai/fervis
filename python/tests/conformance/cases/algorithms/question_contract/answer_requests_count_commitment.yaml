@@ -82,3 +82,38 @@ expect:
       input_refs:
       - staff
       - period
+  result_exact_fields:
+    question_inputs:
+    - id: staff
+      kind: literal_text
+      source: question_context
+      text: Alice
+      resolved_input_ref: ''
+      resolved_value_text: Alice
+      field_label_text: ''
+      value_meaning_hint: staff member
+      role: reference_value
+    - id: period
+      kind: literal_text
+      source: question_context
+      text: yesterday
+      resolved_input_ref: ''
+      resolved_value_text: yesterday
+      field_label_text: ''
+      value_meaning_hint: ''
+      role: time_value
+    requested_fact_input_handoff:
+    - id: fact_1
+      input_refs:
+      - staff
+      - period
+      known_input_refs:
+      - staff
+      - period
+    - id: fact_2
+      input_refs:
+      - staff
+      - period
+      known_input_refs:
+      - staff
+      - period

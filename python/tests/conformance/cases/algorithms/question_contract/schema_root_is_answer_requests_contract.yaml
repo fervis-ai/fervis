@@ -30,3 +30,37 @@ expect:
       - answer_population
       - answer_outputs
       - used_question_inputs
+  result_exact_fields:
+    has_root_one_of: true
+    branch_kinds: [needs_clarification, question_contract]
+    answer_contract_required:
+      - kind
+      - answer_requests_count
+      - question_inputs
+      - answer_requests
+      - question_input_inventory_check
+    answer_contract_properties:
+      - kind
+      - answer_requests_count
+      - question_inputs
+      - answer_requests
+      - question_input_inventory_check
+    answer_contract_kind_values: [question_contract]
+    answer_contract_has_clarification_fields: false
+    clarification_required:
+      - kind
+      - missing
+      - clarification_question
+    clarification_properties:
+      - kind
+      - missing
+      - clarification_question
+    clarification_kind_values: [needs_clarification]
+    clarification_has_answer_fields: false
+    answer_request_required:
+      - answer_fact
+      - answer_expression
+      - answer_subject
+      - answer_population
+      - answer_outputs
+      - used_question_inputs

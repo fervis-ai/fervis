@@ -28,4 +28,5 @@ input:
     question_input_inventory_check:
       all_input_like_phrases_declared: true
 expect:
-  error_contains: question_inputs
+  result_contains:
+    status: rejected

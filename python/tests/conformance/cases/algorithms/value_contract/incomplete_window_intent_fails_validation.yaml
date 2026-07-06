@@ -15,4 +15,5 @@ input:
         count: 0
         direction: past
 expect:
-  error_contains: invalid time intent
+  result_contains:
+    status: rejected

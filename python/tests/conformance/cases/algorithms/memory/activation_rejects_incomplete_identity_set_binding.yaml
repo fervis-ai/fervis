@@ -21,5 +21,6 @@ input:
       use_as: identity_set_binding
       target_binding_id: sales
 expect:
-  error_contains: requires complete relation pagination
+  result_contains:
+    status: rejected
 

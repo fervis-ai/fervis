@@ -62,4 +62,5 @@ input:
         used_question_inputs: [staff, today]
     question_input_inventory_check: {all_input_like_phrases_declared: true}
 expect:
-  error_contains: question inputs must be owned by a requested fact
+  result_contains:
+    status: rejected

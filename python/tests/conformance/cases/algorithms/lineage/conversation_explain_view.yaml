@@ -95,5 +95,5 @@ expect:
       - "Run run_1 (#1): answered"
       - "Run run_2 (#1): factual_terminal"
       - "Requested fact fact_2: unresolved follow-up scope"
-  text_excludes:
-    - "payload_json"
+    excludes:
+      payload_json: true

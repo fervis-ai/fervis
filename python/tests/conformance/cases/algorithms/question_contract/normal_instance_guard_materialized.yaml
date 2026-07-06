@@ -49,3 +49,20 @@ expect:
             kind: NORMAL_INSTANCE_GUARD
             normal_instance_profile:
               profile_id: ORDINARY_BUSINESS_INSTANCE_V1
+  result_exact_fields:
+    question_inputs:
+    - id: period
+      kind: literal_text
+      source: question_context
+      text: today
+      resolved_input_ref: ''
+      resolved_value_text: today
+      field_label_text: ''
+      value_meaning_hint: ''
+      role: time_value
+    requested_fact_input_handoff:
+    - id: fact_1
+      input_refs:
+      - period
+      known_input_refs:
+      - period

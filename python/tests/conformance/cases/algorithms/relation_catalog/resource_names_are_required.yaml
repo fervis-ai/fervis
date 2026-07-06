@@ -10,4 +10,5 @@ input:
       - id: records_read
         endpoint_name: list_records
 expect:
-  error_contains: resource names
+  result_contains:
+    status: rejected

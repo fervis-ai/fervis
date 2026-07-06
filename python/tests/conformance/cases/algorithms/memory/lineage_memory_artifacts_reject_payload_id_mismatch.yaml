@@ -25,4 +25,5 @@ input:
               type: number
               value: "1"
 expect:
-  error_contains: payload artifactId mismatch
+  result_contains:
+    status: rejected

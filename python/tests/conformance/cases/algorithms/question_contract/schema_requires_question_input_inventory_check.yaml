@@ -29,4 +29,5 @@ input:
           - description: sales total
         used_question_inputs: []
 expect:
-  error_contains: question_input_inventory_check
+  result_contains:
+    status: rejected

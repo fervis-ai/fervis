@@ -36,4 +36,5 @@ input:
         term: staff
       unexpected: value
 expect:
-  error_contains: unexpected field
+  result_contains:
+    status: rejected

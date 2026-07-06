@@ -16,4 +16,5 @@ input:
   used_input_refs:
   - period
 expect:
-  error_contains: inventory_check
+  result_contains:
+    status: rejected

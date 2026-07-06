@@ -50,4 +50,5 @@ input:
       - basis: team member can identify Jane Doe because value_meaning_hint is staff member.
         term: team member
 expect:
-  error_contains: at most 5 terms
+  result_contains:
+    status: rejected

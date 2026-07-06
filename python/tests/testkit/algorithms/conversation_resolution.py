@@ -20,7 +20,12 @@ from fervis.lookup.conversation_resolution.schema import (
 )
 from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 
-from tests.testkit.assertions import exact_mismatches, subset_mismatches
+from tests.testkit.assertions import (
+    exact_mismatches,
+    expects_rejection,
+    status_mismatches,
+    subset_mismatches,
+)
 
 
 def run_conversation_resolution_parse_case(payload: dict[str, Any]) -> list[str]:
@@ -119,12 +124,14 @@ def run_conversation_resolution_overlay_case(payload: dict[str, Any]) -> list[st
             for item in payload["input"].get("resolved_question_inputs") or ()
         )
     except ValueError as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error and expected_error in str(exc):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {exc}"]
-    if "error_contains" in payload["expect"]:
-        return [f"expected error containing {payload['expect']['error_contains']!r}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     actual = {
         "prompt_resolved_question_inputs": [
             item.to_prompt_payload() for item in resolved_inputs

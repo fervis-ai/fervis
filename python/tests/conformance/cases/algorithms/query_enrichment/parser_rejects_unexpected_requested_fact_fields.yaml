@@ -17,4 +17,5 @@ input:
             matching_resource_names: [sale]
     entity_target_catalog_search_terms: []
 expect:
-  error_contains: unexpected field
+  result_contains:
+    status: rejected

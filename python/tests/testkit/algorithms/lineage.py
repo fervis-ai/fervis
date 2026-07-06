@@ -120,9 +120,14 @@ def _compare_rendered(rendered: str, expect: dict, *, line_key: str) -> list[str
     for line in expect.get("result_contains", {}).get(line_key, ()):
         if line not in rendered:
             errors.append(f"missing compact lineage line: {line}")
-    for text in expect.get("text_excludes", ()):
-        if text in rendered:
-            errors.append(f"compact lineage included excluded text: {text}")
+    expected_excludes = expect.get("result_contains", {}).get("excludes", {})
+    if expected_excludes:
+        errors.extend(
+            subset_mismatches(
+                actual={"excludes": {text: text not in rendered for text in expected_excludes}},
+                expected_subset={"excludes": expected_excludes},
+            )
+        )
     return errors
 
 

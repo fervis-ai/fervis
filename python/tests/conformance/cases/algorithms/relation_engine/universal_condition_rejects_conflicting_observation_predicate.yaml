@@ -43,4 +43,5 @@ input:
         predicate: {left: qty, operator: lte, right_scalar: zero}
         output_fields: [{source: name}]
 expect:
-  error_contains: conflicting universal observation
+  result_contains:
+    status: rejected

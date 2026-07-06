@@ -30,3 +30,17 @@ expect:
     - id: sales
       kind: row_set_reference
       resolved_input_ref: cr_input_1
+  result_exact_fields:
+    question_inputs:
+    - id: sales
+      kind: row_set_reference
+      source: conversation_resolution
+      text: those sales
+      resolved_input_ref: cr_input_1
+      occurrence: 1
+    requested_fact_input_handoff:
+    - id: fact_1
+      input_refs:
+      - sales
+      known_input_refs:
+      - sales

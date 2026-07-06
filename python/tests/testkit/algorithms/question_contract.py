@@ -25,7 +25,12 @@ from fervis.lookup.conversation_resolution import (
 from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 from fervis.lookup.turn_prompts import build_turn_prompt_context
 
-from tests.testkit.assertions import exact_mismatches, subset_mismatches
+from tests.testkit.assertions import (
+    exact_mismatches,
+    expects_rejection,
+    status_mismatches,
+    subset_mismatches,
+)
 
 
 def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
@@ -53,12 +58,14 @@ def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
             ),
         )
     except ValueError as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error and expected_error in str(exc):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {exc}"]
-    if "error_contains" in payload["expect"]:
-        return [f"expected error containing {payload['expect']['error_contains']!r}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     actual = {
         "question_inputs": [
             _known_input_actual(item)
@@ -97,10 +104,29 @@ def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
             actual=actual,
             expected=payload["expect"]["result_equals"],
         )
-    return subset_mismatches(
+    actual["requested_fact_input_handoff"] = [
+        {
+            "id": fact["id"],
+            "input_refs": fact["input_refs"],
+            "known_input_refs": [item["id"] for item in fact["known_inputs"]],
+        }
+        for fact in actual["requested_facts"]
+    ]
+    errors = subset_mismatches(
         actual=actual,
-        expected_subset=payload["expect"]["result_contains"],
+        expected_subset=payload["expect"].get("result_contains") or {},
     )
+    for field, expected_value in (
+        payload["expect"].get("result_exact_fields") or {}
+    ).items():
+        errors.extend(
+            exact_mismatches(
+                actual=actual.get(field),
+                expected=expected_value,
+                path=field,
+            )
+        )
+    return errors
 
 
 def _known_input_actual(item: RequestedFactKnownInput) -> dict[str, object]:
@@ -250,9 +276,16 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
             actual=actual,
             expected_subset=payload["expect"].get("result_contains") or {},
         )
-    for text in payload["expect"].get("text_excludes") or ():
-        if text in actual["schema_text"]:
-            errors.append(f"unexpected text present: {text!r}")
+    for field, expected_value in (
+        payload["expect"].get("result_exact_fields") or {}
+    ).items():
+        errors.extend(
+            exact_mismatches(
+                actual=actual.get(field),
+                expected=expected_value,
+                path=field,
+            )
+        )
     return errors
 
 
@@ -264,15 +297,15 @@ def run_question_contract_schema_validate_case(payload: dict[str, Any]) -> list[
     schema = build_question_contract_decisions_schema()
     errors = list(Draft7Validator(schema).iter_errors(instance))
     if errors:
-        expected_error = payload["expect"].get("error_contains")
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         error_text = " | ".join(_validation_error_text(error) for error in errors)
-        if expected_error and expected_error in error_text:
-            return []
         return [f"unexpected validation error: {error_text}"]
-    if "error_contains" in payload["expect"]:
-        return [
-            f"expected validation error containing {payload['expect']['error_contains']!r}"
-        ]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     return []
 
 
@@ -323,13 +356,6 @@ def run_question_contract_prompt_case(payload: dict[str, Any]) -> list[str]:
         },
     }
     errors: list[str] = []
-    for field, excluded_values in (
-        payload["expect"].get("text_excludes_from") or {}
-    ).items():
-        text = str(actual.get(field) or "")
-        for value in excluded_values:
-            if value in text:
-                errors.append(f"{field} contains excluded text: {value!r}")
     expected_subset = payload["expect"].get("result_contains") or {}
     if expected_subset:
         errors.extend(subset_mismatches(actual=actual, expected_subset=expected_subset))

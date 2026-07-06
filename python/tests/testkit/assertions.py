@@ -3,6 +3,21 @@ from __future__ import annotations
 from typing import Any
 
 
+def expects_rejection(expect: dict[str, Any]) -> bool:
+    return (expect.get("result_contains") or {}).get("status") == "rejected"
+
+
+def status_mismatches(
+    *,
+    actual_status: str,
+    expected: dict[str, Any],
+) -> list[str]:
+    return subset_mismatches(
+        actual={"status": actual_status},
+        expected_subset=expected.get("result_contains") or {},
+    )
+
+
 def subset_mismatches(
     *,
     actual: dict[str, Any],

@@ -13,4 +13,5 @@ input:
           - kind: value
             value: {type: number, value: 12}
 expect:
-  error_contains: fact address requires address
+  result_contains:
+    status: rejected

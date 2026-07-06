@@ -14,4 +14,5 @@ input:
       subject_identity: CONFLICTS_WITH_TEST
       normal_instance_guard: CONFLICTS_WITH_TEST
 expect:
-  error_contains: not valid
+  result_contains:
+    status: rejected

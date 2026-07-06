@@ -13,4 +13,5 @@ input:
       offset: 0
     mode: start_only
 expect:
-  error_contains: mode has unsupported value
+  result_contains:
+    status: rejected

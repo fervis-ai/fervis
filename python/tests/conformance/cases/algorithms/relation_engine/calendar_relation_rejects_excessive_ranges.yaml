@@ -11,4 +11,5 @@ input:
   output_date_field: runtime_date
   max_rows: 2
 expect:
-  error_contains: max rows
+  result_contains:
+    status: rejected

@@ -5,7 +5,11 @@ from typing import Any
 
 from fervis.lookup.grounding.time_resolution import resolve_time
 
-from tests.testkit.assertions import subset_mismatches
+from tests.testkit.assertions import (
+    expects_rejection,
+    status_mismatches,
+    subset_mismatches,
+)
 
 
 def run_business_time_case(payload: dict[str, Any]) -> list[str]:
@@ -18,12 +22,14 @@ def run_business_time_case(payload: dict[str, Any]) -> list[str]:
             timezone=str(input_payload.get("timezone") or "UTC"),
         )
     except Exception as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error and expected_error in str(exc):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {exc}"]
-    if "error_contains" in payload["expect"]:
-        return [f"expected error containing {payload['expect']['error_contains']!r}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     return subset_mismatches(
         actual=result,
         expected_subset=payload["expect"]["result_contains"],

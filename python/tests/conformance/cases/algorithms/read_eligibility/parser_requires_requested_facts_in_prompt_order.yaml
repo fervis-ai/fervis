@@ -25,4 +25,5 @@ input:
             retention_basis: The sales read is sales evidence.
             retention_decision: RETAIN
 expect:
-  error_contains: same order
+  result_contains:
+    status: rejected

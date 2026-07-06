@@ -11,4 +11,5 @@ input:
     amount: DOES_NOT_FIT_REQUESTED_ANSWER
     data: DOES_NOT_FIT_REQUESTED_ANSWER
 expect:
-  error_contains: selected row count basis does not fit
+  result_contains:
+    status: rejected

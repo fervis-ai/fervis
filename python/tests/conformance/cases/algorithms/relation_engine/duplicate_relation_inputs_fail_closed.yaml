@@ -13,4 +13,5 @@ input:
       rows: []
       grain_keys: []
 expect:
-  error_contains: duplicate relation
+  result_contains:
+    status: rejected

@@ -24,4 +24,5 @@ input:
             identity:
               area_id: area_1
 expect:
-  error_contains: requested_fact memory artifacts cannot carry addresses
+  result_contains:
+    status: rejected

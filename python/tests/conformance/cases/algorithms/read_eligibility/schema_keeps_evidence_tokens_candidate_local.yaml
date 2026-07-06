@@ -23,4 +23,5 @@ input:
             retention_basis: Payments are not sales evidence for this requested fact.
             retention_decision: DROP
 expect:
-  error_contains: not valid
+  result_contains:
+    status: rejected

@@ -25,3 +25,20 @@ expect:
         text: yesterday
         resolved_value_text: yesterday
         role: time_value
+  result_exact_fields:
+    question_inputs:
+    - id: period
+      kind: literal_text
+      source: question_context
+      text: yesterday
+      resolved_input_ref: ''
+      resolved_value_text: yesterday
+      field_label_text: ''
+      value_meaning_hint: ''
+      role: time_value
+    requested_fact_input_handoff:
+    - id: fact_1
+      input_refs:
+      - period
+      known_input_refs:
+      - period

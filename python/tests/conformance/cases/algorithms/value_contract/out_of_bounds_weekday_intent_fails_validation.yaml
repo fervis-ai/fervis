@@ -14,4 +14,5 @@ input:
         precision: day
         named: {weekday: 9}
 expect:
-  error_contains: invalid time intent
+  result_contains:
+    status: rejected

@@ -25,4 +25,5 @@ input:
             retention_basis: This candidate belongs to fact_sales, not fact_payments.
             retention_decision: RETAIN
 expect:
-  error_contains: not valid
+  result_contains:
+    status: rejected

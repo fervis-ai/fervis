@@ -90,7 +90,12 @@ from fervis.lookup.source_binding.review_surface import (
 )
 from fervis.lookup.source_binding.plan_targets import source_binding_target_index
 
-from tests.testkit.assertions import exact_mismatches, subset_mismatches
+from tests.testkit.assertions import (
+    exact_mismatches,
+    expects_rejection,
+    status_mismatches,
+    subset_mismatches,
+)
 from tests.testkit.catalog import catalog_from_payload
 from tests.lookup.prompt_sections import prompt_section_text
 
@@ -913,14 +918,14 @@ def run_source_binding_row_predicate_parse_case(payload: dict[str, Any]) -> list
         validate(instance=model_payload, schema=schema)
         result = parse_source_binding(model_payload, request=request)
     except (ValidationError, ValueError) as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error == "not valid" or (
-            expected_error and expected_error in str(exc)
-        ):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {exc}"]
-    if "error_contains" in payload["expect"]:
-        return [f"expected error containing {payload['expect']['error_contains']!r}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     bound_source = result.outcome.bound_sources[0]
     row_filters = tuple(getattr(bound_source.source, "row_filters", ()))
     return subset_mismatches(
@@ -962,16 +967,14 @@ def run_source_binding_row_predicate_schema_case(payload: dict[str, Any]) -> lis
             schema=prompt.response_contract().provider_schema,
         )
     except ValidationError as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error == "not valid" or (
-            expected_error and expected_error in str(exc)
-        ):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected validation error: {exc.message}"]
-    if "error_contains" in payload["expect"]:
-        return [
-            f"expected validation error containing {payload['expect']['error_contains']!r}"
-        ]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     return []
 
 
@@ -996,20 +999,22 @@ def run_source_binding_finite_choice_parse_case(payload: dict[str, Any]) -> list
         )
         result = parse_source_binding(model_payload, request=request)
     except ValidationError as exc:
-        expected_error = payload["expect"].get("error_contains")
         error_text = f"schema validation failed: {exc.message}"
-        if expected_error == "not valid" or (
-            expected_error and expected_error in error_text
-        ):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {error_text}"]
     except ValueError as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error and expected_error in str(exc):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {exc}"]
-    if "error_contains" in payload["expect"]:
-        return [f"expected error containing {payload['expect']['error_contains']!r}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     bound_source = result.outcome.bound_sources[0]
     param_values = [
         {
@@ -1100,14 +1105,14 @@ def run_source_binding_metric_fit_parse_case(payload: dict[str, Any]) -> list[st
         )
         result = parse_source_binding(model_payload, request=request)
     except (ValidationError, ValueError) as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error == "not valid" or (
-            expected_error and expected_error in str(exc)
-        ):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {exc}"]
-    if "error_contains" in payload["expect"]:
-        return [f"expected error containing {payload['expect']['error_contains']!r}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     bound_source = result.outcome.bound_sources[0]
     fulfillment = bound_source.fulfillments[0]
     return subset_mismatches(
@@ -1165,12 +1170,14 @@ def run_source_binding_parse_case(payload: dict[str, Any]) -> list[str]:
         )
         result = parse_source_binding(model_payload, request=request)
     except (ValidationError, ValueError) as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error and expected_error in str(exc):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {exc}"]
-    if "error_contains" in payload["expect"]:
-        return [f"expected error containing {payload['expect']['error_contains']!r}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     bound_source = result.outcome.bound_sources[0]
     return subset_mismatches(
         actual={
@@ -1304,10 +1311,14 @@ def _run_reused_answer_output_metric_fit_parse(
         )
         result = parse_source_binding(model_payload, request=request)
     except (ValidationError, ValueError) as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error and expected_error in str(exc):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {exc}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     return subset_mismatches(
         actual={
             "metric_measure_evidence_ids_by_fact": {

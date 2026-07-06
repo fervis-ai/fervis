@@ -6,4 +6,15 @@ kind: algorithm
 algorithm: question_contract.schema
 input: {}
 expect:
-  text_excludes: [used_memory_ids]
+  result_contains: {}
+  result_exact_fields:
+    answer_contract_properties:
+      - kind
+      - answer_requests_count
+      - question_inputs
+      - answer_requests
+      - question_input_inventory_check
+    clarification_properties:
+      - kind
+      - missing
+      - clarification_question

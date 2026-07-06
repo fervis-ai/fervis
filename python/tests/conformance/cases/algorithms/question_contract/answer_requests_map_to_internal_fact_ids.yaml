@@ -9,9 +9,15 @@ input:
 expect:
   result_contains:
     requested_facts:
-      - id: fact_1
-        description: sales at ABC Mall
-        answer_expression_family: scalar_aggregate
-        answer_outputs:
-          - id: answer_1
-            description: sales total
+    - id: fact_1
+      description: sales at ABC Mall
+      answer_expression_family: scalar_aggregate
+      answer_outputs:
+      - id: answer_1
+        description: sales total
+  result_exact_fields:
+    question_inputs: []
+    requested_fact_input_handoff:
+    - id: fact_1
+      input_refs: []
+      known_input_refs: []

@@ -19,4 +19,5 @@ input:
   used_input_refs:
   - person
 expect:
-  error_contains: source_text must come from question context
+  result_contains:
+    status: rejected

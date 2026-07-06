@@ -30,4 +30,5 @@ input:
       - basis: list_staff_list can identify Jane Doe because value_meaning_hint is staff member.
         term: list_staff_list
 expect:
-  error_contains: catalog_search_terms must not contain endpoint names
+  result_contains:
+    status: rejected

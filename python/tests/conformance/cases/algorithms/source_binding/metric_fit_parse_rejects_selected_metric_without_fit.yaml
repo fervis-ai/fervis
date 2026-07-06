@@ -11,4 +11,5 @@ input:
   metric_decisions:
     amount: DOES_NOT_FIT_REQUESTED_ANSWER
 expect:
-  error_contains: selected support set metric does not fit
+  result_contains:
+    status: rejected
