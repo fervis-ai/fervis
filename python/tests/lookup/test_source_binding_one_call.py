@@ -79,8 +79,8 @@ from fervis.lookup.source_binding.candidates import source_candidate_registry
 from fervis.lookup.source_binding.candidates.registry import (
     source_candidate_discovery_payload,
 )
-from fervis.lookup.source_binding.parser import (
-    _candidate_value_is_used_by_bound_source,
+from fervis.lookup.source_binding.parser.candidate_access import (
+    candidate_value_is_used_by_bound_source,
 )
 from tests.lookup.source_binding_helpers import source_fulfills_for_candidate
 
@@ -431,7 +431,7 @@ def test_source_linked_value_usage_checks_metric_evidence():
         ),
     )
 
-    assert _candidate_value_is_used_by_bound_source(candidate, bound)
+    assert candidate_value_is_used_by_bound_source(candidate, bound)
 
 
 def test_generate_source_binding_runs_one_model_turn():
