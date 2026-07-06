@@ -4,35 +4,39 @@ set -Eeuo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/run-local-goldset.sh --case-ids case_a,case_b [options]
+  scripts/run-local-goldset.sh [options]
 
 Options:
-  --case-ids CASES        Comma-separated goldset case ids. Required.
+  --case-ids CASES        Comma-separated goldset case ids. Defaults to
+                          FERVIS_GOLDSET_CASE_IDS. Required.
   --project-root PATH     Host API project root. Defaults to FERVIS_HOST_PROJECT_ROOT
-                          or ../../omnishades-code/unified-commerce/api when present.
-  --suite-path PATH       Goldset suite directory. Defaults to FERVIS_GOLDSET_SUITE_PATH
-                          or ../internal/evals/ozana-goldsets when present.
-  --tenant-id ID          Tenant id. Defaults to local.
-  --principal-id ID       Principal id. Defaults to FERVIS_GOLDSET_PRINCIPAL_ID from env/.env.
+                          or the current directory when config/fervis.json exists.
+  --suite REF             Goldset suite path or import entrypoint. Defaults to
+                          FERVIS_GOLDSET_SUITE. Required.
+  --suite-path REF        Alias for --suite.
+  --tenant-id ID          Tenant id. Defaults to FERVIS_GOLDSET_TENANT_ID.
+                          Required.
+  --principal-id ID       Principal id. Defaults to FERVIS_GOLDSET_PRINCIPAL_ID.
+                          Required.
   --database-url URL      Database URL override.
   --ledger-dir PATH       Output directory for per-case ledgers and command output.
   --python PATH           Python executable. Defaults to <project-root>/.venv/bin/python.
+  --wait-seconds SECONDS  Per-case wait timeout. Defaults to 300.
   -h, --help              Show this help.
 EOF
 }
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-default_project_root="$(cd "$repo_root/../.." && pwd)/omnishades-code/unified-commerce/api"
-default_suite_path="$(cd "$repo_root/.." && pwd)/internal/evals/ozana-goldsets"
 
-case_ids=""
+case_ids="${FERVIS_GOLDSET_CASE_IDS:-}"
 project_root="${FERVIS_HOST_PROJECT_ROOT:-}"
-suite_path="${FERVIS_GOLDSET_SUITE_PATH:-}"
-tenant_id="local"
+suite_ref="${FERVIS_GOLDSET_SUITE:-}"
+tenant_id="${FERVIS_GOLDSET_TENANT_ID:-}"
 principal_id="${FERVIS_GOLDSET_PRINCIPAL_ID:-}"
 database_url="${FERVIS_LOCAL_DATABASE_URL:-}"
 ledger_dir=""
 python_bin=""
+wait_seconds="300"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -44,8 +48,12 @@ while [[ $# -gt 0 ]]; do
       project_root="${2:-}"
       shift 2
       ;;
+    --suite)
+      suite_ref="${2:-}"
+      shift 2
+      ;;
     --suite-path)
-      suite_path="${2:-}"
+      suite_ref="${2:-}"
       shift 2
       ;;
     --tenant-id)
@@ -68,6 +76,10 @@ while [[ $# -gt 0 ]]; do
       python_bin="${2:-}"
       shift 2
       ;;
+    --wait-seconds)
+      wait_seconds="${2:-}"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -80,24 +92,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$case_ids" ]]; then
-  echo "--case-ids is required" >&2
-  usage >&2
-  exit 2
+if [[ -z "$project_root" && -f "config/fervis.json" ]]; then
+  project_root="$(pwd)"
 fi
 
-if [[ -z "$project_root" && -d "$default_project_root" ]]; then
-  project_root="$default_project_root"
-fi
-if [[ -z "$suite_path" && -d "$default_suite_path" ]]; then
-  suite_path="$default_suite_path"
-fi
 if [[ -z "$project_root" || ! -d "$project_root" ]]; then
   echo "Host project root not found. Pass --project-root or set FERVIS_HOST_PROJECT_ROOT." >&2
-  exit 2
-fi
-if [[ -z "$suite_path" || ! -d "$suite_path" ]]; then
-  echo "Goldset suite path not found. Pass --suite-path or set FERVIS_GOLDSET_SUITE_PATH." >&2
   exit 2
 fi
 
@@ -108,8 +108,24 @@ if [[ -f "$project_root/.env" ]]; then
   set +a
 fi
 
-if [[ -z "$principal_id" ]]; then
-  principal_id="${FERVIS_GOLDSET_PRINCIPAL_ID:-${FERVIS_GOLDSET_ADMIN_USER_ID:-}}"
+case_ids="${case_ids:-${FERVIS_GOLDSET_CASE_IDS:-}}"
+suite_ref="${suite_ref:-${FERVIS_GOLDSET_SUITE:-}}"
+tenant_id="${tenant_id:-${FERVIS_GOLDSET_TENANT_ID:-}}"
+principal_id="${principal_id:-${FERVIS_GOLDSET_PRINCIPAL_ID:-}}"
+database_url="${database_url:-${FERVIS_LOCAL_DATABASE_URL:-}}"
+
+if [[ -z "$case_ids" ]]; then
+  echo "Goldset case ids not found. Pass --case-ids or set FERVIS_GOLDSET_CASE_IDS." >&2
+  usage >&2
+  exit 2
+fi
+if [[ -z "$suite_ref" ]]; then
+  echo "Goldset suite not found. Pass --suite or set FERVIS_GOLDSET_SUITE." >&2
+  exit 2
+fi
+if [[ -z "$tenant_id" ]]; then
+  echo "Tenant id not found. Pass --tenant-id or set FERVIS_GOLDSET_TENANT_ID." >&2
+  exit 2
 fi
 if [[ -z "$principal_id" ]]; then
   echo "Principal id not found. Pass --principal-id or set FERVIS_GOLDSET_PRINCIPAL_ID." >&2
@@ -118,9 +134,6 @@ fi
 
 if [[ -n "$database_url" ]]; then
   export DATABASE_URL="$database_url"
-elif [[ "${DATABASE_URL:-}" == *"@db:"* ]]; then
-  export DATABASE_URL="postgres://postgres:pw@localhost:5433/brands_api_db"
-  echo "Using local DATABASE_URL override because project .env points at Docker host 'db'."
 fi
 
 if [[ -z "$python_bin" ]]; then
@@ -138,25 +151,22 @@ fi
 mkdir -p "$ledger_dir"
 
 goldset_src_path=""
-if [[ -d "$suite_path/src" ]]; then
-  goldset_src_path="$suite_path/src"
-fi
-if [[ ! -f "$suite_path/fervis_goldset.py" ]]; then
-  if [[ -f "$suite_path/src/fervis_goldsets/ozana/suite.py" ]]; then
-    suite_wrapper_dir="$ledger_dir/suite-entrypoint"
-    mkdir -p "$suite_wrapper_dir"
-    cat >"$suite_wrapper_dir/fervis_goldset.py" <<'PY'
-from fervis_goldsets.ozana.suite import load_suite
-PY
-    suite_path="$suite_wrapper_dir"
-  else
-    echo "Goldset suite entrypoint not found: $suite_path/fervis_goldset.py" >&2
-    exit 2
+if [[ "$suite_ref" != *:* ]]; then
+  suite_path="$suite_ref"
+  if [[ "$suite_path" != /* ]]; then
+    suite_path="$project_root/$suite_path"
+  fi
+  suite_ref="$suite_path"
+  if [[ -d "$suite_path/src" ]]; then
+    goldset_src_path="$suite_path/src"
   fi
 fi
 
 export PYTHONSAFEPATH=1
 export PYTHONPATH="$repo_root/python/src${goldset_src_path:+:$goldset_src_path}:$project_root${PYTHONPATH:+:$PYTHONPATH}"
+export FERVIS_GOLDSET_SUITE="$suite_ref"
+export FERVIS_GOLDSET_TENANT_ID="$tenant_id"
+export FERVIS_GOLDSET_PRINCIPAL_ID="$principal_id"
 
 "$python_bin" -P - "$repo_root" <<'PY'
 from __future__ import annotations
@@ -179,8 +189,6 @@ if expected not in (prompt_path, *prompt_path.parents):
     raise SystemExit(
         f"wrong question_contract prompt import: {prompt_path} does not come from {expected}"
     )
-print(f"fervis_import={actual}")
-print(f"question_contract_prompt={prompt_path}")
 PY
 
 IFS=',' read -r -a cases <<< "$case_ids"
@@ -193,34 +201,41 @@ for raw_case in "${cases[@]}"; do
   stderr_file="$ledger_dir/$case_id.stderr.txt"
   ledger_file="$ledger_dir/$case_id.ledger.jsonl"
 
-  echo "RUNNING $case_id"
+  "$python_bin" -P - "$case_id" <<'PY'
+from __future__ import annotations
+
+import os
+import sys
+
+from fervis.evaluation.goldsets.loader import load_goldset_suite
+
+case_id = sys.argv[1]
+suite = load_goldset_suite(os.environ["FERVIS_GOLDSET_SUITE"])
+case = next((case for case in suite.cases if case.case_id == case_id), None)
+if case is None:
+    raise SystemExit(f"goldset case not found: {case_id}")
+print(f"RUNNING: {case.case_id}, {case.question}")
+PY
+
   set +e
   (
     cd "$project_root"
-    "$python_bin" -P - "$case_id" "$suite_path" "$tenant_id" "$principal_id" "$ledger_file" <<'PY'
+    FERVIS_GOLDSET_CASE_IDS="$case_id" "$python_bin" -P - "$ledger_file" "$wait_seconds" <<'PY'
 from __future__ import annotations
 
 import sys
 from fervis.interfaces.cli.main import main
 
-case_id, suite_path, tenant_id, principal_id, ledger_file = sys.argv[1:6]
+ledger_file, wait_seconds = sys.argv[1:3]
 raise SystemExit(
     main(
         (
             "goldset",
             "run",
-            "--suite-path",
-            suite_path,
-            "--case-ids",
-            case_id,
-            "--tenant-id",
-            tenant_id,
-            "--principal-id",
-            principal_id,
             "--ledger-file",
             ledger_file,
             "--wait-seconds",
-            "300",
+            wait_seconds,
         )
     )
 )
@@ -243,15 +258,13 @@ try:
     payload = json.loads(stdout_path.read_text())
     result = payload["payload"]["cases"][0]
     answer = result.get("answer")
-    print(
-        "RESULT "
-        f"{case_id} exit={exit_code} status={result.get('status')} "
-        f"message={result.get('message')} run_id={result.get('run_id')}"
-    )
-    if answer not in ("", None):
-        print(f"ANSWER {case_id}: {answer}")
+    if str(result.get("status")) == "passed" and str(exit_code) == "0":
+        print(f"PASS: {answer}")
+    else:
+        message = result.get("message") or answer or f"exit={exit_code}"
+        print(f"FAIL: {message}")
 except Exception as exc:
-    print(f"RESULT {case_id} exit={exit_code} parse_error={exc}")
+    print(f"FAIL: parse_error={exc}; exit={exit_code}")
     if stdout_path.exists():
         print(stdout_path.read_text()[-1200:])
 
@@ -263,7 +276,6 @@ PY
   if [[ "$exit_code" -ne 0 ]]; then
     failed=1
   fi
-  echo "DONE $case_id"
 done
 
 echo "Artifacts: $ledger_dir"

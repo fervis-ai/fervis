@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from fervis.lookup.plan_selection import provider_contract as provider_output
 from fervis.lookup.plan_selection.model import SourceAlignment
 
 
@@ -10,7 +11,7 @@ def build_plan_selection_schema(
     requested_fact_ids: tuple[str, ...],
     source_candidate_ids_by_requested_fact_id: dict[str, tuple[str, ...]],
 ) -> dict[str, object]:
-    outcome_schema = _strict_object(
+    outcome_schema = provider_output.SourceAlignmentReviewsOutput.schema(
         {
             "kind": {"enum": ["source_alignment_reviews"]},
             "reviews_by_requested_fact": _source_alignment_reviews_schema(
@@ -20,13 +21,10 @@ def build_plan_selection_schema(
                 ),
             ),
         },
-        required=("kind", "reviews_by_requested_fact"),
     )
+    schema = provider_output.PlanSelectionOutput.schema({"outcome": outcome_schema})
     return {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {"outcome": outcome_schema},
-        "required": ["outcome"],
+        **schema,
         "modelSchemas": {"outcome": outcome_schema},
     }
 
@@ -64,13 +62,12 @@ def _fact_source_alignment_schema(
 
 
 def _source_alignment_review_schema(source_candidate_id: str) -> dict[str, object]:
-    return _strict_object(
+    return provider_output.SourceAlignmentReviewOutput.schema(
         {
             "source_candidate_id": {"enum": [source_candidate_id]},
             "basis": {"type": "string", "minLength": 1},
             "source_alignment": {"enum": [item.value for item in SourceAlignment]},
         },
-        required=("source_candidate_id", "basis", "source_alignment"),
     )
 
 

@@ -20,7 +20,6 @@ from fervis.lookup.source_binding.candidates import (
     source_binding_candidate_payload,
     source_binding_prompt_candidate_fulfillment_support_set_ids_by_answer_output,
     source_binding_prompt_candidate_population_binding_ids,
-    source_candidate_required_param_decision_ids,
     source_candidate_registry,
 )
 from fervis.lookup.source_binding.memory_context import (
@@ -389,7 +388,6 @@ class SourceBindingTurnPrompt(TurnPromptBase):
         target_param_decision_ids_by_param: dict[
             str, dict[str, tuple[str, ...]]
         ] = {}
-        target_required_param_ids: dict[str, tuple[str, ...]] = {}
         target_finite_choice_values: dict[str, dict[str, tuple[str, ...]]] = {}
         target_row_predicate_values: dict[str, dict[str, tuple[str, ...]]] = {}
         target_finite_choice_test_ids: dict[str, dict[str, tuple[str, ...]]] = {}
@@ -429,8 +427,6 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                 ).items()
                 if param_id not in finite_choice_param_ids
             }
-            required_param_ids = source_candidate_required_param_decision_ids(candidate)
-            target_required_param_ids[target_id] = required_param_ids
             target_finite_choice_values[target_id] = {
                 param_id: axis.choices
                 for param_id, axis in review_surface.finite_choice_params.items()
@@ -477,7 +473,6 @@ class SourceBindingTurnPrompt(TurnPromptBase):
         return build_source_binding_schema(
             **source_binding_clarification_input_ids(self.request),
             target_param_decision_ids_by_param=target_param_decision_ids_by_param,
-            target_required_param_ids=target_required_param_ids,
             target_finite_choice_values=target_finite_choice_values,
             target_row_predicate_values=target_row_predicate_values,
             target_finite_choice_test_ids=target_finite_choice_test_ids,

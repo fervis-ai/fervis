@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from fervis.lookup.grounding import provider_contract as provider_output
 from fervis.lookup.grounding.model import (
     InputBindingCompatibility,
     InputBindingOption,
@@ -23,11 +24,12 @@ def parse_grounding_compatibility(
     *,
     request: GroundingRequest,
 ) -> GroundingCompatibilityResult:
+    output = provider_output.GroundingOutput.parse(payload)
     time_resolutions = _time_resolutions_from_payload(
-        payload.get("known_time_resolutions"),
+        output.known_time_resolutions,
         request=request,
     )
-    raw_items = payload.get("known_input_binding_reviews")
+    raw_items = output.known_input_binding_reviews
     if not isinstance(raw_items, dict):
         raise ValueError("known_input_binding_reviews must be an object")
     tasks_by_id = {task.known_input_id: task for task in request.tasks}
@@ -43,11 +45,10 @@ def parse_grounding_compatibility(
             raise ValueError("duplicate grounding review")
         if known_input_id not in tasks_by_id:
             raise ValueError("review references unknown known input")
-        if not isinstance(raw_review, dict):
-            raise ValueError("grounding review must be an object")
+        review = provider_output.KnownInputBindingReviewOutput.parse(raw_review)
         task = tasks_by_id[known_input_id]
         compatible_option_ids = _compatible_option_ids_from_reviews(
-            raw_review.get("option_reviews"),
+            review.option_reviews,
             task=task,
             options_by_id=options_by_task[known_input_id],
         )
@@ -79,17 +80,14 @@ def _time_resolutions_from_payload(
         raise ValueError("grounding time resolutions must cover every time input")
     output: list[TimeResolutionIntent] = []
     for known_input_id, raw_item in raw_items.items():
-        if not isinstance(raw_item, dict):
-            raise ValueError("grounding time resolution must be an object")
+        resolution = provider_output.KnownTimeResolutionOutput.parse(raw_item)
         task = tasks_by_id[_text(known_input_id)]
-        date_intent = raw_item.get("date_intent")
-        if not isinstance(date_intent, dict):
-            raise ValueError("grounding date_intent must be an object")
+        date_intent = provider_output.DateIntentOutput.parse(resolution.date_intent)
         normalized = normalize_grounding_date_intent(
-            date_intent,
+            {"expression": date_intent.expression, "intent": date_intent.intent},
             path=f"known_time_resolutions.{task.known_input_id}.date_intent",
         )
-        expression = str(date_intent.get("expression") or "").strip()
+        expression = str(date_intent.expression or "").strip()
         if expression != task.time_expression:
             raise ValueError("grounding date_intent expression mismatch")
         output.append(
@@ -113,19 +111,17 @@ def _compatible_option_ids_from_reviews(
         raise ValueError("grounding option reviews must cover every binding option")
     compatible_option_ids: list[str] = []
     for option_id, option in options_by_id.items():
-        raw_review = raw_reviews.get(option_id)
-        if not isinstance(raw_review, dict):
-            raise ValueError("grounding option review must be an object")
+        raw_review = provider_output.OptionReviewOutput.parse(raw_reviews.get(option_id))
         expected_question = resolver_fit_question_for_option(
             task=task,
             option=option,
         )
-        if _text(raw_review.get("resolver_fit_question")) != expected_question:
+        if _text(raw_review.resolver_fit_question) != expected_question:
             raise ValueError("grounding resolver_fit_question mismatch")
-        decision = _text(raw_review.get("decision"))
+        decision = _text(raw_review.decision)
         if decision not in {item.value for item in LookupTextResolutionDecision}:
             raise ValueError("unsupported grounding identity decision")
-        _text(raw_review.get("because"))
+        _text(raw_review.because)
         if decision == LookupTextResolutionDecision.CAN_RESOLVE_LOOKUP_TEXT.value:
             if not option_has_targetable_identity(option):
                 raise ValueError("grounding option cannot return targetable identity")

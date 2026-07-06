@@ -11,8 +11,8 @@ from fervis.lookup.fact_planning.schema_helpers import (
     handle_schema as _handle_schema,
     non_empty_array_items as _non_empty_array_items,
     non_empty_string_array as _non_empty_string_array,
-    strict_object as _strict_object,
 )
+from fervis.lookup.fact_planning import provider_contract as provider_output
 from fervis.lookup.fact_plan.fact_plan import (
     BlockedFactBasis,
     MissingCatalogInputKind,
@@ -78,13 +78,13 @@ def build_fact_plan_schema(
         ),
         rank_limit_value_ids=rank_limit_value_ids,
     )
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["outcome"],
-        "properties": {
+    schema = provider_output.FactPlanOutput.schema(
+        {
             "outcome": plan_outcome_schema,
-        },
+        }
+    )
+    return {
+        **schema,
         "modelSchemas": {
             "outcome": plan_outcome_schema,
         },
@@ -201,12 +201,11 @@ def _answer_schema(
     )
     if pattern_schema is None:
         return None
-    return _strict_object(
+    return provider_output.FactPlanAnswerOutput.schema(
         {
             "kind": {"enum": [PlanOutcomeKind.FACT_PLAN.value]},
             "answers": _non_empty_array_items(pattern_schema),
         },
-        required=("kind", "answers"),
     )
 
 
@@ -217,7 +216,7 @@ def _impossible_schema(
     requested_fact_id_schema = _handle_schema()
     if requested_fact_ids:
         requested_fact_id_schema = {"enum": list(requested_fact_ids)}
-    blocked_fact_schema = _strict_object(
+    blocked_fact_schema = provider_output.BlockedFactOutput.schema(
         {
             "requested_fact_id": requested_fact_id_schema,
             "basis": {
@@ -233,24 +232,21 @@ def _impossible_schema(
             },
             "nearest_fields": {
                 "type": "array",
-                "items": _strict_object(
+                "items": provider_output.BlockedFactFieldOutput.schema(
                     {
                         "read_id": _handle_schema(),
                         "field_id": _handle_schema(),
                     },
-                    required=("read_id", "field_id"),
                 ),
             },
             "explanation": {"type": "string"},
         },
-        required=("requested_fact_id", "basis", "evidence_refs"),
     )
-    return _strict_object(
+    return provider_output.PlanImpossibleOutput.schema(
         {
             "kind": {"enum": [PlanOutcomeKind.IMPOSSIBLE.value]},
             "blocked_facts": _non_empty_array_items(blocked_fact_schema),
         },
-        required=("kind", "blocked_facts"),
     )
 
 
@@ -266,7 +262,7 @@ def _clarification_schema(
     }
     if required_catalog_input_ids is None or required_catalog_input_ids:
         missing_catalog_input_variants.append(
-            _strict_object(
+            provider_output.MissingCatalogRequiredInputOutput.schema(
                 {
                     **missing_catalog_input_base,
                     "kind": {"enum": [MissingCatalogInputKind.REQUIRED_INPUT.value]},
@@ -274,17 +270,11 @@ def _clarification_schema(
                         required_catalog_input_ids
                     ),
                 },
-                required=(
-                    "kind",
-                    "id",
-                    "requested_fact_id",
-                    "required_catalog_input_id",
-                ),
             )
         )
     if required_catalog_choice_input_ids is None or required_catalog_choice_input_ids:
         missing_catalog_input_variants.append(
-            _strict_object(
+            provider_output.MissingCatalogChoiceInputOutput.schema(
                 {
                     **missing_catalog_input_base,
                     "kind": {"enum": [MissingCatalogInputKind.CHOICE_INPUT.value]},
@@ -292,24 +282,17 @@ def _clarification_schema(
                         required_catalog_choice_input_ids
                     ),
                 },
-                required=(
-                    "kind",
-                    "id",
-                    "requested_fact_id",
-                    "required_catalog_choice_input_id",
-                ),
             )
         )
     if not missing_catalog_input_variants:
         return None
-    return _strict_object(
+    return provider_output.PlanClarificationOutput.schema(
         {
             "kind": {"enum": [PlanOutcomeKind.NEEDS_CLARIFICATION.value]},
             "missing_catalog_inputs": _non_empty_array_items(
                 {"oneOf": missing_catalog_input_variants}
             ),
         },
-        required=("kind", "missing_catalog_inputs"),
     )
 
 

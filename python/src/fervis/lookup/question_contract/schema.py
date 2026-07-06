@@ -2,20 +2,8 @@
 
 from __future__ import annotations
 
+from fervis.lookup.question_contract import provider_contract as provider_output
 from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
-
-
-def _strict_object(
-    properties: dict[str, object],
-    *,
-    required: tuple[str, ...] = (),
-) -> dict[str, object]:
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": properties,
-        "required": list(required),
-    }
 
 
 def build_question_contract_decisions_schema() -> dict[str, object]:
@@ -31,7 +19,7 @@ def build_answer_request_contract_schema(
     *,
     include_conversation_resolution_inputs: bool = True,
 ) -> dict[str, object]:
-    return _strict_object(
+    return provider_output.QuestionContractOutput.schema(
         {
             "kind": {"enum": ["question_contract"]},
             "answer_requests_count": {"type": "integer", "minimum": 1},
@@ -48,25 +36,19 @@ def build_answer_request_contract_schema(
                 "minItems": 1,
                 "items": _answer_request_schema(),
             },
-            "question_input_inventory_check": _strict_object(
+            "question_input_inventory_check": (
+                provider_output.QuestionInputInventoryCheckOutput.schema(
                 {
                     "all_input_like_phrases_declared": {"type": "boolean"},
                 },
-                required=("all_input_like_phrases_declared",),
+                )
             ),
         },
-        required=(
-            "kind",
-            "answer_requests_count",
-            "question_inputs",
-            "answer_requests",
-            "question_input_inventory_check",
-        ),
     )
 
 
 def build_missing_input_clarification_schema() -> dict[str, object]:
-    return _strict_object(
+    return provider_output.MissingInputClarificationOutput.schema(
         {
             "kind": {"enum": ["needs_clarification"]},
             "missing": {
@@ -77,12 +59,11 @@ def build_missing_input_clarification_schema() -> dict[str, object]:
             },
             "clarification_question": {"type": "string", "minLength": 1},
         },
-        required=("kind", "missing", "clarification_question"),
     )
 
 
 def _missing_question_input_schema() -> dict[str, object]:
-    return _strict_object(
+    return provider_output.MissingQuestionInputOutput.schema(
         {
             "type": {
                 "enum": [
@@ -97,12 +78,6 @@ def _missing_question_input_schema() -> dict[str, object]:
                 "minLength": 1,
             },
         },
-        required=(
-            "type",
-            "source_text",
-            "entity_type",
-            "why_context_is_insufficient",
-        ),
     )
 
 
@@ -122,22 +97,13 @@ def _answer_request_schema() -> dict[str, object]:
             "items": {"type": "string", "minLength": 1},
         },
     }
-    required = [
-        "answer_fact",
-        "answer_expression",
-        "answer_subject",
-        "answer_population",
-        "answer_outputs",
-        "used_question_inputs",
-    ]
-    return _strict_object(
+    return provider_output.AnswerRequestOutput.schema(
         properties,
-        required=tuple(required),
     )
 
 
 def _answer_expression_schema() -> dict[str, object]:
-    return _strict_object(
+    return provider_output.AnswerExpressionOutput.schema(
         {
             "family": {
                 "enum": [
@@ -154,15 +120,15 @@ def _answer_expression_schema() -> dict[str, object]:
                 ]
             },
         },
-        required=("family",),
     )
 
 
 def _answer_subject_schema() -> dict[str, object]:
-    return _strict_object(
+    return provider_output.AnswerSubjectOutput.schema(
         {
             "subject_text": {"type": "string", "minLength": 1},
-            "instance_interpretation": _strict_object(
+            "instance_interpretation": (
+                provider_output.AnswerSubjectInstanceInterpretationOutput.schema(
                 {
                     "kind": {
                         "enum": [
@@ -171,15 +137,14 @@ def _answer_subject_schema() -> dict[str, object]:
                         ]
                     },
                 },
-                required=("kind",),
+                )
             ),
         },
-        required=("subject_text", "instance_interpretation"),
     )
 
 
 def _answer_population_schema() -> dict[str, object]:
-    return _strict_object(
+    return provider_output.AnswerPopulationOutput.schema(
         {
             "population_label": {"type": "string", "minLength": 1},
             "counted_unit": {"type": "string", "minLength": 1},
@@ -189,12 +154,11 @@ def _answer_population_schema() -> dict[str, object]:
                 "items": _answer_population_membership_test_schema(),
             },
         },
-        required=("population_label", "counted_unit", "membership_tests"),
     )
 
 
 def _answer_population_membership_test_schema() -> dict[str, object]:
-    return _strict_object(
+    return provider_output.AnswerPopulationMembershipTestOutput.schema(
         {
             "test_id": {"type": "string", "minLength": 1},
             "kind": {
@@ -212,13 +176,6 @@ def _answer_population_membership_test_schema() -> dict[str, object]:
                 "items": {"type": "string", "minLength": 1},
             },
         },
-        required=(
-            "test_id",
-            "kind",
-            "polarity",
-            "test_question",
-            "owned_question_input_refs",
-        ),
     )
 
 
@@ -226,10 +183,8 @@ def _answer_output_schema() -> dict[str, object]:
     properties: dict[str, object] = {
         "description": {"type": "string", "minLength": 1},
     }
-    required = ["description"]
-    return _strict_object(
+    return provider_output.AnswerOutputOutput.schema(
         properties,
-        required=tuple(required),
     )
 
 
@@ -287,31 +242,21 @@ def _literal_text_input_role_schema(
     }
     if include_conversation_resolution_inputs:
         properties["resolved_input_ref"] = {"type": "string", "minLength": 1}
-    return _strict_object(
+    return provider_output.LiteralTextInputOutput.schema(
         properties,
-        required=(
-            "input_ref",
-            "source",
-            "source_text",
-            "resolved_value_text",
-            "role",
-            "inventory_check",
-            "kind",
-        ),
     )
 
 
 def _question_input_inventory_check_schema() -> dict[str, object]:
-    return _strict_object(
+    return provider_output.QuestionInputItemInventoryCheckOutput.schema(
         {
             "why_this_is_an_input": {"type": "string", "minLength": 1},
         },
-        required=("why_this_is_an_input",),
     )
 
 
 def _row_set_reference_input_schema() -> dict[str, object]:
-    return _strict_object(
+    return provider_output.RowSetReferenceInputOutput.schema(
         {
             "input_ref": {"type": "string", "minLength": 1},
             "source": {"enum": ["conversation_resolution"]},
@@ -321,13 +266,4 @@ def _row_set_reference_input_schema() -> dict[str, object]:
             "inventory_check": _question_input_inventory_check_schema(),
             "kind": {"enum": [KnownInputKind.ROW_SET_REFERENCE.value]},
         },
-        required=(
-            "input_ref",
-            "source",
-            "reference_text",
-            "occurrence",
-            "resolved_input_ref",
-            "inventory_check",
-            "kind",
-        ),
     )

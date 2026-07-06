@@ -27,6 +27,7 @@ from fervis.lookup.plan_selection.model import (
     PlanSelectionRequest,
     PlanSelectionResult,
 )
+from fervis.lookup.plan_selection import provider_contract as provider_output
 
 
 def parse_plan_selection(
@@ -34,12 +35,13 @@ def parse_plan_selection(
     *,
     request: PlanSelectionRequest,
 ) -> PlanSelectionResult:
-    outcome = _dict(payload.get("outcome"), "outcome")
-    kind = _text(outcome.get("kind"))
+    output = provider_output.PlanSelectionOutput.parse(payload)
+    outcome = provider_output.SourceAlignmentReviewsOutput.parse(output.outcome)
+    kind = _text(outcome.kind)
     if kind != "source_alignment_reviews":
         raise ValueError(f"unsupported plan selection outcome: {kind}")
     raw_reviews = _dict(
-        outcome.get("reviews_by_requested_fact"),
+        outcome.reviews_by_requested_fact,
         "reviews_by_requested_fact",
     )
     fact_ids = {fact.id for fact in request.requested_facts}
@@ -125,15 +127,17 @@ def _aligned_source_reviews(
     aligned_source_ids: set[str] = set()
     basis_by_source_id: dict[str, str] = {}
     for source_candidate_id in source_candidate_ids:
-        raw = _dict(raw_reviews.get(source_candidate_id), source_candidate_id)
-        reviewed_source_candidate_id = _text(raw.get("source_candidate_id"))
+        raw = provider_output.SourceAlignmentReviewOutput.parse(
+            raw_reviews.get(source_candidate_id)
+        )
+        reviewed_source_candidate_id = _text(raw.source_candidate_id)
         if reviewed_source_candidate_id != source_candidate_id:
             raise ValueError("source alignment source_candidate_id must match key")
-        basis = _text(raw.get("basis"))
+        basis = _text(raw.basis)
         basis_by_source_id[source_candidate_id] = basis
         alignment = _enum(
             SourceAlignment,
-            raw.get("source_alignment"),
+            raw.source_alignment,
             "source_alignment",
         )
         if alignment in {

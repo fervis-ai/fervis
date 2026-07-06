@@ -66,6 +66,7 @@ from fervis.lookup.source_binding.param_surface import (
     param_has_default_value,
 )
 from fervis.lookup.source_binding.param_values import canonical_param_value
+from fervis.lookup.source_binding import provider_contract as provider_output
 from fervis.lookup.source_binding.plan_targets import (
     SourceBindingTargetIndex,
     source_binding_target_index,
@@ -121,16 +122,6 @@ class _DerivedFiniteChoiceParamDecisions:
     population_choices: tuple[RelationSourcePopulationChoice, ...]
 
 
-_SOURCE_INVOCATION_FIELDS = {
-    "binding_target_id",
-    "answer_population",
-    "fulfillment_decisions",
-    "param_decisions",
-    "row_predicate_reviews",
-    "finite_choice_param_reviews",
-}
-
-
 def parse_source_binding(
     payload: dict[str, Any],
     *,
@@ -139,6 +130,7 @@ def parse_source_binding(
     outcome = _dict(payload.get("outcome"), "outcome")
     kind = _text(outcome.get("kind"))
     if kind == "source_bindings":
+        plan_output = provider_output.SourceBindingPlanOutput.parse(outcome)
         target_index = source_binding_target_index(request)
         candidates = source_candidates(request)
         review_scope = source_binding_review_scope(
@@ -147,11 +139,11 @@ def parse_source_binding(
             target_index=target_index,
         )
         (
-            normalized,
+            normalized_plan,
             effective_param_ids_by_index,
             population_choices_by_index,
         ) = _source_binding_payload_with_derived_finite_choices(
-            outcome,
+            plan_output,
             request,
             target_index=target_index,
             review_scope=review_scope,
@@ -159,7 +151,7 @@ def parse_source_binding(
         )
         return SourceBindingResult(
             outcome=_source_binding_plan(
-                normalized,
+                normalized_plan,
                 request,
                 target_index=target_index,
                 review_scope=review_scope,
@@ -176,54 +168,62 @@ def parse_source_binding(
 
 
 def _source_binding_payload_with_derived_finite_choices(
-    payload: dict[str, Any],
+    payload: provider_output.SourceBindingPlanOutput,
     request: SourceBindingRequest,
     *,
     target_index: SourceBindingTargetIndex,
     review_scope: SourceBindingReviewScope,
     candidates: dict[str, Any],
 ) -> tuple[
-    dict[str, Any],
+    provider_output.SourceBindingPlanOutput,
     dict[int, tuple[str, ...]],
     dict[int, tuple[RelationSourcePopulationChoice, ...]],
 ]:
-    normalized_invocations: list[dict[str, Any]] = []
+    normalized_invocations: list[provider_output.SourceInvocationOutput] = []
     effective_param_ids_by_index: dict[int, tuple[str, ...]] = {}
     population_choices_by_index: dict[
         int, tuple[RelationSourcePopulationChoice, ...]
     ] = {}
     for index, raw in enumerate(
-        _required_dicts(payload.get("source_invocations"), "source_invocations"),
+        _required_dicts(payload.source_invocations, "source_invocations"),
         start=1,
     ):
-        invocation = dict(raw)
-        unsupported = set(invocation) - _SOURCE_INVOCATION_FIELDS
-        if unsupported:
-            raise ValueError("unsupported source binding invocation field")
-        target = target_index.require(_text(invocation.get("binding_target_id")))
+        parsed_invocation = provider_output.SourceInvocationOutput.parse(raw)
+        target = target_index.require(
+            _text(parsed_invocation.binding_target_id)
+        )
         candidate = candidates.get(target.source_candidate_id)
         if candidate is None:
             raise ValueError("source binding references unknown source candidate")
         raw_param_decisions = _normalized_param_decisions(
-            invocation.get("param_decisions")
+            parsed_invocation.param_decisions,
+            parse_provider_output=True,
         )
         derived = _derived_finite_choice_param_decisions(
-            invocation.get("finite_choice_param_reviews"),
+            parsed_invocation.finite_choice_param_reviews,
             candidate=candidate,
             requested_fact_id=target.requested_fact_id,
             binding_target_id=target.binding_target_id,
             request=request,
             review_scope=review_scope,
-            answer_population=_dict(
-                invocation.get("answer_population"),
-                "answer_population",
+            answer_population=provider_output.AnswerPopulationOutput.parse(
+                parsed_invocation.answer_population
             ),
             raw_param_decision_ids=tuple(raw_param_decisions),
         )
         combined_decisions = {**raw_param_decisions, **derived.param_decisions}
-        invocation["param_decisions"] = combined_decisions
-        invocation.pop("finite_choice_param_reviews", None)
-        normalized_invocations.append(invocation)
+        normalized_invocations.append(
+            provider_output.SourceInvocationOutput(
+                binding_target_id=parsed_invocation.binding_target_id,
+                answer_population=parsed_invocation.answer_population,
+                fulfillment_decisions=parsed_invocation.fulfillment_decisions,
+                param_decisions=combined_decisions,
+                row_predicate_reviews=parsed_invocation.row_predicate_reviews,
+                finite_choice_param_reviews=(
+                    parsed_invocation.finite_choice_param_reviews
+                ),
+            )
+        )
         population_choices_by_index[index] = derived.population_choices
         effective_param_ids_by_index[index] = tuple(
             dict.fromkeys(
@@ -234,12 +234,12 @@ def _source_binding_payload_with_derived_finite_choices(
             )
         )
     return (
-        {
-            "kind": "source_bindings",
-            "metric_fit_bases": payload.get("metric_fit_bases"),
-            "fit_basis_interpretations": payload.get("fit_basis_interpretations"),
-            "source_invocations": normalized_invocations,
-        },
+        provider_output.SourceBindingPlanOutput(
+            kind="source_bindings",
+            metric_fit_bases=payload.metric_fit_bases,
+            fit_basis_interpretations=payload.fit_basis_interpretations,
+            source_invocations=tuple(normalized_invocations),
+        ),
         effective_param_ids_by_index,
         population_choices_by_index,
     )
@@ -253,7 +253,7 @@ def _derived_finite_choice_param_decisions(
     binding_target_id: str,
     request: SourceBindingRequest,
     review_scope: SourceBindingReviewScope,
-    answer_population: dict[str, Any],
+    answer_population: provider_output.AnswerPopulationOutput,
     raw_param_decision_ids: tuple[str, ...],
 ) -> _DerivedFiniteChoiceParamDecisions:
     reviews = _dict(raw_reviews, "finite_choice_param_reviews")
@@ -326,7 +326,7 @@ def _derived_finite_choice_param_decisions(
         if axis.can_be_omitted(include_values=include_values):
             continue
         output[param_id] = {
-            "population_intent": _text(answer_population.get("intent_text")),
+            "population_intent": _text(answer_population.intent_text),
             "match_basis_explanation": (
                 "Derived from finite_choice_param_reviews because at least one shown "
                 "choice does not satisfy the requested answer population tests."
@@ -401,37 +401,38 @@ def _reviewed_choice_sets(
     tests_by_id: dict[str, Any],
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     param_id = axis.axis_id
-    raw_review = _dict(raw_reviews, f"finite_choice_param_reviews.{param_id}")
+    raw_review = provider_output.FiniteChoiceParamReviewOutput.parse(raw_reviews)
     _validate_population_test_basis(
-        raw_review.get("population_test_basis"),
+        raw_review.population_test_basis,
         tests_by_id=tests_by_id,
         path=f"finite_choice_param_reviews.{param_id}.population_test_basis",
     )
     reviews = _required_dicts(
-        raw_review.get("choice_reviews"),
+        raw_review.choice_reviews,
         f"finite_choice_param_reviews.{param_id}.choice_reviews",
     )
     choices = axis.choices
     seen: set[str] = set()
     reviewed_effects: list[tuple[str, dict[str, str]]] = []
     choice_inclusions: dict[str, str] = {}
-    for raw in reviews:
-        choice = canonical_param_value(raw.get("choice_option_id"))
+    for raw_item in reviews:
+        raw = provider_output.FiniteChoiceReviewOutput.parse(raw_item)
+        choice = canonical_param_value(raw.choice_option_id)
         if choice not in choices:
             raise ValueError("finite choice review references unknown choice")
         if choice in seen:
             raise ValueError("duplicate finite choice review")
         seen.add(choice)
-        if not _text(raw.get("choice_domain_meaning")).strip():
+        if not _text(raw.choice_domain_meaning).strip():
             raise ValueError("finite choice review requires domain meaning")
-        if not _text(raw.get("choice_inclusion_basis")).strip():
+        if not _text(raw.choice_inclusion_basis).strip():
             raise ValueError("finite choice review requires inclusion basis")
-        inclusion = _text(raw.get("choice_inclusion"))
+        inclusion = _text(raw.choice_inclusion)
         if inclusion not in {"INCLUDE", "EXCLUDE"}:
             raise ValueError("finite choice review requires choice_inclusion")
         choice_inclusions[choice] = inclusion
         test_effects = _population_test_effects(
-            raw.get("population_test_results"),
+            raw.population_test_results,
             axis=axis,
             tests_by_id=tests_by_id,
             path=f"finite_choice_param_reviews.{param_id}.{choice}.population_test_results",
@@ -479,10 +480,10 @@ def _validate_population_test_basis(
             "finite choice population test basis must cover membership tests"
         )
     for test_id in tests_by_id:
-        item = _dict(basis.get(test_id), f"{path}.{test_id}")
-        if not _text(item.get("test_question")).strip():
+        item = provider_output.PopulationTestBasisOutput.parse(basis.get(test_id))
+        if not _text(item.test_question).strip():
             raise ValueError("finite choice population test basis requires question")
-        if not _text(item.get("role_scoped_test_question")).strip():
+        if not _text(item.role_scoped_test_question).strip():
             raise ValueError(
                 "finite choice population test basis requires role-scoped question"
             )
@@ -516,12 +517,18 @@ def _population_test_effects(
     if set(results) != expected:
         raise ValueError("finite choice reviews must answer membership tests")
     for test_id in tests_by_id:
-        raw = _dict(results.get(test_id), f"{path}.{test_id}")
+        raw_value = results.get(test_id)
         if test_id not in tests_by_id:
             raise ValueError("finite choice review references unknown population test")
         if test_id in seen:
             raise ValueError("duplicate finite choice population test result")
         seen.add(test_id)
+        raw = (
+            provider_output.NormalInstanceTestResultOutput.parse(raw_value)
+            if tests_by_id[test_id].kind
+            == AnswerPopulationMembershipTestKind.NORMAL_INSTANCE_GUARD
+            else provider_output.StandardPopulationTestResultOutput.parse(raw_value)
+        )
         effect = _validate_normal_instance_test_effect(
             raw,
             test=tests_by_id[test_id],
@@ -529,13 +536,13 @@ def _population_test_effects(
             path=f"{path}.{test_id}",
         )
         if effect is None:
-            if not _text(raw.get("test_basis")).strip():
+            if not _text(raw.test_basis).strip():
                 raise ValueError("finite choice population test requires basis")
-            if not _text(raw.get("population_consequence")).strip():
+            if not _text(raw.population_consequence).strip():
                 raise ValueError(
                     "finite choice population test requires population consequence"
                 )
-            effect = _text(raw.get("test_effect"))
+            effect = _text(raw.test_effect)
             if effect not in {
                 "SATISFIES_TEST",
                 "CONFLICTS_WITH_TEST",
@@ -548,7 +555,7 @@ def _population_test_effects(
 
 
 def _validate_normal_instance_test_effect(
-    raw: dict[str, Any],
+    raw: Any,
     *,
     test: Any,
     axis: FiniteChoiceReviewAxis,
@@ -561,10 +568,8 @@ def _validate_normal_instance_test_effect(
     profile = getattr(test, "normal_instance_profile", None)
     if profile is None:
         raise ValueError("normal instance review requires normal instance profile")
-    disposition = raw.get("disposition")
-    if not isinstance(disposition, dict):
-        raise ValueError("normal instance review requires disposition")
-    if not _text(raw.get("role_match_basis")).strip():
+    disposition = provider_output.NormalInstanceDispositionOutput.parse(raw.disposition)
+    if not _text(raw.role_match_basis).strip():
         raise ValueError("normal instance role match requires reason")
     role_effect = _normal_instance_role_match_effect(
         disposition,
@@ -572,11 +577,11 @@ def _validate_normal_instance_test_effect(
         test_id=membership_test_key(test),
         path=f"{path}.disposition",
     )
-    override_applies = raw.get("explicit_user_override_applies")
+    override_applies = raw.explicit_user_override_applies
     if not isinstance(override_applies, bool):
         raise ValueError("normal instance review requires explicit override decision")
     override_evidence = _normal_instance_override_evidence(
-        raw.get("explicit_user_override_evidence"),
+        raw.explicit_user_override_evidence,
         path=f"{path}.explicit_user_override_evidence",
     )
     if override_applies and not override_evidence:
@@ -587,9 +592,9 @@ def _validate_normal_instance_test_effect(
         raise ValueError(
             "normal instance review override evidence conflicts with decision"
         )
-    if not _text(raw.get("population_consequence")).strip():
+    if not _text(raw.population_consequence).strip():
         raise ValueError("normal instance review requires population consequence")
-    effect = _text(disposition.get("test_effect"))
+    effect = _text(disposition.test_effect)
     if effect not in {
         "SATISFIES_TEST",
         "CONFLICTS_WITH_TEST",
@@ -607,7 +612,7 @@ def _validate_normal_instance_test_effect(
 
 
 def _normal_instance_role_match_effect(
-    review: dict[str, Any],
+    review: Any,
     *,
     axis: FiniteChoiceReviewAxis,
     test_id: str,
@@ -616,7 +621,7 @@ def _normal_instance_role_match_effect(
     profile = axis.normal_instance_profile(test_id)
     if profile is None:
         raise ValueError("normal instance review requires role profile")
-    matched_role = _text(review.get("matched_excluded_role"))
+    matched_role = _text(review.matched_excluded_role)
     allowed_roles = set(profile.excluded_role_ids)
     if not allowed_roles:
         raise ValueError("normal instance role profile requires excluded roles")
@@ -662,15 +667,14 @@ def _normal_instance_override_evidence(
     if not isinstance(raw, list):
         raise ValueError("normal instance review requires override evidence")
     output: list[dict[str, str]] = []
-    for index, item in enumerate(raw):
-        item_path = f"{path}[{index}]"
-        evidence = _dict(item, item_path)
-        source_text = _text(evidence.get("source_text"))
+    for item in raw:
+        evidence = provider_output.NormalInstanceOverrideEvidenceOutput.parse(item)
+        source_text = _text(evidence.source_text)
         if not source_text.strip():
             raise ValueError(
                 "normal instance review override evidence requires source text"
             )
-        reason = NormalInstanceExplicitOverrideReason(_text(evidence.get("reason")))
+        reason = NormalInstanceExplicitOverrideReason(_text(evidence.reason))
         output.append({"source_text": source_text, "reason": reason.value})
     return tuple(output)
 
@@ -683,14 +687,14 @@ def _controlled_population_role(
 ) -> dict[str, Any]:
     if not population_roles_by_id:
         raise ValueError("finite choice population tests require population_roles")
-    role = _dict(raw, path)
-    role_id = _text(role.get("controlled_population_role_id"))
+    role = provider_output.FiniteChoiceParamReviewOutput.parse(raw)
+    role_id = _text(role.controlled_population_role_id)
     expected = population_roles_by_id.get(role_id)
     if expected is None:
         raise ValueError("finite choice param references unknown role")
     if not role_id:
         raise ValueError("finite choice param requires role id")
-    if not _text(role.get("role_selection_basis")).strip():
+    if not _text(role.role_selection_basis).strip():
         raise ValueError("finite choice param requires role selection basis")
     return expected
 
@@ -804,7 +808,7 @@ def _validate_choice_inclusion_consistency(
 
 
 def _source_binding_plan(
-    payload: dict[str, Any],
+    payload: provider_output.SourceBindingPlanOutput,
     request: SourceBindingRequest,
     *,
     target_index: SourceBindingTargetIndex,
@@ -828,11 +832,10 @@ def _source_binding_plan(
     )
     seen_binding_target_ids: set[str] = set()
     output: list[BoundSource] = []
-    for index, raw in enumerate(
-        _required_dicts(payload.get("source_invocations"), "source_invocations"),
-        start=1,
-    ):
-        target = target_index.require(_text(raw.get("binding_target_id")))
+    for index, parsed_invocation in enumerate(payload.source_invocations, start=1):
+        target = target_index.require(
+            _text(parsed_invocation.binding_target_id)
+        )
         if target.binding_target_id in seen_binding_target_ids:
             raise ValueError("duplicate source binding target")
         seen_binding_target_ids.add(target.binding_target_id)
@@ -854,20 +857,20 @@ def _source_binding_plan(
         ):
             raise ValueError("source candidate does not belong to requested fact")
         answer_population, population_binding = _answer_population(
-            raw.get("answer_population"),
+            parsed_invocation.answer_population,
             request=request,
             requested_fact_id=requested_fact_id,
             candidate=candidate,
         )
         param_decisions = _param_decision_binding_sets(
-            raw.get("param_decisions"),
+            parsed_invocation.param_decisions,
             candidate=candidate,
             available_values=request.available_values,
             answer_population=answer_population,
             effective_param_ids=(effective_param_ids_by_index or {}).get(index),
         )
         row_predicates = _row_predicate_filters(
-            raw.get("row_predicate_reviews"),
+            parsed_invocation.row_predicate_reviews,
             candidate=candidate,
             request=request,
             requested_fact_id=requested_fact_id,
@@ -891,7 +894,7 @@ def _source_binding_plan(
         )
         row_filters = row_predicates.filters
         fulfillments = _source_fulfillments(
-            raw.get("fulfillment_decisions"),
+            parsed_invocation.fulfillment_decisions,
             requested_fact_id=requested_fact_id,
             answer_output_ids=set(target.answer_output_ids),
             candidate=candidate,
@@ -1049,8 +1052,8 @@ def _answer_population(
     requested_fact_id: str,
     candidate: Any,
 ) -> tuple[AnswerPopulation, dict[str, Any]]:
-    raw = _dict(raw_value, "answer_population")
-    population_binding_id = _text(raw.get("population_binding_id"))
+    raw = provider_output.AnswerPopulationOutput.parse(raw_value)
+    population_binding_id = _text(raw.population_binding_id)
     binding = _candidate_population_binding(
         population_binding_id,
         candidate=candidate,
@@ -1060,12 +1063,12 @@ def _answer_population(
         candidate=candidate,
         population_binding_id=population_binding_id,
     )
-    intent_text = _text(raw.get("intent_text"))
+    intent_text = _text(raw.intent_text)
     return (
         AnswerPopulation(
             population_binding_id=population_binding_id,
             intent_text=intent_text,
-            match_basis_explanation=_text(raw.get("match_basis_explanation")),
+            match_basis_explanation=_text(raw.match_basis_explanation),
         ),
         binding,
     )
@@ -1148,18 +1151,10 @@ def _source_fulfillments(
     if not raw_decisions:
         raise ValueError("fulfillment_decisions must contain at least one value")
     for answer_output_id, raw_value in raw_decisions.items():
-        if not isinstance(raw_value, dict):
-            raise ValueError("fulfillment decision must be an object")
-        raw = dict(raw_value)
-        unsupported = set(raw) - {
-            "match_basis_explanation",
-            "fulfillment_choice_id",
-        }
-        if unsupported:
-            raise ValueError("unsupported fulfillment decision field")
+        raw = provider_output.FulfillmentDecisionOutput.parse(raw_value)
         if answer_output_id not in answer_output_ids:
             raise ValueError("source fulfillment references unknown answer output")
-        choice_id = _text(raw.get("fulfillment_choice_id"))
+        choice_id = _text(raw.fulfillment_choice_id)
         support_set_id = _source_fulfillment_support_set_id(
             choice_id,
             answer_output_id=answer_output_id,
@@ -1173,7 +1168,7 @@ def _source_fulfillments(
             answer_output_id=answer_output_id,
             candidate=candidate,
         )
-        explanation = _text(raw.get("match_basis_explanation"))
+        explanation = _text(raw.match_basis_explanation)
         selected_metric_measure_evidence_ids = tuple(
             dict.fromkeys(_slot_evidence_ids(slots, key="metric_measure_evidence"))
         )
@@ -1347,13 +1342,13 @@ def _candidate_evidence_items(candidate: Any) -> tuple[dict[str, Any], ...]:
 
 
 def _metric_fit_interpretations_by_requested_fact(
-    payload: dict[str, Any],
+    payload: provider_output.SourceBindingPlanOutput,
     *,
     request: SourceBindingRequest,
 ) -> dict[str, dict[str, dict[str, str]]]:
-    bases_by_fact = _dict(payload.get("metric_fit_bases"), "metric_fit_bases")
+    bases_by_fact = _dict(payload.metric_fit_bases, "metric_fit_bases")
     interpretations_by_fact = _dict(
-        payload.get("fit_basis_interpretations"),
+        payload.fit_basis_interpretations,
         "fit_basis_interpretations",
     )
     expected_by_fact = source_binding_metric_evidence_ids_by_requested_fact(request)
@@ -1386,14 +1381,13 @@ def _metric_fit_interpretations_by_requested_fact(
             raise ValueError("fit_basis_interpretations must match metric_fit_bases")
         fact_reviews: dict[str, dict[str, str]] = {}
         for metric_evidence_id, raw_basis in raw_fact_bases.items():
-            basis = _dict(raw_basis, "metric_fit_basis")
-            metric_meaning = _text(basis.get("metric_meaning"))
-            fit_basis = _text(basis.get("fit_basis"))
-            raw_interpretation = _dict(
+            basis = provider_output.MetricFitBasisOutput.parse(raw_basis)
+            metric_meaning = _text(basis.metric_meaning)
+            fit_basis = _text(basis.fit_basis)
+            raw_interpretation = provider_output.FitBasisInterpretationOutput.parse(
                 raw_fact_interpretations.get(metric_evidence_id),
-                "fit_basis_interpretation",
             )
-            decision = _text(raw_interpretation.get("interpretation"))
+            decision = _text(raw_interpretation.interpretation)
             if decision not in METRIC_FIT_DECISIONS:
                 raise ValueError("unknown fit_basis interpretation")
             fact_reviews[str(metric_evidence_id)] = {
@@ -2100,24 +2094,25 @@ def _reviewed_row_predicate_effects(
     tests_by_id: dict[str, Any],
     path: str,
 ) -> list[tuple[str, dict[str, str]]]:
-    review = _dict(raw_review, path.rsplit(".", 1)[0])
-    raw_choices = _required_dicts(review.get("choice_reviews"), path)
+    review = provider_output.RowPredicateReviewOutput.parse(raw_review)
+    raw_choices = _required_dicts(review.choice_reviews, path)
     seen: set[str] = set()
     output: list[tuple[str, dict[str, str]]] = []
-    for raw in raw_choices:
-        value = _text(raw.get("choice_option_id"))
+    for raw_value in raw_choices:
+        raw = provider_output.RowPredicateChoiceReviewOutput.parse(raw_value)
+        value = _text(raw.choice_option_id)
         if value not in allowed_values:
             raise ValueError("row predicate review references unknown value")
         if value in seen:
             raise ValueError("duplicate row predicate value review")
         seen.add(value)
-        if not _text(raw.get("choice_domain_meaning")).strip():
+        if not _text(raw.choice_domain_meaning).strip():
             raise ValueError("row predicate value review requires domain meaning")
         output.append(
             (
                 value,
                 _row_predicate_population_test_effects(
-                    raw.get("population_test_results"),
+                    raw.population_test_results,
                     tests_by_id=tests_by_id,
                     path=f"{path}.{value}.population_test_results",
                 ),
@@ -2139,18 +2134,18 @@ def _row_predicate_population_test_effects(
         raise ValueError("row predicate reviews must answer membership tests")
     effects: dict[str, str] = {}
     for test_id, test in tests_by_id.items():
-        raw = _dict(results.get(test_id), f"{path}.{test_id}")
-        if _text(raw.get("test_id")) != test_id:
+        raw = provider_output.RowPredicatePopulationTestResultOutput.parse(results.get(test_id))
+        if _text(raw.test_id) != test_id:
             raise ValueError("row predicate population test id must match result key")
-        if not _text(raw.get("test_question")).strip():
+        if not _text(raw.test_question).strip():
             raise ValueError("row predicate population test requires question")
-        if not _text(raw.get("role_scoped_test_question")).strip():
+        if not _text(raw.role_scoped_test_question).strip():
             raise ValueError(
                 "row predicate population test requires role-scoped question"
             )
-        if not _text(raw.get("because")).strip():
+        if not _text(raw.because).strip():
             raise ValueError("row predicate population test requires reason")
-        effect = _text(raw.get("test_effect"))
+        effect = _text(raw.test_effect)
         if effect not in {
             "SATISFIES_TEST",
             "CONFLICTS_WITH_TEST",
@@ -2225,14 +2220,22 @@ def _param_accepts_collection(param: dict[str, Any]) -> bool:
     return str(param.get("type") or "").strip() in {"array", "list"}
 
 
-def _normalized_param_decisions(raw_decisions: Any) -> dict[str, dict[str, Any]]:
+def _normalized_param_decisions(
+    raw_decisions: Any,
+    *,
+    parse_provider_output: bool = False,
+) -> dict[str, dict[str, Any]]:
     output: dict[str, dict[str, Any]] = {}
     if isinstance(raw_decisions, dict):
         for raw_param_id, raw_value in raw_decisions.items():
             param_id = str(raw_param_id)
             if param_id in output:
                 raise ValueError("duplicate source param decision")
-            output[param_id] = _dict(raw_value, f"param_decisions.{param_id}")
+            output[param_id] = (
+                vars(provider_output.ParamDecisionOutput.parse(raw_value))
+                if parse_provider_output
+                else _dict(raw_value, f"param_decisions.{param_id}")
+            )
         return output
     raise ValueError("param_decisions must be an object")
 

@@ -148,6 +148,143 @@ def test_fervis_goldset_run_accepts_comma_separated_case_ids_and_model_override(
     )
 
 
+def test_fervis_goldset_run_loads_import_entrypoint_suite(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    package_dir = tmp_path / "demo_goldsets"
+    package_dir.mkdir()
+    (package_dir / "__init__.py").write_text("", encoding="utf-8")
+    (package_dir / "suite.py").write_text(
+        """
+from fervis.evaluation.goldsets import GoldsetCase, GoldsetMatch, GoldsetSuite
+
+
+def load_suite():
+    return GoldsetSuite(
+        name="imported",
+        cases=(GoldsetCase(case_id="sales_count", question="Question?"),),
+        match_answer=lambda case, result: GoldsetMatch(passed=True),
+    )
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    stdout = StringIO()
+
+    exit_code = run_fervis(
+        (
+            "goldset",
+            "run",
+            "--suite",
+            "demo_goldsets.suite:load_suite",
+            "--tenant-id",
+            "tenant_1",
+            "--principal-id",
+            "principal_1",
+        ),
+        ports=_ports(question_run_follower=_Follower()),
+        stdout=stdout,
+        stderr=StringIO(),
+    )
+
+    envelope = json.loads(stdout.getvalue())
+    assert exit_code == 0
+    assert envelope["payload"]["suite_name"] == "imported"
+    assert envelope["payload"]["passed_count"] == 1
+
+
+def test_fervis_goldset_run_uses_env_suite_case_ids_and_tenant(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    suite_path = _write_suite(tmp_path)
+    monkeypatch.setenv("FERVIS_GOLDSET_SUITE", str(suite_path))
+    monkeypatch.setenv("FERVIS_GOLDSET_CASE_IDS", "sales_count")
+    monkeypatch.setenv("FERVIS_GOLDSET_TENANT_ID", "tenant_from_env")
+    monkeypatch.setenv("FERVIS_GOLDSET_PRINCIPAL_ID", "principal_from_env")
+    questions = _AnsweringQuestions(
+        AskResult(
+            status="COMPLETED",
+            conversation_id="conversation_1",
+            question_id="question_1",
+            run_id="run_1",
+            answer="42",
+            result_data={},
+        )
+    )
+    stdout = StringIO()
+
+    exit_code = run_fervis(
+        ("goldset", "run"),
+        ports=_ports(questions=questions, question_run_follower=_Follower()),
+        stdout=stdout,
+        stderr=StringIO(),
+    )
+
+    assert exit_code == 0
+    assert questions.requests[0].principal.tenant_id == "tenant_from_env"
+    assert questions.requests[0].principal.principal_id == "principal_from_env"
+
+
+def test_fervis_goldset_run_preflights_before_model_calls(tmp_path: Path) -> None:
+    suite_path = tmp_path / "suite"
+    suite_path.mkdir()
+    (suite_path / "fervis_goldset.py").write_text(
+        """
+from fervis.evaluation.goldsets import GoldsetCase, GoldsetMatch, GoldsetSuite
+
+
+def load_suite():
+    return GoldsetSuite(
+        name="demo",
+        cases=(GoldsetCase(case_id="sales_count", question="Question?"),),
+        match_answer=lambda case, result: GoldsetMatch(passed=True),
+        preflight=lambda: (_ for _ in ()).throw(RuntimeError("database unavailable")),
+    )
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    questions = _AnsweringQuestions(
+        AskResult(
+            status="COMPLETED",
+            conversation_id="conversation_1",
+            question_id="question_1",
+            run_id="run_1",
+            answer="42",
+            result_data={},
+        )
+    )
+    stdout = StringIO()
+
+    exit_code = run_fervis(
+        (
+            "goldset",
+            "run",
+            "--suite-path",
+            str(suite_path),
+            "--tenant-id",
+            "tenant_1",
+            "--principal-id",
+            "principal_1",
+        ),
+        ports=_ports(questions=questions, question_run_follower=_Follower()),
+        stdout=stdout,
+        stderr=StringIO(),
+    )
+
+    envelope = json.loads(stdout.getvalue())
+    assert exit_code == 2
+    assert questions.requests == []
+    assert envelope["status"] == "blocked"
+    assert (
+        envelope["payload"]["error"]["message"]
+        == "goldset preflight failed: database unavailable"
+    )
+
+
 def test_fervis_goldset_run_uses_env_principal_id(
     tmp_path: Path,
     monkeypatch,

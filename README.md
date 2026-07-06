@@ -77,11 +77,13 @@ def match_answer(case, result):
     return GoldsetMatch(passed=False, message="expected answer 42")
 ```
 
-Run it from the host API project root after `fervis doctor` passes:
+Run it from the host API project root after `fervis doctor` passes. The suite
+can be a directory containing `fervis_goldset.py` or an import entrypoint such
+as `package.suite:load_suite`.
 
 ```bash
 fervis goldset run \
-  --suite-path ./goldsets/orders \
+  --suite ./goldsets/orders \
   --tenant-id <tenant-id> \
   --principal-id <principal-id> \
   --model openai:gpt-5.4-mini \
@@ -91,6 +93,22 @@ fervis goldset run \
 Use `--case-ids case_a,case_b` to run specific cases. Use `setup_questions` on
 `GoldsetCase` when a case needs prior conversation context; setup questions run
 in the same conversation before the evaluated question.
+
+For repeated local runs, put stable values in environment variables instead of
+retyping them:
+
+```bash
+export FERVIS_GOLDSET_SUITE=package.suite:load_suite
+export FERVIS_GOLDSET_CASE_IDS=case_a,case_b
+export FERVIS_GOLDSET_TENANT_ID=<tenant-id>
+export FERVIS_GOLDSET_PRINCIPAL_ID=<principal-id>
+
+fervis goldset run --ledger-file .goldset-runs/orders.jsonl
+```
+
+Suites may define `preflight` on `GoldsetSuite` for setup checks that must pass
+before any model call runs, such as host API reachability or oracle database
+connectivity.
 
 ## Development
 
@@ -117,16 +135,21 @@ uv run ruff check src
 uv run pytest
 ```
 
-Run local host goldset cases against the repo checkout, with import-shadowing
+Run local host goldset cases against this repo checkout, with import-shadowing
 checks and per-case progress:
 
 ```bash
 scripts/run-local-goldset.sh \
-  --case-ids staff_id_sales_count_today,staff_id_pair_sales_count_today
+  --project-root /path/to/host-api \
+  --suite package.suite:load_suite \
+  --case-ids case_a,case_b \
+  --tenant-id <tenant-id> \
+  --principal-id <principal-id>
 ```
 
-Pass `--project-root`, `--suite-path`, `--principal-id`, or `--database-url`
-when the defaults do not match your local checkout.
+The script also reads `FERVIS_GOLDSET_SUITE`, `FERVIS_GOLDSET_CASE_IDS`,
+`FERVIS_GOLDSET_TENANT_ID`, and `FERVIS_GOLDSET_PRINCIPAL_ID`, so a configured
+shell can run `scripts/run-local-goldset.sh` with no repeated identifiers.
 
 Run only the desktop app tests:
 

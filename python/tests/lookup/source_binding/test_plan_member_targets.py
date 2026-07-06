@@ -86,10 +86,6 @@ def test_source_binding_schema_scopes_param_surfaces_to_binding_target():
                 "group_by": ("param_decision.source_2.group_by.bind.location",),
             },
         },
-        target_required_param_ids={
-            "target.source_1": ("start_date",),
-            "target.source_2": ("group_by",),
-        },
         target_finite_choice_values={
             "target.source_1": {"status": ("DRAFT", "COMPLETED")},
             "target.source_2": {"sale_type": ("STORE", "ONLINE")},

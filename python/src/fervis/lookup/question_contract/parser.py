@@ -7,6 +7,7 @@ from typing import Any
 
 from fervis.lookup.conversation_resolution import ConversationResolutionOverlay
 from fervis.lookup.question_contract._text_spans import copied_span
+from fervis.lookup.question_contract import provider_contract as provider_output
 from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 from fervis.lookup.question_contract.model import (
     AnswerPopulationMembershipTestKind,
@@ -52,20 +53,17 @@ def parse_question_contract(
     context_texts = (question_text, *question_context_texts)
 
     if tool_name == MISSING_INPUT_CLARIFICATION_TOOL_NAME:
-        parsed = _ParsedObject(payload, "question_contract")
-        if _text(parsed.take("kind")) != "needs_clarification":
+        parsed = provider_output.MissingInputClarificationOutput.parse(payload)
+        if _text(parsed.kind) != "needs_clarification":
             raise ValueError("invalid question contract clarification kind")
-        missing = parsed.take("missing")
-        clarification_question = parsed.take("clarification_question")
-        parsed.finish()
         return QuestionContractResult(
             outcome=QuestionContractNeedsClarification(
                 missing=_missing_question_inputs(
-                    missing,
+                    parsed.missing,
                     question_context_texts=context_texts,
                 ),
                 clarification_question=_required_text(
-                    clarification_question,
+                    parsed.clarification_question,
                     path="clarification_question",
                 ),
             )
@@ -74,12 +72,12 @@ def parse_question_contract(
     if tool_name != ANSWER_REQUEST_CONTRACT_TOOL_NAME:
         raise ValueError("unknown question contract tool")
 
-    parsed = _ParsedObject(payload, "question_contract")
-    kind = _text(parsed.take("kind"))
+    parsed = provider_output.QuestionContractOutput.parse(payload)
+    kind = _text(parsed.kind)
     if kind != "question_contract":
         raise ValueError("invalid question contract kind")
     question_inputs = _question_inputs(
-        parsed.take("question_inputs"),
+        parsed.question_inputs,
         current_question_texts=current_question_texts,
         question_context_texts=context_texts,
     )
@@ -88,7 +86,7 @@ def parse_question_contract(
         conversation_resolution_overlay=conversation_resolution_overlay,
     )
     requested_facts = _requested_facts(
-        parsed.take("answer_requests"),
+        parsed.answer_requests,
         question_inputs=question_inputs,
         question_context_texts=context_texts,
     )
@@ -105,11 +103,10 @@ def parse_question_contract(
         requested_facts=requested_facts,
     )
     _validate_answer_requests_count(
-        parsed.take("answer_requests_count"),
+        parsed.answer_requests_count,
         requested_facts=requested_facts,
     )
-    _question_input_inventory_check(parsed.take("question_input_inventory_check"))
-    parsed.finish()
+    _question_input_inventory_check(parsed.question_input_inventory_check)
     return QuestionContractResult(
         outcome=QuestionContract(
             question_inputs=question_inputs,
@@ -129,32 +126,29 @@ def _missing_question_inputs(
             question_context_texts=question_context_texts,
             path=f"missing[{index}]",
         )
-        for index, item in enumerate(_required_dicts(raw, "missing"))
+        for index, item in enumerate(_required_items(raw, "missing"))
     )
 
 
 def _missing_question_input(
-    raw: dict[str, Any],
+    raw: object,
     *,
     question_context_texts: tuple[str, ...],
     path: str,
 ) -> MissingQuestionInput:
-    parsed = _ParsedObject(raw, path)
-    input_type = parsed.take("type")
-    source_text = parsed.take("source_text")
-    entity_type = parsed.take("entity_type")
-    why_context_is_insufficient = parsed.take("why_context_is_insufficient")
-    parsed.finish()
+    parsed = provider_output.MissingQuestionInputOutput.parse(raw)
     return MissingQuestionInput(
-        type=MissingQuestionInputType(_required_text(input_type, path=f"{path}.type")),
+        type=MissingQuestionInputType(
+            _required_text(parsed.type, path=f"{path}.type")
+        ),
         source_text=_copied_text(
-            source_text,
+            parsed.source_text,
             question_context_texts=question_context_texts,
             path=f"{path}.source_text",
         ),
-        entity_type=_text(entity_type),
+        entity_type=_text(parsed.entity_type),
         why_context_is_insufficient=_required_text(
-            why_context_is_insufficient,
+            parsed.why_context_is_insufficient,
             path=f"{path}.why_context_is_insufficient",
         ),
     )
@@ -179,26 +173,26 @@ def _requested_facts(
 ) -> tuple[RequestedFact, ...]:
     output: list[RequestedFact] = []
     inputs_by_id = {item.id: item for item in question_inputs}
-    for fact_index, item in enumerate(_required_dicts(raw, "answer_requests"), start=1):
+    for fact_index, item in enumerate(_required_items(raw, "answer_requests"), start=1):
         path = f"answer_requests[{fact_index - 1}]"
-        parsed = _ParsedObject(item, path)
+        parsed = provider_output.AnswerRequestOutput.parse(item)
         fact_id = f"fact_{fact_index}"
         answer_outputs = _answer_outputs(
-            parsed.take("answer_outputs"),
+            parsed.answer_outputs,
             path=f"{path}.answer_outputs",
         )
         input_refs = _used_question_inputs(
-            parsed.take("used_question_inputs"),
+            parsed.used_question_inputs,
             inputs_by_id=inputs_by_id,
             path=f"{path}.used_question_inputs",
         )
         answer_subject = _answer_subject(
-            parsed.take("answer_subject"),
+            parsed.answer_subject,
             question_context_texts=question_context_texts,
             path=f"{path}.answer_subject",
         )
         answer_population = _answer_population(
-            parsed.take("answer_population"),
+            parsed.answer_population,
             used_question_input_refs=input_refs,
             path=f"{path}.answer_population",
         )
@@ -206,11 +200,11 @@ def _requested_facts(
             RequestedFact(
                 id=fact_id,
                 description=_required_text(
-                    parsed.take("answer_fact"),
+                    parsed.answer_fact,
                     path=f"{path}.answer_fact",
                 ),
                 answer_expression=_answer_expression(
-                    parsed.take("answer_expression"),
+                    parsed.answer_expression,
                     path=f"{path}.answer_expression",
                 ),
                 answer_subject=answer_subject,
@@ -220,7 +214,6 @@ def _requested_facts(
                 input_refs=input_refs,
             )
         )
-        parsed.finish()
     return tuple(output)
 
 
@@ -229,12 +222,10 @@ def _answer_expression(
     *,
     path: str,
 ) -> RequestedFactAnswerExpression:
-    item = _ParsedObject(raw, path)
-    family = item.take("family")
-    item.finish()
+    item = provider_output.AnswerExpressionOutput.parse(raw)
     return RequestedFactAnswerExpression(
         family=RequestedFactAnswerExpressionFamily(
-            _required_text(family, path=f"{path}.family")
+            _required_text(item.family, path=f"{path}.family")
         )
     )
 
@@ -245,14 +236,11 @@ def _answer_subject(
     question_context_texts: tuple[str, ...],
     path: str,
 ) -> RequestedFactAnswerSubject:
-    item = _ParsedObject(raw, path)
-    subject_text = item.take("subject_text")
-    instance_interpretation = item.take("instance_interpretation")
-    item.finish()
+    item = provider_output.AnswerSubjectOutput.parse(raw)
     return RequestedFactAnswerSubject(
-        subject_text=_required_text(subject_text, path=f"{path}.subject_text"),
+        subject_text=_required_text(item.subject_text, path=f"{path}.subject_text"),
         instance_interpretation=_instance_interpretation(
-            instance_interpretation,
+            item.instance_interpretation,
             path=f"{path}.instance_interpretation",
         ),
     )
@@ -263,11 +251,9 @@ def _instance_interpretation(
     *,
     path: str,
 ) -> RequestedFactAnswerSubjectInstanceInterpretation:
-    item = _ParsedObject(raw, path)
-    kind = item.take("kind")
-    item.finish()
+    item = provider_output.AnswerSubjectInstanceInterpretationOutput.parse(raw)
     return RequestedFactAnswerSubjectInstanceInterpretation(
-        kind=AnswerSubjectInstanceInterpretationKind(_text(kind))
+        kind=AnswerSubjectInstanceInterpretationKind(_text(item.kind))
     )
 
 
@@ -277,22 +263,18 @@ def _answer_population(
     used_question_input_refs: tuple[str, ...],
     path: str,
 ) -> RequestedFactAnswerPopulation:
-    item = _ParsedObject(raw, path)
-    population_label = item.take("population_label")
-    counted_unit = item.take("counted_unit")
-    membership_tests = item.take("membership_tests")
-    item.finish()
+    item = provider_output.AnswerPopulationOutput.parse(raw)
     return RequestedFactAnswerPopulation(
         population_label=_required_text(
-            population_label,
+            item.population_label,
             path=f"{path}.population_label",
         ),
         counted_unit=_required_text(
-            counted_unit,
+            item.counted_unit,
             path=f"{path}.counted_unit",
         ),
         membership_tests=_answer_population_membership_tests(
-            membership_tests,
+            item.membership_tests,
             used_question_input_refs=used_question_input_refs,
             path=f"{path}.membership_tests",
         ),
@@ -306,30 +288,29 @@ def _answer_population_membership_tests(
     path: str,
 ) -> tuple[RequestedFactAnswerPopulationMembershipTest, ...]:
     output: list[RequestedFactAnswerPopulationMembershipTest] = []
-    for index, item in enumerate(_required_dicts(raw, path)):
+    for index, raw_item in enumerate(_required_items(raw, path)):
         item_path = f"{path}[{index}]"
-        parsed = _ParsedObject(item, item_path)
+        item = provider_output.AnswerPopulationMembershipTestOutput.parse(raw_item)
         output.append(
             RequestedFactAnswerPopulationMembershipTest(
-                id=_required_text(parsed.take("test_id"), path=f"{item_path}.test_id"),
+                id=_required_text(item.test_id, path=f"{item_path}.test_id"),
                 kind=AnswerPopulationMembershipTestKind(
-                    _text(parsed.take("kind")),
+                    _text(item.kind),
                 ),
                 polarity=AnswerPopulationMembershipTestPolarity(
-                    _text(parsed.take("polarity")),
+                    _text(item.polarity),
                 ),
                 test_question=_required_text(
-                    parsed.take("test_question"),
+                    item.test_question,
                     path=f"{item_path}.test_question",
                 ),
                 owned_question_input_refs=_owned_question_input_refs(
-                    parsed.take("owned_question_input_refs"),
+                    item.owned_question_input_refs,
                     used_question_input_refs=used_question_input_refs,
                     path=f"{item_path}.owned_question_input_refs",
                 ),
             )
         )
-        parsed.finish()
     if not output:
         raise ValueError(f"{path} must not be empty")
     return tuple(output)
@@ -509,19 +490,18 @@ def _answer_outputs(
     path: str,
 ) -> tuple[RequestedFactAnswerOutput, ...]:
     output: list[RequestedFactAnswerOutput] = []
-    for output_index, item in enumerate(_required_dicts(raw, path), start=1):
+    for output_index, raw_item in enumerate(_required_items(raw, path), start=1):
         item_path = f"{path}[{output_index - 1}]"
-        parsed = _ParsedObject(item, item_path)
+        item = provider_output.AnswerOutputOutput.parse(raw_item)
         output.append(
             RequestedFactAnswerOutput(
                 id=f"answer_{output_index}",
                 description=_required_text(
-                    parsed.take("description"),
+                    item.description,
                     path=f"{item_path}.description",
                 ),
             )
         )
-        parsed.finish()
     if not output:
         raise ValueError(f"{path} must not be empty")
     return tuple(output)
@@ -535,33 +515,36 @@ def _question_inputs(
 ) -> tuple[RequestedFactKnownInput, ...]:
     output: list[RequestedFactKnownInput] = []
     seen_ids: set[str] = set()
-    for index, item in enumerate(_optional_dicts(raw, "question_inputs")):
+    for index, raw_item in enumerate(_optional_items(raw, "question_inputs")):
         path = f"question_inputs[{index}]"
-        parsed = _ParsedObject(item, path)
+        parsed = _question_input_output(raw_item, path=path)
         _question_input_item_inventory_check(
-            parsed.take("inventory_check"),
+            parsed.inventory_check,
             path=f"{path}.inventory_check",
         )
         input_ref = _generated_unique_id(
-            _required_text(parsed.take("input_ref"), path=f"{path}.input_ref"),
+            _required_text(parsed.input_ref, path=f"{path}.input_ref"),
             seen_ids=seen_ids,
         )
-        kind = _question_input_kind(parsed.take("kind"), path=f"{path}.kind")
+        kind = _question_input_kind(parsed.kind, path=f"{path}.kind")
         source = _question_input_source(
-            parsed.take("source"),
+            parsed.source,
             kind=kind,
             path=f"{path}.source",
         )
-        input_text_key = (
-            "source_text" if kind == KnownInputKind.LITERAL else "reference_text"
+        reference_text = (
+            parsed.source_text
+            if isinstance(parsed, provider_output.LiteralTextInputOutput)
+            else parsed.reference_text
         )
+        input_text_key = "source_text" if kind == KnownInputKind.LITERAL else "reference_text"
         span_contexts = (
             current_question_texts
             if source == KnownInputSource.QUESTION_CONTEXT
             else question_context_texts
         )
-        reference_text = _copied_text(
-            parsed.take(input_text_key),
+        copied_reference_text = _copied_text(
+            reference_text,
             question_context_texts=span_contexts,
             path=f"{path}.{input_text_key}",
         )
@@ -571,36 +554,46 @@ def _question_inputs(
                 input_ref=input_ref,
                 kind=kind,
                 source=source,
-                reference_text=reference_text,
+                reference_text=copied_reference_text,
                 question_context_texts=question_context_texts,
                 path=path,
             )
         )
-        parsed.finish()
     return tuple(output)
 
 
+def _question_input_output(
+    raw: object,
+    *,
+    path: str,
+) -> provider_output.LiteralTextInputOutput | provider_output.RowSetReferenceInputOutput:
+    item = _required_dict(raw, path)
+    kind = _question_input_kind(item.get("kind"), path=f"{path}.kind")
+    if kind == KnownInputKind.LITERAL:
+        return provider_output.LiteralTextInputOutput.parse(item)
+    if kind == KnownInputKind.ROW_SET_REFERENCE:
+        return provider_output.RowSetReferenceInputOutput.parse(item)
+    raise ValueError(f"{path}.kind is invalid")
+
+
 def _question_input_inventory_check(raw: Any) -> None:
-    item = _ParsedObject(raw, "question_input_inventory_check")
-    all_declared = item.take("all_input_like_phrases_declared")
-    item.finish()
-    if all_declared is not True:
+    item = provider_output.QuestionInputInventoryCheckOutput.parse(raw)
+    if item.all_input_like_phrases_declared is not True:
         raise ValueError(
             "question_input_inventory_check.all_input_like_phrases_declared must be true"
         )
 
 
 def _question_input_item_inventory_check(raw: Any, *, path: str) -> None:
-    item = _ParsedObject(raw, path)
+    item = provider_output.QuestionInputItemInventoryCheckOutput.parse(raw)
     _required_text(
-        item.take("why_this_is_an_input"),
+        item.why_this_is_an_input,
         path=f"{path}.why_this_is_an_input",
     )
-    item.finish()
 
 
 def _question_input(
-    item: "_ParsedObject",
+    item: provider_output.LiteralTextInputOutput | provider_output.RowSetReferenceInputOutput,
     *,
     input_ref: str,
     kind: KnownInputKind,
@@ -609,22 +602,22 @@ def _question_input(
     question_context_texts: tuple[str, ...],
     path: str,
 ) -> RequestedFactKnownInput:
-    if kind == KnownInputKind.LITERAL:
-        role = LiteralInputRole(_required_text(item.take("role"), path=f"{path}.role"))
-        field_label_text = _text(item.take("field_label_text"))
-        resolved_input_ref = _text(item.take("resolved_input_ref"))
+    if isinstance(item, provider_output.LiteralTextInputOutput):
+        role = LiteralInputRole(_required_text(item.role, path=f"{path}.role"))
+        field_label_text = _text(item.field_label_text)
+        resolved_input_ref = _text(item.resolved_input_ref)
         resolved_value_text = _required_text(
-            item.take("resolved_value_text"),
+            item.resolved_value_text,
             path=f"{path}.resolved_value_text",
         )
-        raw_occurrence = item.take("occurrence")
+        raw_occurrence = item.occurrence
         return RequestedFactLiteralInput(
             id=input_ref,
             source=source,
             text=reference_text,
             resolved_value_text=resolved_value_text,
             field_label_text=field_label_text,
-            value_meaning_hint=_text(item.take("value_meaning_hint")),
+            value_meaning_hint=_text(item.value_meaning_hint),
             role=role,
             resolved_input_ref=resolved_input_ref,
             occurrence=(
@@ -633,16 +626,16 @@ def _question_input(
                 else _positive_int(raw_occurrence, path=f"{path}.occurrence")
             ),
         )
-    if kind == KnownInputKind.ROW_SET_REFERENCE:
+    if isinstance(item, provider_output.RowSetReferenceInputOutput):
         return RequestedFactRowSetReferenceInput(
             id=input_ref,
             text=reference_text,
             occurrence=_positive_int(
-                item.take("occurrence"),
+                item.occurrence,
                 path=f"{path}.occurrence",
             ),
             resolved_input_ref=_required_text(
-                item.take("resolved_input_ref"),
+                item.resolved_input_ref,
                 path=f"{path}.resolved_input_ref",
             ),
         )
@@ -737,15 +730,10 @@ def _required_text(value: Any, *, path: str) -> str:
     return text
 
 
-def _optional_dicts(value: Any, path: str) -> tuple[dict[str, Any], ...]:
+def _optional_items(value: Any, path: str) -> tuple[object, ...]:
     if not isinstance(value, list):
         raise ValueError(f"{path} must be a list")
-    output: list[dict[str, Any]] = []
-    for index, item in enumerate(value):
-        if not isinstance(item, dict):
-            raise ValueError(f"{path}[{index}] must be an object")
-        output.append(item)
-    return tuple(output)
+    return tuple(value)
 
 
 def _required_dict(value: Any, path: str) -> dict[str, Any]:
@@ -754,33 +742,12 @@ def _required_dict(value: Any, path: str) -> dict[str, Any]:
     return value
 
 
-class _ParsedObject:
-    def __init__(self, value: Any, path: str) -> None:
-        self._payload = _required_dict(value, path)
-        self._path = path
-        self._unparsed = set(self._payload)
-
-    def take(self, key: str) -> Any:
-        self._unparsed.discard(key)
-        return self._payload.get(key)
-
-    def finish(self) -> None:
-        if self._unparsed:
-            fields = ", ".join(sorted(self._unparsed))
-            raise ValueError(f"{self._path} has unparsed fields: {fields}")
-
-
-def _required_dicts(value: Any, path: str) -> tuple[dict[str, Any], ...]:
+def _required_items(value: Any, path: str) -> tuple[object, ...]:
     if not isinstance(value, list):
         raise ValueError(f"{path} must be a list")
-    output: list[dict[str, Any]] = []
-    for index, item in enumerate(value):
-        if not isinstance(item, dict):
-            raise ValueError(f"{path}[{index}] must be an object")
-        output.append(item)
-    if not output:
+    if not value:
         raise ValueError(f"{path} must contain at least one value")
-    return tuple(output)
+    return tuple(value)
 
 
 def _text(value: Any) -> str:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from fervis.lookup.read_eligibility import provider_contract as provider_output
+
 
 def build_read_eligibility_schema(
     *,
@@ -26,13 +28,13 @@ def build_read_eligibility_schema(
         requested_fact_assessments_schema["prefixItems"] = list(
             requested_fact_assessment_variants
         )
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
+    schema = provider_output.ReadEligibilityOutput.schema(
+        {
             "requested_fact_assessments": requested_fact_assessments_schema,
         },
-        "required": ["requested_fact_assessments"],
+    )
+    return {
+        **schema,
         "modelSchemas": {
             "requested_fact_assessments": requested_fact_assessments_schema,
         },
@@ -57,18 +59,12 @@ def _requested_fact_assessment_schema(
             )
             for candidate_spec in candidate_specs
         ]
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
+    return provider_output.RequestedFactAssessmentOutput.schema(
+        {
             "requested_fact_id": _string_schema(enum_values=(requested_fact_id,)),
             "read_candidate_reviews": read_candidate_reviews_schema,
         },
-        "required": [
-            "requested_fact_id",
-            "read_candidate_reviews",
-        ],
-    }
+    )
 
 
 def _candidate_read_candidate_review_schema(
@@ -132,10 +128,8 @@ def _read_candidate_review_schema(
     if retention_decision == "DROP":
         relevant_row_path_tokens_schema["maxItems"] = 0
         relevant_field_tokens_schema["maxItems"] = 0
-    schema: dict[str, object] = {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
+    return provider_output.ReadCandidateReviewOutput.schema(
+        {
             "source_candidate_id": candidate_id_schema,
             "read_id": read_id_schema,
             "relevant_row_path_tokens": relevant_row_path_tokens_schema,
@@ -143,16 +137,7 @@ def _read_candidate_review_schema(
             "retention_basis": {"type": "string", "minLength": 1},
             "retention_decision": {"enum": [retention_decision]},
         },
-        "required": [
-            "source_candidate_id",
-            "read_id",
-            "relevant_row_path_tokens",
-            "relevant_field_tokens",
-            "retention_basis",
-            "retention_decision",
-        ],
-    }
-    return schema
+    )
 
 
 def _string_schema(*, enum_values: tuple[str, ...]) -> dict[str, object]:

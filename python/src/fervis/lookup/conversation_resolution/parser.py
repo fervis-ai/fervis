@@ -10,6 +10,7 @@ from fervis.memory.conversation_context import (
     ConversationContextSource,
     ConversationMeaningAnchor,
 )
+from fervis.lookup.conversation_resolution import provider_contract as provider_output
 from fervis.lookup.conversation_resolution.model import (
     CandidateInterpretation,
     ClauseDependency,
@@ -44,22 +45,12 @@ def parse_conversation_resolution(
 ) -> ConversationResolutionResult:
     if tool_name != CONVERSATION_RESOLUTION_TOOL_NAME:
         raise ValueError("unknown conversation resolution tool")
-    _reject_unexpected_keys(
-        payload,
-        {
-            "kind",
-            "status",
-            "current_question_text",
-            "clause_resolutions",
-            "unresolved",
-        },
-        "conversation_resolution",
-    )
-    if payload.get("kind") != "conversation_resolution":
+    output = provider_output.ConversationResolutionOutput.parse(payload)
+    if output.kind != "conversation_resolution":
         raise ValueError("invalid conversation resolution kind")
-    resolution = _status(payload.get("status"))
+    resolution = _status(output.status)
     current_question_text = _current_question_text(
-        payload=payload,
+        output=output,
         current_question=current_question,
     )
     context = _ParseContext.from_inputs(
@@ -68,11 +59,11 @@ def parse_conversation_resolution(
         context_frames=context_frames,
     )
     clause_resolutions = _clause_resolutions(
-        payload.get("clause_resolutions"),
+        output.clause_resolutions,
         context=context,
     )
     unresolved = _unresolved(
-        payload.get("unresolved"),
+        output.unresolved,
         context=context,
     )
     used_sources = _used_sources(
@@ -168,11 +159,11 @@ def _source_text_from_context(source: ConversationContextSource) -> _SourceText:
 
 def _current_question_text(
     *,
-    payload: dict[str, Any],
+    output: provider_output.ConversationResolutionOutput,
     current_question: str,
 ) -> str:
     text = _required_string(
-        payload.get("current_question_text"),
+        output.current_question_text,
         path="current_question_text",
     )
     expected = _required_string(current_question, path="current_question")
@@ -204,27 +195,17 @@ def _clause_resolutions(
 
 
 def _clause_resolution(
-    item: dict[str, Any],
+    raw: object,
     *,
     path: str,
     context: _ParseContext,
 ) -> ClauseResolution:
-    _reject_unexpected_keys(
-        item,
-        {
-            "current_clause_text",
-            "occurrence",
-            "requested_value_frame",
-            "dependencies",
-            "resolved_clause_text",
-        },
-        path,
-    )
+    item = provider_output.ClauseResolutionOutput.parse(raw)
     current_clause_text = _required_string(
-        item.get("current_clause_text"),
+        item.current_clause_text,
         path=f"{path}.current_clause_text",
     )
-    occurrence = _positive_int(item.get("occurrence"), path=f"{path}.occurrence")
+    occurrence = _positive_int(item.occurrence, path=f"{path}.occurrence")
     _require_occurrence(
         text=current_clause_text,
         occurrence=occurrence,
@@ -232,18 +213,18 @@ def _clause_resolution(
         path=f"{path}.current_clause_text",
     )
     resolved_clause_text = _required_string(
-        item.get("resolved_clause_text"),
+        item.resolved_clause_text,
         path=f"{path}.resolved_clause_text",
     )
     requested_value_frame = _requested_value_frame(
-        item.get("requested_value_frame"),
+        item.requested_value_frame,
         context=context,
         path=f"{path}.requested_value_frame",
         current_clause_text=current_clause_text,
         resolved_clause_text=resolved_clause_text,
     )
     dependencies = _dependencies(
-        item.get("dependencies"),
+        item.dependencies,
         context=context,
         current_clause_text=current_clause_text,
         resolved_clause_text=resolved_clause_text,
@@ -266,22 +247,14 @@ def _requested_value_frame(
     current_clause_text: str,
     resolved_clause_text: str,
 ) -> RequestedValueFrame:
-    item = _required_dict(raw, path)
-    _reject_unexpected_keys(
-        item,
-        {
-            "current_value_surface",
-            "context_frame_choices",
-        },
-        path,
-    )
+    item = provider_output.RequestedValueFrameOutput.parse(raw)
     current_value_surface = _current_value_surface(
-        item.get("current_value_surface"),
+        item.current_value_surface,
         current_clause_text=current_clause_text,
         path=f"{path}.current_value_surface",
     )
     choices = _context_frame_choices(
-        item.get("context_frame_choices"),
+        item.context_frame_choices,
         context=context,
         current_clause_text=current_clause_text,
         current_value_surface=current_value_surface,
@@ -320,9 +293,8 @@ def _current_value_surface(
     current_clause_text: str,
     path: str,
 ) -> CurrentValueSurface:
-    item = _required_dict(raw, path)
-    _reject_unexpected_keys(item, {"text", "kind"}, path)
-    text = _required_string(item.get("text"), path=f"{path}.text")
+    item = provider_output.CurrentValueSurfaceOutput.parse(raw)
+    text = _required_string(item.text, path=f"{path}.text")
     _require_occurrence(
         text=text,
         occurrence=1,
@@ -332,7 +304,7 @@ def _current_value_surface(
     return CurrentValueSurface(
         text=text,
         kind=CurrentValueSurfaceKind(
-            _required_string(item.get("kind"), path=f"{path}.kind")
+            _required_string(item.kind, path=f"{path}.kind")
         ),
     )
 
@@ -349,22 +321,18 @@ def _context_frame_choices(
     seen: set[str] = set()
     for index, item in enumerate(_required_dicts(raw, path)):
         item_path = f"{path}[{index}]"
-        _reject_unexpected_keys(
-            item,
-            {"frame_id", "choice", "current_conflict_quotes"},
-            item_path,
-        )
-        frame_id = _required_string(item.get("frame_id"), path=f"{item_path}.frame_id")
+        output = provider_output.ContextFrameChoiceOutput.parse(item)
+        frame_id = _required_string(output.frame_id, path=f"{item_path}.frame_id")
         if frame_id not in context.frames:
             raise ValueError(f"{item_path}.frame_id is not an available frame")
         if frame_id in seen:
             raise ValueError(f"{item_path}.frame_id is duplicated")
         seen.add(frame_id)
         choice = ContextFrameChoiceKind(
-            _required_string(item.get("choice"), path=f"{item_path}.choice")
+            _required_string(output.choice, path=f"{item_path}.choice")
         )
         conflict_quotes = _string_array(
-            item.get("current_conflict_quotes"),
+            output.current_conflict_quotes,
             path=f"{item_path}.current_conflict_quotes",
         )
         for quote_index, quote in enumerate(conflict_quotes):
@@ -450,27 +418,16 @@ def _dependencies(
 
 
 def _dependency(
-    item: dict[str, Any],
+    raw: object,
     *,
     path: str,
     context: _ParseContext,
     current_clause_text: str,
     resolved_clause_text: str,
 ) -> ClauseDependency:
-    _reject_unexpected_keys(
-        item,
-        {
-            "anchor_text",
-            "occurrence",
-            "kind",
-            "meaning_components",
-            "resolved_text",
-            "must_preserve_terms",
-        },
-        path,
-    )
-    anchor_text = _required_string(item.get("anchor_text"), path=f"{path}.anchor_text")
-    occurrence = _positive_int(item.get("occurrence"), path=f"{path}.occurrence")
+    item = provider_output.DependencyOutput.parse(raw)
+    anchor_text = _required_string(item.anchor_text, path=f"{path}.anchor_text")
+    occurrence = _positive_int(item.occurrence, path=f"{path}.occurrence")
     _require_occurrence(
         text=anchor_text,
         occurrence=occurrence,
@@ -478,19 +435,19 @@ def _dependency(
         path=f"{path}.anchor_text",
     )
     resolved_text = _required_string(
-        item.get("resolved_text"),
+        item.resolved_text,
         path=f"{path}.resolved_text",
     )
     preserve_terms = _string_array(
-        item.get("must_preserve_terms"),
+        item.must_preserve_terms,
         path=f"{path}.must_preserve_terms",
     )
     return ClauseDependency(
         anchor_text=anchor_text,
         occurrence=occurrence,
-        kind=DependencyKind(_required_string(item.get("kind"), path=f"{path}.kind")),
+        kind=DependencyKind(_required_string(item.kind, path=f"{path}.kind")),
         meaning_components=_meaning_components(
-            item.get("meaning_components"),
+            item.meaning_components,
             context=context,
             path=f"{path}.meaning_components",
         ),
@@ -508,13 +465,9 @@ def _meaning_components(
     output: list[MeaningComponent] = []
     for index, item in enumerate(_required_dicts(raw, path)):
         item_path = f"{path}[{index}]"
-        _reject_unexpected_keys(
-            item,
-            {"kind", "source_id", "source_text", "memory_id", "resolved_text"},
-            item_path,
-        )
+        output_item = provider_output.MeaningComponentOutput.parse(item)
         source_id = _required_string(
-            item.get("source_id"),
+            output_item.source_id,
             path=f"{item_path}.source_id",
         )
         if source_id == "current_question":
@@ -525,13 +478,13 @@ def _meaning_components(
         if source is None:
             raise ValueError(f"{item_path}.source_id is not an available source")
         source_text = _required_string(
-            item.get("source_text"),
+            output_item.source_text,
             path=f"{item_path}.source_text",
         )
         if not _anchors_source_text(text=source_text, source_text=source.text):
             raise ValueError(f"{item_path}.source_text must appear in declared source")
         memory_id = _required_string(
-            item.get("memory_id"),
+            output_item.memory_id,
             path=f"{item_path}.memory_id",
         )
         _require_meaning_anchor(
@@ -543,13 +496,13 @@ def _meaning_components(
         output.append(
             MeaningComponent(
                 kind=MeaningComponentKind(
-                    _required_string(item.get("kind"), path=f"{item_path}.kind")
+                    _required_string(output_item.kind, path=f"{item_path}.kind")
                 ),
                 source_id=source_id,
                 source_text=source_text,
                 memory_id=memory_id,
                 resolved_text=_required_string(
-                    item.get("resolved_text"),
+                    output_item.resolved_text,
                     path=f"{item_path}.resolved_text",
                 ),
             )
@@ -576,24 +529,19 @@ def _unresolved(
     *,
     context: _ParseContext,
 ) -> UnresolvedResolution:
-    item = _required_dict(raw, "unresolved")
-    _reject_unexpected_keys(
-        item,
-        {"unresolved_kind", "why_unresolved", "candidate_interpretations"},
-        "unresolved",
-    )
+    item = provider_output.UnresolvedOutput.parse(raw)
     return UnresolvedResolution(
         unresolved_kind=_required_string(
-            item.get("unresolved_kind"),
+            item.unresolved_kind,
             path="unresolved.unresolved_kind",
         ),
         why_unresolved=_required_string(
-            item.get("why_unresolved"),
+            item.why_unresolved,
             path="unresolved.why_unresolved",
             allow_empty=True,
         ),
         candidate_interpretations=_candidate_interpretations(
-            item.get("candidate_interpretations"),
+            item.candidate_interpretations,
             context=context,
             path="unresolved.candidate_interpretations",
         ),
@@ -609,19 +557,15 @@ def _candidate_interpretations(
     output: list[CandidateInterpretation] = []
     for index, item in enumerate(_required_dicts(raw, path)):
         item_path = f"{path}[{index}]"
-        _reject_unexpected_keys(
-            item,
-            {"integrated_question", "supporting_evidence"},
-            item_path,
-        )
+        output_item = provider_output.CandidateInterpretationOutput.parse(item)
         output.append(
             CandidateInterpretation(
                 integrated_question=_required_string(
-                    item.get("integrated_question"),
+                    output_item.integrated_question,
                     path=f"{item_path}.integrated_question",
                 ),
                 supporting_evidence=_source_evidence(
-                    item.get("supporting_evidence"),
+                    output_item.supporting_evidence,
                     context=context,
                     path=f"{item_path}.supporting_evidence",
                 ),
@@ -639,16 +583,16 @@ def _source_evidence(
     output: list[SourceEvidence] = []
     for index, item in enumerate(_required_dicts(raw, path)):
         item_path = f"{path}[{index}]"
-        _reject_unexpected_keys(item, {"source_id", "exact_source_texts"}, item_path)
+        output_item = provider_output.SourceEvidenceOutput.parse(item)
         source_id = _required_string(
-            item.get("source_id"),
+            output_item.source_id,
             path=f"{item_path}.source_id",
         )
         source = context.sources.get(source_id)
         if source is None:
             raise ValueError(f"{item_path}.source_id is not an available source")
         exact_source_texts = _string_array(
-            item.get("exact_source_texts"),
+            output_item.exact_source_texts,
             path=f"{item_path}.exact_source_texts",
         )
         for text_index, exact_text in enumerate(exact_source_texts):
@@ -802,12 +746,6 @@ def _anchor_text(value: str) -> str:
     return " ".join(stripped.split())
 
 
-def _required_dict(raw: Any, path: str) -> dict[str, Any]:
-    if not isinstance(raw, dict):
-        raise ValueError(f"{path} must be an object")
-    return raw
-
-
 def _required_dicts(raw: Any, path: str) -> tuple[dict[str, Any], ...]:
     if not isinstance(raw, list):
         raise ValueError(f"{path} must be an array")
@@ -840,13 +778,3 @@ def _string_array(raw: Any, *, path: str) -> tuple[str, ...]:
         _required_string(item, path=f"{path}[{index}]")
         for index, item in enumerate(raw)
     )
-
-
-def _reject_unexpected_keys(
-    raw: dict[str, Any],
-    allowed: set[str],
-    path: str,
-) -> None:
-    unexpected = sorted(set(raw) - allowed)
-    if unexpected:
-        raise ValueError(f"{path} contains unexpected keys: {', '.join(unexpected)}")
