@@ -2072,10 +2072,9 @@ def _canonical_prompt_requested_fact_id(
             return requested_fact_id
         if str(fact.get("evidence_ref") or "") == f"requested_fact:{requested_fact_id}":
             return str(fact.get("requested_fact_id") or requested_fact_id)
-    if requested_fact_id in {"", "fact_1"}:
-        facts = tuple(fact for fact in requested_facts if isinstance(fact, dict))
-        if len(facts) == 1:
-            return str(facts[0].get("requested_fact_id") or requested_fact_id)
+    facts = tuple(fact for fact in requested_facts if isinstance(fact, dict))
+    if len(facts) == 1:
+        return str(facts[0].get("requested_fact_id") or requested_fact_id)
     return requested_fact_id
 
 

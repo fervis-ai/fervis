@@ -407,6 +407,7 @@ class SourceBindingTurnPrompt(TurnPromptBase):
             source_binding_prompt_candidate_population_binding_ids(self.request)
         )
         target_fulfillment_supports: dict[str, dict[str, tuple[str, ...]]] = {}
+        target_required_fulfillment_output_ids: dict[str, tuple[str, ...]] = {}
         target_population_binding_ids: dict[str, tuple[str, ...]] = {}
         for target in targets:
             candidate = registry.candidates_by_id[target.source_candidate_id]
@@ -466,6 +467,9 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                 )
                 if answer_output_id in target.answer_output_ids
             }
+            target_required_fulfillment_output_ids[target_id] = (
+                target.required_answer_output_ids
+            )
             target_population_binding_ids[target_id] = candidate_population_bindings.get(
                 candidate.id,
                 (),
@@ -486,5 +490,8 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                 source_binding_metric_evidence_ids_by_requested_fact(self.request)
             ),
             target_fulfillment_support_set_ids_by_answer_output=target_fulfillment_supports,
+            target_required_fulfillment_answer_output_ids=(
+                target_required_fulfillment_output_ids
+            ),
             target_population_binding_ids=target_population_binding_ids,
         )

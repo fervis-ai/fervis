@@ -28,6 +28,7 @@ class SourceBindingTarget:
     source_candidate_id: str
     requirement_id: str
     answer_output_ids: tuple[str, ...] = ()
+    required_answer_output_ids: tuple[str, ...] = ()
 
     @property
     def requires_answer_fulfillment(self) -> bool:
@@ -41,6 +42,7 @@ class SourceBindingTarget:
             "source_candidate_id": self.source_candidate_id,
             "requirement_id": self.requirement_id,
             "answer_output_ids": list(self.answer_output_ids),
+            "required_answer_output_ids": list(self.required_answer_output_ids),
         }
 
 
@@ -170,6 +172,14 @@ def _target_for_requirement(
     requirement_id: str,
     shape_spec: PlanSelectionShapeSpec | None,
 ) -> tuple[SourceBindingTarget, SourceBindingTargetCompatibility]:
+    answer_output_ids = ()
+    if _requires_answer_fulfillment(
+        requirement_id,
+        shape_spec=shape_spec,
+    ):
+        answer_output_ids = _member_answer_output_ids(member) or (
+            plan.required_answer_output_ids
+        )
     target = SourceBindingTarget(
         binding_target_id=_binding_target_id(
             requested_fact_id=plan.requested_fact_id,
@@ -181,9 +191,10 @@ def _target_for_requirement(
         plan_shape=plan.plan_shape,
         source_candidate_id=member.source_candidate_id,
         requirement_id=requirement_id,
-        answer_output_ids=(
-            plan.required_answer_output_ids
-            if _requires_answer_fulfillment(
+        answer_output_ids=answer_output_ids,
+        required_answer_output_ids=(
+            answer_output_ids
+            if _requires_complete_answer_fulfillment(
                 requirement_id,
                 shape_spec=shape_spec,
             )
@@ -220,6 +231,22 @@ def source_binding_member_requirement_ids(
     return member.requirement_ids or (_DEFAULT_REQUIREMENT_ID,)
 
 
+def _member_answer_output_ids(
+    member: SourceStrategyMember,
+) -> tuple[str, ...]:
+    source_interface = member.source_interface
+    if not isinstance(source_interface, dict):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            answer_output_id
+            for raw in source_interface.get("answer_output_ids") or ()
+            for answer_output_id in (str(raw or ""),)
+            if answer_output_id
+        )
+    )
+
+
 def _requires_answer_fulfillment(
     requirement_id: str,
     *,
@@ -228,6 +255,18 @@ def _requires_answer_fulfillment(
     if shape_spec is None or requirement_id == _DEFAULT_REQUIREMENT_ID:
         return True
     return shape_spec.requires_answer_fulfillment_for_requirement(requirement_id)
+
+
+def _requires_complete_answer_fulfillment(
+    requirement_id: str,
+    *,
+    shape_spec: PlanSelectionShapeSpec | None,
+) -> bool:
+    if shape_spec is None or requirement_id == _DEFAULT_REQUIREMENT_ID:
+        return True
+    return shape_spec.requires_complete_answer_fulfillment_for_requirement(
+        requirement_id
+    )
 
 
 def _shape_spec(

@@ -73,6 +73,10 @@ def source_binding_tool_spec() -> ToolSpec:
                     )
                 },
             },
+            target_required_fulfillment_answer_output_ids={
+                "target.source_1": ("answer_1",),
+                "target.source_2": ("answer_1",),
+            },
             target_population_binding_ids=_candidate_population_bindings(
                 "target.source_1",
                 "target.source_2",

@@ -34,6 +34,8 @@ from fervis.lookup.question_contract import (
     NormalInstanceExcludedStateRole,
     QuestionContract,
     RequestedFact,
+    RequestedFactAnswerExpression,
+    RequestedFactAnswerExpressionFamily,
     RequestedFactAnswerOutput,
     RequestedFactAnswerSubject,
     RequestedFactLiteralInput,
@@ -63,6 +65,9 @@ from fervis.lookup.plan_selection import (
     PlanSelectionSet,
     SourceStrategyMember,
 )
+from fervis.lookup.operation_families.source_binding_registry import (
+    source_binding_metric_evidence_ids_by_requested_fact,
+)
 from fervis.lookup.source_binding.candidates.bound_payload import (
     _bound_sources_prompt_payload,
 )
@@ -82,6 +87,7 @@ from fervis.lookup.source_binding.candidates.registry import (
 from fervis.lookup.source_binding.parser.candidate_access import (
     candidate_value_is_used_by_bound_source,
 )
+from fervis.lookup.source_binding.parser import parse_source_binding
 from tests.lookup.source_binding_helpers import source_fulfills_for_candidate
 
 
@@ -263,6 +269,7 @@ def test_source_binding_targets_are_compact_role_targets_not_private_plan_varian
             "source_candidate_id": "source_1",
             "requirement_id": "source",
             "answer_output_ids": ["answer_1"],
+            "required_answer_output_ids": ["answer_1"],
         }
     ]
 
@@ -432,6 +439,62 @@ def test_source_linked_value_usage_checks_metric_evidence():
     )
 
     assert candidate_value_is_used_by_bound_source(candidate, bound)
+
+
+def test_ranked_aggregate_source_binding_keeps_selected_group_key_lineage():
+    base = _request_with_optional_params(include_extra_evidence_field=True)
+    fact = replace(
+        base.requested_facts[0],
+        answer_expression=RequestedFactAnswerExpression(
+            family=RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+        ),
+    )
+    request = replace(
+        base,
+        question_contract=QuestionContract(requested_facts=(fact,)),
+        requested_facts=(fact,),
+        plan_selection=_selected_plan(plan_shape="ranked_aggregate"),
+    )
+    prompt = SourceBindingTurnPrompt(request)
+    candidate = _only_source_candidate(prompt.source_invocation_candidate_payload())
+    outcome = _source_binding_outcome(
+        candidate,
+        binding_target_id=_only_binding_target_id(prompt),
+        param_decisions={
+            "start_date": _first_param_decision(candidate, "start_date"),
+            "end_date": _first_param_decision(candidate, "end_date"),
+        },
+        finite_choice_param_reviews={
+            "status": _choice_reviews(
+                counts=("OPEN",),
+                does_not_count=("CLOSED",),
+            )
+        },
+        field_ids=("unrelated",),
+    )
+    metric_evidence_ids = source_binding_metric_evidence_ids_by_requested_fact(
+        request
+    )["fact_1"]
+    outcome["metric_fit_bases"] = {
+        "fact_1": {
+            evidence_id: {
+                "metric_meaning": f"{evidence_id} is a candidate metric.",
+                "fit_basis": f"{evidence_id} fits the ranked answer.",
+            }
+            for evidence_id in metric_evidence_ids
+        }
+    }
+    outcome["fit_basis_interpretations"] = {
+        "fact_1": {
+            evidence_id: {"interpretation": "FITS_REQUESTED_ANSWER"}
+            for evidence_id in metric_evidence_ids
+        }
+    }
+
+    result = parse_source_binding({"outcome": outcome}, request=request)
+
+    fulfillment = result.outcome.bound_sources[0].fulfillments[0]
+    assert fulfillment.group_key_evidence_ids == ("source_1.root.unrelated",)
 
 
 def test_generate_source_binding_runs_one_model_turn():

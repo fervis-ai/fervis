@@ -119,6 +119,10 @@ def test_source_binding_schema_scopes_param_surfaces_to_binding_target():
             "target.source_1": {"answer_1": ("support.source_1.answer_1",)},
             "target.source_2": {"answer_1": ("support.source_2.answer_1",)},
         },
+        target_required_fulfillment_answer_output_ids={
+            "target.source_1": ("answer_1",),
+            "target.source_2": ("answer_1",),
+        },
         target_population_binding_ids={
             "target.source_1": ("pop.source_1.candidate_population",),
             "target.source_2": ("pop.source_2.candidate_population",),

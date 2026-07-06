@@ -50,6 +50,7 @@ class _SourceBindingSchemaScope:
     target_fulfillment_support_set_ids_by_answer_output: dict[
         str, dict[str, tuple[str, ...]]
     ]
+    target_required_fulfillment_answer_output_ids: dict[str, tuple[str, ...]]
     target_population_binding_ids: dict[str, tuple[str, ...]]
 
     @property
@@ -103,6 +104,7 @@ def build_source_binding_schema(
     target_fulfillment_support_set_ids_by_answer_output: dict[
         str, dict[str, tuple[str, ...]]
     ],
+    target_required_fulfillment_answer_output_ids: dict[str, tuple[str, ...]],
     target_population_binding_ids: dict[str, tuple[str, ...]] | None = None,
 ) -> dict[str, object]:
     scope = _SourceBindingSchemaScope(
@@ -121,6 +123,9 @@ def build_source_binding_schema(
         metric_evidence_ids_by_requested_fact=metric_evidence_ids_by_requested_fact,
         target_fulfillment_support_set_ids_by_answer_output=(
             target_fulfillment_support_set_ids_by_answer_output
+        ),
+        target_required_fulfillment_answer_output_ids=(
+            target_required_fulfillment_answer_output_ids
         ),
         target_population_binding_ids=target_population_binding_ids or {},
     )
@@ -207,6 +212,12 @@ def _source_binding_item_schema(
             "fulfillment_decisions": _fulfillment_decisions_schema(
                 scope.target_fulfillment_support_set_ids_by_answer_output.get(
                     target_id, {}
+                ),
+                required_answer_output_ids=(
+                    scope.target_required_fulfillment_answer_output_ids.get(
+                        target_id,
+                        (),
+                    )
                 ),
             ),
             "param_decisions": _param_decisions_schema(
@@ -450,6 +461,8 @@ def _answer_population_schema(
 
 def _fulfillment_decisions_schema(
     fulfillment_support_set_ids_by_answer_output: dict[str, tuple[str, ...]],
+    *,
+    required_answer_output_ids: tuple[str, ...],
 ) -> dict[str, object]:
     properties = {
         answer_output_id: _fulfillment_decision_item_schema(support_set_ids)
@@ -461,7 +474,7 @@ def _fulfillment_decisions_schema(
         "type": "object",
         "additionalProperties": False,
         "properties": properties,
-        "required": [],
+        "required": list(required_answer_output_ids),
     }
     return schema
 

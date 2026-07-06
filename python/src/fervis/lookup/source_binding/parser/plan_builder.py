@@ -115,6 +115,7 @@ def build_source_binding_plan(
             parsed_invocation.fulfillment_decisions,
             requested_fact_id=requested_fact_id,
             answer_output_ids=set(target.answer_output_ids),
+            required_answer_output_ids=set(target.required_answer_output_ids),
             candidate=candidate,
             plan_shape=target.plan_shape,
             metric_fit_reviews_by_requested_output=metric_fit_reviews,

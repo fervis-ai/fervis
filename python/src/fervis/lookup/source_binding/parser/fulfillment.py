@@ -21,6 +21,7 @@ def parse_source_fulfillments(
     *,
     requested_fact_id: str,
     answer_output_ids: set[str],
+    required_answer_output_ids: set[str],
     candidate: Any,
     plan_shape: str,
     metric_fit_reviews_by_requested_output: dict[str, dict[str, dict[str, str]]],
@@ -32,12 +33,12 @@ def parse_source_fulfillments(
         if raw_decisions:
             raise ValueError("binding target does not allow answer fulfillment")
         return ()
-    if not raw_decisions:
-        raise ValueError("fulfillment_decisions must contain at least one value")
+    if set(raw_decisions) - answer_output_ids:
+        raise ValueError("source fulfillment references unknown answer output")
+    if required_answer_output_ids - set(raw_decisions):
+        raise ValueError("fulfillment_decisions must cover required answer outputs")
     for answer_output_id, raw_value in raw_decisions.items():
         raw = provider_output.FulfillmentDecisionOutput.parse(raw_value)
-        if answer_output_id not in answer_output_ids:
-            raise ValueError("source fulfillment references unknown answer output")
         choice_id = _text(raw.fulfillment_choice_id)
         support_set_id = _source_fulfillment_support_set_id(
             choice_id,
@@ -116,16 +117,7 @@ def parse_source_fulfillments(
                 )
             )
             selected_group_key_evidence_ids = tuple(
-                dict.fromkeys(
-                    (
-                        *_slot_evidence_ids(slots, key="group_key_evidence"),
-                        *_candidate_support_set_evidence_ids(
-                            candidate,
-                            answer_output_id=answer_output_id,
-                            key="group_key_evidence",
-                        ),
-                    )
-                )
+                dict.fromkeys(_slot_evidence_ids(slots, key="group_key_evidence"))
             )
         else:
             selected_group_key_evidence_ids = _slot_evidence_ids(
@@ -156,34 +148,6 @@ def parse_source_fulfillments(
             )
         )
     return tuple(output)
-
-
-def _candidate_support_set_evidence_ids(
-    candidate: Any,
-    *,
-    answer_output_id: str,
-    key: str,
-) -> tuple[str, ...]:
-    payload = getattr(candidate, "payload", None)
-    available = candidate_evidence_ids(candidate)
-    return tuple(
-        dict.fromkeys(
-            evidence_id
-            for support_set in (payload or {}).get("fulfillment_support_sets") or ()
-            if isinstance(support_set, dict)
-            and str(support_set.get("answer_output_id") or "") == answer_output_id
-            for slot in support_set.get("fulfillment_slots") or ()
-            if isinstance(slot, dict)
-            for item in slot.get(key) or ()
-            if isinstance(item, dict)
-            and not (
-                key == "group_key_evidence"
-                and str(item.get("type") or "").lower() == "row_population"
-            )
-            for evidence_id in (str(item.get("evidence_id") or ""),)
-            if evidence_id and evidence_id in available
-        )
-    )
 
 
 def _source_fulfillment_support_set_slots(
