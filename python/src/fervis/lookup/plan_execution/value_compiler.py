@@ -15,6 +15,7 @@ from fervis.lookup.fact_plan.relations import (
     Relation,
     RelationSourceAppliedFilter,
     RelationSourcePopulationChoice,
+    RelationSourceReviewScopeDecision,
     RelationSourceRowFilter,
     SourceKind,
 )
@@ -89,6 +90,7 @@ class CompiledPopulationChoice:
     included_values: tuple[str, ...]
     excluded_values: tuple[str, ...]
     proof_refs: tuple[str, ...] = ()
+    review_scope_decisions: tuple[RelationSourceReviewScopeDecision, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -271,6 +273,7 @@ def _compiled_population_choice(
         included_values=choice.included_values,
         excluded_values=choice.excluded_values,
         proof_refs=choice.proof_refs,
+        review_scope_decisions=choice.review_scope_decisions,
     )
 
 

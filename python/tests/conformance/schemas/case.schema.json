@@ -52,6 +52,7 @@
         "source_binding.row_predicates",
         "source_binding.row_predicate_parse",
         "source_binding.row_predicate_schema",
+        "source_binding.review_scope",
         "source_binding.schema_surface",
         "execution.relation_engine",
         "execution.calendar_relation",
@@ -119,6 +120,9 @@
           "type": "object"
         },
         "result_equals": {
+          "type": "object"
+        },
+        "result_exact_fields": {
           "type": "object"
         },
         "error_contains": {

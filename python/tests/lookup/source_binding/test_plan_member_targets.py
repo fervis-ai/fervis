@@ -98,13 +98,17 @@ def test_source_binding_schema_scopes_param_surfaces_to_binding_target():
             "target.source_1": {},
             "target.source_2": {},
         },
-        target_membership_test_ids={
-            "target.source_1": ("subject_identity",),
-            "target.source_2": ("subject_identity",),
+        target_finite_choice_test_ids={
+            "target.source_1": {"status": ("subject_identity",)},
+            "target.source_2": {"sale_type": ("subject_identity",)},
         },
-        target_normal_instance_test_ids={
-            "target.source_1": (),
-            "target.source_2": (),
+        target_finite_choice_normal_instance_test_ids={
+            "target.source_1": {"status": ()},
+            "target.source_2": {"sale_type": ()},
+        },
+        target_row_predicate_test_ids={
+            "target.source_1": {},
+            "target.source_2": {},
         },
         target_population_roles={
             "target.source_1": ({"role_id": "role.source_1.rows"},),

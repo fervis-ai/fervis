@@ -284,6 +284,17 @@ def _execution_proof_graph(
                 value={
                     "included_values": list(choice.included_values),
                     "excluded_values": list(choice.excluded_values),
+                    "review_scope_decisions": [
+                        {
+                            "membership_test_id": decision.membership_test_id,
+                            "decision": decision.decision.value,
+                            "axis_kind": decision.axis_kind,
+                            "axis_id": decision.axis_id,
+                            "owner_surface_ids": list(decision.owner_surface_ids),
+                            "proof_refs": list(decision.proof_refs),
+                        }
+                        for decision in choice.review_scope_decisions
+                    ],
                 },
             )
         )

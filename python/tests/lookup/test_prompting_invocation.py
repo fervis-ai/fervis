@@ -66,10 +66,10 @@ from fervis.memory.artifacts import (
 
 
 _APPROVED_CHARS = {
-    "question contract": (364, 12565, 19171),
+    "question contract": (364, 12960, 19691),
     "query enrichment": (364, 6026, 8255),
     "grounding": (364, 5008, 6825),
-    "source binding": (364, 13850, 20248),
+    "source binding": (364, 13810, 20208),
     "pattern fact planning": (364, 3497, 6241),
 }
 

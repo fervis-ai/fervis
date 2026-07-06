@@ -419,6 +419,7 @@ class RequestedFactAnswerPopulationMembershipTest:
     kind: AnswerPopulationMembershipTestKind
     polarity: AnswerPopulationMembershipTestPolarity
     test_question: str
+    owned_question_input_refs: tuple[str, ...] = ()
     normal_instance_profile: NormalInstanceProfile | None = None
 
     def __post_init__(self) -> None:
@@ -426,6 +427,15 @@ class RequestedFactAnswerPopulationMembershipTest:
             raise ValueError("answer population test requires id")
         if not self.test_question.strip():
             raise ValueError("answer population test requires question")
+        owned_refs = tuple(
+            str(item).strip()
+            for item in self.owned_question_input_refs
+            if str(item).strip()
+        )
+        if len(owned_refs) != len(set(owned_refs)):
+            raise ValueError("answer population test owner refs must be unique")
+        if owned_refs != self.owned_question_input_refs:
+            object.__setattr__(self, "owned_question_input_refs", owned_refs)
         if (
             self.kind != AnswerPopulationMembershipTestKind.NORMAL_INSTANCE_GUARD
             and self.normal_instance_profile is not None
@@ -438,6 +448,7 @@ class RequestedFactAnswerPopulationMembershipTest:
             "kind": self.kind.value,
             "polarity": self.polarity.value,
             "test_question": self.test_question,
+            "owned_question_input_refs": list(self.owned_question_input_refs),
         }
         if self.normal_instance_profile is not None:
             payload["normal_instance_profile"] = (
@@ -451,6 +462,7 @@ class RequestedFactAnswerPopulationMembershipTest:
             "kind": self.kind.value,
             "polarity": self.polarity.value,
             "test_question": self.test_question,
+            "owned_question_input_refs": list(self.owned_question_input_refs),
         }
 
 
@@ -521,6 +533,7 @@ def _normalized_population_membership_test(
         kind=test.kind,
         polarity=test.polarity,
         test_question=normal_instance_guard_question(counted_unit),
+        owned_question_input_refs=test.owned_question_input_refs,
         normal_instance_profile=profile,
     )
 
@@ -610,6 +623,18 @@ class RequestedFact:
         )
         if input_refs != self.input_refs:
             object.__setattr__(self, "input_refs", input_refs)
+        if self.answer_population is not None:
+            input_ref_set = set(input_refs)
+            for test in self.answer_population.membership_tests:
+                unknown_refs = tuple(
+                    ref
+                    for ref in test.owned_question_input_refs
+                    if ref not in input_ref_set
+                )
+                if unknown_refs:
+                    raise ValueError(
+                        "answer population test owner refs must be used by requested fact"
+                    )
 
     def answer_request_model_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {

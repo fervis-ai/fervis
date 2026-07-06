@@ -207,8 +207,18 @@ def _answer_population_membership_test_schema() -> dict[str, object]:
             },
             "polarity": {"enum": ["MUST_PASS", "MUST_FAIL"]},
             "test_question": {"type": "string", "minLength": 1},
+            "owned_question_input_refs": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 1},
+            },
         },
-        required=("test_id", "kind", "polarity", "test_question"),
+        required=(
+            "test_id",
+            "kind",
+            "polarity",
+            "test_question",
+            "owned_question_input_refs",
+        ),
     )
 
 

@@ -12,6 +12,8 @@ from fervis.lookup.fact_plan.relations import (
     RelationField,
     RelationSource,
     RelationSourcePopulationChoice,
+    RelationSourceReviewScopeDecision,
+    ReviewScopeDecisionKind,
     SourceKind,
 )
 from fervis.lookup.fact_plan.render_spec import RenderRelationOutput, RenderSpec
@@ -119,6 +121,23 @@ def _population_choice(item: dict[str, Any]) -> RelationSourcePopulationChoice:
         field_id=str(item["field_id"]),
         included_values=tuple(str(value) for value in item["included_values"]),
         excluded_values=tuple(str(value) for value in item.get("excluded_values") or ()),
+        proof_refs=tuple(str(ref) for ref in item.get("proof_refs") or ()),
+        review_scope_decisions=tuple(
+            _review_scope_decision(decision)
+            for decision in item.get("review_scope_decisions") or ()
+        ),
+    )
+
+
+def _review_scope_decision(item: dict[str, Any]) -> RelationSourceReviewScopeDecision:
+    return RelationSourceReviewScopeDecision(
+        membership_test_id=str(item["membership_test_id"]),
+        decision=ReviewScopeDecisionKind(str(item["decision"])),
+        axis_kind=str(item["axis_kind"]),
+        axis_id=str(item["axis_id"]),
+        owner_surface_ids=tuple(
+            str(owner) for owner in item.get("owner_surface_ids") or ()
+        ),
         proof_refs=tuple(str(ref) for ref in item.get("proof_refs") or ()),
     )
 

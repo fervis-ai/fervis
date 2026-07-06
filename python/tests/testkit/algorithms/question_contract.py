@@ -457,6 +457,7 @@ def _answer_request(
                         "kind": "SUBJECT_IDENTITY",
                         "polarity": "MUST_PASS",
                         "test_question": "Does the row/value represent sales?",
+                        "owned_question_input_refs": [],
                     }
                 ],
             }

@@ -49,8 +49,12 @@ def build_source_binding_schema(
     target_required_param_ids: dict[str, tuple[str, ...]],
     target_finite_choice_values: dict[str, dict[str, tuple[str, ...]]],
     target_row_predicate_values: dict[str, dict[str, tuple[str, ...]]],
-    target_membership_test_ids: dict[str, tuple[str, ...]],
-    target_normal_instance_test_ids: dict[str, tuple[str, ...]],
+    target_finite_choice_test_ids: dict[str, dict[str, tuple[str, ...]]],
+    target_finite_choice_normal_instance_test_ids: dict[
+        str,
+        dict[str, tuple[str, ...]],
+    ],
+    target_row_predicate_test_ids: dict[str, dict[str, tuple[str, ...]]],
     target_population_roles: dict[str, tuple[dict[str, object], ...]],
     target_requested_fact_ids: dict[str, str],
     metric_evidence_ids_by_requested_fact: dict[str, tuple[str, ...]],
@@ -72,10 +76,11 @@ def build_source_binding_schema(
         target_required_param_ids=target_required_param_ids,
         target_finite_choice_values=target_finite_choice_values,
         target_row_predicate_values=target_row_predicate_values,
-        target_membership_test_ids=target_membership_test_ids,
-        target_normal_instance_test_ids=(
-            target_normal_instance_test_ids
+        target_finite_choice_test_ids=target_finite_choice_test_ids,
+        target_finite_choice_normal_instance_test_ids=(
+            target_finite_choice_normal_instance_test_ids
         ),
+        target_row_predicate_test_ids=target_row_predicate_test_ids,
         target_population_roles=target_population_roles,
         target_requested_fact_ids=target_requested_fact_ids,
         metric_evidence_ids_by_requested_fact=metric_evidence_ids_by_requested_fact,
@@ -101,8 +106,12 @@ def _source_binding_outcome_schema(
     target_required_param_ids: dict[str, tuple[str, ...]],
     target_finite_choice_values: dict[str, dict[str, tuple[str, ...]]],
     target_row_predicate_values: dict[str, dict[str, tuple[str, ...]]],
-    target_membership_test_ids: dict[str, tuple[str, ...]],
-    target_normal_instance_test_ids: dict[str, tuple[str, ...]],
+    target_finite_choice_test_ids: dict[str, dict[str, tuple[str, ...]]],
+    target_finite_choice_normal_instance_test_ids: dict[
+        str,
+        dict[str, tuple[str, ...]],
+    ],
+    target_row_predicate_test_ids: dict[str, dict[str, tuple[str, ...]]],
     target_population_roles: dict[str, tuple[dict[str, object], ...]],
     target_requested_fact_ids: dict[str, str],
     metric_evidence_ids_by_requested_fact: dict[str, tuple[str, ...]],
@@ -121,8 +130,11 @@ def _source_binding_outcome_schema(
                 target_required_param_ids=target_required_param_ids,
                 target_finite_choice_values=target_finite_choice_values,
                 target_row_predicate_values=target_row_predicate_values,
-                target_membership_test_ids=target_membership_test_ids,
-                target_normal_instance_test_ids=target_normal_instance_test_ids,
+                target_finite_choice_test_ids=target_finite_choice_test_ids,
+                target_finite_choice_normal_instance_test_ids=(
+                    target_finite_choice_normal_instance_test_ids
+                ),
+                target_row_predicate_test_ids=target_row_predicate_test_ids,
                 target_population_roles=target_population_roles,
                 metric_evidence_ids_by_requested_fact=metric_evidence_ids_by_requested_fact,
                 target_fulfillment_support_set_ids_by_answer_output=(
@@ -158,8 +170,12 @@ def _source_binding_plan_schema(
     target_required_param_ids: dict[str, tuple[str, ...]],
     target_finite_choice_values: dict[str, dict[str, tuple[str, ...]]],
     target_row_predicate_values: dict[str, dict[str, tuple[str, ...]]],
-    target_membership_test_ids: dict[str, tuple[str, ...]],
-    target_normal_instance_test_ids: dict[str, tuple[str, ...]],
+    target_finite_choice_test_ids: dict[str, dict[str, tuple[str, ...]]],
+    target_finite_choice_normal_instance_test_ids: dict[
+        str,
+        dict[str, tuple[str, ...]],
+    ],
+    target_row_predicate_test_ids: dict[str, dict[str, tuple[str, ...]]],
     target_population_roles: dict[str, tuple[dict[str, object], ...]],
     metric_evidence_ids_by_requested_fact: dict[str, tuple[str, ...]],
     target_fulfillment_support_set_ids_by_answer_output: dict[
@@ -176,8 +192,11 @@ def _source_binding_plan_schema(
             target_param_decision_ids_by_param=target_param_decision_ids_by_param,
             target_finite_choice_values=target_finite_choice_values,
             target_row_predicate_values=target_row_predicate_values,
-            target_membership_test_ids=target_membership_test_ids,
-            target_normal_instance_test_ids=target_normal_instance_test_ids,
+            target_finite_choice_test_ids=target_finite_choice_test_ids,
+            target_finite_choice_normal_instance_test_ids=(
+                target_finite_choice_normal_instance_test_ids
+            ),
+            target_row_predicate_test_ids=target_row_predicate_test_ids,
             target_population_roles=target_population_roles,
             target_fulfillment_support_set_ids_by_answer_output=(
                 target_fulfillment_support_set_ids_by_answer_output
@@ -211,8 +230,12 @@ def _source_binding_invocation_items_schema(
     target_param_decision_ids_by_param: dict[str, dict[str, tuple[str, ...]]],
     target_finite_choice_values: dict[str, dict[str, tuple[str, ...]]],
     target_row_predicate_values: dict[str, dict[str, tuple[str, ...]]],
-    target_membership_test_ids: dict[str, tuple[str, ...]],
-    target_normal_instance_test_ids: dict[str, tuple[str, ...]],
+    target_finite_choice_test_ids: dict[str, dict[str, tuple[str, ...]]],
+    target_finite_choice_normal_instance_test_ids: dict[
+        str,
+        dict[str, tuple[str, ...]],
+    ],
+    target_row_predicate_test_ids: dict[str, dict[str, tuple[str, ...]]],
     target_population_roles: dict[str, tuple[dict[str, object], ...]],
     target_fulfillment_support_set_ids_by_answer_output: dict[
         str, dict[str, tuple[str, ...]]
@@ -234,13 +257,19 @@ def _source_binding_invocation_items_schema(
                 binding_target_ids[0],
                 {},
             ),
-            membership_test_ids=target_membership_test_ids.get(
+            finite_choice_test_ids=target_finite_choice_test_ids.get(
                 binding_target_ids[0],
-                (),
+                {},
             ),
-            normal_instance_test_ids=target_normal_instance_test_ids.get(
+            finite_choice_normal_instance_test_ids=(
+                target_finite_choice_normal_instance_test_ids.get(
+                    binding_target_ids[0],
+                    {},
+                )
+            ),
+            row_predicate_test_ids=target_row_predicate_test_ids.get(
                 binding_target_ids[0],
-                (),
+                {},
             ),
             population_roles=target_population_roles.get(binding_target_ids[0], ()),
             fulfillment_support_set_ids_by_answer_output=(
@@ -264,10 +293,13 @@ def _source_binding_invocation_items_schema(
                 ),
                 finite_choice_values=target_finite_choice_values.get(target_id, {}),
                 row_predicate_values=target_row_predicate_values.get(target_id, {}),
-                membership_test_ids=target_membership_test_ids.get(target_id, ()),
-                normal_instance_test_ids=target_normal_instance_test_ids.get(
+                finite_choice_test_ids=target_finite_choice_test_ids.get(target_id, {}),
+                finite_choice_normal_instance_test_ids=(
+                    target_finite_choice_normal_instance_test_ids.get(target_id, {})
+                ),
+                row_predicate_test_ids=target_row_predicate_test_ids.get(
                     target_id,
-                    (),
+                    {},
                 ),
                 population_roles=target_population_roles.get(target_id, ()),
                 fulfillment_support_set_ids_by_answer_output=(
@@ -289,8 +321,9 @@ def _source_binding_item_schema(
     param_decision_ids_by_param: dict[str, tuple[str, ...]],
     finite_choice_values: dict[str, tuple[str, ...]],
     row_predicate_values: dict[str, tuple[str, ...]],
-    membership_test_ids: tuple[str, ...],
-    normal_instance_test_ids: tuple[str, ...],
+    finite_choice_test_ids: dict[str, tuple[str, ...]],
+    finite_choice_normal_instance_test_ids: dict[str, tuple[str, ...]],
+    row_predicate_test_ids: dict[str, tuple[str, ...]],
     population_roles: tuple[dict[str, object], ...],
     fulfillment_support_set_ids_by_answer_output: dict[str, tuple[str, ...]],
     population_binding_ids: tuple[str, ...],
@@ -310,13 +343,15 @@ def _source_binding_item_schema(
             ),
             "row_predicate_reviews": _row_predicate_reviews_schema(
                 row_predicate_values,
-                membership_test_ids=membership_test_ids,
+                test_ids_by_predicate=row_predicate_test_ids,
                 require_all=False,
             ),
             "finite_choice_param_reviews": _finite_choice_param_reviews_schema(
                 finite_choice_values,
-                membership_test_ids=membership_test_ids,
-                normal_instance_test_ids=normal_instance_test_ids,
+                test_ids_by_param=finite_choice_test_ids,
+                normal_instance_test_ids_by_param=(
+                    finite_choice_normal_instance_test_ids
+                ),
                 population_roles=population_roles,
             ),
         },
@@ -334,24 +369,32 @@ def _source_binding_item_schema(
 def _finite_choice_param_reviews_schema(
     finite_choice_values: dict[str, tuple[str, ...]],
     *,
-    membership_test_ids: tuple[str, ...],
-    normal_instance_test_ids: tuple[str, ...],
+    test_ids_by_param: dict[str, tuple[str, ...]],
+    normal_instance_test_ids_by_param: dict[str, tuple[str, ...]],
     population_roles: tuple[dict[str, object], ...],
     require_all: bool = True,
 ) -> dict[str, object]:
-    if not finite_choice_values:
+    reviewed_values = {
+        param_id: choices
+        for param_id, choices in finite_choice_values.items()
+        if test_ids_by_param.get(param_id)
+    }
+    if not reviewed_values:
         return _empty_object_schema()
     return _strict_object(
         {
             param_id: _finite_choice_param_review_schema(
                 choices,
-                membership_test_ids=membership_test_ids,
-                normal_instance_test_ids=normal_instance_test_ids,
+                membership_test_ids=test_ids_by_param[param_id],
+                normal_instance_test_ids=normal_instance_test_ids_by_param.get(
+                    param_id,
+                    (),
+                ),
                 population_roles=population_roles,
             )
-            for param_id, choices in finite_choice_values.items()
+            for param_id, choices in reviewed_values.items()
         },
-        required=tuple(finite_choice_values) if require_all else (),
+        required=tuple(reviewed_values) if require_all else (),
     )
 
 
@@ -755,20 +798,25 @@ def _param_decisions_schema(
 def _row_predicate_reviews_schema(
     row_predicate_values: dict[str, tuple[str, ...]],
     *,
-    membership_test_ids: tuple[str, ...],
+    test_ids_by_predicate: dict[str, tuple[str, ...]],
     require_all: bool = True,
 ) -> dict[str, object]:
-    if not row_predicate_values:
+    reviewed_values = {
+        predicate_id: values
+        for predicate_id, values in row_predicate_values.items()
+        if test_ids_by_predicate.get(predicate_id)
+    }
+    if not reviewed_values:
         return _empty_object_schema()
     return _strict_object(
         {
             predicate_id: _row_predicate_review_schema(
                 values,
-                membership_test_ids=membership_test_ids,
+                membership_test_ids=test_ids_by_predicate[predicate_id],
             )
-            for predicate_id, values in row_predicate_values.items()
+            for predicate_id, values in reviewed_values.items()
         },
-        required=tuple(row_predicate_values.keys()) if require_all else (),
+        required=tuple(reviewed_values) if require_all else (),
     )
 
 

@@ -49,6 +49,7 @@ def _single_input_payload(question_input: dict[str, object]) -> dict[str, object
                             "kind": "SUBJECT_IDENTITY",
                             "polarity": "MUST_PASS",
                             "test_question": "Is this a sale?",
+                            "owned_question_input_refs": [],
                         }
                     ],
                 },
@@ -274,6 +275,7 @@ def test_question_contract_parser_fails_closed_on_unparsed_fields():
                             "kind": "SUBJECT_IDENTITY",
                             "polarity": "MUST_PASS",
                             "test_question": "Is this a sale?",
+                            "owned_question_input_refs": [],
                         }
                     ],
                 },
@@ -331,6 +333,7 @@ def test_conversation_resolution_resolved_text_requires_conversation_source():
                             "kind": "SUBJECT_IDENTITY",
                             "polarity": "MUST_PASS",
                             "test_question": "Is this a sale?",
+                            "owned_question_input_refs": [],
                         }
                     ],
                 },
@@ -388,6 +391,7 @@ def test_result_limit_requires_canonical_digit_text_at_parse_boundary():
                             "kind": "SUBJECT_IDENTITY",
                             "polarity": "MUST_PASS",
                             "test_question": "Is this a sale?",
+                            "owned_question_input_refs": [],
                         }
                     ],
                 },
@@ -511,7 +515,9 @@ def test_question_contract_parser_allows_field_label_hint_for_id_values():
         question_context=question,
     )
 
-    assert tuple(input_.field_label_text for input_ in parsed.outcome.question_inputs) == (
+    assert tuple(
+        input_.field_label_text for input_ in parsed.outcome.question_inputs
+    ) == (
         "staff member id",
         "staff member id",
     )
@@ -561,7 +567,9 @@ def test_question_contract_parser_allows_field_label_scoped_over_coordinated_val
         question_context=question,
     )
 
-    assert tuple(input_.field_label_text for input_ in parsed.outcome.question_inputs) == (
+    assert tuple(
+        input_.field_label_text for input_ in parsed.outcome.question_inputs
+    ) == (
         "staff_id",
         "staff_id",
     )
@@ -638,9 +646,7 @@ def test_question_contract_parser_rejects_answer_subject_literal_input():
     payload["answer_requests"][0]["answer_population"]["population_label"] = (
         "cash deposits"
     )
-    payload["answer_requests"][0]["answer_population"]["counted_unit"] = (
-        "cash deposits"
-    )
+    payload["answer_requests"][0]["answer_population"]["counted_unit"] = "cash deposits"
 
     with pytest.raises(ValueError, match="answer subject"):
         parse_question_contract(
@@ -705,6 +711,7 @@ def test_question_contract_parser_rejects_unowned_row_set_reference_input():
                             "kind": "SUBJECT_IDENTITY",
                             "polarity": "MUST_PASS",
                             "test_question": "Is this a sale?",
+                            "owned_question_input_refs": [],
                         }
                     ],
                 },

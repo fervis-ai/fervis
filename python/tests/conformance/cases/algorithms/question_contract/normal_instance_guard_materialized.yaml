@@ -19,10 +19,12 @@ input:
       kind: SUBJECT_IDENTITY
       polarity: MUST_PASS
       test_question: Does the row/value represent shifts?
+      owned_question_input_refs: []
     - test_id: pop_test_2
       kind: NORMAL_INSTANCE_GUARD
       polarity: MUST_PASS
       test_question: Is the shift a normal business instance rather than a non-normal instance?
+      owned_question_input_refs: []
   answer_outputs:
   - description: number of shifts
   question_inputs:

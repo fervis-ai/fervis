@@ -294,6 +294,7 @@ class _CapturingQuestionContractModelPort:
                                             "test_question": (
                                                 "Does the row/value represent money?"
                                             ),
+                                            "owned_question_input_refs": [],
                                         }
                                     ],
                                 },
@@ -381,12 +382,14 @@ class _FollowUpQuestionContractModelPort:
                                             "test_question": (
                                                 "Is the instance a sale?"
                                             ),
+                                            "owned_question_input_refs": [],
                                         },
                                         {
                                             "test_id": "test_2",
                                             "kind": "EXPLICIT_USER_CONSTRAINT",
                                             "polarity": "MUST_PASS",
                                             "test_question": ("Is the sale completed?"),
+                                            "owned_question_input_refs": [],
                                         },
                                         {
                                             "test_id": "test_3",
@@ -395,6 +398,7 @@ class _FollowUpQuestionContractModelPort:
                                             "test_question": (
                                                 "Was the sale in-person?"
                                             ),
+                                            "owned_question_input_refs": [],
                                         },
                                     ],
                                 },

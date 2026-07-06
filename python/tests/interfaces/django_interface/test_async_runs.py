@@ -568,12 +568,13 @@ def test_worker_fails_before_answer_synthesis_when_budget_is_exceeded(
                                                     "test_id": "pop_test_1",
                                                     "kind": "SUBJECT_IDENTITY",
                                                     "polarity": "MUST_PASS",
-                                                    "test_question": (
-                                                        "Does the row/value represent restricted fact?"
-                                                    ),
-                                                }
-                                            ],
-                                        },
+                                                        "test_question": (
+                                                            "Does the row/value represent restricted fact?"
+                                                        ),
+                                                        "owned_question_input_refs": [],
+                                                    }
+                                                ],
+                                            },
                                         "answer_outputs": [
                                             {
                                                 "description": "restricted fact",

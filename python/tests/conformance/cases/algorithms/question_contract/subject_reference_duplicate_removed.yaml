@@ -19,6 +19,7 @@ input:
       kind: SUBJECT_IDENTITY
       polarity: MUST_PASS
       test_question: Does the row/value represent cash deposits?
+      owned_question_input_refs: []
   answer_outputs:
   - description: number of unverified cash deposits
   question_inputs:

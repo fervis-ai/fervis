@@ -46,14 +46,17 @@ input:
               kind: SUBJECT_IDENTITY
               polarity: MUST_PASS
               test_question: Does the row represent a sale?
+              owned_question_input_refs: []
             - test_id: pop_test_2
               kind: EXPLICIT_USER_CONSTRAINT
               polarity: MUST_PASS
               test_question: Is the sale by the specified staff member?
+              owned_question_input_refs: []
             - test_id: pop_test_3
               kind: EXPLICIT_USER_CONSTRAINT
               polarity: MUST_PASS
               test_question: Is the sale today?
+              owned_question_input_refs: []
         answer_outputs:
           - description: number of sales
         used_question_inputs: [staff, today]

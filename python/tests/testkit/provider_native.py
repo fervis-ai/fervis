@@ -32,6 +32,7 @@ def provider_native_test_arguments(
                                 "test_question": (
                                     "Does the row/value represent test adapter answer?"
                                 ),
+                                "owned_question_input_refs": [],
                             }
                         ],
                     },

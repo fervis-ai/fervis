@@ -332,6 +332,7 @@ def _question_contract_with_time_value_input() -> dict[str, object]:
                             "kind": "SUBJECT_IDENTITY",
                             "polarity": "MUST_PASS",
                             "test_question": "Is this a sale?",
+                            "owned_question_input_refs": [],
                         }
                     ],
                 },

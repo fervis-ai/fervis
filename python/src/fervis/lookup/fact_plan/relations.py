@@ -24,6 +24,29 @@ class PopulationChoiceControllerKind(StrEnum):
     ROW_PREDICATE = "row_predicate"
 
 
+class ReviewScopeDecisionKind(StrEnum):
+    IN_SCOPE = "in_scope"
+    OUT_OF_SCOPE = "out_of_scope"
+
+
+@dataclass(frozen=True)
+class RelationSourceReviewScopeDecision:
+    membership_test_id: str
+    decision: ReviewScopeDecisionKind
+    axis_kind: str
+    axis_id: str
+    owner_surface_ids: tuple[str, ...] = ()
+    proof_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.membership_test_id:
+            raise ValueError("review scope decision requires membership test")
+        if not self.axis_kind:
+            raise ValueError("review scope decision requires axis kind")
+        if not self.axis_id:
+            raise ValueError("review scope decision requires axis id")
+
+
 @dataclass(frozen=True)
 class EndpointParamBinding:
     param_id: str
@@ -100,6 +123,7 @@ class RelationSourcePopulationChoice:
     included_values: tuple[str, ...]
     excluded_values: tuple[str, ...]
     proof_refs: tuple[str, ...] = ()
+    review_scope_decisions: tuple[RelationSourceReviewScopeDecision, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.controller_id:

@@ -12,7 +12,9 @@ from fervis.lookup.fact_plan.relations import (
     PopulationChoiceControllerKind,
     RelationSource,
     RelationSourcePopulationChoice,
+    RelationSourceReviewScopeDecision,
     RelationSourceRowFilter,
+    ReviewScopeDecisionKind as RelationReviewScopeDecisionKind,
     SourceKind,
 )
 from fervis.lookup.fact_planning.value_components import value_component
@@ -59,18 +61,26 @@ from fervis.lookup.operation_families.source_binding_registry import (
 from fervis.lookup.source_binding.normal_instance_roles import (
     NORMAL_INSTANCE_NO_EXCLUDED_ROLE,
     NORMAL_INSTANCE_UNKNOWN_EXCLUDED_ROLE,
-    normal_instance_profile_for_param,
 )
 from fervis.lookup.source_binding.param_surface import (
     param_has_default_value,
-    param_requires_finite_choice_review,
 )
 from fervis.lookup.source_binding.param_values import canonical_param_value
 from fervis.lookup.source_binding.plan_targets import (
+    SourceBindingTargetIndex,
     source_binding_target_index,
 )
 from fervis.lookup.source_binding.population_bindings import (
     PopulationBindingIndex,
+)
+from fervis.lookup.source_binding.review_scope import (
+    ReviewScopeDecision,
+    SourceBindingReviewScope,
+    source_binding_review_scope,
+)
+from fervis.lookup.source_binding.review_surface import (
+    FiniteChoiceReviewAxis,
+    source_binding_review_surface,
 )
 from fervis.lookup.source_binding.role_selection import (
     bound_plan_selection_for_source_binding,
@@ -129,15 +139,31 @@ def parse_source_binding(
     outcome = _dict(payload.get("outcome"), "outcome")
     kind = _text(outcome.get("kind"))
     if kind == "source_bindings":
+        target_index = source_binding_target_index(request)
+        candidates = source_candidates(request)
+        review_scope = source_binding_review_scope(
+            request,
+            candidates_by_id=candidates,
+            target_index=target_index,
+        )
         (
             normalized,
             effective_param_ids_by_index,
             population_choices_by_index,
-        ) = _source_binding_payload_with_derived_finite_choices(outcome, request)
+        ) = _source_binding_payload_with_derived_finite_choices(
+            outcome,
+            request,
+            target_index=target_index,
+            review_scope=review_scope,
+            candidates=candidates,
+        )
         return SourceBindingResult(
             outcome=_source_binding_plan(
                 normalized,
                 request,
+                target_index=target_index,
+                review_scope=review_scope,
+                candidates=candidates,
                 effective_param_ids_by_index=effective_param_ids_by_index,
                 population_choices_by_index=population_choices_by_index,
             )
@@ -152,18 +178,20 @@ def parse_source_binding(
 def _source_binding_payload_with_derived_finite_choices(
     payload: dict[str, Any],
     request: SourceBindingRequest,
+    *,
+    target_index: SourceBindingTargetIndex,
+    review_scope: SourceBindingReviewScope,
+    candidates: dict[str, Any],
 ) -> tuple[
     dict[str, Any],
     dict[int, tuple[str, ...]],
     dict[int, tuple[RelationSourcePopulationChoice, ...]],
 ]:
-    candidates = source_candidates(request)
     normalized_invocations: list[dict[str, Any]] = []
     effective_param_ids_by_index: dict[int, tuple[str, ...]] = {}
     population_choices_by_index: dict[
         int, tuple[RelationSourcePopulationChoice, ...]
     ] = {}
-    target_index = source_binding_target_index(request)
     for index, raw in enumerate(
         _required_dicts(payload.get("source_invocations"), "source_invocations"),
         start=1,
@@ -183,7 +211,9 @@ def _source_binding_payload_with_derived_finite_choices(
             invocation.get("finite_choice_param_reviews"),
             candidate=candidate,
             requested_fact_id=target.requested_fact_id,
+            binding_target_id=target.binding_target_id,
             request=request,
+            review_scope=review_scope,
             answer_population=_dict(
                 invocation.get("answer_population"),
                 "answer_population",
@@ -220,13 +250,29 @@ def _derived_finite_choice_param_decisions(
     *,
     candidate: Any,
     requested_fact_id: str,
+    binding_target_id: str,
     request: SourceBindingRequest,
+    review_scope: SourceBindingReviewScope,
     answer_population: dict[str, Any],
     raw_param_decision_ids: tuple[str, ...],
 ) -> _DerivedFiniteChoiceParamDecisions:
     reviews = _dict(raw_reviews, "finite_choice_param_reviews")
-    finite_choice_params = _finite_choice_review_params(candidate)
-    expected_param_ids = set(finite_choice_params)
+    review_surface = source_binding_review_surface(candidate)
+    scoped_test_ids_by_param = {
+        param_id: test_ids
+        for param_id in review_surface.finite_choice_params
+        if (
+            test_ids := review_scope.finite_choice_param_test_ids(
+                binding_target_id,
+                param_id,
+            )
+        )
+    }
+    finite_choice_axes = {
+        param_id: review_surface.finite_choice_params[param_id]
+        for param_id in scoped_test_ids_by_param
+    }
+    expected_param_ids = set(finite_choice_axes)
     if set(reviews) != expected_param_ids:
         raise ValueError(
             "finite choice param reviews must cover every finite-choice population param"
@@ -236,24 +282,29 @@ def _derived_finite_choice_param_decisions(
         raise ValueError(
             "finite-choice population params must be derived from choice reviews"
         )
-    tests_by_id = _answer_population_tests_by_id(
-        request=request,
-        requested_fact_id=requested_fact_id,
-    )
     output: dict[str, dict[str, Any]] = {}
     population_choices: list[RelationSourcePopulationChoice] = []
     population_roles_by_id = _candidate_population_roles_by_id(candidate)
-    for param_id, param in finite_choice_params.items():
+    for param_id, axis in finite_choice_axes.items():
+        out_of_scope_decisions = (
+            review_scope.finite_choice_param_out_of_scope_decisions(
+                binding_target_id,
+                param_id,
+            )
+        )
+        tests_by_id = _answer_population_tests_by_id(
+            request=request,
+            requested_fact_id=requested_fact_id,
+            scoped_test_ids=scoped_test_ids_by_param[param_id],
+        )
         _controlled_population_role(
             reviews.get(param_id),
             population_roles_by_id=population_roles_by_id,
-            tests_by_id=tests_by_id,
             path=f"finite_choice_param_reviews.{param_id}",
         )
         include_values, exclude_values = _reviewed_choice_sets(
             reviews.get(param_id),
-            param=param,
-            param_id=param_id,
+            axis=axis,
             tests_by_id=tests_by_id,
         )
         population_choices.append(
@@ -263,13 +314,16 @@ def _derived_finite_choice_param_decisions(
                 field_id=param_id,
                 included_values=include_values,
                 excluded_values=exclude_values,
-                proof_refs=(f"population_choice:{param_id}",),
+                proof_refs=_population_choice_proof_refs(
+                    f"population_choice:{param_id}",
+                    out_of_scope_decisions,
+                ),
+                review_scope_decisions=_relation_review_scope_decisions(
+                    out_of_scope_decisions
+                ),
             )
         )
-        if _finite_choice_param_can_be_omitted(
-            param,
-            include_values=include_values,
-        ):
+        if axis.can_be_omitted(include_values=include_values):
             continue
         output[param_id] = {
             "population_intent": _text(answer_population.get("intent_text")),
@@ -288,37 +342,65 @@ def _derived_finite_choice_param_decisions(
     )
 
 
-def _finite_choice_review_params(candidate: Any) -> dict[str, dict[str, Any]]:
-    return {
-        param_id: param
-        for param in candidate.params
-        if isinstance(param, dict) and param_requires_finite_choice_review(param)
-        for param_id in (str(param.get("param_id") or ""),)
-        if param_id
-    }
-
-
 def _answer_population_tests_by_id(
     *,
     request: SourceBindingRequest,
     requested_fact_id: str,
+    scoped_test_ids: tuple[str, ...],
 ) -> dict[str, Any]:
+    if not scoped_test_ids:
+        return {}
     fact = next(
         (item for item in request.requested_facts if item.id == requested_fact_id),
         None,
     )
     if fact is None or fact.answer_population is None:
         raise ValueError("finite choice reviews require answer population tests")
-    return membership_tests_by_key(fact.answer_population.membership_tests)
+    tests_by_id = membership_tests_by_key(fact.answer_population.membership_tests)
+    return {test_id: tests_by_id[test_id] for test_id in scoped_test_ids}
+
+
+def _population_choice_proof_refs(
+    base_ref: str,
+    out_of_scope_decisions: tuple[ReviewScopeDecision, ...],
+) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            (
+                base_ref,
+                *(
+                    ref
+                    for decision in out_of_scope_decisions
+                    for ref in decision.proof_refs
+                ),
+            )
+        )
+    )
+
+
+def _relation_review_scope_decisions(
+    decisions: tuple[ReviewScopeDecision, ...],
+) -> tuple[RelationSourceReviewScopeDecision, ...]:
+    return tuple(
+        RelationSourceReviewScopeDecision(
+            membership_test_id=decision.membership_test_id,
+            decision=RelationReviewScopeDecisionKind(decision.decision.value),
+            axis_kind=decision.axis_kind.value,
+            axis_id=decision.axis_id,
+            owner_surface_ids=decision.owner_surface_ids,
+            proof_refs=decision.proof_refs,
+        )
+        for decision in decisions
+    )
 
 
 def _reviewed_choice_sets(
     raw_reviews: Any,
     *,
-    param: dict[str, Any],
-    param_id: str,
+    axis: FiniteChoiceReviewAxis,
     tests_by_id: dict[str, Any],
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    param_id = axis.axis_id
     raw_review = _dict(raw_reviews, f"finite_choice_param_reviews.{param_id}")
     _validate_population_test_basis(
         raw_review.get("population_test_basis"),
@@ -329,9 +411,7 @@ def _reviewed_choice_sets(
         raw_review.get("choice_reviews"),
         f"finite_choice_param_reviews.{param_id}.choice_reviews",
     )
-    choices = tuple(
-        canonical_param_value(choice) for choice in param.get("choices") or ()
-    )
+    choices = axis.choices
     seen: set[str] = set()
     reviewed_effects: list[tuple[str, dict[str, str]]] = []
     choice_inclusions: dict[str, str] = {}
@@ -352,7 +432,7 @@ def _reviewed_choice_sets(
         choice_inclusions[choice] = inclusion
         test_effects = _population_test_effects(
             raw.get("population_test_results"),
-            param=param,
+            axis=axis,
             tests_by_id=tests_by_id,
             path=f"finite_choice_param_reviews.{param_id}.{choice}.population_test_results",
         )
@@ -425,7 +505,7 @@ def _active_membership_test_ids(
 def _population_test_effects(
     raw_results: Any,
     *,
-    param: dict[str, Any],
+    axis: FiniteChoiceReviewAxis,
     tests_by_id: dict[str, Any],
     path: str,
 ) -> dict[str, str]:
@@ -445,7 +525,7 @@ def _population_test_effects(
         effect = _validate_normal_instance_test_effect(
             raw,
             test=tests_by_id[test_id],
-            param=param,
+            axis=axis,
             path=f"{path}.{test_id}",
         )
         if effect is None:
@@ -471,7 +551,7 @@ def _validate_normal_instance_test_effect(
     raw: dict[str, Any],
     *,
     test: Any,
-    param: dict[str, Any],
+    axis: FiniteChoiceReviewAxis,
     path: str,
 ) -> str | None:
     if test.kind != AnswerPopulationMembershipTestKind.NORMAL_INSTANCE_GUARD:
@@ -488,7 +568,7 @@ def _validate_normal_instance_test_effect(
         raise ValueError("normal instance role match requires reason")
     role_effect = _normal_instance_role_match_effect(
         disposition,
-        param=param,
+        axis=axis,
         test_id=membership_test_key(test),
         path=f"{path}.disposition",
     )
@@ -529,19 +609,15 @@ def _validate_normal_instance_test_effect(
 def _normal_instance_role_match_effect(
     review: dict[str, Any],
     *,
-    param: dict[str, Any],
+    axis: FiniteChoiceReviewAxis,
     test_id: str,
     path: str,
 ) -> dict[str, bool]:
-    profile = normal_instance_profile_for_param(param, test_id=test_id)
+    profile = axis.normal_instance_profile(test_id)
     if profile is None:
         raise ValueError("normal instance review requires role profile")
     matched_role = _text(review.get("matched_excluded_role"))
-    allowed_roles = {
-        _text(item.get("role"))
-        for item in profile.get("excluded_state_roles") or ()
-        if isinstance(item, dict)
-    }
+    allowed_roles = set(profile.excluded_role_ids)
     if not allowed_roles:
         raise ValueError("normal instance role profile requires excluded roles")
     if matched_role == NORMAL_INSTANCE_NO_EXCLUDED_ROLE:
@@ -603,7 +679,6 @@ def _controlled_population_role(
     raw: Any,
     *,
     population_roles_by_id: dict[str, dict[str, Any]],
-    tests_by_id: dict[str, Any],
     path: str,
 ) -> dict[str, Any]:
     if not population_roles_by_id:
@@ -621,18 +696,9 @@ def _controlled_population_role(
 
 
 def _candidate_population_roles_by_id(candidate: Any) -> dict[str, dict[str, Any]]:
-    payload = getattr(candidate, "payload", None)
-    if not isinstance(payload, dict):
-        return {}
     return {
-        role_id: {
-            "role_kind": _text(item.get("role_kind")),
-            "role_text": _text(item.get("role_text")),
-        }
-        for item in payload.get("population_roles") or ()
-        if isinstance(item, dict)
-        for role_id in (_text(item.get("role_id")),)
-        if role_id
+        role.role_id: {"role_kind": "", "role_text": ""}
+        for role in source_binding_review_surface(candidate).population_roles
     }
 
 
@@ -737,41 +803,18 @@ def _validate_choice_inclusion_consistency(
             )
 
 
-def _finite_choice_param_can_be_omitted(
-    param: dict[str, Any],
-    *,
-    include_values: tuple[str, ...],
-) -> bool:
-    if param.get("required") is True:
-        return False
-    choices = {canonical_param_value(choice) for choice in param.get("choices") or ()}
-    include_set = set(include_values)
-    omission_behavior = _dict(
-        _dict(param.get("population_contract"), "population_contract").get(
-            "omission_behavior"
-        ),
-        "omission_behavior",
-    )
-    kind = _text(omission_behavior.get("kind"))
-    if kind == "all_values":
-        return include_set == choices
-    if kind == "uses_default":
-        default_value = canonical_param_value(omission_behavior.get("default_value"))
-        return bool(default_value) and include_set == {default_value}
-    return False
-
-
 def _source_binding_plan(
     payload: dict[str, Any],
     request: SourceBindingRequest,
     *,
+    target_index: SourceBindingTargetIndex,
+    review_scope: SourceBindingReviewScope,
+    candidates: dict[str, Any],
     effective_param_ids_by_index: dict[int, tuple[str, ...]] | None = None,
     population_choices_by_index: (
         dict[int, tuple[RelationSourcePopulationChoice, ...]] | None
     ) = None,
 ) -> SourceBindingPlan:
-    candidates = source_candidates(request)
-    target_index = source_binding_target_index(request)
     value_candidates_by_relation_id = _value_candidates_by_source_relation_id(
         candidates.values()
     )
@@ -828,6 +871,8 @@ def _source_binding_plan(
             candidate=candidate,
             request=request,
             requested_fact_id=requested_fact_id,
+            binding_target_id=target.binding_target_id,
+            review_scope=review_scope,
         )
         candidate_base_binding_sets = candidate.applied_param_binding_sets or (
             candidate.applied_param_bindings,
@@ -1696,9 +1741,8 @@ def _candidate_source_fields(
     )
     existing_field_ids.update(field.field_id for field in fields)
     predicate_types = {
-        str(item.get("field_id") or ""): str(item.get("type") or "")
-        for item in _candidate_row_predicates(candidate)
-        if isinstance(item, dict) and str(item.get("field_id") or "")
+        axis.field_id: axis.field_type
+        for axis in source_binding_review_surface(candidate).row_predicates.values()
     }
     fields.extend(
         SourceField(
@@ -1888,31 +1932,46 @@ def _row_predicate_filters(
     candidate: Any,
     request: SourceBindingRequest,
     requested_fact_id: str,
+    binding_target_id: str,
+    review_scope: SourceBindingReviewScope,
 ) -> _RowPredicateParse:
     reviews = _dict(raw_reviews, "row_predicate_reviews")
+    candidate_predicates_by_id = source_binding_review_surface(candidate).row_predicates
+    scoped_test_ids_by_predicate = {
+        predicate_id: test_ids
+        for predicate_id in candidate_predicates_by_id
+        if (
+            test_ids := review_scope.row_predicate_test_ids(
+                binding_target_id,
+                predicate_id,
+            )
+        )
+    }
     predicates_by_id = {
-        str(item.get("predicate_id") or ""): item
-        for item in _candidate_row_predicates(candidate)
-        if str(item.get("predicate_id") or "")
+        predicate_id: candidate_predicates_by_id[predicate_id]
+        for predicate_id in scoped_test_ids_by_predicate
     }
     if not predicates_by_id and not reviews:
         return _RowPredicateParse()
     missing_predicate_ids = set(predicates_by_id) - set(reviews)
     if missing_predicate_ids:
         raise ValueError("source binding missing row predicate review")
-    tests_by_id = _answer_population_tests_by_id(
-        request=request,
-        requested_fact_id=requested_fact_id,
-    )
     filters: list[RelationSourceRowFilter] = []
     population_choices: list[RelationSourcePopulationChoice] = []
     for predicate_id, raw in reviews.items():
         predicate = predicates_by_id.get(predicate_id)
         if predicate is None:
             raise ValueError("row predicate review references unknown predicate")
-        allowed_values = tuple(
-            str(value) for value in predicate.get("allowed_values") or () if str(value)
+        out_of_scope_decisions = review_scope.row_predicate_out_of_scope_decisions(
+            binding_target_id,
+            predicate_id,
         )
+        tests_by_id = _answer_population_tests_by_id(
+            request=request,
+            requested_fact_id=requested_fact_id,
+            scoped_test_ids=scoped_test_ids_by_predicate[predicate_id],
+        )
+        allowed_values = predicate.allowed_values
         values = _row_predicate_include_values(
             raw,
             allowed_values=allowed_values,
@@ -1922,7 +1981,7 @@ def _row_predicate_filters(
         excluded_values = tuple(
             value for value in allowed_values if value not in values
         )
-        field_id = _text(predicate.get("field_id"))
+        field_id = predicate.field_id
         if not field_id:
             raise ValueError("row predicate missing field")
         population_choices.append(
@@ -1932,7 +1991,13 @@ def _row_predicate_filters(
                 field_id=field_id,
                 included_values=values,
                 excluded_values=excluded_values,
-                proof_refs=(f"row_predicate:{predicate_id}",),
+                proof_refs=_population_choice_proof_refs(
+                    f"row_predicate:{predicate_id}",
+                    out_of_scope_decisions,
+                ),
+                review_scope_decisions=_relation_review_scope_decisions(
+                    out_of_scope_decisions
+                ),
             )
         )
         if set(values) == set(allowed_values):
@@ -1940,7 +2005,7 @@ def _row_predicate_filters(
         filters.append(
             RelationSourceRowFilter(
                 field_id=field_id,
-                operator=_text(predicate.get("operator")) or "in",
+                operator=predicate.operator,
                 values=values,
                 proof_refs=(f"row_predicate:{predicate_id}",),
             )
@@ -2095,16 +2160,6 @@ def _row_predicate_population_test_effects(
             raise ValueError("unsupported row predicate population test effect")
         effects[test_id] = effect
     return effects
-
-
-def _candidate_row_predicates(candidate: Any) -> tuple[dict[str, Any], ...]:
-    payload = getattr(candidate, "payload", None)
-    if not isinstance(payload, dict):
-        return ()
-    return tuple(
-        item for item in payload.get("row_predicates") or () if isinstance(item, dict)
-    )
-
 
 def _population_choice_set(
     raw: dict[str, Any],

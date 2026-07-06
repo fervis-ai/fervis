@@ -536,29 +536,32 @@ def test_lookup_derives_finite_choice_membership_from_answer_population_tests():
                     "population_label": "in-person sales",
                     "counted_unit": "sale",
                     "membership_tests": [
-                        {
-                            "test_id": "pop_test_1",
-                            "kind": "SUBJECT_IDENTITY",
-                            "polarity": "MUST_PASS",
-                            "test_question": "Does the row/value represent a sale?",
-                        },
-                        {
-                            "test_id": "pop_test_2",
-                            "kind": "EXPLICIT_USER_CONSTRAINT",
-                            "polarity": "MUST_PASS",
-                            "test_question": "Is the sale in-person?",
-                        },
-                        {
-                            "test_id": "pop_test_3",
-                            "kind": "NORMAL_INSTANCE_GUARD",
-                            "polarity": "MUST_PASS",
+                            {
+                                "test_id": "pop_test_1",
+                                "kind": "SUBJECT_IDENTITY",
+                                "polarity": "MUST_PASS",
+                                "test_question": "Does the row/value represent a sale?",
+                                "owned_question_input_refs": [],
+                            },
+                            {
+                                "test_id": "pop_test_2",
+                                "kind": "EXPLICIT_USER_CONSTRAINT",
+                                "polarity": "MUST_PASS",
+                                "test_question": "Is the sale in-person?",
+                                "owned_question_input_refs": [],
+                            },
+                            {
+                                "test_id": "pop_test_3",
+                                "kind": "NORMAL_INSTANCE_GUARD",
+                                "polarity": "MUST_PASS",
                             "test_question": (
                                 "Is this an actual business sale instance rather "
-                                "than a draft, canceled, voided, failed, or raw "
-                                "storage representation unless the user explicitly "
-                                "requested that state?"
-                            ),
-                        },
+                                    "than a draft, canceled, voided, failed, or raw "
+                                    "storage representation unless the user explicitly "
+                                    "requested that state?"
+                                ),
+                                "owned_question_input_refs": [],
+                            },
                     ],
                 },
                 "answer_outputs": [{"description": "count"}],

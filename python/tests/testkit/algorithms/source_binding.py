@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 import json
 from typing import Any
 from xml.etree import ElementTree
@@ -36,10 +37,14 @@ from fervis.lookup.fact_plan.values import (
 from fervis.lookup.turn_prompts import build_turn_prompt_context
 from fervis.lookup.question_contract import (
     KnownInputSource,
+    AnswerPopulationMembershipTestKind,
+    AnswerPopulationMembershipTestPolarity,
     LiteralInputRole,
     NormalInstanceExcludedStateRole,
     QuestionContract,
     RequestedFact,
+    RequestedFactAnswerPopulation,
+    RequestedFactAnswerPopulationMembershipTest,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
     RequestedFactAnswerOutput,
@@ -77,8 +82,15 @@ from fervis.lookup.source_binding.candidates.row_predicates import (
 from fervis.lookup.source_binding.candidates.registry_builder import (
     _source_candidates_from_cards,
 )
+from fervis.lookup.source_binding.candidates.registry import source_candidate_registry
+from fervis.lookup.source_binding.review_scope import source_binding_review_scope
+from fervis.lookup.source_binding.review_surface import (
+    SourceBindingReviewAxisKind,
+    source_binding_review_surface,
+)
+from fervis.lookup.source_binding.plan_targets import source_binding_target_index
 
-from tests.testkit.assertions import subset_mismatches
+from tests.testkit.assertions import exact_mismatches, subset_mismatches
 from tests.testkit.catalog import catalog_from_payload
 from tests.lookup.prompt_sections import prompt_section_text
 
@@ -299,8 +311,7 @@ def run_source_binding_prompt_surface_case(payload: dict[str, Any]) -> list[str]
     expected_prompt_terms = [
         str(item) for item in expected.get("prompt_text_contains") or ()
     ]
-    return subset_mismatches(
-        actual={
+    actual = {
             "tool_name": invocation.tool_specs[0].name,
             "prompt_text_contains": [
                 term for term in expected_prompt_terms if term in invocation.prompt_text
@@ -440,14 +451,185 @@ def run_source_binding_prompt_surface_case(payload: dict[str, Any]) -> list[str]
                     ),
                 ),
             },
-        },
-        expected_subset=payload["expect"]["result_contains"],
+            "schema_review_test_ids": _schema_review_test_ids(schema),
+            "schema_review_test_id_counts": _schema_review_test_id_counts(schema),
+    }
+    errors = subset_mismatches(
+        actual=actual,
+        expected_subset=payload["expect"].get("result_contains") or {},
     )
+    for field, expected_value in (
+        payload["expect"].get("result_exact_fields") or {}
+    ).items():
+        errors.extend(
+            exact_mismatches(
+                actual=actual.get(field),
+                expected=expected_value,
+                path=field,
+            )
+        )
+    return errors
 
 
 def _prompt_surface_allows_multiple_candidates(payload: dict[str, Any]) -> bool:
     expected = payload["expect"].get("result_contains", {})
     return any(key in expected for key in ("candidate_count", "read_id_presence"))
+
+
+def run_source_binding_review_scope_case(payload: dict[str, Any]) -> list[str]:
+    request = _source_binding_request(payload["input"]["request"])
+    registry = source_candidate_registry(request)
+    target_index = source_binding_target_index(request)
+    candidates = dict(registry.candidates_by_id)
+    candidate = next(iter(candidates.values()))
+    candidate = _candidate_with_axis_owner_edges(
+        candidate,
+        finite_choice_axis_owners=payload["input"].get("finite_choice_axis_owners")
+        or {},
+        row_predicate_axis_owners=payload["input"].get("row_predicate_axis_owners")
+        or {},
+    )
+    candidates[candidate.id] = candidate
+    scope = source_binding_review_scope(
+        request,
+        candidates_by_id=candidates,
+        target_index=target_index,
+    )
+    target = target_index.targets[0]
+    surface = source_binding_review_surface(candidate)
+    actual = {
+        "finite_choice": {
+            axis_id: list(
+                scope.finite_choice_param_test_ids(
+                    target.binding_target_id,
+                    axis_id,
+                )
+            )
+            for axis_id in surface.finite_choice_params
+        },
+        "row_predicate": {
+            axis_id: list(
+                scope.row_predicate_test_ids(
+                    target.binding_target_id,
+                    axis_id,
+                )
+            )
+            for axis_id in surface.row_predicates
+        },
+        "decisions": {
+            f"{axis_kind.value}:{axis_id}": _scope_decisions(
+                scope,
+                binding_target_id=target.binding_target_id,
+                axis_kind=axis_kind,
+                axis_id=axis_id,
+            )
+            for axis_kind, axis_ids in (
+                (
+                    SourceBindingReviewAxisKind.FINITE_CHOICE_PARAM,
+                    tuple(surface.finite_choice_params),
+                ),
+                (
+                    SourceBindingReviewAxisKind.ROW_PREDICATE,
+                    tuple(surface.row_predicates),
+                ),
+            )
+            for axis_id in axis_ids
+        },
+    }
+    if "result_equals" in payload["expect"]:
+        return exact_mismatches(
+            actual=actual,
+            expected=payload["expect"]["result_equals"],
+        )
+    errors = subset_mismatches(
+        actual=actual,
+        expected_subset=payload["expect"].get("result_contains") or {},
+    )
+    for field, expected_value in (
+        payload["expect"].get("result_exact_fields") or {}
+    ).items():
+        errors.extend(
+            exact_mismatches(
+                actual=actual.get(field),
+                expected=expected_value,
+                path=field,
+            )
+        )
+    return errors
+
+
+def _scope_decisions(
+    scope: Any,
+    *,
+    binding_target_id: str,
+    axis_kind: SourceBindingReviewAxisKind,
+    axis_id: str,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "membership_test_id": decision.membership_test_id,
+            "decision": decision.decision.value,
+            "owner_surface_id": decision.owner_surface_id,
+            "owner_surface_ids": list(decision.owner_surface_ids),
+            "proof_refs": list(decision.proof_refs),
+        }
+        for decision in scope.axis_scope(
+            binding_target_id,
+            axis_kind,
+            axis_id,
+        ).test_scope_decisions
+    ]
+
+
+def _candidate_with_axis_owner_edges(
+    candidate: Any,
+    *,
+    finite_choice_axis_owners: dict[str, Any],
+    row_predicate_axis_owners: dict[str, Any],
+) -> Any:
+    params = tuple(
+        _param_with_axis_owner_edge(param, finite_choice_axis_owners)
+        for param in candidate.params
+    )
+    payload = dict(candidate.payload or {})
+    payload["row_predicates"] = [
+        _row_predicate_with_axis_owner_edge(item, row_predicate_axis_owners)
+        for item in payload.get("row_predicates") or ()
+        if isinstance(item, dict)
+    ]
+    return replace(candidate, params=params, payload=payload)
+
+
+def _param_with_axis_owner_edge(
+    param: Any,
+    owners_by_param: dict[str, Any],
+) -> Any:
+    if not isinstance(param, dict):
+        return param
+    param_id = str(param.get("param_id") or "")
+    owners = tuple(str(item) for item in owners_by_param.get(param_id) or () if str(item))
+    if not owners:
+        return param
+    output = dict(param)
+    contract = dict(output.get("population_contract") or {})
+    contract["owned_membership_test_ids"] = list(owners)
+    output["population_contract"] = contract
+    return output
+
+
+def _row_predicate_with_axis_owner_edge(
+    item: dict[str, Any],
+    owners_by_predicate: dict[str, Any],
+) -> dict[str, Any]:
+    predicate_id = str(item.get("predicate_id") or "")
+    owners = tuple(
+        str(owner) for owner in owners_by_predicate.get(predicate_id) or () if str(owner)
+    )
+    if not owners:
+        return dict(item)
+    output = dict(item)
+    output["owned_membership_test_ids"] = list(owners)
+    return output
 
 
 def _rendered_fulfillment_evidence(prompt_text: str) -> list[dict[str, str]]:
@@ -708,7 +890,9 @@ def run_source_binding_schema_surface_case(payload: dict[str, Any]) -> list[str]
 
 
 def run_source_binding_row_predicate_parse_case(payload: dict[str, Any]) -> list[str]:
-    request = _boolean_row_predicate_request()
+    request = _source_binding_request(
+        payload["input"].get("request") or {"mode": "boolean_row_predicate"}
+    )
     prompt = SourceBindingTurnPrompt(request)
     candidate = _only_candidate(prompt.source_invocation_candidate_payload())
     outcome = _source_binding_outcome(
@@ -792,7 +976,7 @@ def run_source_binding_row_predicate_schema_case(payload: dict[str, Any]) -> lis
 
 
 def run_source_binding_finite_choice_parse_case(payload: dict[str, Any]) -> list[str]:
-    request = _choice_param_request()
+    request = _source_binding_request(payload["input"].get("request") or {})
     prompt = SourceBindingTurnPrompt(request)
     candidate = _only_candidate(prompt.source_invocation_candidate_payload())
     outcome = _source_binding_outcome(
@@ -852,6 +1036,17 @@ def _population_choices(source: object) -> list[dict[str, object]]:
             "field_id": item.field_id,
             "included_values": list(item.included_values),
             "excluded_values": list(item.excluded_values),
+            "review_scope_decisions": [
+                {
+                    "membership_test_id": decision.membership_test_id,
+                    "decision": decision.decision.value,
+                    "axis_kind": decision.axis_kind,
+                    "axis_id": decision.axis_id,
+                    "owner_surface_ids": list(decision.owner_surface_ids),
+                    "proof_refs": list(decision.proof_refs),
+                }
+                for decision in item.review_scope_decisions
+            ],
         }
         for item in getattr(source, "population_choices", ())
     ]
@@ -1274,6 +1469,24 @@ def _source_binding_request(
         return _optional_population_params_request()
     if mode == "grounded_time_filter":
         return _grounded_time_filter_request()
+    if mode == "scoped_review_owned_input":
+        return _scoped_review_owned_input_request()
+    if mode == "scoped_review_owned_input_unbound":
+        return _scoped_review_owned_input_request(
+            bind_owned_input=False,
+            include_available_staff_value=False,
+        )
+    if mode == "scoped_review_selectable_owned_inputs":
+        return _scoped_review_owned_input_request(
+            bind_owned_input=False,
+            include_time_input=True,
+        )
+    if mode == "scoped_review_owned_input_choice_only":
+        return _scoped_review_owned_input_request(include_row_predicate=False)
+    if mode == "scoped_review_owned_input_row_only":
+        return _scoped_review_owned_input_request(include_finite_choice=False)
+    if mode == "scoped_review_axis_owned_test":
+        return _scoped_review_owned_input_request(include_axis_owned_test=True)
     if mode == "identity_field_filter":
         return _identity_field_filter_request()
     if mode == "same_scope_memory":
@@ -1886,6 +2099,281 @@ def _choice_param_request(
                     basis="Selected by conformance fixture.",
                 ),
             )
+        ),
+        read_eligibility=ReadEligibilityResult(
+            read_assessments=(
+                _read_assessment(
+                    scope=scope,
+                    requested_fact_id="fact_1",
+                    read_id="sales",
+                    relevant_row_path_ids=("root",),
+                ),
+            )
+        ),
+    )
+
+
+def _scoped_review_owned_input_request(
+    *,
+    include_finite_choice: bool = True,
+    include_row_predicate: bool = True,
+    bind_owned_input: bool = True,
+    include_axis_owned_test: bool = False,
+    include_time_input: bool = False,
+    include_reference_param: bool = True,
+    include_available_staff_value: bool = True,
+) -> SourceBindingRequest:
+    staff_input = RequestedFactLiteralInput(
+        id="staff_id_1",
+        source=KnownInputSource.QUESTION_CONTEXT,
+        text="staff_id: 51515151-0000-0000-0002-000000000001",
+        resolved_value_text="51515151-0000-0000-0002-000000000001",
+        field_label_text="staff_id",
+        value_meaning_hint="staff member",
+        role=LiteralInputRole.REFERENCE_VALUE,
+    )
+    time_input = RequestedFactLiteralInput(
+        id="time_1",
+        source=KnownInputSource.QUESTION_CONTEXT,
+        text="today",
+        resolved_value_text="today",
+        role=LiteralInputRole.TIME_VALUE,
+    )
+    membership_tests: list[RequestedFactAnswerPopulationMembershipTest] = [
+        RequestedFactAnswerPopulationMembershipTest(
+            id="subject_identity",
+            kind=AnswerPopulationMembershipTestKind.SUBJECT_IDENTITY,
+            polarity=AnswerPopulationMembershipTestPolarity.MUST_PASS,
+            test_question="Does the row/value represent sales?",
+        ),
+        RequestedFactAnswerPopulationMembershipTest(
+            id="specified_staff",
+            kind=AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT,
+            polarity=AnswerPopulationMembershipTestPolarity.MUST_PASS,
+            test_question=(
+                "Does the sale belong to the staff member identified by the "
+                "question input?"
+            ),
+            owned_question_input_refs=("staff_id_1",),
+        ),
+    ]
+    if include_time_input:
+        membership_tests.append(
+            RequestedFactAnswerPopulationMembershipTest(
+                id="today_constraint",
+                kind=AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT,
+                polarity=AnswerPopulationMembershipTestPolarity.MUST_PASS,
+                test_question="Did the sale happen during the requested time span?",
+                owned_question_input_refs=("time_1",),
+            )
+        )
+    if include_axis_owned_test:
+        membership_tests.append(
+            RequestedFactAnswerPopulationMembershipTest(
+                id="sale_type_constraint",
+                kind=AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT,
+                polarity=AnswerPopulationMembershipTestPolarity.MUST_PASS,
+                test_question="Does the sale have the requested sale type?",
+            )
+        )
+    membership_tests.append(
+        RequestedFactAnswerPopulationMembershipTest(
+            id="normal_instance_guard",
+            kind=AnswerPopulationMembershipTestKind.NORMAL_INSTANCE_GUARD,
+            polarity=AnswerPopulationMembershipTestPolarity.MUST_PASS,
+            test_question="Is this an ordinary business instance of sales?",
+        )
+    )
+    fact = RequestedFact(
+        id="fact_1",
+        description="sales for one staff member",
+        answer_subject=RequestedFactAnswerSubject(subject_text="sales"),
+        answer_population=RequestedFactAnswerPopulation(
+            population_label="sales for one staff member",
+            counted_unit="sales",
+            membership_tests=tuple(membership_tests),
+        ),
+        answer_outputs=(RequestedFactAnswerOutput(id="answer_1"),),
+        known_inputs=(staff_input, *((time_input,) if include_time_input else ())),
+        input_refs=("staff_id_1", *(("time_1",) if include_time_input else ())),
+    )
+    available_values = (
+        *(
+            (
+                FactValue.identity(
+                    id="staff_identity_1",
+                    identity_type="staff",
+                    identity_field="staff_id",
+                    value="51515151-0000-0000-0002-000000000001",
+                    display_value="51515151-0000-0000-0002-000000000001",
+                    proof_refs=("known_input:staff_id_1", "read:staff_lookup"),
+                    applies_to_requested_fact_ids=("fact_1",),
+                ),
+            )
+            if include_available_staff_value
+            else ()
+        ),
+        *(
+            (
+                FactValue.time(
+                    id="time_1",
+                    expression="today",
+                    resolved_start="2026-07-06",
+                    resolved_end="2026-07-07",
+                    proof_refs=("known_input:time_1",),
+                    applies_to_requested_fact_ids=("fact_1",),
+                ),
+            )
+            if include_time_input
+            else ()
+        ),
+    )
+    params = []
+    if include_reference_param:
+        params.append(
+            CatalogParam(
+                ref="sales.query.staff_id",
+                name="staff_id",
+                source=ParamSource.QUERY,
+                type="uuid",
+                identity=IdentityMetadata(
+                    entity_ref="staff",
+                    identity_field="staff_id",
+                    primary_key=True,
+                    stable=True,
+                ),
+            )
+        )
+    if include_time_input:
+        params.extend(
+            (
+                CatalogParam(
+                    ref="sales.query.start_date",
+                    name="start_date",
+                    source=ParamSource.QUERY,
+                    type="date",
+                ),
+                CatalogParam(
+                    ref="sales.query.end_date",
+                    name="end_date",
+                    source=ParamSource.QUERY,
+                    type="date",
+                ),
+            )
+        )
+    if include_finite_choice:
+        params.append(
+            CatalogParam(
+                ref="sales.query.status",
+                name="status",
+                source=ParamSource.QUERY,
+                type="choice",
+                choices=("OPEN", "CLOSED"),
+                choice_labels={"OPEN": "Open", "CLOSED": "Closed"},
+            )
+        )
+    if include_axis_owned_test:
+        params.append(
+            CatalogParam(
+                ref="sales.query.sale_type",
+                name="sale_type",
+                source=ParamSource.QUERY,
+                type="choice",
+                choices=("STORE", "ONLINE"),
+                choice_labels={"STORE": "Store", "ONLINE": "Online"},
+            )
+        )
+    fields: list[CatalogField] = [
+        CatalogField(
+            ref="sales.field.amount",
+            path="amount",
+            type="decimal",
+        )
+    ]
+    if bind_owned_input:
+        fields.append(
+            CatalogField(
+                ref="sales.field.staff_id",
+                path="staff_id",
+                type="uuid",
+                identity=IdentityMetadata(
+                    entity_ref="staff",
+                    identity_field="staff_id",
+                    primary_key=True,
+                    stable=True,
+                ),
+            )
+        )
+    if include_finite_choice:
+        fields.append(
+            CatalogField(
+                ref="sales.field.status",
+                path="status",
+                type="choice",
+                choices=("OPEN", "CLOSED"),
+            )
+        )
+    if include_axis_owned_test:
+        fields.append(
+            CatalogField(
+                ref="sales.field.sale_type",
+                path="sale_type",
+                type="choice",
+                choices=("STORE", "ONLINE"),
+            )
+        )
+    if include_row_predicate:
+        fields.append(
+            CatalogField(
+                ref="sales.field.is_deleted",
+                path="is_deleted",
+                type="boolean",
+            )
+        )
+    catalog = RelationCatalog(
+        reads=(
+            EndpointRead(
+                id="sales",
+                endpoint_name="list_sale_list",
+                resource_names=("sale",),
+                params=tuple(params),
+                fields=tuple(fields),
+            ),
+        )
+    )
+    catalog_selection = _single_fact_catalog_selection(catalog, read_ids=("sales",))
+    scope = read_eligibility_candidate_surface(
+        ReadEligibilityRequest(
+            question="How many sales did the staff member sell?",
+            question_contract=QuestionContract(requested_facts=(fact,)),
+            requested_facts=(fact,),
+            catalog_selection=catalog_selection,
+            conversation_context={},
+            available_values=available_values,
+        )
+    ).candidate_scopes[0]
+    return SourceBindingRequest(
+        question="How many sales did the staff member sell?",
+        question_contract=QuestionContract(requested_facts=(fact,)),
+        requested_facts=(fact,),
+        relation_catalog=catalog,
+        catalog_selection=catalog_selection,
+        plan_selection=_plan_for_sources(
+            requested_fact_id="fact_1",
+            source_candidate_ids=(scope.source_candidate_id,),
+        ),
+        available_values=available_values,
+        available_value_uses=(
+            (
+                GroundedInputUse(
+                    id="grounded_staff_id",
+                    value_id="staff_identity_1",
+                    row_source_id=api_row_source_id("sales", "root"),
+                    param_id="staff_id",
+                ),
+            )
+            if bind_owned_input
+            else ()
         ),
         read_eligibility=ReadEligibilityResult(
             read_assessments=(
@@ -2789,6 +3277,92 @@ def _schema_property_order(
     return []
 
 
+def _schema_review_test_ids(schema: dict[str, Any]) -> dict[str, dict[str, list[str]]]:
+    finite_choice: dict[str, list[str]] = {}
+    row_predicate: dict[str, list[str]] = {}
+    for item_schema in _source_invocation_item_schemas(schema):
+        properties = _schema_properties(item_schema)
+        finite_choice_reviews = _schema_properties(
+            properties.get("finite_choice_param_reviews")
+        )
+        for param_id, review_schema in finite_choice_reviews.items():
+            finite_choice[param_id] = _finite_choice_review_test_ids(review_schema)
+        row_predicate_reviews = _schema_properties(
+            properties.get("row_predicate_reviews")
+        )
+        for predicate_id, review_schema in row_predicate_reviews.items():
+            row_predicate[predicate_id] = _row_predicate_review_test_ids(review_schema)
+    return {
+        "finite_choice": finite_choice,
+        "row_predicate": row_predicate,
+    }
+
+
+def _schema_review_test_id_counts(
+    schema: dict[str, Any],
+) -> dict[str, dict[str, int]]:
+    test_ids = _schema_review_test_ids(schema)
+    return {
+        group: {key: len(values) for key, values in ids_by_key.items()}
+        for group, ids_by_key in test_ids.items()
+    }
+
+
+def _source_invocation_item_schemas(schema: object) -> tuple[dict[str, Any], ...]:
+    if not isinstance(schema, dict):
+        return ()
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        source_invocations = properties.get("source_invocations")
+        if isinstance(source_invocations, dict):
+            return _expand_schema_variants(source_invocations.get("items"))
+    for value in schema.values():
+        if isinstance(value, dict):
+            found = _source_invocation_item_schemas(value)
+            if found:
+                return found
+        if isinstance(value, list):
+            for item in value:
+                found = _source_invocation_item_schemas(item)
+                if found:
+                    return found
+    return ()
+
+
+def _expand_schema_variants(schema: object) -> tuple[dict[str, Any], ...]:
+    if not isinstance(schema, dict):
+        return ()
+    variants = schema.get("oneOf")
+    if isinstance(variants, list):
+        return tuple(item for item in variants if isinstance(item, dict))
+    return (schema,)
+
+
+def _schema_properties(schema: object) -> dict[str, Any]:
+    if not isinstance(schema, dict):
+        return {}
+    variants = _expand_schema_variants(schema)
+    if variants != (schema,):
+        return _schema_properties(variants[0])
+    properties = schema.get("properties")
+    return properties if isinstance(properties, dict) else {}
+
+
+def _finite_choice_review_test_ids(schema: object) -> list[str]:
+    properties = _schema_properties(schema)
+    basis = _schema_properties(properties.get("population_test_basis"))
+    return list(basis)
+
+
+def _row_predicate_review_test_ids(schema: object) -> list[str]:
+    properties = _schema_properties(schema)
+    choice_reviews = properties.get("choice_reviews")
+    choice_item = choice_reviews.get("items") if isinstance(choice_reviews, dict) else {}
+    item_properties = _schema_properties(choice_item)
+    results = _schema_properties(item_properties.get("population_test_results"))
+    return list(results)
+
+
 def _schema_surface_outcome(
     request: SourceBindingRequest,
     candidate: dict[str, Any],
@@ -3088,36 +3662,26 @@ def _row_predicate_reviews_from_case(
     return output
 
 
-def _row_predicate_choice_review(*, value: str, effect: str) -> dict[str, Any]:
-    effects = (
-        {"subject_identity": str(effect), "normal_instance_guard": str(effect)}
-        if isinstance(effect, str)
-        else {
-            "subject_identity": str(effect["subject_identity"]),
-            "normal_instance_guard": str(effect["normal_instance_guard"]),
-        }
-    )
+def _row_predicate_choice_review(*, value: str, effect: object) -> dict[str, Any]:
+    membership_tests = _membership_tests_from_effect(effect)
+    effects = _effects_by_membership_test(effect, membership_tests)
     return {
         "choice_option_id": str(value),
         "choice_domain_meaning": f"is_active={value}",
         "population_test_results": {
-            "subject_identity": _row_predicate_population_test_result(
-                test_id="subject_identity",
-                question="Does the row/value represent sales?",
-                effect=effects["subject_identity"],
-            ),
-            "normal_instance_guard": _row_predicate_population_test_result(
-                test_id="normal_instance_guard",
-                question="Is this an ordinary business instance of sales?",
-                effect=effects["normal_instance_guard"],
-            ),
+            test["test_id"]: _row_predicate_population_test_result(
+                test_id=test["test_id"],
+                question=test["test_question"],
+                effect=effects[test["test_id"]],
+            )
+            for test in membership_tests
         },
     }
 
 
 def _finite_choice_review_from_case(payload: dict[str, Any]) -> dict[str, Any]:
     choices = payload["choices"]
-    membership_tests = _finite_choice_membership_tests()
+    membership_tests = _membership_tests_from_choice_effects(choices)
     return {
         "controlled_population_role_id": str(
             payload.get("controlled_population_role_id") or "role_1"
@@ -3156,31 +3720,27 @@ def _finite_choice_option_review(
     membership_tests: tuple[dict[str, str], ...],
 ) -> dict[str, Any]:
     effect_spec = {} if isinstance(effect, str) else dict(effect)
-    effects = (
-        {
-            "subject_identity": str(effect),
-            "normal_instance_guard": str(effect),
-        }
-        if isinstance(effect, str)
-        else {
-            "subject_identity": str(effect_spec["subject_identity"]),
-            "normal_instance_guard": str(effect_spec["normal_instance_guard"]),
-        }
-    )
+    effects = _effects_by_membership_test(effect, membership_tests)
     omitted_tests = {
         str(item) for item in effect_spec.get("omit_tests", ()) if str(item)
     }
     population_test_results = {
-        "subject_identity": _compact_population_test_result(
-            test=_membership_test_by_id(membership_tests, "subject_identity"),
-            effect=effects["subject_identity"],
-        ),
-        "normal_instance_guard": _finite_choice_normal_guard_result(
-            value=str(value),
-            effect=effects["normal_instance_guard"],
-            include_review=bool(effect_spec.get("include_normal_guard_result", True)),
-            review_payload=effect_spec.get("normal_instance_match"),
-        ),
+        test["test_id"]: (
+            _finite_choice_normal_guard_result(
+                value=str(value),
+                effect=effects[test["test_id"]],
+                include_review=bool(
+                    effect_spec.get("include_normal_guard_result", True)
+                ),
+                review_payload=effect_spec.get("normal_instance_match"),
+            )
+            if test["test_id"] == "normal_instance_guard"
+            else _compact_population_test_result(
+                test=test,
+                effect=effects[test["test_id"]],
+            )
+        )
+        for test in membership_tests
     }
     return {
         "choice_option_id": str(value),
@@ -3312,6 +3872,62 @@ def _finite_choice_membership_tests() -> tuple[dict[str, str], ...]:
             "test_question": "Is this an ordinary business instance of sales?",
         },
     )
+
+
+def _membership_tests_from_choice_effects(
+    choices: dict[str, Any],
+) -> tuple[dict[str, str], ...]:
+    test_ids: list[str] = []
+    for effect in choices.values():
+        for test_id in _effect_membership_test_ids(effect):
+            if test_id not in test_ids:
+                test_ids.append(test_id)
+    if not test_ids:
+        return _finite_choice_membership_tests()
+    return tuple(_membership_test_definition(test_id) for test_id in test_ids)
+
+
+def _membership_tests_from_effect(effect: object) -> tuple[dict[str, str], ...]:
+    test_ids = _effect_membership_test_ids(effect)
+    if not test_ids:
+        return _finite_choice_membership_tests()
+    return tuple(_membership_test_definition(test_id) for test_id in test_ids)
+
+
+def _effect_membership_test_ids(effect: object) -> tuple[str, ...]:
+    if isinstance(effect, str):
+        return ()
+    effect_spec = dict(effect)
+    special_keys = {
+        "omit_tests",
+        "include_normal_guard_result",
+        "normal_instance_match",
+    }
+    return tuple(str(key) for key in effect_spec if str(key) not in special_keys)
+
+
+def _effects_by_membership_test(
+    effect: object,
+    membership_tests: tuple[dict[str, str], ...],
+) -> dict[str, str]:
+    if isinstance(effect, str):
+        return {test["test_id"]: str(effect) for test in membership_tests}
+    effect_spec = dict(effect)
+    return {test["test_id"]: str(effect_spec[test["test_id"]]) for test in membership_tests}
+
+
+def _membership_test_definition(test_id: str) -> dict[str, str]:
+    questions = {
+        "subject_identity": "Does the row/value represent sales?",
+        "normal_instance_guard": "Is this an ordinary business instance of sales?",
+        "explicit_user_constraint:specified_staff": (
+            "Does the sale belong to the specified staff member?"
+        ),
+    }
+    return {
+        "test_id": test_id,
+        "test_question": questions.get(test_id, f"Does this satisfy {test_id}?"),
+    }
 
 
 def _membership_test_by_id(

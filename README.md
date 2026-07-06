@@ -117,6 +117,17 @@ uv run ruff check src
 uv run pytest
 ```
 
+Run local host goldset cases against the repo checkout, with import-shadowing
+checks and per-case progress:
+
+```bash
+scripts/run-local-goldset.sh \
+  --case-ids staff_id_sales_count_today,staff_id_pair_sales_count_today
+```
+
+Pass `--project-root`, `--suite-path`, `--principal-id`, or `--database-url`
+when the defaults do not match your local checkout.
+
 Run only the desktop app tests:
 
 ```bash

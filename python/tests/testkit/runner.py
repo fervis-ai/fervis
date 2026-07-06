@@ -100,6 +100,7 @@ from tests.testkit.algorithms.source_binding import (
     run_source_binding_row_predicate_parse_case,
     run_source_binding_row_predicates_case,
     run_source_binding_row_predicate_schema_case,
+    run_source_binding_review_scope_case,
     run_source_binding_schema_surface_case,
 )
 from tests.testkit.adapters.host_api import run_host_api_projection_case
@@ -213,6 +214,9 @@ _RUNNERS: dict[tuple[str, str], CaseRunner] = {
     ),
     ("algorithm", "source_binding.row_predicate_schema"): (
         run_source_binding_row_predicate_schema_case
+    ),
+    ("algorithm", "source_binding.review_scope"): (
+        run_source_binding_review_scope_case
     ),
     ("algorithm", "source_binding.schema_surface"): (
         run_source_binding_schema_surface_case

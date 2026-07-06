@@ -199,6 +199,7 @@ def _requested_facts(
         )
         answer_population = _answer_population(
             parsed.take("answer_population"),
+            used_question_input_refs=input_refs,
             path=f"{path}.answer_population",
         )
         output.append(
@@ -273,6 +274,7 @@ def _instance_interpretation(
 def _answer_population(
     raw: Any,
     *,
+    used_question_input_refs: tuple[str, ...],
     path: str,
 ) -> RequestedFactAnswerPopulation:
     item = _ParsedObject(raw, path)
@@ -291,6 +293,7 @@ def _answer_population(
         ),
         membership_tests=_answer_population_membership_tests(
             membership_tests,
+            used_question_input_refs=used_question_input_refs,
             path=f"{path}.membership_tests",
         ),
     )
@@ -299,6 +302,7 @@ def _answer_population(
 def _answer_population_membership_tests(
     raw: Any,
     *,
+    used_question_input_refs: tuple[str, ...],
     path: str,
 ) -> tuple[RequestedFactAnswerPopulationMembershipTest, ...]:
     output: list[RequestedFactAnswerPopulationMembershipTest] = []
@@ -318,11 +322,40 @@ def _answer_population_membership_tests(
                     parsed.take("test_question"),
                     path=f"{item_path}.test_question",
                 ),
+                owned_question_input_refs=_owned_question_input_refs(
+                    parsed.take("owned_question_input_refs"),
+                    used_question_input_refs=used_question_input_refs,
+                    path=f"{item_path}.owned_question_input_refs",
+                ),
             )
         )
         parsed.finish()
     if not output:
         raise ValueError(f"{path} must not be empty")
+    return tuple(output)
+
+
+def _owned_question_input_refs(
+    raw: Any,
+    *,
+    used_question_input_refs: tuple[str, ...],
+    path: str,
+) -> tuple[str, ...]:
+    if not isinstance(raw, list):
+        raise ValueError(f"{path} must be a list")
+    allowed_refs = set(used_question_input_refs)
+    output: list[str] = []
+    seen: set[str] = set()
+    for index, item in enumerate(raw):
+        input_ref = _required_text(item, path=f"{path}[{index}]")
+        if input_ref not in allowed_refs:
+            raise ValueError(
+                f"{path}[{index}] references question input not used by this fact"
+            )
+        if input_ref in seen:
+            raise ValueError(f"{path}[{index}] duplicates question input")
+        seen.add(input_ref)
+        output.append(input_ref)
     return tuple(output)
 
 

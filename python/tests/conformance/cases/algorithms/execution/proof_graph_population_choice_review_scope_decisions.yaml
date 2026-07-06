@@ -1,0 +1,49 @@
+id: proof_graph_population_choice_review_scope_decisions
+kind: algorithm
+algorithm: execution.proof_graph
+description: Population-choice proof nodes preserve skipped membership-test review scope decisions.
+input:
+  population_choices:
+    - controller_kind: query_param
+      controller_id: status
+      field_id: status
+      included_values: [OPEN]
+      excluded_values: [CLOSED]
+      proof_refs:
+        - population_choice:status
+        - membership_test:explicit_user_constraint:specified_staff
+        - known_input:staff_id_1
+        - applied_filter:staff_id:staff_id_1
+        - read:staff_lookup
+      review_scope_decisions:
+        - membership_test_id: explicit_user_constraint:specified_staff
+          decision: out_of_scope
+          axis_kind: finite_choice_param
+          axis_id: status
+          owner_surface_ids:
+            - applied_filter:staff_id:staff_id_1
+          proof_refs:
+            - membership_test:explicit_user_constraint:specified_staff
+            - known_input:staff_id_1
+            - applied_filter:staff_id:staff_id_1
+            - read:staff_lookup
+expect:
+  result_contains:
+    nodes:
+      - id: population_choice:source_1:query_param:status
+        kind: population_choice
+        value:
+          included_values: [OPEN]
+          excluded_values: [CLOSED]
+          review_scope_decisions:
+            - membership_test_id: explicit_user_constraint:specified_staff
+              decision: out_of_scope
+              axis_kind: finite_choice_param
+              axis_id: status
+              owner_surface_ids:
+                - applied_filter:staff_id:staff_id_1
+              proof_refs:
+                - membership_test:explicit_user_constraint:specified_staff
+                - known_input:staff_id_1
+                - applied_filter:staff_id:staff_id_1
+                - read:staff_lookup

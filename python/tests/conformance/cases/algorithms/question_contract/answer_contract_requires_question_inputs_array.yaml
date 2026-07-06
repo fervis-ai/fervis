@@ -21,6 +21,7 @@ input:
               kind: SUBJECT_IDENTITY
               polarity: MUST_PASS
               test_question: Is this a payment item?
+              owned_question_input_refs: []
         answer_outputs:
           - description: number of payment items
         used_question_inputs: []

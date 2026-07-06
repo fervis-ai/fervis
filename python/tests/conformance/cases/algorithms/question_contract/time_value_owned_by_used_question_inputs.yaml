@@ -25,10 +25,12 @@ input:
           kind: SUBJECT_IDENTITY
           polarity: MUST_PASS
           test_question: Does the row/value represent shifts?
+          owned_question_input_refs: []
         - test_id: pop_test_2
           kind: EXPLICIT_USER_CONSTRAINT
           polarity: MUST_PASS
           test_question: Does the shift fall within today?
+          owned_question_input_refs: [time_1]
       answer_outputs:
       - description: number of shifts
       used_question_inputs:
