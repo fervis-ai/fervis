@@ -22,11 +22,7 @@ def build_plan_selection_schema(
             ),
         },
     )
-    schema = provider_output.PlanSelectionOutput.schema({"outcome": outcome_schema})
-    return {
-        **schema,
-        "modelSchemas": {"outcome": outcome_schema},
-    }
+    return provider_output.PlanSelectionOutput.schema({"outcome": outcome_schema})
 
 
 def _source_alignment_reviews_schema(

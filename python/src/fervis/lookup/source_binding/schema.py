@@ -138,7 +138,6 @@ def build_source_binding_schema(
         "additionalProperties": False,
         "properties": {"outcome": outcome_schema},
         "required": ["outcome"],
-        "modelSchemas": {"outcome": outcome_schema},
     }
 
 

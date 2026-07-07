@@ -28,17 +28,11 @@ def build_read_eligibility_schema(
         requested_fact_assessments_schema["prefixItems"] = list(
             requested_fact_assessment_variants
         )
-    schema = provider_output.ReadEligibilityOutput.schema(
+    return provider_output.ReadEligibilityOutput.schema(
         {
             "requested_fact_assessments": requested_fact_assessments_schema,
         },
     )
-    return {
-        **schema,
-        "modelSchemas": {
-            "requested_fact_assessments": requested_fact_assessments_schema,
-        },
-    }
 
 
 def _requested_fact_assessment_schema(

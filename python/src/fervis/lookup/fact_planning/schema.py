@@ -78,17 +78,11 @@ def build_fact_plan_schema(
         ),
         rank_limit_value_ids=rank_limit_value_ids,
     )
-    schema = provider_output.FactPlanOutput.schema(
+    return provider_output.FactPlanOutput.schema(
         {
             "outcome": plan_outcome_schema,
         }
     )
-    return {
-        **schema,
-        "modelSchemas": {
-            "outcome": plan_outcome_schema,
-        },
-    }
 
 
 def _plan_outcome_schema(
