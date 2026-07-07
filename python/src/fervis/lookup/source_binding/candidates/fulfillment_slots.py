@@ -6,6 +6,9 @@ from dataclasses import dataclass
 
 from fervis.lookup.relation_catalog import identity_payload_is_primary_stable
 from fervis.lookup.question_contract import RequestedFact
+from fervis.lookup.question_contract.answer_output_support import (
+    ANSWER_OUTPUT_SUPPORT_ROLE_VALUES,
+)
 from fervis.lookup.source_binding.evidence_types import (
     evidence_item_can_measure,
 )
@@ -21,6 +24,20 @@ class _EvidenceGroup:
     count_basis_items: tuple[dict[str, Any], ...] = ()
     scope_items: tuple[dict[str, Any], ...] = ()
     group_key_items: tuple[dict[str, Any], ...] = ()
+
+
+FULFILLMENT_EVIDENCE_GROUP_KINDS_BY_ANSWER_ROLE = {
+    "GROUP_KEY": ("group_key",),
+    "ROW_POPULATION": ("count_basis",),
+    "MEASURED_VALUE": ("metric",),
+    "POPULATION_SCOPE": ("scope",),
+    "ANSWER_VALUE": ("group_key", "metric", "scope"),
+}
+
+if set(FULFILLMENT_EVIDENCE_GROUP_KINDS_BY_ANSWER_ROLE) != set(
+    ANSWER_OUTPUT_SUPPORT_ROLE_VALUES
+):
+    raise ValueError("source-binding fulfillment role dispatch is incomplete")
 
 
 def _candidate_with_fulfillment_slots(
@@ -45,10 +62,11 @@ def _candidate_with_fulfillment_slots(
     fulfillment_slots = [
         slot
         for fact in requested_facts
-        for answer_output in fact.answer_outputs
+        for answer_output in fact.support_answer_outputs
         for group in _answer_output_evidence_item_groups(
             support_evidence_items,
             answer_output_id=answer_output.id,
+            answer_output_role=answer_output.role,
             row_population_path_ids=row_population_path_ids,
         )
         for slot in (
@@ -86,6 +104,7 @@ def _answer_output_evidence_item_groups(
     evidence_items: tuple[dict[str, Any], ...],
     *,
     answer_output_id: str,
+    answer_output_role: str,
     row_population_path_ids: tuple[str, ...],
 ) -> tuple[_EvidenceGroup, ...]:
     explicitly_scoped = tuple(
@@ -100,7 +119,7 @@ def _answer_output_evidence_item_groups(
         compatibility_basis="source_result_grain",
     )
     if explicitly_scoped:
-        return (
+        groups = (
             *row_population_groups,
             *_evidence_item_groups(
                 _with_structural_identity_items(
@@ -110,13 +129,51 @@ def _answer_output_evidence_item_groups(
                 compatibility_basis="explicit_answer_output_metadata",
             ),
         )
-    if any(item.get("answer_output_ids") for item in evidence_items):
-        return row_population_groups
-    return _open_candidate_evidence_item_groups(
-        evidence_items,
-        row_population_path_ids=row_population_path_ids,
-        compatibility_basis="open_candidate_field",
+    elif any(item.get("answer_output_ids") for item in evidence_items):
+        groups = row_population_groups
+    else:
+        groups = _open_candidate_evidence_item_groups(
+            evidence_items,
+            row_population_path_ids=row_population_path_ids,
+            compatibility_basis="open_candidate_field",
+        )
+    return tuple(
+        group
+        for group in groups
+        if _evidence_group_matches_answer_output_role(
+            group,
+            answer_output_role=answer_output_role,
+        )
     )
+
+
+def _evidence_group_matches_answer_output_role(
+    group: _EvidenceGroup,
+    *,
+    answer_output_role: str,
+) -> bool:
+    if not answer_output_role:
+        return True
+    allowed_kinds = FULFILLMENT_EVIDENCE_GROUP_KINDS_BY_ANSWER_ROLE.get(
+        answer_output_role
+    )
+    if allowed_kinds is None:
+        raise ValueError("unsupported answer output support role")
+    return bool(set(allowed_kinds) & _evidence_group_kinds(group))
+
+
+def _evidence_group_kinds(group: _EvidenceGroup) -> set[str]:
+    kinds: set[str] = set()
+    if group.group_key_items:
+        kinds.add("group_key")
+    if group.count_basis_items:
+        kinds.add("count_basis")
+    if group.metric_items:
+        kinds.add("metric")
+    if group.scope_items:
+        kinds.add("scope")
+    return kinds
+
 
 
 def _candidate_row_population_path_ids(candidate: dict[str, Any]) -> tuple[str, ...]:

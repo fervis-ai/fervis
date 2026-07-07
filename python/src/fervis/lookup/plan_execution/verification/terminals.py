@@ -64,7 +64,7 @@ def _verify_plan_clarification(
         fact = requested.get(item.requested_fact_id)
         if fact is None:
             raise VerificationError("clarification references unknown requested fact")
-        if item.id in {output.id for output in fact.answer_outputs}:
+        if item.id in {output.id for output in fact.support_answer_outputs}:
             raise VerificationError("clarification id must not be an answer output")
         _verify_missing_catalog_input(
             item,
@@ -83,7 +83,7 @@ def _verify_missing_catalog_input(
 ) -> None:
     protected_ids = {
         *(known.id for known in fact.known_inputs),
-        *(output.id for output in fact.answer_outputs),
+        *(output.id for output in fact.support_answer_outputs),
     }
     if isinstance(item, MissingCatalogRequiredInput):
         if item.required_catalog_input_id in satisfied_required_input_ids:

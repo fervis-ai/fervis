@@ -10,7 +10,7 @@ input:
     kind: literal_text
     inventory_check:
       why_this_is_an_input: Alice's is a named reference
-    source_text: Alice's
+    value_source_text: Alice's
     resolved_value_text: Alice
     value_meaning_hint: staff member
     role: reference_value

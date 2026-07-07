@@ -36,6 +36,7 @@ from fervis.lookup.fact_plan.values import (
 )
 from fervis.lookup.turn_prompts import build_turn_prompt_context
 from fervis.lookup.question_contract import (
+    GroupKeyDomainKind,
     KnownInputSource,
     AnswerPopulationMembershipTestKind,
     AnswerPopulationMembershipTestPolarity,
@@ -47,6 +48,7 @@ from fervis.lookup.question_contract import (
     RequestedFactAnswerPopulationMembershipTest,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
+    RequestedFactGroupKey,
     RequestedFactAnswerOutput,
     RequestedFactAnswerSubject,
     RequestedFactLiteralInput,
@@ -279,6 +281,9 @@ def run_source_binding_fulfillment_support_case(payload: dict[str, Any]) -> list
                 for slot in slots
                 if slot.get("row_count_basis_evidence")
             ],
+            "slot_role_presence_by_answer_output": (
+                _slot_role_presence_by_answer_output(slots)
+            ),
         },
         expected_subset=payload["expect"]["result_contains"],
     )
@@ -3245,24 +3250,122 @@ def _selected_source_strategy(
 
 def _requested_fact(payload: object) -> RequestedFact:
     data = payload if isinstance(payload, dict) else {}
-    family = str(data.get("answer_expression_family") or "")
+    known_inputs = tuple(
+        _literal_input(raw_input) for raw_input in data.get("known_inputs") or ()
+    )
     return RequestedFact(
         id=str(data.get("id") or "fact_1"),
         description=str(data.get("description") or "requested fact"),
-        answer_expression=(
-            RequestedFactAnswerExpression(RequestedFactAnswerExpressionFamily(family))
-            if family
-            else None
-        ),
+        answer_expression=_answer_expression(data),
         answer_subject=RequestedFactAnswerSubject(
             subject_text=str(data.get("subject_text") or "records")
         ),
-        answer_outputs=(
-            RequestedFactAnswerOutput(
-                id=str(data.get("answer_output_id") or "answer_1")
-            ),
+        answer_outputs=_answer_outputs(data),
+        known_inputs=known_inputs,
+        input_refs=tuple(input_item.id for input_item in known_inputs),
+    )
+
+
+def _answer_outputs(data: dict[str, Any]) -> tuple[RequestedFactAnswerOutput, ...]:
+    raw_outputs = data.get("answer_outputs")
+    if raw_outputs:
+        return tuple(_answer_output(raw_output) for raw_output in raw_outputs)
+    return (
+        RequestedFactAnswerOutput(id=str(data.get("answer_output_id") or "answer_1")),
+    )
+
+
+def _answer_output(raw_output: object) -> RequestedFactAnswerOutput:
+    if isinstance(raw_output, dict):
+        return RequestedFactAnswerOutput(
+            id=str(raw_output.get("id") or raw_output.get("answer_output_id") or ""),
+            description=str(raw_output.get("description") or ""),
+            role=str(raw_output.get("role") or ""),
+        )
+    return RequestedFactAnswerOutput(id=str(raw_output))
+
+
+def _answer_expression(data: dict[str, Any]) -> RequestedFactAnswerExpression | None:
+    family = str(data.get("answer_expression_family") or "")
+    if not family:
+        return None
+    return RequestedFactAnswerExpression(
+        family=RequestedFactAnswerExpressionFamily(family),
+        group_key=_group_key(data.get("group_key")),
+    )
+
+
+def _group_key(raw_value: object) -> RequestedFactGroupKey | None:
+    if raw_value is None:
+        return None
+    if not isinstance(raw_value, dict):
+        raise ValueError("group_key must be an object")
+    return RequestedFactGroupKey(
+        id=str(raw_value.get("id") or "group_key"),
+        description=str(raw_value.get("description") or "group key"),
+        domain=GroupKeyDomainKind(str(raw_value.get("domain") or "")),
+        question_input_refs=tuple(
+            str(item) for item in raw_value.get("question_input_refs") or ()
         ),
     )
+
+
+def _literal_input(raw_input: object) -> RequestedFactLiteralInput:
+    data = raw_input if isinstance(raw_input, dict) else {}
+    return RequestedFactLiteralInput(
+        id=str(data.get("id") or ""),
+        source=KnownInputSource(str(data.get("source") or "question_context")),
+        role=LiteralInputRole(str(data.get("role") or "reference_value")),
+        text=str(data.get("text") or ""),
+        resolved_value_text=str(
+            data.get("resolved_value_text") or data.get("text") or ""
+        ),
+        field_label_text=str(data.get("field_label_text") or ""),
+        value_meaning_hint=str(data.get("value_meaning_hint") or ""),
+    )
+
+
+def _slot_role_presence_by_answer_output(
+    slots: list[dict[str, Any]],
+) -> dict[str, dict[str, bool]]:
+    output_ids = sorted(
+        {
+            str(slot.get("answer_output_id") or "")
+            for slot in slots
+            if str(slot.get("answer_output_id") or "")
+        }
+    )
+    output = {
+        answer_output_id: {
+            "GROUP_KEY": False,
+            "ROW_POPULATION": False,
+            "MEASURED_VALUE": False,
+            "POPULATION_SCOPE": False,
+        }
+        for answer_output_id in output_ids
+    }
+    for slot in slots:
+        answer_output_id = str(slot.get("answer_output_id") or "")
+        if not answer_output_id:
+            continue
+        roles = output.setdefault(
+            answer_output_id,
+            {
+                "GROUP_KEY": False,
+                "ROW_POPULATION": False,
+                "MEASURED_VALUE": False,
+                "POPULATION_SCOPE": False,
+            },
+        )
+        if slot.get("group_key_evidence"):
+            roles["GROUP_KEY"] = True
+        if slot.get("row_count_basis_evidence"):
+            roles["ROW_POPULATION"] = True
+        if slot.get("metric_measure_evidence"):
+            roles["MEASURED_VALUE"] = True
+        if slot.get("scope_evidence"):
+            roles["POPULATION_SCOPE"] = True
+    return output
 
 
 def _schema_property_order(

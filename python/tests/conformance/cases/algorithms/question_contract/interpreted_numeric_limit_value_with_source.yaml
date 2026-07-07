@@ -18,7 +18,7 @@ input:
     kind: literal_text
     inventory_check:
       why_this_is_an_input: top five is a rank limit
-    source_text: top five
+    value_source_text: top five
     resolved_value_text: '5'
     role: result_limit
   used_input_refs:

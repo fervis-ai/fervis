@@ -18,8 +18,8 @@ expect:
       - resolved_value_text
       - role
       - source
-      - source_text
       - value_meaning_hint
+      - value_source_text
     row_set_reference_properties:
       - input_ref
       - inventory_check

@@ -180,8 +180,8 @@ def _question_contract_for(
             RequestedFact(
                 id=requested_fact_id,
                 description=text,
-                answer_expression=RequestedFactAnswerExpression(
-                    family=answer_expression_family
+                answer_expression=_requested_fact_answer_expression(
+                    answer_expression_family
                 ),
                 answer_subject=RequestedFactAnswerSubject(
                     subject_text=subject_text or text
@@ -193,6 +193,22 @@ def _question_contract_for(
                 known_inputs=known_inputs,
             ),
         )
+    )
+
+
+def _requested_fact_answer_expression(
+    family: RequestedFactAnswerExpressionFamily,
+) -> RequestedFactAnswerExpression:
+    return RequestedFactAnswerExpression(
+        family=family,
+        group_key=(
+            RequestedFactGroupKey(
+                description="group",
+                domain=GroupKeyDomainKind.SOURCE_RESULT_VALUES,
+            )
+            if family == RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE
+            else None
+        ),
     )
 
 

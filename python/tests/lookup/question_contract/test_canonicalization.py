@@ -11,12 +11,15 @@ from fervis.lookup.question_contract import (
     KnownInputSource,
     LiteralInputRole,
     QuestionContract,
+    GroupKeyDomainKind,
     RequestedFact,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
+    RequestedFactGroupKey,
     RequestedFactAnswerOutput,
     RequestedFactKnownInput,
     RequestedFactLiteralInput,
+    build_answer_request_contract_schema,
     parse_question_contract,
 )
 
@@ -90,6 +93,195 @@ def test_requested_fact_answer_output_serializes_description_only():
             "description": "the amount she made yesterday",
         }
     ]
+
+
+def test_grouped_aggregate_requires_expression_group_key():
+    with pytest.raises(ValueError, match="grouped_aggregate requires group key"):
+        RequestedFact(
+            id="fact_1",
+            description="sales count by store",
+            answer_expression=RequestedFactAnswerExpression(
+                family=RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
+            ),
+            answer_outputs=(
+                RequestedFactAnswerOutput(
+                    id="answer_count",
+                    description="sales count",
+                    role="ROW_POPULATION",
+                ),
+            ),
+        )
+
+
+def test_grouped_aggregate_provider_schema_requires_expression_group_key():
+    schema = build_answer_request_contract_schema()
+    answer_expression_schema = schema["properties"]["answer_requests"]["items"][
+        "properties"
+    ]["answer_expression"]
+    grouped_branch = next(
+        branch
+        for branch in answer_expression_schema["oneOf"]
+        if branch["properties"]["family"]["enum"] == ["grouped_aggregate"]
+    )
+
+    assert grouped_branch["required"] == ["family", "group_key"]
+
+
+def test_grouped_aggregate_serializes_group_key_on_answer_expression():
+    fact = RequestedFact(
+        id="fact_1",
+        description="sales count for each specified staff member today",
+        answer_expression=RequestedFactAnswerExpression(
+            family=RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
+            group_key=RequestedFactGroupKey(
+                description="staff member",
+                domain=GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS,
+                question_input_refs=("qi_staff_1", "qi_staff_2"),
+            ),
+        ),
+        answer_outputs=(
+            RequestedFactAnswerOutput(
+                id="answer_count",
+                description="sales count",
+                role="ROW_POPULATION",
+            ),
+        ),
+        input_refs=("qi_staff_1", "qi_staff_2"),
+    )
+
+    assert fact.answer_request_model_dict()["answer_expression"] == {
+        "family": "grouped_aggregate",
+        "group_key": {
+            "description": "staff member",
+            "domain": "SPECIFIED_QUESTION_INPUTS",
+            "question_input_refs": ["qi_staff_1", "qi_staff_2"],
+        },
+    }
+    assert fact.answer_request_model_dict()["answer_outputs"] == [
+        {
+            "description": "sales count",
+            "role": "ROW_POPULATION",
+        }
+    ]
+
+
+def test_parse_question_contract_accepts_group_key_on_grouped_expression():
+    payload = {
+        "kind": "question_contract",
+        "answer_requests_count": 1,
+        "question_inputs": [
+            {
+                "source": "question_context",
+                "role": "reference_value",
+                "kind": "literal_text",
+                "input_ref": "qi_staff_1",
+                "value_source_text": "51515151-0000-0000-0002-000000000001",
+                "resolved_value_text": "51515151-0000-0000-0002-000000000001",
+                "field_label_text": "staff id",
+                "occurrence": 1,
+                "inventory_check": {
+                    "why_this_is_an_input": "first requested staff key",
+                },
+            },
+            {
+                "source": "question_context",
+                "role": "reference_value",
+                "kind": "literal_text",
+                "input_ref": "qi_staff_2",
+                "value_source_text": "51515151-0000-0000-0002-000000000002",
+                "resolved_value_text": "51515151-0000-0000-0002-000000000002",
+                "field_label_text": "staff id",
+                "occurrence": 1,
+                "inventory_check": {
+                    "why_this_is_an_input": "second requested staff key",
+                },
+            },
+            {
+                "source": "question_context",
+                "role": "time_value",
+                "kind": "literal_text",
+                "input_ref": "qi_today",
+                "value_source_text": "today",
+                "resolved_value_text": "today",
+                "occurrence": 1,
+                "inventory_check": {
+                    "why_this_is_an_input": "requested time constraint",
+                },
+            },
+        ],
+        "answer_requests": [
+            {
+                "answer_fact": "sales count for each specified staff member today",
+                "answer_expression": {
+                    "family": "grouped_aggregate",
+                    "group_key": {
+                        "description": "staff member",
+                        "domain": "SPECIFIED_QUESTION_INPUTS",
+                        "question_input_refs": ["qi_staff_1", "qi_staff_2"],
+                    },
+                },
+                "answer_subject": {
+                    "subject_text": "sales",
+                    "instance_interpretation": {
+                        "kind": "NORMAL_BUSINESS_INSTANCE",
+                    },
+                },
+                "answer_population": {
+                    "population_label": "sales today",
+                    "counted_unit": "sale",
+                    "membership_tests": [
+                        {
+                            "test_id": "test_1",
+                            "kind": "SUBJECT_IDENTITY",
+                            "polarity": "MUST_PASS",
+                            "test_question": "Is this a sale?",
+                            "owned_question_input_refs": [],
+                        },
+                        {
+                            "test_id": "test_2",
+                            "kind": "EXPLICIT_USER_CONSTRAINT",
+                            "polarity": "MUST_PASS",
+                            "test_question": "Did the sale occur today?",
+                            "owned_question_input_refs": ["qi_today"],
+                        },
+                        {
+                            "test_id": "test_3",
+                            "kind": "NORMAL_INSTANCE_GUARD",
+                            "polarity": "MUST_PASS",
+                            "test_question": "Is this an ordinary business sale?",
+                            "owned_question_input_refs": [],
+                        },
+                    ],
+                },
+                "answer_outputs": [
+                    {"description": "sales count", "role": "ROW_POPULATION"}
+                ],
+                "used_question_inputs": ["qi_staff_1", "qi_staff_2", "qi_today"],
+            }
+        ],
+        "question_input_inventory_check": {
+            "all_input_like_phrases_declared": True,
+        },
+    }
+
+    result = parse_question_contract(
+        tool_name="submit_answer_request_contract",
+        payload=payload,
+        question_context=(
+            "How many sales did the staff members with ids: "
+            "51515151-0000-0000-0002-000000000001 and "
+            "51515151-0000-0000-0002-000000000002 sell each today?"
+        ),
+    )
+
+    fact = result.outcome.requested_facts[0]
+    assert fact.answer_expression is not None
+    assert fact.answer_expression.group_key is not None
+    assert fact.answer_expression.group_key.question_input_refs == (
+        "qi_staff_1",
+        "qi_staff_2",
+    )
+    assert tuple(output.role for output in fact.answer_outputs) == ("ROW_POPULATION",)
 
 
 def test_literal_input_requires_explicit_role():
@@ -178,7 +370,7 @@ def test_question_contract_parser_accepts_positive_used_question_inputs():
         "input_ref": "staff_a",
         "kind": "literal_text",
         "source": "question_context",
-        "source_text": "51515151-0000-0000-0002-000000000001",
+        "value_source_text": "51515151-0000-0000-0002-000000000001",
         "resolved_value_text": "51515151-0000-0000-0002-000000000001",
         "field_label_text": "staff id",
         "role": "reference_value",
@@ -191,7 +383,7 @@ def test_question_contract_parser_accepts_positive_used_question_inputs():
         "input_ref": "staff_b",
         "kind": "literal_text",
         "source": "question_context",
-        "source_text": "51515151-0000-0000-0002-000000000002",
+        "value_source_text": "51515151-0000-0000-0002-000000000002",
         "resolved_value_text": "51515151-0000-0000-0002-000000000002",
         "field_label_text": "staff id",
         "role": "reference_value",
@@ -204,7 +396,7 @@ def test_question_contract_parser_accepts_positive_used_question_inputs():
         "input_ref": "today",
         "kind": "literal_text",
         "source": "question_context",
-        "source_text": "today",
+        "value_source_text": "today",
         "resolved_value_text": "today",
         "role": "time_value",
         "inventory_check": {
@@ -303,7 +495,7 @@ def test_conversation_resolution_resolved_text_requires_conversation_source():
                 "input_ref": "input_staff",
                 "kind": "literal_text",
                 "source": "question_context",
-                "source_text": "Alice Smith",
+                "value_source_text": "Alice Smith",
                 "resolved_value_text": "Alice Smith",
                 "role": "reference_value",
                 "inventory_check": {
@@ -343,7 +535,7 @@ def test_conversation_resolution_resolved_text_requires_conversation_source():
         ],
     }
 
-    with pytest.raises(ValueError, match="source_text"):
+    with pytest.raises(ValueError, match="value_source_text"):
         parse_question_contract(
             tool_name="submit_answer_request_contract",
             payload=payload,
@@ -361,7 +553,7 @@ def test_result_limit_requires_canonical_digit_text_at_parse_boundary():
                 "input_ref": "input_limit",
                 "kind": "literal_text",
                 "source": "question_context",
-                "source_text": "top five",
+                "value_source_text": "top five",
                 "resolved_value_text": "five",
                 "role": "result_limit",
                 "inventory_check": {
@@ -427,7 +619,7 @@ def test_question_contract_parser_rejects_partial_uuid_segment_input_span():
             "input_ref": "input_staff",
             "kind": "literal_text",
             "source": "question_context",
-            "source_text": "0002",
+            "value_source_text": "0002",
             "resolved_value_text": "0002",
             "role": "reference_value",
             "value_meaning_hint": "staff member",
@@ -437,7 +629,7 @@ def test_question_contract_parser_rejects_partial_uuid_segment_input_span():
         }
     )
 
-    with pytest.raises(ValueError, match="source_text"):
+    with pytest.raises(ValueError, match="value_source_text"):
         parse_question_contract(
             tool_name="submit_answer_request_contract",
             payload=payload,
@@ -452,7 +644,7 @@ def test_question_contract_parser_rejects_partial_snake_case_input_span():
             "input_ref": "input_field",
             "kind": "literal_text",
             "source": "question_context",
-            "source_text": "id",
+            "value_source_text": "id",
             "resolved_value_text": "id",
             "role": "reference_value",
             "value_meaning_hint": "field fragment",
@@ -462,7 +654,7 @@ def test_question_contract_parser_rejects_partial_snake_case_input_span():
         }
     )
 
-    with pytest.raises(ValueError, match="source_text"):
+    with pytest.raises(ValueError, match="value_source_text"):
         parse_question_contract(
             tool_name="submit_answer_request_contract",
             payload=payload,
@@ -480,7 +672,7 @@ def test_question_contract_parser_allows_field_label_hint_for_id_values():
         "input_ref": "input_staff_a",
         "kind": "literal_text",
         "source": "question_context",
-        "source_text": "51515151-0000-0000-0002-000000000001",
+        "value_source_text": "51515151-0000-0000-0002-000000000001",
         "resolved_value_text": "51515151-0000-0000-0002-000000000001",
         "field_label_text": "staff member id",
         "role": "reference_value",
@@ -493,7 +685,7 @@ def test_question_contract_parser_allows_field_label_hint_for_id_values():
         "input_ref": "input_staff_b",
         "kind": "literal_text",
         "source": "question_context",
-        "source_text": "51515151-0000-0000-0002-000000000002",
+        "value_source_text": "51515151-0000-0000-0002-000000000002",
         "resolved_value_text": "51515151-0000-0000-0002-000000000002",
         "field_label_text": "staff member id",
         "role": "reference_value",
@@ -532,7 +724,7 @@ def test_question_contract_parser_allows_field_label_scoped_over_coordinated_val
         "input_ref": "input_staff_a",
         "kind": "literal_text",
         "source": "question_context",
-        "source_text": "51515151-0000-0000-0002-000000000001",
+        "value_source_text": "51515151-0000-0000-0002-000000000001",
         "resolved_value_text": "51515151-0000-0000-0002-000000000001",
         "field_label_text": "staff_id",
         "role": "reference_value",
@@ -545,7 +737,7 @@ def test_question_contract_parser_allows_field_label_scoped_over_coordinated_val
         "input_ref": "input_staff_b",
         "kind": "literal_text",
         "source": "question_context",
-        "source_text": "51515151-0000-0000-0002-000000000002",
+        "value_source_text": "51515151-0000-0000-0002-000000000002",
         "resolved_value_text": "51515151-0000-0000-0002-000000000002",
         "field_label_text": "staff_id",
         "role": "reference_value",
@@ -584,7 +776,7 @@ def test_question_contract_parser_allows_repeated_field_label_for_later_value():
         "input_ref": "input_staff_a",
         "kind": "literal_text",
         "source": "question_context",
-        "source_text": "51515151-0000-0000-0002-000000000001",
+        "value_source_text": "51515151-0000-0000-0002-000000000001",
         "resolved_value_text": "51515151-0000-0000-0002-000000000001",
         "field_label_text": "staff_id",
         "role": "reference_value",
@@ -597,7 +789,7 @@ def test_question_contract_parser_allows_repeated_field_label_for_later_value():
         "input_ref": "input_staff_b",
         "kind": "literal_text",
         "source": "question_context",
-        "source_text": "51515151-0000-0000-0002-000000000002",
+        "value_source_text": "51515151-0000-0000-0002-000000000002",
         "resolved_value_text": "51515151-0000-0000-0002-000000000002",
         "field_label_text": "staff_id",
         "role": "reference_value",
@@ -632,7 +824,7 @@ def test_question_contract_parser_rejects_answer_subject_literal_input():
             "input_ref": "subject",
             "kind": "literal_text",
             "source": "question_context",
-            "source_text": "cash deposits",
+            "value_source_text": "cash deposits",
             "resolved_value_text": "cash deposits",
             "role": "reference_value",
             "value_meaning_hint": "cash deposits",
@@ -765,7 +957,7 @@ def test_question_contract_parser_requires_complete_cr_literal_handoff_match(
         "input_ref": "input_staff",
         "kind": "literal_text",
         "source": "conversation_resolution",
-        "source_text": "she",
+        "value_source_text": "she",
         "resolved_input_ref": "cr_input_1",
         "resolved_value_text": "Alice Smith",
         "value_meaning_hint": "staff member",

@@ -347,7 +347,7 @@ class _FollowUpQuestionContractModelPort:
                                 "source": "question_context",
                                 "kind": "literal_text",
                                 "input_ref": "time_1",
-                                "source_text": "last month",
+                                "value_source_text": "last month",
                                 "resolved_value_text": "last month",
                                 "role": "time_value",
                                 "inventory_check": {

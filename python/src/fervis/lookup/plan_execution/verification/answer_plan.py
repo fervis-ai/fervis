@@ -153,7 +153,7 @@ def _verify_fact_fulfillment(
 ) -> None:
     requested = {fact.id: fact for fact in question_contract.requested_facts}
     requested_outputs = {
-        fact.id: {output.id for output in fact.answer_outputs}
+        fact.id: {output.id for output in fact.support_answer_outputs}
         for fact in requested.values()
     }
     fulfilled_outputs: set[tuple[str, str]] = set()
@@ -196,7 +196,7 @@ def _verify_fact_fulfillment(
     missing = {
         (fact.id, output.id)
         for fact in requested.values()
-        for output in fact.answer_outputs
+        for output in fact.support_answer_outputs
     } - fulfilled_outputs
     if missing:
         raise VerificationError("requested fact answer output is not fulfilled")

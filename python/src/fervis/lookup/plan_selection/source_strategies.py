@@ -243,7 +243,7 @@ def _source_strategies_for_fact(
 ) -> tuple[SourceStrategy, ...]:
     output: list[SourceStrategy] = []
     seen: set[tuple[Any, ...]] = set()
-    answer_output_ids = tuple(output.id for output in fact.answer_outputs)
+    answer_output_ids = tuple(output.id for output in fact.support_answer_outputs)
     for shape_spec in _plan_shape_specs_for_fact(
         fact,
         shape_specs_for_family=shape_specs_for_family,

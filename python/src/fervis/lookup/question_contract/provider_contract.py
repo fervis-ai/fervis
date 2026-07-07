@@ -36,7 +36,13 @@ AnswerRequestOutput = provider_output_type(
 )
 AnswerExpressionOutput = provider_output_type(
     "AnswerExpressionOutput",
-    ("family",),
+    ("family", "group_key"),
+    optional_fields=("group_key",),
+)
+GroupKeyOutput = provider_output_type(
+    "GroupKeyOutput",
+    ("description", "domain", "question_input_refs"),
+    optional_fields=("question_input_refs",),
 )
 AnswerSubjectOutput = provider_output_type(
     "AnswerSubjectOutput",
@@ -56,14 +62,15 @@ AnswerPopulationMembershipTestOutput = provider_output_type(
 )
 AnswerOutputOutput = provider_output_type(
     "AnswerOutputOutput",
-    ("description",),
+    ("description", "role"),
+    optional_fields=("role",),
 )
 LiteralTextInputOutput = provider_output_type(
     "LiteralTextInputOutput",
     (
         "input_ref",
         "source",
-        "source_text",
+        "value_source_text",
         "resolved_value_text",
         "field_label_text",
         "value_meaning_hint",

@@ -13,7 +13,7 @@ input:
     kind: literal_text
     inventory_check:
       why_this_is_an_input: today is a time scope
-    source_text: today
+    value_source_text: today
     resolved_value_text: today
     role: time_value
   - input_ref: yesterday
@@ -21,7 +21,7 @@ input:
     kind: literal_text
     inventory_check:
       why_this_is_an_input: yesterday is a time scope
-    source_text: yesterday
+    value_source_text: yesterday
     resolved_value_text: yesterday
     role: time_value
   used_input_refs:

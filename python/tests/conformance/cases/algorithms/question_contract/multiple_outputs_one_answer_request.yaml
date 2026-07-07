@@ -17,7 +17,7 @@ input:
     kind: literal_text
     inventory_check:
       why_this_is_an_input: Westlands Beauty Hub is a named reference
-    source_text: Westlands Beauty Hub
+    value_source_text: Westlands Beauty Hub
     resolved_value_text: Westlands Beauty Hub
     value_meaning_hint: store location
     role: reference_value
@@ -26,7 +26,7 @@ input:
     kind: literal_text
     inventory_check:
       why_this_is_an_input: December 3, 2025 is a time scope
-    source_text: December 3, 2025
+    value_source_text: December 3, 2025
     resolved_value_text: December 3, 2025
     role: time_value
   used_input_refs:

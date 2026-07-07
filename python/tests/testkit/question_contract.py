@@ -3,11 +3,15 @@ from __future__ import annotations
 from typing import Any
 
 from fervis.lookup.question_contract import (
+    GroupKeyDomainKind,
     KnownInputKind,
     KnownInputSource,
     LiteralInputRole,
     QuestionContract,
     RequestedFact,
+    RequestedFactAnswerExpression,
+    RequestedFactAnswerExpressionFamily,
+    RequestedFactGroupKey,
     RequestedFactAnswerOutput,
     RequestedFactAnswerSubject,
     RequestedFactKnownInput,
@@ -34,6 +38,9 @@ def requested_fact_from_payload(payload: dict[str, Any]) -> RequestedFact:
         description=str(payload.get("description") or payload["id"]),
         required_for=str(payload.get("required_for") or ""),
         answer_subject=answer_subject_from_payload(payload.get("answer_subject")),
+        answer_expression=answer_expression_from_payload(
+            payload.get("answer_expression")
+        ),
         answer_outputs=tuple(
             answer_output_from_payload(item)
             for item in payload.get("answer_outputs") or ()
@@ -65,6 +72,35 @@ def answer_output_from_payload(payload: Any) -> RequestedFactAnswerOutput:
     return RequestedFactAnswerOutput(
         id=str(payload["id"]),
         description=str(payload.get("description") or ""),
+        role=str(payload.get("role") or ""),
+    )
+
+
+def answer_expression_from_payload(
+    payload: Any,
+) -> RequestedFactAnswerExpression | None:
+    if payload is None:
+        return None
+    if not isinstance(payload, dict):
+        raise ValueError("answer_expression must be an object")
+    return RequestedFactAnswerExpression(
+        family=RequestedFactAnswerExpressionFamily(str(payload["family"])),
+        group_key=group_key_from_payload(payload.get("group_key")),
+    )
+
+
+def group_key_from_payload(payload: Any) -> RequestedFactGroupKey | None:
+    if payload is None:
+        return None
+    if not isinstance(payload, dict):
+        raise ValueError("group_key must be an object")
+    return RequestedFactGroupKey(
+        id=str(payload.get("id") or "group_key"),
+        description=str(payload["description"]),
+        domain=GroupKeyDomainKind(str(payload["domain"])),
+        question_input_refs=tuple(
+            str(item) for item in payload.get("question_input_refs") or ()
+        ),
     )
 
 

@@ -305,7 +305,7 @@ def _question_contract_with_time_value_input() -> dict[str, object]:
                 "kind": "literal_text",
                 "input_ref": "time_1",
                 "source": "question_context",
-                "source_text": "today",
+                "value_source_text": "today",
                 "resolved_value_text": "today",
                 "role": "time_value",
                 "inventory_check": {

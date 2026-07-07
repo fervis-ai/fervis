@@ -28,7 +28,7 @@ input:
     kind: literal_text
     inventory_check:
       why_this_is_an_input: cash deposits is a named reference
-    source_text: cash deposits
+    value_source_text: cash deposits
     resolved_value_text: cash deposits
     value_meaning_hint: cash deposits
     role: reference_value

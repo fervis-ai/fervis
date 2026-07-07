@@ -7,11 +7,16 @@ from fervis.lookup.relation_catalog import (
     RowPath,
 )
 from fervis.lookup.question_contract import (
+    GroupKeyDomainKind,
+    KnownInputSource,
+    LiteralInputRole,
     QuestionContract,
     RequestedFact,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
+    RequestedFactGroupKey,
     RequestedFactAnswerOutput,
+    RequestedFactLiteralInput,
 )
 from fervis.lookup.source_binding.candidates.plan_selection_filter import (
     filter_prompt_payload_by_plan_selection,
@@ -518,6 +523,125 @@ def test_aggregate_operation_plan_selection_surfaces_each_valid_metric_operation
                 "support.source_1.answer_2.amount",
             )
         ),
+    }
+
+
+def test_plan_selection_keeps_closed_key_grouped_count_as_one_operation():
+    staff_1 = RequestedFactLiteralInput(
+        id="staff_1",
+        source=KnownInputSource.QUESTION_CONTEXT,
+        role=LiteralInputRole.REFERENCE_VALUE,
+        text="51515151-0000-0000-0002-000000000001",
+        resolved_value_text="51515151-0000-0000-0002-000000000001",
+        field_label_text="staff id",
+    )
+    staff_2 = RequestedFactLiteralInput(
+        id="staff_2",
+        source=KnownInputSource.QUESTION_CONTEXT,
+        role=LiteralInputRole.REFERENCE_VALUE,
+        text="51515151-0000-0000-0002-000000000002",
+        resolved_value_text="51515151-0000-0000-0002-000000000002",
+        field_label_text="staff id",
+    )
+    fact = RequestedFact(
+        id="fact_1",
+        description="sales count for each specified staff member today",
+        answer_expression=RequestedFactAnswerExpression(
+            family=RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
+            group_key=RequestedFactGroupKey(
+                id="answer_staff",
+                description="specified staff member",
+                domain=GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS,
+                question_input_refs=("staff_1", "staff_2"),
+            ),
+        ),
+        known_inputs=(staff_1, staff_2),
+        input_refs=("staff_1", "staff_2"),
+        answer_outputs=(
+            RequestedFactAnswerOutput(
+                id="answer_sales_count",
+                description="sales count",
+                role="ROW_POPULATION",
+            ),
+        ),
+    )
+    request = PlanSelectionRequest(
+        question="How many sales did staff A and staff B sell each today?",
+        question_contract=QuestionContract(requested_facts=(fact,)),
+        requested_facts=(fact,),
+        relation_catalog=RelationCatalog(reads=()),
+        source_candidate_payload={
+            "requested_fact_sources": [
+                {
+                    "requested_fact_id": "fact_1",
+                    "source_contexts": [
+                        {
+                            "context_id": "fact_1:sources",
+                            "source_options": [
+                                {
+                                    "source_candidate_id": "source_1",
+                                    "kind": "new_api_read",
+                                    "read_id": "get_staff_sales",
+                                    "fields": [
+                                        {"field_id": "staff_id", "type": "uuid"},
+                                        {"field_id": "sale_id", "type": "uuid"},
+                                    ],
+                                    "fulfillment_support_sets": [
+                                        _group_key_support_set(
+                                            "support.source_1.answer_staff.staff_id",
+                                            answer_output_id="answer_staff",
+                                            slot_id="slot.source_1.answer_staff.staff_id",
+                                            evidence_id="source_1.data.staff_id",
+                                            field_id="staff_id",
+                                            type="uuid",
+                                        ),
+                                        _row_count_support_set(
+                                            (
+                                                "support.source_1.answer_sales_count."
+                                                "row.data"
+                                            ),
+                                            answer_output_id="answer_sales_count",
+                                            slot_id=(
+                                                "slot.source_1.answer_sales_count."
+                                                "row.data"
+                                            ),
+                                            evidence_id="row_population.data",
+                                            row_path_id="data",
+                                            field_id="data",
+                                        ),
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+        conversation_context={},
+    )
+
+    strategies = source_strategies_by_fact(
+        request.source_candidate_payload,
+        requested_facts=request.requested_facts,
+        relation_catalog=request.relation_catalog,
+        shape_specs_for_family=plan_selection_shape_specs_for_family,
+    )["fact_1"]
+    aggregate_by_group_strategies = [
+        strategy for strategy in strategies if strategy.plan_shape == "aggregate_by_group"
+    ]
+
+    assert len(aggregate_by_group_strategies) == 1
+    strategy = aggregate_by_group_strategies[0]
+    assert strategy.required_answer_output_ids == (
+        "answer_staff",
+        "answer_sales_count",
+    )
+    assert len(strategy.source_members) == 1
+    member = strategy.source_members[0]
+    assert member.requirement_ids == ("operation",)
+    assert set(member.fulfillment_support_set_ids) == {
+        "support.source_1.answer_staff.staff_id",
+        "support.source_1.answer_sales_count.row.data",
     }
 
 
@@ -1430,12 +1554,18 @@ def test_grouped_operation_candidate_combines_multiple_identity_outputs_with_met
         description="salespeople, products, shades, and total sales",
         answer_expression=RequestedFactAnswerExpression(
             family=RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
+            group_key=RequestedFactGroupKey(
+                id="answer_1",
+                description="staff, product, and shade",
+                domain=GroupKeyDomainKind.SOURCE_RESULT_VALUES,
+            ),
         ),
         answer_outputs=(
-            RequestedFactAnswerOutput(id="answer_1", description="staff"),
-            RequestedFactAnswerOutput(id="answer_2", description="product"),
-            RequestedFactAnswerOutput(id="answer_3", description="shade"),
-            RequestedFactAnswerOutput(id="answer_4", description="total sales"),
+            RequestedFactAnswerOutput(
+                id="answer_4",
+                description="total sales",
+                role="MEASURED_VALUE",
+            ),
         ),
     )
     request = PlanSelectionRequest(
@@ -1523,8 +1653,6 @@ def test_grouped_operation_candidate_combines_multiple_identity_outputs_with_met
 
     assert set(source_strategy["required_answer_output_ids"]) == {
         "answer_1",
-        "answer_2",
-        "answer_3",
         "answer_4",
     }
     assert _response_row_field_ids(source_member) == [
@@ -1988,6 +2116,7 @@ def _source_candidate_payload() -> dict[str, object]:
 def _row_count_support_set(
     support_set_id: str,
     *,
+    answer_output_id: str = "answer_1",
     slot_id: str,
     evidence_id: str,
     row_path_id: str,
@@ -1995,7 +2124,7 @@ def _row_count_support_set(
 ) -> dict[str, object]:
     return {
         "fulfillment_support_set_id": support_set_id,
-        "answer_output_id": "answer_1",
+        "answer_output_id": answer_output_id,
         "fulfillment_slots": [
             {
                 "fulfillment_slot_id": slot_id,

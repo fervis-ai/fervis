@@ -91,7 +91,7 @@ def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
                     for item in fact.known_inputs
                 ],
                 "answer_outputs": [
-                    {"id": output.id, "description": output.description}
+                    output.to_model_dict()
                     for output in fact.answer_outputs
                 ],
                 "answer_request": fact.answer_request_model_dict(),
@@ -157,6 +157,12 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
     answer_request_schema = answer_contract_schema["properties"]["answer_requests"][
         "items"
     ]
+    answer_output_item_schema = answer_request_schema["properties"]["answer_outputs"][
+        "items"
+    ]
+    answer_expression_schema = answer_request_schema["properties"][
+        "answer_expression"
+    ]
     question_input_item = answer_contract_schema["properties"]["question_inputs"][
         "items"
     ]
@@ -210,12 +216,25 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
             )
         ),
         "answer_request_required": answer_request_schema["required"],
-        "answer_output_required": answer_request_schema["properties"]["answer_outputs"][
-            "items"
-        ]["required"],
-        "answer_output_properties": sorted(
-            answer_request_schema["properties"]["answer_outputs"]["items"]["properties"]
+        "answer_expression_schema_kind": _branching_schema_kind(
+            answer_expression_schema
         ),
+        "answer_expression_one_of_branch_count": len(
+            answer_expression_schema.get("oneOf") or ()
+        ),
+        "grouped_answer_expression_branch": _answer_expression_branch_summary(
+            _answer_expression_grouped_branch(answer_expression_schema)
+        ),
+        "ordinary_answer_expression_branch": _answer_expression_branch_summary(
+            _answer_expression_ordinary_branch(answer_expression_schema)
+        ),
+        "answer_output_schema_kind": _answer_output_schema_kind(
+            answer_output_item_schema
+        ),
+        "answer_output_one_of_branch_count": len(
+            answer_output_item_schema.get("oneOf") or ()
+        ),
+        "answer_output_branch": _answer_output_branch_summary(answer_output_item_schema),
         "question_input_kinds": sorted(
             {
                 variant["properties"]["kind"]["enum"][0]
@@ -230,7 +249,7 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
                 "input_ref",
                 "kind",
                 "source",
-                "source_text",
+                "value_source_text",
                 "resolved_value_text",
                 "field_label_text",
                 "value_meaning_hint",
@@ -287,6 +306,65 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
             )
         )
     return errors
+
+
+def _answer_output_schema_kind(schema: dict[str, Any]) -> str:
+    return _branching_schema_kind(schema)
+
+
+def _branching_schema_kind(schema: dict[str, Any]) -> str:
+    if "oneOf" in schema:
+        return "oneOf"
+    return "object"
+
+
+def _answer_expression_grouped_branch(schema: dict[str, Any]) -> dict[str, Any]:
+    return next(
+        (
+            branch
+            for branch in schema.get("oneOf") or ()
+            if branch.get("properties", {}).get("family", {}).get("enum")
+            == ["grouped_aggregate"]
+        ),
+        {},
+    )
+
+
+def _answer_expression_ordinary_branch(schema: dict[str, Any]) -> dict[str, Any]:
+    return next(
+        (
+            branch
+            for branch in schema.get("oneOf") or ()
+            if branch.get("properties", {}).get("family", {}).get("enum")
+            != ["grouped_aggregate"]
+        ),
+        {},
+    )
+
+
+def _answer_expression_branch_summary(branch: dict[str, Any]) -> dict[str, object]:
+    properties = branch.get("properties") or {}
+    group_key_schema = properties.get("group_key") or {}
+    return {
+        "required": list(branch.get("required") or ()),
+        "properties": sorted(properties),
+        "family_enum": list((properties.get("family") or {}).get("enum") or ()),
+        "allows_group_key": "group_key" in properties,
+        "additional_properties": bool(branch.get("additionalProperties", True)),
+        "group_key_schema_kind": _branching_schema_kind(group_key_schema),
+        "group_key_branch_count": len(group_key_schema.get("oneOf") or ()),
+    }
+
+
+def _answer_output_branch_summary(branch: dict[str, Any]) -> dict[str, object]:
+    properties = branch.get("properties") or {}
+    role_schema = properties.get("role") or {}
+    return {
+        "required": list(branch.get("required") or ()),
+        "properties": sorted(properties),
+        "role_enum": list(role_schema.get("enum") or ()),
+        "additional_properties": bool(branch.get("additionalProperties", True)),
+    }
 
 
 def run_question_contract_schema_validate_case(payload: dict[str, Any]) -> list[str]:

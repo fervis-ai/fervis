@@ -19,9 +19,11 @@ from fervis.lookup.question_contract.model import (
     QuestionContract,
     QuestionContractNeedsClarification,
     QuestionContractResult,
+    GroupKeyDomainKind,
     RequestedFact,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
+    RequestedFactGroupKey,
     RequestedFactAnswerPopulation,
     RequestedFactAnswerPopulationMembershipTest,
     RequestedFactAnswerOutput,
@@ -226,7 +228,33 @@ def _answer_expression(
     return RequestedFactAnswerExpression(
         family=RequestedFactAnswerExpressionFamily(
             _required_text(item.family, path=f"{path}.family")
-        )
+        ),
+        group_key=_answer_expression_group_key(
+            item.group_key,
+            path=f"{path}.group_key",
+        ),
+    )
+
+
+def _answer_expression_group_key(
+    raw: Any,
+    *,
+    path: str,
+) -> RequestedFactGroupKey | None:
+    if raw is None:
+        return None
+    item = provider_output.GroupKeyOutput.parse(raw)
+    try:
+        domain = GroupKeyDomainKind(_required_text(item.domain, path=f"{path}.domain"))
+    except ValueError as exc:
+        raise ValueError(f"{path}.domain is invalid") from exc
+    return RequestedFactGroupKey(
+        description=_required_text(item.description, path=f"{path}.description"),
+        domain=domain,
+        question_input_refs=_answer_expression_group_key_refs(
+            item.question_input_refs,
+            path=f"{path}.question_input_refs",
+        ),
     )
 
 
@@ -500,11 +528,28 @@ def _answer_outputs(
                     item.description,
                     path=f"{item_path}.description",
                 ),
+                role=_text(item.role),
             )
         )
     if not output:
         raise ValueError(f"{path} must not be empty")
     return tuple(output)
+
+
+def _answer_expression_group_key_refs(raw: Any, *, path: str) -> tuple[str, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ValueError(f"{path} must be a list")
+    refs: list[str] = []
+    seen: set[str] = set()
+    for index, item in enumerate(raw):
+        input_ref = _required_text(item, path=f"{path}[{index}]")
+        if input_ref in seen:
+            raise ValueError(f"{path}[{index}] duplicates question input")
+        seen.add(input_ref)
+        refs.append(input_ref)
+    return tuple(refs)
 
 
 def _question_inputs(
@@ -533,11 +578,15 @@ def _question_inputs(
             path=f"{path}.source",
         )
         reference_text = (
-            parsed.source_text
+            parsed.value_source_text
             if isinstance(parsed, provider_output.LiteralTextInputOutput)
             else parsed.reference_text
         )
-        input_text_key = "source_text" if kind == KnownInputKind.LITERAL else "reference_text"
+        input_text_key = (
+            "value_source_text"
+            if kind == KnownInputKind.LITERAL
+            else "reference_text"
+        )
         span_contexts = (
             current_question_texts
             if source == KnownInputSource.QUESTION_CONTEXT

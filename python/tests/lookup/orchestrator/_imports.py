@@ -82,6 +82,7 @@ from fervis.lookup.fact_plan.values import (
 )
 from fervis.lookup.fact_planning.request import RuntimeValueContext
 from fervis.lookup.question_contract import (
+    GroupKeyDomainKind,
     KnownInputKind,
     KnownInputSource,
     LiteralInputRole,
@@ -90,6 +91,7 @@ from fervis.lookup.question_contract import (
     RequestedFact,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
+    RequestedFactGroupKey,
     RequestedFactAnswerOutput,
     RequestedFactAnswerSubject,
     RequestedFactKnownInput,

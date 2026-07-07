@@ -11,7 +11,7 @@ input:
       - input_ref: staff
         kind: literal_text
         source: question_context
-        source_text: staff_id 51515151-0000-0000-0002-000000000001
+        value_source_text: staff_id 51515151-0000-0000-0002-000000000001
         field_label_text: staff_id
         resolved_value_text: 51515151-0000-0000-0002-000000000001
         value_meaning_hint: staff member
@@ -20,14 +20,14 @@ input:
       - input_ref: today
         kind: literal_text
         source: question_context
-        source_text: today
+        value_source_text: today
         resolved_value_text: today
         role: time_value
         inventory_check: {why_this_is_an_input: today is the time scope}
       - input_ref: bbs_mall
         kind: literal_text
         source: question_context
-        source_text: BBS Mall
+        value_source_text: BBS Mall
         resolved_value_text: BBS Mall
         value_meaning_hint: location
         role: reference_value

@@ -5,19 +5,47 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from fervis.lookup.fact_plan.relations import RelationSourcePopulationChoice
+from fervis.lookup.fact_plan.relations import (
+    RelationSourcePopulationChoice,
+)
 from fervis.lookup.source_binding import provider_contract as provider_output
-from fervis.lookup.source_binding.model import BoundSource, SourceBindingPlan, SourceBindingRequest
-from fervis.lookup.source_binding.parser.candidate_access import candidate_applied_filters, candidate_cardinality, candidate_source_evidence_items, candidate_source_fields, candidate_value_is_used_by_bound_source
+from fervis.lookup.source_binding.candidates import SourceCandidate
+from fervis.lookup.source_binding.closed_key_params import (
+    closed_key_param_binding_index,
+)
+from fervis.lookup.source_binding.model import (
+    BoundSource,
+    SourceBindingPlan,
+    SourceBindingRequest,
+)
+from fervis.lookup.source_binding.parser.candidate_access import (
+    candidate_applied_filters,
+    candidate_cardinality,
+    candidate_source_evidence_items,
+    candidate_source_fields,
+    candidate_value_is_used_by_bound_source,
+)
 from fervis.lookup.source_binding.parser.fulfillment import parse_source_fulfillments
-from fervis.lookup.source_binding.parser.metric_fit import metric_fit_interpretations_by_requested_fact
-from fervis.lookup.source_binding.parser.params import merged_param_bindings, parse_param_decision_binding_sets
-from fervis.lookup.source_binding.parser.population import bound_relation_source, parse_answer_population
-from fervis.lookup.source_binding.parser.row_predicates import parse_row_predicate_filters
+from fervis.lookup.source_binding.parser.metric_fit import (
+    metric_fit_interpretations_by_requested_fact,
+)
+from fervis.lookup.source_binding.parser.params import (
+    merged_param_bindings,
+    parse_param_decision_binding_sets,
+)
+from fervis.lookup.source_binding.parser.population import (
+    bound_relation_source,
+    parse_answer_population,
+)
+from fervis.lookup.source_binding.parser.row_predicates import (
+    parse_row_predicate_filters,
+)
 from fervis.lookup.source_binding.parser_common import _text
 from fervis.lookup.source_binding.plan_targets import SourceBindingTargetIndex
 from fervis.lookup.source_binding.review_scope import SourceBindingReviewScope
-from fervis.lookup.source_binding.role_selection import bound_plan_selection_for_source_binding
+from fervis.lookup.source_binding.role_selection import (
+    bound_plan_selection_for_source_binding,
+)
 
 
 __all__ = [
@@ -31,7 +59,7 @@ def build_source_binding_plan(
     *,
     target_index: SourceBindingTargetIndex,
     review_scope: SourceBindingReviewScope,
-    candidates: dict[str, Any],
+    candidates: dict[str, SourceCandidate],
     effective_param_ids_by_index: dict[int, tuple[str, ...]] | None = None,
     population_choices_by_index: (
         dict[int, tuple[RelationSourcePopulationChoice, ...]] | None
@@ -41,19 +69,22 @@ def build_source_binding_plan(
         candidates.values()
     )
     requested_fact_output_ids = {
-        fact.id: {output.id for output in fact.answer_outputs}
+        fact.id: {output.id for output in fact.support_answer_outputs}
         for fact in request.requested_facts
     }
     metric_fit_reviews = metric_fit_interpretations_by_requested_fact(
         payload,
         request=request,
     )
+    closed_key_bindings = closed_key_param_binding_index(
+        request,
+        targets=target_index.targets,
+        candidates_by_id=candidates,
+    )
     seen_binding_target_ids: set[str] = set()
     output: list[BoundSource] = []
     for index, parsed_invocation in enumerate(payload.source_invocations, start=1):
-        target = target_index.require(
-            _text(parsed_invocation.binding_target_id)
-        )
+        target = target_index.require(_text(parsed_invocation.binding_target_id))
         if target.binding_target_id in seen_binding_target_ids:
             raise ValueError("duplicate source binding target")
         seen_binding_target_ids.add(target.binding_target_id)
@@ -98,12 +129,19 @@ def build_source_binding_plan(
         candidate_base_binding_sets = candidate.applied_param_binding_sets or (
             candidate.applied_param_bindings,
         )
+        backend_param_binding_sets = closed_key_bindings.backend_param_binding_sets(
+            target.binding_target_id,
+        )
         param_binding_sets = tuple(
             merged_param_bindings(
-                base_param_bindings,
+                merged_param_bindings(
+                    base_param_bindings,
+                    backend_param_bindings,
+                ),
                 model_param_bindings,
             )
             for base_param_bindings in candidate_base_binding_sets
+            for backend_param_bindings in backend_param_binding_sets
             for model_param_bindings in param_decisions.binding_sets
         )
         population_choices = (
@@ -119,6 +157,11 @@ def build_source_binding_plan(
             candidate=candidate,
             plan_shape=target.plan_shape,
             metric_fit_reviews_by_requested_output=metric_fit_reviews,
+        )
+        closed_key_bindings.require_compatible_fulfillments(
+            target.binding_target_id,
+            candidate=candidate,
+            fulfillments=fulfillments,
         )
         source, source_invocations = bound_relation_source(
             candidate=candidate,
@@ -188,7 +231,9 @@ def _require_complete_role_target_coverage(
         )
         is None
     ):
-        raise ValueError("source binding must cover one complete source binding role set")
+        raise ValueError(
+            "source binding must cover one complete source binding role set"
+        )
 
 
 def _require_answer_output_coverage(

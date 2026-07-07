@@ -22,7 +22,7 @@ input:
       - input_ref: staff
         kind: literal_text
         source: conversation_resolution
-        source_text: she
+        value_source_text: she
         resolved_input_ref: cr_input_999
         resolved_value_text: Alice Smith
         value_meaning_hint: staff member
@@ -31,7 +31,7 @@ input:
       - input_ref: today
         kind: literal_text
         source: question_context
-        source_text: today
+        value_source_text: today
         resolved_value_text: today
         role: time_value
         inventory_check: {why_this_is_an_input: today is the time scope}

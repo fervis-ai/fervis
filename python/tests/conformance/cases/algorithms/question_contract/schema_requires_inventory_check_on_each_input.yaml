@@ -10,7 +10,7 @@ input:
   - input_ref: period
     kind: literal_text
     source: question_context
-    source_text: today
+    value_source_text: today
     resolved_value_text: today
     role: time_value
   used_input_refs:

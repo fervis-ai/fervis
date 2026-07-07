@@ -12,7 +12,7 @@ input:
     kind: literal_text
     inventory_check:
       why_this_is_an_input: Ann is a named reference
-    source_text: Ann
+    value_source_text: Ann
     resolved_value_text: Ann
     value_meaning_hint: named entity
     role: reference_value

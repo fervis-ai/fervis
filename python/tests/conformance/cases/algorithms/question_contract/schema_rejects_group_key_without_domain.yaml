@@ -1,0 +1,26 @@
+id: schema_rejects_group_key_without_domain
+description: Grouped answer expressions must declare the group-key domain.
+kind: algorithm
+algorithm: question_contract.schema_validate
+input:
+  question_context: How many sales per store this month?
+  answer_expression:
+    family: grouped_aggregate
+    group_key:
+      description: store
+  question_inputs:
+  - input_ref: this_month
+    kind: literal_text
+    source: question_context
+    value_source_text: this month
+    resolved_value_text: this month
+    role: time_value
+    inventory_check:
+      why_this_is_an_input: this month is the requested time scope
+  answer_outputs:
+  - description: sales count
+    role: ROW_POPULATION
+  used_input_refs: [this_month]
+expect:
+  result_contains:
+    status: rejected

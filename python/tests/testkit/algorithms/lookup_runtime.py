@@ -517,11 +517,7 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
         "answer_requests": [
             {
                 "answer_fact": fact_description,
-                "answer_expression": {
-                    "family": str(
-                        payload.get("answer_expression_family") or "list_rows"
-                    )
-                },
+                "answer_expression": _scripted_answer_expression(payload),
                 "answer_subject": _answer_subject_payload(subject_text),
                 "answer_population": default_answer_population(
                     description=fact_description,
@@ -531,7 +527,7 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
                     ).instance_interpretation,
                 ).to_question_contract_dict(),
                 "answer_outputs": [
-                    {"description": str(answer_output)}
+                    _scripted_answer_output(answer_output)
                     for answer_output in answer_outputs
                 ],
                 "used_question_inputs": [
@@ -543,6 +539,36 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
             "all_input_like_phrases_declared": True,
         },
     }
+
+
+def _scripted_answer_expression(payload: dict[str, Any]) -> dict[str, Any]:
+    output = {
+        "family": str(payload.get("answer_expression_family") or "list_rows")
+    }
+    if isinstance(payload.get("group_key"), dict):
+        output["group_key"] = dict(payload["group_key"])
+    return output
+
+
+def _scripted_answer_output(payload: object) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {"description": str(payload)}
+    output: dict[str, Any] = {"description": str(payload.get("description") or "")}
+    if payload.get("role"):
+        output["role"] = str(payload["role"])
+    return output
+
+
+def _scripted_answer_output_description(payload: object) -> str:
+    if isinstance(payload, dict):
+        return str(payload.get("description") or "")
+    return str(payload)
+
+
+def _scripted_answer_output_support_role(payload: object, *, default: str) -> str:
+    if isinstance(payload, dict):
+        return str(payload.get("support_role") or payload.get("role") or default)
+    return default
 
 
 def _scripted_question_input(*, index: int, payload: dict[str, Any]) -> dict[str, Any]:
@@ -559,7 +585,7 @@ def _scripted_question_input(*, index: int, payload: dict[str, Any]) -> dict[str
     }
     if kind == KnownInputKind.LITERAL:
         role = LiteralInputRole(str(payload["role"]))
-        output["source_text"] = text
+        output["value_source_text"] = text
         output["resolved_value_text"] = str(payload.get("resolved_value_text") or text)
         output["role"] = role.value
         if payload.get("value_meaning_hint"):
@@ -590,10 +616,13 @@ def _scripted_query_enrichment_payload(payload: dict[str, Any]) -> dict[str, Any
                 "answer_output_resource_lineage": [
                     {
                         "answer_output_id": f"answer_{index}",
-                        "support_role": str(
-                            payload.get("support_role") or "ROW_POPULATION"
+                        "support_role": _scripted_answer_output_support_role(
+                            answer_output,
+                            default=str(payload.get("support_role") or "ROW_POPULATION"),
                         ),
-                        "source_text": str(answer_output),
+                        "source_text": _scripted_answer_output_description(
+                            answer_output
+                        ),
                         "matching_resource_names": resource_terms,
                     }
                     for index, answer_output in enumerate(
@@ -1163,7 +1192,7 @@ def _question_contract_decisions_payload() -> dict[str, Any]:
                 "input_ref": "input_1",
                 "source": "question_context",
                 "kind": KnownInputKind.LITERAL.value,
-                "source_text": "Alice",
+                "value_source_text": "Alice",
                 "resolved_value_text": "Alice",
                 "value_meaning_hint": "staff member",
                 "role": LiteralInputRole.REFERENCE_VALUE.value,
@@ -1175,7 +1204,7 @@ def _question_contract_decisions_payload() -> dict[str, Any]:
                 "input_ref": "input_2",
                 "source": "question_context",
                 "kind": KnownInputKind.LITERAL.value,
-                "source_text": "today",
+                "value_source_text": "today",
                 "resolved_value_text": "today",
                 "role": LiteralInputRole.TIME_VALUE.value,
                 "inventory_check": {

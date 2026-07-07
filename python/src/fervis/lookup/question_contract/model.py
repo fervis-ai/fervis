@@ -10,6 +10,9 @@ from typing import Any, TypeAlias
 from fervis.lookup.conversation_resolution.overlay import (
     ConversationResolutionOverlay,
 )
+from fervis.lookup.question_contract.answer_output_support import (
+    ANSWER_OUTPUT_SUPPORT_ROLE_VALUES,
+)
 from fervis.lookup.question_contract._text_spans import contains_copied_span
 from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 from fervis.lookup.turn_prompts.context import HostPromptContext
@@ -77,6 +80,11 @@ class RequestedFactAnswerExpressionFamily(StrEnum):
 class MissingQuestionInputType(StrEnum):
     TARGET_REFERENCE = "target_reference"
     ANSWER_DEFINITION = "answer_definition"
+
+
+class GroupKeyDomainKind(StrEnum):
+    SPECIFIED_QUESTION_INPUTS = "SPECIFIED_QUESTION_INPUTS"
+    SOURCE_RESULT_VALUES = "SOURCE_RESULT_VALUES"
 
 
 NORMAL_INSTANCE_EXPLICIT_USER_OVERRIDE_POLICY = (
@@ -192,35 +200,108 @@ def normal_instance_guard_question(subject_text: str) -> str:
 
 
 @dataclass(frozen=True)
+class RequestedFactGroupKey:
+    description: str
+    domain: GroupKeyDomainKind
+    question_input_refs: tuple[str, ...] = ()
+    id: str = "group_key"
+
+    def __post_init__(self) -> None:
+        if not self.id.strip():
+            raise ValueError("group key requires id")
+        if not self.description.strip():
+            raise ValueError("group key requires description")
+        if not isinstance(self.domain, GroupKeyDomainKind):
+            raise ValueError("group key requires structured domain")
+        refs = tuple(
+            str(item).strip()
+            for item in self.question_input_refs
+            if str(item).strip()
+        )
+        if refs != self.question_input_refs:
+            object.__setattr__(self, "question_input_refs", refs)
+        if self.domain == GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS and not refs:
+            raise ValueError("specified group key requires question inputs")
+        if self.domain == GroupKeyDomainKind.SOURCE_RESULT_VALUES and refs:
+            raise ValueError("source-result group key cannot carry input refs")
+
+    def to_model_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "id": self.id,
+            "description": self.description,
+            "domain": self.domain.value,
+        }
+        if self.question_input_refs:
+            payload["question_input_refs"] = list(self.question_input_refs)
+        return payload
+
+    def to_answer_request_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "description": self.description,
+            "domain": self.domain.value,
+        }
+        if self.question_input_refs:
+            payload["question_input_refs"] = list(self.question_input_refs)
+        return payload
+
+
+@dataclass(frozen=True)
 class RequestedFactAnswerOutput:
     id: str
     description: str = ""
+    role: str = ""
 
     def __post_init__(self) -> None:
         if not self.id.strip():
             raise ValueError("answer output requires id")
         if not self.description.strip():
             object.__setattr__(self, "description", self.id)
+        role = self.role.strip()
+        if role and role not in ANSWER_OUTPUT_SUPPORT_ROLE_VALUES:
+            raise ValueError("answer output role is invalid")
+        if role != self.role:
+            object.__setattr__(self, "role", role)
 
     def to_model_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
             "id": self.id,
             "description": self.description,
         }
+        if self.role:
+            payload["role"] = self.role
         return payload
 
     def to_answer_request_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "description": self.description,
         }
+        if self.role:
+            payload["role"] = self.role
+        return payload
 
 
 @dataclass(frozen=True)
 class RequestedFactAnswerExpression:
     family: RequestedFactAnswerExpressionFamily
+    group_key: RequestedFactGroupKey | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            self.family == RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE
+            and self.group_key is None
+        ):
+            raise ValueError("grouped_aggregate requires group key")
+        if (
+            self.family != RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE
+            and self.group_key is not None
+        ):
+            raise ValueError("group key requires grouped_aggregate answer expression")
 
     def to_answer_request_dict(self) -> dict[str, object]:
-        return {"family": self.family.value}
+        payload: dict[str, object] = {"family": self.family.value}
+        if self.group_key is not None:
+            payload["group_key"] = self.group_key.to_answer_request_dict()
+        return payload
 
 
 @dataclass(frozen=True)
@@ -635,6 +716,50 @@ class RequestedFact:
                     raise ValueError(
                         "answer population test owner refs must be used by requested fact"
                     )
+        if (
+            self.answer_expression is not None
+            and self.answer_expression.family
+            == RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE
+            and self.answer_expression.group_key is None
+        ):
+            raise ValueError("grouped_aggregate requires group key")
+        if (
+            self.answer_expression is not None
+            and self.answer_expression.group_key is not None
+            and self.answer_expression.group_key.domain
+            == GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS
+        ):
+            input_ref_set = set(input_refs)
+            unknown_refs = tuple(
+                ref
+                for ref in self.answer_expression.group_key.question_input_refs
+                if ref not in input_ref_set
+            )
+            if unknown_refs:
+                raise ValueError(
+                    "answer expression group key refs must be used by requested fact"
+                )
+        for output in self.answer_outputs:
+            if output.role == "GROUP_KEY":
+                raise ValueError("GROUP_KEY belongs to answer_expression.group_key")
+
+    @property
+    def support_answer_outputs(self) -> tuple[RequestedFactAnswerOutput, ...]:
+        group_key = (
+            self.answer_expression.group_key
+            if self.answer_expression is not None
+            else None
+        )
+        if group_key is None:
+            return self.answer_outputs
+        return (
+            RequestedFactAnswerOutput(
+                id=group_key.id,
+                description=group_key.description,
+                role="GROUP_KEY",
+            ),
+            *self.answer_outputs,
+        )
 
     def answer_request_model_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -712,7 +837,7 @@ class QuestionContract:
                     )
             requested_facts.append(materialized_fact)
             output_ids: set[str] = set()
-            for output in materialized_fact.answer_outputs:
+            for output in materialized_fact.support_answer_outputs:
                 if output.id in output_ids:
                     raise ValueError("duplicate requested fact answer output")
                 output_ids.add(output.id)

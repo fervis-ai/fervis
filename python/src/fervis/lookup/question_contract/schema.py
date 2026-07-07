@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from fervis.lookup.question_contract.answer_output_support import (
+    ANSWER_OUTPUT_SUPPORT_ROLE_VALUES,
+)
 from fervis.lookup.question_contract import provider_contract as provider_output
 from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 
@@ -103,6 +106,26 @@ def _answer_request_schema() -> dict[str, object]:
 
 
 def _answer_expression_schema() -> dict[str, object]:
+    return {
+        "oneOf": [
+            _grouped_answer_expression_schema(),
+            _ordinary_answer_expression_schema(),
+        ]
+    }
+
+
+def _grouped_answer_expression_schema() -> dict[str, object]:
+    schema = provider_output.AnswerExpressionOutput.schema(
+        {
+            "family": {"enum": ["grouped_aggregate"]},
+            "group_key": _group_key_schema(),
+        },
+    )
+    schema["required"] = ["family", "group_key"]
+    return schema
+
+
+def _ordinary_answer_expression_schema() -> dict[str, object]:
     return provider_output.AnswerExpressionOutput.schema(
         {
             "family": {
@@ -110,7 +133,6 @@ def _answer_expression_schema() -> dict[str, object]:
                     "list_rows",
                     "scalar_value",
                     "scalar_aggregate",
-                    "grouped_aggregate",
                     "ranked_selection",
                     "computed_scalar",
                     "set_difference",
@@ -180,11 +202,50 @@ def _answer_population_membership_test_schema() -> dict[str, object]:
 
 
 def _answer_output_schema() -> dict[str, object]:
-    properties: dict[str, object] = {
-        "description": {"type": "string", "minLength": 1},
-    }
     return provider_output.AnswerOutputOutput.schema(
-        properties,
+        {
+            "description": {"type": "string", "minLength": 1},
+            "role": {
+                "enum": [
+                    role for role in ANSWER_OUTPUT_SUPPORT_ROLE_VALUES
+                    if role != "GROUP_KEY"
+                ]
+            },
+        },
+    )
+
+
+def _group_key_schema() -> dict[str, object]:
+    return {
+        "oneOf": [
+            _specified_question_inputs_group_key_schema(),
+            _source_result_values_group_key_schema(),
+        ]
+    }
+
+
+def _specified_question_inputs_group_key_schema() -> dict[str, object]:
+    schema = provider_output.GroupKeyOutput.schema(
+        {
+            "description": {"type": "string", "minLength": 1},
+            "domain": {"enum": ["SPECIFIED_QUESTION_INPUTS"]},
+            "question_input_refs": {
+                "type": "array",
+                "minItems": 1,
+                "items": {"type": "string", "minLength": 1},
+            },
+        },
+    )
+    schema["required"] = ["description", "domain", "question_input_refs"]
+    return schema
+
+
+def _source_result_values_group_key_schema() -> dict[str, object]:
+    return provider_output.GroupKeyOutput.schema(
+        {
+            "description": {"type": "string", "minLength": 1},
+            "domain": {"enum": ["SOURCE_RESULT_VALUES"]},
+        },
     )
 
 
@@ -231,7 +292,7 @@ def _literal_text_input_role_schema(
                 else ["question_context"]
             )
         },
-        "source_text": {"type": "string", "minLength": 1},
+        "value_source_text": {"type": "string", "minLength": 1},
         "resolved_value_text": {"type": "string", "minLength": 1},
         "field_label_text": {"type": "string", "minLength": 1},
         "value_meaning_hint": {"type": "string", "minLength": 1},

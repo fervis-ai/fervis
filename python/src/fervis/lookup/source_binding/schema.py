@@ -52,6 +52,7 @@ class _SourceBindingSchemaScope:
     ]
     target_required_fulfillment_answer_output_ids: dict[str, tuple[str, ...]]
     target_population_binding_ids: dict[str, tuple[str, ...]]
+    source_invocations_max_items: int | None = None
 
     @property
     def binding_target_ids(self) -> tuple[str, ...]:
@@ -106,6 +107,7 @@ def build_source_binding_schema(
     ],
     target_required_fulfillment_answer_output_ids: dict[str, tuple[str, ...]],
     target_population_binding_ids: dict[str, tuple[str, ...]] | None = None,
+    source_invocations_max_items: int | None = None,
 ) -> dict[str, object]:
     scope = _SourceBindingSchemaScope(
         required_catalog_input_ids=required_catalog_input_ids,
@@ -128,6 +130,7 @@ def build_source_binding_schema(
             target_required_fulfillment_answer_output_ids
         ),
         target_population_binding_ids=target_population_binding_ids or {},
+        source_invocations_max_items=source_invocations_max_items,
     )
     outcome_schema = _source_binding_outcome_schema(scope)
     return {
@@ -165,11 +168,6 @@ def _source_binding_outcome_schema(scope: _SourceBindingSchemaScope) -> dict[str
 
 
 def _source_binding_plan_schema(scope: _SourceBindingSchemaScope) -> dict[str, object]:
-    source_invocations_schema = {
-        "type": "array",
-        "minItems": 1,
-        "items": _source_binding_invocation_items_schema(scope),
-    }
     return provider_output.SourceBindingPlanOutput.schema(
         {
             "kind": {"enum": ["source_bindings"]},
@@ -179,9 +177,24 @@ def _source_binding_plan_schema(scope: _SourceBindingSchemaScope) -> dict[str, o
             "fit_basis_interpretations": _fit_basis_interpretations_schema(
                 scope.metric_evidence_ids_by_requested_fact
             ),
-            "source_invocations": source_invocations_schema,
+            "source_invocations": _source_invocations_schema(scope),
         }
     )
+
+
+def _source_invocations_schema(scope: _SourceBindingSchemaScope) -> dict[str, object]:
+    return {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": _source_invocations_max_items(scope),
+        "items": _source_binding_invocation_items_schema(scope),
+    }
+
+
+def _source_invocations_max_items(scope: _SourceBindingSchemaScope) -> int:
+    if scope.source_invocations_max_items is None:
+        return len(scope.binding_target_ids)
+    return max(1, min(scope.source_invocations_max_items, len(scope.binding_target_ids)))
 
 
 def _source_binding_invocation_items_schema(

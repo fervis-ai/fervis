@@ -12,7 +12,7 @@ input:
     source: current_question
     inventory_check:
       why_this_is_an_input: yesterday is a time scope
-    source_text: yesterday
+    value_source_text: yesterday
     resolved_value_text: yesterday
     role: time_value
   used_input_refs:

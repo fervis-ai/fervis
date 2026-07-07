@@ -17,10 +17,15 @@ from fervis.lookup.turn_prompts import (
 from fervis.lookup.turn_prompts.projections import source_binding_candidates_xml
 from fervis.lookup.question_contract import requested_fact_evidence_ref
 from fervis.lookup.source_binding.candidates import (
+    SourceCandidateRegistry,
     source_binding_candidate_payload,
     source_binding_prompt_candidate_fulfillment_support_set_ids_by_answer_output,
     source_binding_prompt_candidate_population_binding_ids,
     source_candidate_registry,
+)
+from fervis.lookup.source_binding.closed_key_params import (
+    ClosedKeyParamBindingIndex,
+    closed_key_param_binding_index,
 )
 from fervis.lookup.source_binding.memory_context import (
     source_binding_memory_context_payload as source_binding_memory_context_input_payload,
@@ -69,7 +74,7 @@ def source_binding_requested_facts_payload(
                         "id": output.id,
                         "description": output.description,
                     }
-                    for output in fact.answer_outputs
+                    for output in fact.support_answer_outputs
                 ],
             }
             for fact in request.requested_facts
@@ -205,6 +210,7 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                 "Param Binding",
                 (
                     "Bind every catalog-required param in param_decisions unless that param appears in binding_params with population_contract.",
+                    "Do not author param_decisions for backend_owned_param_bindings; the backend compiles those keyed bindings.",
                     "You may bind an optional non-choice param in param_decisions only when the requested fact needs that param value.",
                     "For params with decision_surface=single_decision and no population_contract, choose exactly one decision_options item.",
                     "Do not author param_decisions for params with population_contract; write finite_choice_param_reviews keyed by param_id instead.",
@@ -355,14 +361,26 @@ class SourceBindingTurnPrompt(TurnPromptBase):
         return source_binding_memory_context_payload(self.request)
 
     def source_invocation_candidate_payload(self) -> dict[str, object]:
-        return source_binding_candidate_payload(self.request)
+        registry = source_candidate_registry(self.request)
+        targets = _prompt_binding_targets(self.request, registry=registry)
+        closed_key_bindings = self._closed_key_bindings(targets, registry=registry)
+        return closed_key_bindings.model_visible_candidate_payload(
+            source_binding_candidate_payload(self.request)
+        )
 
     def binding_targets_payload(self) -> dict[str, object]:
         registry = source_candidate_registry(self.request)
+        target_index = source_binding_target_index(self.request)
+        targets = _prompt_binding_targets(
+            self.request,
+            registry=registry,
+            target_index=target_index,
+        )
+        closed_key_bindings = self._closed_key_bindings(targets, registry=registry)
         return {
             "binding_targets": [
-                target.to_payload()
-                for target in _prompt_binding_targets(self.request, registry=registry)
+                closed_key_bindings.model_visible_target_payload(target)
+                for target in targets
             ]
         }
 
@@ -385,9 +403,8 @@ class SourceBindingTurnPrompt(TurnPromptBase):
             candidates_by_id=registry.candidates_by_id,
             target_index=target_index,
         )
-        target_param_decision_ids_by_param: dict[
-            str, dict[str, tuple[str, ...]]
-        ] = {}
+        closed_key_bindings = self._closed_key_bindings(targets, registry=registry)
+        target_param_decision_ids_by_param: dict[str, dict[str, tuple[str, ...]]] = {}
         target_finite_choice_values: dict[str, dict[str, tuple[str, ...]]] = {}
         target_row_predicate_values: dict[str, dict[str, tuple[str, ...]]] = {}
         target_finite_choice_test_ids: dict[str, dict[str, tuple[str, ...]]] = {}
@@ -398,10 +415,8 @@ class SourceBindingTurnPrompt(TurnPromptBase):
         target_row_predicate_test_ids: dict[str, dict[str, tuple[str, ...]]] = {}
         target_population_roles: dict[str, tuple[dict[str, object], ...]] = {}
         target_requested_fact_ids: dict[str, str] = {}
-        candidate_fulfillment_supports = (
-            source_binding_prompt_candidate_fulfillment_support_set_ids_by_answer_output(
-                self.request
-            )
+        candidate_fulfillment_supports = source_binding_prompt_candidate_fulfillment_support_set_ids_by_answer_output(
+            self.request
         )
         candidate_population_bindings = (
             source_binding_prompt_candidate_population_binding_ids(self.request)
@@ -416,18 +431,23 @@ class SourceBindingTurnPrompt(TurnPromptBase):
             finite_choice_param_ids = set(review_surface.finite_choice_params)
             requested_fact_id = target.requested_fact_id
             target_requested_fact_ids[target_id] = requested_fact_id
-            target_param_decision_ids_by_param[target_id] = {
-                param_id: decision_ids
-                for param_id, decision_ids in param_decision_ids_by_effective_param(
-                    candidate,
-                    effective_param_ids=tuple(
-                        str(param.get("param_id") or "")
-                        for param in candidate.params
-                        if isinstance(param, dict)
-                    ),
-                ).items()
-                if param_id not in finite_choice_param_ids
-            }
+            target_param_decision_ids_by_param[target_id] = (
+                closed_key_bindings.model_visible_param_map(
+                    target_id,
+                    {
+                        param_id: decision_ids
+                        for param_id, decision_ids in param_decision_ids_by_effective_param(
+                            candidate,
+                            effective_param_ids=tuple(
+                                str(param.get("param_id") or "")
+                                for param in candidate.params
+                                if isinstance(param, dict)
+                            ),
+                        ).items()
+                        if param_id not in finite_choice_param_ids
+                    },
+                )
+            )
             target_finite_choice_values[target_id] = {
                 param_id: axis.choices
                 for param_id, axis in review_surface.finite_choice_params.items()
@@ -460,19 +480,24 @@ class SourceBindingTurnPrompt(TurnPromptBase):
             target_population_roles[target_id] = tuple(
                 {"role_id": role.role_id} for role in review_surface.population_roles
             )
-            target_fulfillment_supports[target_id] = {
-                answer_output_id: choice_ids
-                for answer_output_id, choice_ids in (
-                    candidate_fulfillment_supports.get(candidate.id, {}).items()
+            target_fulfillment_supports[target_id] = (
+                closed_key_bindings.model_visible_fulfillment_supports(
+                    candidate,
+                    target=target,
+                    candidate_fulfillment_supports=candidate_fulfillment_supports.get(
+                        candidate.id,
+                        {},
+                    ),
                 )
-                if answer_output_id in target.answer_output_ids
-            }
+            )
             target_required_fulfillment_output_ids[target_id] = (
                 target.required_answer_output_ids
             )
-            target_population_binding_ids[target_id] = candidate_population_bindings.get(
-                candidate.id,
-                (),
+            target_population_binding_ids[target_id] = (
+                candidate_population_bindings.get(
+                    candidate.id,
+                    (),
+                )
             )
         return build_source_binding_schema(
             **source_binding_clarification_input_ids(self.request),
@@ -494,4 +519,51 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                 target_required_fulfillment_output_ids
             ),
             target_population_binding_ids=target_population_binding_ids,
+            source_invocations_max_items=_source_invocations_max_items(
+                target_index=target_index,
+                visible_targets=targets,
+            ),
         )
+
+    def _closed_key_bindings(
+        self,
+        targets: tuple[SourceBindingTarget, ...],
+        *,
+        registry: SourceCandidateRegistry,
+    ) -> ClosedKeyParamBindingIndex:
+        return closed_key_param_binding_index(
+            self.request,
+            targets=targets,
+            candidates_by_id=registry.candidates_by_id,
+        )
+
+
+def _source_invocations_max_items(
+    *,
+    target_index: SourceBindingTargetIndex,
+    visible_targets: tuple[SourceBindingTarget, ...],
+) -> int:
+    visible_target_ids = {target.binding_target_id for target in visible_targets}
+    plan_target_ids = tuple(
+        target_ids
+        for target_ids in target_index.target_ids_by_plan().values()
+        if target_ids <= visible_target_ids
+    )
+    if not plan_target_ids:
+        return len(visible_targets)
+    target_requested_fact_ids = {
+        target.binding_target_id: target.requested_fact_id for target in visible_targets
+    }
+    max_items_by_fact: dict[str, int] = {}
+    for target_ids in plan_target_ids:
+        requested_fact_ids = {
+            target_requested_fact_ids[target_id] for target_id in target_ids
+        }
+        if len(requested_fact_ids) != 1:
+            continue
+        requested_fact_id = next(iter(requested_fact_ids))
+        max_items_by_fact[requested_fact_id] = max(
+            max_items_by_fact.get(requested_fact_id, 0),
+            len(target_ids),
+        )
+    return sum(max_items_by_fact.values()) or len(visible_targets)

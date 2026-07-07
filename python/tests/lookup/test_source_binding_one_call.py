@@ -40,6 +40,9 @@ from fervis.lookup.question_contract import (
     RequestedFactAnswerSubject,
     RequestedFactLiteralInput,
 )
+from fervis.lookup.question_contract.answer_output_support import (
+    ANSWER_OUTPUT_SUPPORT_ROLE_VALUES,
+)
 from fervis.lookup.read_eligibility.candidate_identity import (
     read_candidate_signature,
 )
@@ -75,6 +78,7 @@ from fervis.lookup.source_binding.candidates import (
     raw_payload as raw_payload_module,
 )
 from fervis.lookup.source_binding.candidates.fulfillment_slots import (
+    FULFILLMENT_EVIDENCE_GROUP_KINDS_BY_ANSWER_ROLE,
     _candidate_with_fulfillment_slots,
 )
 from fervis.lookup.source_binding.candidates.evidence import (
@@ -99,6 +103,12 @@ def _candidate_with_evidence_and_fulfillment_slots(
     return _candidate_with_fulfillment_slots(
         _candidate_with_evidence_items(candidate),
         requested_facts=requested_facts,
+    )
+
+
+def test_fulfillment_role_dispatch_covers_answer_output_support_roles():
+    assert set(FULFILLMENT_EVIDENCE_GROUP_KINDS_BY_ANSWER_ROLE) == set(
+        ANSWER_OUTPUT_SUPPORT_ROLE_VALUES
     )
 
 

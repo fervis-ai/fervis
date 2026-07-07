@@ -19,7 +19,7 @@ input:
     kind: literal_text
     inventory_check:
       why_this_is_an_input: this month is a time scope
-    source_text: this month
+    value_source_text: this month
     resolved_value_text: this month
     role: time_value
   used_input_refs:

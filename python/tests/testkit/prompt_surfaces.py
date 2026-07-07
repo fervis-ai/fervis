@@ -81,6 +81,7 @@ PROMPT_SURFACE_CONTRACTS = {
             "Question Boundary",
             "Clarification Boundary",
             "Answer Requests",
+            "Answer Outputs",
             "Question Inputs Overview",
             "Question Input Inventory",
             "Question Input Sources",

@@ -20,7 +20,7 @@ input:
     kind: literal_text
     inventory_check:
       why_this_is_an_input: this month is a time scope
-    source_text: this month
+    value_source_text: this month
     resolved_value_text: this month
     role: time_value
   - input_ref: ranking
@@ -28,7 +28,7 @@ input:
     kind: literal_text
     inventory_check:
       why_this_is_an_input: highest is a ranking phrase
-    source_text: highest
+    value_source_text: highest
     resolved_value_text: highest
     role: time_value
   used_input_refs:

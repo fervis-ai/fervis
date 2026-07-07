@@ -54,7 +54,7 @@ class GroupedRankedSelection:
     source_binding_id: str
     fulfills_answer_output_ids: tuple[str, ...]
     group_field_id: str
-    metric: dict[str, Any]
+    metric: dict[str, object]
     answer_outputs: tuple[GroupedRankedAnswerOutput, ...]
 
 
@@ -181,7 +181,11 @@ def selected_grouped_ranked_operation(
             dict.fromkeys(item.answer_output_id for item in answer_outputs)
         ),
         group_field_id=_text(group.get("field_id")),
-        metric=_compiled_metric(metric, function),
+        metric=_compiled_metric(
+            metric,
+            function,
+            answer_output_id=_metric_answer_output_id(metric, answer_outputs),
+        ),
         answer_outputs=answer_outputs,
     )
 
@@ -376,9 +380,11 @@ def _function_candidates(
 
 
 def _compiled_metric(
-    metric: Mapping[str, Any],
-    function: Mapping[str, Any],
-) -> dict[str, Any]:
+    metric: Mapping[str, object],
+    function: Mapping[str, object],
+    *,
+    answer_output_id: str,
+) -> dict[str, object]:
     if metric.get("kind") == "count_records":
         count_basis = compiled_count_basis_payload(_dict(metric.get("count_basis")))
         return {
@@ -388,7 +394,7 @@ def _compiled_metric(
             "label": "count",
             "output_field_id": "count",
             "function": AggregationFunction.COUNT,
-            "answer_output_id": "",
+            "answer_output_id": answer_output_id,
         }
     field_id = _text(metric.get("field_id"))
     return {
@@ -398,8 +404,29 @@ def _compiled_metric(
         "label": field_id,
         "output_field_id": field_id,
         "function": AggregationFunction(_text(function.get("value"))),
-        "answer_output_id": "",
+        "answer_output_id": answer_output_id,
     }
+
+
+def _metric_answer_output_id(
+    metric: Mapping[str, object],
+    answer_outputs: tuple[GroupedRankedAnswerOutput, ...],
+) -> str:
+    expected_role = (
+        "ROW_POPULATION"
+        if _text(metric.get("kind")) == "count_records"
+        else "MEASURED_VALUE"
+    )
+    evidence_id = _text(metric.get("evidence_id"))
+    if not evidence_id:
+        return ""
+    matches = tuple(
+        answer_output.answer_output_id
+        for answer_output in answer_outputs
+        if answer_output.role == expected_role
+        and answer_output.evidence_id == evidence_id
+    )
+    return matches[0] if len(matches) == 1 else ""
 
 
 def _answer_outputs_for_selection(
@@ -415,16 +442,22 @@ def _answer_outputs_for_selection(
     metric_field_id = _text(metric_candidate.get("field_id"))
     count_basis = _dict_or_empty(metric_candidate.get("count_basis"))
     output: list[GroupedRankedAnswerOutput] = []
-    for index, fulfillment in enumerate(
+    for fulfillment in (
         item
         for item in source.fulfillments
         if item.requested_fact_id == requested_fact_id
     ):
-        if index == 0 and group_field_id:
+        group_evidence_id = _first_matching_group_evidence_id(
+            source,
+            fulfillment,
+            group_field_id=group_field_id,
+            plan_shape=plan_shape,
+        )
+        if group_evidence_id:
             output.append(
                 GroupedRankedAnswerOutput(
                     answer_output_id=fulfillment.answer_output_id,
-                    role="ANSWER_VALUE",
+                    role="GROUP_KEY",
                     field_id=group_field_id,
                     evidence_id=group_evidence_id,
                 )
@@ -456,12 +489,28 @@ def _answer_outputs_for_selection(
             output.append(
                 GroupedRankedAnswerOutput(
                     answer_output_id=fulfillment.answer_output_id,
-                    role="MEASURED_VALUE",
+                    role="ROW_POPULATION",
                     field_id="count",
                     evidence_id=count_evidence_id,
                 )
             )
     return tuple(output)
+
+
+def _first_matching_group_evidence_id(
+    source: BoundSource,
+    fulfillment: SourceFulfillment,
+    *,
+    group_field_id: str,
+    plan_shape: str,
+) -> str:
+    for evidence_id in fulfillment.group_key_evidence_ids:
+        if (
+            _field_id_for_evidence_id(source, evidence_id, plan_shape=plan_shape)
+            == group_field_id
+        ):
+            return evidence_id
+    return ""
 
 
 def _first_matching_metric_evidence_id(

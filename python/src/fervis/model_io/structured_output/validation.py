@@ -32,6 +32,7 @@ def strip_null_properties(value: Any, *, schema: dict[str, Any] | None = None) -
             output[key] = strip_null_properties(item, schema=property_schema)
         return output
     if isinstance(value, list):
+        schema = _matching_union_array_schema(value, schema) or schema
         item_schema = schema.get("items") if isinstance(schema, dict) else None
         return [strip_null_properties(item, schema=item_schema) for item in value]
     return value
@@ -76,7 +77,62 @@ def _matching_union_object_schema(
     return candidates[0] if len(candidates) == 1 else None
 
 
+def _matching_union_array_schema(
+    value: list[Any],
+    schema: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(schema, dict):
+        return None
+    branches = schema.get("oneOf") or schema.get("anyOf")
+    if not isinstance(branches, list):
+        return None
+    candidates = [
+        branch
+        for branch in branches
+        if isinstance(branch, dict) and _array_branch_matches(value, branch)
+    ]
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _array_branch_matches(value: list[Any], schema: dict[str, Any]) -> bool:
+    schema_type = schema.get("type")
+    if schema_type not in (None, "array"):
+        return False
+    min_items = schema.get("minItems")
+    if isinstance(min_items, int) and len(value) < min_items:
+        return False
+    max_items = schema.get("maxItems")
+    if isinstance(max_items, int) and len(value) > max_items:
+        return False
+    item_schema = schema.get("items")
+    if not isinstance(item_schema, dict):
+        return True
+    return all(_value_matches_branch(item, item_schema) for item in value)
+
+
+def _value_matches_branch(value: Any, schema: dict[str, Any]) -> bool:
+    nested = _matching_union_schema(value, schema)
+    if nested is not None:
+        return True
+    if isinstance(value, dict):
+        return _object_branch_matches(value, schema)
+    if isinstance(value, list):
+        return _array_branch_matches(value, schema)
+    return _scalar_branch_matches(value, schema)
+
+
+def _matching_union_schema(value: Any, schema: dict[str, Any]) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return _matching_union_object_schema(value, schema)
+    if isinstance(value, list):
+        return _matching_union_array_schema(value, schema)
+    return None
+
+
 def _object_branch_matches(value: dict[str, Any], schema: dict[str, Any]) -> bool:
+    schema_type = schema.get("type")
+    if schema_type not in (None, "object"):
+        return False
     properties = schema.get("properties")
     if not isinstance(properties, dict):
         return False
@@ -91,6 +147,28 @@ def _object_branch_matches(value: dict[str, Any], schema: dict[str, Any]) -> boo
         enum = property_schema.get("enum")
         if isinstance(enum, list) and value[key] not in enum:
             return False
+    return True
+
+
+def _scalar_branch_matches(value: Any, schema: dict[str, Any]) -> bool:
+    if "const" in schema:
+        return value == schema["const"]
+    enum = schema.get("enum")
+    if isinstance(enum, list):
+        return value in enum
+    schema_type = schema.get("type")
+    if schema_type is None:
+        return True
+    if schema_type == "string":
+        return isinstance(value, str)
+    if schema_type == "boolean":
+        return isinstance(value, bool)
+    if schema_type == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if schema_type == "number":
+        return isinstance(value, int | float) and not isinstance(value, bool)
+    if schema_type == "null":
+        return value is None
     return True
 
 

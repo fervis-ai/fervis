@@ -18,7 +18,7 @@ input:
     kind: literal_text
     inventory_check:
       why_this_is_an_input: ABC Mall is a named reference
-    source_text: ABC Mall
+    value_source_text: ABC Mall
     resolved_value_text: ABC Mall
     value_meaning_hint: store location
     role: reference_value
@@ -27,7 +27,7 @@ input:
     kind: literal_text
     inventory_check:
       why_this_is_an_input: first 2 is a literal value
-    source_text: first 2
+    value_source_text: first 2
     resolved_value_text: '2'
     role: result_limit
   used_input_refs:

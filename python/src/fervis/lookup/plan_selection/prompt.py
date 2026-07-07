@@ -124,7 +124,7 @@ class PlanSelectionTurnPrompt(TurnPromptBase):
                             "answer_output_id": output.id,
                             "description": output.description,
                         }
-                        for output in fact.answer_outputs
+                        for output in fact.support_answer_outputs
                     ],
                     "source_strategies": [
                         source_strategy_payload(source_strategy)
@@ -153,7 +153,7 @@ class PlanSelectionTurnPrompt(TurnPromptBase):
                             "answer_output_id": output.id,
                             "description": output.description,
                         }
-                        for output in fact.answer_outputs
+                        for output in fact.support_answer_outputs
                     ],
                     "source_candidates": [
                         source_alignment_candidate_payload(candidate)

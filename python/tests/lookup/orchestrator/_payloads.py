@@ -809,8 +809,8 @@ def _question_contract_for_arguments(
             RequestedFact(
                 id=fact_id,
                 description=description or fact_id,
-                answer_expression=RequestedFactAnswerExpression(
-                    family=RequestedFactAnswerExpressionFamily(
+                answer_expression=_requested_fact_answer_expression(
+                    RequestedFactAnswerExpressionFamily(
                         _answer_expression_family_by_fact_id_from_fact_plan(
                             arguments
                         ).get(fact_id, "scalar_aggregate")
@@ -840,8 +840,8 @@ def _question_contract_with_answer_expression_from_fact_plan(
         (
             replace(
                 fact,
-                answer_expression=RequestedFactAnswerExpression(
-                    family=RequestedFactAnswerExpressionFamily(family)
+                answer_expression=_requested_fact_answer_expression(
+                    RequestedFactAnswerExpressionFamily(family)
                 ),
             )
             if (
@@ -958,7 +958,7 @@ def _known_input_payload(
         payload["occurrence"] = known.occurrence
         payload["resolved_input_ref"] = known.resolved_input_ref
         return payload
-    payload["source_text"] = known.text
+    payload["value_source_text"] = known.text
     payload["role"] = known.role.value if known.role else ""
     payload["resolved_value_text"] = known.resolved_value_text
     if known.field_label_text:
@@ -1097,7 +1097,12 @@ def _question_input_from_response_item(
     input_ref: str,
 ) -> dict[str, Any]:
     kind = KnownInputKind(str(item["kind"]))
-    source_text = str(item.get("source_text") or item.get("reference_text") or "")
+    source_text = str(
+        item.get("value_source_text")
+        or item.get("source_text")
+        or item.get("reference_text")
+        or ""
+    )
     output: dict[str, Any] = {
         "input_ref": input_ref,
         "kind": kind.value,
@@ -1118,7 +1123,7 @@ def _question_input_from_response_item(
         output["occurrence"] = int(item.get("occurrence") or 1)
         output["resolved_input_ref"] = str(item["resolved_input_ref"])
         return output
-    output["source_text"] = source_text
+    output["value_source_text"] = source_text
     role = LiteralInputRole(str(item["role"]))
     output["role"] = role.value
     output["resolved_value_text"] = str(
@@ -1188,7 +1193,9 @@ def _question_contract_answer_request_for_current_contract(
         return item
     output = dict(item)
     if answer_expression_family:
-        output["answer_expression"] = {"family": answer_expression_family}
+        output["answer_expression"] = _question_contract_answer_expression_payload(
+            answer_expression_family
+        )
     else:
         output.setdefault("answer_expression", {"family": "scalar_aggregate"})
     if "answer_subject" in output:
@@ -1217,6 +1224,16 @@ def _question_contract_answer_request_for_current_contract(
             )
             for answer_output in answer_outputs
         ]
+    return output
+
+
+def _question_contract_answer_expression_payload(family: str) -> dict[str, object]:
+    output: dict[str, object] = {"family": family}
+    if family == "grouped_aggregate":
+        output["group_key"] = {
+            "description": "group",
+            "domain": "SOURCE_RESULT_VALUES",
+        }
     return output
 
 

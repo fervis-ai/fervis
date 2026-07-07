@@ -609,7 +609,7 @@ def _question_contract_payload(contract: QuestionContract) -> dict[str, Any]:
                             else {}
                         ),
                     }
-                    for output in fact.answer_outputs
+                    for output in fact.support_answer_outputs
                 ],
             }
             for fact in contract.requested_facts

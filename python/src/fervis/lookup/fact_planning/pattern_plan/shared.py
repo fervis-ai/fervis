@@ -32,7 +32,6 @@ from fervis.lookup.fact_planning.fulfillment_evidence import (
     source_field_id_by_evidence_id,
     value_evidence_ids_for_plan,
 )
-from fervis.lookup.fact_planning.metric_options import metric_for_selection
 from fervis.lookup.source_binding import BoundSource
 
 from .render_ids import _safe_field_id
@@ -50,6 +49,7 @@ def _compiled_pattern(
     values: tuple[FactValue, ...] = (),
     value_uses: tuple[ValueUse, ...] = (),
     required_answer_evidence_ids_by_output: Mapping[str, tuple[str, ...]] | None = None,
+    selected_metric: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     requested_fact_id = _text(payload.get("requested_fact_id"))
     explicit_answer_output_ids = _required_strings(
@@ -79,6 +79,7 @@ def _compiled_pattern(
         relation_fields=relation_fields,
         bound_sources=bound_sources,
         required_answer_evidence_ids_by_output=(required_answer_evidence_ids_by_output),
+        selected_metric=selected_metric,
     )
     return {
         "fulfillment": fulfillment,
@@ -143,6 +144,7 @@ def _relations_for_bound_source(
     relation_fields: tuple[RelationField, ...],
     bound_sources: dict[str, BoundSource],
     required_answer_evidence_ids_by_output: Mapping[str, tuple[str, ...]] | None = None,
+    selected_metric: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     bound = _bound_source(payload, bound_sources=bound_sources)
     invocations = bound.source_invocations or (
@@ -159,6 +161,7 @@ def _relations_for_bound_source(
                     required_answer_evidence_ids_by_output=(
                         required_answer_evidence_ids_by_output
                     ),
+                    selected_metric=selected_metric,
                 ),
             ),
             "operations": (),
@@ -172,6 +175,7 @@ def _relations_for_bound_source(
             required_answer_evidence_ids_by_output=(
                 required_answer_evidence_ids_by_output
             ),
+            selected_metric=selected_metric,
         )
         for index, source in enumerate(invocations, start=1)
     )
@@ -202,6 +206,7 @@ def _relation_for_bound_source(
     relation_fields: tuple[RelationField, ...],
     bound_sources: dict[str, BoundSource],
     required_answer_evidence_ids_by_output: Mapping[str, tuple[str, ...]] | None = None,
+    selected_metric: Mapping[str, Any] | None = None,
 ) -> Relation:
     bound = _bound_source(payload, bound_sources=bound_sources)
     return _relation_for_bound(
@@ -210,6 +215,7 @@ def _relation_for_bound_source(
         bound=bound,
         relation_fields=relation_fields,
         required_answer_evidence_ids_by_output=required_answer_evidence_ids_by_output,
+        selected_metric=selected_metric,
     )
 
 
@@ -237,6 +243,7 @@ def _relation_for_bound(
     bound: BoundSource,
     relation_fields: tuple[RelationField, ...],
     required_answer_evidence_ids_by_output: Mapping[str, tuple[str, ...]] | None = None,
+    selected_metric: Mapping[str, Any] | None = None,
 ) -> Relation:
     if bound.source is None:
         raise ValueError("fact plan references unknown relation source binding")
@@ -257,6 +264,7 @@ def _relation_for_bound(
         bound=bound,
         relation_fields=relation_fields,
         required_answer_evidence_ids_by_output=required_answer_evidence_ids_by_output,
+        selected_metric=selected_metric,
     )
     return Relation(id=relation_id, source=source, fields=relation_fields)
 
@@ -322,6 +330,7 @@ def _validate_relation_fields_for_bound(
     bound: BoundSource,
     relation_fields: tuple[RelationField, ...],
     required_answer_evidence_ids_by_output: Mapping[str, tuple[str, ...]] | None = None,
+    selected_metric: Mapping[str, Any] | None = None,
 ) -> None:
     if bound.source is None:
         raise ValueError("fact plan references unknown relation source binding")
@@ -331,6 +340,7 @@ def _validate_relation_fields_for_bound(
         bound=bound,
         relation_fields=relation_fields,
         required_answer_evidence_ids_by_output=required_answer_evidence_ids_by_output,
+        selected_metric=selected_metric,
     )
 
 
@@ -366,13 +376,11 @@ def _validate_required_fulfillment_evidence(
     bound: BoundSource,
     relation_fields: tuple[RelationField, ...],
     required_answer_evidence_ids_by_output: Mapping[str, tuple[str, ...]] | None = None,
+    selected_metric: Mapping[str, Any] | None = None,
 ) -> None:
     selected_field_ids = {field.field_id for field in relation_fields}
     selected_field_ids.update(_bound_param_field_ids(bound))
-    count_answer_output_id = _selected_count_records_answer_output_id(
-        payload=payload,
-        bound=bound,
-    )
+    count_answer_output_id = _count_records_answer_output_id(selected_metric)
     required_fields = (
         _field_ids_by_answer_output_from_selected_evidence(
             bound,
@@ -411,17 +419,17 @@ def _field_ids_by_answer_output_from_selected_evidence(
     }
 
 
-def _selected_count_records_answer_output_id(
-    *,
-    payload: dict[str, Any],
-    bound: BoundSource,
-) -> str:
-    if not isinstance(payload.get("metric"), dict):
+def _count_records_answer_output_id(selected_metric: Mapping[str, Any] | None) -> str:
+    if selected_metric is None:
         return ""
-    selected_metric = metric_for_selection(
-        payload=payload,
-        bound_sources={bound.id: bound},
+    if _text(selected_metric.get("field_id")):
+        return ""
+    has_count_basis = bool(_text(selected_metric.get("record_id_field_id"))) or isinstance(
+        selected_metric.get("row_population_basis"),
+        Mapping,
     )
+    if not has_count_basis:
+        return ""
     return _text(selected_metric.get("answer_output_id"))
 
 

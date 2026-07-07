@@ -28,7 +28,7 @@ input:
     kind: literal_text
     inventory_check:
       why_this_is_an_input: London is a named reference
-    source_text: London
+    value_source_text: London
     resolved_value_text: London
     value_meaning_hint: city
     role: reference_value
