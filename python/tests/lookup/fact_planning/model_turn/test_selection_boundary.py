@@ -555,7 +555,7 @@ def test_pattern_schema_uses_shape_compatible_bound_source_fields():
 
     assert '"field_id": "label"' not in prompt_text
     assert '"label"' not in schema_text
-    assert '"location_id"' in schema_text
+    assert '"location_id"' not in schema_text
     assert '"amount"' in schema_text
-    assert '<group id="group_1" field="location_id"' in prompt_text
+    assert '<group field="location_id" type="uuid" source="source_binding" />' in prompt_text
     assert '<metric id="metric_1" kind="aggregate_field" field="amount"' in prompt_text

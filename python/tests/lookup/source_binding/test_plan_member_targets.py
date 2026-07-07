@@ -726,11 +726,6 @@ def test_closed_key_source_binding_retains_input_proofs_through_grouped_count_pl
                     "requested_fact_id": "fact_1",
                     "pattern": "aggregate_by_group",
                     "source_binding_id": bound_source.id,
-                    "group": {
-                        "selection_basis": "Group by the specified staff member.",
-                        "id": "group_1",
-                        "field_id": "staff_id",
-                    },
                     "metric": {
                         "selection_basis": "Count matching sales rows.",
                         "id": "metric_1",

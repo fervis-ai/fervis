@@ -36,9 +36,9 @@ def run_grouped_ranked_choices_case(payload: dict[str, Any]) -> list[str]:
         actual={
             "group_field_ids": sorted(
                 {
-                    str(group["field_id"])
+                    str(group.get("field_id") or "")
                     for choice in choices
-                    for group in choice.get("group_candidates") or ()
+                    for group in (choice.get("group"),)
                     if isinstance(group, dict)
                 }
             ),

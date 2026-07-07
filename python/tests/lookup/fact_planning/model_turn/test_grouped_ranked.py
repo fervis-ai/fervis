@@ -12,18 +12,13 @@ from fervis.lookup.fact_planning.grouped_ranked_choices import (
 )
 
 
-def _ranked_payload(*, group_id="group_1", group_field_id="location_name", metric_id="metric_1", metric_field_id="metric_total", function_id="function_sum", function_value="sum"):
+def _ranked_payload(*, metric_id="metric_1", metric_field_id="metric_total", function_id="function_sum", function_value="sum"):
     return {
         "answers": [
             {
                 "requested_fact_id": "rf_answer",
                 "pattern": "ranked_aggregate",
                 "source_binding_id": "sb_1",
-                "group": {
-                    "selection_basis": "The requested answer is grouped by location.",
-                    "id": group_id,
-                    "field_id": group_field_id,
-                },
                 "metric": {
                     "selection_basis": "The requested measure is metric_total.",
                     "id": metric_id,
@@ -54,11 +49,6 @@ def test_aggregate_by_group_fulfillment_maps_answer_outputs_by_selected_parts():
                     "requested_fact_id": "rf_answer",
                     "pattern": "aggregate_by_group",
                     "source_binding_id": "sb_1",
-                    "group": {
-                        "selection_basis": "Group by the location answer.",
-                        "id": "group_1",
-                        "field_id": "location_name",
-                    },
                     "metric": {
                         "selection_basis": "Metric total is the measured value.",
                         "id": "metric_1",
@@ -84,6 +74,30 @@ def test_aggregate_by_group_fulfillment_maps_answer_outputs_by_selected_parts():
     }
 
 
+def test_grouped_ranked_group_is_backend_owned_not_model_selected():
+    selection = selected_grouped_ranked_operation(
+        {
+            "requested_fact_id": "rf_answer",
+            "pattern": "aggregate_by_group",
+            "source_binding_id": "sb_1",
+            "metric": {
+                "selection_basis": "Metric total is the measured value.",
+                "id": "metric_1",
+                "kind": "aggregate_field",
+                "field_id": "metric_total",
+            },
+            "function": {
+                "selection_basis": "Total requires sum.",
+                "id": "function_sum",
+                "value": "sum",
+            },
+        },
+        bound_sources={"sb_1": _two_output_aggregate_bound_source()},
+    )
+
+    assert selection.group_field_id == "location_name"
+
+
 def test_aggregate_by_group_fulfillment_maps_answer_outputs_by_evidence_not_order():
     source = _two_output_aggregate_bound_source()
     plan = compile_pattern_answer_plan(
@@ -93,11 +107,6 @@ def test_aggregate_by_group_fulfillment_maps_answer_outputs_by_evidence_not_orde
                     "requested_fact_id": "rf_answer",
                     "pattern": "aggregate_by_group",
                     "source_binding_id": "sb_1",
-                    "group": {
-                        "selection_basis": "Group by the location answer.",
-                        "id": "group_1",
-                        "field_id": "location_name",
-                    },
                     "metric": {
                         "selection_basis": "Metric total is the measured value.",
                         "id": "metric_1",
@@ -129,11 +138,6 @@ def test_grouped_ranked_selection_roles_outputs_by_selected_evidence_kind():
             "requested_fact_id": "rf_answer",
             "pattern": "aggregate_by_group",
             "source_binding_id": "sb_1",
-            "group": {
-                "selection_basis": "Group by store.",
-                "id": "group_1",
-                "field_id": "store_id",
-            },
             "metric": {
                 "selection_basis": "Orders are counted as records.",
                 "id": "metric_1",
@@ -162,11 +166,6 @@ def test_grouped_ranked_count_metric_keeps_answer_output_identity():
             "requested_fact_id": "rf_answer",
             "pattern": "aggregate_by_group",
             "source_binding_id": "sb_1",
-            "group": {
-                "selection_basis": "Group by store.",
-                "id": "group_1",
-                "field_id": "store_id",
-            },
             "metric": {
                 "selection_basis": "Orders are counted as records.",
                 "id": "metric_1",
@@ -192,11 +191,6 @@ def test_aggregate_by_group_count_plan_keeps_count_output_through_validation():
                     "requested_fact_id": "rf_answer",
                     "pattern": "aggregate_by_group",
                     "source_binding_id": "sb_1",
-                    "group": {
-                        "selection_basis": "Group by store.",
-                        "id": "group_1",
-                        "field_id": "store_id",
-                    },
                     "metric": {
                         "selection_basis": "Orders are counted as records.",
                         "id": "metric_1",
@@ -227,11 +221,6 @@ def test_grouped_ranked_measured_metric_keeps_answer_output_identity():
             "requested_fact_id": "rf_answer",
             "pattern": "aggregate_by_group",
             "source_binding_id": "sb_1",
-            "group": {
-                "selection_basis": "Group by location.",
-                "id": "group_1",
-                "field_id": "location_name",
-            },
             "metric": {
                 "selection_basis": "Metric total is the measured value.",
                 "id": "metric_1",
@@ -392,23 +381,63 @@ def test_ranked_aggregate_prompt_exposes_compact_linear_choice_surface():
     )
 
     assert "Grouped/ranked operation choices:" in prompt
-    assert '<group id="group_1" field="location_name" type="string" />' in prompt
+    assert '<group field="location_name" type="string" source="source_binding" />' in prompt
+    assert "<group_candidates>" not in prompt
+    assert "choose group" not in prompt
     assert '<metric id="metric_1" kind="aggregate_field" field="metric_total" type="decimal" allowed_functions="sum min max avg" />' in prompt
     assert '<function id="function_sum" value="sum" meaning="total across matching rows" />' in prompt
     assert prompt.count("<metric ") == 1
 
 
-def test_ranked_aggregate_parser_validates_candidate_id_matches_echoed_field():
-    with pytest.raises(ValueError, match="group selection mismatches candidate"):
-        compile_pattern_answer_plan(
-            _ranked_payload(group_id="group_1", group_field_id="metric_total"),
-            bound_sources=(_two_output_aggregate_bound_source(),),
-        )
+def test_ranked_aggregate_schema_does_not_request_model_group_selection():
+    request = FactPlanRequest(
+        question="Which store had the highest sales this month?",
+        question_contract=QuestionContract(
+            requested_facts=(
+                RequestedFact(
+                    id="rf_answer",
+                    description="store with the highest sales this month",
+                    answer_outputs=(
+                        RequestedFactAnswerOutput(
+                            id="answer_1",
+                            description="store name",
+                        ),
+                        RequestedFactAnswerOutput(
+                            id="answer_2",
+                            description="sales amount",
+                        ),
+                    ),
+                ),
+            )
+        ),
+        relation_catalog=RelationCatalog(reads=()),
+        bound_sources=(_two_output_aggregate_bound_source(),),
+    )
+    prompt = PatternFactPlanTurnPrompt(
+        request,
+        plan_selection=BoundPlanSelectionSet(
+            plan_selections=(
+                BoundSelectedSourceStrategy(
+                    requested_fact_id="rf_answer",
+                    plan_selection_id="rf_answer.ranked_aggregate.sb_1",
+                    source_strategy_id="source_strategy.rf_answer.ranked_aggregate.1",
+                    plan_shape="ranked_aggregate",
+                    required_answer_output_ids=("answer_1", "answer_2"),
+                    source_members=(
+                        _bound_plan_member(request, source_binding_ids=("sb_1",)),
+                    ),
+                ),
+            )
+        ),
+    )
+    schema_text = json.dumps(prompt.response_contract().provider_schema)
+
+    assert '"group"' not in schema_text
 
 
 def test_ranked_aggregate_choice_keeps_canonical_group_key_for_render_contract():
     plan = compile_pattern_answer_plan(
-        _ranked_payload(group_field_id="location_id"),
+        _ranked_payload(),
         bound_sources=(_ranked_group_key_with_display_bound_source(),),
     )
 
@@ -438,11 +467,6 @@ def test_ranked_aggregate_choice_compiles_count_metric():
                     "requested_fact_id": "rf_answer",
                     "pattern": "ranked_aggregate",
                     "source_binding_id": "sb_1",
-                    "group": {
-                        "selection_basis": "The requested answer is a store.",
-                        "id": "group_1",
-                        "field_id": "store_id",
-                    },
                     "metric": {
                         "selection_basis": "Orders are counted as records.",
                         "id": "metric_1",
@@ -488,11 +512,6 @@ def test_ranked_aggregate_excludes_null_answer_group_keys_before_ranking():
                     "requested_fact_id": "rf_answer",
                     "pattern": "ranked_aggregate",
                     "source_binding_id": "sb_1",
-                    "group": {
-                        "selection_basis": "The requested answer is a store.",
-                        "id": "group_1",
-                        "field_id": "store_id",
-                    },
                     "metric": {
                         "selection_basis": "Orders are counted as records.",
                         "id": "metric_1",
@@ -542,7 +561,7 @@ def test_ranked_aggregate_excludes_null_answer_group_keys_before_ranking():
 
 def test_ranked_aggregate_keeps_metric_render_artifact_role_scoped_for_single_output():
     plan = compile_pattern_answer_plan(
-        _ranked_payload(group_field_id="location_id"),
+        _ranked_payload(),
         bound_sources=(_single_output_ranked_aggregate_bound_source(),),
     )
 

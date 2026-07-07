@@ -146,11 +146,7 @@ def selected_grouped_ranked_operation(
     )
     if choice is None:
         raise ValueError("fact plan references unavailable grouped/ranked choices")
-    group = _selected_candidate(
-        payload.get("group"),
-        choice.get("group_candidates"),
-        label="group",
-    )
+    group = _dict(choice.get("group"))
     metric = _selected_candidate(
         payload.get("metric"),
         choice.get("metric_candidates"),
@@ -161,7 +157,6 @@ def selected_grouped_ranked_operation(
         choice.get("function_candidates"),
         label="function",
     )
-    _validate_group_selection(payload.get("group"), group)
     _validate_metric_selection(payload.get("metric"), metric)
     _validate_function_selection(payload.get("function"), function)
     if _text(function.get("value")) not in tuple(metric.get("allowed_functions") or ()):
@@ -203,7 +198,7 @@ def _choice_payload_for_source(
     )
     if not fulfillments:
         return None
-    groups = _group_candidates(
+    group = _backend_owned_group(
         source,
         fulfillments=fulfillments,
         plan_shape=plan_shape,
@@ -213,7 +208,7 @@ def _choice_payload_for_source(
         fulfillments=fulfillments,
         plan_shape=plan_shape,
     )
-    if not groups or not metrics:
+    if group is None or not metrics:
         return None
     functions = _function_candidates(metrics)
     return {
@@ -221,7 +216,7 @@ def _choice_payload_for_source(
         "source_binding_id": source.id,
         "read_id": source.source.read_id if source.source is not None else "",
         "plan_shape": plan_shape,
-        "group_candidates": groups,
+        "group": group,
         "metric_candidates": metrics,
         "function_candidates": functions,
         **(
@@ -276,6 +271,20 @@ def _group_candidates(
         }
         for index, (evidence_id, field_id) in enumerate(compatible, start=1)
     )
+
+
+def _backend_owned_group(
+    source: BoundSource,
+    *,
+    fulfillments: tuple[SourceFulfillment, ...],
+    plan_shape: str,
+) -> dict[str, Any] | None:
+    groups = _group_candidates(
+        source,
+        fulfillments=fulfillments,
+        plan_shape=plan_shape,
+    )
+    return groups[0] if len(groups) == 1 else None
 
 
 def _metric_candidates(
@@ -438,7 +447,6 @@ def _answer_outputs_for_selection(
     plan_shape: str,
 ) -> tuple[GroupedRankedAnswerOutput, ...]:
     group_field_id = _text(group_candidate.get("field_id"))
-    group_evidence_id = _text(group_candidate.get("evidence_id"))
     metric_field_id = _text(metric_candidate.get("field_id"))
     count_basis = _dict_or_empty(metric_candidate.get("count_basis"))
     output: list[GroupedRankedAnswerOutput] = []
@@ -576,15 +584,12 @@ def _choice_xml_lines(choice: Mapping[str, Any], *, indent: str) -> list[str]:
     lines = [
         f'{indent}<source_binding id="{source_id}" read="{read_id}">',
         f'{indent}  <operation family="{plan_shape}">',
-        f"{indent}    <group_candidates>",
     ]
-    for item in choice.get("group_candidates") or ():
-        lines.append(
-            f'{indent}      <group id="{_xml(_text(item.get("id")))}" field="{_xml(_text(item.get("field_id")))}" type="{_xml(_text(item.get("type")))}" />'
-        )
-    lines.extend(
-        (f"{indent}    </group_candidates>", f"{indent}    <metric_candidates>")
+    group = _dict(choice.get("group"))
+    lines.append(
+        f'{indent}    <group field="{_xml(_text(group.get("field_id")))}" type="{_xml(_text(group.get("type")))}" source="source_binding" />'
     )
+    lines.append(f"{indent}    <metric_candidates>")
     for item in choice.get("metric_candidates") or ():
         if _text(item.get("kind")) == "count_records":
             lines.append(
@@ -620,12 +625,6 @@ def _selected_candidate(
     label: str,
 ) -> dict[str, Any]:
     return selected_choice(raw_selection, raw_candidates, label=label)
-
-
-def _validate_group_selection(raw_selection: Any, candidate: Mapping[str, Any]) -> None:
-    selection = _dict(raw_selection)
-    if _text(selection.get("field_id")) != _text(candidate.get("field_id")):
-        raise ValueError("group selection mismatches candidate")
 
 
 def _validate_metric_selection(

@@ -4242,11 +4242,6 @@ def _matching_grouped_ranked_selection(
         if group and metric and function:
             return {
                 "source_binding_id": choice["source_binding_id"],
-                "group": {
-                    "selection_basis": "Selected from grouped/ranked operation choices.",
-                    "id": group["id"],
-                    "field_id": group["field"],
-                },
                 "metric": {
                     "selection_basis": "Selected from grouped/ranked operation choices.",
                     "id": metric["id"],
@@ -4329,7 +4324,6 @@ def _grouped_ranked_choices_from_prompt(prompt: str) -> tuple[dict[str, Any], ..
                 "source_binding_id": source_match.group(1),
                 "groups": tuple(
                     {
-                        "id": attrs.get("id", ""),
                         "field": attrs.get("field", ""),
                     }
                     for attrs in _xml_tag_attrs(body, "group")

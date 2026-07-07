@@ -539,7 +539,6 @@ def test_fact_planning_model_turn_summary_projects_selected_binding() -> None:
                     "answers": [
                         {
                             "requested_fact_id": "fact_1",
-                            "group": {"field_id": "staff_id"},
                             "metric": {"field_id": "calculated_pay"},
                             "function": {"value": "sum"},
                         }
@@ -551,6 +550,6 @@ def test_fact_planning_model_turn_summary_projects_selected_binding() -> None:
 
     assert summary == step_summary_json(
         StepSummaryItem(
-            text="Binding: group=staff_id metric=calculated_pay function=sum"
+            text="Binding: metric=calculated_pay function=sum"
         )
     )

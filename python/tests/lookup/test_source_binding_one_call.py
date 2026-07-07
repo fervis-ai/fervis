@@ -70,6 +70,7 @@ from fervis.lookup.plan_selection import (
 )
 from fervis.lookup.operation_families.source_binding_registry import (
     source_binding_metric_evidence_ids_by_requested_fact,
+    source_binding_metric_fit_surface_payload,
 )
 from fervis.lookup.source_binding.candidates.bound_payload import (
     _bound_sources_prompt_payload,
@@ -505,6 +506,72 @@ def test_ranked_aggregate_source_binding_keeps_selected_group_key_lineage():
 
     fulfillment = result.outcome.bound_sources[0].fulfillments[0]
     assert fulfillment.group_key_evidence_ids == ("source_1.root.unrelated",)
+
+
+def test_row_population_metric_fit_surface_is_backend_owned_count_basis():
+    base = _request_with_optional_params(
+        include_many_data_row_path=True,
+        include_secondary_metric_field=True,
+    )
+    fact = replace(
+        base.requested_facts[0],
+        description="sales count",
+        answer_outputs=(
+            RequestedFactAnswerOutput(
+                id="answer_1",
+                description="sales count",
+                role="ROW_POPULATION",
+            ),
+        ),
+    )
+    request = replace(
+        base,
+        question_contract=QuestionContract(requested_facts=(fact,)),
+        requested_facts=(fact,),
+        plan_selection=_selected_plan(plan_shape="aggregate_scalar"),
+    )
+
+    surface = source_binding_metric_fit_surface_payload(request)
+    requested_fact_surfaces = surface["requested_fact_metric_fit_surface"]
+    metric_candidates = requested_fact_surfaces[0]["metric_candidates"]
+    metric_evidence_ids = tuple(
+        candidate["metric_evidence_id"] for candidate in metric_candidates
+    )
+
+    assert metric_evidence_ids == ("row_population.data",)
+    assert source_binding_metric_evidence_ids_by_requested_fact(request) == {
+        "fact_1": ("row_population.data",),
+    }
+
+
+def test_measured_value_metric_fit_surface_uses_measured_fields_not_row_population():
+    base = _request_with_optional_params(
+        include_many_data_row_path=True,
+        include_secondary_metric_field=True,
+    )
+    fact = replace(
+        base.requested_facts[0],
+        description="sales total",
+        answer_outputs=(
+            RequestedFactAnswerOutput(
+                id="answer_1",
+                description="sales total",
+                role="MEASURED_VALUE",
+            ),
+        ),
+    )
+    request = replace(
+        base,
+        question_contract=QuestionContract(requested_facts=(fact,)),
+        requested_facts=(fact,),
+        plan_selection=_selected_plan(plan_shape="aggregate_scalar"),
+    )
+
+    metric_evidence_ids = source_binding_metric_evidence_ids_by_requested_fact(request)
+
+    assert metric_evidence_ids == {
+        "fact_1": ("source_1.data.amount", "source_1.data.secondary_amount"),
+    }
 
 
 def test_generate_source_binding_runs_one_model_turn():

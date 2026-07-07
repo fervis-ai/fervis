@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
+from fervis.lookup.question_contract import RequestedFact
 from fervis.lookup.source_binding.candidates import source_candidate_registry
 from fervis.lookup.source_binding.evidence_types import (
     evidence_item_can_measure,
@@ -77,6 +80,7 @@ def _metric_candidates_by_requested_fact(
     output: dict[str, list[dict[str, object]]] = {}
     seen_by_requested_fact: dict[str, set[str]] = {}
     relevant_field_refs = _relevant_field_refs_by_fact_candidate(request)
+    facts_by_id = {fact.id: fact for fact in request.requested_facts}
     for candidate_id in registry.prompt_candidate_ids:
         candidate = registry.candidates_by_id.get(candidate_id)
         if candidate is None:
@@ -87,18 +91,21 @@ def _metric_candidates_by_requested_fact(
         payload = candidate.payload or {}
         read_contract = _read_contract(payload)
         for requested_fact_id in requested_fact_ids:
-            include_row_count = _plan_shape_for_candidate(
+            fact = facts_by_id.get(requested_fact_id)
+            if fact is None:
+                continue
+            plan_shape = _plan_shape_for_candidate(
                 request,
                 requested_fact_id=requested_fact_id,
                 source_candidate_id=candidate.id,
-            ) in {
-                "aggregate_scalar",
-                "aggregate_by_group",
-                "ranked_aggregate",
-            }
+            )
+            evidence_policy = _metric_evidence_policy(
+                fact,
+                plan_shape=plan_shape,
+            )
             for item in _metric_evidence_items(
                 payload,
-                include_row_count=include_row_count,
+                evidence_policy=evidence_policy,
             ):
                 if not _metric_evidence_is_relevant(
                     item,
@@ -381,20 +388,105 @@ def _metric_evidence_source(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+@dataclass(frozen=True)
+class _MetricEvidencePolicy:
+    include_measured_fields: bool
+    include_row_population: bool
+
+
+class _MetricEvidenceKind(Enum):
+    MEASURED_FIELD = "measured_field"
+    ROW_POPULATION = "row_population"
+    UNSUPPORTED = "unsupported"
+
+
+def _metric_evidence_policy(
+    fact: RequestedFact,
+    *,
+    plan_shape: str,
+) -> _MetricEvidencePolicy:
+    roles = _answer_output_roles(fact)
+    supports_row_count_metric = _plan_shape_supports_row_count_metric(plan_shape)
+    if not roles:
+        return _legacy_metric_evidence_policy(
+            supports_row_count_metric=supports_row_count_metric,
+        )
+    return _role_scoped_metric_evidence_policy(
+        roles,
+        supports_row_count_metric=supports_row_count_metric,
+    )
+
+
+def _answer_output_roles(fact: RequestedFact) -> frozenset[str]:
+    return frozenset(
+        output.role for output in fact.support_answer_outputs if output.role
+    )
+
+
+def _role_scoped_metric_evidence_policy(
+    roles: frozenset[str],
+    *,
+    supports_row_count_metric: bool,
+) -> _MetricEvidencePolicy:
+    return _MetricEvidencePolicy(
+        include_measured_fields=bool(roles & {"ANSWER_VALUE", "MEASURED_VALUE"}),
+        include_row_population=(
+            "ROW_POPULATION" in roles and supports_row_count_metric
+        ),
+    )
+
+
+def _legacy_metric_evidence_policy(
+    *,
+    supports_row_count_metric: bool,
+) -> _MetricEvidencePolicy:
+    return _MetricEvidencePolicy(
+        include_measured_fields=True,
+        include_row_population=supports_row_count_metric,
+    )
+
+
 def _metric_evidence_items(
     payload: dict[str, Any],
     *,
-    include_row_count: bool,
+    evidence_policy: _MetricEvidencePolicy,
 ) -> tuple[dict[str, Any], ...]:
     return tuple(
         item
         for item in _metric_evidence_source(payload).get("evidence_items") or ()
         if isinstance(item, dict)
-        and (
-            evidence_item_can_measure(item)
-            or (include_row_count and str(item.get("type") or "") == "row_population")
+        and _metric_evidence_policy_allows(
+            evidence_policy,
+            _metric_evidence_kind(item),
         )
     )
+
+
+def _metric_evidence_policy_allows(
+    policy: _MetricEvidencePolicy,
+    evidence_kind: _MetricEvidenceKind,
+) -> bool:
+    if evidence_kind == _MetricEvidenceKind.MEASURED_FIELD:
+        return policy.include_measured_fields
+    if evidence_kind == _MetricEvidenceKind.ROW_POPULATION:
+        return policy.include_row_population
+    return False
+
+
+def _metric_evidence_kind(item: dict[str, Any]) -> _MetricEvidenceKind:
+    if str(item.get("type") or "") == "row_population":
+        return _MetricEvidenceKind.ROW_POPULATION
+    if evidence_item_can_measure(item):
+        return _MetricEvidenceKind.MEASURED_FIELD
+    return _MetricEvidenceKind.UNSUPPORTED
+
+
+def _plan_shape_supports_row_count_metric(plan_shape: str) -> bool:
+    return plan_shape in {
+        "aggregate_scalar",
+        "aggregate_by_group",
+        "ranked_aggregate",
+    }
 
 
 def _plan_shape_for_candidate(
