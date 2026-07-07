@@ -72,6 +72,7 @@ def build_source_binding_plan(
         fact.id: {output.id for output in fact.support_answer_outputs}
         for fact in request.requested_facts
     }
+    metric_answer_output_ids = _metric_answer_output_ids_by_requested_fact(request)
     metric_fit_reviews = metric_fit_interpretations_by_requested_fact(
         payload,
         request=request,
@@ -154,6 +155,10 @@ def build_source_binding_plan(
             requested_fact_id=requested_fact_id,
             answer_output_ids=set(target.answer_output_ids),
             required_answer_output_ids=set(target.required_answer_output_ids),
+            metric_answer_output_ids=metric_answer_output_ids.get(
+                requested_fact_id,
+                set(),
+            ),
             candidate=candidate,
             plan_shape=target.plan_shape,
             metric_fit_reviews_by_requested_output=metric_fit_reviews,
@@ -216,6 +221,19 @@ def build_source_binding_plan(
     plan = SourceBindingPlan(bound_sources=tuple(output))
     _require_complete_role_target_coverage(plan, request=request)
     return plan
+
+
+def _metric_answer_output_ids_by_requested_fact(
+    request: SourceBindingRequest,
+) -> dict[str, set[str]]:
+    return {
+        fact.id: {
+            output.id
+            for output in fact.support_answer_outputs
+            if output.role in {"MEASURED_VALUE", "ROW_POPULATION"}
+        }
+        for fact in request.requested_facts
+    }
 
 
 def _require_complete_role_target_coverage(

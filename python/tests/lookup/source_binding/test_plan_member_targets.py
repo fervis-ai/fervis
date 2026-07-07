@@ -64,6 +64,8 @@ from fervis.lookup.source_binding import (
     SourceBindingRequest,
     SourceBindingTurnPrompt,
 )
+from fervis.lookup.source_binding.candidates import SourceCandidate
+from fervis.lookup.source_binding.parser.fulfillment import parse_source_fulfillments
 from fervis.lookup.source_binding.schema import build_source_binding_schema
 from fervis.lookup.source_binding.plan_targets import SourceBindingTargetCompatibility
 from fervis.lookup.source_binding.role_selection import value_only_source_binding_plan
@@ -172,6 +174,77 @@ def test_source_binding_schema_scopes_param_surfaces_to_binding_target():
     assert set(
         source_2["properties"]["finite_choice_param_reviews"]["properties"]
     ) == {"sale_type"}
+
+
+def test_source_binding_schema_requires_only_selectable_fulfillment_outputs():
+    schema = build_source_binding_schema(
+        target_param_decision_ids_by_param={"target.source_1": {}},
+        target_finite_choice_values={"target.source_1": {}},
+        target_row_predicate_values={"target.source_1": {}},
+        target_finite_choice_test_ids={"target.source_1": {}},
+        target_finite_choice_normal_instance_test_ids={"target.source_1": {}},
+        target_row_predicate_test_ids={"target.source_1": {}},
+        target_population_roles={"target.source_1": ()},
+        target_requested_fact_ids={"target.source_1": "fact_1"},
+        metric_evidence_ids_by_requested_fact={
+            "fact_1": ("source_1.data.total",),
+        },
+        target_fulfillment_support_set_ids_by_answer_output={
+            "target.source_1": {
+                "answer_group": ("support.source_1.answer_group",),
+            },
+        },
+        target_required_fulfillment_answer_output_ids={
+            "target.source_1": ("answer_group", "answer_metric"),
+        },
+        target_population_binding_ids={
+            "target.source_1": ("pop.source_1.candidate_population",),
+        },
+    )
+    invocation_schema = _source_invocation_variants_by_target(schema)["target.source_1"]
+    fulfillment_schema = invocation_schema["properties"]["fulfillment_decisions"]
+
+    assert fulfillment_schema["required"] == ["answer_group"]
+    assert set(fulfillment_schema["properties"]) == {"answer_group"}
+    validate(
+        instance={
+            "outcome": {
+                "kind": "source_bindings",
+                "metric_fit_bases": {
+                    "fact_1": {
+                        "source_1.data.total": {
+                            "metric_meaning": "sales total",
+                            "fit_basis": "The selected metric answers the fact.",
+                        }
+                    }
+                },
+                "fit_basis_interpretations": {
+                    "fact_1": {
+                        "source_1.data.total": {
+                            "interpretation": "FITS_REQUESTED_ANSWER",
+                        }
+                    }
+                },
+                "source_invocations": [
+                    {
+                        **_minimal_source_invocation(
+                            "target.source_1",
+                            "pop.source_1.candidate_population",
+                        ),
+                        "fulfillment_decisions": {
+                            "answer_group": {
+                                "fulfillment_choice_id": (
+                                    "support.source_1.answer_group"
+                                ),
+                                "match_basis_explanation": "The selected group key.",
+                            },
+                        },
+                    }
+                ],
+            },
+        },
+        schema=schema,
+    )
 
 
 def test_source_binding_schema_accepts_known_target_arrays_without_enumeration():
@@ -545,6 +618,72 @@ def test_parse_source_binding_expands_backend_owned_closed_key_param_bindings():
         "51515151-0000-0000-0002-000000000001",
         "51515151-0000-0000-0002-000000000002",
     )
+
+
+def test_parse_source_fulfillment_derives_required_row_count_without_selectable_choice():
+    candidate = SourceCandidate(
+        id="source_1",
+        requested_fact_id="fact_1",
+        kind="read",
+        payload={
+            "evidence_items": [
+                {
+                    "evidence_id": "source_1.data.staff_id",
+                    "field_id": "staff_id",
+                    "type": "string",
+                },
+                {
+                    "evidence_id": "row_population.data",
+                    "type": "row_population",
+                    "row_source_id": "read.sales.data",
+                },
+            ],
+            "fulfillment_support_sets": [
+                {
+                    "answer_output_id": "answer_staff",
+                    "fulfillment_choice_id": "fulfillment_staff",
+                    "fulfillment_support_set_id": "support_staff",
+                    "fulfillment_slots": [
+                        {
+                            "group_key_evidence": [
+                                {"evidence_id": "source_1.data.staff_id"}
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    fulfillments = parse_source_fulfillments(
+        {
+            "answer_staff": {
+                "fulfillment_choice_id": "fulfillment_staff",
+                "match_basis_explanation": "Staff id is the grouped result key.",
+            }
+        },
+        requested_fact_id="fact_1",
+        answer_output_ids={"answer_staff", "answer_count"},
+        required_answer_output_ids={"answer_staff", "answer_count"},
+        metric_answer_output_ids={"answer_count"},
+        candidate=candidate,
+        plan_shape="aggregate_by_group",
+        metric_fit_reviews_by_requested_output={
+            "fact_1": {
+                "row_population.data": {
+                    "interpretation": "FITS_REQUESTED_ANSWER",
+                    "metric_meaning": "count of sales rows",
+                    "fit_basis": "The requested count is row cardinality.",
+                }
+            }
+        },
+    )
+    count_fulfillment = next(
+        fulfillment
+        for fulfillment in fulfillments
+        if fulfillment.answer_output_id == "answer_count"
+    )
+    assert count_fulfillment.row_count_basis_evidence_ids == ("row_population.data",)
 
 
 def test_closed_key_source_binding_retains_input_proofs_through_grouped_count_plan():

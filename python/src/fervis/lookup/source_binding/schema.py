@@ -486,7 +486,11 @@ def _fulfillment_decisions_schema(
         "type": "object",
         "additionalProperties": False,
         "properties": properties,
-        "required": list(required_answer_output_ids),
+        "required": [
+            output_id
+            for output_id in required_answer_output_ids
+            if output_id in properties
+        ],
     }
     return schema
 
