@@ -605,7 +605,7 @@ def _row_predicate_reviews_schema(
             )
             for predicate_id, values in reviewed_values.items()
         },
-        required=(),
+        required=tuple(reviewed_values),
     )
 
 

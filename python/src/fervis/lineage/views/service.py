@@ -287,7 +287,7 @@ def _run_clarification_requests(
     run: RunRow, *, rows: LineageRows
 ) -> tuple[ClarificationRequestView, ...]:
     return tuple(
-        _clarification_request_view(item)
+        _clarification_request_view(item, rows=rows)
         for item in rows.clarification_requests
         if item.run_id == run.run_id
     )
@@ -592,15 +592,46 @@ def _runtime_error_view(
 
 def _clarification_request_view(
     clarification: ClarificationRequestRow,
+    *,
+    rows: LineageRows,
 ) -> ClarificationRequestView:
     return ClarificationRequestView(
         clarification_id=clarification.clarification_id,
         basis=clarification.basis.value,
         question_text=clarification.question_text,
+        requested_fact_id=_clarification_requested_fact_id(clarification, rows=rows),
+        known_input_id=_known_input_id_from_refs(clarification.evidence_refs_json),
         fact_result_id=clarification.fact_result_id,
         step_id=clarification.step_id,
         options=clarification.options_json,
         evidence_refs=clarification.evidence_refs_json,
+    )
+
+
+def _clarification_requested_fact_id(
+    clarification: ClarificationRequestRow,
+    *,
+    rows: LineageRows,
+) -> str:
+    if not clarification.fact_result_id:
+        return ""
+    fact_result = next(
+        (
+            item
+            for item in rows.fact_results
+            if item.run_id == clarification.run_id
+            and item.fact_result_id == clarification.fact_result_id
+        ),
+        None,
+    )
+    return fact_result.requested_fact_id if fact_result is not None else ""
+
+
+def _known_input_id_from_refs(refs: tuple[str, ...]) -> str:
+    prefix = "known_input:"
+    return next(
+        (ref.removeprefix(prefix) for ref in refs if ref.startswith(prefix)),
+        "",
     )
 
 

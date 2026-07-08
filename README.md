@@ -39,6 +39,8 @@ fervis migrate
 fervis doctor
 ```
 
+`fervis init` writes `config/fervis.json`, including host metadata such as the
+organization name, API description, and timezone used for relative dates.
 Run `fervis runtime ask` only after `fervis doctor` passes.
 
 ## Models

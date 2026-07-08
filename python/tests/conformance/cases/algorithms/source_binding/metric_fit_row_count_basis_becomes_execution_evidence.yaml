@@ -13,4 +13,4 @@ input:
 expect:
   result_contains:
     metric_measure_field_ids: []
-    row_count_basis_evidence_ids: [row_population.data]
+    row_count_basis_evidence_ids: [row_population.rs_fe04a78e484397a4]

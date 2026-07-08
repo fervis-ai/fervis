@@ -157,6 +157,7 @@ def _project_schema() -> dict[str, object]:
         "host": {
             "organization_name": "Shop",
             "about_api": "The Shop API exposes orders and inventory records.",
+            "timezone": "UTC",
         },
         "routes": {"prefix": "/fervis/"},
         "sources": [

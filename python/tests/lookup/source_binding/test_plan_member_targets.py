@@ -72,6 +72,9 @@ from fervis.lookup.source_binding.role_selection import value_only_source_bindin
 from fervis.lookup.source_binding.parser import parse_source_binding
 from fervis.lookup.source_binding.model import SourceBindingPlan
 from fervis.lookup.orchestration.pipeline import _bound_plan_selection_from_plan_selection
+from fervis.lookup.operation_families.source_binding_registry import (
+    source_binding_metric_evidence_ids_by_requested_fact,
+)
 from tests.lookup.source_binding_helpers import (
     source_binding_target_id_for_candidate,
     source_fulfills_by_row_population_for_candidate,
@@ -247,6 +250,54 @@ def test_source_binding_schema_requires_only_selectable_fulfillment_outputs():
     )
 
 
+def test_source_binding_schema_requires_exposed_row_predicate_reviews():
+    schema = build_source_binding_schema(
+        target_param_decision_ids_by_param={"target.source_1": {}},
+        target_finite_choice_values={"target.source_1": {}},
+        target_row_predicate_values={
+            "target.source_1": {
+                "rp.source_1.row.data.is_deposited": ("true", "false"),
+            },
+        },
+        target_finite_choice_test_ids={"target.source_1": {}},
+        target_finite_choice_normal_instance_test_ids={"target.source_1": {}},
+        target_row_predicate_test_ids={
+            "target.source_1": {
+                "rp.source_1.row.data.is_deposited": ("membership_test_1",),
+            },
+        },
+        target_population_roles={"target.source_1": ()},
+        target_requested_fact_ids={"target.source_1": "fact_1"},
+        metric_evidence_ids_by_requested_fact={},
+        target_fulfillment_support_set_ids_by_answer_output={"target.source_1": {}},
+        target_required_fulfillment_answer_output_ids={"target.source_1": ()},
+        target_population_binding_ids={
+            "target.source_1": ("pop.source_1.candidate_population",),
+        },
+    )
+    invocation_schema = _source_invocation_variants_by_target(schema)["target.source_1"]
+    row_reviews_schema = invocation_schema["properties"]["row_predicate_reviews"]
+
+    assert row_reviews_schema["required"] == ["rp.source_1.row.data.is_deposited"]
+    with pytest.raises(ValidationError):
+        validate(
+            instance={
+                "outcome": {
+                    "kind": "source_bindings",
+                    "metric_fit_bases": {},
+                    "fit_basis_interpretations": {},
+                    "source_invocations": [
+                        _minimal_source_invocation(
+                            "target.source_1",
+                            "pop.source_1.candidate_population",
+                        )
+                    ],
+                },
+            },
+            schema=schema,
+        )
+
+
 def test_source_binding_schema_accepts_known_target_arrays_without_enumeration():
     schema = build_source_binding_schema(
         target_param_decision_ids_by_param={
@@ -380,6 +431,29 @@ def test_source_binding_prompt_caps_invocations_by_compatible_plan_size():
     assert source_invocations_schema["maxItems"] == 2
 
 
+def test_source_binding_prompt_scopes_plan_selection_basis_to_api_read():
+    request = _closed_key_grouped_staff_sales_request()
+    note = "Uses row-level sales records; grouping and counting still happen later."
+    plan = request.plan_selection.plan_selections[0]
+    request = replace(
+        request,
+        plan_selection=PlanSelectionSet(plan_selections=(replace(plan, basis=note),)),
+    )
+    prompt = SourceBindingTurnPrompt(request)
+    target = _only_binding_target(prompt)
+    xml = source_binding_candidates_xml(prompt.source_invocation_candidate_payload())
+
+    api_read = f'<api_read id="{target["source_candidate_id"]}"'
+    note_node = f"<selection_note>{note}</selection_note>"
+
+    assert api_read in xml
+    assert note_node in xml
+    api_read_start = xml.index(api_read)
+    note_start = xml.index(note_node)
+    input_params_start = xml.index("<input_params>", api_read_start)
+    assert api_read_start < note_start < input_params_start
+
+
 def test_closed_key_grouped_identity_param_is_backend_owned_not_model_authored():
     request = _closed_key_grouped_staff_sales_request()
     prompt = SourceBindingTurnPrompt(request)
@@ -483,6 +557,7 @@ def test_closed_key_grouped_identity_param_scopes_group_key_fulfillment_choices(
 
 def test_parse_source_binding_rejects_closed_key_param_with_mismatched_group_key():
     request = _closed_key_grouped_staff_sales_request()
+    row_population_evidence_id = _only_metric_evidence_id(request)
     prompt = SourceBindingTurnPrompt(request)
     target = _only_binding_target(prompt)
     candidate = _prompt_candidates_by_id(prompt.source_invocation_candidate_payload())[
@@ -496,7 +571,7 @@ def test_parse_source_binding_rejects_closed_key_param_with_mismatched_group_key
                     "kind": "source_bindings",
                     "metric_fit_bases": {
                         "fact_1": {
-                            "row_population.data": {
+                            row_population_evidence_id: {
                                 "metric_meaning": "count of sales rows",
                                 "fit_basis": (
                                     "The requested sales count is row cardinality."
@@ -506,7 +581,7 @@ def test_parse_source_binding_rejects_closed_key_param_with_mismatched_group_key
                     },
                     "fit_basis_interpretations": {
                         "fact_1": {
-                            "row_population.data": {
+                            row_population_evidence_id: {
                                 "interpretation": "FITS_REQUESTED_ANSWER",
                             }
                         }
@@ -549,6 +624,7 @@ def test_parse_source_binding_rejects_closed_key_param_with_mismatched_group_key
 
 def test_parse_source_binding_expands_backend_owned_closed_key_param_bindings():
     request = _closed_key_grouped_staff_sales_request()
+    row_population_evidence_id = _only_metric_evidence_id(request)
     prompt = SourceBindingTurnPrompt(request)
     target = _only_binding_target(prompt)
     candidate = _prompt_candidates_by_id(prompt.source_invocation_candidate_payload())[
@@ -561,7 +637,7 @@ def test_parse_source_binding_expands_backend_owned_closed_key_param_bindings():
                 "kind": "source_bindings",
                 "metric_fit_bases": {
                     "fact_1": {
-                        "row_population.data": {
+                        row_population_evidence_id: {
                             "metric_meaning": "count of sales rows",
                             "fit_basis": "The requested sales count is row cardinality.",
                         }
@@ -569,7 +645,7 @@ def test_parse_source_binding_expands_backend_owned_closed_key_param_bindings():
                 },
                 "fit_basis_interpretations": {
                     "fact_1": {
-                        "row_population.data": {
+                        row_population_evidence_id: {
                             "interpretation": "FITS_REQUESTED_ANSWER",
                         }
                     }
@@ -698,6 +774,7 @@ def test_closed_key_source_binding_retains_input_proofs_through_grouped_count_pl
         _closed_key_model_output_with_single_staff_param(
             binding_target_id=target["binding_target_id"],
             candidate=candidate,
+            row_population_evidence_id=_only_metric_evidence_id(request),
         ),
         request=request,
     )
@@ -1473,13 +1550,14 @@ def _closed_key_model_output_with_single_staff_param(
     *,
     binding_target_id: str,
     candidate: dict[str, Any],
+    row_population_evidence_id: str,
 ) -> dict[str, Any]:
     return {
         "outcome": {
             "kind": "source_bindings",
             "metric_fit_bases": {
                 "fact_1": {
-                    "row_population.data": {
+                    row_population_evidence_id: {
                         "metric_meaning": "count of sales rows",
                         "fit_basis": "The requested sales count is row cardinality.",
                     }
@@ -1487,7 +1565,7 @@ def _closed_key_model_output_with_single_staff_param(
             },
             "fit_basis_interpretations": {
                 "fact_1": {
-                    "row_population.data": {
+                    row_population_evidence_id: {
                         "interpretation": "FITS_REQUESTED_ANSWER",
                     }
                 }
@@ -1762,6 +1840,13 @@ def _only_binding_target(prompt: SourceBindingTurnPrompt) -> dict[str, Any]:
     targets = _binding_targets(prompt)
     assert len(targets) == 1
     return targets[0]
+
+
+def _only_metric_evidence_id(request: SourceBindingRequest) -> str:
+    evidence_ids_by_fact = source_binding_metric_evidence_ids_by_requested_fact(request)
+    evidence_ids = evidence_ids_by_fact["fact_1"]
+    assert len(evidence_ids) == 1
+    return evidence_ids[0]
 
 
 def _target_for(

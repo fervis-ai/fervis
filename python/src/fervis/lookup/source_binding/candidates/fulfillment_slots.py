@@ -14,9 +14,6 @@ from fervis.lookup.source_binding.evidence_types import (
 )
 
 from ._shared import Any
-from .row_population import row_population_evidence_id
-
-
 @dataclass(frozen=True)
 class _EvidenceGroup:
     compatibility_basis: str
@@ -61,13 +58,14 @@ def _candidate_with_fulfillment_slots(
     output = dict(candidate)
     fulfillment_slots = [
         slot
-        for fact in requested_facts
+    for fact in requested_facts
         for answer_output in fact.support_answer_outputs
         for group in _answer_output_evidence_item_groups(
             support_evidence_items,
             answer_output_id=answer_output.id,
             answer_output_role=answer_output.role,
             row_population_path_ids=row_population_path_ids,
+            allow_scoped_metrics_for_row_population=support_field_refs is not None,
         )
         for slot in (
             _fulfillment_slot(
@@ -106,6 +104,7 @@ def _answer_output_evidence_item_groups(
     answer_output_id: str,
     answer_output_role: str,
     row_population_path_ids: tuple[str, ...],
+    allow_scoped_metrics_for_row_population: bool,
 ) -> tuple[_EvidenceGroup, ...]:
     explicitly_scoped = tuple(
         item
@@ -143,6 +142,9 @@ def _answer_output_evidence_item_groups(
         if _evidence_group_matches_answer_output_role(
             group,
             answer_output_role=answer_output_role,
+            allow_scoped_metrics_for_row_population=(
+                allow_scoped_metrics_for_row_population
+            ),
         )
     )
 
@@ -151,15 +153,35 @@ def _evidence_group_matches_answer_output_role(
     group: _EvidenceGroup,
     *,
     answer_output_role: str,
+    allow_scoped_metrics_for_row_population: bool,
 ) -> bool:
     if not answer_output_role:
         return True
-    allowed_kinds = FULFILLMENT_EVIDENCE_GROUP_KINDS_BY_ANSWER_ROLE.get(
-        answer_output_role
+    allowed_kinds = _allowed_evidence_group_kinds(
+        answer_output_role,
+        allow_scoped_metrics_for_row_population=allow_scoped_metrics_for_row_population,
     )
     if allowed_kinds is None:
         raise ValueError("unsupported answer output support role")
-    return bool(set(allowed_kinds) & _evidence_group_kinds(group))
+    allowed_kind_set = set(allowed_kinds)
+    group_kind_set = _evidence_group_kinds(group)
+    evidence_group_has_allowed_kind = bool(allowed_kind_set & group_kind_set)
+    return evidence_group_has_allowed_kind
+
+
+def _allowed_evidence_group_kinds(
+    answer_output_role: str,
+    *,
+    allow_scoped_metrics_for_row_population: bool,
+) -> tuple[str, ...] | None:
+    kinds = FULFILLMENT_EVIDENCE_GROUP_KINDS_BY_ANSWER_ROLE.get(answer_output_role)
+    if kinds is None:
+        return None
+    answer_role_is_row_population = answer_output_role == "ROW_POPULATION"
+    scoped_metric_support_is_allowed = allow_scoped_metrics_for_row_population
+    if answer_role_is_row_population and scoped_metric_support_is_allowed:
+        return (*kinds, "metric")
+    return kinds
 
 
 def _evidence_group_kinds(group: _EvidenceGroup) -> set[str]:
@@ -234,8 +256,7 @@ def _row_population_count_basis_items(
     return tuple(
         item
         for item in evidence_items
-        if str(item.get("evidence_id") or "") == row_population_evidence_id(row_path_id)
-        and str(item.get("type") or "") == "row_population"
+        if _evidence_item_is_row_population_for_path(item, row_path_id=row_path_id)
     )
 
 
@@ -248,7 +269,9 @@ def _with_structural_identity_items(
     seen = {str(item.get("evidence_id") or "") for item in output}
     for item in evidence_items:
         evidence_id = str(item.get("evidence_id") or "")
-        if evidence_id in seen or not _field_has_stable_identity_shape(item):
+        evidence_item_already_selected = evidence_id in seen
+        evidence_item_has_stable_identity = _field_has_stable_identity_shape(item)
+        if evidence_item_already_selected or not evidence_item_has_stable_identity:
             continue
         output.append(item)
         seen.add(evidence_id)
@@ -281,17 +304,31 @@ def _evidence_item_groups(
 
 def _field_can_group_rows(evidence_item: dict[str, Any]) -> bool:
     field_id = str(evidence_item.get("field_id") or "")
-    if not field_id:
+    field_has_id = bool(field_id)
+    if not field_has_id:
         return False
-    if evidence_item_can_measure(evidence_item):
+    field_is_measure = evidence_item_can_measure(evidence_item)
+    if field_is_measure:
         return False
-    return str(evidence_item.get("type") or "").lower() not in {
+    field_type = str(evidence_item.get("type") or "").lower()
+    field_type_can_group_rows = field_type not in {
         "any",
         "json",
         "object",
         "array",
         "list",
     }
+    return field_type_can_group_rows
+
+
+def _evidence_item_is_row_population_for_path(
+    item: dict[str, Any],
+    *,
+    row_path_id: str,
+) -> bool:
+    evidence_is_for_row_path = str(item.get("row_path_id") or "") == row_path_id
+    evidence_is_row_population = str(item.get("type") or "") == "row_population"
+    return evidence_is_for_row_path and evidence_is_row_population
 
 
 def _field_has_stable_identity_shape(evidence_item: dict[str, Any]) -> bool:

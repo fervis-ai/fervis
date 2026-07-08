@@ -500,7 +500,7 @@ def test_fervis_fastapi_router_exposes_question_lifecycle_routes() -> None:
 
     router = FastAPIIntegration(
         config=FervisConfig(
-            host=HostConfig(),
+            host=HostConfig(timezone="UTC"),
             routes=RuntimeRoutes(prefix="/fervis/"),
             model=ModelConfig(
                 default_provider="openai",

@@ -70,11 +70,10 @@ class PlanSelectionTurnPrompt(TurnPromptBase):
                 (
                     "Compare each source_candidate against the fact_text and answer_outputs in the same requested_fact block.",
                     "Use the source response rows, field names, row cardinality, input params, and read description to assess business meaning alignment.",
-                    "Use source_alignment=DIRECT when the source can plausibly answer the requested fact by itself.",
-                    "Use source_alignment=PARTIAL when the source contains concrete evidence needed for the requested fact, but needs another source or later computation to complete the answer.",
-                    "Use source_alignment=NOT_ALIGNED when the source is only related or shape-compatible; do not forward it.",
+                    "Use source_alignment=DIRECT when this source contains the complete raw ingredient set needed to answer the requested fact by itself, even if subsequent steps must choose params, filters, metrics, groups, aggregation, ranking, or rendering.",
+                    "Use source_alignment=PARTIAL when this source contains a necessary raw ingredient for the requested fact, but the fact cannot be answered without combining it with another source.",
+                    "Use source_alignment=NOT_ALIGNED when the source is only related, adjacent, or shape-compatible, or lacks the raw ingredients needed for the requested fact; do not forward it.",
                     "For each review, write basis before source_alignment.",
-                    "A source can be DIRECT even if source binding still needs to choose params, filters, metrics, or groups later.",
                 ),
             ),
             builder.instruction_block(

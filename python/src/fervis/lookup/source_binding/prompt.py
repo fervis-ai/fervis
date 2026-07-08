@@ -23,6 +23,10 @@ from fervis.lookup.source_binding.candidates import (
     source_binding_prompt_candidate_population_binding_ids,
     source_candidate_registry,
 )
+from fervis.lookup.source_binding.candidates.candidate_tree import (
+    CandidateTreeContext,
+    map_source_candidate_tree,
+)
 from fervis.lookup.source_binding.closed_key_params import (
     ClosedKeyParamBindingIndex,
     closed_key_param_binding_index,
@@ -193,6 +197,7 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                     "Use metric_contexts to understand what a metric field is likely measuring from its row path, same-row sibling fields, and scope fields.",
                     "Do not copy metric_context_id, same_row_field_paths, or scope_field_paths into output.",
                     "Do not treat metric context fields as selectable fulfillment evidence.",
+                    "Consider each api_read selection_note before choosing an invocation, but treat it as advisory guidance to evaluate against the read's evidence, not as source truth.",
                     "metric_fit_bases is keyed by requested_fact_id, then metric_evidence_id from Metric fit candidates.",
                     "metric_meaning states what the reviewed metric_evidence_id appears to measure from field_path, field_type, resource_names, and the referenced metric_context.",
                     "fit_basis evaluates whether the metric is the row-level or scalar measure that should be aggregated, ranked, compared, or otherwise computed to determine the requested answer output.",
@@ -364,8 +369,12 @@ class SourceBindingTurnPrompt(TurnPromptBase):
         registry = source_candidate_registry(self.request)
         targets = _prompt_binding_targets(self.request, registry=registry)
         closed_key_bindings = self._closed_key_bindings(targets, registry=registry)
+        payload = _candidate_payload_with_selection_notes(
+            source_binding_candidate_payload(self.request),
+            self.request,
+        )
         return closed_key_bindings.model_visible_candidate_payload(
-            source_binding_candidate_payload(self.request)
+            payload
         )
 
     def binding_targets_payload(self) -> dict[str, object]:
@@ -536,6 +545,54 @@ class SourceBindingTurnPrompt(TurnPromptBase):
             targets=targets,
             candidates_by_id=registry.candidates_by_id,
         )
+
+
+def _candidate_payload_with_selection_notes(
+    payload: dict[str, object],
+    request: SourceBindingRequest,
+) -> dict[str, object]:
+    notes = _selection_notes_by_fact_source(request)
+    if not notes:
+        return payload
+
+    def apply_note(
+        candidate: dict[str, Any],
+        context: CandidateTreeContext,
+    ) -> dict[str, Any]:
+        note = notes.get(
+            (
+                context.requested_fact_id,
+                str(candidate.get("source_candidate_id") or ""),
+            ),
+            "",
+        )
+        return {**candidate, "selection_note": note} if note else candidate
+
+    return map_source_candidate_tree(
+        payload,
+        apply_note,
+        top_level_keys=(),
+    )
+
+
+def _selection_notes_by_fact_source(
+    request: SourceBindingRequest,
+) -> dict[tuple[str, str], str]:
+    grouped: dict[tuple[str, str], list[str]] = {}
+    for plan in request.plan_selection.plan_selections:
+        basis = plan.basis.strip()
+        if not basis:
+            continue
+        for member in plan.source_members:
+            key = (plan.requested_fact_id, member.source_candidate_id)
+            notes = grouped.setdefault(key, [])
+            if basis not in notes:
+                notes.append(basis)
+    return {
+        key: " | ".join(notes)
+        for key, notes in grouped.items()
+        if notes
+    }
 
 
 def _source_invocations_max_items(

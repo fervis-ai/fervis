@@ -61,6 +61,7 @@ def validate_config_schema(payload: dict[str, object]) -> None:
         "about_api",
     ):
         _require_string(host, key, allow_blank=True)
+    _require_string(host, "timezone")
     routes = _require_mapping(payload, "routes")
     _require_string(routes, "prefix")
     model = _require_mapping(payload, "models")
@@ -148,7 +149,7 @@ def _unsupported_schema_keys(payload: dict[str, object]) -> tuple[str, ...]:
     if isinstance(host, dict):
         _collect_unknown_keys(
             host,
-            allowed={"organization_name", "about_api"},
+            allowed={"organization_name", "about_api", "timezone"},
             label="host",
             paths=paths,
         )
@@ -235,6 +236,7 @@ def config_to_schema(config: FervisConfig, *, framework: str) -> dict[str, objec
         "host": {
             "organization_name": config.host.organization_name,
             "about_api": config.host.about_api,
+            "timezone": config.host.timezone,
         },
         "routes": {"prefix": config.routes.prefix},
         "models": {
@@ -295,6 +297,7 @@ def add_source_schema(
 
 def _host_config(payload: dict[str, object]) -> HostConfig:
     return HostConfig(
+        timezone=str(payload.get("timezone") or ""),
         organization_name=str(payload.get("organization_name") or ""),
         about_api=str(payload.get("about_api") or ""),
     )

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy.engine import Engine
 
-from fervis.lineage.enums import RunResultKind, RuntimeErrorKind
+from fervis.lineage.enums import FactResultKind, RunResultKind, RuntimeErrorKind
 from fervis.lineage.ids import lineage_id
 from fervis.lineage.recorder import (
     RunResultWrite,
@@ -49,6 +50,7 @@ def terminal_result_for_run(engine: Engine, run_id: str) -> TerminalResult | Non
     runtime_error = metadata.tables["fervis_runtime_error_detail"]
     answer = metadata.tables["fervis_answer"]
     presentation = metadata.tables["fervis_answer_presentation"]
+    fact_result = metadata.tables["fervis_fact_result"]
     with sql_connection(engine) as connection:
         result = connection.execute(
             sa.select(run_result).where(run_result.c.run_id == run_id)
@@ -72,13 +74,53 @@ def terminal_result_for_run(engine: Engine, run_id: str) -> TerminalResult | Non
             )
             .order_by(presentation.c.created_at)
         ).scalar()
+        result_data = _terminal_result_data(
+            connection,
+            fact_result=fact_result,
+            run_id=run_id,
+            run_result_id=str(result_values["run_result_id"]),
+        )
     error_values = row_mapping(error_row) if error_row is not None else {}
     return TerminalResult(
         status=_terminal_status(str(result_values["result_kind"])),
         answer=answer_text,
-        result_data={"run_result_id": result_values["run_result_id"]},
+        result_data=result_data,
         error=str(error_values["message"]) if error_values else None,
     )
+
+
+def _terminal_result_data(
+    connection,
+    *,
+    fact_result,
+    run_id: str,
+    run_result_id: str,
+) -> dict[str, Any]:
+    clarification = connection.execute(
+        sa.select(fact_result.c.payload_json)
+        .where(
+            fact_result.c.run_id == run_id,
+            fact_result.c.result_kind == FactResultKind.NEEDS_CLARIFICATION.value,
+            fact_result.c.payload_json.is_not(None),
+        )
+        .order_by(fact_result.c.created_at)
+    ).scalar()
+    clarification_payload = _dict(clarification)
+    if clarification_payload:
+        return {
+            "kind": "needs_clarification",
+            "details": clarification_payload,
+        }
+    return {"run_result_id": run_result_id}
+
+
+def _dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        raw = json.loads(value)
+        return raw if isinstance(raw, dict) else {}
+    return {}
 
 
 def record_runtime_error_result(

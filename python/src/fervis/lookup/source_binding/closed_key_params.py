@@ -218,7 +218,11 @@ class ClosedKeyParamBindingIndex:
         choice_ids: tuple[str, ...],
     ) -> tuple[str, ...]:
         binding = self._binding_for_target(target_id)
-        if binding is None or answer_output_id != binding.answer_output_id:
+        target_has_no_closed_key_binding = binding is None
+        answer_output_is_not_closed_key = (
+            binding is not None and answer_output_id != binding.answer_output_id
+        )
+        if target_has_no_closed_key_binding or answer_output_is_not_closed_key:
             return choice_ids
         compatible = set(
             _closed_key_group_key_fulfillment_choice_ids(candidate, binding)
@@ -462,8 +466,11 @@ def _candidate_identity_param_id(
     params = tuple(
         param
         for param in candidate.params
-        if _param_identity_field(param) == identity_field
-        and value_ids <= _param_bindable_value_ids(param)
+        if _param_matches_closed_key_identity(
+            param,
+            identity_field=identity_field,
+            value_ids=value_ids,
+        )
     )
     if len(params) != 1:
         return ""
@@ -544,9 +551,28 @@ def _group_key_evidence_matches_identity(
     fields_by_id: dict[str, Mapping[str, object]],
     identity_field: str,
 ) -> bool:
-    if _evidence_identity_field(item, fields_by_id=fields_by_id) == identity_field:
+    evidence_identity_field = _evidence_identity_field(
+        item,
+        fields_by_id=fields_by_id,
+    )
+    evidence_identity_matches = evidence_identity_field == identity_field
+    if evidence_identity_matches:
         return True
-    return str(item.get("field_id") or "") == identity_field
+    evidence_field_id_matches_identity_field = (
+        str(item.get("field_id") or "") == identity_field
+    )
+    return evidence_field_id_matches_identity_field
+
+
+def _param_matches_closed_key_identity(
+    param: Mapping[str, object],
+    *,
+    identity_field: str,
+    value_ids: frozenset[str],
+) -> bool:
+    param_identity_matches = _param_identity_field(param) == identity_field
+    param_can_bind_all_key_values = value_ids <= _param_bindable_value_ids(param)
+    return param_identity_matches and param_can_bind_all_key_values
 
 
 def _candidate_fields_by_id(

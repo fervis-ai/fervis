@@ -763,6 +763,8 @@ def test_run_view_projects_needs_clarification_result_data_in_canonical_shape(
                     "id": "clarification_1",
                     "basis": "unresolved_reference",
                     "question": "Which store do you mean?",
+                    "requestedFactId": "run_clarification_result_data.fact",
+                    "knownInputId": "store",
                     "availableOptions": [{"id": "store_1", "label": "ABC Mall"}],
                     "evidenceRefs": ["known_input:store"],
                     "factResultId": "run_clarification_result_data.fact_result",

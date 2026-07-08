@@ -511,6 +511,8 @@ def _clarification_json(
         "clarification_id": clarification.clarification_id,
         "basis": clarification.basis,
         "question_text": clarification.question_text,
+        "requested_fact_id": clarification.requested_fact_id,
+        "known_input_id": clarification.known_input_id,
         "fact_result_id": clarification.fact_result_id,
         "step_id": clarification.step_id,
         "options": clarification.options,

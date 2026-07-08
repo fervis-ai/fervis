@@ -615,7 +615,11 @@ def _field_spec(payload: dict[str, Any]) -> dict[str, str]:
 
 def _rank_spec(payload: dict[str, Any]) -> dict[str, Any]:
     limit = payload.get("limit")
-    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+    limit_is_boolean = isinstance(limit, bool)
+    limit_is_integer = isinstance(limit, int) and not limit_is_boolean
+    limit_is_not_integer = not limit_is_integer
+    limit_is_not_positive = limit_is_integer and limit < 1
+    if limit_is_boolean or limit_is_not_integer or limit_is_not_positive:
         raise ValueError("rank.limit must be a positive integer")
     limit_value_id = _text(payload.get("limit_value_id"))
     return {
@@ -702,7 +706,9 @@ def _relation_field_roles(
     identity: bool,
     source_identity_field_ids: set[str],
 ) -> tuple[FieldBindingRole, ...]:
-    if identity or field_id in source_identity_field_ids:
+    field_is_explicit_identity = identity
+    field_is_source_identity = field_id in source_identity_field_ids
+    if field_is_explicit_identity or field_is_source_identity:
         return (FieldBindingRole.IDENTITY, FieldBindingRole.OUTPUT)
     return (FieldBindingRole.OUTPUT,)
 

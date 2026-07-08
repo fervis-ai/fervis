@@ -20,7 +20,7 @@ def test_fervis_catalog_returns_configured_fastapi_endpoint_contracts(
             "schema_version": "v0.1",
             "framework": "fastapi",
             "default_environment": "local",
-            "host": {"organization_name": "Acme", "about_api": "Acme operations API."},
+            "host": {"organization_name": "Acme", "about_api": "Acme operations API.", "timezone": "UTC"},
             "routes": {"prefix": "/fervis/"},
             "models": {
                 "providers": [
@@ -127,7 +127,7 @@ def test_fervis_catalog_returns_configured_flask_route_only_endpoints(
             "schema_version": "v0.1",
             "framework": "flask",
             "default_environment": "local",
-            "host": {"organization_name": "Acme", "about_api": "Acme operations API."},
+            "host": {"organization_name": "Acme", "about_api": "Acme operations API.", "timezone": "UTC"},
             "routes": {"prefix": "/fervis/"},
             "models": {
                 "providers": [
@@ -265,7 +265,7 @@ def test_fervis_catalog_reports_missing_flask_dependency_action(
             "schema_version": "v0.1",
             "framework": "flask",
             "default_environment": "local",
-            "host": {"organization_name": "Acme", "about_api": "Acme operations API."},
+            "host": {"organization_name": "Acme", "about_api": "Acme operations API.", "timezone": "UTC"},
             "routes": {"prefix": "/fervis/"},
             "models": {
                 "providers": [
@@ -340,7 +340,7 @@ def test_fervis_catalog_reports_missing_flask_submodule_dependency_action(
             "schema_version": "v0.1",
             "framework": "flask",
             "default_environment": "local",
-            "host": {"organization_name": "Acme", "about_api": "Acme operations API."},
+            "host": {"organization_name": "Acme", "about_api": "Acme operations API.", "timezone": "UTC"},
             "routes": {"prefix": "/fervis/"},
             "models": {
                 "providers": [
@@ -414,7 +414,7 @@ def test_fervis_catalog_reports_incompatible_flask_dependency_action(
             "schema_version": "v0.1",
             "framework": "flask",
             "default_environment": "local",
-            "host": {"organization_name": "Acme", "about_api": "Acme operations API."},
+            "host": {"organization_name": "Acme", "about_api": "Acme operations API.", "timezone": "UTC"},
             "routes": {"prefix": "/fervis/"},
             "models": {
                 "providers": [

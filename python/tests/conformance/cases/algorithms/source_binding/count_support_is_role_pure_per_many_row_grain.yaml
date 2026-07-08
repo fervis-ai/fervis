@@ -29,7 +29,7 @@ input:
             identity: {entity_ref: line_item, identity_field: line_item_id, primary_key: true, stable: true}
 expect:
   result_contains:
-    row_count_evidence_ids: [row_population.data.line_items, row_population.root]
+    row_count_evidence_ids: [row_population.rs_source_1_data_line_items, row_population.rs_source_1_root]
     row_count_evidence:
       - [data.line_items, rs_source_1_data_line_items]
       - [root, rs_source_1_root]

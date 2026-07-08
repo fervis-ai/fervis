@@ -234,7 +234,11 @@ def test_fervis_config_show_exposes_public_contract(tmp_path: Path) -> None:
         "name": "local",
         "source": "default_environment",
     }
-    assert payload["host"] == {"organization_name": "", "about_api": ""}
+    assert payload["host"] == {
+        "organization_name": "",
+        "about_api": "",
+        "timezone": "UTC",
+    }
     assert payload["models"]["default"] == {
         "provider": "openai",
         "model_key": "gpt-5.4-mini",
@@ -1061,7 +1065,7 @@ def test_fervis_django_integration_urls_are_importable() -> None:
 
     integration = DjangoIntegration(
         config=FervisConfig(
-            host=HostConfig(),
+            host=HostConfig(timezone="UTC"),
             routes=RuntimeRoutes(prefix="/fervis/"),
             model=ModelConfig(
                 default_provider="openai",
@@ -1095,7 +1099,7 @@ def test_fervis_fastapi_integration_mounts_router() -> None:
 
     integration = FastAPIIntegration(
         config=FervisConfig(
-            host=HostConfig(),
+            host=HostConfig(timezone="UTC"),
             routes=RuntimeRoutes(prefix="/fervis/"),
             model=ModelConfig(
                 default_provider="openai",
@@ -1896,6 +1900,7 @@ def test_fervis_init_existing_config_does_not_execute_fastapi_factory(
             "host": {
                 "organization_name": "",
                 "about_api": "",
+                "timezone": "UTC",
             },
             "routes": {"prefix": "/fervis"},
             "models": {
@@ -4849,6 +4854,7 @@ def _valid_schema(framework: str) -> dict[str, object]:
         "host": {
             "organization_name": "",
             "about_api": "",
+            "timezone": "UTC",
         },
         "routes": {"prefix": prefix},
         "models": {

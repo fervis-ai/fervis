@@ -214,6 +214,8 @@ class ClarificationRequestView:
     clarification_id: str
     basis: str
     question_text: str
+    requested_fact_id: str = ""
+    known_input_id: str = ""
     fact_result_id: str | None = None
     step_id: str | None = None
     options: tuple[dict[str, object], ...] = ()

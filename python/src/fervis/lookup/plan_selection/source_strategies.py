@@ -351,15 +351,25 @@ def _selected_support_set_groups_for_requirement(
 ) -> tuple[tuple[dict[str, Any], ...], ...]:
     support_options = plan_selection_support_options(candidate)
     validation_roles = shape_spec.validation_roles_for_requirement(requirement_id)
-    if validation_roles is not None and not any(
-        set(option.get("support_roles") or ()) & validation_roles
-        for option in support_options
-    ):
+    requirement_has_validation_roles = validation_roles is not None
+    validation_role_is_supported = (
+        any(
+            set(option.get("support_roles") or ()) & validation_roles
+            for option in support_options
+        )
+        if requirement_has_validation_roles
+        else True
+    )
+    if requirement_has_validation_roles and not validation_role_is_supported:
         return ()
-    if validation_roles is None and not support_options:
-        if shape_spec.allows_intrinsic_support_for_requirement(
-            requirement_id
-        ) and _candidate_has_intrinsic_source(candidate):
+    requirement_has_no_validation_roles = validation_roles is None
+    candidate_has_no_support_options = not support_options
+    if requirement_has_no_validation_roles and candidate_has_no_support_options:
+        intrinsic_support_is_allowed = (
+            shape_spec.allows_intrinsic_support_for_requirement(requirement_id)
+        )
+        candidate_has_intrinsic_source = _candidate_has_intrinsic_source(candidate)
+        if intrinsic_support_is_allowed and candidate_has_intrinsic_source:
             return ((),)
         return ()
     binding_roles = shape_spec.binding_roles_for_requirement(
@@ -380,13 +390,24 @@ def _selected_support_set_groups_for_requirement(
             )
         if support_sets:
             return (support_sets,)
-        if shape_spec.allows_intrinsic_support_for_requirement(requirement_id) and (
-            _candidate_has_intrinsic_source(candidate)
-            and _has_intrinsic_support_option(support_options)
-            and _intrinsic_support_matches_requirement(
+        intrinsic_support_is_allowed = (
+            shape_spec.allows_intrinsic_support_for_requirement(requirement_id)
+        )
+        candidate_has_intrinsic_source = _candidate_has_intrinsic_source(candidate)
+        intrinsic_support_option_exists = _has_intrinsic_support_option(
+            support_options
+        )
+        intrinsic_support_matches_requirement = (
+            _intrinsic_support_matches_requirement(
                 support_options,
                 requirement_id=requirement_id,
             )
+        )
+        if (
+            intrinsic_support_is_allowed
+            and candidate_has_intrinsic_source
+            and intrinsic_support_option_exists
+            and intrinsic_support_matches_requirement
         ):
             return ((),)
         return ()
@@ -403,17 +424,23 @@ def _selected_support_set_groups_for_requirement(
         for support_set in _raw_fulfillment_support_sets(candidate)
         if _support_set_binding_id(support_set) in selected_ids
     )
+    no_binding_support_sets_selected = not support_sets
+    intrinsic_support_is_allowed = (
+        shape_spec.allows_intrinsic_support_for_requirement(requirement_id)
+    )
+    intrinsic_support_option_exists = _has_intrinsic_support_option(
+        support_options,
+        binding_roles=binding_roles,
+    )
+    intrinsic_support_matches_requirement = _intrinsic_support_matches_requirement(
+        support_options,
+        requirement_id=requirement_id,
+    )
     if (
-        not support_sets
-        and shape_spec.allows_intrinsic_support_for_requirement(requirement_id)
-        and _has_intrinsic_support_option(
-            support_options,
-            binding_roles=binding_roles,
-        )
-        and _intrinsic_support_matches_requirement(
-            support_options,
-            requirement_id=requirement_id,
-        )
+        no_binding_support_sets_selected
+        and intrinsic_support_is_allowed
+        and intrinsic_support_option_exists
+        and intrinsic_support_matches_requirement
     ):
         return ((),)
     return shape_spec.support_set_groups_for_requirement(
@@ -430,13 +457,29 @@ def _has_intrinsic_support_option(
     binding_roles: frozenset[str] | None = None,
 ) -> bool:
     return any(
-        not option.get("binding_support_set_id")
-        and set(option.get("support_roles") or ())
-        and (
-            binding_roles is None
-            or set(option.get("support_roles") or ()) <= binding_roles
+        _support_option_is_intrinsic(
+            option,
+            binding_roles=binding_roles,
         )
         for option in support_options
+    )
+
+
+def _support_option_is_intrinsic(
+    option: dict[str, object],
+    *,
+    binding_roles: frozenset[str] | None,
+) -> bool:
+    option_has_no_binding_support_set = not option.get("binding_support_set_id")
+    support_roles = set(option.get("support_roles") or ())
+    option_has_support_roles = bool(support_roles)
+    option_roles_match_binding_roles = (
+        binding_roles is None or support_roles <= binding_roles
+    )
+    return (
+        option_has_no_binding_support_set
+        and option_has_support_roles
+        and option_roles_match_binding_roles
     )
 
 
@@ -484,10 +527,12 @@ def _source_strategy_members(
             requirement_ids.append(requirement_id)
         for support_set in support_sets:
             support_set_id = _support_set_binding_id(support_set)
-            if support_set_id and not any(
+            support_set_has_binding_id = bool(support_set_id)
+            support_set_already_selected = any(
                 _support_set_binding_id(item) == support_set_id
                 for item in support_sets_by_candidate[source_candidate_id]
-            ):
+            )
+            if support_set_has_binding_id and not support_set_already_selected:
                 support_sets_by_candidate[source_candidate_id].append(support_set)
     output: list[SourceStrategyMember] = []
     for source_candidate_id, support_sets in support_sets_by_candidate.items():

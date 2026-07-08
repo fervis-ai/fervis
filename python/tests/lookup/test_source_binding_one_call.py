@@ -510,6 +510,14 @@ def test_ranked_aggregate_source_binding_keeps_selected_group_key_lineage():
 
 def test_row_population_metric_fit_surface_is_backend_owned_count_basis():
     base = _request_with_optional_params(
+        read_eligibility=ReadEligibilityResult(
+            read_assessments=(
+                _retained_read_assessment(
+                    relevant_row_path_ids=("data",),
+                    relevant_field_refs=("sales.field.status",),
+                ),
+            )
+        ),
         include_many_data_row_path=True,
         include_secondary_metric_field=True,
     )
@@ -538,10 +546,141 @@ def test_row_population_metric_fit_surface_is_backend_owned_count_basis():
         candidate["metric_evidence_id"] for candidate in metric_candidates
     )
 
-    assert metric_evidence_ids == ("row_population.data",)
+    expected_row_population_id = f"row_population.{api_row_source_id('sales', 'data')}"
+    assert metric_evidence_ids == (expected_row_population_id,)
     assert source_binding_metric_evidence_ids_by_requested_fact(request) == {
-        "fact_1": ("row_population.data",),
+        "fact_1": (expected_row_population_id,),
     }
+
+
+def test_row_population_metric_fit_keeps_read_scoped_summary_metric():
+    request = _request_with_scoped_summary_count_metric()
+
+    surface = source_binding_metric_fit_surface_payload(request)
+    metric_candidates = surface["requested_fact_metric_fit_surface"][0][
+        "metric_candidates"
+    ]
+    metric_evidence_ids = tuple(
+        candidate["metric_evidence_id"] for candidate in metric_candidates
+    )
+
+    expected_row_population_id = (
+        f"row_population.{api_row_source_id('sales_summary', 'data')}"
+    )
+    assert metric_evidence_ids == (
+        expected_row_population_id,
+        "source_1.summary.total_count",
+    )
+    assert "source_1.data.item_count" not in metric_evidence_ids
+
+    prompt = SourceBindingTurnPrompt(request)
+    candidate = _source_candidate(
+        prompt.source_invocation_candidate_payload(),
+        requested_fact_id="fact_1",
+        read_id="sales_summary",
+    )
+    support_sets = _binding_surface(candidate).get("fulfillment_support_sets") or ()
+    fulfillment_metric_ids = {
+        item["evidence_id"]
+        for support_set in support_sets
+        if isinstance(support_set, dict)
+        and support_set.get("answer_output_id") == "answer_1"
+        for slot in support_set.get("fulfillment_slots") or ()
+        if isinstance(slot, dict)
+        for item in slot.get("metric_measure_evidence") or ()
+        if isinstance(item, dict)
+    }
+
+    assert fulfillment_metric_ids == {"source_1.summary.total_count"}
+
+
+def test_row_population_metric_fit_ids_do_not_collapse_across_candidates():
+    base = _request_with_optional_params(include_many_data_row_path=True)
+    read_eligibility = ReadEligibilityResult(
+        read_assessments=(
+            _retained_read_assessment(
+                source_candidate_id="source_1",
+                source_candidate_signature="source_1",
+                requested_fact_id="fact_1",
+                read_id="sales",
+                relevant_row_path_ids=("data",),
+            ),
+            _retained_read_assessment(
+                source_candidate_id="source_2",
+                source_candidate_signature="source_2",
+                requested_fact_id="fact_1",
+                read_id="returns",
+                relevant_row_path_ids=("data",),
+            ),
+        )
+    )
+    returns_read = EndpointRead(
+        id="returns",
+        endpoint_name="list_return_list",
+        resource_names=("return",),
+        row_paths=(
+            RowPath(id="data", path="data", cardinality=RowCardinality.MANY),
+        ),
+        fields=(
+            CatalogField(
+                ref="returns.field.return_id",
+                path="data.return_id",
+                row_path_id="data",
+                type="uuid",
+            ),
+        ),
+    )
+    catalog = RelationCatalog(
+        reads=(
+            *base.relation_catalog.reads,
+            returns_read,
+        )
+    )
+    catalog_selection = CatalogSelectionResult(
+        relation_catalog=catalog,
+        requested_fact_selections=(
+            RequestedFactCatalogSelection(
+                requested_fact_id="fact_1",
+                query_terms=("records",),
+                rankings=(
+                    CatalogSelectionRanking(read_id="sales", score=10),
+                    CatalogSelectionRanking(read_id="returns", score=9),
+                ),
+                selected_read_ids=("sales", "returns"),
+            ),
+        ),
+        selected_read_ids=("sales", "returns"),
+    )
+    request = replace(
+        base,
+        relation_catalog=catalog,
+        catalog_selection=catalog_selection,
+        plan_selection=_selected_plan(
+            source_candidate_ids=("source_1", "source_2"),
+            plan_shape="aggregate_scalar",
+        ),
+        read_eligibility=_read_eligibility_with_candidate_signatures(
+            read_eligibility,
+            requested_facts=base.requested_facts,
+            catalog_selection=catalog_selection,
+        ),
+    )
+
+    surface = source_binding_metric_fit_surface_payload(request)
+    metric_candidates = surface["requested_fact_metric_fit_surface"][0][
+        "metric_candidates"
+    ]
+    row_population_candidates = tuple(
+        candidate
+        for candidate in metric_candidates
+        if candidate["field_type"] == "row_population"
+    )
+    metric_evidence_ids = tuple(
+        candidate["metric_evidence_id"] for candidate in row_population_candidates
+    )
+
+    assert len(metric_evidence_ids) == 2
+    assert len(set(metric_evidence_ids)) == 2
 
 
 def test_measured_value_metric_fit_surface_uses_measured_fields_not_row_population():
@@ -1068,6 +1207,104 @@ def _request_with_metric_support(
     return _request_with_optional_params(
         read_eligibility=read_eligibility,
         include_secondary_metric_field=include_secondary_metric_field,
+    )
+
+
+def _request_with_scoped_summary_count_metric() -> SourceBindingRequest:
+    fact = RequestedFact(
+        id="fact_1",
+        description="sales count",
+        answer_subject=RequestedFactAnswerSubject(subject_text="sales"),
+        answer_outputs=(
+            RequestedFactAnswerOutput(
+                id="answer_1",
+                description="sales count",
+                role="ROW_POPULATION",
+            ),
+        ),
+    )
+    catalog = RelationCatalog(
+        reads=(
+            EndpointRead(
+                id="sales_summary",
+                endpoint_name="list_sales_summary",
+                resource_names=("sales",),
+                row_paths=(
+                    RowPath(id="data", path="data", cardinality=RowCardinality.MANY),
+                    RowPath(
+                        id="summary",
+                        path="summary",
+                        cardinality=RowCardinality.ONE,
+                    ),
+                ),
+                fields=(
+                    CatalogField(
+                        ref="sales_summary.field.sale_id",
+                        path="data.sale_id",
+                        row_path_id="data",
+                        type="uuid",
+                    ),
+                    CatalogField(
+                        ref="sales_summary.field.item_count",
+                        path="data.item_count",
+                        row_path_id="data",
+                        type="integer",
+                    ),
+                    CatalogField(
+                        ref="sales_summary.field.total_count",
+                        path="summary.total_count",
+                        row_path_id="summary",
+                        type="integer",
+                    ),
+                ),
+            ),
+        )
+    )
+    catalog_selection = CatalogSelectionResult(
+        relation_catalog=catalog,
+        requested_fact_selections=(
+            RequestedFactCatalogSelection(
+                requested_fact_id="fact_1",
+                query_terms=("sales",),
+                rankings=(CatalogSelectionRanking(read_id="sales_summary", score=10),),
+                selected_read_ids=("sales_summary",),
+            ),
+        ),
+        selected_read_ids=("sales_summary",),
+    )
+    scope = read_eligibility_candidate_surface(
+        ReadEligibilityRequest(
+            question="How many sales happened this month?",
+            question_contract=QuestionContract(requested_facts=(fact,)),
+            requested_facts=(fact,),
+            catalog_selection=catalog_selection,
+            conversation_context={},
+            available_values=(),
+        )
+    ).candidate_scopes[0]
+    read_eligibility = ReadEligibilityResult(
+        read_assessments=(
+            _retained_read_assessment(
+                source_candidate_id=scope.source_candidate_id,
+                source_candidate_signature=scope.source_candidate_signature,
+                requested_fact_id="fact_1",
+                read_id="sales_summary",
+                relevant_row_path_ids=("data", "summary"),
+                relevant_field_refs=("sales_summary.field.total_count",),
+            ),
+        )
+    )
+    return SourceBindingRequest(
+        question="How many sales happened this month?",
+        question_contract=QuestionContract(requested_facts=(fact,)),
+        requested_facts=(fact,),
+        relation_catalog=catalog,
+        catalog_selection=catalog_selection,
+        plan_selection=_selected_plan(
+            source_candidate_ids=(scope.source_candidate_id,),
+            plan_shape="aggregate_scalar",
+        ),
+        read_eligibility=read_eligibility,
     )
 
 

@@ -61,11 +61,15 @@ def _grounding_issue_fact_result(
                 for item in issue.candidate_options
             ),
             candidate_refs=tuple(issue.candidates),
-            evidence_refs=tuple(issue.proof_refs),
+            evidence_refs=_grounding_issue_evidence_refs(issue),
         )
         for issue in issues
     )
     return FactResult(outcome=NeedsClarification(clarifications=clarifications))
+
+
+def _grounding_issue_evidence_refs(issue: GroundingIssue) -> tuple[str, ...]:
+    return (*issue.proof_refs, f"grounding:{issue.kind.value}")
 
 
 def _grounding_issue_basis(kind: GroundingTerminalKind) -> ClarificationBasis:

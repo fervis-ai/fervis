@@ -12,7 +12,10 @@ def row_population_evidence_item(
     if not row_source_id:
         raise ValueError("row population evidence requires row source")
     return {
-        "evidence_id": row_population_evidence_id(row_path_id),
+        "evidence_id": row_population_evidence_id(
+            row_path_id,
+            row_source_id=row_source_id,
+        ),
         "field_id": row_path_id,
         "label": row_path_id,
         "row_path_id": row_path_id,
@@ -22,5 +25,11 @@ def row_population_evidence_item(
     }
 
 
-def row_population_evidence_id(row_path_id: str) -> str:
+def row_population_evidence_id(
+    row_path_id: str,
+    *,
+    row_source_id: str = "",
+) -> str:
+    if row_source_id:
+        return f"row_population.{row_source_id}"
     return f"row_population.{row_path_id}"

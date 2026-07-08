@@ -243,6 +243,10 @@ def _clarification_data(request: ClarificationRequestView) -> dict[str, Any]:
         "factResultId": request.fact_result_id,
         "stepId": request.step_id,
     }
+    if request.requested_fact_id:
+        payload["requestedFactId"] = request.requested_fact_id
+    if request.known_input_id:
+        payload["knownInputId"] = request.known_input_id
     if request.options:
         payload["availableOptions"] = list(request.options)
     if request.evidence_refs:

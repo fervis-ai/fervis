@@ -589,6 +589,13 @@ def _source_member_xml_lines(member: dict[str, Any], *, indent: str) -> list[str
         )
     )
     lines.extend(
+        _text_node_xml_lines(
+            "selection_note",
+            member.get("selection_note"),
+            indent=indent + "  ",
+        )
+    )
+    lines.extend(
         _input_params_xml_lines(member.get("input_params"), indent=indent + "  ")
     )
     if member.get("bound_params"):

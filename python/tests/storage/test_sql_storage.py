@@ -38,16 +38,19 @@ from fervis.lineage.recorder import (
     ClarificationRequestWrite,
     ExecutionProofGraphWrite,
     FactResultWrite,
+    FactualTerminalRunResultWrite,
     LineageRecorderConflict,
     ModelCallAuditWrite,
     ModelCallWrite,
     RequestedFactWrite,
+    RunResultWrite,
     RunStepWrite,
 )
 from fervis.lineage.enums import (
     ClarificationBasis,
     FactResultKind,
     ModelCallStatus,
+    RunResultKind,
     RunStepKey,
     RunStepKind,
 )
@@ -954,6 +957,95 @@ def test_sql_storage_terminal_result_reads_active_transaction(
     assert _count_rows(root, "fervis_run_result") == 0
 
 
+def test_sql_storage_terminal_result_projects_clarification_payload(
+    tmp_path: Path,
+) -> None:
+    root = _migrated_fastapi_project(tmp_path)
+    bundle = _storage_bundle(root)
+    result = bundle.questions.ask(
+        AskRequest(
+            question="How many orders came in today?",
+            principal=QuestionPrincipal(principal_id="u1", tenant_id="t1"),
+            execution_mode=ExecutionMode.QUEUED,
+            conversation_id="c1",
+        )
+    )
+    run_id = result.run_id
+    clarification_payload = {
+        "clarifications": [
+            {
+                "id": "clarify_q1_grounding",
+                "requestedFactId": "fact_1",
+                "basis": "unresolved_reference",
+                "question": "Which store do you mean?",
+                "knownInputId": "q1_store",
+                "evidenceRefs": ["known_input:q1_store"],
+            }
+        ]
+    }
+
+    recorder = LineageRecorder(SQLLineageRecorderStore(bundle.engine))
+    recorder.record_step(
+        RunStepWrite(
+            step_id=f"{run_id}:render",
+            run_id=run_id,
+            sequence=1,
+            step_key=RunStepKey.RENDER,
+            kind=RunStepKind.DETERMINISTIC,
+        )
+    )
+    recorder.record_factual_terminal_result(
+        FactualTerminalRunResultWrite(
+            result=RunResultWrite(
+                run_result_id=f"{run_id}:result",
+                run_id=run_id,
+                result_kind=RunResultKind.FACTUAL_TERMINAL,
+            ),
+            requested_facts=(
+                RequestedFactWrite(
+                    requested_fact_id=f"{run_id}:fact",
+                    run_id=run_id,
+                    produced_by_step_id=f"{run_id}:render",
+                    fact_key="fact_1",
+                    answer_expression_family="scalar_aggregate",
+                ),
+            ),
+            fact_results=(
+                FactResultWrite(
+                    fact_result_id=f"{run_id}:fact-result",
+                    run_id=run_id,
+                    requested_fact_id=f"{run_id}:fact",
+                    produced_by_step_id=f"{run_id}:render",
+                    result_kind=FactResultKind.NEEDS_CLARIFICATION,
+                    evidence_refs_json=["known_input:q1_store"],
+                    payload_schema="fervis.fact_terminal",
+                    payload_schema_rev=1,
+                    payload_json=clarification_payload,
+                ),
+            ),
+            clarifications=(
+                ClarificationRequestWrite(
+                    clarification_id=f"{run_id}:clarification",
+                    run_id=run_id,
+                    fact_result_id=f"{run_id}:fact-result",
+                    basis=ClarificationBasis.UNRESOLVED_REFERENCE,
+                    question_text="Which store do you mean?",
+                    evidence_refs_json=["known_input:q1_store"],
+                ),
+            ),
+        )
+    )
+
+    terminal = terminal_result_for_run(bundle.engine, run_id)
+
+    assert terminal is not None
+    assert terminal.status == "NEEDS_CLARIFICATION"
+    assert terminal.result_data == {
+        "kind": "needs_clarification",
+        "details": clarification_payload,
+    }
+
+
 def test_fervis_runtime_ask_queued_uses_sqlite_storage_and_explain_reads_it(
     tmp_path: Path,
 ) -> None:
@@ -1608,6 +1700,7 @@ def _write_order_count_fastapi_app(root: Path) -> None:
     schema["host"] = {
         "organization_name": "Test Shop",
         "about_api": "The Test Shop API exposes order records.",
+        "timezone": "UTC",
     }
     schema["models"] = {
         "providers": [
