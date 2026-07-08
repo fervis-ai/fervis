@@ -103,7 +103,6 @@ def test_conversation_resolution_turn_artifact_carries_value_frame_projection():
         model_port=_ConversationResolutionModelPort(
             arguments={
                 "kind": "conversation_resolution",
-                "status": "resolved",
                 "current_question_text": "what about last month?",
                 "clause_resolutions": [
                     {
@@ -151,7 +150,6 @@ def test_conversation_resolution_dependency_separates_anchor_from_inherited_comp
         tool_name=CONVERSATION_RESOLUTION_TOOL_NAME,
         payload={
             "kind": "conversation_resolution",
-            "status": "resolved",
             "current_question_text": "How much is that in total sales?",
             "clause_resolutions": [
                 {
@@ -280,7 +278,6 @@ def test_context_frame_contract_preserves_prior_requested_value_frame():
         tool_name=CONVERSATION_RESOLUTION_TOOL_NAME,
         payload={
             "kind": "conversation_resolution",
-            "status": "resolved",
             "current_question_text": (
                 "And how much did she make yesterday? and where did she work?"
             ),
@@ -441,7 +438,6 @@ def test_conversation_resolution_projects_first_class_context_overlay():
         tool_name=CONVERSATION_RESOLUTION_TOOL_NAME,
         payload={
             "kind": "conversation_resolution",
-            "status": "resolved",
             "current_question_text": (
                 "And how much did she make yesterday? and where did she work?"
             ),
@@ -616,7 +612,6 @@ def test_conversation_resolution_overlay_question_contract_context_uses_value_fr
             tool_name=CONVERSATION_RESOLUTION_TOOL_NAME,
             payload={
                 "kind": "conversation_resolution",
-                "status": "resolved",
                 "current_question_text": "How much is that in total sales?",
                 "clause_resolutions": [
                     {
@@ -688,7 +683,6 @@ def test_conversation_resolution_source_binding_payload_exposes_stable_annotatio
             tool_name=CONVERSATION_RESOLUTION_TOOL_NAME,
             payload={
                 "kind": "conversation_resolution",
-                "status": "resolved",
                 "current_question_text": "How many were open today?",
                 "clause_resolutions": [
                     {
@@ -747,7 +741,6 @@ def test_conversation_resolution_overlay_projects_entity_references_as_question_
         tool_name=CONVERSATION_RESOLUTION_TOOL_NAME,
         payload={
             "kind": "conversation_resolution",
-            "status": "resolved",
             "current_question_text": "And how much did she make for that yesterday?",
             "clause_resolutions": [
                 {
@@ -921,7 +914,6 @@ def test_conversation_resolution_derives_resolved_input_from_selected_memory_anc
         tool_name=CONVERSATION_RESOLUTION_TOOL_NAME,
         payload={
             "kind": "conversation_resolution",
-            "status": "resolved",
             "current_question_text": "How much did she make yesterday?",
             "clause_resolutions": [
                 {
@@ -1040,7 +1032,6 @@ def test_conversation_resolution_handoff_uses_selected_memory_not_preserve_terms
         tool_name=CONVERSATION_RESOLUTION_TOOL_NAME,
         payload={
             "kind": "conversation_resolution",
-            "status": "resolved",
             "current_question_text": "What about her for then?",
             "clause_resolutions": [
                 {
@@ -1189,7 +1180,6 @@ def test_conversation_resolution_entity_handoff_is_text_only_without_authority()
         tool_name=CONVERSATION_RESOLUTION_TOOL_NAME,
         payload={
             "kind": "conversation_resolution",
-            "status": "resolved",
             "current_question_text": "How much did she make yesterday?",
             "clause_resolutions": [
                 {
@@ -1303,7 +1293,6 @@ def test_conversation_resolution_derives_time_value_input_from_scope_memory_anch
         tool_name=CONVERSATION_RESOLUTION_TOOL_NAME,
         payload={
             "kind": "conversation_resolution",
-            "status": "resolved",
             "current_question_text": "ABC Mall",
             "clause_resolutions": [
                 {
@@ -1403,7 +1392,6 @@ def test_parser_accepts_contextual_frame_when_preserve_terms_are_kept():
         tool_name=CONVERSATION_RESOLUTION_TOOL_NAME,
         payload={
             "kind": "conversation_resolution",
-            "status": "resolved",
             "current_question_text": "How much did she make yesterday?",
             "clause_resolutions": [
                 {
@@ -1511,7 +1499,14 @@ def test_conversation_resolution_prompt_exposes_available_context_frames():
 
     assert "Available context frames:" in invocation.prompt_text
     assert "requested_value_frame.context_frame_choices" in invocation.prompt_text
+    assert "status=standalone" not in invocation.prompt_text
+    assert "status=resolved" not in invocation.prompt_text
+    assert "status=needs_clarification" not in invocation.prompt_text
+    assert 'unresolved.why_unresolved=""' in invocation.prompt_text
+    assert "unresolved.candidate_interpretations=[]" in invocation.prompt_text
     schema = invocation.provider_schema[CONVERSATION_RESOLUTION_TOOL_NAME]
+    assert "status" not in schema["properties"]
+    assert "status" not in schema["required"]
     clause_schema = schema["properties"]["clause_resolutions"]["items"]
     frame_schema = clause_schema["properties"]["requested_value_frame"]
     assert "literal_frame_status" not in frame_schema["properties"]

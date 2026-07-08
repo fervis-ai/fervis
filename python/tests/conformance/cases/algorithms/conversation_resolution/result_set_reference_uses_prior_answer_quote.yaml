@@ -20,7 +20,6 @@ input:
           label: row set
   payload:
     kind: conversation_resolution
-    status: resolved
     current_question_text: What shades were in those sales?
     clause_resolutions:
       - current_clause_text: What shades were in those sales

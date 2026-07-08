@@ -16,7 +16,6 @@ input:
         - {memory_id: mem_1, text: Alice}
   payload:
     kind: conversation_resolution
-    status: resolved
     current_question_text: Where did she work?
     clause_resolutions:
       - current_clause_text: Where did she work?

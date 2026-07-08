@@ -1307,7 +1307,6 @@ def _conversation_resolution_payload_from_prompt(prompt: str) -> dict[str, Any]:
     current_question = _current_question_from_prompt(prompt)
     return {
         "kind": "conversation_resolution",
-        "status": "standalone",
         "current_question_text": current_question,
         "clause_resolutions": [],
         "unresolved": _resolved_unresolved(),
@@ -1484,7 +1483,6 @@ def _conversation_resolution_clause_payload(
             ]
     return {
         "kind": "conversation_resolution",
-        "status": "resolved",
         "current_question_text": current_question,
         "clause_resolutions": [
             {

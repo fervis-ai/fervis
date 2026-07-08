@@ -89,9 +89,13 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                 (
                     "Return a conversation resolution result for the current user utterance.",
                     "If the current question can already be answered without prior turns, "
-                    "set status=standalone and set clause_resolutions=[].",
-                    "If context is needed, set status=resolved and produce "
-                    "one clause_resolution for each answerable clause.",
+                    "set clause_resolutions=[] and unresolved.unresolved_kind=none.",
+                    "If context is needed and sufficient, produce one "
+                    "clause_resolution for each answerable clause and set "
+                    "unresolved.unresolved_kind=none.",
+                    "When unresolved.unresolved_kind=none, set "
+                    'unresolved.why_unresolved="" and '
+                    "unresolved.candidate_interpretations=[].",
                     "A standalone factual question can be answered without reading prior "
                     "turns, memory cards, or transcript context.",
                     "Use visible context sources only when the current question is not "
@@ -131,8 +135,8 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                     "mark that frame use_frame and mark every other frame "
                     "not_for_this_clause or current_text_names_different_value.",
                     "If multiple prior frames seem necessary for the requested "
-                    "value frame, the clause is not resolved; use "
-                    "status=needs_clarification and explain the competing frames.",
+                    "value frame, the clause is not resolved; use unresolved "
+                    "with multiple_meanings and explain the competing frames.",
                     "Use use_frame when the current clause continues that context "
                     "frame as the requested value frame.",
                     "Use current_text_names_different_value only when the current "
@@ -153,9 +157,9 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                     "current wording.",
                     "When current_value_surface.kind=broad_current_value, do not use "
                     "current_text_names_different_value.",
-                    "For status=resolved, do not use ambiguous. If a clause cannot "
+                    "For resolved clauses, do not use ambiguous. If a clause cannot "
                     "choose one value frame from current text and available context, "
-                    "use status=needs_clarification.",
+                    "return unresolved with clause_resolutions=[].",
                 ),
             ),
             builder.instruction_block(
@@ -215,17 +219,17 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                     "that clause without losing required terms.",
                     "Do not simplify or generalize a resolved measure, attribute, "
                     "relation, comparison, action, entity, row set, or scope.",
-                    "For status=standalone, clause_resolutions is empty because "
+                    "For self-sufficient questions, clause_resolutions is empty because "
                     "current_question_text already carries its own meaning.",
                 ),
             ),
             builder.instruction_block(
                 "Needs Clarification",
                 (
-                    "Use status=needs_clarification only when the current question "
+                    "Use unresolved only when the current question "
                     "plus visible context cannot determine one standalone factual "
                     "question.",
-                    "For needs_clarification, set clause_resolutions=[].",
+                    "When unresolved is used, set clause_resolutions=[].",
                     "If there are multiple plausible meanings, set "
                     "unresolved_kind=multiple_meanings and provide at least two "
                     "candidate_interpretations with complete integrated_question values.",
@@ -252,7 +256,7 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                     f"Return exactly one {CONVERSATION_RESOLUTION_TOOL_NAME} tool call.",
                     "Return only valid JSON arguments for that tool call.",
                     "Always include kind, current_question_text, "
-                    "clause_resolutions, unresolved, and status.",
+                    "clause_resolutions, and unresolved.",
                 ),
             ),
         )

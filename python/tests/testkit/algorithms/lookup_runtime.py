@@ -735,7 +735,6 @@ def _scripted_conversation_resolution_payload(
     current_question = _current_question_from_prompt(prompt)
     return {
         "kind": "conversation_resolution",
-        "status": "standalone",
         "current_question_text": current_question,
         "clause_resolutions": [],
         "unresolved": {
@@ -775,7 +774,6 @@ def _conversation_resolution_using_visible_memory(
     ]
     return {
         "kind": "conversation_resolution",
-        "status": "resolved" if dependencies else "standalone",
         "current_question_text": current_question,
         "clause_resolutions": (
             [
@@ -832,7 +830,6 @@ def _conversation_resolution_selecting_visible_memory(
     resolved = resolved_text or component["resolved_text"]
     return {
         "kind": "conversation_resolution",
-        "status": "resolved",
         "current_question_text": current_question,
         "clause_resolutions": [
             {

@@ -27,7 +27,6 @@ input:
       prior_answer_fact: products grouped by sale
   payload:
     kind: conversation_resolution
-    status: resolved
     current_question_text: How much is that in total sales?
     clause_resolutions:
       - current_clause_text: How much is that in total sales?

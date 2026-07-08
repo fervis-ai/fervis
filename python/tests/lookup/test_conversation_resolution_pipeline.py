@@ -63,7 +63,6 @@ def _memory_attribution_response(
     )
     return {
         "kind": "conversation_resolution",
-        "status": "resolved",
         "current_question_text": question,
         "clause_resolutions": [
             {
@@ -91,7 +90,6 @@ def _standalone_attribution_response(
 ) -> dict[str, object]:
     payload = {
         "kind": "conversation_resolution",
-        "status": "standalone",
         "current_question_text": question,
         "clause_resolutions": [],
         "unresolved": _resolved_unresolved(),
@@ -146,7 +144,6 @@ def _clause_resolution_conversation_response(
         )
     return {
         "kind": "conversation_resolution",
-        "status": "resolved",
         "current_question_text": question,
         "clause_resolutions": [
             {
@@ -202,7 +199,6 @@ def _clause_resolution_response(
         )
     return {
         "kind": "conversation_resolution",
-        "status": "resolved",
         "current_question_text": question,
         "clause_resolutions": [
             {
@@ -2358,7 +2354,7 @@ class _TwoFactActiveMemoryPlannerPort:
         self.prompts.append(prompt)
         tool_name = _select_conversation_resolution_tool_name(
             tool_specs,
-            payload={"status": "resolved"},
+            payload={},
         ) or (tool_specs[0].name if tool_specs else "")
         self.tool_names.append(tool_name)
         if tool_name in CONVERSATION_RESOLUTION_TOOL_NAMES:
@@ -2377,7 +2373,6 @@ class _TwoFactActiveMemoryPlannerPort:
                 CONVERSATION_RESOLUTION_TOOL_NAME,
                 {
                     "kind": "conversation_resolution",
-                    "status": "resolved",
                     "current_question_text": (
                         "For those sales, show the amount; also show current inventory."
                     ),
@@ -2645,7 +2640,7 @@ class _TwoSalesFactActiveMemoryPlannerPort:
         self.prompts.append(prompt)
         tool_name = _select_conversation_resolution_tool_name(
             tool_specs,
-            payload={"status": "resolved"},
+            payload={},
         ) or (tool_specs[0].name if tool_specs else "")
         self.tool_names.append(tool_name)
         if tool_name in CONVERSATION_RESOLUTION_TOOL_NAMES:
@@ -2664,7 +2659,6 @@ class _TwoSalesFactActiveMemoryPlannerPort:
                 CONVERSATION_RESOLUTION_TOOL_NAME,
                 {
                     "kind": "conversation_resolution",
-                    "status": "resolved",
                     "current_question_text": (
                         "For those sales, show the amount; also show sale id."
                     ),

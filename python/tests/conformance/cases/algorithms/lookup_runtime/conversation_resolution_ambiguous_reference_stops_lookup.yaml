@@ -19,7 +19,6 @@ input:
           display: "10"
   conversation_resolution:
     kind: conversation_resolution
-    status: needs_clarification
     current_question_text: How much was that?
     clause_resolutions: []
     unresolved:
