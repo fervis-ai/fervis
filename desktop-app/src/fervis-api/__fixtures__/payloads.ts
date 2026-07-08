@@ -306,6 +306,8 @@ export const clarificationRunFixture = {
           id: "clar_store",
           basis: "ambiguous_store",
           question: "Which store do you mean?",
+          requestedFactId: "rf_sales_count",
+          knownInputId: "input_store",
           availableOptions: [
             { id: "store_mall", label: "ABC Mall" },
             { id: "store_outlet", label: "BBS Outlet" }
@@ -338,6 +340,8 @@ export const freeTextClarificationRunFixture = {
           id: "clar_period",
           basis: "ambiguous_period",
           question: "Which March should I use?",
+          requestedFactId: "rf_sales_count",
+          knownInputId: "input_period",
           availableOptions: [],
           evidenceRefs: ["ev_period"],
           factResultId: null,

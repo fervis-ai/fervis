@@ -9,7 +9,7 @@ export interface ConversationSummary {
   readonly conversationId: string;
   readonly firstQuestion: string;
   readonly latestQuestionId: string;
-  readonly currentRunId: string;
+  readonly currentRunId: string | null;
   readonly status: RunStatus;
   readonly runCount: number;
   readonly updatedAt: string;
@@ -114,6 +114,8 @@ export interface ClarificationRequest {
   readonly id: string;
   readonly basis: string;
   readonly question: string;
+  readonly requestedFactId: string | null;
+  readonly knownInputId: string | null;
   readonly availableOptions: readonly ClarificationOption[];
   readonly evidenceRefs: readonly string[];
   readonly factResultId: string | null;

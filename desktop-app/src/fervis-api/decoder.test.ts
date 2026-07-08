@@ -32,6 +32,27 @@ describe("Fervis API boundary decoder", () => {
     );
   });
 
+  it("decodes legacy conversation summaries without a current run id", () => {
+    const decoded = decodeConversationList({
+      conversations: [
+        {
+          conversationId: "conv_legacy",
+          firstQuestion: "Which staff person made the most sales this month?",
+          latestQuestionId: "q_legacy",
+          currentRunId: null,
+          status: "RUNNING",
+          runCount: 1,
+          updatedAt: "2026-06-29T08:36:00.438620+00:00"
+        }
+      ]
+    });
+
+    if (!decoded.ok) {
+      throw new Error(decoded.error.message);
+    }
+    expect(decoded.value.conversations[0]?.currentRunId).toBeNull();
+  });
+
   it("decodes question state without requiring worker or usage diagnostics", () => {
     const decoded = decodeQuestionState(questionStateFixture);
 
@@ -74,7 +95,7 @@ describe("Fervis API boundary decoder", () => {
     expect(decoded.value.nextActions).toEqual([]);
   });
 
-  it("decodes live clarification payloads without option lists", () => {
+  it("decodes live clarification payloads with omitted optional lists", () => {
     const decoded = decodeQuestionState({
       questionId: "q_clarify",
       conversationId: "conv_clarify",
@@ -90,9 +111,10 @@ describe("Fervis API boundary decoder", () => {
               id: "clarification_1",
               basis: "missing_answer_metric",
               question: "Which metric should I use?",
+              requestedFactId: "fact_1",
+              knownInputId: "q1_store",
               factResultId: null,
-              stepId: null,
-              evidenceRefs: ["question_contract:needs_clarification"]
+              stepId: null
             }
           ]
         }
@@ -109,8 +131,159 @@ describe("Fervis API boundary decoder", () => {
     expect(
       decoded.value.resultData.details.clarifications[0]?.availableOptions
     ).toEqual([]);
+    expect(decoded.value.resultData.details.clarifications[0]?.evidenceRefs).toEqual([]);
+    expect(decoded.value.resultData.details.clarifications[0]?.requestedFactId).toBe(
+      "fact_1"
+    );
+    expect(decoded.value.resultData.details.clarifications[0]?.knownInputId).toBe(
+      "q1_store"
+    );
     expect(decoded.value.resultData.details.clarifications[0]?.factResultId).toBeNull();
     expect(decoded.value.resultData.details.clarifications[0]?.stepId).toBeNull();
+  });
+
+  it("decodes semantic known inputs without lookup text", () => {
+    const decoded = decodeQuestionRunList({
+      questionId: "q_clarify",
+      runs: [
+        {
+          runId: "run_clarify",
+          runNumber: 1,
+          triggerKind: "initial",
+          questionId: "q_clarify",
+          conversationId: "conv_clarify",
+          status: "NEEDS_CLARIFICATION",
+          answer: null,
+          resultData: {
+            kind: "needs_clarification",
+            details: {
+              clarifications: [
+                {
+                  id: "clarification_1",
+                  basis: "unresolved_reference",
+                  question: "Which staff identifier do you mean?",
+                  requestedFactId: "fact_1",
+                  knownInputId: "q1",
+                  evidenceRefs: [],
+                  factResultId: null,
+                  stepId: null
+                }
+              ]
+            }
+          },
+          explanation: null,
+          steps: [
+            {
+              stepId: "step_question_contract",
+              stepKey: "question_contract",
+              decisions: [],
+              semantic: {
+                requestedFacts: [],
+                knownInputs: [
+                  {
+                    inputId: "q1",
+                    text: "staff_id: 51515151-0000-0000-0002-000000009999",
+                    kind: "literal_text",
+                    role: "reference_value",
+                    description: "staff identifier",
+                    resolvedValueText: "51515151-0000-0000-0002-000000009999"
+                  }
+                ],
+                resolverCandidates: [],
+                groundingResults: [],
+                interpretedInputs: [],
+                conversationClauses: []
+              }
+            }
+          ],
+          error: null,
+          nextActions: []
+        }
+      ]
+    });
+
+    if (!decoded.ok) {
+      throw new Error(decoded.error.message);
+    }
+    expect(decoded.value.runs[0]?.steps[0]?.semantic.knownInputs[0]?.lookupText).toBe(
+      "51515151-0000-0000-0002-000000009999"
+    );
+  });
+
+  it("decodes lineage runtime errors using errorKind", () => {
+    const decoded = decodeRun({
+      runId: "run_failed",
+      runNumber: 1,
+      triggerKind: "initial",
+      questionId: "q_failed",
+      conversationId: "conv_failed",
+      status: "FAILED",
+      answer: null,
+      resultData: null,
+      error: "provider_bad_request",
+      explanation: {
+        inputs: { results: [] },
+        lineage: {
+          compact: {
+            questions: [
+              {
+                questionId: "q_failed",
+                conversationId: "conv_failed",
+                text: "How many stores do we have?",
+                runs: [
+                  {
+                    runId: "run_failed",
+                    runNumber: 1,
+                    triggerKind: "initial",
+                    steps: [
+                      {
+                        stepId: "step_1",
+                        stepKey: "question_contract",
+                        sequence: 1,
+                        decisions: [],
+                        semantic: {
+                          requestedFacts: [],
+                          knownInputs: [],
+                          resolverCandidates: [],
+                          groundingResults: [],
+                          interpretedInputs: [],
+                          conversationClauses: []
+                        },
+                        sourceReads: [],
+                        runtimeErrors: [
+                          {
+                            runtimeErrorDetailId: "runtime_error_1",
+                            errorKind: "infrastructure_failed",
+                            message: "provider_bad_request",
+                            failedStepId: "step_1",
+                            failedStepKey: "question_contract"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          verbose: { questions: [] }
+        }
+      },
+      steps: [],
+      worker: null,
+      usage: null,
+      nextActions: null
+    });
+
+    if (!decoded.ok) {
+      throw new Error(decoded.error.message);
+    }
+    const runtimeError =
+      decoded.value.explanation.lineage.compact.questions[0]?.runs[0]?.steps[0]
+        ?.runtimeErrors[0];
+    expect(runtimeError?.code).toBe("infrastructure_failed");
+    expect(runtimeError?.message).toBe("provider_bad_request");
+    expect(runtimeError?.retryable).toBe(false);
   });
 
   it("decodes structured next actions without CLI command text", () => {
@@ -321,5 +494,22 @@ describe("Fervis API boundary decoder", () => {
     }
     expect(decoded.value.status).toBe("FAILED");
     expect(decoded.value.nextActions[0]?.command).toContain("--debug");
+  });
+
+  it("decodes live failed run string errors", () => {
+    const decoded = decodeRun({
+      ...failedRunFixture,
+      error: "planning_failed"
+    });
+
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) {
+      throw new Error(decoded.error.message);
+    }
+    expect(decoded.value.error).toEqual({
+      code: "planning_failed",
+      message: "planning_failed",
+      retryable: false
+    });
   });
 });

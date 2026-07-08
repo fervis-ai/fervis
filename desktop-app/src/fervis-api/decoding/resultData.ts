@@ -61,14 +61,42 @@ function decodeClarification(raw: unknown): ClarificationRequest {
     id,
     basis: expectString(object.basis, "clarification.basis"),
     question: expectString(object.question, "clarification.question"),
+    requestedFactId: decodeOptionalNullableString(
+      object.requestedFactId,
+      "clarification.requestedFactId"
+    ),
+    knownInputId: decodeOptionalNullableString(
+      object.knownInputId,
+      "clarification.knownInputId"
+    ),
     availableOptions: decodeClarificationOptions(object.availableOptions),
-    evidenceRefs: expectStringArray(object.evidenceRefs, "clarification.evidenceRefs"),
+    evidenceRefs: decodeOptionalStringArray(
+      object.evidenceRefs,
+      "clarification.evidenceRefs"
+    ),
     factResultId: expectNullableString(
       object.factResultId,
       "clarification.factResultId"
     ),
     stepId: expectNullableString(object.stepId, "clarification.stepId")
   };
+}
+
+function decodeOptionalNullableString(raw: unknown, label: string): string | null {
+  if (raw === undefined) {
+    return null;
+  }
+  return expectNullableString(raw, label);
+}
+
+function decodeOptionalStringArray(
+  raw: unknown,
+  label: string
+): readonly string[] {
+  if (raw === undefined) {
+    return [];
+  }
+  return expectStringArray(raw, label);
 }
 
 function decodeClarificationOptions(

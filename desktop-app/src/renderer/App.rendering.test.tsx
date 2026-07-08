@@ -162,7 +162,7 @@ describe("Ledger app rendering", () => {
 
     fireEvent.click(screen.getByLabelText("Open connection settings"));
     expect(screen.getByLabelText("Base API URL")).toHaveValue(
-      "http://127.0.0.1:8000/v1"
+      "http://127.0.0.1:8000/fervis"
     );
     fireEvent.change(screen.getByLabelText("Base API URL"), {
       target: { value: "http://127.0.0.1:9000/fervis" }
