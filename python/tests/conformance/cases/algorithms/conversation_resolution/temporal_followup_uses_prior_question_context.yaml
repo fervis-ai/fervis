@@ -25,7 +25,6 @@ input:
       prior_answer_fact: money made yesterday
   payload:
     kind: conversation_resolution
-    status: resolved
     current_question_text: How about the day before?
     clause_resolutions:
       - current_clause_text: How about the day before

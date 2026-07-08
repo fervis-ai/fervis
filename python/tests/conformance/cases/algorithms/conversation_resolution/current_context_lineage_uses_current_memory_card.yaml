@@ -20,7 +20,6 @@ input:
           label: staff
   payload:
     kind: conversation_resolution
-    status: resolved
     current_question_text: How much did she make yesterday?
     clause_resolutions:
       - current_clause_text: How much did she make yesterday

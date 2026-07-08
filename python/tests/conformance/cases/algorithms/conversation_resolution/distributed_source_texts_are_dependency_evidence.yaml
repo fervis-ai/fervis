@@ -16,7 +16,6 @@ input:
         - {memory_id: mem_time, text: "2026-05-20T10:00:00Z"}
   payload:
     kind: conversation_resolution
-    status: resolved
     current_question_text: How much is that in total sales?
     clause_resolutions:
       - current_clause_text: How much is that in total sales?

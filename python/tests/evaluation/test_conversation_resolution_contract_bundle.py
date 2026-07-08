@@ -151,7 +151,6 @@ class _ConversationResolutionModelPort:
                 '{"tool": "submit_conversation_resolution", '
                 '"arguments": {'
                 '"kind": "conversation_resolution", '
-                '"status": "resolved", '
                 '"current_question_text": "What quantities were those?", '
                 '"clause_resolutions": [{'
                 '"current_clause_text": "What quantities were those", '

@@ -99,7 +99,7 @@ def run_conversation_resolution_schema_case(payload: dict[str, Any]) -> list[str
     ]["properties"]["clause_resolutions"]["items"]["properties"]["dependencies"]
     actual = {
         "tool_names": sorted(schemas),
-        "status_values": schema["properties"]["status"]["enum"],
+        "has_status": "status" in schema["properties"],
         "has_clause_resolutions": "clause_resolutions" in schema["properties"],
         "dependency_source_ids": dependency_schema["properties"]["meaning_components"][
             "items"

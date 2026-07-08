@@ -19,7 +19,6 @@ input:
       prior_answer_fact: money did we make last week
   payload:
     kind: conversation_resolution
-    status: resolved
     current_question_text: How about yesterday and where?
     clause_resolutions:
       - current_clause_text: How about yesterday

@@ -69,7 +69,6 @@ def test_conversation_resolution_model_turn_summary_projects_clause_semantics() 
             EventPayloadKey.PURPOSE: ModelTurnPurpose.CONVERSATION_RESOLUTION,
             EventPayloadKey.PARSED_ARGUMENTS: {
                 "kind": "conversation_resolution",
-                "status": "resolved",
                 "current_question_text": "what about last month?",
                 "clause_resolutions": [
                     {

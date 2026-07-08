@@ -47,10 +47,6 @@ def _conversation_resolution_schema(
                 ),
             },
             "unresolved": _unresolved_schema(source_id_schema),
-            "status": {
-                "type": "string",
-                "enum": ["standalone", "resolved", "needs_clarification"],
-            },
         },
     )
 

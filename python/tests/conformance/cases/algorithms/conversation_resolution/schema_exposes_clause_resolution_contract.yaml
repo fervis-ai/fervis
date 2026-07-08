@@ -17,7 +17,7 @@ input:
 expect:
   result_contains:
     tool_names: [submit_conversation_resolution]
-    status_values: [standalone, resolved, needs_clarification]
+    has_status: false
     has_clause_resolutions: true
     dependency_source_ids: [prior_1]
     unresolved_evidence_source_ids: [current_question, prior_1]

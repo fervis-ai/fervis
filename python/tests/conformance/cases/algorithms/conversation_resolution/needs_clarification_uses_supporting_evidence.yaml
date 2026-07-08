@@ -15,7 +15,6 @@ input:
       source_memory_ids: [mem_1]
   payload:
     kind: conversation_resolution
-    status: needs_clarification
     current_question_text: How much did that one make?
     clause_resolutions: []
     unresolved:

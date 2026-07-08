@@ -7,7 +7,7 @@ from fervis.lookup.provider_contract import provider_output_type
 
 ConversationResolutionOutput = provider_output_type(
     "ConversationResolutionOutput",
-    ("kind", "current_question_text", "clause_resolutions", "unresolved", "status"),
+    ("kind", "current_question_text", "clause_resolutions", "unresolved"),
 )
 ClauseResolutionOutput = provider_output_type(
     "ClauseResolutionOutput",

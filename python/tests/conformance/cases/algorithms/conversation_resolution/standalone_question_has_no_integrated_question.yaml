@@ -9,7 +9,6 @@ input:
   current_question: How much did she sell yesterday?
   payload:
     kind: conversation_resolution
-    status: standalone
     current_question_text: How much did she sell yesterday?
     clause_resolutions: []
     unresolved: {unresolved_kind: none, why_unresolved: "", candidate_interpretations: []}

@@ -48,7 +48,6 @@ def parse_conversation_resolution(
     output = provider_output.ConversationResolutionOutput.parse(payload)
     if output.kind != "conversation_resolution":
         raise ValueError("invalid conversation resolution kind")
-    resolution = _status(output.status)
     current_question_text = _current_question_text(
         output=output,
         current_question=current_question,
@@ -65,6 +64,10 @@ def parse_conversation_resolution(
     unresolved = _unresolved(
         output.unresolved,
         context=context,
+    )
+    resolution = _derived_resolution(
+        clause_resolutions=clause_resolutions,
+        unresolved=unresolved,
     )
     used_sources = _used_sources(
         clause_resolutions=clause_resolutions,
@@ -172,11 +175,22 @@ def _current_question_text(
     return text
 
 
-def _status(raw: Any) -> ConversationResolutionKind:
-    try:
-        return ConversationResolutionKind(str(raw))
-    except ValueError as exc:
-        raise ValueError("conversation resolution status is invalid") from exc
+def _derived_resolution(
+    *,
+    clause_resolutions: tuple[ClauseResolution, ...],
+    unresolved: UnresolvedResolution,
+) -> ConversationResolutionKind:
+    has_resolved_clauses = bool(clause_resolutions)
+    has_unresolved_meaning = unresolved.unresolved_kind != "none"
+    if has_resolved_clauses and has_unresolved_meaning:
+        raise ValueError(
+            "conversation resolution cannot include clauses and unresolved meanings"
+        )
+    if has_unresolved_meaning:
+        return ConversationResolutionKind.NEEDS_CLARIFICATION
+    if has_resolved_clauses:
+        return ConversationResolutionKind.RESOLVED
+    return ConversationResolutionKind.STANDALONE
 
 
 def _clause_resolutions(
