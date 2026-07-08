@@ -17,4 +17,3 @@ expect:
     clarification_properties:
       - kind
       - missing
-      - clarification_question

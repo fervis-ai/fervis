@@ -7,7 +7,6 @@ from fervis.host_api.contracts import FrameworkKind, SourceNamespaceKind
 from fervis.lineage.enums import (
     AnswerValueKind,
     ArtifactKind,
-    ClarificationBasis,
     FactResultKind,
     ModelCallStatus,
     ModelUsageKind,
@@ -348,9 +347,23 @@ def test_django_observability_query_answer_scope_includes_clarification_trigger_
             clarification_id="clarification_1",
             run_id="run_1",
             fact_result_id="clarification_fact_result_1",
-            basis=ClarificationBasis.MULTIPLE_MATCHING_ENTITIES,
-            question_text="Which store do you mean?",
-            options_json=[{"id": "store_1", "label": "Store 1"}],
+            payload_json={
+                "id": "clarification_1",
+                "need": "target_reference",
+                "reason": "multiple_matching_entities",
+                "requestedFactId": "clarification_fact_1",
+                "question": "Which matching store should I use?",
+                "subjects": [
+                    {
+                        "kind": "question_input",
+                        "id": "store",
+                        "label": "store",
+                        "sourceText": "",
+                        "options": [{"id": "store_1", "label": "Store 1"}],
+                    }
+                ],
+                "evidence": [],
+            },
         )
     )
     recorder.record_clarification_response(

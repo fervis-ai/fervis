@@ -65,6 +65,7 @@ from tests.lookup.source_binding_helpers import (
     source_binding_target_id_for_candidate,
     source_fulfills_for_candidate,
 )
+from fervis.lookup.clarification import clarification_payload
 from tests.testkit.assertions import subset_mismatches
 from tests.testkit.catalog import catalog_from_payload
 
@@ -131,15 +132,7 @@ def _run_scripted_pattern(payload: dict[str, Any]) -> list[str]:
             "answer": result.answer,
             "outcome_kind": getattr(getattr(outcome, "kind", ""), "value", ""),
             "clarifications": [
-                {
-                    "question": item.question,
-                    "candidate_refs": list(item.candidate_refs),
-                    "available_options": [
-                        {"id": option.id, "label": option.label}
-                        for option in item.available_options
-                    ],
-                }
-                for item in clarifications
+                clarification_payload(item) for item in clarifications
             ],
             "rendered_rows": rendered_rows,
             "rendered_scalars": rendered_scalars,

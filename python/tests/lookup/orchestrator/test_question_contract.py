@@ -315,7 +315,6 @@ def test_lookup_question_contract_clarification_stops_after_question_contract_tu
                     ),
                 }
             ],
-            "clarification_question": "What should I check?",
         }
     )
 
@@ -334,14 +333,28 @@ def test_lookup_question_contract_clarification_stops_after_question_contract_tu
     )
 
     assert result.status == "NEEDS_CLARIFICATION", result
-    assert result.answer == "What should I check?"
+    assert result.answer == "Which metric should I use?"
     assert planner.tool_names == ["submit_missing_input_clarification"]
     details = result.rendered_fact.details  # type: ignore[union-attr]
     clarification = details["clarifications"][0]  # type: ignore[index]
-    assert clarification["basis"] == "missing_answer_metric"
-    assert clarification["question"] == "What should I check?"
-    assert clarification["ambiguousMetricPhrase"] == "check"
-    assert "requested_fact:question_contract" in clarification["evidenceRefs"]
+    assert clarification["need"] == "answer_metric"
+    assert clarification["reason"] == "missing_answer_metric"
+    assert clarification["question"] == "Which metric should I use?"
+    assert clarification["subjects"] == [
+        {
+            "kind": "metric_phrase",
+            "id": "clarify_question_contract_1",
+            "label": (
+                "The question does not say what business fact or metric "
+                "should be checked."
+            ),
+            "sourceText": "check",
+            "options": [],
+        }
+    ]
+    assert {"kind": "proof_ref", "id": "requested_fact:question_contract"} in (
+        clarification["evidence"]
+    )
 
 
 def test_lookup_question_contract_can_terminally_request_missing_target_reference():
@@ -359,7 +372,6 @@ def test_lookup_question_contract_can_terminally_request_missing_target_referenc
                     ),
                 }
             ],
-            "clarification_question": "Which staff member do you mean?",
         }
     )
 
@@ -378,13 +390,24 @@ def test_lookup_question_contract_can_terminally_request_missing_target_referenc
     )
 
     assert result.status == "NEEDS_CLARIFICATION", result
-    assert result.answer == "Which staff member do you mean?"
+    assert result.answer == 'I could not find staff "her". Which staff should I use?'
     assert planner.tool_names == ["submit_missing_input_clarification"]
     details = result.rendered_fact.details  # type: ignore[union-attr]
     clarification = details["clarifications"][0]  # type: ignore[index]
-    assert clarification["basis"] == "unsupported_reference"
-    assert clarification["knownInputId"] == "question_contract:her"
-    assert "known_input:question_contract:her" in clarification["evidenceRefs"]
+    assert clarification["need"] == "target_reference"
+    assert clarification["reason"] == "unresolved_reference"
+    assert clarification["subjects"] == [
+        {
+            "kind": "question_input",
+            "id": "question_contract:her",
+            "label": "staff",
+            "sourceText": "her",
+            "options": [],
+        }
+    ]
+    assert {"kind": "known_input", "id": "known_input:question_contract:her"} in (
+        clarification["evidence"]
+    )
 
 
 def test_lookup_question_contract_rejects_false_inventory_check():

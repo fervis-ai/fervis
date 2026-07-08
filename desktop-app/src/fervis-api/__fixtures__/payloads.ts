@@ -121,6 +121,7 @@ const salesGroundingStepFixture = {
         inputText: "ABC Mall",
         resolverReadId: "list_location_list",
         resolverLabel: "List Location List",
+        entityKind: "location",
         matchedField: "location_id",
         matchedValue: "60606060-0000-0000-0001-000000000001",
         matchedLabel: "ABC Mall"
@@ -304,17 +305,68 @@ export const clarificationRunFixture = {
       clarifications: [
         {
           id: "clar_store",
-          basis: "ambiguous_store",
-          question: "Which store do you mean?",
+          need: "target_reference",
+          reason: "multiple_matching_entities",
+          question: "Which matching store should I use?",
           requestedFactId: "rf_sales_count",
-          knownInputId: "input_store",
-          availableOptions: [
-            { id: "store_mall", label: "ABC Mall" },
-            { id: "store_outlet", label: "BBS Outlet" }
+          subjects: [
+            {
+              kind: "question_input",
+              id: "input_store",
+              label: "store",
+              sourceText: "ABC Mall",
+              options: [
+                {
+                  id: "location:location_id:60606060-0000-0000-0001-000000000001",
+                  label: "ABC Mall",
+                  value: "60606060-0000-0000-0001-000000000001",
+                  entityKind: "location",
+                  matchedLabel: "ABC Mall",
+                  matchedField: "location_id",
+                  matchedValue: "60606060-0000-0000-0001-000000000001",
+                  resolverReadId: "list_location_list",
+                  resolverLabel: "List Location List"
+                },
+                {
+                  id: "store:store_id:70707070-0000-0000-0001-000000000002",
+                  label: "BBS Outlet",
+                  value: "70707070-0000-0000-0001-000000000002",
+                  entityKind: "store",
+                  matchedLabel: "BBS Outlet",
+                  matchedField: "store_id",
+                  matchedValue: "70707070-0000-0000-0001-000000000002",
+                  resolverReadId: "list_store_list",
+                  resolverLabel: "List Store List"
+                }
+              ]
+            }
           ],
-          evidenceRefs: ["ev_store_candidates"],
-          factResultId: "fr_store",
-          stepId: "step_clarify"
+          evidence: [
+            {
+              kind: "known_input",
+              id: "known_input:input_store",
+              readId: null,
+              endpointName: null,
+              fieldId: null,
+              identityField: null
+            },
+            {
+              kind: "candidate",
+              id: "location:location_id:60606060-0000-0000-0001-000000000001",
+              readId: null,
+              endpointName: null,
+              fieldId: null,
+              identityField: null
+            },
+            {
+              kind: "candidate",
+              id: "store:store_id:70707070-0000-0000-0001-000000000002",
+              readId: null,
+              endpointName: null,
+              fieldId: null,
+              identityField: null
+            }
+          ]
         }
       ]
     }
@@ -338,14 +390,29 @@ export const freeTextClarificationRunFixture = {
       clarifications: [
         {
           id: "clar_period",
-          basis: "ambiguous_period",
+          need: "question_interpretation",
+          reason: "ambiguous_interpretation",
           question: "Which March should I use?",
           requestedFactId: "rf_sales_count",
-          knownInputId: "input_period",
-          availableOptions: [],
-          evidenceRefs: ["ev_period"],
-          factResultId: null,
-          stepId: "step_clarify"
+          subjects: [
+            {
+              kind: "interpretation",
+              id: "input_period",
+              label: "period",
+              sourceText: "March",
+              options: []
+            }
+          ],
+          evidence: [
+            {
+              kind: "question_contract",
+              id: "ev_period",
+              readId: null,
+              endpointName: null,
+              fieldId: null,
+              identityField: null
+            }
+          ]
         }
       ]
     }

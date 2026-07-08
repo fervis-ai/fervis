@@ -342,12 +342,10 @@ def _source_fulfillment_support_set_id(
     candidate: SourceCandidate,
 ) -> str:
     support_set = _candidate_fulfillment_support_sets_by_choice_id(candidate).get(
-        choice_id
+        (answer_output_id, choice_id)
     )
     if support_set is None:
         raise ValueError("source fulfillment references unknown choice")
-    if str(support_set.get("answer_output_id") or "") != answer_output_id:
-        raise ValueError("source fulfillment choice mismatches answer output")
     support_set_id = str(support_set.get("fulfillment_support_set_id") or "")
     if not support_set_id:
         raise ValueError("source fulfillment choice is missing internal support set")
@@ -382,12 +380,13 @@ def _candidate_fulfillment_support_sets_by_id(
 
 def _candidate_fulfillment_support_sets_by_choice_id(
     candidate: SourceCandidate,
-) -> dict[str, dict[str, Any]]:
+) -> dict[tuple[str, str], dict[str, Any]]:
     payload = getattr(candidate, "payload", None)
     return {
-        choice_id: item
+        (answer_output_id, choice_id): item
         for item in (payload or {}).get("fulfillment_support_sets") or ()
         if isinstance(item, dict)
+        for answer_output_id in (str(item.get("answer_output_id") or ""),)
         for choice_id in (str(item.get("fulfillment_choice_id") or ""),)
-        if choice_id
+        if answer_output_id and choice_id
     }

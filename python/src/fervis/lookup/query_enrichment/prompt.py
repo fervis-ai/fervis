@@ -15,6 +15,7 @@ from fervis.lookup.question_contract.answer_output_support import (
 from fervis.lookup.conversation_resolution import (
     conversation_resolution_value_frame_instruction_lines,
 )
+from fervis.lookup.turn_prompts.projections import answer_output_prompt_payload
 from fervis.lookup.query_enrichment.model import (
     QueryEnrichmentRequest,
     query_enrichment_endpoint_names,
@@ -184,10 +185,7 @@ class QueryEnrichmentTurnPrompt(TurnPromptBase):
                     "requested_fact_id": fact.id,
                     "requested_fact_description": fact.description,
                     "answer_outputs": [
-                        {
-                            "answer_output_id": output.id,
-                            "description": output.description or output.id,
-                        }
+                        answer_output_prompt_payload(output)
                         for output in fact.answer_outputs
                     ],
                     "question_text_input_text": [

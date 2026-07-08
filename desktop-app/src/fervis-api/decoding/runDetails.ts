@@ -74,6 +74,7 @@ export function decodeStepSemantic(raw: unknown): StepSemantic {
         inputText: expectString(result.inputText, "inputText"),
         resolverReadId: expectString(result.resolverReadId, "resolverReadId"),
         resolverLabel: expectString(result.resolverLabel, "resolverLabel"),
+        entityKind: expectString(result.entityKind, "entityKind"),
         matchedField: expectString(result.matchedField, "matchedField"),
         matchedValue: expectString(result.matchedValue, "matchedValue"),
         matchedLabel: expectString(result.matchedLabel, "matchedLabel")

@@ -261,7 +261,7 @@ def _time_scope_payload(
     }
 
 
-def _clarification_payload(
+def _clarification_answer_payload(
     *,
     artifact: FactArtifact,
     address: FactAddress,
@@ -361,5 +361,5 @@ _CARD_PAYLOAD_BUILDERS = {
     "scalar_value": _scalar_value_payload_from_card,
     "comparison": _comparison_payload_from_card,
     "time_scope": _time_scope_payload_from_card,
-    "clarification_answer": _clarification_payload,
+    "clarification_answer": _clarification_answer_payload,
 }

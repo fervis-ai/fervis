@@ -27,7 +27,9 @@ from fervis.lookup.memory.available_values import (
     active_memory_operation_values,
 )
 from fervis.lookup.memory.projection import LookupMemory, MemoryValue
-from fervis.lookup.outcomes.clarifications import Clarification, ClarificationBasis
+from fervis.lookup.clarification import (
+    clarification_from_payload,
+)
 from fervis.lookup.plan_execution.relations import RelationRows
 from fervis.lookup.memory.outcomes import (
     fact_result_answer_addresses,
@@ -598,15 +600,7 @@ def _undefined(payload: dict[str, Any]) -> Undefined:
 def _needs_clarification(payload: dict[str, Any]) -> NeedsClarification:
     return NeedsClarification(
         clarifications=tuple(
-            Clarification(
-                id=item["id"],
-                requested_fact_id=item["requested_fact_id"],
-                basis=ClarificationBasis(item["basis"]),
-                question=item["question"],
-                known_input_id=item.get("known_input_id") or "",
-                candidate_refs=tuple(item.get("candidate_refs") or ()),
-                evidence_refs=tuple(item.get("evidence_refs") or ()),
-            )
+            clarification_from_payload(item)
             for item in payload.get("clarifications") or ()
         ),
         proof_refs=tuple(payload.get("proof_refs") or ()),

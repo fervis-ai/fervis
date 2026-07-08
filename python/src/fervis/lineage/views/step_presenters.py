@@ -137,6 +137,7 @@ def _grounding_result(item: StepSemanticItem) -> SemanticGroundingResultView | N
         input_text=_text(item.payload.get("input_text")),
         resolver_read_id=_text(item.payload.get("resolver_read_id")),
         resolver_label=_text(item.payload.get("resolver_label")),
+        entity_kind=_text(item.payload.get("entity_kind")),
         matched_field=matched_field,
         matched_value=matched_value,
         matched_label=_text(item.payload.get("matched_label")),

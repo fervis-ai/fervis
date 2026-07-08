@@ -342,6 +342,7 @@ def _grounding_result_semantic_item(
             "input_text": _text(getattr(known_input, "text", "")),
             "resolver_read_id": resolver_read_id,
             "resolver_label": _title_words(resolver_read_id or resolver_endpoint_name),
+            "entity_kind": payload.identity_type,
             "matched_field": payload.identity_field,
             "matched_value": payload.value,
             "matched_label": payload.display_value or value.label or payload.value,

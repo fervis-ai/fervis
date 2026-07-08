@@ -20,7 +20,11 @@ from fervis.lineage.recorder import (
     RunStepWrite,
     RuntimeErrorResultWrite,
 )
-from fervis.lookup.outcomes.clarifications import Clarification, ClarificationBasis
+from fervis.lookup.clarification import (
+    MissingAnswerMetric,
+    TargetReferenceNotFound,
+    clarify,
+)
 from fervis.lookup.plan_execution.compiled_execution import (
     ExecutionProofEdge,
     ExecutionProofGraph,
@@ -457,18 +461,20 @@ def test_terminal_lineage_records_clarification_result() -> None:
         fact_result=FactResult(
             outcome=NeedsClarification(
                 clarifications=(
-                    Clarification(
-                        id="clarify_1",
-                        requested_fact_id="fact_1",
-                        basis=ClarificationBasis.UNRESOLVED_REFERENCE,
-                        question="Which area do you mean?",
-                        evidence_refs=("known_input:area",),
+                    clarify(
+                        TargetReferenceNotFound(
+                            clarification_id="clarify_1",
+                            requested_fact_id="fact_1",
+                            known_input_id="area",
+                            source_text="",
+                            target_label="area",
+                        )
                     ),
                 )
             )
         ),
         rendered=RenderedFact(kind=OutcomeKind.NEEDS_CLARIFICATION),
-        answer="Which area do you mean?",
+        answer="Which area should I use?",
         question_contract=_question_contract({"fact_1": "answer_1"}),
         question_contract_step_id="step_contract",
         compile_step_id=None,
@@ -482,15 +488,18 @@ def test_terminal_lineage_records_clarification_result() -> None:
     terminal = recorder.terminal_results[0]
     assert terminal.result.result_kind is RunResultKind.FACTUAL_TERMINAL
     assert terminal.fact_results[0].result_kind is FactResultKind.NEEDS_CLARIFICATION
-    assert terminal.clarifications[0].fact_result_id == (
-        terminal.fact_results[0].fact_result_id
-    )
+    clarification = terminal.clarifications[0]
+    assert clarification.fact_result_id == terminal.fact_results[0].fact_result_id
+    assert clarification.clarification_id == clarification.payload_json["id"]
+    assert terminal.fact_results[0].payload_json == {
+        "clarificationIds": [clarification.clarification_id],
+    }
     memory_artifact = _single_memory_artifact(
         terminal.memory_artifacts,
         source_kind=MemoryArtifactSourceKind.FACT_RESULT,
     )
     assert memory_artifact.payload_json["addresses"][0]["clarificationQuestions"] == [
-        "Which area do you mean?"
+        "Which area should I use?"
     ]
 
 
@@ -540,19 +549,23 @@ def test_terminal_lineage_memory_artifacts_are_requested_fact_scoped() -> None:
         fact_result=FactResult(
             outcome=NeedsClarification(
                 clarifications=(
-                    Clarification(
-                        id="clarify_1",
-                        requested_fact_id="fact_1",
-                        basis=ClarificationBasis.UNRESOLVED_REFERENCE,
-                        question="Which area do you mean?",
-                        evidence_refs=("known_input:area",),
+                    clarify(
+                        TargetReferenceNotFound(
+                            clarification_id="clarify_1",
+                            requested_fact_id="fact_1",
+                            known_input_id="area",
+                            source_text="",
+                            target_label="area",
+                        )
                     ),
-                    Clarification(
-                        id="clarify_2",
-                        requested_fact_id="fact_2",
-                        basis=ClarificationBasis.MISSING_ANSWER_METRIC,
-                        question="Which total should I calculate?",
-                        evidence_refs=("question_contract:metric",),
+                    clarify(
+                        MissingAnswerMetric(
+                            clarification_id="clarify_2",
+                            requested_fact_id="fact_2",
+                            source_text="total",
+                            metric_needed="total",
+                            proof_refs=("question_contract:metric",),
+                        )
                     ),
                 )
             )
@@ -590,10 +603,10 @@ def test_terminal_lineage_memory_artifacts_are_requested_fact_scoped() -> None:
 
     assert payloads_by_fact_result[fact_result_id_by_fact_key["fact_1"]]["addresses"][
         0
-    ]["clarificationQuestions"] == ["Which area do you mean?"]
+    ]["clarificationQuestions"] == ["Which area should I use?"]
     assert payloads_by_fact_result[fact_result_id_by_fact_key["fact_2"]]["addresses"][
         0
-    ]["clarificationQuestions"] == ["Which total should I calculate?"]
+    ]["clarificationQuestions"] == ["Which metric should I use?"]
 
 
 def test_pre_contract_terminal_lineage_records_run_scoped_clarification_memory() -> (
@@ -606,18 +619,20 @@ def test_pre_contract_terminal_lineage_records_run_scoped_clarification_memory()
         fact_result=FactResult(
             outcome=NeedsClarification(
                 clarifications=(
-                    Clarification(
-                        id="clarify_reference",
-                        requested_fact_id="question_contract",
-                        basis=ClarificationBasis.UNRESOLVED_REFERENCE,
-                        question="Which London do you mean?",
-                        evidence_refs=("known_input:london",),
+                    clarify(
+                        TargetReferenceNotFound(
+                            clarification_id="clarify_reference",
+                            requested_fact_id="question_contract",
+                            known_input_id="london",
+                            source_text="",
+                            target_label="London",
+                        )
                     ),
                 )
             )
         ),
         rendered=RenderedFact(kind=OutcomeKind.NEEDS_CLARIFICATION),
-        answer="Which London do you mean?",
+        answer="Which London should I use?",
         question_contract=None,
         question_contract_step_id="step_question_contract",
         compile_step_id=None,
@@ -636,7 +651,7 @@ def test_pre_contract_terminal_lineage_records_run_scoped_clarification_memory()
         source_kind=MemoryArtifactSourceKind.RUN_TERMINAL,
     )
     assert memory_artifact.payload_json["addresses"][0]["clarificationQuestions"] == [
-        "Which London do you mean?"
+        "Which London should I use?"
     ]
 
 

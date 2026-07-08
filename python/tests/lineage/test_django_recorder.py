@@ -8,7 +8,6 @@ from fervis.lineage.views.django import DjangoLineageQuery
 from fervis.lineage.enums import (
     AnswerValueKind,
     ArtifactKind,
-    ClarificationBasis,
     FactResultKind,
     MemoryArtifactSourceKind,
     ModelCallStatus,
@@ -22,6 +21,7 @@ from fervis.lineage.enums import (
     RuntimeErrorKind,
     SourceReadStatus,
 )
+from fervis.lookup.clarification import ClarificationNeed, ClarificationReason
 from fervis.lineage.models import (
     Answer,
     AnswerOutput,
@@ -988,9 +988,23 @@ def test_django_lineage_recorder_persists_clarification_primitives() -> None:
         clarification_id="clarification_1",
         run_id="run_1",
         fact_result_id="fact_result_1",
-        basis=ClarificationBasis.MULTIPLE_MATCHING_ENTITIES,
-        question_text="Which London do you mean?",
-        options_json=[{"id": "area:1", "label": "London"}],
+        payload_json={
+            "id": "clarification_1",
+            "need": "target_reference",
+            "reason": "multiple_matching_entities",
+            "requestedFactId": "fact_1",
+            "question": "Which matching area should I use?",
+            "subjects": [
+                {
+                    "kind": "question_input",
+                    "id": "input_1",
+                    "label": "area",
+                    "sourceText": "London",
+                    "options": [{"id": "area:1", "label": "London"}],
+                }
+            ],
+            "evidence": [{"kind": "known_input", "id": "known_input:input_1"}],
+        },
     )
     response = ClarificationResponseWrite(
         response_id="response_1",
@@ -1012,7 +1026,11 @@ def test_django_lineage_recorder_persists_clarification_primitives() -> None:
     saved_response = ClarificationResponse.objects.get(response_id="response_1")
 
     assert saved_clarification.fact_result_id == "fact_result_1"
-    assert saved_clarification.basis == ClarificationBasis.MULTIPLE_MATCHING_ENTITIES
+    assert saved_clarification.need == ClarificationNeed.TARGET_REFERENCE
+    assert saved_clarification.reason == ClarificationReason.MULTIPLE_MATCHING_ENTITIES
+    assert saved_clarification.payload_json["question"] == (
+        "Which matching area should I use?"
+    )
     assert saved_response.clarification_id == "clarification_1"
     assert saved_response.selected_option_id == "area:1"
 

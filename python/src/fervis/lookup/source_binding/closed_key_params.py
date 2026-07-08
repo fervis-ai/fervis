@@ -66,6 +66,12 @@ class _ClosedKeyParamBinding:
     key_input_bindings: tuple[_KeyInputBinding, ...]
 
     @property
+    def question_input_ids(self) -> frozenset[str]:
+        return frozenset(
+            binding.question_input_id for binding in self.key_input_bindings
+        )
+
+    @property
     def param_binding_sets(self) -> tuple[tuple[EndpointParamBinding, ...], ...]:
         return tuple(
             (
@@ -162,6 +168,21 @@ class ClosedKeyParamBindingIndex:
         if binding is None:
             return ((),)
         return binding.param_binding_sets
+
+    def source_level_applied_filters(
+        self,
+        target_id: str,
+        applied_filters: tuple[Mapping[str, object], ...],
+    ) -> tuple[dict[str, object], ...]:
+        binding = self._binding_for_target(target_id)
+        if binding is None:
+            return tuple(dict(applied_filter) for applied_filter in applied_filters)
+        return tuple(
+            dict(applied_filter)
+            for applied_filter in applied_filters
+            if str(applied_filter.get("known_input_id") or "")
+            not in binding.question_input_ids
+        )
 
     def require_compatible_fulfillments(
         self,

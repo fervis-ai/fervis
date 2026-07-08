@@ -17,8 +17,10 @@ input:
       completeness: {status: complete, source_kind: api_read, set_kind: unknown, proof_refs: [read:staff_candidates]}
 expect:
   result_contains:
-    rendered_text: Which staff do you mean?
+    rendered_text: Which matching reference should I use?
     rendered_details:
       clarifications:
-        - basis: multiple_matching_entities
-          knownInputId: alice
+        - id: clarify_staff
+          need: target_reference
+          reason: multiple_matching_entities
+          requestedFactId: rf_staff

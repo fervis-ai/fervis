@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from html import escape
 from typing import Any, Iterable
 
+from fervis.lookup.question_contract import RequestedFactAnswerOutput
 from fervis.lookup.relation_catalog import (
     CatalogFactAvailability,
     CatalogField,
@@ -19,6 +20,18 @@ from fervis.lookup.fact_plan.row_sources import (
     executable_field_ids_for_row_path,
 )
 from fervis.lookup.fact_planning.executable_support import ScopedRowPredicate
+
+
+def answer_output_prompt_payload(
+    output: RequestedFactAnswerOutput,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "answer_output_id": output.id,
+        "description": output.description or output.id,
+    }
+    if output.role:
+        payload["role"] = output.role
+    return payload
 
 
 @dataclass(frozen=True)
@@ -393,8 +406,10 @@ def source_alignment_reviews_xml(payload: dict[str, Any]) -> str:
         if answer_outputs:
             lines.append("    <answer_outputs>")
             for output in answer_outputs:
+                role = str(output.get("role") or "")
+                role_attr = f" role={_xml_quote(role)}" if role else ""
                 lines.append(
-                    f"      <answer_output id={_xml_quote(output.get('answer_output_id'))}>"
+                    f"      <answer_output id={_xml_quote(output.get('answer_output_id'))}{role_attr}>"
                 )
                 lines.extend(
                     _text_node_xml_lines(

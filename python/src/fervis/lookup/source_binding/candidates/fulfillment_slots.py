@@ -403,6 +403,9 @@ def _fulfillment_evidence_item(evidence_item: dict[str, Any]) -> dict[str, Any]:
         )
         if str(evidence_item.get(key) or "")
     }
+    identity = evidence_item.get("identity")
+    if isinstance(identity, dict) and identity:
+        output["identity"] = dict(identity)
     roles = tuple(str(role) for role in evidence_item.get("roles") or () if str(role))
     if roles:
         output["roles"] = list(roles)

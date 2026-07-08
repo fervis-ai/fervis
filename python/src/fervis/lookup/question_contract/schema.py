@@ -60,7 +60,6 @@ def build_missing_input_clarification_schema() -> dict[str, object]:
                 "maxItems": 4,
                 "items": _missing_question_input_schema(),
             },
-            "clarification_question": {"type": "string", "minLength": 1},
         },
     )
 

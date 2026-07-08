@@ -391,15 +391,30 @@ def test_fervis_explain_clarifications_include_followup_next_actions() -> None:
         {
             "clarification_id": "clar_1",
             "run_id": "run_1",
-            "basis": "multiple_matching_entities",
-            "question_text": "Which store do you mean?",
+            "need": "target_reference",
+            "reason": "multiple_matching_entities",
+            "payload_json": {
+                "id": "clar_1",
+                "need": "target_reference",
+                "reason": "multiple_matching_entities",
+                "requestedFactId": "fact_1",
+                "question": "Which store do you mean?",
+                "subjects": [
+                    {
+                        "kind": "question_input",
+                        "id": "store",
+                        "label": "store",
+                        "sourceText": "store",
+                        "options": [
+                            {"id": "store_1", "label": "ABC Mall"},
+                            {"id": "store_2", "label": "ABC Outlet"},
+                        ],
+                    }
+                ],
+                "evidence": [{"kind": "resolver_read", "id": "source_read:store_lookup"}],
+            },
             "fact_result_id": "fact_result_1",
             "step_id": "step_source_binding",
-            "options_json": [
-                {"id": "store_1", "label": "ABC Mall"},
-                {"id": "store_2", "label": "ABC Outlet"},
-            ],
-            "evidence_refs_json": ["source_read:store_lookup"],
         }
     ]
 

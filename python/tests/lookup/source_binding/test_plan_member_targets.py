@@ -546,13 +546,31 @@ def test_closed_key_grouped_identity_param_scopes_group_key_fulfillment_choices(
         candidate,
         field_ids_by_answer_output={"answer_staff": ("staff_id",)},
     )["answer_staff"]["fulfillment_choice_id"]
-    staff_name_choice = source_fulfills_fields_for_candidate(
-        candidate,
-        field_ids_by_answer_output={"answer_staff": ("staff_name",)},
-    )["answer_staff"]["fulfillment_choice_id"]
 
-    assert choice_ids == [staff_id_choice]
-    assert staff_name_choice not in choice_ids
+    assert choice_ids == ["source_1.data.staff_id"]
+    assert staff_id_choice == "source_1.data.staff_id"
+    assert "source_1.data.staff_name" not in choice_ids
+
+
+def test_source_binding_prompt_marks_canonical_group_identity_choice():
+    request = _closed_key_grouped_staff_sales_request()
+    prompt = SourceBindingTurnPrompt(request)
+    prompt_text = prompt.to_model_invocation(
+        build_turn_prompt_context(
+            current_question=request.question,
+            conversation_context={},
+        )
+    ).prompt_text
+
+    candidate_prompt = source_binding_candidates_xml(
+        prompt.source_invocation_candidate_payload()
+    )
+
+    assert "prefer stable primary identity evidence" in prompt_text
+    assert "display labels are presentation context" in prompt_text
+    assert '<choice id="source_1.data.staff_id"' in candidate_prompt
+    assert 'identity="staff.staff_id primary_stable"' in candidate_prompt
+    assert '<choice id="fulfillment_' not in candidate_prompt
 
 
 def test_parse_source_binding_rejects_closed_key_param_with_mismatched_group_key():
@@ -564,7 +582,7 @@ def test_parse_source_binding_rejects_closed_key_param_with_mismatched_group_key
         target["source_candidate_id"]
     ]
 
-    with pytest.raises(ValueError, match="backend-owned group key param"):
+    with pytest.raises(ValueError, match="source fulfillment references unknown choice"):
         parse_source_binding(
             {
                 "outcome": {
@@ -599,12 +617,12 @@ def test_parse_source_binding_rejects_closed_key_param_with_mismatched_group_key
                                 ),
                             },
                             "fulfillment_decisions": {
-                                **source_fulfills_fields_for_candidate(
-                                    candidate,
-                                    field_ids_by_answer_output={
-                                        "answer_staff": ("staff_name",),
-                                    },
-                                ),
+                                "answer_staff": {
+                                    "fulfillment_choice_id": "source_1.data.staff_name",
+                                    "match_basis_explanation": (
+                                        "Stale non-canonical display field choice."
+                                    ),
+                                },
                                 **source_fulfills_by_row_population_for_candidate(
                                     candidate,
                                     answer_output_ids=("answer_count",),
@@ -794,7 +812,7 @@ def test_closed_key_source_binding_retains_input_proofs_through_grouped_count_pl
     assert {
         applied_filter["known_input_id"]
         for applied_filter in bound_source.applied_filters
-    } == {"staff_id_1", "staff_id_2", "today"}
+    } == {"today"}
 
     answer_plan = compile_pattern_answer_plan(
         {

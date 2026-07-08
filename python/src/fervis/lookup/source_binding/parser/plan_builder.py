@@ -204,7 +204,10 @@ def build_source_binding_plan(
                 sorted(field.field_id for field in available_fields)
             ),
             available_fields=available_fields,
-            applied_filters=candidate_applied_filters(candidate),
+            applied_filters=closed_key_bindings.source_level_applied_filters(
+                target.binding_target_id,
+                candidate_applied_filters(candidate),
+            ),
         )
         output.append(bound)
         output.extend(

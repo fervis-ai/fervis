@@ -11,7 +11,10 @@ from fervis.lookup.turn_prompts import (
     TurnPromptBase,
     TurnPromptBuilder,
 )
-from fervis.lookup.turn_prompts.projections import source_alignment_reviews_xml
+from fervis.lookup.turn_prompts.projections import (
+    answer_output_prompt_payload,
+    source_alignment_reviews_xml,
+)
 from fervis.lookup.plan_selection.source_strategies import (
     source_alignment_candidate_payload,
     source_alignment_candidates_by_fact,
@@ -61,7 +64,7 @@ class PlanSelectionTurnPrompt(TurnPromptBase):
                     "For each requested_fact in the XML, review every source_candidate inside it.",
                     "Write exactly one alignment review for every source_candidate shown under that requested_fact.",
                     "Assess source alignment only; executable choices are made in later turns.",
-                    "The backend will forward aligned sources to source binding.",
+                    "The backend deterministically derives forwarded source strategies from your DIRECT, PARTIAL, and NOT_ALIGNED reviews.",
                     "If no shown candidate is aligned, review every source as NOT_ALIGNED; the backend derives the terminal outcome.",
                 ),
             ),
@@ -119,10 +122,7 @@ class PlanSelectionTurnPrompt(TurnPromptBase):
                 {
                     "requested_fact_id": fact.id,
                     "answer_outputs": [
-                        {
-                            "answer_output_id": output.id,
-                            "description": output.description,
-                        }
+                        answer_output_prompt_payload(output)
                         for output in fact.support_answer_outputs
                     ],
                     "source_strategies": [
@@ -148,10 +148,7 @@ class PlanSelectionTurnPrompt(TurnPromptBase):
                     "requested_fact_id": fact.id,
                     "fact_text": fact.description,
                     "answer_outputs": [
-                        {
-                            "answer_output_id": output.id,
-                            "description": output.description,
-                        }
+                        answer_output_prompt_payload(output)
                         for output in fact.support_answer_outputs
                     ],
                     "source_candidates": [

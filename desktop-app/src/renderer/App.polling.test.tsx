@@ -28,10 +28,9 @@ describe("Ledger app polling", () => {
       .mockResolvedValue(terminalRun);
     render(<App initialClient={createPollingClient({ getRun })} />);
 
+    expect(await screen.findByText("Inputs:")).toBeInTheDocument();
     expect(
-      await screen.findByText(
-        "Interpreted input: this month: 2026-06-01 to 2026-06-30"
-      )
+      screen.getByText("\"this month\": 2026-06-01 to 2026-06-30")
     ).toBeInTheDocument();
     expect(screen.getByText("Evidence").closest("details")).not.toHaveAttribute(
       "open"
@@ -58,17 +57,14 @@ describe("Ledger app polling", () => {
     });
     render(<App initialClient={createPollingClient({ getRun })} />);
 
+    expect(await screen.findByText("Inputs:")).toBeInTheDocument();
     expect(
-      await screen.findByText(
-        "Interpreted input: this month: 2026-06-01 to 2026-06-30"
-      )
+      screen.getByText("\"this month\": 2026-06-01 to 2026-06-30")
     ).toBeInTheDocument();
 
     expect(await screen.findByText(/polling paused · temporary polling failure/)).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "Interpreted input: this month: 2026-06-01 to 2026-06-30"
-      )
+      screen.getByText("\"this month\": 2026-06-01 to 2026-06-30")
     ).toBeInTheDocument();
   });
 

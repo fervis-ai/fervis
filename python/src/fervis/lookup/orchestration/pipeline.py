@@ -39,9 +39,11 @@ from fervis.lookup.outcomes.model import (
     NeedsClarification,
 )
 from fervis.lookup.outcomes.answerability import classify_plan_impossible
-from fervis.lookup.outcomes.clarifications import (
+from fervis.lookup.clarification import (
+    AmbiguousQuestionInterpretation,
     Clarification,
-    ClarificationBasis,
+    ClarificationOption,
+    clarify,
 )
 from fervis.lookup.plan_selection import (
     BoundPlanSelectionSet,
@@ -1382,29 +1384,39 @@ def _conversation_resolution_clarifications(
     unresolved: Any,
 ) -> tuple[Clarification, ...]:
     if getattr(unresolved, "unresolved_kind", "") == "multiple_meanings":
-        candidate_refs = tuple(
+        option_labels = tuple(
             str(getattr(item, "integrated_question", "") or "")
             for item in getattr(unresolved, "candidate_interpretations", ()) or ()
             if str(getattr(item, "integrated_question", "") or "")
         )
         return (
-            Clarification(
-                id="conversation_resolution_ambiguous_1",
-                requested_fact_id="conversation_resolution",
-                basis=ClarificationBasis.UNRESOLVED_REFERENCE,
-                question="Which interpretation should I use?",
-                candidate_refs=candidate_refs,
-                evidence_refs=("conversation_resolution:unresolved",),
+            clarify(
+                AmbiguousQuestionInterpretation(
+                    clarification_id="conversation_resolution_ambiguous_1",
+                    requested_fact_id="conversation_resolution",
+                    source_text="",
+                    options=tuple(
+                        ClarificationOption(id=item, label=item)
+                        for item in option_labels
+                    ),
+                    proof_refs=("conversation_resolution:unresolved",),
+                )
             ),
         )
     return (
-        Clarification(
-            id="conversation_resolution_ambiguous_1",
-            requested_fact_id="conversation_resolution",
-            basis=ClarificationBasis.UNRESOLVED_REFERENCE,
-            question=_unresolved_text(unresolved),
-            candidate_refs=(_unresolved_text(unresolved),),
-            evidence_refs=("conversation_resolution:unresolved",),
+        clarify(
+            AmbiguousQuestionInterpretation(
+                clarification_id="conversation_resolution_ambiguous_1",
+                requested_fact_id="conversation_resolution",
+                source_text=_unresolved_text(unresolved),
+                options=(
+                    ClarificationOption(
+                        id=_unresolved_text(unresolved),
+                        label=_unresolved_text(unresolved),
+                    ),
+                ),
+                proof_refs=("conversation_resolution:unresolved",),
+            )
         ),
     )
 

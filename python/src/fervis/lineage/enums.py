@@ -34,16 +34,6 @@ class FactResultKind(StrEnum):
     UNDEFINED = "undefined"
 
 
-class ClarificationBasis(StrEnum):
-    MISSING_ANSWER_METRIC = "missing_answer_metric"
-    MISSING_COMPARISON_BASELINE = "missing_comparison_baseline"
-    CATALOG_REQUIRES_CHOICE = "catalog_requires_choice"
-    MULTIPLE_MATCHING_ENTITIES = "multiple_matching_entities"
-    UNRESOLVED_REFERENCE = "unresolved_reference"
-    MISSING_REQUIRED_VALUE = "missing_required_value"
-    UNSUPPORTED_REFERENCE = "unsupported_reference"
-
-
 class AnswerValueKind(StrEnum):
     ENTITY = "entity"
     NUMBER = "number"

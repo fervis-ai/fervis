@@ -128,6 +128,7 @@ class ContinueQuestionRequest:
     previous_run_id: str | None = None
     trigger_clarification_response_run_id: str | None = None
     trigger_clarification_response_id: str | None = None
+    trigger_clarification_selected_option_id: str | None = None
     max_budget_usd: Any = None
     max_thinking_tokens: int | None = None
     runtime_context: dict[str, Any] = field(default_factory=dict)

@@ -17,7 +17,7 @@ QuestionContractOutput = provider_output_type(
 )
 MissingInputClarificationOutput = provider_output_type(
     "MissingInputClarificationOutput",
-    ("kind", "missing", "clarification_question"),
+    ("kind", "missing"),
 )
 MissingQuestionInputOutput = provider_output_type(
     "MissingQuestionInputOutput",

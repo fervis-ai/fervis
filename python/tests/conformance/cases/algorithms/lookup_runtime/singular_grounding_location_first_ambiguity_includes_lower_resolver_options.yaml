@@ -148,15 +148,24 @@ expect:
     status: NEEDS_CLARIFICATION
     outcome_kind: needs_clarification
     clarifications:
-    - question: Which matching entity should I use?
-      candidate_refs:
-      - location:location_id:loc_1
-      - location:location_id:loc_2
-      - area:area_id:area_nairobi
-      available_options:
-      - id: location:location_id:loc_1
-        label: 'Location: London [location_id=loc_1]'
-      - id: location:location_id:loc_2
-        label: 'Location: London [location_id=loc_2]'
-      - id: area:area_id:area_nairobi
-        label: 'Area: London [area_id=area_nairobi]'
+    - question: Which matching city should I use?
+      need: target_reference
+      reason: multiple_matching_entities
+      subjects:
+      - kind: question_input
+        options:
+        - id: location:location_id:loc_1
+          label: 'Location: London [location_id=loc_1]'
+        - id: location:location_id:loc_2
+          label: 'Location: London [location_id=loc_2]'
+        - id: area:area_id:area_nairobi
+          label: 'Area: London [area_id=area_nairobi]'
+      evidence:
+      - kind: known_input
+        id: known_input:input_1
+      - kind: candidate
+        id: location:location_id:loc_1
+      - kind: candidate
+        id: location:location_id:loc_2
+      - kind: candidate
+        id: area:area_id:area_nairobi

@@ -191,7 +191,7 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                     "answer_population.population_binding_id is the source candidate's population handle that this invocation uses.",
                     "applied_filters are backend-derived grounded-value filters already attached to this source candidate.",
                     "Do not reinterpret, rematch, remove, or rewrite applied_filters.",
-                    "For each answer output shown under the selected binding target, choose fulfillment_choice_id from that source candidate's fulfillment_choices.",
+                    "For each answer output shown under the selected binding target, choose fulfillment_choice_id from that source candidate's fulfillment_choices; for entity/group computation keys, prefer stable primary identity evidence when available, because display labels are presentation context unless no stable identity is available.",
                     "Before choosing fulfillment, write metric_fit_bases for every metric candidate.",
                     "Metric contexts are read-only interpretation context for metric candidates.",
                     "Use metric_contexts to understand what a metric field is likely measuring from its row path, same-row sibling fields, and scope fields.",

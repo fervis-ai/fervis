@@ -79,7 +79,7 @@ def _actionable_clarification_id(event: dict[str, object]) -> str:
     first = clarifications[0]
     if not isinstance(first, dict):
         raise ValueError("run.needs_clarification event requires clarification objects")
-    clarification_id = str(first.get("id") or first.get("clarification_id") or "")
+    clarification_id = str(first.get("id") or "")
     if not clarification_id.strip():
         raise ValueError("run.needs_clarification event requires clarification id")
     if not str(first.get("question") or "").strip():

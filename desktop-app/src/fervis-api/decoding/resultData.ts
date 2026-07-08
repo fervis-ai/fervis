@@ -1,15 +1,16 @@
 import type {
   AnswerOutput,
+  ClarificationEvidence,
   ClarificationOption,
   ClarificationRequest,
+  ClarificationSubject,
   ResultData
 } from "../contracts";
 import {
   expectArray,
   expectNullableString,
   expectObject,
-  expectString,
-  expectStringArray
+  expectString
 } from "./primitives";
 import { decodeValueKind } from "./enums";
 
@@ -59,26 +60,19 @@ function decodeClarification(raw: unknown): ClarificationRequest {
   }
   return {
     id,
-    basis: expectString(object.basis, "clarification.basis"),
+    need: expectString(object.need, "clarification.need"),
+    reason: expectString(object.reason, "clarification.reason"),
     question: expectString(object.question, "clarification.question"),
-    requestedFactId: decodeOptionalNullableString(
+    requestedFactId: expectString(
       object.requestedFactId,
       "clarification.requestedFactId"
     ),
-    knownInputId: decodeOptionalNullableString(
-      object.knownInputId,
-      "clarification.knownInputId"
+    subjects: expectArray(object.subjects, "clarification.subjects").map(
+      decodeClarificationSubject
     ),
-    availableOptions: decodeClarificationOptions(object.availableOptions),
-    evidenceRefs: decodeOptionalStringArray(
-      object.evidenceRefs,
-      "clarification.evidenceRefs"
-    ),
-    factResultId: expectNullableString(
-      object.factResultId,
-      "clarification.factResultId"
-    ),
-    stepId: expectNullableString(object.stepId, "clarification.stepId")
+    evidence: expectArray(object.evidence, "clarification.evidence").map(
+      decodeClarificationEvidence
+    )
   };
 }
 
@@ -89,31 +83,55 @@ function decodeOptionalNullableString(raw: unknown, label: string): string | nul
   return expectNullableString(raw, label);
 }
 
-function decodeOptionalStringArray(
-  raw: unknown,
-  label: string
-): readonly string[] {
-  if (raw === undefined) {
-    return [];
-  }
-  return expectStringArray(raw, label);
-}
-
-function decodeClarificationOptions(
-  raw: unknown
-): readonly ClarificationOption[] {
-  if (raw === undefined) {
-    return [];
-  }
-  return expectArray(raw, "clarification.availableOptions").map(
-    decodeClarificationOption
-  );
+function decodeClarificationSubject(raw: unknown): ClarificationSubject {
+  const object = expectObject(raw, "clarification subject");
+  return {
+    kind: expectString(object.kind, "clarification.subject.kind"),
+    id: expectString(object.id, "clarification.subject.id"),
+    label: expectString(object.label, "clarification.subject.label"),
+    sourceText: expectString(object.sourceText, "clarification.subject.sourceText"),
+    options: expectArray(
+      object.options,
+      "clarification.subject.options"
+    ).map(decodeClarificationOption)
+  };
 }
 
 function decodeClarificationOption(raw: unknown): ClarificationOption {
   const object = expectObject(raw, "clarification option");
   return {
     id: expectString(object.id, "option.id"),
-    label: expectString(object.label, "option.label")
+    label: expectString(object.label, "option.label"),
+    value: decodeOptionalNullableString(object.value, "option.value"),
+    entityKind: decodeOptionalNullableString(object.entityKind, "option.entityKind"),
+    matchedLabel: decodeOptionalNullableString(object.matchedLabel, "option.matchedLabel"),
+    matchedField: decodeOptionalNullableString(object.matchedField, "option.matchedField"),
+    matchedValue: decodeOptionalNullableString(object.matchedValue, "option.matchedValue"),
+    resolverReadId: decodeOptionalNullableString(object.resolverReadId, "option.resolverReadId"),
+    resolverLabel: decodeOptionalNullableString(object.resolverLabel, "option.resolverLabel")
+  };
+}
+
+function decodeClarificationEvidence(raw: unknown): ClarificationEvidence {
+  const object = expectObject(raw, "clarification evidence");
+  return {
+    kind: expectString(object.kind, "clarification.evidence.kind"),
+    id: expectString(object.id, "clarification.evidence.id"),
+    readId: decodeOptionalNullableString(
+      object.readId,
+      "clarification.evidence.readId"
+    ),
+    endpointName: decodeOptionalNullableString(
+      object.endpointName,
+      "clarification.evidence.endpointName"
+    ),
+    fieldId: decodeOptionalNullableString(
+      object.fieldId,
+      "clarification.evidence.fieldId"
+    ),
+    identityField: decodeOptionalNullableString(
+      object.identityField,
+      "clarification.evidence.identityField"
+    )
   };
 }

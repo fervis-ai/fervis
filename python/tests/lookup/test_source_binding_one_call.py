@@ -93,6 +93,7 @@ from fervis.lookup.source_binding.parser.candidate_access import (
     candidate_value_is_used_by_bound_source,
 )
 from fervis.lookup.source_binding.parser import parse_source_binding
+from fervis.lookup.turn_prompts.projections import source_binding_candidates_xml
 from tests.lookup.source_binding_helpers import source_fulfills_for_candidate
 
 
@@ -506,6 +507,56 @@ def test_ranked_aggregate_source_binding_keeps_selected_group_key_lineage():
 
     fulfillment = result.outcome.bound_sources[0].fulfillments[0]
     assert fulfillment.group_key_evidence_ids == ("source_1.root.unrelated",)
+
+
+def test_ranked_aggregate_source_binding_choices_use_canonical_group_identity():
+    request = _ranked_staff_compensation_request()
+    prompt = SourceBindingTurnPrompt(request)
+    candidate_payload = prompt.source_invocation_candidate_payload()
+    candidate = _source_candidate(
+        candidate_payload,
+        requested_fact_id="fact_1",
+        read_id="shift_compensation",
+    )
+    support_sets = _binding_surface(candidate).get("fulfillment_support_sets") or ()
+    choice_ids = tuple(
+        support_set.get("fulfillment_choice_id")
+        for support_set in support_sets
+        if isinstance(support_set, dict)
+        and support_set.get("answer_output_id") == "answer_1"
+    )
+    candidate_prompt = source_binding_candidates_xml(candidate_payload)
+
+    assert choice_ids == ("source_1.data.staff_id",)
+    assert '<choice id="source_1.data.staff_id"' in candidate_prompt
+    assert 'identity="staff.staff_id primary_stable"' in candidate_prompt
+    assert "data.staff_name" in candidate_prompt
+    assert '<choice id="source_1.data.staff_name"' not in candidate_prompt
+    assert '<choice id="source_1.data.location_name"' not in candidate_prompt
+
+
+def test_ranked_aggregate_source_binding_prefers_relevant_answer_identity():
+    request = _ranked_store_sales_request()
+    prompt = SourceBindingTurnPrompt(request)
+    candidate_payload = prompt.source_invocation_candidate_payload()
+    candidate = _source_candidate(
+        candidate_payload,
+        requested_fact_id="fact_1",
+        read_id="sales",
+    )
+    support_sets = _binding_surface(candidate).get("fulfillment_support_sets") or ()
+    choice_ids = tuple(
+        support_set.get("fulfillment_choice_id")
+        for support_set in support_sets
+        if isinstance(support_set, dict)
+        and support_set.get("answer_output_id") == "answer_1"
+    )
+    candidate_prompt = source_binding_candidates_xml(candidate_payload)
+
+    assert "source_1.data.location_id" in choice_ids
+    assert "source_1.data.sale_id" not in choice_ids
+    assert '<choice id="source_1.data.location_id"' in candidate_prompt
+    assert '<choice id="source_1.data.sale_id"' not in candidate_prompt
 
 
 def test_row_population_metric_fit_surface_is_backend_owned_count_basis():
@@ -1186,6 +1237,237 @@ def _request_with_identity_field_filter() -> SourceBindingRequest:
                 applies_to_requested_fact_ids=("fact_1",),
             ),
         ),
+        read_eligibility=read_eligibility,
+    )
+
+
+def _ranked_staff_compensation_request() -> SourceBindingRequest:
+    fact = RequestedFact(
+        id="fact_1",
+        description="staff member with the highest compensation this month",
+        answer_subject=RequestedFactAnswerSubject(subject_text="staff"),
+        answer_outputs=(
+            RequestedFactAnswerOutput(
+                id="answer_1",
+                description="staff member who earned the most compensation",
+            ),
+        ),
+        answer_expression=RequestedFactAnswerExpression(
+            family=RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+        ),
+    )
+    catalog = RelationCatalog(
+        reads=(
+            EndpointRead(
+                id="shift_compensation",
+                endpoint_name="list_shift_compensation_list",
+                resource_names=("shift compensation",),
+                row_paths=(
+                    RowPath(id="data", path="data", cardinality=RowCardinality.MANY),
+                ),
+                fields=(
+                    CatalogField(
+                        ref="shift_compensation.field.shift_compensation_id",
+                        path="data.shift_compensation_id",
+                        row_path_id="data",
+                        type="uuid",
+                    ),
+                    CatalogField(
+                        ref="shift_compensation.field.staff_id",
+                        path="data.staff_id",
+                        row_path_id="data",
+                        type="uuid",
+                        identity=IdentityMetadata(
+                            entity_ref="staff",
+                            identity_field="staff_id",
+                            primary_key=True,
+                            stable=True,
+                        ),
+                    ),
+                    CatalogField(
+                        ref="shift_compensation.field.staff_name",
+                        path="data.staff_name",
+                        row_path_id="data",
+                        type="string",
+                    ),
+                    CatalogField(
+                        ref="shift_compensation.field.location_name",
+                        path="data.location_name",
+                        row_path_id="data",
+                        type="string",
+                    ),
+                    CatalogField(
+                        ref="shift_compensation.field.calculated_pay",
+                        path="data.calculated_pay",
+                        row_path_id="data",
+                        type="decimal",
+                    ),
+                ),
+            ),
+        )
+    )
+    catalog_selection = CatalogSelectionResult(
+        relation_catalog=catalog,
+        requested_fact_selections=(
+            RequestedFactCatalogSelection(
+                requested_fact_id="fact_1",
+                query_terms=("staff", "compensation"),
+                rankings=(
+                    CatalogSelectionRanking(read_id="shift_compensation", score=10),
+                ),
+                selected_read_ids=("shift_compensation",),
+            ),
+        ),
+        selected_read_ids=("shift_compensation",),
+    )
+    scope = read_eligibility_candidate_surface(
+        ReadEligibilityRequest(
+            question="Which staff earned the most compensation this month?",
+            question_contract=QuestionContract(requested_facts=(fact,)),
+            requested_facts=(fact,),
+            catalog_selection=catalog_selection,
+            conversation_context={},
+            available_values=(),
+        )
+    ).candidate_scopes[0]
+    read_eligibility = ReadEligibilityResult(
+        read_assessments=(
+            _retained_read_assessment(
+                source_candidate_id=scope.source_candidate_id,
+                source_candidate_signature=scope.source_candidate_signature,
+                requested_fact_id="fact_1",
+                read_id="shift_compensation",
+                relevant_row_path_ids=("data",),
+                relevant_field_refs=(
+                    "shift_compensation.field.staff_id",
+                    "shift_compensation.field.staff_name",
+                    "shift_compensation.field.location_name",
+                    "shift_compensation.field.calculated_pay",
+                ),
+            ),
+        )
+    )
+    return SourceBindingRequest(
+        question="Which staff earned the most compensation this month?",
+        question_contract=QuestionContract(requested_facts=(fact,)),
+        requested_facts=(fact,),
+        relation_catalog=catalog,
+        catalog_selection=catalog_selection,
+        plan_selection=_selected_plan(plan_shape="ranked_aggregate"),
+        read_eligibility=read_eligibility,
+    )
+
+
+def _ranked_store_sales_request() -> SourceBindingRequest:
+    fact = RequestedFact(
+        id="fact_1",
+        description="store with the highest sales this month",
+        answer_subject=RequestedFactAnswerSubject(subject_text="store"),
+        answer_outputs=(
+            RequestedFactAnswerOutput(
+                id="answer_1",
+                description="store selected by highest sales",
+                role="ANSWER_VALUE",
+            ),
+        ),
+        answer_expression=RequestedFactAnswerExpression(
+            family=RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+        ),
+    )
+    catalog = RelationCatalog(
+        reads=(
+            EndpointRead(
+                id="sales",
+                endpoint_name="list_sale_list",
+                resource_names=("sale",),
+                row_paths=(
+                    RowPath(id="data", path="data", cardinality=RowCardinality.MANY),
+                ),
+                fields=(
+                    CatalogField(
+                        ref="sales.field.sale_id",
+                        path="data.sale_id",
+                        row_path_id="data",
+                        type="uuid",
+                        identity=IdentityMetadata(
+                            entity_ref="sale",
+                            identity_field="sale_id",
+                            primary_key=True,
+                            stable=True,
+                        ),
+                    ),
+                    CatalogField(
+                        ref="sales.field.location_id",
+                        path="data.location_id",
+                        row_path_id="data",
+                        type="uuid",
+                        identity=IdentityMetadata(
+                            entity_ref="location",
+                            identity_field="location_id",
+                            stable=True,
+                        ),
+                    ),
+                    CatalogField(
+                        ref="sales.field.location_name",
+                        path="data.location_name",
+                        row_path_id="data",
+                        type="string",
+                    ),
+                    CatalogField(
+                        ref="sales.field.amount",
+                        path="data.amount",
+                        row_path_id="data",
+                        type="decimal",
+                    ),
+                ),
+            ),
+        )
+    )
+    catalog_selection = CatalogSelectionResult(
+        relation_catalog=catalog,
+        requested_fact_selections=(
+            RequestedFactCatalogSelection(
+                requested_fact_id="fact_1",
+                query_terms=("store", "sales"),
+                rankings=(CatalogSelectionRanking(read_id="sales", score=10),),
+                selected_read_ids=("sales",),
+            ),
+        ),
+        selected_read_ids=("sales",),
+    )
+    scope = read_eligibility_candidate_surface(
+        ReadEligibilityRequest(
+            question="Which store has the highest sales this month?",
+            question_contract=QuestionContract(requested_facts=(fact,)),
+            requested_facts=(fact,),
+            catalog_selection=catalog_selection,
+            conversation_context={},
+            available_values=(),
+        )
+    ).candidate_scopes[0]
+    read_eligibility = ReadEligibilityResult(
+        read_assessments=(
+            _retained_read_assessment(
+                source_candidate_id=scope.source_candidate_id,
+                source_candidate_signature=scope.source_candidate_signature,
+                requested_fact_id="fact_1",
+                read_id="sales",
+                relevant_row_path_ids=("data",),
+                relevant_field_refs=(
+                    "sales.field.location_id",
+                    "sales.field.location_name",
+                    "sales.field.amount",
+                ),
+            ),
+        )
+    )
+    return SourceBindingRequest(
+        question="Which store has the highest sales this month?",
+        question_contract=QuestionContract(requested_facts=(fact,)),
+        requested_facts=(fact,),
+        relation_catalog=catalog,
+        catalog_selection=catalog_selection,
+        plan_selection=_selected_plan(plan_shape="ranked_aggregate"),
         read_eligibility=read_eligibility,
     )
 

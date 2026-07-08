@@ -9,7 +9,7 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy.engine import Engine
 
-from fervis.lineage.enums import FactResultKind, RunResultKind, RuntimeErrorKind
+from fervis.lineage.enums import RunResultKind, RuntimeErrorKind
 from fervis.lineage.ids import lineage_id
 from fervis.lineage.recorder import (
     RunResultWrite,
@@ -50,7 +50,7 @@ def terminal_result_for_run(engine: Engine, run_id: str) -> TerminalResult | Non
     runtime_error = metadata.tables["fervis_runtime_error_detail"]
     answer = metadata.tables["fervis_answer"]
     presentation = metadata.tables["fervis_answer_presentation"]
-    fact_result = metadata.tables["fervis_fact_result"]
+    clarification_request = metadata.tables["fervis_clarification_request"]
     with sql_connection(engine) as connection:
         result = connection.execute(
             sa.select(run_result).where(run_result.c.run_id == run_id)
@@ -76,7 +76,7 @@ def terminal_result_for_run(engine: Engine, run_id: str) -> TerminalResult | Non
         ).scalar()
         result_data = _terminal_result_data(
             connection,
-            fact_result=fact_result,
+            clarification_request=clarification_request,
             run_id=run_id,
             run_result_id=str(result_values["run_result_id"]),
         )
@@ -92,24 +92,28 @@ def terminal_result_for_run(engine: Engine, run_id: str) -> TerminalResult | Non
 def _terminal_result_data(
     connection,
     *,
-    fact_result,
+    clarification_request,
     run_id: str,
     run_result_id: str,
 ) -> dict[str, Any]:
-    clarification = connection.execute(
-        sa.select(fact_result.c.payload_json)
+    clarification_rows = connection.execute(
+        sa.select(clarification_request.c.payload_json)
         .where(
-            fact_result.c.run_id == run_id,
-            fact_result.c.result_kind == FactResultKind.NEEDS_CLARIFICATION.value,
-            fact_result.c.payload_json.is_not(None),
+            clarification_request.c.run_id == run_id,
+            clarification_request.c.payload_json.is_not(None),
         )
-        .order_by(fact_result.c.created_at)
-    ).scalar()
-    clarification_payload = _dict(clarification)
-    if clarification_payload:
+        .order_by(
+            clarification_request.c.created_at,
+            clarification_request.c.clarification_id,
+        )
+    ).scalars()
+    clarifications = [
+        payload for row in clarification_rows for payload in (_dict(row),) if payload
+    ]
+    if clarifications:
         return {
             "kind": "needs_clarification",
-            "details": clarification_payload,
+            "details": {"clarifications": clarifications},
         }
     return {"run_result_id": run_result_id}
 

@@ -687,6 +687,13 @@ class RequestedFact:
             raise ValueError("requested fact requires id and description")
         if not self.answer_outputs:
             raise ValueError("requested fact requires answer outputs")
+        row_population_outputs = tuple(
+            output for output in self.answer_outputs if output.role == "ROW_POPULATION"
+        )
+        if len(row_population_outputs) > 1:
+            raise ValueError(
+                "requested fact can have at most one row population answer output"
+            )
         if self.answer_population is None and self.answer_subject is not None:
             object.__setattr__(
                 self,
@@ -927,19 +934,15 @@ class MissingQuestionInput:
 @dataclass(frozen=True)
 class QuestionContractNeedsClarification:
     missing: tuple[MissingQuestionInput, ...]
-    clarification_question: str
 
     def __post_init__(self) -> None:
         if not self.missing:
             raise ValueError("question-contract clarification requires missing inputs")
-        if not self.clarification_question.strip():
-            raise ValueError("question-contract clarification requires question")
 
     def to_model_dict(self) -> dict[str, object]:
         return {
             "kind": "needs_clarification",
             "missing": [item.to_model_dict() for item in self.missing],
-            "clarification_question": self.clarification_question,
         }
 
 

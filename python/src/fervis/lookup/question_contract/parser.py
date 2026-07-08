@@ -64,10 +64,6 @@ def parse_question_contract(
                     parsed.missing,
                     question_context_texts=context_texts,
                 ),
-                clarification_question=_required_text(
-                    parsed.clarification_question,
-                    path="clarification_question",
-                ),
             )
         )
 

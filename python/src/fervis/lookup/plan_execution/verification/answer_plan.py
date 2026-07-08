@@ -28,7 +28,11 @@ from .operations import (
     _verify_operation_references,
 )
 from .question_contract import _verify_question_contract
-from .render import _render_output_fact_refs, _verify_render_references
+from .render import (
+    _render_output_fact_refs,
+    _verify_render_output_targets,
+    _verify_render_references,
+)
 from .sources import (
     _allowed_read_ids,
     _verify_api_relation_catalog_refs,
@@ -107,6 +111,7 @@ def _verify_answer_plan(
         )
     _verify_compute_scalar_availability(answer)
     _verify_answer_uses_evidence_relation(answer)
+    _verify_render_output_targets(answer, require_output=False)
     compiled = compile_fact_execution(
         answer=answer,
         catalog=catalog,

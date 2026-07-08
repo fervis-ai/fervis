@@ -236,22 +236,7 @@ def _clarification_result(run: RunView) -> dict[str, Any] | None:
 
 
 def _clarification_data(request: ClarificationRequestView) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "id": request.clarification_id,
-        "basis": request.basis,
-        "question": request.question_text,
-        "factResultId": request.fact_result_id,
-        "stepId": request.step_id,
-    }
-    if request.requested_fact_id:
-        payload["requestedFactId"] = request.requested_fact_id
-    if request.known_input_id:
-        payload["knownInputId"] = request.known_input_id
-    if request.options:
-        payload["availableOptions"] = list(request.options)
-    if request.evidence_refs:
-        payload["evidenceRefs"] = list(request.evidence_refs)
-    return payload
+    return dict(request.payload_json)
 
 
 def _answer_output_data(output: AnswerOutputView) -> dict[str, Any]:

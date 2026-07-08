@@ -20,7 +20,6 @@ expect:
     clarification_required:
       - kind
       - missing
-      - clarification_question
     clarification_kind_values: [needs_clarification]
     clarification_has_answer_fields: false
     answer_request_required:
@@ -50,11 +49,9 @@ expect:
     clarification_required:
       - kind
       - missing
-      - clarification_question
     clarification_properties:
       - kind
       - missing
-      - clarification_question
     clarification_kind_values: [needs_clarification]
     clarification_has_answer_fields: false
     answer_request_required:

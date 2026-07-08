@@ -1467,6 +1467,7 @@ def test_lookup_cutover_executes_set_difference_without_python_or_old_phases():
                 description="variant name",
                 subject_text="item variants",
                 binding_target_ids=("answer_1",),
+                answer_output_role="ANSWER_VALUE",
             ),
         ),
     )

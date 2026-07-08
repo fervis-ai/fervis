@@ -32,13 +32,13 @@ describe("Fervis API boundary decoder", () => {
     );
   });
 
-  it("decodes legacy conversation summaries without a current run id", () => {
+  it("decodes conversation summaries without a current run id", () => {
     const decoded = decodeConversationList({
       conversations: [
         {
-          conversationId: "conv_legacy",
+          conversationId: "conv_pending",
           firstQuestion: "Which staff person made the most sales this month?",
-          latestQuestionId: "q_legacy",
+          latestQuestionId: "q_pending",
           currentRunId: null,
           status: "RUNNING",
           runCount: 1,
@@ -109,12 +109,20 @@ describe("Fervis API boundary decoder", () => {
           clarifications: [
             {
               id: "clarification_1",
-              basis: "missing_answer_metric",
+              need: "answer_metric",
+              reason: "missing_answer_metric",
               question: "Which metric should I use?",
               requestedFactId: "fact_1",
-              knownInputId: "q1_store",
-              factResultId: null,
-              stepId: null
+              subjects: [
+                {
+                  kind: "metric_phrase",
+                  id: "clarification_1",
+                  label: "metric",
+                  sourceText: "",
+                  options: []
+                }
+              ],
+              evidence: []
             }
           ]
         }
@@ -129,17 +137,15 @@ describe("Fervis API boundary decoder", () => {
       throw new Error("expected clarification result data");
     }
     expect(
-      decoded.value.resultData.details.clarifications[0]?.availableOptions
+      decoded.value.resultData.details.clarifications[0]?.subjects[0]?.options
     ).toEqual([]);
-    expect(decoded.value.resultData.details.clarifications[0]?.evidenceRefs).toEqual([]);
+    expect(decoded.value.resultData.details.clarifications[0]?.evidence).toEqual([]);
     expect(decoded.value.resultData.details.clarifications[0]?.requestedFactId).toBe(
       "fact_1"
     );
-    expect(decoded.value.resultData.details.clarifications[0]?.knownInputId).toBe(
-      "q1_store"
+    expect(decoded.value.resultData.details.clarifications[0]?.reason).toBe(
+      "missing_answer_metric"
     );
-    expect(decoded.value.resultData.details.clarifications[0]?.factResultId).toBeNull();
-    expect(decoded.value.resultData.details.clarifications[0]?.stepId).toBeNull();
   });
 
   it("decodes semantic known inputs without lookup text", () => {
@@ -160,13 +166,20 @@ describe("Fervis API boundary decoder", () => {
               clarifications: [
                 {
                   id: "clarification_1",
-                  basis: "unresolved_reference",
+                  need: "target_reference",
+                  reason: "unresolved_reference",
                   question: "Which staff identifier do you mean?",
                   requestedFactId: "fact_1",
-                  knownInputId: "q1",
-                  evidenceRefs: [],
-                  factResultId: null,
-                  stepId: null
+                  subjects: [
+                    {
+                      kind: "question_input",
+                      id: "q1",
+                      label: "staff identifier",
+                      sourceText: "51515151-0000-0000-0002-000000009999",
+                      options: []
+                    }
+                  ],
+                  evidence: [{ kind: "known_input", id: "known_input:q1" }]
                 }
               ]
             }
@@ -300,11 +313,20 @@ describe("Fervis API boundary decoder", () => {
           clarifications: [
             {
               id: "clarification_1",
-              basis: "missing_answer_metric",
+              need: "answer_metric",
+              reason: "missing_answer_metric",
               question: "Which metric should I use?",
-              factResultId: null,
-              stepId: "step_1",
-              evidenceRefs: []
+              requestedFactId: "fact_1",
+              subjects: [
+                {
+                  kind: "metric_phrase",
+                  id: "clarification_1",
+                  label: "metric",
+                  sourceText: "",
+                  options: []
+                }
+              ],
+              evidence: []
             }
           ]
         }
@@ -421,7 +443,17 @@ describe("Fervis API boundary decoder", () => {
       throw new Error("expected clarification result data");
     }
     expect(firstRun.resultData.details.clarifications[0]?.id).toBe("clar_store");
-    expect(firstRun.resultData.details.clarifications[0]?.availableOptions).toHaveLength(2);
+    const options =
+      firstRun.resultData.details.clarifications[0]?.subjects[0]?.options ?? [];
+    expect(options).toHaveLength(2);
+    expect(options[0]).toMatchObject({
+      entityKind: "location",
+      matchedLabel: "ABC Mall",
+      matchedField: "location_id",
+      matchedValue: "60606060-0000-0000-0001-000000000001",
+      resolverReadId: "list_location_list",
+      resolverLabel: "List Location List"
+    });
   });
 
   it("decodes free-text clarification as the same contract with zero options", () => {
@@ -434,7 +466,7 @@ describe("Fervis API boundary decoder", () => {
     if (decoded.value.resultData?.kind !== "needs_clarification") {
       throw new Error("expected clarification result data");
     }
-    expect(decoded.value.resultData.details.clarifications[0]?.availableOptions).toEqual([]);
+    expect(decoded.value.resultData.details.clarifications[0]?.subjects[0]?.options).toEqual([]);
   });
 
   it("rejects a clarification terminal payload with no clarification objects", () => {
@@ -464,12 +496,20 @@ describe("Fervis API boundary decoder", () => {
           clarifications: [
             {
               id: "",
-              basis: "ambiguous_period",
+              need: "question_interpretation",
+              reason: "ambiguous_interpretation",
               question: "Which March should I use?",
-              availableOptions: [],
-              evidenceRefs: ["ev_period"],
-              factResultId: "fr_period",
-              stepId: "step_clarify"
+              requestedFactId: "rf_sales_count",
+              subjects: [
+                {
+                  kind: "interpretation",
+                  id: "input_period",
+                  label: "period",
+                  sourceText: "March",
+                  options: []
+                }
+              ],
+              evidence: [{ kind: "question_contract", id: "ev_period" }]
             }
           ]
         }

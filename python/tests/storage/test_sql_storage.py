@@ -47,7 +47,6 @@ from fervis.lineage.recorder import (
     RunStepWrite,
 )
 from fervis.lineage.enums import (
-    ClarificationBasis,
     FactResultKind,
     ModelCallStatus,
     RunResultKind,
@@ -440,8 +439,23 @@ def test_sql_storage_clarification_continuation_authorizes_trigger_run(
             clarification_id="owner-clarification",
             run_id=owner_result.run_id,
             step_id="owner-clarification-step",
-            basis=ClarificationBasis.MULTIPLE_MATCHING_ENTITIES,
-            question_text="Which store do you mean?",
+            payload_json={
+                "id": "owner-clarification",
+                "need": "target_reference",
+                "reason": "multiple_matching_entities",
+                "requestedFactId": "question_contract",
+                "question": "Which matching store should I use?",
+                "subjects": [
+                    {
+                        "kind": "question_input",
+                        "id": "store",
+                        "label": "store",
+                        "sourceText": "",
+                        "options": [],
+                    }
+                ],
+                "evidence": [],
+            },
         )
     )
     other_result = bundle.questions.ask(
@@ -971,15 +985,27 @@ def test_sql_storage_terminal_result_projects_clarification_payload(
         )
     )
     run_id = result.run_id
-    clarification_payload = {
+    clarification_id = f"{run_id}:clarification"
+    clarification_details = {
         "clarifications": [
             {
-                "id": "clarify_q1_grounding",
+                "id": clarification_id,
                 "requestedFactId": "fact_1",
-                "basis": "unresolved_reference",
-                "question": "Which store do you mean?",
-                "knownInputId": "q1_store",
-                "evidenceRefs": ["known_input:q1_store"],
+                "need": "target_reference",
+                "reason": "unresolved_reference",
+                "question": "Which store should I use?",
+                "subjects": [
+                    {
+                        "kind": "question_input",
+                        "id": "q1_store",
+                        "label": "store",
+                        "sourceText": "",
+                        "options": [],
+                    }
+                ],
+                "evidence": [
+                    {"kind": "known_input", "id": "known_input:q1_store"}
+                ],
             }
         ]
     }
@@ -1020,17 +1046,15 @@ def test_sql_storage_terminal_result_projects_clarification_payload(
                     evidence_refs_json=["known_input:q1_store"],
                     payload_schema="fervis.fact_terminal",
                     payload_schema_rev=1,
-                    payload_json=clarification_payload,
+                    payload_json={"clarificationIds": [clarification_id]},
                 ),
             ),
             clarifications=(
                 ClarificationRequestWrite(
-                    clarification_id=f"{run_id}:clarification",
+                    clarification_id=clarification_id,
                     run_id=run_id,
                     fact_result_id=f"{run_id}:fact-result",
-                    basis=ClarificationBasis.UNRESOLVED_REFERENCE,
-                    question_text="Which store do you mean?",
-                    evidence_refs_json=["known_input:q1_store"],
+                    payload_json=clarification_details["clarifications"][0],
                 ),
             ),
         )
@@ -1042,7 +1066,7 @@ def test_sql_storage_terminal_result_projects_clarification_payload(
     assert terminal.status == "NEEDS_CLARIFICATION"
     assert terminal.result_data == {
         "kind": "needs_clarification",
-        "details": clarification_payload,
+        "details": clarification_details,
     }
 
 

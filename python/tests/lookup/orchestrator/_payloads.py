@@ -909,9 +909,7 @@ def _question_contract_answer_request_payload(
             subject_text=subject_text,
         ),
         "answer_outputs": [
-            {
-                "description": output.description or output.id,
-            }
+            _answer_output_for_current_contract(output.to_answer_request_dict())
             for output in fact.answer_outputs
         ],
         "used_question_inputs": [
@@ -1217,13 +1215,22 @@ def _question_contract_answer_request_for_current_contract(
     answer_outputs = output.get("answer_outputs")
     if isinstance(answer_outputs, list):
         output["answer_outputs"] = [
-            (
-                {"description": answer_output.get("description")}
-                if isinstance(answer_output, dict) and "description" in answer_output
-                else answer_output
-            )
+            _answer_output_for_current_contract(answer_output)
             for answer_output in answer_outputs
         ]
+    return output
+
+
+def _answer_output_for_current_contract(answer_output: object) -> object:
+    if not isinstance(answer_output, dict):
+        return answer_output
+    if "description" not in answer_output:
+        return answer_output
+    output: dict[str, object] = {
+        "description": answer_output.get("description"),
+    }
+    if answer_output.get("role"):
+        output["role"] = answer_output["role"]
     return output
 
 
@@ -1672,6 +1679,10 @@ def _source_text_for_source(source: dict[str, Any]) -> str:
     return text
 
 
+def _answer_output_support_role(answer_output: dict[str, Any]) -> str:
+    return str(answer_output.get("role") or "ROW_POPULATION")
+
+
 def _query_enrichment_payload_from_prompt(prompt: str) -> dict[str, Any]:
     requested_facts = _planner_prompt_json_section(prompt, label="Requested facts")[
         "requested_facts"
@@ -1691,7 +1702,7 @@ def _query_enrichment_payload_from_prompt(prompt: str) -> dict[str, Any]:
                     [
                         {
                             "answer_output_id": str(answer_output["answer_output_id"]),
-                            "support_role": "ROW_POPULATION",
+                            "support_role": _answer_output_support_role(answer_output),
                             "source_text": str(
                                 fact.get("requested_fact_description")
                                 or "requested fact"

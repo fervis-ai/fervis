@@ -73,7 +73,6 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                     "Use missing.type=answer_definition when the user has not supplied the answer definition, metric, comparison baseline, or factual request needed to know what answer to produce.",
                     "For each missing item, copy source_text verbatim from the current question or visible context.",
                     "Set why_context_is_insufficient to the specific reason the visible context cannot resolve that missing item.",
-                    "Set clarification_question to one direct question that asks only for the missing information.",
                 ),
             ),
             builder.instruction_block(
@@ -88,7 +87,7 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                     "answer_expression.group_key.description names the result key or grouping dimension, such as region, period, category, or supplied key.",
                     "Use answer_expression.group_key.domain=SPECIFIED_QUESTION_INPUTS when groups are exactly declared question_inputs; otherwise use SOURCE_RESULT_VALUES.",
                     "With SPECIFIED_QUESTION_INPUTS, question_input_refs must list only inputs that define the result key axis, not filter-only inputs such as time, status, lifecycle, threshold, or channel.",
-                    "For a repeated measure over specified inputs, set answer_expression.group_key with domain=SPECIFIED_QUESTION_INPUTS and put only the measure or count output in answer_outputs.",
+                    "For a repeated measure over specified inputs, set answer_expression.group_key with domain=SPECIFIED_QUESTION_INPUTS and put one measure/count result column in answer_outputs, not one output per key value.",
                     "Use scalar_value only for one direct requested value, not for row/population counts.",
                     "Choose answer_expression.family from the requested answer shape, not endpoints, fields, APIs, or a single keyword.",
                     "answer_subject is required and names the base business subject whose instances the answer will count, list, rank, group, total, or describe.",

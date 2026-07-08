@@ -162,7 +162,7 @@ def test_question_contract_schema_is_decisions_only():
             "question_input_inventory_check",
         ],
         "answer_kind_enum": ["question_contract"],
-        "clarification_required": ["kind", "missing", "clarification_question"],
+        "clarification_required": ["kind", "missing"],
         "clarification_kind_enum": ["needs_clarification"],
         "has_prior_answer_references": False,
     }
@@ -1275,7 +1275,7 @@ def test_anthropic_adapter_sends_question_contract_tool_contracts():
                 "answer_requests",
                 "question_input_inventory_check",
             ],
-            ["kind", "missing", "clarification_question"],
+            ["kind", "missing"],
         ],
         "tool_choice_type": "any",
         "disable_parallel": True,

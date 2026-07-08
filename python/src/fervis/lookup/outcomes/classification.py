@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from fervis.lookup.outcomes.clarifications import (
-    Clarification,
-    ClarificationBasis,
+from fervis.lookup.clarification import (
+    ClarificationOption,
+    TargetReferenceAmbiguous,
+    TargetReferenceUnsupported,
+    clarify,
 )
 from fervis.lookup.fact_plan.fact_plan import AnswerPlan
 from fervis.lookup.fact_plan.operations import AggregateSpec
@@ -115,16 +117,13 @@ def classify_binding_candidates(
         return FactResult(
             outcome=NeedsClarification(
                 clarifications=(
-                    Clarification(
-                        id=f"unsupported_{binding_target_id}",
-                        requested_fact_id=requested_fact_id,
-                        basis=ClarificationBasis.UNSUPPORTED_REFERENCE,
-                        question=f"I could not resolve {binding_target_id}.",
-                        known_input_id=known_input_id,
-                        evidence_refs=(
-                            f"known_input:{known_input_id}",
-                            *proof.proof_refs,
-                        ),
+                    clarify(
+                        _unsupported_binding_candidate_cause(
+                            requested_fact_id=requested_fact_id,
+                            binding_target_id=binding_target_id,
+                            known_input_id=known_input_id,
+                            proof_refs=proof.proof_refs,
+                        )
                     ),
                 ),
                 proof_refs=(f"known_input:{known_input_id}", *proof.proof_refs),
@@ -135,21 +134,60 @@ def classify_binding_candidates(
     return FactResult(
         outcome=NeedsClarification(
             clarifications=(
-                Clarification(
-                    id=f"clarify_{binding_target_id}",
-                    requested_fact_id=requested_fact_id,
-                    basis=ClarificationBasis.MULTIPLE_MATCHING_ENTITIES,
-                    question=f"Which {binding_target_id} do you mean?",
-                    known_input_id=known_input_id,
-                    candidate_refs=tuple(
-                        f"{candidate_relation.id}:{index}"
-                        for index, _row in enumerate(candidate_relation.rows, start=1)
-                    ),
-                    evidence_refs=(f"known_input:{known_input_id}", *proof.proof_refs),
+                clarify(
+                    _ambiguous_binding_candidate_cause(
+                        requested_fact_id=requested_fact_id,
+                        binding_target_id=binding_target_id,
+                        known_input_id=known_input_id,
+                        candidate_relation=candidate_relation,
+                        proof_refs=proof.proof_refs,
+                    )
                 ),
             ),
             proof_refs=(f"known_input:{known_input_id}", *proof.proof_refs),
         )
+    )
+
+
+def _unsupported_binding_candidate_cause(
+    *,
+    requested_fact_id: str,
+    binding_target_id: str,
+    known_input_id: str,
+    proof_refs: tuple[str, ...],
+) -> TargetReferenceUnsupported:
+    return TargetReferenceUnsupported(
+        clarification_id=f"unsupported_{binding_target_id}",
+        requested_fact_id=requested_fact_id,
+        known_input_id=known_input_id,
+        source_text=binding_target_id,
+        target_label="reference",
+        proof_refs=proof_refs,
+    )
+
+
+def _ambiguous_binding_candidate_cause(
+    *,
+    requested_fact_id: str,
+    binding_target_id: str,
+    known_input_id: str,
+    candidate_relation: RelationRows,
+    proof_refs: tuple[str, ...],
+) -> TargetReferenceAmbiguous:
+    return TargetReferenceAmbiguous(
+        clarification_id=f"clarify_{binding_target_id}",
+        requested_fact_id=requested_fact_id,
+        known_input_id=known_input_id,
+        source_text=binding_target_id,
+        target_label="reference",
+        options=tuple(
+            ClarificationOption(
+                id=f"{candidate_relation.id}:{index}",
+                label=f"Candidate {index}",
+            )
+            for index, _row in enumerate(candidate_relation.rows, start=1)
+        ),
+        proof_refs=proof_refs,
     )
 
 

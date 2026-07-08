@@ -284,6 +284,26 @@ def test_parse_question_contract_accepts_group_key_on_grouped_expression():
     assert tuple(output.role for output in fact.answer_outputs) == ("ROW_POPULATION",)
 
 
+def test_requested_fact_rejects_duplicate_row_population_outputs():
+    with pytest.raises(ValueError, match="at most one row population"):
+        RequestedFact(
+            id="fact_1",
+            description="sales count",
+            answer_outputs=(
+                RequestedFactAnswerOutput(
+                    id="answer_1",
+                    description="count for first staff member",
+                    role="ROW_POPULATION",
+                ),
+                RequestedFactAnswerOutput(
+                    id="answer_2",
+                    description="count for second staff member",
+                    role="ROW_POPULATION",
+                ),
+            ),
+        )
+
+
 def test_literal_input_requires_explicit_role():
     with pytest.raises(TypeError):
         RequestedFactLiteralInput(

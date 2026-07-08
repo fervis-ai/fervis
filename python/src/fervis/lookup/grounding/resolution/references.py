@@ -921,9 +921,25 @@ def _ambiguous_reference_issue(
 
 
 def _identity_candidate(value: FactValue) -> GroundingCandidate:
+    payload = value.payload
+    if not isinstance(payload, IdentityValuePayload):
+        return GroundingCandidate(
+            id=_identity_candidate_ref(value),
+            label=_identity_candidate_label(value),
+        )
+    resolver_read_id = value.source_refs[0] if value.source_refs else ""
+    resolver_endpoint_name = (
+        value.source_refs[1] if len(value.source_refs) > 1 else resolver_read_id
+    )
     return GroundingCandidate(
         id=_identity_candidate_ref(value),
         label=_identity_candidate_label(value),
+        entity_kind=payload.identity_type,
+        matched_label=payload.display_value or value.label or payload.value,
+        matched_field=payload.identity_field,
+        matched_value=payload.value,
+        resolver_read_id=resolver_read_id,
+        resolver_label=_title_words(resolver_read_id or resolver_endpoint_name),
     )
 
 
@@ -941,6 +957,13 @@ def _identity_candidate_label(value: FactValue) -> str:
     identity_label = payload.identity_type.replace("_", " ").title()
     display = payload.display_value or value.label or str(payload.value)
     return f"{identity_label}: {display} [{payload.identity_field}={payload.value}]"
+
+
+def _title_words(value: str) -> str:
+    return " ".join(
+        word.capitalize()
+        for word in value.replace("_", " ").replace("-", " ").split()
+    )
 
 
 def _execute_reference_route(
@@ -975,6 +998,10 @@ def _execute_reference_route(
                     known_input_text=task.lookup_text,
                     known_input_description=task.known_input_description,
                     proof_refs=(f"known_input:{task.known_input_id}",),
+                    resolver_read_id=route.resolver_read_id,
+                    resolver_endpoint_name=route.resolver_endpoint_name,
+                    resolver_field_id=route.return_field_id,
+                    identity_field=route.identity_field,
                 ),
             )
         )
@@ -1019,6 +1046,10 @@ def _execute_reference_route(
                     known_input_text=task.lookup_text,
                     known_input_description=task.known_input_description,
                     proof_refs=(f"known_input:{task.known_input_id}",),
+                    resolver_read_id=route.resolver_read_id,
+                    resolver_endpoint_name=route.resolver_endpoint_name,
+                    resolver_field_id=route.return_field_id,
+                    identity_field=route.identity_field,
                 ),
             )
         )

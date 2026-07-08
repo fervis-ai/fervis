@@ -1610,7 +1610,7 @@ def test_lookup_unresolved_named_entity_returns_resource_specific_clarification(
     )
 
     assert result.status == "NEEDS_CLARIFICATION", result
-    assert result.answer == 'Which store do you mean by "Nextgen"?'
+    assert result.answer == 'I could not find store "Nextgen". Which store should I use?'
     assert planner.tool_names == [
         "submit_answer_request_contract",
         "submit_query_enrichment",
@@ -2117,6 +2117,7 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
             "input_text": "Jane Doe",
             "resolver_read_id": "staff_list",
             "resolver_label": "Staff List",
+            "entity_kind": "staff",
             "matched_field": "staff_id",
             "matched_value": "staff-1",
             "matched_label": "Jane Doe",

@@ -14,6 +14,14 @@ from .candidate_tree import CandidateTreeContext, map_source_candidate_tree
 from .row_predicates import candidate_row_path_ids
 
 
+_FULFILLMENT_EVIDENCE_KEYS = (
+    "scope_evidence",
+    "metric_measure_evidence",
+    "row_count_basis_evidence",
+    "group_key_evidence",
+)
+
+
 def _compact_prompt_payload(
     payload: dict[str, Any],
     *,
@@ -181,12 +189,9 @@ def _visible_fulfillment_support_sets(
     *,
     requested_fact: RequestedFact | None,
 ) -> list[dict[str, Any]]:
-    support_sets = prefer_canonical_group_support_sets(
-        tuple(
-            item
-            for item in candidate.get("fulfillment_support_sets") or ()
-            if isinstance(item, dict)
-        )
+    support_sets = _visible_support_sets(
+        candidate,
+        requested_fact=requested_fact,
     )
     if not support_sets:
         return []
@@ -196,7 +201,6 @@ def _visible_fulfillment_support_sets(
         if str(slot.get("fulfillment_slot_id") or "")
     }
     output: list[dict[str, Any]] = []
-    visible_index = 0
     for support_set in support_sets:
         visible_slots = [
             visible_slots_by_id[slot_id]
@@ -207,15 +211,70 @@ def _visible_fulfillment_support_sets(
         ]
         if not visible_slots:
             continue
-        visible_index += 1
         output.append(
             {
-                "fulfillment_choice_id": f"fulfillment_{visible_index}",
+                "fulfillment_choice_id": _visible_fulfillment_choice_id(
+                    support_set,
+                    visible_slots=tuple(visible_slots),
+                ),
                 "answer_output_id": str(support_set.get("answer_output_id") or ""),
                 "fulfillment_slots": visible_slots,
             }
         )
     return output
+
+
+def _visible_support_sets(
+    candidate: dict[str, Any],
+    *,
+    requested_fact: RequestedFact | None,
+) -> tuple[dict[str, Any], ...]:
+    support_sets = tuple(
+        item
+        for item in candidate.get("fulfillment_support_sets") or ()
+        if isinstance(item, dict)
+    )
+    if _prefers_canonical_group_support(requested_fact):
+        return prefer_canonical_group_support_sets(support_sets)
+    return support_sets
+
+
+def _prefers_canonical_group_support(
+    requested_fact: RequestedFact | None,
+) -> bool:
+    if requested_fact is None or requested_fact.answer_expression is None:
+        return False
+    return requested_fact.answer_expression.family in {
+        RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
+        RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+    }
+
+
+def _visible_fulfillment_choice_id(
+    support_set: dict[str, Any],
+    *,
+    visible_slots: tuple[dict[str, Any], ...],
+) -> str:
+    visible_evidence_ids = _visible_fulfillment_evidence_ids(visible_slots)
+    if len(visible_evidence_ids) == 1:
+        return visible_evidence_ids[0]
+    return str(support_set.get("fulfillment_support_set_id") or "")
+
+
+def _visible_fulfillment_evidence_ids(
+    visible_slots: tuple[dict[str, Any], ...],
+) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            evidence_id
+            for slot in visible_slots
+            for key in _FULFILLMENT_EVIDENCE_KEYS
+            for item in slot.get(key) or ()
+            if isinstance(item, dict)
+            for evidence_id in (str(item.get("evidence_id") or ""),)
+            if evidence_id
+        )
+    )
 
 
 def _visible_fulfillment_slots(
@@ -274,12 +333,7 @@ def _visible_fulfillment_slots(
                 slot_output.pop(key, None)
         if not any(
             slot_output.get(key)
-            for key in (
-                "metric_measure_evidence",
-                "row_count_basis_evidence",
-                "scope_evidence",
-                "group_key_evidence",
-            )
+            for key in _FULFILLMENT_EVIDENCE_KEYS
         ):
             continue
         output.append(slot_output)

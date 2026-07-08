@@ -134,6 +134,7 @@ fi
 
 if [[ -n "$database_url" ]]; then
   export DATABASE_URL="$database_url"
+  export FERVIS_DATABASE_URL="$database_url"
 fi
 
 if [[ -z "$python_bin" ]]; then
@@ -167,6 +168,7 @@ export PYTHONPATH="$repo_root/python/src${goldset_src_path:+:$goldset_src_path}:
 export FERVIS_GOLDSET_SUITE="$suite_ref"
 export FERVIS_GOLDSET_TENANT_ID="$tenant_id"
 export FERVIS_GOLDSET_PRINCIPAL_ID="$principal_id"
+export FERVIS_GOLDSET_ADMIN_USER_ID="${FERVIS_GOLDSET_ADMIN_USER_ID:-$principal_id}"
 
 "$python_bin" -P - "$repo_root" <<'PY'
 from __future__ import annotations

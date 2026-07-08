@@ -201,7 +201,7 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
         ],
         "answer_contract_has_clarification_fields": any(
             field in answer_contract_schema["properties"]
-            for field in ("missing", "clarification_question")
+            for field in ("missing",)
         ),
         "clarification_required": list(clarification_schema["required"]),
         "clarification_properties": list(clarification_schema["properties"]),

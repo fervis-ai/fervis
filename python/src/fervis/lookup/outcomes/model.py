@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Mapping
 
-from fervis.lookup.outcomes.clarifications import Clarification
+from fervis.lookup.clarification import Clarification
 
 if TYPE_CHECKING:
     from fervis.lookup.plan_execution.relations import RelationRows

@@ -213,6 +213,12 @@ class GroundedInputUse:
 class GroundingCandidate:
     id: str
     label: str = ""
+    entity_kind: str = ""
+    matched_label: str = ""
+    matched_field: str = ""
+    matched_value: str = ""
+    resolver_read_id: str = ""
+    resolver_label: str = ""
 
     def __post_init__(self) -> None:
         if not self.id:
@@ -230,6 +236,10 @@ class GroundingIssue:
     candidates: tuple[str, ...] = ()
     candidate_options: tuple[GroundingCandidate, ...] = ()
     proof_refs: tuple[str, ...] = ()
+    resolver_read_id: str = ""
+    resolver_endpoint_name: str = ""
+    resolver_field_id: str = ""
+    identity_field: str = ""
 
 
 @dataclass(frozen=True)

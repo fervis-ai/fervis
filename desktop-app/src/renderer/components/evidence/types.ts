@@ -1,3 +1,5 @@
+import type { StepInputItem } from "../../stepDisplay";
+
 export type ProofMode = "compact" | "verbose";
 
 export interface EvidenceInsight {
@@ -9,4 +11,5 @@ export interface EvidenceInsight {
 export interface ProofNote {
   readonly label: string;
   readonly text: string;
+  readonly inputs?: readonly StepInputItem[];
 }

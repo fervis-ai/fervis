@@ -169,6 +169,7 @@ def _question_contract_for(
     description: str | None = None,
     subject_text: str | None = None,
     binding_target_ids: tuple[str, ...] = ("answer",),
+    answer_output_role: str = "",
     known_inputs: tuple[RequestedFactKnownInput, ...] = (),
     answer_expression_family: RequestedFactAnswerExpressionFamily = (
         RequestedFactAnswerExpressionFamily.SCALAR_AGGREGATE
@@ -187,7 +188,10 @@ def _question_contract_for(
                     subject_text=subject_text or text
                 ),
                 answer_outputs=tuple(
-                    RequestedFactAnswerOutput(id=binding_target_id)
+                    RequestedFactAnswerOutput(
+                        id=binding_target_id,
+                        role=answer_output_role,
+                    )
                     for binding_target_id in binding_target_ids
                 ),
                 known_inputs=known_inputs,
