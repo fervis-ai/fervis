@@ -25,6 +25,30 @@ class RowSourceParamSemantics(StrEnum):
     RESPONSE_SHAPE = "response_shape"
 
 
+class RowSourceValueType(StrEnum):
+    ANY = "any"
+    ARRAY = "array"
+    BOOLEAN = "boolean"
+    CHOICE = "choice"
+    DATE = "date"
+    DATETIME = "datetime"
+    DECIMAL = "decimal"
+    DOUBLE = "double"
+    DURATION = "duration"
+    FLOAT = "float"
+    INTEGER = "integer"
+    JSON = "json"
+    LIST = "list"
+    NUMBER = "number"
+    OBJECT = "object"
+    PATH = "path"
+    PK = "pk"
+    STRING = "string"
+    TIME = "time"
+    UUID = "uuid"
+    UNKNOWN = "unknown"
+
+
 CALENDAR_ROW_SOURCE_ID = "rs_calendar_days"
 CALENDAR_DATE_FIELD_ID = "runtime_date"
 CALENDAR_START_PARAM_ID = "interval_start"
@@ -40,7 +64,7 @@ class RowSourceField:
     id: str
     field_ref: str
     label: str
-    type: str
+    type: RowSourceValueType
     allowed_roles: tuple[FieldBindingRole, ...]
     choices: tuple[str, ...] = ()
     identity: IdentityMetadata | None = None
@@ -50,13 +74,19 @@ class RowSourceField:
     response_path: str = ""
     description: str = ""
 
+    @property
+    def can_carry_lookup_text(self) -> bool:
+        return self.type in {RowSourceValueType.STRING, RowSourceValueType.ANY} and not (
+            self.identity is not None and self.identity.primary_key
+        )
+
 
 @dataclass(frozen=True)
 class RowSourceParam:
     id: str
     param_ref: str
     name: str
-    type: str
+    type: RowSourceValueType
     source: ParamSource | str = ""
     required: bool = False
     choices: tuple[str, ...] = ()
@@ -66,6 +96,10 @@ class RowSourceParam:
     identity: IdentityMetadata | None = None
     semantics: RowSourceParamSemantics = RowSourceParamSemantics.OPAQUE_QUERY_PARAM
 
+    @property
+    def accepts_lookup_text(self) -> bool:
+        return self.type in {RowSourceValueType.STRING, RowSourceValueType.ANY}
+
 
 @dataclass(frozen=True)
 class RowSourceBlockedFact:
@@ -73,6 +107,13 @@ class RowSourceBlockedFact:
     availability: CatalogFactAvailability
     field_id: str = ""
     proof_refs: tuple[str, ...] = ()
+
+
+def row_source_value_type(raw_value: str) -> RowSourceValueType:
+    try:
+        return RowSourceValueType(raw_value.strip().casefold())
+    except ValueError:
+        return RowSourceValueType.UNKNOWN
 
 
 @dataclass(frozen=True)

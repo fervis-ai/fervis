@@ -11,6 +11,7 @@ from fervis.lineage.enums import (
     ProofNodeKind,
 )
 from fervis.lookup.relation_catalog import RelationCatalog
+from fervis.lookup.plan_execution.errors import VerificationError
 from fervis.lookup.plan_execution.relations import (
     CompletenessSourceKind,
     RelationRows,
@@ -177,17 +178,44 @@ def compile_fact_execution(
         row_sources=row_sources,
         grounded_input_uses=available_value_uses,
     )
+    proof_graph = _execution_proof_graph(
+        answer,
+        render_spec=answer.render_spec,
+        value_uses=value_uses,
+        values=(*answer.values, *available_values),
+    )
     return CompiledFactExecution(
         answer=answer,
         row_sources=row_sources,
         value_uses=value_uses,
-        proof_graph=_execution_proof_graph(
-            answer,
-            render_spec=answer.render_spec,
-            value_uses=value_uses,
-            values=(*answer.values, *available_values),
-        ),
+        proof_graph=_require_valid_proof_graph(proof_graph),
     )
+
+
+def _require_valid_proof_graph(
+    proof_graph: ExecutionProofGraph,
+) -> ExecutionProofGraph:
+    node_ids = [node.id for node in proof_graph.nodes]
+    duplicate_node_ids = tuple(
+        node_id for node_id in dict.fromkeys(node_ids) if node_ids.count(node_id) > 1
+    )
+    if duplicate_node_ids:
+        raise VerificationError(
+            "duplicate proof graph node ids: " + ", ".join(duplicate_node_ids)
+        )
+    known_node_ids = set(node_ids)
+    missing_edge_endpoints = tuple(
+        endpoint
+        for edge in proof_graph.edges
+        for endpoint in (edge.source, edge.target)
+        if endpoint not in known_node_ids
+    )
+    if missing_edge_endpoints:
+        raise VerificationError(
+            "proof graph edges reference missing nodes: "
+            + ", ".join(dict.fromkeys(missing_edge_endpoints))
+        )
+    return proof_graph
 
 
 def _execution_proof_graph(
@@ -284,6 +312,17 @@ def _execution_proof_graph(
                 value={
                     "included_values": list(choice.included_values),
                     "excluded_values": list(choice.excluded_values),
+                    "review_scope_decisions": [
+                        {
+                            "membership_test_id": decision.membership_test_id,
+                            "decision": decision.decision.value,
+                            "axis_kind": decision.axis_kind,
+                            "axis_id": decision.axis_id,
+                            "owner_surface_ids": list(decision.owner_surface_ids),
+                            "proof_refs": list(decision.proof_refs),
+                        }
+                        for decision in choice.review_scope_decisions
+                    ],
                 },
             )
         )
@@ -388,17 +427,52 @@ def _execution_proof_graph(
                     role=ProofEdgeRole.PRODUCES,
                 )
             )
-    for relation in relations:
+    relation_node_ids = tuple(
+        dict.fromkeys(
+            (
+                *(relation.id for relation in relations),
+                *(
+                    output_relation
+                    for operation in answer.operations
+                    for output_relation in (
+                        str(getattr(operation, "output_relation", "") or ""),
+                    )
+                    if output_relation
+                ),
+            )
+        )
+    )
+    for relation_id in relation_node_ids:
         nodes.append(
             ExecutionProofNode(
-                id=f"relation:{relation.id}",
+                id=f"relation:{relation_id}",
                 kind=ProofNodeKind.RELATION,
             )
         )
-    for scalar_output in tuple(getattr(render_spec, "scalar_outputs", ()) or ()):
+    scalar_node_ids = tuple(
+        dict.fromkeys(
+            (
+                *(
+                    output_scalar
+                    for operation in answer.operations
+                    for output_scalar in (
+                        str(getattr(operation.spec, "output_scalar", "") or ""),
+                    )
+                    if output_scalar
+                ),
+                *(
+                    scalar_output.scalar_id
+                    for scalar_output in tuple(
+                        getattr(render_spec, "scalar_outputs", ()) or ()
+                    )
+                ),
+            )
+        )
+    )
+    for scalar_id in scalar_node_ids:
         nodes.append(
             ExecutionProofNode(
-                id=f"scalar:{scalar_output.scalar_id}",
+                id=f"scalar:{scalar_id}",
                 kind=ProofNodeKind.SCALAR,
             )
         )
@@ -414,10 +488,13 @@ def _execution_proof_graph(
 def _answer_output_nodes(answer: AnswerPlan) -> tuple[ExecutionProofNode, ...]:
     return tuple(
         ExecutionProofNode(
-            id=_answer_output_node_id(fulfillment),
+            id=node_id,
             kind=ProofNodeKind.ANSWER_OUTPUT,
         )
-        for fulfillment in answer.fulfillment
+        for node_id in dict.fromkeys(
+            _answer_output_node_id(fulfillment)
+            for fulfillment in answer.fulfillment
+        )
     )
 
 

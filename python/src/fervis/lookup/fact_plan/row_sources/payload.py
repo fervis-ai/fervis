@@ -25,6 +25,7 @@ from .model import (
     RowSourceField,
     RowSourceKind,
     RowSourceParam,
+    row_source_value_type,
 )
 
 
@@ -58,7 +59,7 @@ def _memory_prompt_row_sources(memory_inputs: dict[str, Any]) -> tuple[RowSource
                 id=str(field.get("id") or ""),
                 field_ref=str(field.get("id") or ""),
                 label=str(field.get("id") or ""),
-                type=str(field.get("type") or "unknown"),
+                type=row_source_value_type(str(field.get("type") or "")),
                 allowed_roles=_memory_prompt_roles(field),
             )
             for field in relation.get("fields", ()) or ()
@@ -97,7 +98,7 @@ def _prompt_source_payload(source: RowSource) -> dict[str, Any]:
                     field_id=field.id,
                 ),
                 "label": field.label,
-                "type": field.type,
+                "type": field.type.value,
                 "allowed_roles": [role.value for role in field.allowed_roles],
                 **({"description": field.description} if field.description else {}),
                 **(_identity_prompt_payload(field.identity)),
@@ -140,7 +141,7 @@ def row_source_param_prompt_payload(
         ),
         "label": param.name,
         "source": _param_source_value(param.source),
-        "type": param.type,
+        "type": param.type.value,
         **(_identity_prompt_payload(param.identity)),
     }
     if param.required:

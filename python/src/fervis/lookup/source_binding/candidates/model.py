@@ -1,6 +1,12 @@
 """Source-binding candidate registry models."""
 
-from ._shared import Any, EndpointParamBinding, RelationSource, dataclass
+from ._shared import (
+    Any,
+    EndpointParamBinding,
+    RelationSource,
+    RelationSourceAppliedFilter,
+    dataclass,
+)
 
 
 @dataclass(frozen=True)
@@ -14,6 +20,7 @@ class SourceCandidate:
     params: tuple[dict[str, Any], ...] = ()
     applied_param_bindings: tuple[EndpointParamBinding, ...] = ()
     applied_param_binding_sets: tuple[tuple[EndpointParamBinding, ...], ...] = ()
+    applied_filters: tuple[RelationSourceAppliedFilter, ...] = ()
     fields: tuple[dict[str, Any], ...] = ()
     population_bindings: tuple[dict[str, Any], ...] = ()
     payload: dict[str, Any] | None = None

@@ -17,4 +17,5 @@ input:
           type: choice
           source: ""
 expect:
-  error_contains: param source
+  result_contains:
+    status: rejected

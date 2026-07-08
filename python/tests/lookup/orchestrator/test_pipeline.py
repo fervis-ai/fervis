@@ -18,6 +18,7 @@ from fervis.lineage.step_summary import step_semantic_items_from_json
 from fervis.lookup.lineage.steps import LineageRuntimeStepSink
 from fervis.lookup.lineage.errors import LineagePersistenceUnavailable
 from fervis.lookup.relation_catalog import CatalogEndpointMetadata
+from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 from fervis.lookup.turn_prompts import HostPromptContext
 from fervis.run_work.events import CollectingQuestionRunEventSink
 
@@ -28,6 +29,7 @@ from tests.lookup.source_binding_helpers import (
     _source_candidate_param_decision_options,
     plan_selection_payload_from_fact_plan,
     source_binding_payload_from_fact_plan_with_invocation_overrides,
+    source_binding_target_id_for_candidate,
 )
 
 
@@ -255,7 +257,7 @@ def test_lookup_runtime_records_source_reads_against_canonical_execute_step():
     execute_steps = [
         step for step in lineage.steps if step.step_key is RunStepKey.EXECUTE
     ]
-    assert result.status == "COMPLETED", (result.error)
+    assert result.status == "COMPLETED", result.error
     assert lineage.model_call_audits
     assert all(
         audit.model_call.run_id == "run_source_read_lineage"
@@ -299,7 +301,9 @@ def test_lookup_runtime_records_source_reads_against_canonical_execute_step():
     assert [
         (item.catalog_endpoint_id, item.step_id, item.row_count)
         for item in lineage.source_reads
-    ] == [(lineage.catalog_endpoints[0].catalog_endpoint_id, execute_steps[0].step_id, 1)]
+    ] == [
+        (lineage.catalog_endpoints[0].catalog_endpoint_id, execute_steps[0].step_id, 1)
+    ]
     assert (
         f"source_read:{lineage.source_reads[0].source_read_id}"
         in result.rendered_fact.proof_refs
@@ -397,7 +401,7 @@ def test_lookup_retains_ambiguous_read_eligibility_candidates_with_docstring_con
         ports,
     )
 
-    assert result.status == "COMPLETED", (result.error)
+    assert result.status == "COMPLETED", result.error
     assert data_access.requests == [{"endpointName": "list_sales_summary", "args": {}}]
     assert read_id in planner.source_binding_selection_prompt
 
@@ -532,33 +536,36 @@ def test_lookup_derives_finite_choice_membership_from_answer_population_tests():
                     "population_label": "in-person sales",
                     "counted_unit": "sale",
                     "membership_tests": [
-                        {
-                            "test_id": "pop_test_1",
-                            "kind": "SUBJECT_IDENTITY",
-                            "polarity": "MUST_PASS",
-                            "test_question": "Does the row/value represent a sale?",
-                        },
-                        {
-                            "test_id": "pop_test_2",
-                            "kind": "EXPLICIT_USER_CONSTRAINT",
-                            "polarity": "MUST_PASS",
-                            "test_question": "Is the sale in-person?",
-                        },
-                        {
-                            "test_id": "pop_test_3",
-                            "kind": "NORMAL_INSTANCE_GUARD",
-                            "polarity": "MUST_PASS",
+                            {
+                                "test_id": "pop_test_1",
+                                "kind": "SUBJECT_IDENTITY",
+                                "polarity": "MUST_PASS",
+                                "test_question": "Does the row/value represent a sale?",
+                                "owned_question_input_refs": [],
+                            },
+                            {
+                                "test_id": "pop_test_2",
+                                "kind": "EXPLICIT_USER_CONSTRAINT",
+                                "polarity": "MUST_PASS",
+                                "test_question": "Is the sale in-person?",
+                                "owned_question_input_refs": [],
+                            },
+                            {
+                                "test_id": "pop_test_3",
+                                "kind": "NORMAL_INSTANCE_GUARD",
+                                "polarity": "MUST_PASS",
                             "test_question": (
                                 "Is this an actual business sale instance rather "
-                                "than a draft, canceled, voided, failed, or raw "
-                                "storage representation unless the user explicitly "
-                                "requested that state?"
-                            ),
-                        },
+                                    "than a draft, canceled, voided, failed, or raw "
+                                    "storage representation unless the user explicitly "
+                                    "requested that state?"
+                                ),
+                                "owned_question_input_refs": [],
+                            },
                     ],
                 },
                 "answer_outputs": [{"description": "count"}],
-                "input_decisions": [],
+                "used_question_inputs": [],
             }
         ],
         "question_input_inventory_check": {
@@ -701,7 +708,7 @@ def test_lookup_derives_finite_choice_membership_from_answer_population_tests():
         ports,
     )
 
-    assert result.status == "COMPLETED", (result.error)
+    assert result.status == "COMPLETED", result.error
     assert data_access.requests == [
         {
             "endpointName": "list_sales_summary",
@@ -1008,7 +1015,7 @@ def test_lookup_cutover_runs_single_fact_plan_then_execution_then_response_rende
         ports,
     )
 
-    assert result.status == "COMPLETED", (result)
+    assert result.status == "COMPLETED", result
     assert result.answer == "Location Alpha: 125.00"
     assert ports.planner_model_port.calls == 6
     assert result.rendered_fact.rows == (  # type: ignore[union-attr]
@@ -1074,9 +1081,7 @@ class _LineageRecorder:
     catalog_endpoints: list[CatalogEndpointWrite] = field(default_factory=list)
     source_reads: list[SourceReadWrite] = field(default_factory=list)
     answered_results: list[AnsweredRunResultWrite] = field(default_factory=list)
-    terminal_results: list[FactualTerminalRunResultWrite] = field(
-        default_factory=list
-    )
+    terminal_results: list[FactualTerminalRunResultWrite] = field(default_factory=list)
     runtime_error_results: list[RuntimeErrorResultWrite] = field(default_factory=list)
     model_call_audits: list[object] = field(default_factory=list)
 
@@ -1456,8 +1461,12 @@ class _OmitOptionalDefaultChoicePlannerPort(_ReadEligibilityPlannerPort):
                     "kind": "source_bindings",
                     "source_invocations": [
                         {
-                            "requested_fact_id": "fact_1",
-                            "source_candidate_id": "source_1",
+                            "binding_target_id": source_binding_target_id_for_candidate(
+                                prompt,
+                                requested_fact_id="fact_1",
+                                source_candidate_id="source_1",
+                                plan_shape="list_rows",
+                            ),
                             "answer_population": {
                                 "population_binding_id": (
                                     "pop.source_1.candidate_population"
@@ -1480,7 +1489,6 @@ class _OmitOptionalDefaultChoicePlannerPort(_ReadEligibilityPlannerPort):
                             "param_decisions": {},
                             "row_predicate_reviews": {},
                             "finite_choice_param_reviews": {},
-                            "source_binding_decision": "USE_SOURCE",
                         }
                     ],
                 }
@@ -1513,10 +1521,12 @@ def test_lookup_unresolved_named_entity_returns_resource_specific_clarification(
                 parts=("buyer feedback reasons",),
                 question_inputs=(
                     {
+                        "kind": KnownInputKind.LITERAL.value,
                         "source": "question_context",
-                        "reference_text": "Nextgen",
-                        "target_meaning": "store",
-                        "lookup_text": "Nextgen",
+                        "source_text": "Nextgen",
+                        "role": LiteralInputRole.REFERENCE_VALUE.value,
+                        "value_meaning_hint": "store",
+                        "resolved_value_text": "Nextgen",
                     },
                 ),
             ),
@@ -1526,7 +1536,7 @@ def test_lookup_unresolved_named_entity_returns_resource_specific_clarification(
                         "target_id": "fact_1_entity_1",
                         "catalog_search_terms": [
                             {
-                                "basis": "location can identify Nextgen because target_meaning is store.",
+                                "basis": "location can identify Nextgen because value_meaning_hint is store.",
                                 "term": "location",
                             }
                         ],
@@ -1600,7 +1610,7 @@ def test_lookup_unresolved_named_entity_returns_resource_specific_clarification(
     )
 
     assert result.status == "NEEDS_CLARIFICATION", result
-    assert result.answer == 'Which store do you mean by "Nextgen"?'
+    assert result.answer == 'I could not find store "Nextgen". Which store should I use?'
     assert planner.tool_names == [
         "submit_answer_request_contract",
         "submit_query_enrichment",
@@ -1615,35 +1625,34 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
             tool_name = tool_specs[0].name if tool_specs else ""
             if tool_name == "submit_source_binding":
                 from tests.lookup.source_binding_helpers import (
+                    source_candidate_answer_population,
+                    source_candidate_with_fields,
                     source_fulfills_for_candidate,
+                    source_binding_target_id_for_candidate,
                 )
 
                 prompt = str(kwargs.get("prompt") or "")
-                payload = _planner_prompt_json_section(
+                candidate = source_candidate_with_fields(
                     prompt,
-                    label="Candidate evidence sources",
+                    required=("staff_id",),
                 )
-                candidate = payload["requested_fact_sources"][0]["source_contexts"][0][
-                    "source_options"
-                ][0]
                 arguments = {
                     "outcome": {
                         "kind": "source_bindings",
-                        "metric_fit_bases": {},
-                        "fit_basis_interpretations": {},
                         "source_invocations": [
                             {
-                                "requested_fact_id": "fact_1",
-                                "source_candidate_id": candidate["source_candidate_id"],
-                                "answer_population": {
-                                    "population_binding_id": candidate[
-                                        "population_bindings"
-                                    ][0]["population_binding_id"],
-                                    "intent_text": "Jane Doe staff ID",
-                                    "match_basis_explanation": (
-                                        "Jane Doe staff ID defines the source population"
+                                "binding_target_id": source_binding_target_id_for_candidate(
+                                    prompt,
+                                    requested_fact_id="fact_1",
+                                    source_candidate_id=str(
+                                        candidate["source_candidate_id"]
                                     ),
-                                },
+                                    plan_shape="list_rows",
+                                ),
+                                "answer_population": source_candidate_answer_population(
+                                    prompt,
+                                    source_candidate_id=candidate["source_candidate_id"],
+                                ),
                                 "fulfillment_decisions": source_fulfills_for_candidate(
                                     candidate,
                                     field_ids=("staff_id",),
@@ -1684,10 +1693,12 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
                 parts=("staff ID",),
                 question_inputs=(
                     {
+                        "kind": KnownInputKind.LITERAL.value,
                         "source": "question_context",
-                        "reference_text": "Jane Doe",
-                        "target_meaning": "staff member",
-                        "lookup_text": "Jane Doe",
+                        "source_text": "Jane Doe",
+                        "role": LiteralInputRole.REFERENCE_VALUE.value,
+                        "value_meaning_hint": "staff member",
+                        "resolved_value_text": "Jane Doe",
                     },
                 ),
             ),
@@ -1698,7 +1709,7 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
                         "target_id": "fact_1_entity_1",
                         "catalog_search_terms": [
                             {
-                                "basis": "staff can identify Jane Doe because target_meaning is staff member.",
+                                "basis": "staff can identify Jane Doe because value_meaning_hint is staff member.",
                                 "term": "staff",
                             },
                         ],
@@ -1712,7 +1723,12 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
                         "option_reviews": {
                             "bind_fact_1_entity_1_1": {
                                 "resolver_fit_question": "Can this resolver search lookup text 'Jane Doe' and return canonical API identity 'staff' for target meaning 'staff member'?",
-                                "because": "The staff resolver returns the staff identity named by Jane Doe.",
+                                "because": "The detail route requires a canonical staff identity value, not a display name.",
+                                "decision": "CANNOT_RESOLVE_LOOKUP_TEXT",
+                            },
+                            "bind_fact_1_entity_1_2": {
+                                "resolver_fit_question": "Can this resolver search lookup text 'Jane Doe' and return canonical API identity 'staff' for target meaning 'staff member'?",
+                                "because": "The staff list resolver can match Jane Doe against returned staff identity rows.",
                                 "decision": "CAN_RESOLVE_LOOKUP_TEXT",
                             },
                         }
@@ -1786,7 +1802,7 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
         ports,
     )
 
-    assert result.status == "COMPLETED", (result)
+    assert result.status == "COMPLETED", result
     assert planner.tool_names == [
         "submit_answer_request_contract",
         "submit_query_enrichment",
@@ -1823,10 +1839,12 @@ def test_lookup_grounding_executes_ambiguous_resolver_routes_before_source_bindi
                 parts=("sales",),
                 question_inputs=(
                     {
+                        "kind": KnownInputKind.LITERAL.value,
                         "source": "question_context",
-                        "reference_text": "ABC Mall",
-                        "target_meaning": "store location",
-                        "lookup_text": "ABC Mall",
+                        "source_text": "ABC Mall",
+                        "role": LiteralInputRole.REFERENCE_VALUE.value,
+                        "value_meaning_hint": "store location",
+                        "resolved_value_text": "ABC Mall",
                     },
                 ),
             ),
@@ -1837,7 +1855,7 @@ def test_lookup_grounding_executes_ambiguous_resolver_routes_before_source_bindi
                         "target_id": "fact_1_entity_1",
                         "catalog_search_terms": [
                             {
-                                "basis": "location can identify ABC Mall because target_meaning is store location.",
+                                "basis": "location can identify ABC Mall because value_meaning_hint is store location.",
                                 "term": "location",
                             },
                         ],
@@ -1946,7 +1964,7 @@ def test_lookup_grounding_executes_ambiguous_resolver_routes_before_source_bindi
         ports,
     )
 
-    assert result.status == "COMPLETED", (result)
+    assert result.status == "COMPLETED", result
     assert planner.tool_names == [
         "submit_answer_request_contract",
         "submit_query_enrichment",
@@ -1977,10 +1995,12 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
                 parts=("staff ID",),
                 question_inputs=(
                     {
+                        "kind": KnownInputKind.LITERAL.value,
                         "source": "question_context",
-                        "reference_text": "Jane Doe",
-                        "target_meaning": "staff member",
-                        "lookup_text": "Jane Doe",
+                        "source_text": "Jane Doe",
+                        "role": LiteralInputRole.REFERENCE_VALUE.value,
+                        "value_meaning_hint": "staff member",
+                        "resolved_value_text": "Jane Doe",
                     },
                 ),
             ),
@@ -1991,7 +2011,7 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
                         "target_id": "fact_1_entity_1",
                         "catalog_search_terms": [
                             {
-                                "basis": "staff can identify Jane Doe because target_meaning is staff member.",
+                                "basis": "staff can identify Jane Doe because value_meaning_hint is staff member.",
                                 "term": "staff",
                             },
                         ],
@@ -2064,9 +2084,7 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
     )
 
     assert result.status == "COMPLETED", (result, result.error)
-    source_reads_by_step_key = {
-        step.step_id: step.step_key for step in lineage.steps
-    }
+    source_reads_by_step_key = {step.step_id: step.step_key for step in lineage.steps}
     assert [
         (
             source_reads_by_step_key[item.step_id],
@@ -2099,6 +2117,7 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
             "input_text": "Jane Doe",
             "resolver_read_id": "staff_list",
             "resolver_label": "Staff List",
+            "entity_kind": "staff",
             "matched_field": "staff_id",
             "matched_value": "staff-1",
             "matched_label": "Jane Doe",
@@ -2106,7 +2125,9 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
     ]
 
 
-def test_lookup_runtime_fails_closed_on_grounding_resolver_source_read_failure() -> None:
+def test_lookup_runtime_fails_closed_on_grounding_resolver_source_read_failure() -> (
+    None
+):
     planner = _ToolNamePlannerPort(
         responses={
             "submit_answer_request_contract": _question_contract_response(
@@ -2115,10 +2136,12 @@ def test_lookup_runtime_fails_closed_on_grounding_resolver_source_read_failure()
                 parts=("staff ID",),
                 question_inputs=(
                     {
+                        "kind": KnownInputKind.LITERAL.value,
                         "source": "question_context",
-                        "reference_text": "Jane Doe",
-                        "target_meaning": "staff member",
-                        "lookup_text": "Jane Doe",
+                        "source_text": "Jane Doe",
+                        "role": LiteralInputRole.REFERENCE_VALUE.value,
+                        "value_meaning_hint": "staff member",
+                        "resolved_value_text": "Jane Doe",
                     },
                 ),
             ),
@@ -2129,7 +2152,7 @@ def test_lookup_runtime_fails_closed_on_grounding_resolver_source_read_failure()
                         "target_id": "fact_1_entity_1",
                         "catalog_search_terms": [
                             {
-                                "basis": "staff can identify Jane Doe because target_meaning is staff member.",
+                                "basis": "staff can identify Jane Doe because value_meaning_hint is staff member.",
                                 "term": "staff",
                             },
                         ],
@@ -2181,11 +2204,9 @@ def test_lookup_runtime_fails_closed_on_grounding_resolver_source_read_failure()
         ports,
     )
 
-    assert result.status == "FAILED", (result)
+    assert result.status == "FAILED", result
     assert result.error == "framework_adapter_failed"
-    source_reads_by_step_key = {
-        step.step_id: step.step_key for step in lineage.steps
-    }
+    source_reads_by_step_key = {step.step_id: step.step_key for step in lineage.steps}
     assert [
         (source_reads_by_step_key[item.step_id], item.status, item.row_count)
         for item in lineage.source_reads
@@ -2205,10 +2226,12 @@ def test_lookup_runtime_fails_closed_on_grounding_missing_catalog_endpoint() -> 
                 parts=("staff ID",),
                 question_inputs=(
                     {
+                        "kind": KnownInputKind.LITERAL.value,
                         "source": "question_context",
-                        "reference_text": "Jane Doe",
-                        "target_meaning": "staff member",
-                        "lookup_text": "Jane Doe",
+                        "source_text": "Jane Doe",
+                        "role": LiteralInputRole.REFERENCE_VALUE.value,
+                        "value_meaning_hint": "staff member",
+                        "resolved_value_text": "Jane Doe",
                     },
                 ),
             ),
@@ -2219,7 +2242,7 @@ def test_lookup_runtime_fails_closed_on_grounding_missing_catalog_endpoint() -> 
                         "target_id": "fact_1_entity_1",
                         "catalog_search_terms": [
                             {
-                                "basis": "staff can identify Jane Doe because target_meaning is staff member.",
+                                "basis": "staff can identify Jane Doe because value_meaning_hint is staff member.",
                                 "term": "staff",
                             },
                         ],
@@ -2265,7 +2288,7 @@ def test_lookup_runtime_fails_closed_on_grounding_missing_catalog_endpoint() -> 
         ports,
     )
 
-    assert result.status == "FAILED", (result)
+    assert result.status == "FAILED", result
     assert result.error == "framework_adapter_failed"
     assert not lineage.source_reads
     assert lineage.runtime_error_results
@@ -2425,26 +2448,21 @@ def test_lookup_cutover_runs_combined_source_and_split_planning_turns():
         ),
         responses={"list_sale_list": {"data": [{"amount": "50000"}]}},
     )
-    planner = _ToolNamePlannerPort(
-        read_eligibility_retention_specs=(
-            ReadEligibilityRetentionSpec(
-                requested_fact_id="fact_1",
-                read_id="sales",
-                answer_value_fields=("amount",),
-            ),
-        ),
-        responses={
-            "submit_answer_request_contract": _question_contract_response(
-                subject="sales",
-                parts=("sales",),
-            ),
-            "submit_source_binding": {
+
+    def source_binding_payload(*, prompt, tool_specs):
+        del tool_specs
+        return source_binding_payload_for_one_call(
+            {
                 "outcome": {
                     "kind": "source_bindings",
                     "source_invocations": [
                         {
-                            "requested_fact_id": "fact_1",
-                            "source_candidate_id": "source_1",
+                            "binding_target_id": source_binding_target_id_for_candidate(
+                                prompt,
+                                requested_fact_id="fact_1",
+                                source_candidate_id="source_1",
+                                plan_shape="list_rows",
+                            ),
                             "answer_population": {
                                 "population_binding_id": "pop.source_1.candidate_population",
                                 "intent_text": "sales",
@@ -2465,6 +2483,23 @@ def test_lookup_cutover_runs_combined_source_and_split_planning_turns():
                     ],
                 }
             },
+            prompt=prompt,
+        )
+
+    planner = _ToolNamePlannerPort(
+        read_eligibility_retention_specs=(
+            ReadEligibilityRetentionSpec(
+                requested_fact_id="fact_1",
+                read_id="sales",
+                answer_value_fields=("amount",),
+            ),
+        ),
+        responses={
+            "submit_answer_request_contract": _question_contract_response(
+                subject="sales",
+                parts=("sales",),
+            ),
+            "submit_source_binding": source_binding_payload,
             "submit_source_alignment_reviews": {
                 "outcome": {
                     "kind": "fact_plan",
@@ -2610,32 +2645,21 @@ def test_lookup_source_binding_uses_first_class_fulfillment_usage():
             binding_target_ids=("answer_1", "answer_2"),
         ),
     )
-    planner = _ToolNamePlannerPort(
-        read_eligibility_retention_specs=(
-            ReadEligibilityRetentionSpec(
-                requested_fact_id="fact_1",
-                read_id="sales",
-                answer_value_fields=("staff_name",),
-            ),
-            ReadEligibilityRetentionSpec(
-                requested_fact_id="fact_1",
-                read_id="sales",
-                measured_value_fields=("amount",),
-            ),
-        ),
-        responses={
-            "submit_answer_request_contract": _question_contract_response(
-                subject="staff and sales amount",
-                answer_subject="staff",
-                parts=("staff", "sales amount"),
-            ),
-            "submit_source_binding": {
+
+    def source_binding_payload(*, prompt, tool_specs):
+        del tool_specs
+        return source_binding_payload_for_one_call(
+            {
                 "outcome": {
                     "kind": "source_bindings",
                     "source_invocations": [
                         {
-                            "requested_fact_id": "fact_1",
-                            "source_candidate_id": "source_1",
+                            "binding_target_id": source_binding_target_id_for_candidate(
+                                prompt,
+                                requested_fact_id="fact_1",
+                                source_candidate_id="source_1",
+                                plan_shape="list_rows",
+                            ),
                             "answer_population": {
                                 "population_binding_id": "pop.source_1.candidate_population",
                                 "intent_text": "staff and sales amount",
@@ -2656,6 +2680,29 @@ def test_lookup_source_binding_uses_first_class_fulfillment_usage():
                     ],
                 }
             },
+            prompt=prompt,
+        )
+
+    planner = _ToolNamePlannerPort(
+        read_eligibility_retention_specs=(
+            ReadEligibilityRetentionSpec(
+                requested_fact_id="fact_1",
+                read_id="sales",
+                answer_value_fields=("staff_name",),
+            ),
+            ReadEligibilityRetentionSpec(
+                requested_fact_id="fact_1",
+                read_id="sales",
+                measured_value_fields=("amount",),
+            ),
+        ),
+        responses={
+            "submit_answer_request_contract": _question_contract_response(
+                subject="staff and sales amount",
+                answer_subject="staff",
+                parts=("staff", "sales amount"),
+            ),
+            "submit_source_binding": source_binding_payload,
             "submit_pattern_fact_plan": {
                 "outcome": {
                     "kind": "fact_plan",
@@ -2742,7 +2789,7 @@ def test_lookup_rejects_param_distinct_bindings_for_one_selected_plan_member():
         ports,
     )
 
-    assert result.status == "FAILED", (result)
+    assert result.status == "FAILED", result
     assert data_access.requests == []
 
 
@@ -2979,8 +3026,12 @@ def test_lookup_plan_selection_uses_backend_projected_candidates():
                         "kind": "source_bindings",
                         "source_invocations": [
                             {
-                                "requested_fact_id": "fact_1",
-                                "source_candidate_id": "source_1",
+                                "binding_target_id": source_binding_target_id_for_candidate(
+                                    prompt,
+                                    requested_fact_id="fact_1",
+                                    source_candidate_id="source_1",
+                                    plan_shape="direct_field_value",
+                                ),
                                 "answer_population": {
                                     "population_binding_id": "pop.source_1.candidate_population",
                                     "intent_text": "total sales",
@@ -3135,11 +3186,12 @@ def test_lookup_cutover_uses_relation_as_read_instance_and_derives_grain():
                     subject_text="sales",
                     binding_target_ids=("amount",),
                     known_inputs=(
-                        RequestedFactKnownInput(
+                        RequestedFactLiteralInput(
                             id="today",
-                            kind=KnownInputKind.TIME,
                             source=KnownInputSource.QUESTION_CONTEXT,
                             text="today",
+                            role=LiteralInputRole.TIME_VALUE,
+                            resolved_value_text="today",
                         ),
                     ),
                 ),
@@ -3263,7 +3315,7 @@ def test_lookup_model_turns_send_business_system_prompt_and_question_frame():
         ),
     )
 
-    assert result.status == "COMPLETED", (result)
+    assert result.status == "COMPLETED", result
     assert len(planner.system_prompts) == 6
     assert all(
         prompt.startswith("You are an Fervis runtime for Shopify.\n\nAbout the API:\n")
@@ -3510,7 +3562,7 @@ def test_lookup_cutover_no_data_is_tied_to_fulfilled_requested_fact():
         ports,
     )
 
-    assert result.status == "COMPLETED", (result)
+    assert result.status == "COMPLETED", result
     assert result.fact_result.outcome.kind == OutcomeKind.NO_DATA
     details = result.rendered_fact.details  # type: ignore[union-attr]
     empty = details["emptyRelation"]  # type: ignore[index]

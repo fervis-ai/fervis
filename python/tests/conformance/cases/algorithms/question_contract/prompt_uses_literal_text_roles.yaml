@@ -1,0 +1,19 @@
+id: prompt_uses_literal_text_roles
+description: Question-contract prompt describes question inputs with literal_text roles.
+kind: algorithm
+algorithm: question_contract.prompt
+input:
+  current_question: How much did staff_id 51515151-0000-0000-0002-000000000001 make today?
+  contains:
+  - kind=literal_text with role=reference_value
+  - kind=literal_text with role=time_value
+  - kind=literal_text with role=result_limit
+  - Use source=conversation_resolution only for a resolved_question_inputs item whose kind is literal_text or row_set_reference.
+expect:
+  result_contains:
+    contains:
+      kind=literal_text with role=reference_value: true
+      kind=literal_text with role=time_value: true
+      kind=literal_text with role=result_limit: true
+      ? Use source=conversation_resolution only for a resolved_question_inputs item whose kind is literal_text or row_set_reference.
+      : true

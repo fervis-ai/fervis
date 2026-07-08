@@ -1,35 +1,40 @@
 id: parser_rejects_unexpected_entity_target_fields
 description: Query-enrichment parser rejects unexpected entity-target fields.
 migrates:
-  - api/tests/fervis/lookup/query_enrichment/test_query_enrichment.py::test_query_enrichment_parser_rejects_unexpected_entity_target_fields
+- api/tests/fervis/lookup/query_enrichment/test_query_enrichment.py::test_query_enrichment_parser_rejects_unexpected_entity_target_fields
 kind: algorithm
 algorithm: query_enrichment.parse
 input:
   request_fixture: booked_money
   request:
     requested_facts:
-      - id: fact_1
-        description: booked money total
-        answer_outputs: [{id: answer_1}]
-        known_inputs:
-          - id: entity_1
-            kind: named_reference_text
-            source: question_context
-            text: Jane Doe
-            lookup_text: Jane Doe
-            description: staff member named Jane Doe
+    - id: fact_1
+      description: booked money total
+      answer_outputs:
+      - id: answer_1
+      known_inputs:
+      - id: entity_1
+        kind: literal_text
+        source: question_context
+        text: Jane Doe
+        description: staff member named Jane Doe
+        resolved_value_text: Jane Doe
+        role: reference_value
   payload:
     requested_fact_resource_name_matches:
-      - requested_fact_id: fact_1
-        answer_output_resource_lineage:
-          - answer_output_id: answer_1
-            support_role: MEASURED_VALUE
-            source_text: booked money
-            matching_resource_names: [sale]
+    - requested_fact_id: fact_1
+      answer_output_resource_lineage:
+      - answer_output_id: answer_1
+        support_role: MEASURED_VALUE
+        source_text: booked money
+        matching_resource_names:
+        - sale
     entity_target_catalog_search_terms:
-      - target_id: entity_1
-        catalog_search_terms:
-          - {basis: "staff can identify Jane Doe because target_meaning is staff member.", term: staff}
-        unexpected: value
+    - target_id: entity_1
+      catalog_search_terms:
+      - basis: staff can identify Jane Doe because value_meaning_hint is staff member.
+        term: staff
+      unexpected: value
 expect:
-  error_contains: unexpected field
+  result_contains:
+    status: rejected

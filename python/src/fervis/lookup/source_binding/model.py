@@ -168,6 +168,8 @@ class SourceEvidenceItem:
 class BoundSource:
     id: str
     requested_fact_id: str = ""
+    binding_target_id: str = ""
+    requirement_id: str = ""
     answer_population: AnswerPopulation | None = None
     source: RelationSource | None = None
     source_invocations: tuple[RelationSource, ...] = ()
@@ -195,6 +197,15 @@ class BoundSource:
             )
         if self.source_invocations and self.source is None:
             raise ValueError("source invocations require relation source")
+
+    @property
+    def is_auxiliary_value(self) -> bool:
+        return (
+            bool(self.value_id)
+            and not self.binding_target_id
+            and self.source is None
+            and not self.fulfillments
+        )
 
 
 @dataclass(frozen=True)

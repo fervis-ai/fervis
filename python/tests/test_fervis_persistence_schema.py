@@ -57,7 +57,7 @@ def test_persistence_metadata_uses_fervis_work_item_table() -> None:
 def test_initial_revision_fingerprint_matches_current_metadata() -> None:
     assert (
         schema.metadata_fingerprint()
-        == "afb5ddc3b7a48c91a38397a9730bc4bd75aa1450c5ca3e9124ec03c7d1b4b3cc"
+        == "8ce3627a220b28017ab1a4b8414d7bcb5f5041ad6f494a14597912fc2d973a7f"
     )
     schema.assert_head_schema_fingerprint_is_current()
 

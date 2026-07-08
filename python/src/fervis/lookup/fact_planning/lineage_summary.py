@@ -27,7 +27,6 @@ def _outcome_answers(payload: dict[str, Any]) -> tuple[dict[str, Any], ...]:
 
 def _fact_answer_binding(answer: dict[str, Any]) -> StepSummaryItem | None:
     values = {
-        "group": _selected_value(answer.get("group"), key="field_id"),
         "metric": _selected_value(answer.get("metric"), key="field_id"),
         "function": _selected_value(answer.get("function"), key="value"),
         "rank": _rank_value(answer.get("rank")),

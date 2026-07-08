@@ -1,0 +1,34 @@
+id: finite_choice_parse_accepts_scoped_review_tests
+description: Finite-choice parsing accepts review results for the scoped membership tests only.
+kind: algorithm
+algorithm: source_binding.finite_choice_parse
+input:
+  request:
+    mode: scoped_review_owned_input_choice_only
+  choices:
+    OPEN:
+      subject_identity: SATISFIES_TEST
+      normal_instance_guard: SATISFIES_TEST
+    CLOSED:
+      subject_identity: SATISFIES_TEST
+      normal_instance_guard: CONFLICTS_WITH_TEST
+expect:
+  result_contains:
+    source_invocation_param_values:
+      - status: OPEN
+    population_choices:
+      - controller_kind: query_param
+        controller_id: status
+        field_id: status
+        included_values: [OPEN]
+        excluded_values: [CLOSED]
+        review_scope_decisions:
+          - membership_test_id: explicit_user_constraint:specified_staff
+            decision: out_of_scope
+            owner_surface_ids:
+              - applied_filter:staff_id:staff_id_1
+            proof_refs:
+              - membership_test:explicit_user_constraint:specified_staff
+              - known_input:staff_id_1
+              - applied_filter:staff_id:staff_id_1
+              - read:staff_lookup

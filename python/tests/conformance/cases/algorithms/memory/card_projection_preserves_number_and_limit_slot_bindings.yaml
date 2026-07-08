@@ -1,64 +1,52 @@
-id: card_projection_preserves_number_and_limit_slot_bindings
-description: Prior answer request cards preserve numeric limit and number slot bindings with source lineage.
+id: card_projection_preserves_result_limit_slot_bindings
+description: Prior answer request cards preserve result-limit slot bindings with source lineage.
 migrates:
-  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_prior_answer_request_card_preserves_number_and_limit_slot_bindings
+- api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_prior_answer_request_card_preserves_number_and_limit_slot_bindings
 kind: algorithm
 algorithm: conversation_memory.card_projection
 input:
   current_question: What about yesterday?
   conversation_context:
     factArtifacts:
-      - artifactId: turn_top_products
-        outcome: answered
-        sourceQuestion: What are the top 5 products Staff One sold?
-        sourceAnswer: Five products.
-        provenance:
-          question_contract:
-            answer_requests:
-              - id: fact_1
-                answer_fact: top 5 products Staff One sold
-                answer_outputs:
-                  - description: product names
-                    requested_value_frame: product names
-                known_inputs:
-                  - id: fact_1_limit_1
-                    kind: explicit_numeric_limit_text
-                    source: question_context
-                    text: top 5
-                    numeric_value: 5
-                    value_source_text: "5"
-                  - id: fact_1_number_1
-                    kind: number_text
-                    source: question_context
-                    text: "5"
-                    numeric_value: 5
-        addresses:
-          - address: value.grounded_fact_1_limit_1
-            kind: value
-            value: {type: integer, value: 5}
-            display: top 5
-            evidence: {stepIds: [known_input:fact_1_limit_1]}
-          - address: value.grounded_fact_1_number_1
-            kind: value
-            value: {type: integer, value: 5}
-            display: "5"
-            evidence: {stepIds: [known_input:fact_1_number_1]}
+    - artifactId: turn_top_products
+      outcome: answered
+      sourceQuestion: What are the top 5 products Staff One sold?
+      sourceAnswer: Five products.
+      provenance:
+        question_contract:
+          answer_requests:
+          - id: fact_1
+            answer_fact: top 5 products Staff One sold
+            answer_outputs:
+            - description: product names
+              requested_value_frame: product names
+            known_inputs:
+            - id: fact_1_limit_1
+              kind: literal_text
+              source: question_context
+              text: top 5
+              resolved_value_text: '5'
+              role: result_limit
+      addresses:
+      - address: value.grounded_fact_1_limit_1
+        kind: value
+        value:
+          type: integer
+          value: 5
+        display: top 5
+        evidence:
+          stepIds:
+          - known_input:fact_1_limit_1
 expect:
   result_contains:
     cards:
-      - kind: prior_answer_request
-        details:
-          prior_slot_bindings:
-            fact_1_limit_1:
-              value_kind: limit
-              value: 5
-              value_type: integer
-              display: top 5
-              source_lineage: [turn_top_products.value.grounded_fact_1_limit_1]
-            fact_1_number_1:
-              value_kind: number
-              value: 5
-              value_type: integer
-              display: "5"
-              source_lineage: [turn_top_products.value.grounded_fact_1_number_1]
-
+    - kind: prior_answer_request
+      details:
+        prior_slot_bindings:
+          fact_1_limit_1:
+            value_kind: limit
+            value: 5
+            value_type: integer
+            display: top 5
+            source_lineage:
+            - turn_top_products.value.grounded_fact_1_limit_1

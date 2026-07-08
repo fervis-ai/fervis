@@ -12,7 +12,7 @@ from fervis.lookup.grounding.model import (
     resolver_fit_question_for_option,
 )
 from fervis.lookup.grounding.schema import build_grounding_schema
-from fervis.lookup.fact_plan.values import IdentityValuePayload
+from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 from fervis.lookup.turn_prompts import (
     ProviderResponseContract,
     ProviderToolContract,
@@ -65,7 +65,7 @@ class GroundingTurnPrompt(TurnPromptBase):
                 "For named reference inputs, review every resolver option and mark whether it can resolve the lookup text into its returned API identity.",
                 "Do not decide how the identity will be used by the final answer source.",
                 "Do not force one selected resolver. The backend executes compatible resolver routes and later phases decide source use.",
-                "known_input_text is the original question span; lookup_text is the text value to search or match.",
+                "known_input_text is the original question span; lookup_text and time_expression are the resolved values to search, match, or compile.",
             ),
         )
 
@@ -76,7 +76,7 @@ class GroundingTurnPrompt(TurnPromptBase):
         return builder.instruction_block(
             "Time Resolution",
             (
-                "For each time input, copy known_input_text into date_intent.expression.",
+                "For each time input, copy time_expression into date_intent.expression.",
                 "date_intent.intent is flat: choose one time_shape, then fill every intent field.",
                 "Use time_shape=point_date for exact dates, point_relative for relative dates, period_relative for relative periods, period_named for named periods, range for closed ranges, open_range for open ranges, and window for rolling windows.",
                 "Use point_relative for today, yesterday, tomorrow, or any relative day word.",
@@ -103,15 +103,15 @@ class GroundingTurnPrompt(TurnPromptBase):
                 "Mark CAN_RESOLVE_LOOKUP_TEXT when the resolver can search or match the lookup text and return the shown canonical API identity.",
                 "Mark CANNOT_RESOLVE_LOOKUP_TEXT when the resolver cannot search or match the lookup text into the shown canonical API identity.",
                 "Do not reject a resolver because you are unsure how the final answer source will use the identity.",
-                "Use question_context.raw_question and question_context.conversation_resolution_annotations when interpreting target_meaning.",
+                "Use question_context.raw_question and question_context.conversation_resolution_annotations when interpreting value_meaning_hint.",
                 "Use question_context.requested_facts only as local context for what the lookup text refers to; do not decide final source use from it.",
-                "Use the known input's target meaning and each option's read_id, resource_names, returned_identity, lookup_surface, query_params, and selected_output_fields to decide whether the resolver can resolve the lookup text.",
+                "Use the known input's value_meaning_hint and each option's read_id, resource_names, returned_identity, lookup_surface, query_params, and selected_output_fields to decide whether the resolver can resolve the lookup text.",
                 "lookup_surface.param_ref means the resolver can search its own resource directly using the lookup text.",
                 "lookup_surface.field_refs without param_ref lists the returned fields that resolver execution can compare against lookup_text.",
                 "The backend records the exact matched field after resolver execution; do not output matched field refs.",
                 "query_params shows endpoint filters available on the resolver resource.",
                 "selected_output_fields shows identity, display, and choice fields from the resolver response that are useful for distinguishing what object the resolver returns.",
-                "Treat target meaning as the business meaning to ground, not as a required exact match to returned_identity.identity_type.",
+                "Treat value_meaning_hint as the business meaning to ground, not as a required exact match to returned_identity.identity_type.",
                 "For every option, answer the resolver_fit_question shown in the option payload.",
             ),
         )
@@ -167,7 +167,7 @@ class GroundingTurnPrompt(TurnPromptBase):
                     "known_input_text": task.known_input_text,
                     "lookup_text": task.lookup_text,
                     "known_input_kind": task.known_input_kind,
-                    "target_meaning": task.known_input_description,
+                    "value_meaning_hint": task.known_input_description,
                     "question_context": self._question_context_payload(task),
                 }
                 for task in self.request.tasks
@@ -180,7 +180,9 @@ class GroundingTurnPrompt(TurnPromptBase):
                 {
                     "known_input_id": task.known_input_id,
                     "known_input_text": task.known_input_text,
-                    "known_input_kind": "time_text",
+                    "time_expression": task.time_expression,
+                    "known_input_kind": KnownInputKind.LITERAL.value,
+                    "known_input_role": LiteralInputRole.TIME_VALUE.value,
                     "question_context": self._time_question_context_payload(task),
                 }
                 for task in self.request.time_tasks
@@ -266,15 +268,6 @@ class GroundingTurnPrompt(TurnPromptBase):
                 option=option,
             ),
         }
-        if option.resolved_value is not None and isinstance(
-            option.resolved_value.payload, IdentityValuePayload
-        ):
-            payload["returned_identity"] = {
-                "identity_type": option.resolved_value.payload.identity_type,
-                "identity_field": option.resolved_value.payload.identity_field,
-                "field_ref": "",
-            }
-            return payload
         route = option.route
         if route is None:
             return payload

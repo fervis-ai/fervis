@@ -20,5 +20,21 @@ expect:
   result_contains:
     outcome_kind: needs_clarification
     clarifications:
-      - basis: multiple_matching_entities
-        candidate_refs: [staff_candidates:1, staff_candidates:2]
+      - id: clarify_staff
+        need: target_reference
+        reason: multiple_matching_entities
+        requestedFactId: rf_staff
+        subjects:
+          - kind: question_input
+            id: alice
+            label: reference
+            sourceText: staff
+        evidence:
+          - kind: known_input
+            id: known_input:alice
+          - kind: candidate
+            id: staff_candidates:1
+          - kind: candidate
+            id: staff_candidates:2
+          - kind: proof_ref
+            id: read:staff_candidates

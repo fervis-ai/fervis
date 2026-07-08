@@ -17,12 +17,12 @@ from fervis.lookup.lineage.step_summaries import (
     model_turn_output_summary,
 )
 from fervis.lookup.question_contract import (
-    KnownInputKind,
     KnownInputSource,
+    LiteralInputRole,
     QuestionContract,
     RequestedFact,
     RequestedFactAnswerOutput,
-    RequestedFactKnownInput,
+    RequestedFactLiteralInput,
 )
 from fervis.model_io.turns import ModelTurnPurpose
 from fervis.observability.event_contracts import EventPayloadKey
@@ -109,9 +109,7 @@ def test_conversation_resolution_model_turn_summary_projects_clause_semantics() 
         }
     )
 
-    assert [
-        item.to_json() for item in step_semantic_items_from_json(summary)
-    ] == [
+    assert [item.to_json() for item in step_semantic_items_from_json(summary)] == [
         {
             "kind": "conversation_clause",
             "payload": {
@@ -133,14 +131,12 @@ def test_source_binding_model_turn_summary_projects_decision_basis() -> None:
                     "kind": "source_bindings",
                     "metric_fit_bases": {},
                     "fit_basis_interpretations": {},
-                    "source_invocations": [
-                        {
-                            "requested_fact_id": "fact_1",
-                            "source_candidate_id": "source_5",
-                            "source_binding_decision": "USE_SOURCE",
-                            "answer_population": {
-                                "match_basis_explanation": (
-                                    "Payroll summary rows match the requested "
+                        "source_invocations": [
+                            {
+                                "binding_target_id": "target.source_5",
+                                "answer_population": {
+                                    "match_basis_explanation": (
+                                        "Payroll summary rows match the requested "
                                     "staff population."
                                 )
                             },
@@ -169,7 +165,7 @@ def test_source_binding_model_turn_summary_projects_decision_basis() -> None:
 
     assert summary == step_summary_json(
         StepSummaryItem(
-            text="Source binding source_5: USE_SOURCE for fact_1",
+            text="Source binding target.source_5",
             detail=StepSummaryDetail.VERBOSE,
         ),
         StepSummaryItem(
@@ -238,7 +234,7 @@ def test_model_turn_summary_projects_generic_explanation_fields() -> None:
             ),
             detail=StepSummaryDetail.VERBOSE,
             is_explanation=True,
-        )
+        ),
     )
 
 
@@ -292,7 +288,9 @@ def test_plan_selection_model_turn_summary_projects_reviewed_candidates() -> Non
     )
 
 
-def test_question_contract_summary_projects_semantic_requested_facts_and_known_inputs() -> None:
+def test_question_contract_summary_projects_semantic_requested_facts_and_known_inputs() -> (
+    None
+):
     summary = model_turn_output_summary(
         {
             EventPayloadKey.PURPOSE: ModelTurnPurpose.QUESTION_CONTRACT,
@@ -301,15 +299,18 @@ def test_question_contract_summary_projects_semantic_requested_facts_and_known_i
                 "question_inputs": [
                     {
                         "input_ref": "fact_1_entity_1",
-                        "kind": "named_reference_text",
-                        "reference_text": "ABC Mall",
-                        "target_meaning": "store",
-                        "lookup_text": "ABC Mall",
+                        "kind": "literal_text",
+                        "role": "reference_value",
+                        "source_text": "ABC Mall",
+                        "value_meaning_hint": "store",
+                        "resolved_value_text": "ABC Mall",
                     },
                     {
                         "input_ref": "fact_1_time_1",
-                        "kind": "time_text",
-                        "reference_text": "this month",
+                        "kind": "literal_text",
+                        "role": "time_value",
+                        "source_text": "this month",
+                        "resolved_value_text": "this month",
                     },
                 ],
                 "answer_requests": [
@@ -334,9 +335,10 @@ def test_question_contract_summary_projects_semantic_requested_facts_and_known_i
             payload={
                 "input_id": "fact_1_entity_1",
                 "text": "ABC Mall",
-                "kind": "named_reference_text",
+                "kind": "literal_text",
+                "role": "reference_value",
                 "description": "store",
-                "lookup_text": "ABC Mall",
+                "resolved_value_text": "ABC Mall",
             },
         ),
         StepSemanticItem(
@@ -344,9 +346,10 @@ def test_question_contract_summary_projects_semantic_requested_facts_and_known_i
             payload={
                 "input_id": "fact_1_time_1",
                 "text": "this month",
-                "kind": "time_text",
+                "kind": "literal_text",
+                "role": "time_value",
                 "description": "",
-                "lookup_text": "",
+                "resolved_value_text": "this month",
             },
         ),
     )
@@ -447,12 +450,12 @@ def test_grounding_summary_projects_time_interpretations_as_semantic_inputs() ->
                     description="sales at ABC Mall this month",
                     answer_outputs=(RequestedFactAnswerOutput("answer_1"),),
                     known_inputs=(
-                        RequestedFactKnownInput(
+                        RequestedFactLiteralInput(
                             id="fact_1_time_1",
-                            kind=KnownInputKind.TIME,
                             source=KnownInputSource.QUESTION_CONTEXT,
                             text="this month",
-                            description="reporting period",
+                            role=LiteralInputRole.TIME_VALUE,
+                            resolved_value_text="this month",
                         ),
                     ),
                 ),
@@ -475,7 +478,9 @@ def test_grounding_summary_projects_time_interpretations_as_semantic_inputs() ->
     )
 
 
-def test_grounding_summary_projects_literal_interpretations_as_semantic_inputs() -> None:
+def test_grounding_summary_projects_literal_interpretations_as_semantic_inputs() -> (
+    None
+):
     summary = add_grounding_result_semantics(
         {},
         ledger=CanonicalInputLedger(
@@ -496,14 +501,13 @@ def test_grounding_summary_projects_literal_interpretations_as_semantic_inputs()
                     description="top 10 salespeople this month",
                     answer_outputs=(RequestedFactAnswerOutput("answer_1"),),
                     known_inputs=(
-                        RequestedFactKnownInput(
+                        RequestedFactLiteralInput(
                             id="fact_1_limit_1",
-                            kind=KnownInputKind.LIMIT,
                             source=KnownInputSource.QUESTION_CONTEXT,
                             text="top 10",
-                            description="rank limit",
-                            numeric_value=10,
-                            value_source_text="10",
+                            role=LiteralInputRole.RESULT_LIMIT,
+                            resolved_value_text="10",
+                            value_meaning_hint="rank limit",
                         ),
                     ),
                 ),
@@ -535,7 +539,6 @@ def test_fact_planning_model_turn_summary_projects_selected_binding() -> None:
                     "answers": [
                         {
                             "requested_fact_id": "fact_1",
-                            "group": {"field_id": "staff_id"},
                             "metric": {"field_id": "calculated_pay"},
                             "function": {"value": "sum"},
                         }
@@ -547,6 +550,6 @@ def test_fact_planning_model_turn_summary_projects_selected_binding() -> None:
 
     assert summary == step_summary_json(
         StepSummaryItem(
-            text="Binding: group=staff_id metric=calculated_pay function=sum"
+            text="Binding: metric=calculated_pay function=sum"
         )
     )

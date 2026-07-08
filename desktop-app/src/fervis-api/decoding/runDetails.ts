@@ -48,7 +48,7 @@ export function decodeStepSemantic(raw: unknown): StepSemantic {
           text: expectString(input.text, "text"),
           kind: expectString(input.kind, "kind"),
           description: expectString(input.description, "description"),
-          lookupText: expectString(input.lookupText, "lookupText")
+          lookupText: semanticInputLookupText(input)
         };
       }
     ),
@@ -74,6 +74,7 @@ export function decodeStepSemantic(raw: unknown): StepSemantic {
         inputText: expectString(result.inputText, "inputText"),
         resolverReadId: expectString(result.resolverReadId, "resolverReadId"),
         resolverLabel: expectString(result.resolverLabel, "resolverLabel"),
+        entityKind: expectString(result.entityKind, "entityKind"),
         matchedField: expectString(result.matchedField, "matchedField"),
         matchedValue: expectString(result.matchedValue, "matchedValue"),
         matchedLabel: expectString(result.matchedLabel, "matchedLabel")
@@ -147,6 +148,13 @@ export function decodeSourceRead(raw: unknown): SourceRead {
 
 export function decodeRunError(raw: unknown): RunError {
   const object = expectObject(raw, "run error");
+  if (typeof object.errorKind === "string") {
+    return {
+      code: object.errorKind,
+      message: expectString(object.message, "error.message"),
+      retryable: false
+    };
+  }
   return {
     code: expectString(object.code, "error.code"),
     message: expectString(object.message, "error.message"),
@@ -204,4 +212,14 @@ function decodeRunStepDecisions(object: Record<string, unknown>): readonly StepD
 
 function emptyStringToNull(value: string | null): string | null {
   return value === "" ? null : value;
+}
+
+function semanticInputLookupText(input: Record<string, unknown>): string {
+  if (input.lookupText !== undefined && input.lookupText !== null) {
+    return expectString(input.lookupText, "lookupText");
+  }
+  if (input.resolvedValueText !== undefined && input.resolvedValueText !== null) {
+    return expectString(input.resolvedValueText, "resolvedValueText");
+  }
+  return "";
 }

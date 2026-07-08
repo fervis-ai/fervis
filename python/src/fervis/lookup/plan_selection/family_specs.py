@@ -41,6 +41,8 @@ class PlanSelectionShapeSpec:
     distinct_members: bool = False
     row_population_grain_requirements: frozenset[str] = frozenset()
     intrinsic_source_requirements: frozenset[str] = frozenset()
+    answer_fulfillment_requirements: frozenset[str] | None = None
+    complete_answer_fulfillment_requirements: frozenset[str] | None = None
     support_set_grouper: SupportSetGrouper | None = None
 
     def validation_roles_for_requirement(
@@ -101,6 +103,24 @@ class PlanSelectionShapeSpec:
                 "value_2",
             }
         )
+
+    def requires_answer_fulfillment_for_requirement(
+        self,
+        requirement_id: str,
+    ) -> bool:
+        if self.answer_fulfillment_requirements is None:
+            return requirement_id in self.member_requirements
+        return requirement_id in self.answer_fulfillment_requirements
+
+    def requires_complete_answer_fulfillment_for_requirement(
+        self,
+        requirement_id: str,
+    ) -> bool:
+        if not self.requires_answer_fulfillment_for_requirement(requirement_id):
+            return False
+        if self.complete_answer_fulfillment_requirements is None:
+            return True
+        return requirement_id in self.complete_answer_fulfillment_requirements
 
     def supports_member_combo(
         self,

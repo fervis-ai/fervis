@@ -9,7 +9,11 @@ from fervis.lookup.source_reads.response import (
     extract_row_source_rows,
 )
 
-from tests.testkit.assertions import subset_mismatches
+from tests.testkit.assertions import (
+    expects_rejection,
+    status_mismatches,
+    subset_mismatches,
+)
 
 
 def run_endpoint_response_case(payload: dict[str, Any]) -> list[str]:
@@ -17,12 +21,14 @@ def run_endpoint_response_case(payload: dict[str, Any]) -> list[str]:
     try:
         rows = _extract_rows(input_payload)
     except EndpointResponseError as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error and expected_error in str(exc):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {exc}"]
-    if "error_contains" in payload["expect"]:
-        return [f"expected error containing {payload['expect']['error_contains']!r}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     return subset_mismatches(
         actual={"rows": list(rows)},
         expected_subset=payload["expect"]["result_contains"],

@@ -3,11 +3,11 @@ from fervis.model_io.backbone.dto import ToolSpec
 
 
 def _candidate_population_bindings(
-    *source_candidate_ids: str,
+    *target_ids: str,
 ) -> dict[str, tuple[str, ...]]:
     return {
-        source_candidate_id: (f"pop.{source_candidate_id}.candidate_population",)
-        for source_candidate_id in source_candidate_ids
+        target_id: (f"pop.{target_id.rsplit('.', 1)[-1]}.candidate_population",)
+        for target_id in target_ids
     }
 
 
@@ -17,38 +17,37 @@ def source_binding_tool_spec() -> ToolSpec:
         description="Submit source binding decisions.",
         strict=True,
         input_schema=build_source_binding_schema(
-            source_candidate_param_decision_ids_by_param={
-                "source_1": {
+            target_param_decision_ids_by_param={
+                "target.source_1": {
                     "start_date": (
                         "param_decision.source_1.start_date.bind.this_month",
                     ),
-                    "status": ("param_decision.source_1.status.bind.completed",),
                 },
-                "source_2": {},
+                "target.source_2": {},
             },
-            source_candidate_required_param_ids={
-                "source_1": ("start_date",),
-                "source_2": (),
+            target_finite_choice_values={
+                "target.source_1": {"status": ("DRAFT", "COMPLETED")},
+                "target.source_2": {},
             },
-            source_candidate_finite_choice_values={
-                "source_1": {"status": ("DRAFT", "COMPLETED")},
-                "source_2": {},
+            target_row_predicate_values={
+                "target.source_1": {},
+                "target.source_2": {},
             },
-            source_candidate_row_predicate_values={
-                "source_1": {},
-                "source_2": {},
+            target_finite_choice_test_ids={
+                "target.source_1": {"status": ("subject_identity",)},
+                "target.source_2": {},
             },
-            source_candidate_membership_test_ids={
-                "source_1": ("subject_identity",),
-                "source_2": ("subject_identity",),
+            target_finite_choice_normal_instance_test_ids={
+                "target.source_1": {"status": ()},
+                "target.source_2": {},
             },
-            source_candidate_normal_instance_test_ids={
-                "source_1": (),
-                "source_2": (),
+            target_row_predicate_test_ids={
+                "target.source_1": {},
+                "target.source_2": {},
             },
-            source_candidate_population_roles={
-                "source_1": ({"role_id": "role_1"},),
-                "source_2": ({"role_id": "role_1"},),
+            target_population_roles={
+                "target.source_1": ({"role_id": "role_1"},),
+                "target.source_2": ({"role_id": "role_1"},),
             },
             metric_evidence_ids_by_requested_fact={
                 "fact_1": (
@@ -56,27 +55,31 @@ def source_binding_tool_spec() -> ToolSpec:
                     "source_2.root.amount",
                 )
             },
-            source_candidate_requested_fact_ids={
-                "source_1": "fact_1",
-                "source_2": "fact_1",
+            target_requested_fact_ids={
+                "target.source_1": "fact_1",
+                "target.source_2": "fact_1",
             },
-            source_candidate_fulfillment_support_set_ids_by_answer_output={
-                "source_1": {
+            target_fulfillment_support_set_ids_by_answer_output={
+                "target.source_1": {
                     "answer_1": (
                         "support.source_1.answer_1."
                         "slot.source_1.answer_1.source_1.root.amount",
                     )
                 },
-                "source_2": {
+                "target.source_2": {
                     "answer_1": (
                         "support.source_2.answer_1."
                         "slot.source_2.answer_1.source_2.root.amount",
                     )
                 },
             },
-            source_candidate_population_binding_ids=_candidate_population_bindings(
-                "source_1",
-                "source_2",
+            target_required_fulfillment_answer_output_ids={
+                "target.source_1": ("answer_1",),
+                "target.source_2": ("answer_1",),
+            },
+            target_population_binding_ids=_candidate_population_bindings(
+                "target.source_1",
+                "target.source_2",
             ),
         ),
     )

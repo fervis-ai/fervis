@@ -33,4 +33,5 @@ input:
         field_id: data_entity_id
         operator: equals
 expect:
-  error_contains: requires scalar sink
+  result_contains:
+    status: rejected

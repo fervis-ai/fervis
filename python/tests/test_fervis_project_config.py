@@ -9,6 +9,7 @@ from fervis.project.configuration import (
     LoadedFervisConfig,
     load_fervis_project_config,
 )
+from fervis.project.host_api_context import host_api_context_from_config
 from fervis.project.integration import FlaskAppSource
 from fervis.project.source_scope import configured_django_source_scopes
 
@@ -26,6 +27,24 @@ def test_load_fervis_project_config_accepts_versioned_json_config(
     assert loaded.integration.framework == "django"
     assert loaded.config.model.default_model_ref == "openai:gpt-5.4-mini"
     assert loaded.active_environment.name == "local"
+
+
+def test_project_config_timezone_flows_into_host_api_context(
+    tmp_path: Path,
+) -> None:
+    root = _django_project(tmp_path)
+    schema = _valid_django_schema()
+    host = dict(schema["host"])
+    host["timezone"] = "Africa/Nairobi"
+    schema["host"] = host
+    _write_schema_config(root, schema)
+    project = discover_project(root)
+
+    loaded = load_fervis_project_config(project)
+
+    assert isinstance(loaded, LoadedFervisConfig)
+    context = host_api_context_from_config(project=project, loaded_config=loaded)
+    assert context.host_context.timezone == "Africa/Nairobi"
 
 
 def test_load_fervis_project_config_accepts_flask_json_config(
@@ -119,9 +138,6 @@ def test_load_fervis_project_config_rejects_unknown_schema_keys(
     root = _django_project(tmp_path)
     schema = _valid_django_schema()
     schema["system_prompt"] = "ignored"
-    host = dict(schema["host"])
-    host["timezone"] = "UTC"
-    schema["host"] = host
     _write_schema_config(root, schema)
 
     problem = load_fervis_project_config(discover_project(root))
@@ -196,6 +212,7 @@ def _valid_django_schema() -> dict[str, object]:
         "host": {
             "organization_name": "",
             "about_api": "",
+            "timezone": "UTC",
         },
         "routes": {"prefix": "/fervis/"},
         "models": {

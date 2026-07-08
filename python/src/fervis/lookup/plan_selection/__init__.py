@@ -8,6 +8,7 @@ from fervis.lookup.plan_selection.model import (
     SourceStrategyMember,
     PlanSelectionRequest,
     PlanSelectionResult,
+    BoundRoleTarget,
 )
 from fervis.lookup.plan_selection.parser import parse_plan_selection
 from fervis.lookup.plan_selection.prompt import (
@@ -24,6 +25,7 @@ from fervis.lookup.plan_selection.turn import (
 __all__ = [
     "BoundSelectedSourceStrategy",
     "BoundSourceStrategyMember",
+    "BoundRoleTarget",
     "BoundPlanSelectionSet",
     "SelectedSourceStrategy",
     "PlanSelectionSet",

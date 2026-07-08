@@ -1,75 +1,96 @@
 id: card_projection_prior_request_owns_backing_entity
 description: Prior request cards own backing entity/time inputs without exposing separate identity cards for continuation questions.
 migrates:
-  - api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_prior_answer_request_owns_backing_entity_when_current_question_has_no_direct_identity_text
+- api/tests/fervis/lookup/memory/test_conversation_memory_projection.py::test_prior_answer_request_owns_backing_entity_when_current_question_has_no_direct_identity_text
 kind: algorithm
 algorithm: conversation_memory.card_projection
 input:
   current_question: Can you show the shade names too, not just the product names?
   conversation_context:
     factArtifacts:
-      - artifactId: turn_salespeople
-        outcome: answered
-        sourceQuestion: List all salespeople who had sales at Westlands Beauty Hub on December 3, 2025, the products they sold, and total sales per person.
-        sourceAnswer: Salespeople, products, and totals.
-        provenance:
-          question_contract:
-            answer_requests:
-              - id: fact_1
-                answer_fact: salespeople who had sales at Westlands Beauty Hub on December 3, 2025
-                answer_outputs:
-                  - description: salesperson name
-                  - description: products they sold
-                  - description: total sales per person
-                known_inputs:
-                  - id: fact_1_entity_1
-                    kind: named_reference_text
-                    source: question_context
-                    text: Westlands Beauty Hub
-                    description: store location
-                  - id: fact_1_time_1
-                    kind: time_text
-                    source: question_context
-                    text: December 3, 2025
-        addresses:
-          - address: entity.grounded_fact_1_entity_1
-            kind: entity
-            resource: location
-            referenceText: Westlands Beauty Hub
-            identity: {location_id: loc-westlands}
-            evidence: {stepIds: [known_input:fact_1_entity_1]}
-          - address: value.grounded_fact_1_time_1
-            kind: value
-            value:
-              type: time_scope
-              value: December 3, 2025
-              expression: December 3, 2025
-              resolvedStart: "2025-12-03"
-              resolvedEnd: "2025-12-03"
-              granularity: day
-            evidence: {stepIds: [known_input:fact_1_time_1]}
-          - address: relation.answer_rows
-            kind: relation
-            source: {kind: api_read}
-            scope: {location_id: loc-westlands}
-            grainKeys: [sale_id]
-            completeness: {status: complete, pagination: all_pages}
-            rowAddresses: [row.answer_1]
-            evidence: {stepIds: [turn_salespeople.answer]}
-          - address: row.answer_1
-            kind: row
-            relation: relation.answer_rows
-            identity: {sale_id: sale-1}
-            values:
-              product_name: {type: string, value: Lipstick}
+    - artifactId: turn_salespeople
+      outcome: answered
+      sourceQuestion: List all salespeople who had sales at Westlands Beauty Hub on December 3, 2025, the products they sold, and total sales per person.
+      sourceAnswer: Salespeople, products, and totals.
+      provenance:
+        question_contract:
+          answer_requests:
+          - id: fact_1
+            answer_fact: salespeople who had sales at Westlands Beauty Hub on December 3, 2025
+            answer_outputs:
+            - description: salesperson name
+            - description: products they sold
+            - description: total sales per person
+            known_inputs:
+            - id: fact_1_entity_1
+              kind: literal_text
+              source: question_context
+              text: Westlands Beauty Hub
+              description: store location
+              resolved_value_text: Westlands Beauty Hub
+              role: reference_value
+            - id: fact_1_time_1
+              kind: literal_text
+              source: question_context
+              text: December 3, 2025
+              resolved_value_text: December 3, 2025
+              role: time_value
+      addresses:
+      - address: entity.grounded_fact_1_entity_1
+        kind: entity
+        resource: location
+        referenceText: Westlands Beauty Hub
+        identity:
+          location_id: loc-westlands
+        evidence:
+          stepIds:
+          - known_input:fact_1_entity_1
+      - address: value.grounded_fact_1_time_1
+        kind: value
+        value:
+          type: time_scope
+          value: December 3, 2025
+          expression: December 3, 2025
+          resolvedStart: '2025-12-03'
+          resolvedEnd: '2025-12-03'
+          granularity: day
+        evidence:
+          stepIds:
+          - known_input:fact_1_time_1
+      - address: relation.answer_rows
+        kind: relation
+        source:
+          kind: api_read
+        scope:
+          location_id: loc-westlands
+        grainKeys:
+        - sale_id
+        completeness:
+          status: complete
+          pagination: all_pages
+        rowAddresses:
+        - row.answer_1
+        evidence:
+          stepIds:
+          - turn_salespeople.answer
+      - address: row.answer_1
+        kind: row
+        relation: relation.answer_rows
+        identity:
+          sale_id: sale-1
+        values:
+          product_name:
+            type: string
+            value: Lipstick
 expect:
   result_contains:
-    card_kinds: [prior_answer_request, row_set]
+    card_kinds:
+    - prior_answer_request
+    - row_set
     cards:
-      - kind: prior_answer_request
-      - kind: row_set
-        display: salespeople who had sales at Westlands Beauty Hub on December 3, 2025
+    - kind: prior_answer_request
+    - kind: row_set
+      display: salespeople who had sales at Westlands Beauty Hub on December 3, 2025
     private_cards:
       turn_salespeople.relation.answer_rows:
         kind: row_set
-

@@ -9,13 +9,23 @@ from fervis.memory.conversation_context import (
 )
 from fervis.lookup.conversation_resolution import (
     CONVERSATION_RESOLUTION_TOOL_NAME,
+    LiteralQuestionInputOverlay,
+    ResolvedCanonicalIdentityOverlay,
+    ResolvedQuestionInputOverlay,
+    RowSetQuestionInputOverlay,
     parse_conversation_resolution,
 )
 from fervis.lookup.conversation_resolution.schema import (
     build_conversation_resolution_tool_schemas,
 )
+from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 
-from tests.testkit.assertions import subset_mismatches
+from tests.testkit.assertions import (
+    exact_mismatches,
+    expects_rejection,
+    status_mismatches,
+    subset_mismatches,
+)
 
 
 def run_conversation_resolution_parse_case(payload: dict[str, Any]) -> list[str]:
@@ -60,6 +70,11 @@ def run_conversation_resolution_parse_case(payload: dict[str, Any]) -> list[str]
             for clause in result.outcome.clause_resolutions
         ],
     }
+    if "result_equals" in payload["expect"]:
+        return exact_mismatches(
+            actual=actual,
+            expected=payload["expect"]["result_equals"],
+        )
     return subset_mismatches(
         actual=actual,
         expected_subset=payload["expect"]["result_contains"],
@@ -86,9 +101,9 @@ def run_conversation_resolution_schema_case(payload: dict[str, Any]) -> list[str
         "tool_names": sorted(schemas),
         "status_values": schema["properties"]["status"]["enum"],
         "has_clause_resolutions": "clause_resolutions" in schema["properties"],
-        "dependency_source_ids": dependency_schema["properties"][
-            "meaning_components"
-        ]["items"]["properties"]["source_id"]["enum"],
+        "dependency_source_ids": dependency_schema["properties"]["meaning_components"][
+            "items"
+        ]["properties"]["source_id"]["enum"],
         "unresolved_evidence_source_ids": schema["properties"]["unresolved"][
             "properties"
         ]["candidate_interpretations"]["items"]["properties"]["supporting_evidence"][
@@ -99,6 +114,84 @@ def run_conversation_resolution_schema_case(payload: dict[str, Any]) -> list[str
     return subset_mismatches(
         actual=actual,
         expected_subset=payload["expect"]["result_contains"],
+    )
+
+
+def run_conversation_resolution_overlay_case(payload: dict[str, Any]) -> list[str]:
+    try:
+        resolved_inputs = tuple(
+            _resolved_question_input_overlay(item)
+            for item in payload["input"].get("resolved_question_inputs") or ()
+        )
+    except ValueError as exc:
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
+        return [f"unexpected error: {exc}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
+    actual = {
+        "prompt_resolved_question_inputs": [
+            item.to_prompt_payload() for item in resolved_inputs
+        ],
+        "backend_resolved_question_inputs": [
+            item.to_backend_payload() for item in resolved_inputs
+        ],
+    }
+    if "result_equals" in payload["expect"]:
+        return exact_mismatches(
+            actual=actual,
+            expected=payload["expect"]["result_equals"],
+        )
+    return subset_mismatches(
+        actual=actual,
+        expected_subset=payload["expect"]["result_contains"],
+    )
+
+
+def _resolved_question_input_overlay(
+    item: dict[str, Any],
+) -> ResolvedQuestionInputOverlay:
+    kind = KnownInputKind(str(item["kind"]))
+    if kind == KnownInputKind.LITERAL:
+        return LiteralQuestionInputOverlay(
+            source_text=str(item["source_text"]),
+            occurrence=int(item.get("occurrence") or 1),
+            resolved_input_ref=str(item["resolved_input_ref"]),
+            resolved_value_text=str(item["resolved_value_text"]),
+            value_meaning_hint=str(item.get("value_meaning_hint") or ""),
+            field_label_text=str(item.get("field_label_text") or ""),
+            role=LiteralInputRole(str(item["role"])),
+            evidence_refs=tuple(str(ref) for ref in item.get("evidence_refs") or ()),
+            resolved_canonical_identity=_resolved_canonical_identity_overlay(
+                item.get("resolved_canonical_identity")
+            ),
+        )
+    if kind == KnownInputKind.ROW_SET_REFERENCE:
+        return RowSetQuestionInputOverlay(
+            reference_text=str(item["reference_text"]),
+            occurrence=int(item.get("occurrence") or 1),
+            resolved_input_ref=str(item["resolved_input_ref"]),
+            memory_ids=tuple(str(ref) for ref in item.get("memory_ids") or ()),
+        )
+    raise ValueError(f"unsupported resolved question input kind: {kind}")
+
+
+def _resolved_canonical_identity_overlay(
+    raw: object,
+) -> ResolvedCanonicalIdentityOverlay | None:
+    if raw is None:
+        return None
+    if str(raw["kind"]) != "identity":
+        raise ValueError("resolved canonical identity kind must be identity")
+    return ResolvedCanonicalIdentityOverlay(
+        identity_type=str(raw["identity_type"]),
+        identity_field=str(raw["identity_field"]),
+        value=str(raw["value"]),
+        authority_refs=tuple(str(ref) for ref in raw.get("authority_refs") or ()),
+        lineage_refs=tuple(str(ref) for ref in raw.get("lineage_refs") or ()),
     )
 
 

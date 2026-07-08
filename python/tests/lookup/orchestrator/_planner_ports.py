@@ -466,7 +466,6 @@ class _PromptSurfacePlannerPort:
                         "answer_fact": "salespeople with sales",
                         "answer_expression": {"family": "list_rows"},
                         "answer_subject": _answer_subject_payload("salespeople"),
-                        "input_requirements": {"time_requirements": []},
                         "answer_population": default_answer_population(
                             description="salespeople with sales",
                             subject_text="salespeople",
@@ -475,7 +474,7 @@ class _PromptSurfacePlannerPort:
                             ).instance_interpretation,
                         ).to_question_contract_dict(),
                         "answer_outputs": [{"description": "staff name"}],
-                        "input_decisions": [],
+                        "used_question_inputs": [],
                     }
                 ],
                 "question_input_inventory_check": {
@@ -493,35 +492,36 @@ class _PromptSurfacePlannerPort:
             )
         elif tool_name == "submit_source_binding":
             self.source_binding_selection_prompt = prompt
-            payload = _planner_prompt_json_section(
+            candidate = source_candidate_with_fields(
                 prompt,
-                label="Candidate evidence sources",
-            )
-            candidate = _source_candidate_with_fulfillment_field(
-                payload,
-                field_id="staff_name",
+                requested_fact_id="fact_1",
+                required=("staff_name",),
             )
             arguments = {
                 "outcome": {
                     "kind": "source_bindings",
                     "source_invocations": [
                         {
-                            "requested_fact_id": "fact_1",
-                            "source_candidate_id": candidate["source_candidate_id"],
-                            "answer_population": {
-                                "population_binding_id": (
-                                    _source_candidate_population_binding_id(candidate)
+                            "binding_target_id": source_binding_target_id_for_candidate(
+                                prompt,
+                                requested_fact_id="fact_1",
+                                source_candidate_id=str(
+                                    candidate["source_candidate_id"]
                                 ),
-                                "intent_text": "sales",
-                                "match_basis_explanation": "sales defines the source population",
-                            },
+                                plan_shape="list_rows",
+                            ),
+                            "answer_population": source_candidate_answer_population(
+                                prompt,
+                                source_candidate_id=str(
+                                    candidate["source_candidate_id"]
+                                ),
+                            ),
                             "fulfillment_decisions": source_fulfills_for_candidate(
                                 candidate,
                                 field_ids=("staff_name",),
                             ),
                             "param_decisions": {},
                             "finite_choice_param_reviews": {},
-                            "source_binding_decision": "USE_SOURCE",
                         }
                     ],
                 }
@@ -702,7 +702,6 @@ class _QuestionIntentAwarePlannerPort:
                             "answer_fact": "total for the prior referenced sales amount",
                             "answer_expression": {"family": "scalar_aggregate"},
                             "answer_subject": _answer_subject_payload("total"),
-                            "input_requirements": {"time_requirements": []},
                             "answer_population": default_answer_population(
                                 description="total for the prior referenced sales amount",
                                 subject_text="total",
@@ -715,7 +714,7 @@ class _QuestionIntentAwarePlannerPort:
                                     "description": "metric_total",
                                 }
                             ],
-                            "input_decisions": [],
+                            "used_question_inputs": [],
                         }
                     ],
                 }

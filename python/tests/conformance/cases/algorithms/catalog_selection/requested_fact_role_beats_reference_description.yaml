@@ -1,44 +1,54 @@
 id: requested_fact_role_beats_reference_description
 description: Catalog selection uses the requested fact role, not a reference input description, for source ranking.
 migrates:
-  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_uses_requested_fact_not_reference_description_for_role
+- api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_uses_requested_fact_not_reference_description_for_role
 kind: algorithm
 algorithm: catalog_selection.select
 input:
   catalog:
     reads:
-      - id: sales_read
-        endpoint_name: list_records
-        resource_names: [staff sales]
-        facts: [{ref: sales.staff.total}]
-      - id: location_read
-        endpoint_name: list_records
-        resource_names: [location sales]
-        facts: [{ref: sales.location.total}]
+    - id: sales_read
+      endpoint_name: list_records
+      resource_names:
+      - staff sales
+      facts:
+      - ref: sales.staff.total
+    - id: location_read
+      endpoint_name: list_records
+      resource_names:
+      - location sales
+      facts:
+      - ref: sales.location.total
   requested_facts:
+  - id: sales_total
+    description: staff sales total
+    answer_outputs:
     - id: sales_total
-      description: staff sales total
-      answer_outputs:
-        - id: sales_total
-      known_inputs:
-        - id: person_name
-          kind: named_reference_text
-          source: question_context
-          description: location
-          text: Alice
-          lookup_text: Alice
+    known_inputs:
+    - id: person_name
+      kind: literal_text
+      source: question_context
+      text: Alice
+      resolved_value_text: Alice
+      value_meaning_hint: location
+      role: reference_value
   resource_name_matches:
-    - requested_fact_id: sales_total
-      answer_output_resource_lineage:
-        - answer_output_id: answer_1
-          support_role: MEASURED_VALUE
-          source_text: staff sales total
-          matching_resource_names: [staff sales]
+  - requested_fact_id: sales_total
+    answer_output_resource_lineage:
+    - answer_output_id: answer_1
+      support_role: MEASURED_VALUE
+      source_text: staff sales total
+      matching_resource_names:
+      - staff sales
   max_reads_per_fact: 1
 expect:
   result_contains:
-    selected_read_ids: [sales_read]
+    selected_read_ids:
+    - sales_read
     requested_fact_selections:
-      - requested_fact_id: sales_total
-        query_terms: [staff, sale]
-        selected_read_ids: [sales_read]
+    - requested_fact_id: sales_total
+      query_terms:
+      - staff
+      - sale
+      selected_read_ids:
+      - sales_read

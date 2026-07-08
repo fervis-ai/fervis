@@ -17,7 +17,7 @@ from sqlalchemy.dialects import sqlite
 from .schema_snapshots.v0002 import metadata
 
 HEAD_SCHEMA_FINGERPRINT = (
-    "afb5ddc3b7a48c91a38397a9730bc4bd75aa1450c5ca3e9124ec03c7d1b4b3cc"
+    "8ce3627a220b28017ab1a4b8414d7bcb5f5041ad6f494a14597912fc2d973a7f"
 )
 FERVIS_TABLES = tuple(metadata.tables)
 

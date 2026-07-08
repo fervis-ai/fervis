@@ -7,7 +7,7 @@ from fervis.lookup.conversation_resolution import (
     ConversationDependencyOverlay,
     ConversationResolutionOverlay,
     ConversationValueFrameOverlay,
-    ResolvedQuestionInputOverlay,
+    LiteralQuestionInputOverlay,
     conversation_resolution_question_contract_prompt_payload,
 )
 from fervis.lookup.question_contract import QuestionContractRequest
@@ -16,6 +16,7 @@ from fervis.lookup.question_contract.tools import (
     ANSWER_REQUEST_CONTRACT_TOOL_NAME,
 )
 from fervis.lookup.question_contract.turn import generate_question_contract
+from fervis.lookup.question_inputs import LiteralInputRole
 from fervis.memory.addresses import FactAddress
 from fervis.memory.artifacts import (
     build_fact_artifact,
@@ -51,12 +52,13 @@ def test_question_contract_prompt_uses_raw_question_with_conversation_overlay():
         activated_memory_ids=("mem_prior_total_sales",),
         used_source_card_ids=("card_prior_total_sales",),
         resolved_question_inputs=(
-            ResolvedQuestionInputOverlay(
-                kind="named_reference_text",
-                reference_text="she",
+            LiteralQuestionInputOverlay(
+                source_text="she",
                 occurrence=1,
-                lookup_text="Alice Smith",
-                target_meaning="staff identity",
+                resolved_input_ref="cr_input_1",
+                resolved_value_text="Alice Smith",
+                value_meaning_hint="staff identity",
+                role=LiteralInputRole.REFERENCE_VALUE,
             ),
         ),
     )
@@ -86,7 +88,7 @@ def test_question_contract_prompt_uses_raw_question_with_conversation_overlay():
     assert "And how much did she make yesterday? and where did she work?" in prompt
     assert "Conversation resolution annotations:" in prompt
     assert "resolved_question_inputs" in prompt
-    assert "named_reference_text" in prompt
+    assert "literal_text" in prompt
     assert "Alice Smith" in prompt
     assert "question_context" in prompt
     assert '"value_frames"' in prompt
@@ -94,8 +96,8 @@ def test_question_contract_prompt_uses_raw_question_with_conversation_overlay():
     assert '"must_preserve_terms"' in prompt
     assert "total sales amount" in prompt
     assert (
-        "Conversation resolution can supply the requested value frame, but time "
-        "phrases still require matching time_text question inputs."
+        "When a time input constrains an answer_request, include its input_ref "
+        "in that answer_request's used_question_inputs."
     ) in prompt
     assert "integrated_question" not in prompt
     assert "Integrated question:" not in prompt
@@ -281,9 +283,6 @@ class _CapturingQuestionContractModelPort:
                                         "kind": "NORMAL_BUSINESS_INSTANCE"
                                     },
                                 },
-                                "input_requirements": {
-                                    "time_requirements": []
-                                },
                                 "answer_population": {
                                     "population_label": "money made at ABC Mall yesterday",
                                     "counted_unit": "money",
@@ -295,6 +294,7 @@ class _CapturingQuestionContractModelPort:
                                             "test_question": (
                                                 "Does the row/value represent money?"
                                             ),
+                                            "owned_question_input_refs": [],
                                         }
                                     ],
                                 },
@@ -303,7 +303,7 @@ class _CapturingQuestionContractModelPort:
                                         "description": "total money",
                                     }
                                 ],
-                                "input_decisions": [],
+                                "used_question_inputs": [],
                             }
                         ],
                         "question_input_inventory_check": {
@@ -327,7 +327,14 @@ class _FollowUpQuestionContractModelPort:
         output_mode=None,
         tool_specs=(),
     ):
-        del provider, prompt, max_thinking_tokens, system_prompt, output_mode, tool_specs
+        del (
+            provider,
+            prompt,
+            max_thinking_tokens,
+            system_prompt,
+            output_mode,
+            tool_specs,
+        )
         return {
             "answer": json.dumps(
                 {
@@ -338,15 +345,16 @@ class _FollowUpQuestionContractModelPort:
                         "question_inputs": [
                             {
                                 "source": "question_context",
-                                "kind": "time_text",
+                                "kind": "literal_text",
                                 "input_ref": "time_1",
-                                "reference_text": "last month",
+                                "value_source_text": "last month",
+                                "resolved_value_text": "last month",
+                                "role": "time_value",
                                 "inventory_check": {
                                     "why_this_is_an_input": (
                                         "This calendar period constrains the count."
                                     )
                                 },
-                                "satisfies_requirement_id": "time_requirement_1",
                             }
                         ],
                         "answer_requests": [
@@ -361,18 +369,6 @@ class _FollowUpQuestionContractModelPort:
                                         "kind": "NORMAL_BUSINESS_INSTANCE"
                                     },
                                 },
-                                "input_requirements": {
-                                    "time_requirements": [
-                                        {
-                                            "requirement_id": "time_requirement_1",
-                                            "source_text": "last month",
-                                            "why_required": (
-                                                "This period limits which sales are "
-                                                "included in the count."
-                                            ),
-                                        }
-                                    ]
-                                },
                                 "answer_population": {
                                     "population_label": (
                                         "completed in-person sales last month"
@@ -386,14 +382,14 @@ class _FollowUpQuestionContractModelPort:
                                             "test_question": (
                                                 "Is the instance a sale?"
                                             ),
+                                            "owned_question_input_refs": [],
                                         },
                                         {
                                             "test_id": "test_2",
                                             "kind": "EXPLICIT_USER_CONSTRAINT",
                                             "polarity": "MUST_PASS",
-                                            "test_question": (
-                                                "Is the sale completed?"
-                                            ),
+                                            "test_question": ("Is the sale completed?"),
+                                            "owned_question_input_refs": [],
                                         },
                                         {
                                             "test_id": "test_3",
@@ -402,6 +398,7 @@ class _FollowUpQuestionContractModelPort:
                                             "test_question": (
                                                 "Was the sale in-person?"
                                             ),
+                                            "owned_question_input_refs": [],
                                         },
                                     ],
                                 },
@@ -412,12 +409,7 @@ class _FollowUpQuestionContractModelPort:
                                         )
                                     }
                                 ],
-                                "input_decisions": [
-                                    {
-                                        "input_ref": "time_1",
-                                        "use_input": True,
-                                    }
-                                ],
+                                "used_question_inputs": ["time_1"],
                             }
                         ],
                         "question_input_inventory_check": {

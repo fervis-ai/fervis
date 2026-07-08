@@ -138,27 +138,56 @@ class PlanSelectionSet:
 
 
 @dataclass(frozen=True)
-class BoundSourceStrategyMember:
+class BoundRoleTarget:
+    requirement_id: str
     source_candidate_id: str
     source_binding_ids: tuple[str, ...]
-    requirement_ids: tuple[str, ...] = ()
+    fulfillment_support_set_ids: tuple[str, ...] = ()
+    answer_output_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.requirement_id.strip():
+            raise ValueError("bound role target requires requirement id")
+        if not self.source_candidate_id.strip():
+            raise ValueError("bound role target requires source candidate")
+        if not self.source_binding_ids:
+            raise ValueError("bound role target requires source bindings")
+        if any(not source_id.strip() for source_id in self.source_binding_ids):
+            raise ValueError("bound role target source bindings require ids")
+
+
+@dataclass(frozen=True)
+class BoundSourceStrategyMember:
+    source_candidate_id: str
+    role_targets: tuple[BoundRoleTarget, ...]
     field_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.source_candidate_id.strip():
             raise ValueError("bound source strategy member requires source candidate")
-        if not self.source_binding_ids:
-            raise ValueError("bound source strategy member requires source bindings")
-        if any(not source_id.strip() for source_id in self.source_binding_ids):
-            raise ValueError("bound source strategy member source bindings require ids")
-        if any(not requirement_id.strip() for requirement_id in self.requirement_ids):
-            raise ValueError(
-                "bound source strategy member requirement ids must be non-empty"
+        if not self.role_targets:
+            raise ValueError("bound source strategy member requires role targets")
+        if any(
+            target.source_candidate_id != self.source_candidate_id
+            for target in self.role_targets
+        ):
+            raise ValueError("bound source strategy member role target mismatch")
+
+    @property
+    def source_binding_ids(self) -> tuple[str, ...]:
+        return tuple(
+            dict.fromkeys(
+                source_id
+                for target in self.role_targets
+                for source_id in target.source_binding_ids
             )
-        if len(set(self.requirement_ids)) != len(self.requirement_ids):
-            raise ValueError(
-                "bound source strategy member requirement ids must be unique"
-            )
+        )
+
+    @property
+    def requirement_ids(self) -> tuple[str, ...]:
+        return tuple(
+            dict.fromkeys(target.requirement_id for target in self.role_targets)
+        )
 
 
 @dataclass(frozen=True)
@@ -273,12 +302,12 @@ class BoundPlanSelectionSet:
         for plan in self.plan_selections:
             roles = output.setdefault(plan.requested_fact_id, {})
             for member in plan.source_members:
-                for requirement_id in member.requirement_ids:
-                    current = list(roles.get(requirement_id, ()))
-                    for source_binding_id in member.source_binding_ids:
+                for target in member.role_targets:
+                    current = list(roles.get(target.requirement_id, ()))
+                    for source_binding_id in target.source_binding_ids:
                         if source_binding_id not in current:
                             current.append(source_binding_id)
-                    roles[requirement_id] = tuple(current)
+                    roles[target.requirement_id] = tuple(current)
         return output
 
     def pattern_names(self) -> tuple[str, ...]:

@@ -11,7 +11,9 @@ input:
     fact_description: variants not observed
     subject_text: variants
     answer_expression_family: set_difference
-    answer_outputs: [answer_1]
+    answer_outputs:
+      - description: answer_1
+        role: ANSWER_VALUE
     resource_terms: [variant]
   catalog:
     reads:

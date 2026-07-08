@@ -20,4 +20,5 @@ input:
         tie_breakers: [{field: id, direction: asc}]
         limit: 0
 expect:
-  error_contains: positive limit
+  result_contains:
+    status: rejected

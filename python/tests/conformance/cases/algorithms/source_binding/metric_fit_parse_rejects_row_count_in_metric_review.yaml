@@ -11,4 +11,5 @@ input:
   raw_metric_evidence_decisions:
     row_population.root: FITS_REQUESTED_ANSWER
 expect:
-  error_contains: not valid
+  result_contains:
+    status: rejected

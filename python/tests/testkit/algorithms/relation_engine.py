@@ -48,19 +48,26 @@ from fervis.lookup.fact_plan.operations import (
     UniversalConditionSpec,
 )
 
-from tests.testkit.assertions import exact_mismatches, subset_mismatches
+from tests.testkit.assertions import (
+    exact_mismatches,
+    expects_rejection,
+    status_mismatches,
+    subset_mismatches,
+)
 
 
 def run_relation_engine_case(payload: dict[str, Any]) -> list[str]:
     try:
         output = execute_operations(engine_input_from_payload(payload["input"]))
     except RelationEngineError as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error and expected_error in str(exc):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {exc}"]
-    if "error_contains" in payload["expect"]:
-        return [f"expected error containing {payload['expect']['error_contains']!r}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     actual = {
         relation.id: {
             "rows": list(relation.rows),
@@ -106,12 +113,14 @@ def run_calendar_relation_case(payload: dict[str, Any]) -> list[str]:
             )
         )
     except RelationEngineError as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error and expected_error in str(exc):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {exc}"]
-    if "error_contains" in payload["expect"]:
-        return [f"expected error containing {payload['expect']['error_contains']!r}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     actual = {
         "rows": list(relation.rows),
         "grain_keys": list(relation.grain_keys),

@@ -96,8 +96,9 @@ class SemanticKnownInputView:
     input_id: str
     text: str
     kind: str
+    role: str = ""
     description: str = ""
-    lookup_text: str = ""
+    resolved_value_text: str = ""
 
 
 @dataclass(frozen=True)
@@ -114,6 +115,7 @@ class SemanticGroundingResultView:
     input_text: str
     resolver_read_id: str
     resolver_label: str
+    entity_kind: str
     matched_field: str
     matched_value: str
     matched_label: str
@@ -211,12 +213,9 @@ class RuntimeErrorView:
 @dataclass(frozen=True)
 class ClarificationRequestView:
     clarification_id: str
-    basis: str
-    question_text: str
+    payload_json: dict[str, object]
     fact_result_id: str | None = None
     step_id: str | None = None
-    options: tuple[dict[str, object], ...] = ()
-    evidence_refs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

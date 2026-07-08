@@ -12,4 +12,5 @@ input:
     OPEN: SATISFIES_TEST
     CLOSED: CONFLICTS_WITH_TEST
 expect:
-  error_contains: duplicate source binding
+  result_contains:
+    status: rejected

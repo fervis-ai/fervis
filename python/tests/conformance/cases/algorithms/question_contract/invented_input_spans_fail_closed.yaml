@@ -1,19 +1,23 @@
 id: invented_input_spans_fail_closed
 description: Parser rejects input spans that do not appear in the question context or supplied context texts.
 migrates:
-  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_rejects_invented_input_spans
+- api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_rejects_invented_input_spans
 kind: algorithm
 algorithm: question_contract.parse
 input:
   question_context: How much sales at ABC Mall?
   question_inputs:
-    - input_ref: store
-      source: question_context
-      kind: named_reference_text
-      reference_text: Westlands
-      target_meaning: store location
-      lookup_text: Westlands
-      inventory_check: {why_this_is_an_input: Westlands is a named reference}
-  used_input_refs: [store]
+  - input_ref: store
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: Westlands is a named reference
+    value_source_text: Westlands
+    resolved_value_text: Westlands
+    value_meaning_hint: store location
+    role: reference_value
+  used_input_refs:
+  - store
 expect:
-  error_contains: input text must come from question context
+  result_contains:
+    status: rejected

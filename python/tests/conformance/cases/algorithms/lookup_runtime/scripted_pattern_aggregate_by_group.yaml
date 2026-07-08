@@ -11,9 +11,13 @@ input:
     fact_description: metric total by location
     subject_text: location
     answer_expression_family: grouped_aggregate
-    answer_outputs: [location]
+    group_key:
+      description: location
+      domain: SOURCE_RESULT_VALUES
+    answer_outputs:
+      - description: metric total
+        role: MEASURED_VALUE
     resource_terms: [metric]
-    support_role: MEASURED_VALUE
   catalog:
     reads:
       - id: metric_read

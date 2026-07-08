@@ -194,13 +194,23 @@ def _entity_identity_payload(
     *,
     address: FactAddress,
 ) -> dict[str, Any]:
-    canonical_values = tuple(
-        str(value).strip() for value in address.identity.values() if str(value).strip()
-    )
+    canonical_values = {
+        str(field).strip(): str(value).strip()
+        for field, value in address.identity.items()
+        if str(field).strip() and str(value).strip()
+    }
+    if len(canonical_values) != 1:
+        raise ValueError("entity identity memory requires one canonical identity")
+    identity_field, canonical_id = next(iter(canonical_values.items()))
+    identity_type = str(address.resource or "").strip()
+    if not identity_type:
+        raise ValueError("entity identity memory requires identity type")
     return {
         "kind": "entity_identity",
-        "entity_kind": address.resource,
-        "canonical_id": canonical_values[0] if canonical_values else "",
+        "identity_type": identity_type,
+        "identity_field": identity_field,
+        "canonical_id": canonical_id,
+        "canonical_values": canonical_values,
         "display_label": address.reference_text,
         "display_fact_refs": (address.address,),
         "proof_refs": _proof_refs(address),
@@ -251,7 +261,7 @@ def _time_scope_payload(
     }
 
 
-def _clarification_payload(
+def _clarification_answer_payload(
     *,
     artifact: FactArtifact,
     address: FactAddress,
@@ -351,5 +361,5 @@ _CARD_PAYLOAD_BUILDERS = {
     "scalar_value": _scalar_value_payload_from_card,
     "comparison": _comparison_payload_from_card,
     "time_scope": _time_scope_payload_from_card,
-    "clarification_answer": _clarification_payload,
+    "clarification_answer": _clarification_answer_payload,
 }

@@ -3,6 +3,7 @@ import type {
   ConversationSummary,
   DecodeResult,
   QuestionRunListPayload,
+  RunError,
   QuestionStatePayload,
   RunStep,
   RunPayload
@@ -66,7 +67,7 @@ function decodeConversationSummary(raw: unknown): ConversationSummary {
     conversationId: expectString(object.conversationId, "conversationId"),
     firstQuestion: expectString(object.firstQuestion, "firstQuestion"),
     latestQuestionId: expectString(object.latestQuestionId, "latestQuestionId"),
-    currentRunId: expectString(object.currentRunId, "currentRunId"),
+    currentRunId: expectNullableString(object.currentRunId, "currentRunId"),
     status: decodeRunStatus(object.status, "status"),
     runCount: expectNumber(object.runCount, "runCount"),
     updatedAt: expectString(object.updatedAt, "updatedAt")
@@ -89,7 +90,7 @@ function decodeRunPayload(raw: unknown): RunPayload {
         ? emptyExplanation()
         : decodeExplanation(object.explanation),
     steps: decodeRunSteps(object.steps),
-    error: object.error === null ? null : decodeRunError(object.error),
+    error: decodeRunErrorPayload(object.error),
     worker:
       object.worker === undefined || object.worker === null
         ? null
@@ -100,6 +101,20 @@ function decodeRunPayload(raw: unknown): RunPayload {
         : decodeUsage(object.usage),
     nextActions: decodeNextActions(object.nextActions)
   };
+}
+
+function decodeRunErrorPayload(raw: unknown): RunError | null {
+  if (raw === undefined || raw === null || raw === "") {
+    return null;
+  }
+  if (typeof raw === "string") {
+    return {
+      code: raw,
+      message: raw,
+      retryable: false
+    };
+  }
+  return decodeRunError(raw);
 }
 
 function decodeRunSteps(raw: unknown): readonly RunStep[] {

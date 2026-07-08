@@ -10,4 +10,5 @@ input:
       - outcome: answered
         addresses: []
 expect:
-  error_contains: fact artifact requires artifact_id
+  result_contains:
+    status: rejected

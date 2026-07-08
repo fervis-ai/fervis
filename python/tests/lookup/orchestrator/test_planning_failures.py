@@ -53,13 +53,13 @@ def test_lookup_cutover_fails_closed_on_invalid_source_binding_output():
 
 def test_lookup_cutover_fails_closed_on_invalid_verified_plan():
     valid_source_binding_plan = _pattern_fact_plan_payload(
-        requested_fact_id="rf_answer",
+        requested_fact_id="fact_1",
         answer_output_ids=("answer",),
         read_id="metric_read",
         output_fields=({"field_id": "metric_total"},),
     )
     invalid_fact_plan = _pattern_fact_plan_payload(
-        requested_fact_id="rf_answer",
+        requested_fact_id="fact_1",
         answer_output_ids=("answer",),
         read_id="metric_read",
         output_fields=({"field_id": "missing_field"},),
@@ -182,10 +182,11 @@ def test_lookup_cutover_returns_validation_failure_for_invalid_fact_plan():
 
 def test_lookup_cutover_blocks_invalid_plan_clarification_before_synthesis():
     valid_source_binding_plan = _pattern_fact_plan_payload(
-        requested_fact_id="rf_answer",
+        requested_fact_id="fact_1",
         answer_output_ids=("answer",),
         read_id="metric_read",
         output_fields=({"field_id": "metric_total"},),
+        pattern="aggregate_scalar",
     )
     invalid_clarification_plan = {
         "outcome": {

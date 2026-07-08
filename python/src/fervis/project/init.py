@@ -234,6 +234,7 @@ def _config_template(framework: str, source: dict[str, object]) -> dict[str, obj
         "host": {
             "organization_name": "",
             "about_api": "",
+            "timezone": "UTC",
         },
         "routes": {"prefix": routes_prefix},
         "sources": [source],

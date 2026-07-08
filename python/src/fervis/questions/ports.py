@@ -42,6 +42,7 @@ class QuestionRunStart:
     previous_run_id: str | None = None
     trigger_clarification_response_run_id: str | None = None
     trigger_clarification_response_id: str | None = None
+    trigger_clarification_selected_option_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,7 @@ class ClarificationResponseStart:
     run_id: str
     clarification_id: str
     response_text: str
+    selected_option_id: str = ""
 
 
 @dataclass(frozen=True)

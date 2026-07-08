@@ -37,11 +37,16 @@ input:
             value: {type: decimal, value: "100.00"}
             display: total for turn_1
             evidence: {stepIds: [turn_1.value_proof]}
-expect:
-  result_contains:
-    card_kinds: [prior_answer_request, row_set, scalar_value]
-  text_excludes_from:
+  excludes_from:
     cards:
       - We made 100.
       - proof
       - source
+expect:
+  result_contains:
+    card_kinds: [prior_answer_request, row_set, scalar_value]
+    excludes_from:
+      cards:
+        We made 100.: true
+        proof: true
+        source: true

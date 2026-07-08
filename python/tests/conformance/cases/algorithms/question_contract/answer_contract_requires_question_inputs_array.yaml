@@ -13,7 +13,6 @@ input:
         answer_subject:
           subject_text: payment items
           instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
-        input_requirements: {time_requirements: []}
         answer_population:
           population_label: payment items
           counted_unit: payment item
@@ -22,10 +21,12 @@ input:
               kind: SUBJECT_IDENTITY
               polarity: MUST_PASS
               test_question: Is this a payment item?
+              owned_question_input_refs: []
         answer_outputs:
           - description: number of payment items
-        input_decisions: []
+        used_question_inputs: []
     question_input_inventory_check:
       all_input_like_phrases_declared: true
 expect:
-  error_contains: question_inputs
+  result_contains:
+    status: rejected

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fervis.lookup.fact_planning.schema import build_fact_plan_schema
+from tests.testkit.assertions import subset_mismatches
 
 
 def run_fact_plan_schema_case(payload: dict) -> list[str]:
@@ -50,8 +51,13 @@ def run_fact_plan_schema_case(payload: dict) -> list[str]:
             },
         )
     )
-    return [
-        f"schema unexpectedly contains {item!r}"
-        for item in payload["expect"]["text_excludes"]
-        if item in schema_text
-    ]
+    actual = {
+        "excludes": {
+            text: text not in schema_text
+            for text in input_payload.get("excludes") or ()
+        }
+    }
+    return subset_mismatches(
+        actual=actual,
+        expected_subset=payload["expect"]["result_contains"],
+    )

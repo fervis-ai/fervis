@@ -1,0 +1,27 @@
+id: row_predicate_parse_accepts_scoped_review_tests
+description: Row-predicate parsing accepts review results for the scoped membership tests only.
+kind: algorithm
+algorithm: source_binding.row_predicate_parse
+input:
+  request:
+    mode: scoped_review_owned_input_row_only
+  row_predicates:
+    is_deleted:
+      "false":
+        subject_identity: SATISFIES_TEST
+        normal_instance_guard: SATISFIES_TEST
+      "true":
+        subject_identity: SATISFIES_TEST
+        normal_instance_guard: CONFLICTS_WITH_TEST
+expect:
+  result_contains:
+    row_filters:
+      - field_id: is_deleted
+        operator: in
+        values: ["false"]
+    population_choices:
+      - controller_kind: row_predicate
+        controller_id: rp.source_1.row.root.is_deleted
+        field_id: is_deleted
+        included_values: ["false"]
+        excluded_values: ["true"]

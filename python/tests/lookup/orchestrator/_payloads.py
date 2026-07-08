@@ -2,6 +2,8 @@ from dataclasses import replace
 import re
 from typing import Iterable
 
+from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
+
 from tests.lookup.orchestrator._plans import *  # noqa: F403
 from tests.lookup.prompt_sections import prompt_section_payload
 
@@ -409,11 +411,12 @@ def _read_eligibility_retention_specs_from_set_difference_answer(
     observed_source = observed.get("source") or {}
     specs: list[ReadEligibilityRetentionSpec] = []
     if isinstance(candidate_source, dict) and candidate_source.get("kind") == "read":
+        candidate_identity_fields = tuple(candidate.get("identity_fields") or ())
         specs.append(
             ReadEligibilityRetentionSpec(
                 requested_fact_id=requested_fact_id,
                 read_id=str(candidate_source.get("read_id") or ""),
-                row_path_ids=tuple(candidate.get("identity_fields") or ()),
+                population_scope_fields=candidate_identity_fields,
                 answer_value_fields=tuple(
                     str(field.get("field_id") or "")
                     for field in candidate.get("output_fields") or ()
@@ -422,11 +425,12 @@ def _read_eligibility_retention_specs_from_set_difference_answer(
             )
         )
     if isinstance(observed_source, dict) and observed_source.get("kind") == "read":
+        observed_identity_fields = tuple(observed.get("identity_fields") or ())
         specs.append(
             ReadEligibilityRetentionSpec(
                 requested_fact_id=requested_fact_id,
                 read_id=str(observed_source.get("read_id") or ""),
-                row_path_ids=tuple(observed.get("identity_fields") or ()),
+                population_scope_fields=observed_identity_fields,
             )
         )
     return tuple(specs)
@@ -731,27 +735,18 @@ def _question_contract_id_map(contract: QuestionContract) -> _QuestionContractId
         for output_index, output in enumerate(fact.answer_outputs, start=1):
             answer_output_ids[(fact.id, output.id)] = f"answer_{output_index}"
         counters = {
-            "named_reference_text": 0,
-            "time_text": 0,
-            "number_text": 0,
-            "explicit_numeric_limit_text": 0,
-        }
-        labels = {
-            "named_reference_text": "entity",
-            "time_text": "time",
-            "number_text": "number",
-            "explicit_numeric_limit_text": "limit",
+            "entity": 0,
+            "time": 0,
+            "limit": 0,
         }
         for known in fact.known_inputs:
             if known.id in known_input_ids:
                 continue
-            kind = known.kind.value
-            if kind not in counters:
+            label = _known_input_label(known)
+            if not label:
                 continue
-            counters[kind] += 1
-            known_input_ids[known.id] = (
-                f"{canonical_fact_id}_{labels[kind]}_{counters[kind]}"
-            )
+            counters[label] += 1
+            known_input_ids[known.id] = f"{canonical_fact_id}_{label}_{counters[label]}"
     return _QuestionContractIdMap(
         requested_fact_ids=requested_fact_ids,
         answer_output_ids=answer_output_ids,
@@ -814,8 +809,8 @@ def _question_contract_for_arguments(
             RequestedFact(
                 id=fact_id,
                 description=description or fact_id,
-                answer_expression=RequestedFactAnswerExpression(
-                    family=RequestedFactAnswerExpressionFamily(
+                answer_expression=_requested_fact_answer_expression(
+                    RequestedFactAnswerExpressionFamily(
                         _answer_expression_family_by_fact_id_from_fact_plan(
                             arguments
                         ).get(fact_id, "scalar_aggregate")
@@ -845,8 +840,8 @@ def _question_contract_with_answer_expression_from_fact_plan(
         (
             replace(
                 fact,
-                answer_expression=RequestedFactAnswerExpression(
-                    family=RequestedFactAnswerExpressionFamily(family)
+                answer_expression=_requested_fact_answer_expression(
+                    RequestedFactAnswerExpressionFamily(family)
                 ),
             )
             if (
@@ -909,23 +904,18 @@ def _question_contract_answer_request_payload(
             else {"family": "scalar_aggregate"}
         ),
         "answer_subject": _answer_subject_payload(subject_text),
-        "input_requirements": fact.input_requirements.to_answer_request_dict(),
         "answer_population": _answer_population_payload(
             fact,
             subject_text=subject_text,
         ),
         "answer_outputs": [
-            {
-                "description": output.description or output.id,
-            }
+            _answer_output_for_current_contract(output.to_answer_request_dict())
             for output in fact.answer_outputs
         ],
-        "input_decisions": [
-            {
-                "input_ref": input_ref,
-                "use_input": input_ref in used_input_refs,
-            }
+        "used_question_inputs": [
+            input_ref
             for input_ref in id_map.known_input_ids.values()
+            if input_ref in used_input_refs
         ],
     }
     return payload
@@ -955,23 +945,35 @@ def _known_input_payload(
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "input_ref": input_ref,
-        "source": "question_context",
+        "source": known.source.value,
         "kind": known.kind.value,
-        "reference_text": known.text,
         "inventory_check": {
             "why_this_is_an_input": f"{known.text} is a declared question input"
         },
     }
-    if known.kind.value == "named_reference_text":
-        payload["target_meaning"] = known.description or known.text
-        payload["lookup_text"] = known.lookup_text
-    if known.kind.value in {"number_text", "explicit_numeric_limit_text"}:
-        payload["numeric_value"] = known.numeric_value
-    if known.kind.value == "explicit_numeric_limit_text":
-        payload["value_source_text"] = known.value_source_text
-    if known.kind.value == "time_text" and known.satisfies_requirement_id:
-        payload["satisfies_requirement_id"] = known.satisfies_requirement_id
+    if known.kind == KnownInputKind.ROW_SET_REFERENCE:
+        payload["reference_text"] = known.text
+        payload["occurrence"] = known.occurrence
+        payload["resolved_input_ref"] = known.resolved_input_ref
+        return payload
+    payload["value_source_text"] = known.text
+    payload["role"] = known.role.value if known.role else ""
+    payload["resolved_value_text"] = known.resolved_value_text
+    if known.field_label_text:
+        payload["field_label_text"] = known.field_label_text
+    if known.value_meaning_hint:
+        payload["value_meaning_hint"] = known.value_meaning_hint
     return payload
+
+
+def _known_input_label(known: RequestedFactKnownInput) -> str:
+    if known.is_reference_value:
+        return "entity"
+    if known.is_time_value:
+        return "time"
+    if known.is_result_limit:
+        return "limit"
+    return ""
 
 
 def _question_contract_response(
@@ -1009,19 +1011,12 @@ def _question_contract_response(
         "answer_fact": subject,
         "answer_expression": {"family": answer_expression_family},
         "answer_subject": _answer_subject_payload(answer_subject or subject),
-        "input_requirements": {"time_requirements": []},
         "answer_population": _answer_population_payload_from_text(
             description=subject,
             subject_text=answer_subject or subject,
         ),
         "answer_outputs": [{"description": part} for part in parts],
-        "input_decisions": [
-            {
-                "input_ref": input_ref,
-                "use_input": True,
-            }
-            for input_ref in input_refs
-        ],
+        "used_question_inputs": input_refs,
     }
     return {
         "kind": "question_contract",
@@ -1077,13 +1072,19 @@ def _question_input_ref_for_response_item(
     provided = str(item.get("input_ref") or "").strip()
     if provided:
         return provided
-    resolved_kind = str(item.get("kind") or "named_reference_text")
+    resolved_kind = KnownInputKind(str(item["kind"]))
+    resolved_role = (
+        LiteralInputRole(str(item["role"]))
+        if resolved_kind == KnownInputKind.LITERAL
+        else None
+    )
     resolved_label = {
-        "named_reference_text": "entity",
-            "time_text": "time",
-        "number_text": "number",
-        "explicit_numeric_limit_text": "limit",
-    }.get(resolved_kind, "input")
+        LiteralInputRole.REFERENCE_VALUE: "entity",
+        LiteralInputRole.TIME_VALUE: "time",
+        LiteralInputRole.RESULT_LIMIT: "limit",
+    }.get(resolved_role, "input")
+    if resolved_kind == KnownInputKind.ROW_SET_REFERENCE:
+        resolved_label = "row_set"
     counters[resolved_label] = counters.get(resolved_label, 0) + 1
     index = counters[resolved_label]
     return f"fact_1_{resolved_label}_{index}"
@@ -1093,26 +1094,43 @@ def _question_input_from_response_item(
     item: dict[str, Any],
     input_ref: str,
 ) -> dict[str, Any]:
-    kind = str(item.get("kind") or "named_reference_text")
-    reference_text = str(item.get("reference_text") or "")
+    kind = KnownInputKind(str(item["kind"]))
+    source_text = str(
+        item.get("value_source_text")
+        or item.get("source_text")
+        or item.get("reference_text")
+        or ""
+    )
     output: dict[str, Any] = {
         "input_ref": input_ref,
-        "kind": kind,
-        "source": "question_context",
-        "reference_text": reference_text,
+        "kind": kind.value,
+        "source": str(
+            item.get("source")
+            or (
+                "conversation_resolution"
+                if kind == KnownInputKind.ROW_SET_REFERENCE
+                else "question_context"
+            )
+        ),
         "inventory_check": {
-            "why_this_is_an_input": f"{reference_text} is a declared question input"
+            "why_this_is_an_input": f"{source_text} is a declared question input"
         },
     }
-    if kind == "named_reference_text":
-        output["target_meaning"] = str(item.get("target_meaning") or reference_text)
-        output["lookup_text"] = str(item.get("lookup_text") or reference_text)
-    if kind in {"number_text", "explicit_numeric_limit_text"}:
-        output["numeric_value"] = item["numeric_value"]
-    if kind == "explicit_numeric_limit_text":
-        output["value_source_text"] = str(item["value_source_text"])
-    if kind == "time_text" and item.get("satisfies_requirement_id"):
-        output["satisfies_requirement_id"] = str(item["satisfies_requirement_id"])
+    if kind == KnownInputKind.ROW_SET_REFERENCE:
+        output["reference_text"] = source_text
+        output["occurrence"] = int(item.get("occurrence") or 1)
+        output["resolved_input_ref"] = str(item["resolved_input_ref"])
+        return output
+    output["value_source_text"] = source_text
+    role = LiteralInputRole(str(item["role"]))
+    output["role"] = role.value
+    output["resolved_value_text"] = str(
+        item.get("resolved_value_text") or item.get("value_text") or source_text
+    )
+    if item.get("field_label_text"):
+        output["field_label_text"] = str(item["field_label_text"])
+    if item.get("value_meaning_hint"):
+        output["value_meaning_hint"] = str(item["value_meaning_hint"])
     return output
 
 
@@ -1173,7 +1191,9 @@ def _question_contract_answer_request_for_current_contract(
         return item
     output = dict(item)
     if answer_expression_family:
-        output["answer_expression"] = {"family": answer_expression_family}
+        output["answer_expression"] = _question_contract_answer_expression_payload(
+            answer_expression_family
+        )
     else:
         output.setdefault("answer_expression", {"family": "scalar_aggregate"})
     if "answer_subject" in output:
@@ -1182,7 +1202,6 @@ def _question_contract_answer_request_for_current_contract(
                 output.get("answer_subject"),
             )
         )
-    output.setdefault("input_requirements", {"time_requirements": []})
     if "answer_population" not in output:
         subject_text = str(
             (output.get("answer_subject") or {}).get("subject_text")
@@ -1196,13 +1215,32 @@ def _question_contract_answer_request_for_current_contract(
     answer_outputs = output.get("answer_outputs")
     if isinstance(answer_outputs, list):
         output["answer_outputs"] = [
-            (
-                {"description": answer_output.get("description")}
-                if isinstance(answer_output, dict) and "description" in answer_output
-                else answer_output
-            )
+            _answer_output_for_current_contract(answer_output)
             for answer_output in answer_outputs
         ]
+    return output
+
+
+def _answer_output_for_current_contract(answer_output: object) -> object:
+    if not isinstance(answer_output, dict):
+        return answer_output
+    if "description" not in answer_output:
+        return answer_output
+    output: dict[str, object] = {
+        "description": answer_output.get("description"),
+    }
+    if answer_output.get("role"):
+        output["role"] = answer_output["role"]
+    return output
+
+
+def _question_contract_answer_expression_payload(family: str) -> dict[str, object]:
+    output: dict[str, object] = {"family": family}
+    if family == "grouped_aggregate":
+        output["group_key"] = {
+            "description": "group",
+            "domain": "SOURCE_RESULT_VALUES",
+        }
     return output
 
 
@@ -1641,6 +1679,10 @@ def _source_text_for_source(source: dict[str, Any]) -> str:
     return text
 
 
+def _answer_output_support_role(answer_output: dict[str, Any]) -> str:
+    return str(answer_output.get("role") or "ROW_POPULATION")
+
+
 def _query_enrichment_payload_from_prompt(prompt: str) -> dict[str, Any]:
     requested_facts = _planner_prompt_json_section(prompt, label="Requested facts")[
         "requested_facts"
@@ -1660,7 +1702,7 @@ def _query_enrichment_payload_from_prompt(prompt: str) -> dict[str, Any]:
                     [
                         {
                             "answer_output_id": str(answer_output["answer_output_id"]),
-                            "support_role": "ROW_POPULATION",
+                            "support_role": _answer_output_support_role(answer_output),
                             "source_text": str(
                                 fact.get("requested_fact_description")
                                 or "requested fact"
@@ -1689,8 +1731,10 @@ def _query_enrichment_payload_from_prompt(prompt: str) -> dict[str, Any]:
                 "catalog_search_terms": [
                     {
                         "basis": (
-                            f"{resource_name} can identify {target['lookup_text']} "
-                            f"because target_meaning is {target['target_meaning']}."
+                            f"{resource_name} can identify "
+                            f"{target['resolved_value_text']} because "
+                            "value_meaning_hint is "
+                            f"{target['value_meaning_hint']}."
                         ),
                         "term": resource_name,
                     }

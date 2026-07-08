@@ -20,5 +20,6 @@ input:
       use_as: identity_value_binding
       target_binding_id: total
 expect:
-  error_contains: uses value as identity_value_binding
+  result_contains:
+    status: rejected
 

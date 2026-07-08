@@ -99,9 +99,14 @@ def active_project_schema(
 
 
 def _validate_host(host: Mapping[str, object]) -> None:
-    reject_unknown_keys(host, allowed={"organization_name", "about_api"}, prefix="host")
+    reject_unknown_keys(
+        host,
+        allowed={"organization_name", "about_api", "timezone"},
+        prefix="host",
+    )
     require_string(host, "organization_name", allow_blank=True)
     require_string(host, "about_api", allow_blank=True)
+    require_string(host, "timezone")
 
 
 def _validate_routes(routes: Mapping[str, object]) -> None:

@@ -24,4 +24,5 @@ input:
         tie_breakers: []
         limit: 1
 expect:
-  error_contains: unique ordering keys
+  result_contains:
+    status: rejected

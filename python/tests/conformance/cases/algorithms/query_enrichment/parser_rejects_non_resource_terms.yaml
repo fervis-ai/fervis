@@ -16,4 +16,5 @@ input:
             matching_resource_names: [amount]
     entity_target_catalog_search_terms: []
 expect:
-  error_contains: must be resource names
+  result_contains:
+    status: rejected

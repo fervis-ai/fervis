@@ -26,6 +26,11 @@ input:
               pagination: not_paginated
               rowCount: 0
               proofRefs: [read:list_sale_list, row_source:rs_1:param:staff_id, answer_1_rows_project]
+  excludes_from:
+    private_cards:
+      - read:list_sale_list
+      - row_source:rs_1:param:staff_id
+      - answer_1_rows_project
 expect:
   result_contains:
     private_cards:
@@ -34,9 +39,8 @@ expect:
         artifact_id: turn_1
         address: relation.sales
         display: relation.sales
-  text_excludes_from:
-    private_cards:
-      - read:list_sale_list
-      - row_source:rs_1:param:staff_id
-      - answer_1_rows_project
-
+    excludes_from:
+      private_cards:
+        read:list_sale_list: true
+        row_source:rs_1:param:staff_id: true
+        answer_1_rows_project: true

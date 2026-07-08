@@ -9,8 +9,6 @@ input:
   metric_decisions:
     amount: FITS_REQUESTED_ANSWER
     data: DOES_NOT_FIT_REQUESTED_ANSWER
-  raw_metric_evidence_decisions:
-    row_population.summary: DOES_NOT_FIT_REQUESTED_ANSWER
 expect:
   result_contains:
     metric_measure_field_ids: [amount]

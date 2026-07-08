@@ -82,16 +82,20 @@ from fervis.lookup.fact_plan.values import (
 )
 from fervis.lookup.fact_planning.request import RuntimeValueContext
 from fervis.lookup.question_contract import (
+    GroupKeyDomainKind,
     KnownInputKind,
     KnownInputSource,
+    LiteralInputRole,
     NormalInstanceExcludedStateRole,
     QuestionContract,
     RequestedFact,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
+    RequestedFactGroupKey,
     RequestedFactAnswerOutput,
     RequestedFactAnswerSubject,
     RequestedFactKnownInput,
+    RequestedFactLiteralInput,
     default_answer_population,
     requested_fact_evidence_ref,
 )
@@ -124,6 +128,7 @@ from tests.lookup.source_binding_helpers import (
     source_fulfills_for_candidate,
     source_binding_payload_for_one_call,
     source_binding_payload_from_fact_plan,
+    source_binding_target_id_for_candidate,
 )
 
 __all__ = tuple(name for name in globals() if not name.startswith("__"))

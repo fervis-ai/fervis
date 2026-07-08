@@ -6,6 +6,7 @@ from fervis.memory.conversation_context import (
     ConversationContextFrame,
     ConversationContextSource,
 )
+from fervis.lookup.conversation_resolution import provider_contract as provider_output
 from fervis.lookup.conversation_resolution.tools import (
     CONVERSATION_RESOLUTION_TOOL_NAME,
 )
@@ -32,7 +33,7 @@ def _conversation_resolution_schema(
     source_id_schema = _source_id_schema(context_sources)
     context_source_id_schema = _context_source_id_schema(context_sources)
     frame_id_schema = _frame_id_schema(context_frames)
-    return _strict_object(
+    return provider_output.ConversationResolutionOutput.schema(
         {
             "kind": {"type": "string", "enum": ["conversation_resolution"]},
             "current_question_text": {"type": "string", "minLength": 1},
@@ -51,13 +52,6 @@ def _conversation_resolution_schema(
                 "enum": ["standalone", "resolved", "needs_clarification"],
             },
         },
-        required=(
-            "kind",
-            "current_question_text",
-            "clause_resolutions",
-            "unresolved",
-            "status",
-        ),
     )
 
 
@@ -68,7 +62,7 @@ def _clause_resolution_schema(
     context_source_count: int,
     context_frame_count: int,
 ) -> dict[str, object]:
-    return _strict_object(
+    return provider_output.ClauseResolutionOutput.schema(
         {
             "current_clause_text": {"type": "string", "minLength": 1},
             "occurrence": {"type": "integer", "minimum": 1},
@@ -83,13 +77,6 @@ def _clause_resolution_schema(
             },
             "resolved_clause_text": {"type": "string", "minLength": 1},
         },
-        required=(
-            "current_clause_text",
-            "occurrence",
-            "requested_value_frame",
-            "dependencies",
-            "resolved_clause_text",
-        ),
     )
 
 
@@ -98,7 +85,7 @@ def _requested_value_frame_schema(
     frame_id_schema: dict[str, object],
     context_frame_count: int,
 ) -> dict[str, object]:
-    return _strict_object(
+    return provider_output.RequestedValueFrameOutput.schema(
         {
             "current_value_surface": _current_value_surface_schema(),
             "context_frame_choices": {
@@ -108,15 +95,11 @@ def _requested_value_frame_schema(
                 "items": _context_frame_choice_schema(frame_id_schema),
             },
         },
-        required=(
-            "current_value_surface",
-            "context_frame_choices",
-        ),
     )
 
 
 def _current_value_surface_schema() -> dict[str, object]:
-    return _strict_object(
+    return provider_output.CurrentValueSurfaceOutput.schema(
         {
             "text": {"type": "string", "minLength": 1},
             "kind": {
@@ -128,14 +111,13 @@ def _current_value_surface_schema() -> dict[str, object]:
                 ],
             },
         },
-        required=("text", "kind"),
     )
 
 
 def _context_frame_choice_schema(
     frame_id_schema: dict[str, object],
 ) -> dict[str, object]:
-    return _strict_object(
+    return provider_output.ContextFrameChoiceOutput.schema(
         {
             "frame_id": frame_id_schema,
             "current_conflict_quotes": {
@@ -152,12 +134,11 @@ def _context_frame_choice_schema(
                 ],
             },
         },
-        required=("frame_id", "current_conflict_quotes", "choice"),
     )
 
 
 def _dependency_schema(source_id_schema: dict[str, object]) -> dict[str, object]:
-    return _strict_object(
+    return provider_output.DependencyOutput.schema(
         {
             "anchor_text": {"type": "string", "minLength": 1},
             "occurrence": {"type": "integer", "minimum": 1},
@@ -173,19 +154,11 @@ def _dependency_schema(source_id_schema: dict[str, object]) -> dict[str, object]
             },
             "kind": {"type": "string", "enum": ["reference", "scope"]},
         },
-        required=(
-            "anchor_text",
-            "occurrence",
-            "meaning_components",
-            "resolved_text",
-            "must_preserve_terms",
-            "kind",
-        ),
     )
 
 
 def _meaning_component_schema(source_id_schema: dict[str, object]) -> dict[str, object]:
-    return _strict_object(
+    return provider_output.MeaningComponentOutput.schema(
         {
             "source_id": source_id_schema,
             "source_text": {"type": "string", "minLength": 1},
@@ -196,12 +169,11 @@ def _meaning_component_schema(source_id_schema: dict[str, object]) -> dict[str, 
                 "enum": ["entity", "scope", "row_set", "value", "other"],
             },
         },
-        required=("source_id", "source_text", "memory_id", "resolved_text", "kind"),
     )
 
 
 def _unresolved_schema(source_id_schema: dict[str, object]) -> dict[str, object]:
-    return _strict_object(
+    return provider_output.UnresolvedOutput.schema(
         {
             "why_unresolved": {"type": "string"},
             "candidate_interpretations": {
@@ -213,18 +185,13 @@ def _unresolved_schema(source_id_schema: dict[str, object]) -> dict[str, object]
                 "enum": ["none", "multiple_meanings", "missing_input"],
             },
         },
-        required=(
-            "why_unresolved",
-            "candidate_interpretations",
-            "unresolved_kind",
-        ),
     )
 
 
 def _candidate_interpretation_schema(
     source_id_schema: dict[str, object],
 ) -> dict[str, object]:
-    return _strict_object(
+    return provider_output.CandidateInterpretationOutput.schema(
         {
             "integrated_question": {"type": "string", "minLength": 1},
             "supporting_evidence": {
@@ -233,12 +200,11 @@ def _candidate_interpretation_schema(
                 "items": _source_evidence_schema(source_id_schema),
             },
         },
-        required=("integrated_question", "supporting_evidence"),
     )
 
 
 def _source_evidence_schema(source_id_schema: dict[str, object]) -> dict[str, object]:
-    return _strict_object(
+    return provider_output.SourceEvidenceOutput.schema(
         {
             "source_id": source_id_schema,
             "exact_source_texts": {
@@ -247,7 +213,6 @@ def _source_evidence_schema(source_id_schema: dict[str, object]) -> dict[str, ob
                 "items": {"type": "string", "minLength": 1},
             },
         },
-        required=("source_id", "exact_source_texts"),
     )
 
 
@@ -274,16 +239,3 @@ def _frame_id_schema(
     if not frame_ids:
         return {"type": "string"}
     return {"type": "string", "enum": frame_ids}
-
-
-def _strict_object(
-    properties: dict[str, object],
-    *,
-    required: tuple[str, ...],
-) -> dict[str, object]:
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": properties,
-        "required": list(required),
-    }

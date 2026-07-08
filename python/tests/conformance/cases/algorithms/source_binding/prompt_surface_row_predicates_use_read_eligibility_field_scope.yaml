@@ -1,0 +1,75 @@
+id: prompt_surface_row_predicates_use_read_eligibility_field_scope
+description: Source-binding row predicate review surface is limited by read-eligibility relevant fields.
+kind: algorithm
+algorithm: source_binding.prompt_surface
+input:
+  request:
+    mode: yaml_prompt_surface
+    question: How many sales did one staff member make today?
+    requested_fact:
+      id: fact_1
+      description: count of sales today for one staff member
+      answer_subject: sales
+      answer_outputs: [answer_1]
+    relation_catalog:
+      reads:
+        - id: staff_sales
+          endpoint_name: get_staff_sales
+          resource_names: [sale]
+          params:
+            - ref: staff_sales.path.staff_id
+              name: staff_id
+              source: query
+              type: uuid
+            - ref: staff_sales.query.start_date
+              name: start_date
+              source: query
+              type: date
+            - ref: staff_sales.query.end_date
+              name: end_date
+              source: query
+              type: date
+          row_paths:
+            - id: data
+              path: data
+              cardinality: many
+          fields:
+            - ref: staff_sales.field.sale_id
+              path: data.sale_id
+              row_path_id: data
+              type: uuid
+            - ref: staff_sales.field.staff_id
+              path: data.staff_id
+              row_path_id: data
+              type: uuid
+            - ref: staff_sales.field.sold_at
+              path: data.sold_at
+              row_path_id: data
+              type: datetime
+            - ref: staff_sales.field.item_count
+              path: data.item_count
+              row_path_id: data
+              type: integer
+            - ref: staff_sales.field.is_deleted
+              path: data.is_deleted
+              row_path_id: data
+              type: boolean
+            - ref: staff_sales.field.sale_type
+              path: data.sale_type
+              row_path_id: data
+              type: choice
+              choices: [STORE, ONLINE]
+    selected_read_ids: [staff_sales]
+    retained_read_ids: [staff_sales]
+    retained_row_path_ids_by_read_id:
+      staff_sales: [data]
+    retained_field_refs_by_read_id:
+      staff_sales:
+        - staff_sales.field.sale_id
+        - staff_sales.field.staff_id
+        - staff_sales.field.sold_at
+        - staff_sales.field.item_count
+expect:
+  result_contains:
+    read_ids: [staff_sales]
+    row_predicate_field_ids: []

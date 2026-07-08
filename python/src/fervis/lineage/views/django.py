@@ -5,7 +5,6 @@ from __future__ import annotations
 from fervis.lineage import models
 from fervis.lineage.enums import (
     AnswerValueKind,
-    ClarificationBasis,
     FactResultKind,
     MemoryArtifactSourceKind,
     PresentationClientKey,
@@ -17,6 +16,7 @@ from fervis.lineage.enums import (
     RuntimeErrorKind,
     SourceReadStatus,
 )
+from fervis.lookup.clarification import ClarificationNeed, ClarificationReason
 from fervis.lineage.views.query import (
     AnswerOutputRow,
     AnswerPresentationRow,
@@ -316,12 +316,11 @@ def _clarification_request_row(
     return ClarificationRequestRow(
         clarification_id=item.clarification_id,
         run_id=item.run_id,
-        basis=ClarificationBasis(item.basis),
-        question_text=item.question_text,
+        need=ClarificationNeed(item.need),
+        reason=ClarificationReason(item.reason),
+        payload_json=item.payload_json or {},
         fact_result_id=item.fact_result_id,
         step_id=item.step_id,
-        options_json=tuple(item.options_json or ()),
-        evidence_refs_json=tuple(item.evidence_refs_json or ()),
     )
 
 

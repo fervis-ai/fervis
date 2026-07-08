@@ -81,6 +81,56 @@ describe("LiveZone", () => {
     expect(screen.getByText("Known inputs: 1: ABC Mall · 2: this month")).toBeInTheDocument();
   });
 
+  it("groups grounded and interpreted inputs in the running state", () => {
+    render(
+      <LiveZone
+        run={runningRunAt({
+          decisions: [],
+          semantic: {
+            groundingResults: [
+              {
+                inputId: "fact_1_entity_1",
+                inputText: "ABC Mall",
+                entityKind: "",
+                matchedField: "location_id",
+                matchedLabel: "ABC Mall",
+                matchedValue: "60606060-0000-0000-0001-000000000001",
+                resolverLabel: "List Location List",
+                resolverReadId: "list_location_list"
+              }
+            ],
+            interpretedInputs: [
+              {
+                detail: "month",
+                inputId: "fact_1_time_1",
+                inputText: "this month",
+                kind: "time",
+                label: "this month",
+                value: "2026-06-01 to 2026-06-30"
+              }
+            ],
+            knownInputs: [],
+            requestedFacts: [],
+            resolverCandidates: [],
+            conversationClauses: []
+          },
+          stepId: "step_grounding",
+          stepKey: "grounding"
+        })}
+      />
+    );
+
+    expect(screen.getByText("Inputs:")).toBeInTheDocument();
+    expect(
+      screen.getByText("\"this month\": 2026-06-01 to 2026-06-30")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "\"ABC Mall\": location_id: 60606060-0000-0000-0001-000000000001 via List Location List"
+      )
+    ).toBeInTheDocument();
+  });
+
   it("summarizes noisy decision traces into running highlights", () => {
     render(
       <LiveZone

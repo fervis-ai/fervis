@@ -15,4 +15,5 @@ input:
   render_outputs:
     - {id: answer, relation_id: rows, field_id: missing}
 expect:
-  error_contains: render field
+  result_contains:
+    status: rejected

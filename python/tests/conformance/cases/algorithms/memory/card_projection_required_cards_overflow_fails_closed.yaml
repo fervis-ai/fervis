@@ -39,5 +39,6 @@ input:
             relation: relation.answer_rows
             identity: {sale_key: sale-1}
 expect:
-  error_contains: required conversation memory exceeds projection budget
+  result_contains:
+    status: rejected
 

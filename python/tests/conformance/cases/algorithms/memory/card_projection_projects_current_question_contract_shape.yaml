@@ -16,9 +16,11 @@ input:
           question_contract:
             question_inputs:
               - id: input_period
-                kind: time_text
+                kind: literal_text
+                role: time_value
                 source: question_context
                 text: yesterday
+                resolved_value_text: yesterday
             answer_requests:
               - id: fact_1
                 answer_fact: sales by Staff One yesterday
@@ -26,9 +28,8 @@ input:
                   - id: answer_1
                     description: total sales amount
                     requested_value_frame: total sales amount
-                input_decisions:
-                  - input_ref: input_period
-                    use_input: true
+                used_question_inputs:
+                  - input_period
         addresses:
           - address: value.grounded_fact_1_time_1
             kind: value
@@ -56,4 +57,3 @@ expect:
               - slot_id: input_period
                 slot_kind: time_scope
                 text: yesterday
-

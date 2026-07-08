@@ -52,7 +52,11 @@ expect:
     outcome_kind: needs_clarification
     clarifications:
       - question: Which interpretation should I use?
-        candidate_refs:
-          - How much was that? (1)
-          - How much was that? (2)
+        need: question_interpretation
+        reason: ambiguous_interpretation
+        subjects:
+          - kind: interpretation
+            options:
+              - id: How much was that? (1)
+              - id: How much was that? (2)
     tool_names: [submit_conversation_resolution]

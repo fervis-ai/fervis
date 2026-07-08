@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from typing import Any, Mapping
 
 from fervis.lookup.errors import ErrorCode
+from fervis.lookup.clarification import clarification_payload
 from fervis.lineage.enums import (
     AnswerValueKind,
-    ClarificationBasis as LineageClarificationBasis,
     FactResultKind,
     PresentationKind,
     RunResultKind,
@@ -486,10 +486,32 @@ def _terminal_fact_results(
             evidence_refs_json=list(_terminal_proof_refs(fact_result)),
             payload_schema=TERMINAL_FACT_PAYLOAD_SCHEMA,
             payload_schema_rev=TERMINAL_FACT_PAYLOAD_SCHEMA_REV,
-            payload_json=dict(fact_result_terminal_details(fact_result) or {}),
+            payload_json=_terminal_fact_result_payload(
+                fact_result,
+                run_id=run_id,
+                requested_fact_id=fact.fact_key,
+            ),
         )
         for fact in requested_facts
     )
+
+
+def _terminal_fact_result_payload(
+    fact_result: FactResult,
+    *,
+    run_id: str,
+    requested_fact_id: str,
+) -> dict[str, object]:
+    outcome = fact_result.outcome
+    if isinstance(outcome, NeedsClarification):
+        return {
+            "clarificationIds": [
+                _clarification_request_id(run_id, item)
+                for item in outcome.clarifications
+                if _clarification_applies_to_requested_fact(item, requested_fact_id)
+            ],
+        }
+    return dict(fact_result_terminal_details(fact_result) or {})
 
 
 def _execution_proofs(
@@ -532,22 +554,31 @@ def _clarification_requests(
         fact_result_id = fact_result_id_by_fact_key.get(item.requested_fact_id)
         if fact_result_id is None and terminal_step_id is None:
             raise ValueError("clarification lineage requires a fact result or step id")
+        clarification_id = _clarification_request_id(run_id, item)
         clarifications.append(
             ClarificationRequestWrite(
-                clarification_id=lineage_id("clarification", run_id, item.id),
+                clarification_id=clarification_id,
                 run_id=run_id,
                 fact_result_id=fact_result_id,
                 step_id=None if fact_result_id is not None else terminal_step_id,
-                basis=LineageClarificationBasis(item.basis.value),
-                question_text=item.question,
-                options_json=[
-                    {"id": option.id, "label": option.label}
-                    for option in item.available_options
-                ],
-                evidence_refs_json=list(item.evidence_refs),
+                payload_json=clarification_payload(replace(item, id=clarification_id)),
             )
         )
     return tuple(clarifications)
+
+
+def _clarification_request_id(run_id: str, item: Any) -> str:
+    return lineage_id("clarification", run_id, item.id)
+
+
+def _clarification_applies_to_requested_fact(
+    item: Any,
+    requested_fact_id: str,
+) -> bool:
+    return (
+        item.requested_fact_id == requested_fact_id
+        or item.requested_fact_id == "question_contract"
+    )
 
 
 def _terminal_fact_result_kind(fact_result: FactResult) -> FactResultKind:
@@ -597,7 +628,7 @@ def _terminal_proof_refs(fact_result: FactResult) -> tuple[str, ...]:
     refs = list(getattr(outcome, "proof_refs", ()))
     if isinstance(outcome, NeedsClarification):
         for item in outcome.clarifications:
-            refs.extend(item.evidence_refs)
+            refs.extend(evidence.id for evidence in item.evidence)
     if isinstance(outcome, Impossible):
         for item in outcome.blocked_requirements:
             refs.extend(item.proof_refs)

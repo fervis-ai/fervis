@@ -15,4 +15,5 @@ input:
         mode: full
         named: {value: 10000}
 expect:
-  error_contains: invalid time intent
+  result_contains:
+    status: rejected

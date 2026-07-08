@@ -38,14 +38,14 @@ def _verify_requested_facts(
             raise VerificationError("duplicate requested fact")
         seen.add(fact.id)
         _verify_unique_ids(
-            (output.id for output in fact.answer_outputs),
+            (output.id for output in fact.support_answer_outputs),
             message="duplicate requested fact answer output",
         )
         _verify_unique_ids(
             (known.id for known in fact.known_inputs),
             message="duplicate requested fact known input",
         )
-        output_ids = {output.id for output in fact.answer_outputs}
+        output_ids = {output.id for output in fact.support_answer_outputs}
         known_ids = {known.id for known in fact.known_inputs}
         if output_ids & known_ids:
             raise VerificationError(

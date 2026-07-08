@@ -29,5 +29,5 @@ input:
             roles: [output]
 expect:
   result_contains:
-    row_count_evidence_ids: [row_population.data]
+    row_count_evidence_ids: [row_population.rs_source_1_data]
     metric_evidence_ids: [source_1.summary.total_count]

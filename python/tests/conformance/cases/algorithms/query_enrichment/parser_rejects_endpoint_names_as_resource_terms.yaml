@@ -16,4 +16,5 @@ input:
             matching_resource_names: [list_sale_list]
     entity_target_catalog_search_terms: []
 expect:
-  error_contains: must not contain endpoint names
+  result_contains:
+    status: rejected

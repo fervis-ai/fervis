@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 
 from fervis.lookup.fact_plan.fact_plan import (
     BlockedFactBasis,
@@ -19,13 +20,50 @@ from fervis.lookup.source_binding.normal_instance_roles import (
 from fervis.lookup.source_binding.metric_fit import (
     METRIC_FIT_DECISIONS,
 )
+from fervis.lookup.source_binding import provider_contract as provider_output
+
+_POPULATION_TEST_EFFECT_SCHEMA = {
+    "enum": [
+        "SATISFIES_TEST",
+        "CONFLICTS_WITH_TEST",
+        "DOES_NOT_DECIDE_TEST",
+        "UNKNOWN_TEST_EFFECT",
+    ]
+}
+
+
+@dataclass(frozen=True)
+class _SourceBindingSchemaScope:
+    required_catalog_input_ids: tuple[str, ...]
+    required_catalog_choice_input_ids: tuple[str, ...]
+    target_param_decision_ids_by_param: dict[str, dict[str, tuple[str, ...]]]
+    target_finite_choice_values: dict[str, dict[str, tuple[str, ...]]]
+    target_row_predicate_values: dict[str, dict[str, tuple[str, ...]]]
+    target_finite_choice_test_ids: dict[str, dict[str, tuple[str, ...]]]
+    target_finite_choice_normal_instance_test_ids: dict[
+        str, dict[str, tuple[str, ...]]
+    ]
+    target_row_predicate_test_ids: dict[str, dict[str, tuple[str, ...]]]
+    target_population_roles: dict[str, tuple[dict[str, object], ...]]
+    target_requested_fact_ids: dict[str, str]
+    metric_evidence_ids_by_requested_fact: dict[str, tuple[str, ...]]
+    target_fulfillment_support_set_ids_by_answer_output: dict[
+        str, dict[str, tuple[str, ...]]
+    ]
+    target_required_fulfillment_answer_output_ids: dict[str, tuple[str, ...]]
+    target_population_binding_ids: dict[str, tuple[str, ...]]
+    source_invocations_max_items: int | None = None
+
+    @property
+    def binding_target_ids(self) -> tuple[str, ...]:
+        return tuple(self.target_param_decision_ids_by_param)
+
+    @property
+    def requested_fact_ids(self) -> tuple[str, ...]:
+        return tuple(dict.fromkeys(self.target_requested_fact_ids.values()))
 
 
 def _handle_schema() -> dict[str, object]:
-    return {"type": "string", "minLength": 1}
-
-
-def _population_intent_schema() -> dict[str, object]:
     return {"type": "string", "minLength": 1}
 
 
@@ -42,288 +80,212 @@ def _strict_object(
     }
 
 
+def _variant_schema(variants: tuple[dict[str, object], ...]) -> dict[str, object]:
+    if len(variants) == 1:
+        return variants[0]
+    return {"oneOf": list(variants)}
+
+
 def build_source_binding_schema(
     *,
     required_catalog_input_ids: tuple[str, ...] = (),
     required_catalog_choice_input_ids: tuple[str, ...] = (),
-    source_candidate_param_decision_ids_by_param: dict[str, dict[str, tuple[str, ...]]],
-    source_candidate_required_param_ids: dict[str, tuple[str, ...]],
-    source_candidate_finite_choice_values: dict[str, dict[str, tuple[str, ...]]],
-    source_candidate_row_predicate_values: dict[str, dict[str, tuple[str, ...]]],
-    source_candidate_membership_test_ids: dict[str, tuple[str, ...]],
-    source_candidate_normal_instance_test_ids: dict[str, tuple[str, ...]],
-    source_candidate_population_roles: dict[str, tuple[dict[str, object], ...]],
+    target_param_decision_ids_by_param: dict[str, dict[str, tuple[str, ...]]],
+    target_finite_choice_values: dict[str, dict[str, tuple[str, ...]]],
+    target_row_predicate_values: dict[str, dict[str, tuple[str, ...]]],
+    target_finite_choice_test_ids: dict[str, dict[str, tuple[str, ...]]],
+    target_finite_choice_normal_instance_test_ids: dict[
+        str,
+        dict[str, tuple[str, ...]],
+    ],
+    target_row_predicate_test_ids: dict[str, dict[str, tuple[str, ...]]],
+    target_population_roles: dict[str, tuple[dict[str, object], ...]],
+    target_requested_fact_ids: dict[str, str],
     metric_evidence_ids_by_requested_fact: dict[str, tuple[str, ...]],
-    source_candidate_requested_fact_ids: dict[str, str] | None = None,
-    source_candidate_fulfillment_support_set_ids_by_answer_output: dict[
+    target_fulfillment_support_set_ids_by_answer_output: dict[
         str, dict[str, tuple[str, ...]]
     ],
-    source_candidate_population_binding_ids: dict[str, tuple[str, ...]] | None = None,
+    target_required_fulfillment_answer_output_ids: dict[str, tuple[str, ...]],
+    target_population_binding_ids: dict[str, tuple[str, ...]] | None = None,
+    source_invocations_max_items: int | None = None,
 ) -> dict[str, object]:
-    fulfillment_support_set_ids_by_answer_output = (
-        source_candidate_fulfillment_support_set_ids_by_answer_output
-    )
-    population_binding_ids = source_candidate_population_binding_ids or {}
-    outcome_schema = _source_binding_outcome_schema(
+    scope = _SourceBindingSchemaScope(
         required_catalog_input_ids=required_catalog_input_ids,
         required_catalog_choice_input_ids=required_catalog_choice_input_ids,
-        source_candidate_param_decision_ids_by_param=(
-            source_candidate_param_decision_ids_by_param
+        target_param_decision_ids_by_param=target_param_decision_ids_by_param,
+        target_finite_choice_values=target_finite_choice_values,
+        target_row_predicate_values=target_row_predicate_values,
+        target_finite_choice_test_ids=target_finite_choice_test_ids,
+        target_finite_choice_normal_instance_test_ids=(
+            target_finite_choice_normal_instance_test_ids
         ),
-        source_candidate_required_param_ids=source_candidate_required_param_ids,
-        source_candidate_finite_choice_values=source_candidate_finite_choice_values,
-        source_candidate_row_predicate_values=source_candidate_row_predicate_values,
-        source_candidate_membership_test_ids=source_candidate_membership_test_ids,
-        source_candidate_normal_instance_test_ids=(
-            source_candidate_normal_instance_test_ids
-        ),
-        source_candidate_population_roles=source_candidate_population_roles,
+        target_row_predicate_test_ids=target_row_predicate_test_ids,
+        target_population_roles=target_population_roles,
+        target_requested_fact_ids=target_requested_fact_ids,
         metric_evidence_ids_by_requested_fact=metric_evidence_ids_by_requested_fact,
-        source_candidate_requested_fact_ids=source_candidate_requested_fact_ids or {},
-        source_candidate_fulfillment_support_set_ids_by_answer_output=(
-            fulfillment_support_set_ids_by_answer_output
+        target_fulfillment_support_set_ids_by_answer_output=(
+            target_fulfillment_support_set_ids_by_answer_output
         ),
-        source_candidate_population_binding_ids=population_binding_ids,
+        target_required_fulfillment_answer_output_ids=(
+            target_required_fulfillment_answer_output_ids
+        ),
+        target_population_binding_ids=target_population_binding_ids or {},
+        source_invocations_max_items=source_invocations_max_items,
     )
+    outcome_schema = _source_binding_outcome_schema(scope)
     return {
         "type": "object",
         "additionalProperties": False,
         "properties": {"outcome": outcome_schema},
         "required": ["outcome"],
-        "modelSchemas": {"outcome": outcome_schema},
     }
 
 
-def _source_binding_outcome_schema(
-    *,
-    required_catalog_input_ids: tuple[str, ...],
-    required_catalog_choice_input_ids: tuple[str, ...],
-    source_candidate_param_decision_ids_by_param: dict[str, dict[str, tuple[str, ...]]],
-    source_candidate_required_param_ids: dict[str, tuple[str, ...]],
-    source_candidate_finite_choice_values: dict[str, dict[str, tuple[str, ...]]],
-    source_candidate_row_predicate_values: dict[str, dict[str, tuple[str, ...]]],
-    source_candidate_membership_test_ids: dict[str, tuple[str, ...]],
-    source_candidate_normal_instance_test_ids: dict[str, tuple[str, ...]],
-    source_candidate_population_roles: dict[str, tuple[dict[str, object], ...]],
-    metric_evidence_ids_by_requested_fact: dict[str, tuple[str, ...]],
-    source_candidate_requested_fact_ids: dict[str, str],
-    source_candidate_fulfillment_support_set_ids_by_answer_output: dict[
-        str, dict[str, tuple[str, ...]]
-    ],
-    source_candidate_population_binding_ids: dict[str, tuple[str, ...]],
-) -> dict[str, object]:
+def _source_binding_outcome_schema(scope: _SourceBindingSchemaScope) -> dict[str, object]:
     variants: list[dict[str, object]] = []
-    answer_source_candidate_ids = tuple(
-        source_candidate_id
-        for source_candidate_id in source_candidate_param_decision_ids_by_param
-        if source_candidate_fulfillment_support_set_ids_by_answer_output.get(
-            source_candidate_id
-        )
-    )
-    requested_fact_ids = tuple(
-        dict.fromkeys(source_candidate_requested_fact_ids.values())
-    )
-    if answer_source_candidate_ids:
-        variants.append(
-            _source_binding_plan_schema(
-                source_candidate_param_decision_ids_by_param={
-                    source_candidate_id: source_candidate_param_decision_ids_by_param[
-                        source_candidate_id
-                    ]
-                    for source_candidate_id in answer_source_candidate_ids
-                },
-                source_candidate_required_param_ids=source_candidate_required_param_ids,
-                source_candidate_finite_choice_values=source_candidate_finite_choice_values,
-                source_candidate_row_predicate_values=source_candidate_row_predicate_values,
-                source_candidate_membership_test_ids=source_candidate_membership_test_ids,
-                source_candidate_normal_instance_test_ids=(
-                    source_candidate_normal_instance_test_ids
-                ),
-                source_candidate_population_roles=source_candidate_population_roles,
-                metric_evidence_ids_by_requested_fact=metric_evidence_ids_by_requested_fact,
-                source_candidate_requested_fact_ids=source_candidate_requested_fact_ids,
-                source_candidate_fulfillment_support_set_ids_by_answer_output=(
-                    source_candidate_fulfillment_support_set_ids_by_answer_output
-                ),
-                source_candidate_population_binding_ids=source_candidate_population_binding_ids,
-            )
-        )
+    if scope.binding_target_ids:
+        variants.append(_source_binding_plan_schema(scope))
         variants.append(
             _impossible_schema(
                 allowed_bases=(BlockedFactBasis.POLICY_ACCESS.value,),
-                requested_fact_ids=requested_fact_ids,
+                requested_fact_ids=scope.requested_fact_ids,
             )
         )
     clarification = _clarification_schema(
-        required_catalog_input_ids=required_catalog_input_ids,
-        required_catalog_choice_input_ids=required_catalog_choice_input_ids,
+        required_catalog_input_ids=scope.required_catalog_input_ids,
+        required_catalog_choice_input_ids=scope.required_catalog_choice_input_ids,
     )
     if (
-        not answer_source_candidate_ids
-        and not required_catalog_input_ids
-        and not required_catalog_choice_input_ids
+        not scope.binding_target_ids
+        and not scope.required_catalog_input_ids
+        and not scope.required_catalog_choice_input_ids
     ):
-        variants.append(_impossible_schema(requested_fact_ids=requested_fact_ids))
+        variants.append(_impossible_schema(requested_fact_ids=scope.requested_fact_ids))
     if clarification is not None:
         variants.append(clarification)
     return {"oneOf": variants}
 
 
-def _source_binding_plan_schema(
-    *,
-    source_candidate_param_decision_ids_by_param: dict[str, dict[str, tuple[str, ...]]],
-    source_candidate_required_param_ids: dict[str, tuple[str, ...]],
-    source_candidate_finite_choice_values: dict[str, dict[str, tuple[str, ...]]],
-    source_candidate_row_predicate_values: dict[str, dict[str, tuple[str, ...]]],
-    source_candidate_membership_test_ids: dict[str, tuple[str, ...]],
-    source_candidate_normal_instance_test_ids: dict[str, tuple[str, ...]],
-    source_candidate_population_roles: dict[str, tuple[dict[str, object], ...]],
-    metric_evidence_ids_by_requested_fact: dict[str, tuple[str, ...]],
-    source_candidate_requested_fact_ids: dict[str, str],
-    source_candidate_fulfillment_support_set_ids_by_answer_output: dict[
-        str, dict[str, tuple[str, ...]]
-    ],
-    source_candidate_population_binding_ids: dict[str, tuple[str, ...]],
-) -> dict[str, object]:
-    source_invocations_schema = {
-        "type": "array",
-        "minItems": 1,
-        "items": {
-            "oneOf": [
-                _source_binding_item_schema(
-                    source_candidate_id=source_candidate_id,
-                    requested_fact_id=source_candidate_requested_fact_ids.get(
-                        source_candidate_id, ""
-                    ),
-                    param_decision_ids_by_param=param_decision_ids_by_param,
-                    required_param_ids=source_candidate_required_param_ids.get(
-                        source_candidate_id, ()
-                    ),
-                    finite_choice_values=source_candidate_finite_choice_values.get(
-                        source_candidate_id, {}
-                    ),
-                    row_predicate_values=source_candidate_row_predicate_values.get(
-                        source_candidate_id, {}
-                    ),
-                    membership_test_ids=source_candidate_membership_test_ids.get(
-                        source_candidate_id, ()
-                    ),
-                    normal_instance_test_ids=(
-                        source_candidate_normal_instance_test_ids.get(
-                            source_candidate_id, ()
-                        )
-                    ),
-                    population_roles=source_candidate_population_roles.get(
-                        source_candidate_id,
-                        (),
-                    ),
-                    fulfillment_support_set_ids_by_answer_output=source_candidate_fulfillment_support_set_ids_by_answer_output.get(
-                        source_candidate_id, {}
-                    ),
-                    population_binding_ids=source_candidate_population_binding_ids.get(
-                        source_candidate_id, ()
-                    ),
-                )
-                for source_candidate_id, param_decision_ids_by_param in (
-                    source_candidate_param_decision_ids_by_param.items()
-                )
-            ]
-        },
-    }
-    return _strict_object(
+def _source_binding_plan_schema(scope: _SourceBindingSchemaScope) -> dict[str, object]:
+    return provider_output.SourceBindingPlanOutput.schema(
         {
             "kind": {"enum": ["source_bindings"]},
             "metric_fit_bases": _metric_fit_bases_schema(
-                metric_evidence_ids_by_requested_fact
+                scope.metric_evidence_ids_by_requested_fact
             ),
             "fit_basis_interpretations": _fit_basis_interpretations_schema(
-                metric_evidence_ids_by_requested_fact
+                scope.metric_evidence_ids_by_requested_fact
             ),
-            "source_invocations": source_invocations_schema,
-        },
-        required=(
-            "kind",
-            "metric_fit_bases",
-            "fit_basis_interpretations",
-            "source_invocations",
-        ),
+            "source_invocations": _source_invocations_schema(scope),
+        }
+    )
+
+
+def _source_invocations_schema(scope: _SourceBindingSchemaScope) -> dict[str, object]:
+    return {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": _source_invocations_max_items(scope),
+        "items": _source_binding_invocation_items_schema(scope),
+    }
+
+
+def _source_invocations_max_items(scope: _SourceBindingSchemaScope) -> int:
+    if scope.source_invocations_max_items is None:
+        return len(scope.binding_target_ids)
+    return max(1, min(scope.source_invocations_max_items, len(scope.binding_target_ids)))
+
+
+def _source_binding_invocation_items_schema(
+    scope: _SourceBindingSchemaScope,
+) -> dict[str, object]:
+    return _variant_schema(
+        tuple(
+            _source_binding_item_schema(
+                target_id,
+                scope=scope,
+            )
+            for target_id in scope.binding_target_ids
+        )
     )
 
 
 def _source_binding_item_schema(
+    target_id: str,
     *,
-    source_candidate_id: str,
-    requested_fact_id: str,
-    param_decision_ids_by_param: dict[str, tuple[str, ...]],
-    required_param_ids: tuple[str, ...],
-    finite_choice_values: dict[str, tuple[str, ...]],
-    row_predicate_values: dict[str, tuple[str, ...]],
-    membership_test_ids: tuple[str, ...],
-    normal_instance_test_ids: tuple[str, ...],
-    population_roles: tuple[dict[str, object], ...],
-    fulfillment_support_set_ids_by_answer_output: dict[str, tuple[str, ...]],
-    population_binding_ids: tuple[str, ...],
+    scope: _SourceBindingSchemaScope,
 ) -> dict[str, object]:
-    return _strict_object(
+    return provider_output.SourceInvocationOutput.schema(
         {
-            "requested_fact_id": (
-                {"enum": [requested_fact_id]} if requested_fact_id else _handle_schema()
+            "binding_target_id": {"enum": [target_id]},
+            "answer_population": _answer_population_schema(
+                scope.target_population_binding_ids.get(target_id, ())
             ),
-            "source_candidate_id": {"enum": [source_candidate_id]},
-            "answer_population": _answer_population_schema(population_binding_ids),
             "fulfillment_decisions": _fulfillment_decisions_schema(
-                fulfillment_support_set_ids_by_answer_output,
-                enforce_enum=True,
+                scope.target_fulfillment_support_set_ids_by_answer_output.get(
+                    target_id, {}
+                ),
+                required_answer_output_ids=(
+                    scope.target_required_fulfillment_answer_output_ids.get(
+                        target_id,
+                        (),
+                    )
+                ),
             ),
             "param_decisions": _param_decisions_schema(
-                param_decision_ids_by_param,
-                required_param_ids=required_param_ids,
+                scope.target_param_decision_ids_by_param.get(target_id, {}),
+                required_param_ids=(),
             ),
             "row_predicate_reviews": _row_predicate_reviews_schema(
-                row_predicate_values,
-                membership_test_ids=membership_test_ids,
+                scope.target_row_predicate_values.get(target_id, {}),
+                test_ids_by_predicate=scope.target_row_predicate_test_ids.get(
+                    target_id, {}
+                ),
             ),
             "finite_choice_param_reviews": _finite_choice_param_reviews_schema(
-                finite_choice_values,
-                membership_test_ids=membership_test_ids,
-                normal_instance_test_ids=normal_instance_test_ids,
-                population_roles=population_roles,
+                scope.target_finite_choice_values.get(target_id, {}),
+                test_ids_by_param=scope.target_finite_choice_test_ids.get(
+                    target_id, {}
+                ),
+                normal_instance_test_ids_by_param=(
+                    scope.target_finite_choice_normal_instance_test_ids.get(
+                        target_id, {}
+                    )
+                ),
+                population_roles=scope.target_population_roles.get(target_id, ()),
             ),
-            "source_binding_decision": {"enum": ["USE_SOURCE"]},
-        },
-        required=(
-            "requested_fact_id",
-            "source_candidate_id",
-            "answer_population",
-            "fulfillment_decisions",
-            "param_decisions",
-            "row_predicate_reviews",
-            "finite_choice_param_reviews",
-            "source_binding_decision",
-        ),
+        }
     )
 
 
 def _finite_choice_param_reviews_schema(
     finite_choice_values: dict[str, tuple[str, ...]],
     *,
-    membership_test_ids: tuple[str, ...],
-    normal_instance_test_ids: tuple[str, ...],
+    test_ids_by_param: dict[str, tuple[str, ...]],
+    normal_instance_test_ids_by_param: dict[str, tuple[str, ...]],
     population_roles: tuple[dict[str, object], ...],
 ) -> dict[str, object]:
-    if not finite_choice_values:
+    reviewed_values = {
+        param_id: choices
+        for param_id, choices in finite_choice_values.items()
+        if test_ids_by_param.get(param_id)
+    }
+    if not reviewed_values:
         return _empty_object_schema()
     return _strict_object(
         {
             param_id: _finite_choice_param_review_schema(
                 choices,
-                membership_test_ids=membership_test_ids,
-                normal_instance_test_ids=normal_instance_test_ids,
+                membership_test_ids=test_ids_by_param[param_id],
+                normal_instance_test_ids=normal_instance_test_ids_by_param.get(
+                    param_id,
+                    (),
+                ),
                 population_roles=population_roles,
             )
-            for param_id, choices in finite_choice_values.items()
+            for param_id, choices in reviewed_values.items()
         },
-        required=tuple(finite_choice_values),
+        required=tuple(reviewed_values),
     )
 
 
@@ -344,10 +306,8 @@ def _finite_choice_param_review_schema(
         for role in population_roles
         if str(role.get("role_id") or "")
     )
-    if len(role_variants) == 1:
-        return role_variants[0]
     if role_variants:
-        return {"oneOf": list(role_variants)}
+        return _variant_schema(role_variants)
     raise ValueError("finite choice param requires population roles")
 
 
@@ -359,7 +319,7 @@ def _finite_choice_param_role_review_schema(
     normal_instance_test_ids: tuple[str, ...],
 ) -> dict[str, object]:
     role_id = str(role.get("role_id") or "")
-    return _strict_object(
+    return provider_output.FiniteChoiceParamReviewOutput.schema(
         {
             "controlled_population_role_id": (
                 {"enum": [role_id]} if role_id else _handle_schema()
@@ -376,13 +336,7 @@ def _finite_choice_param_role_review_schema(
                     normal_instance_test_ids=normal_instance_test_ids,
                 ),
             },
-        },
-        required=(
-            "controlled_population_role_id",
-            "role_selection_basis",
-            "population_test_basis",
-            "choice_reviews",
-        ),
+        }
     )
 
 
@@ -391,12 +345,11 @@ def _population_test_basis_schema(
 ) -> dict[str, object]:
     return _strict_object(
         {
-            test_id: _strict_object(
+            test_id: provider_output.PopulationTestBasisOutput.schema(
                 {
                     "test_question": _handle_schema(),
                     "role_scoped_test_question": _handle_schema(),
-                },
-                required=("test_question", "role_scoped_test_question"),
+                }
             )
             for test_id in membership_test_ids
         },
@@ -410,7 +363,7 @@ def _finite_choice_review_schema(
     membership_test_ids: tuple[str, ...],
     normal_instance_test_ids: tuple[str, ...],
 ) -> dict[str, object]:
-    return _strict_object(
+    return provider_output.FiniteChoiceReviewOutput.schema(
         {
             "choice_option_id": {"enum": list(choices)},
             "choice_domain_meaning": _handle_schema(),
@@ -420,14 +373,7 @@ def _finite_choice_review_schema(
                 membership_test_ids,
                 normal_instance_test_ids=normal_instance_test_ids,
             ),
-        },
-        required=(
-            "choice_option_id",
-            "choice_domain_meaning",
-            "choice_inclusion_basis",
-            "choice_inclusion",
-            "population_test_results",
-        ),
+        }
     )
 
 
@@ -455,70 +401,36 @@ def _population_test_result_schema(
 ) -> dict[str, object]:
     if is_normal_instance:
         return _normal_instance_test_result_schema()
-    return _standard_population_test_result_schema()
-
-
-def _standard_population_test_result_schema() -> dict[str, object]:
-    return _strict_object(
+    return provider_output.StandardPopulationTestResultOutput.schema(
         {
             "test_basis": _handle_schema(),
             "population_consequence": _handle_schema(),
-            "test_effect": {
-                "enum": [
-                    "SATISFIES_TEST",
-                    "CONFLICTS_WITH_TEST",
-                    "DOES_NOT_DECIDE_TEST",
-                    "UNKNOWN_TEST_EFFECT",
-                ]
-            },
-        },
-        required=(
-            "test_basis",
-            "population_consequence",
-            "test_effect",
-        ),
+            "test_effect": _POPULATION_TEST_EFFECT_SCHEMA,
+        }
     )
 
 
 def _normal_instance_test_result_schema() -> dict[str, object]:
-    return _strict_object(
+    return provider_output.NormalInstanceTestResultOutput.schema(
         {
             "role_match_basis": _handle_schema(),
             "explicit_user_override_evidence": _normal_instance_override_schema(),
             "explicit_user_override_applies": {"type": "boolean"},
             "population_consequence": _handle_schema(),
-            "disposition": _strict_object(
+            "disposition": provider_output.NormalInstanceDispositionOutput.schema(
                 {
                     "matched_excluded_role": _normal_instance_role_schema(),
-                    "test_effect": {
-                        "enum": [
-                            "SATISFIES_TEST",
-                            "CONFLICTS_WITH_TEST",
-                            "DOES_NOT_DECIDE_TEST",
-                            "UNKNOWN_TEST_EFFECT",
-                        ]
-                    },
-                },
-                required=(
-                    "matched_excluded_role",
-                    "test_effect",
-                ),
+                    "test_effect": _POPULATION_TEST_EFFECT_SCHEMA,
+                }
             ),
-        },
-        required=(
-            "role_match_basis",
-            "explicit_user_override_evidence",
-            "explicit_user_override_applies",
-            "population_consequence",
-            "disposition",
-        ),
+        }
     )
 
 
 def _normal_instance_override_schema() -> dict[str, object]:
     return {
         "type": "array",
-        "items": _strict_object(
+        "items": provider_output.NormalInstanceOverrideEvidenceOutput.schema(
             {
                 "source_text": _handle_schema(),
                 "reason": {
@@ -526,8 +438,7 @@ def _normal_instance_override_schema() -> dict[str, object]:
                         reason.value for reason in NormalInstanceExplicitOverrideReason
                     ],
                 },
-            },
-            required=("source_text", "reason"),
+            }
         ),
     }
 
@@ -551,26 +462,22 @@ def _answer_population_schema(
             "type": "string",
             "enum": list(population_binding_ids),
         }
-    return _strict_object(
+    return provider_output.AnswerPopulationOutput.schema(
         {
             "population_binding_id": population_binding_id_schema,
             "intent_text": _handle_schema(),
             "match_basis_explanation": _handle_schema(),
-        },
-        required=("population_binding_id", "intent_text", "match_basis_explanation"),
+        }
     )
 
 
 def _fulfillment_decisions_schema(
     fulfillment_support_set_ids_by_answer_output: dict[str, tuple[str, ...]],
     *,
-    enforce_enum: bool,
+    required_answer_output_ids: tuple[str, ...],
 ) -> dict[str, object]:
     properties = {
-        answer_output_id: _fulfillment_decision_item_schema(
-            support_set_ids,
-            enforce_enum=enforce_enum,
-        )
+        answer_output_id: _fulfillment_decision_item_schema(support_set_ids)
         for answer_output_id, support_set_ids in (
             fulfillment_support_set_ids_by_answer_output.items()
         )
@@ -579,80 +486,42 @@ def _fulfillment_decisions_schema(
         "type": "object",
         "additionalProperties": False,
         "properties": properties,
-        "required": [],
+        "required": [
+            output_id
+            for output_id in required_answer_output_ids
+            if output_id in properties
+        ],
     }
-    if properties:
-        schema["anyOf"] = [
-            {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": properties,
-                "required": [answer_output_id],
-            }
-            for answer_output_id in properties
-        ]
     return schema
 
 
 def _fulfillment_decision_item_schema(
     fulfillment_choice_ids: tuple[str, ...],
-    *,
-    enforce_enum: bool,
 ) -> dict[str, object]:
     choice_id_schema = _handle_schema()
-    if fulfillment_choice_ids and enforce_enum:
+    if fulfillment_choice_ids:
         choice_id_schema = {
             "type": "string",
             "enum": list(fulfillment_choice_ids),
         }
-    return _strict_object(
+    return provider_output.FulfillmentDecisionOutput.schema(
         {
             "match_basis_explanation": {"type": "string", "minLength": 1},
             "fulfillment_choice_id": choice_id_schema,
-        },
-        required=(
-            "match_basis_explanation",
-            "fulfillment_choice_id",
-        ),
+        }
     )
 
 
 def _metric_fit_bases_schema(
     metric_evidence_ids_by_requested_fact: dict[str, tuple[str, ...]],
 ) -> dict[str, object]:
-    properties = {
-        requested_fact_id: _metric_fit_bases_for_fact_schema(metric_evidence_ids)
-        for requested_fact_id, metric_evidence_ids in (
-            metric_evidence_ids_by_requested_fact.items()
-        )
-        if metric_evidence_ids
-    }
-    if not properties:
-        return _empty_object_schema()
-    return _strict_object(properties, required=tuple(properties))
-
-
-def _metric_fit_bases_for_fact_schema(
-    metric_evidence_ids: tuple[str, ...],
-) -> dict[str, object]:
-    return _strict_object(
-        {
-            metric_evidence_id: _metric_fit_basis_schema()
-            for metric_evidence_id in metric_evidence_ids
-        },
-        required=metric_evidence_ids,
-    )
-
-
-def _metric_fit_basis_schema() -> dict[str, object]:
-    return _strict_object(
-        {
-            "metric_meaning": {"type": "string", "minLength": 1},
-            "fit_basis": {"type": "string", "minLength": 1},
-        },
-        required=(
-            "metric_meaning",
-            "fit_basis",
+    return _metric_reviews_schema(
+        metric_evidence_ids_by_requested_fact,
+        item_schema=provider_output.MetricFitBasisOutput.schema(
+            {
+                "metric_meaning": {"type": "string", "minLength": 1},
+                "fit_basis": {"type": "string", "minLength": 1},
+            }
         ),
     )
 
@@ -660,9 +529,28 @@ def _metric_fit_basis_schema() -> dict[str, object]:
 def _fit_basis_interpretations_schema(
     metric_evidence_ids_by_requested_fact: dict[str, tuple[str, ...]],
 ) -> dict[str, object]:
+    return _metric_reviews_schema(
+        metric_evidence_ids_by_requested_fact,
+        item_schema=provider_output.FitBasisInterpretationOutput.schema(
+            {
+                "interpretation": {
+                    "type": "string",
+                    "enum": list(METRIC_FIT_DECISIONS),
+                },
+            }
+        ),
+    )
+
+
+def _metric_reviews_schema(
+    metric_evidence_ids_by_requested_fact: dict[str, tuple[str, ...]],
+    *,
+    item_schema: dict[str, object],
+) -> dict[str, object]:
     properties = {
-        requested_fact_id: _fit_basis_interpretations_for_fact_schema(
-            metric_evidence_ids
+        requested_fact_id: _strict_object(
+            {metric_evidence_id: item_schema for metric_evidence_id in metric_evidence_ids},
+            required=metric_evidence_ids,
         )
         for requested_fact_id, metric_evidence_ids in (
             metric_evidence_ids_by_requested_fact.items()
@@ -674,35 +562,10 @@ def _fit_basis_interpretations_schema(
     return _strict_object(properties, required=tuple(properties))
 
 
-def _fit_basis_interpretations_for_fact_schema(
-    metric_evidence_ids: tuple[str, ...],
-) -> dict[str, object]:
-    return _strict_object(
-        {
-            metric_evidence_id: _fit_basis_interpretation_schema()
-            for metric_evidence_id in metric_evidence_ids
-        },
-        required=metric_evidence_ids,
-    )
-
-
-def _fit_basis_interpretation_schema() -> dict[str, object]:
-    return _strict_object(
-        {
-            "interpretation": {
-                "type": "string",
-                "enum": list(METRIC_FIT_DECISIONS),
-            },
-        },
-        required=("interpretation",),
-    )
-
-
 def _param_decisions_schema(
     param_decision_ids_by_param: dict[str, tuple[str, ...]],
     *,
     required_param_ids: tuple[str, ...],
-    enforce_enum: bool = True,
 ) -> dict[str, object]:
     if not param_decision_ids_by_param:
         return _empty_object_schema()
@@ -711,7 +574,6 @@ def _param_decisions_schema(
         {
             param_id: _param_decision_item_schema(
                 param_decision_ids_by_param[param_id],
-                enforce_enum=enforce_enum,
             )
             for param_id in param_ids
         },
@@ -726,19 +588,24 @@ def _param_decisions_schema(
 def _row_predicate_reviews_schema(
     row_predicate_values: dict[str, tuple[str, ...]],
     *,
-    membership_test_ids: tuple[str, ...],
+    test_ids_by_predicate: dict[str, tuple[str, ...]],
 ) -> dict[str, object]:
-    if not row_predicate_values:
+    reviewed_values = {
+        predicate_id: values
+        for predicate_id, values in row_predicate_values.items()
+        if test_ids_by_predicate.get(predicate_id)
+    }
+    if not reviewed_values:
         return _empty_object_schema()
     return _strict_object(
         {
             predicate_id: _row_predicate_review_schema(
                 values,
-                membership_test_ids=membership_test_ids,
+                membership_test_ids=test_ids_by_predicate[predicate_id],
             )
-            for predicate_id, values in row_predicate_values.items()
+            for predicate_id, values in reviewed_values.items()
         },
-        required=tuple(row_predicate_values.keys()),
+        required=tuple(reviewed_values),
     )
 
 
@@ -747,7 +614,7 @@ def _row_predicate_review_schema(
     *,
     membership_test_ids: tuple[str, ...],
 ) -> dict[str, object]:
-    return _strict_object(
+    return provider_output.RowPredicateReviewOutput.schema(
         {
             "choice_reviews": {
                 "type": "array",
@@ -758,8 +625,7 @@ def _row_predicate_review_schema(
                     membership_test_ids=membership_test_ids,
                 ),
             },
-        },
-        required=("choice_reviews",),
+        }
     )
 
 
@@ -768,19 +634,14 @@ def _row_predicate_choice_review_schema(
     *,
     membership_test_ids: tuple[str, ...],
 ) -> dict[str, object]:
-    return _strict_object(
+    return provider_output.RowPredicateChoiceReviewOutput.schema(
         {
             "choice_option_id": {"enum": list(values)},
             "choice_domain_meaning": _handle_schema(),
             "population_test_results": _row_predicate_population_test_results_schema(
                 membership_test_ids,
             ),
-        },
-        required=(
-            "choice_option_id",
-            "choice_domain_meaning",
-            "population_test_results",
-        ),
+        }
     )
 
 
@@ -797,28 +658,14 @@ def _row_predicate_population_test_results_schema(
 
 
 def _row_predicate_population_test_result_schema(test_id: str) -> dict[str, object]:
-    return _strict_object(
+    return provider_output.RowPredicatePopulationTestResultOutput.schema(
         {
             "test_id": {"enum": [test_id]},
             "test_question": _handle_schema(),
             "role_scoped_test_question": _handle_schema(),
             "because": _handle_schema(),
-            "test_effect": {
-                "enum": [
-                    "SATISFIES_TEST",
-                    "CONFLICTS_WITH_TEST",
-                    "DOES_NOT_DECIDE_TEST",
-                    "UNKNOWN_TEST_EFFECT",
-                ]
-            },
-        },
-        required=(
-            "test_id",
-            "test_question",
-            "role_scoped_test_question",
-            "because",
-            "test_effect",
-        ),
+            "test_effect": _POPULATION_TEST_EFFECT_SCHEMA,
+        }
     )
 
 
@@ -832,29 +679,16 @@ def _empty_object_schema() -> dict[str, object]:
 
 def _param_decision_item_schema(
     param_decision_ids: tuple[str, ...],
-    *,
-    enforce_enum: bool = True,
-    include_param_id: bool = False,
 ) -> dict[str, object]:
     param_decision_id_schema: dict[str, object] = {"type": "string"}
-    if param_decision_ids and enforce_enum:
+    if param_decision_ids:
         param_decision_id_schema["enum"] = list(param_decision_ids)
-    properties = {
-        "population_intent": _population_intent_schema(),
-        "match_basis_explanation": _handle_schema(),
-        "param_decision_id": param_decision_id_schema,
-    }
-    required = [
-        "population_intent",
-        "match_basis_explanation",
-        "param_decision_id",
-    ]
-    if include_param_id:
-        properties = {"param_id": _handle_schema(), **properties}
-        required = ["param_id", *required]
-    return _strict_object(
-        properties,
-        required=tuple(required),
+    return provider_output.ParamDecisionOutput.schema(
+        {
+            "population_intent": _handle_schema(),
+            "match_basis_explanation": _handle_schema(),
+            "param_decision_id": param_decision_id_schema,
+        }
     )
 
 

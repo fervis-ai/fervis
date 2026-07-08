@@ -1,5 +1,5 @@
 id: output_descriptions_and_literals_do_not_contaminate_terms
-description: Catalog selection ignores required_for text, output descriptions, and literal numeric input descriptions.
+description: Catalog selection ignores required_for text, output descriptions, and literal result-limit input text.
 migrates:
   - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_ignores_required_for_output_and_literal_descriptions
 kind: algorithm
@@ -24,11 +24,11 @@ input:
           description: Inventory quantity output
       known_inputs:
         - id: literal_1
-          kind: number_text
+          kind: literal_text
           source: question_context
-          description: inventory quantity context
-          text: "125"
-          numeric_value: 125
+          text: "top 125"
+          resolved_value_text: "125"
+          role: result_limit
   resource_name_matches:
     - requested_fact_id: fact_1
       answer_output_resource_lineage:
@@ -44,4 +44,3 @@ expect:
       - requested_fact_id: fact_1
         selected_read_ids: [sales_read]
         query_terms: [sale]
-

@@ -23,4 +23,5 @@ input:
         input_relation: rows
         fields: [{source: id}]
 expect:
-  error_contains: duplicate relation
+  result_contains:
+    status: rejected

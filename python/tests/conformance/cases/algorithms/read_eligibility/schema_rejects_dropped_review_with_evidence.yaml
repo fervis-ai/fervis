@@ -23,4 +23,5 @@ input:
             retention_basis: This invalid payload drops a read while citing evidence.
             retention_decision: DROP
 expect:
-  error_contains: expected to be empty
+  result_contains:
+    status: rejected

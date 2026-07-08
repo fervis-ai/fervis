@@ -1,23 +1,70 @@
-id: lookup_text_may_differ_from_reference_text
-description: Named references preserve original reference text alongside normalized lookup text.
-migrates:
-  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_accepts_lookup_text_distinct_from_reference_text
+id: reference_value_resolved_text_may_differ_from_source_text
+description: Literal reference values preserve source text alongside resolved value text.
 kind: algorithm
 algorithm: question_contract.parse
 input:
   question_context: How much sales for Alice's products?
   question_inputs:
-    - input_ref: staff
-      source: question_context
-      kind: named_reference_text
-      reference_text: Alice's
-      target_meaning: staff member
-      lookup_text: Alice
-      inventory_check: {why_this_is_an_input: Alice's is a named reference}
-  used_input_refs: [staff]
+  - input_ref: staff
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: Alice's is a named reference
+    value_source_text: Alice's
+    resolved_value_text: Alice
+    value_meaning_hint: staff member
+    role: reference_value
+  used_input_refs:
+  - staff
 expect:
-  result_contains:
+  result_equals:
     question_inputs:
+    - id: staff
+      kind: literal_text
+      source: question_context
+      text: Alice's
+      resolved_input_ref: ''
+      resolved_value_text: Alice
+      field_label_text: ''
+      value_meaning_hint: staff member
+      role: reference_value
+    requested_facts:
+    - id: fact_1
+      description: sales at ABC Mall
+      answer_expression_family: scalar_aggregate
+      answer_subject_text: sales
+      input_refs: [staff]
+      known_inputs:
       - id: staff
+        kind: literal_text
+        source: question_context
         text: Alice's
-        lookup_text: Alice
+        resolved_input_ref: ''
+        resolved_value_text: Alice
+        field_label_text: ''
+        value_meaning_hint: staff member
+        role: reference_value
+      answer_outputs:
+      - id: answer_1
+        description: sales total
+      answer_request:
+        answer_fact: sales at ABC Mall
+        answer_expression:
+          family: scalar_aggregate
+        answer_subject:
+          subject_text: sales
+          instance_interpretation:
+            kind: NORMAL_BUSINESS_INSTANCE
+            short_label: ordinary business meaning of sales
+            meaning: Answer over ordinary business instances of 'sales' as they are normally understood in business operations and reporting. Do not assume this includes every persisted representation the host API may expose for 'sales'. Explicit user wording may narrow or override this normal instance interpretation.
+        answer_population:
+          population_label: sales
+          counted_unit: sales
+          membership_tests:
+          - test_id: pop_test_1
+            kind: SUBJECT_IDENTITY
+            polarity: MUST_PASS
+            test_question: Does the row/value represent sales?
+            owned_question_input_refs: []
+        answer_outputs:
+        - description: sales total

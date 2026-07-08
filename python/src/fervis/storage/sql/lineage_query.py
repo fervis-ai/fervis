@@ -9,7 +9,6 @@ from sqlalchemy.engine import Engine
 
 from fervis.lineage.enums import (
     AnswerValueKind,
-    ClarificationBasis,
     FactResultKind,
     MemoryArtifactSourceKind,
     PresentationClientKey,
@@ -22,6 +21,7 @@ from fervis.lineage.enums import (
     SourceReadStatus,
 )
 from fervis.lineage.memory_artifacts import MemoryArtifactRow
+from fervis.lookup.clarification import ClarificationNeed, ClarificationReason
 from fervis.lineage.views.query import (
     AnswerOutputRow,
     AnswerPresentationRow,
@@ -382,14 +382,11 @@ def _clarification_request_row(row: dict[str, Any]) -> ClarificationRequestRow:
     return ClarificationRequestRow(
         clarification_id=str(row["clarification_id"]),
         run_id=str(row["run_id"]),
-        basis=ClarificationBasis(row["basis"]),
-        question_text=str(row["question_text"]),
+        need=ClarificationNeed(row["need"]),
+        reason=ClarificationReason(row["reason"]),
+        payload_json=_dict(row["payload_json"]),
         fact_result_id=row["fact_result_id"],
         step_id=row["step_id"],
-        options_json=_tuple(row["options_json"]),
-        evidence_refs_json=tuple(
-            str(item) for item in _tuple(row["evidence_refs_json"])
-        ),
     )
 
 

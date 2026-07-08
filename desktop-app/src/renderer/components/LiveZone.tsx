@@ -1,5 +1,10 @@
 import type { RunPayload, RunStep } from "../../fervis-api/contracts";
-import { liveStepHighlightsFor, sourceReferenceLabelsFor } from "../stepDisplay";
+import {
+  liveStepHighlightsFor,
+  sourceReferenceLabelsFor,
+  type StepSignal
+} from "../stepDisplay";
+import { StepSignalContent } from "./StepSignalContent";
 import { formatStepKey } from "../textFormat";
 
 export function LiveZone({ run }: { readonly run: RunPayload }) {
@@ -19,7 +24,7 @@ export function LiveZone({ run }: { readonly run: RunPayload }) {
     );
   }
 
-  const lines = liveStepLines(currentStep, run);
+  const signals = liveStepSignals(currentStep, run);
 
   return (
     <div className="live-zone">
@@ -29,10 +34,12 @@ export function LiveZone({ run }: { readonly run: RunPayload }) {
         <span className="step-name">{formatStepKey(currentStep.stepKey)}</span>
       </div>
       <div className="decision-lines">
-        {lines.map((line, index) => (
+        {signals.map((signal, index) => (
           <div className="decision-line current" key={`${currentStep.stepId}-${index}`}>
-            {line}
-            {index === lines.length - 1 ? <span className="cursor" /> : null}
+            <StepSignalContent
+              signal={signal}
+              tail={index === signals.length - 1 ? <span className="cursor" /> : null}
+            />
           </div>
         ))}
       </div>
@@ -48,7 +55,7 @@ export function LiveZone({ run }: { readonly run: RunPayload }) {
   );
 }
 
-function liveStepLines(step: RunStep, run: RunPayload): readonly string[] {
+function liveStepSignals(step: RunStep, run: RunPayload): readonly StepSignal[] {
   const decisionLines = step.decisions.flatMap((decision) => decision.lines);
   const sourceLabels = sourceReferenceLabelsFor(run, decisionLines);
   return liveStepHighlightsFor(
@@ -56,5 +63,5 @@ function liveStepLines(step: RunStep, run: RunPayload): readonly string[] {
     decisionLines,
     step.semantic,
     sourceLabels
-  ).map((signal) => `${signal.label}: ${signal.text}`);
+  );
 }

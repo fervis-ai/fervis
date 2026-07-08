@@ -21,7 +21,6 @@ def provider_native_test_arguments(
                         "subject_text": "test adapter answer",
                         "instance_interpretation": {"kind": "NORMAL_BUSINESS_INSTANCE"},
                     },
-                    "input_requirements": {"time_requirements": []},
                     "answer_population": {
                         "population_label": "test adapter answer",
                         "counted_unit": "test adapter answer",
@@ -33,6 +32,7 @@ def provider_native_test_arguments(
                                 "test_question": (
                                     "Does the row/value represent test adapter answer?"
                                 ),
+                                "owned_question_input_refs": [],
                             }
                         ],
                     },
@@ -41,7 +41,7 @@ def provider_native_test_arguments(
                             "description": "test adapter answer",
                         }
                     ],
-                    "input_decisions": [],
+                    "used_question_inputs": [],
                 }
             ],
             "question_input_inventory_check": {

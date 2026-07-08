@@ -246,8 +246,8 @@ def _grounding_payload_from_prompt(prompt: str) -> dict[str, Any]:
         options = group["binding_options"]
         selected = _select_grounding_route_option(
             options,
-            target_meaning=str(
-                tasks.get(group["known_input_id"], {}).get("target_meaning") or ""
+            value_meaning_hint=str(
+                tasks.get(group["known_input_id"], {}).get("value_meaning_hint") or ""
             ),
         )
         reviews[group["known_input_id"]] = {
@@ -276,7 +276,7 @@ def _time_resolution_payload_from_prompt(prompt: str) -> dict[str, Any]:
     ]
     return {
         task["known_input_id"]: {
-            "date_intent": _date_intent_payload(str(task["known_input_text"]))
+            "date_intent": _date_intent_payload(str(task["time_expression"]))
         }
         for task in time_tasks
     }
@@ -401,15 +401,15 @@ def _window_time_intent(
 def _select_grounding_route_option(
     options: list[dict[str, Any]],
     *,
-    target_meaning: str,
+    value_meaning_hint: str,
 ) -> dict[str, Any]:
     usable = list(options)
-    normalized_target = target_meaning.casefold().strip()
+    normalized_hint = value_meaning_hint.casefold().strip()
     for option in usable:
         identity_type = str(
             (option.get("returned_identity") or {}).get("identity_type") or ""
         ).casefold()
-        if identity_type and normalized_target.endswith(identity_type):
+        if identity_type and normalized_hint.endswith(identity_type):
             return option
     return usable[0] if usable else options[0]
 

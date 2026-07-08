@@ -106,6 +106,7 @@ def _compile_aggregate_pattern_answer(
         payload=payload,
         bound=bound,
         relation_fields=relation_fields,
+        selected_metric=metric,
     )
     relation_outputs = _aggregate_relation_outputs(
         index=index,
@@ -137,6 +138,7 @@ def _compile_aggregate_pattern_answer(
             metric=metric,
         ),
         bound_sources={**bound_sources, bound.id: bound},
+        selected_metric=metric,
     )
 
 
@@ -228,6 +230,7 @@ def _compile_grouped_ranked_aggregate_answer(
         required_answer_evidence_ids_by_output=(
             _grouped_ranked_answer_evidence_ids_by_output(selection)
         ),
+        selected_metric=metric,
     )
     relation_outputs = _grouped_ranked_relation_outputs(
         index=index,
@@ -266,6 +269,7 @@ def _compile_grouped_ranked_aggregate_answer(
         required_answer_evidence_ids_by_output=(
             _grouped_ranked_answer_evidence_ids_by_output(selection)
         ),
+        selected_metric=metric,
     )
 
 
@@ -318,6 +322,7 @@ def _compile_grouped_ranked_ranked_aggregate_answer(
         required_answer_evidence_ids_by_output=(
             _grouped_ranked_answer_evidence_ids_by_output(selection)
         ),
+        selected_metric=metric,
     )
     rank = _rank_spec(_dict(payload.get("rank"), "rank"))
     relation_outputs = _grouped_ranked_relation_outputs(
@@ -360,6 +365,7 @@ def _compile_grouped_ranked_ranked_aggregate_answer(
         required_answer_evidence_ids_by_output=(
             _grouped_ranked_answer_evidence_ids_by_output(selection)
         ),
+        selected_metric=metric,
     )
 
 

@@ -17,4 +17,5 @@ input:
         scalar_inputs: [a, b]
         output_scalar: result
 expect:
-  error_contains: unsupported compute expression
+  result_contains:
+    status: rejected

@@ -32,6 +32,27 @@ describe("Fervis API boundary decoder", () => {
     );
   });
 
+  it("decodes conversation summaries without a current run id", () => {
+    const decoded = decodeConversationList({
+      conversations: [
+        {
+          conversationId: "conv_pending",
+          firstQuestion: "Which staff person made the most sales this month?",
+          latestQuestionId: "q_pending",
+          currentRunId: null,
+          status: "RUNNING",
+          runCount: 1,
+          updatedAt: "2026-06-29T08:36:00.438620+00:00"
+        }
+      ]
+    });
+
+    if (!decoded.ok) {
+      throw new Error(decoded.error.message);
+    }
+    expect(decoded.value.conversations[0]?.currentRunId).toBeNull();
+  });
+
   it("decodes question state without requiring worker or usage diagnostics", () => {
     const decoded = decodeQuestionState(questionStateFixture);
 
@@ -74,7 +95,7 @@ describe("Fervis API boundary decoder", () => {
     expect(decoded.value.nextActions).toEqual([]);
   });
 
-  it("decodes live clarification payloads without option lists", () => {
+  it("decodes live clarification payloads with omitted optional lists", () => {
     const decoded = decodeQuestionState({
       questionId: "q_clarify",
       conversationId: "conv_clarify",
@@ -88,11 +109,20 @@ describe("Fervis API boundary decoder", () => {
           clarifications: [
             {
               id: "clarification_1",
-              basis: "missing_answer_metric",
+              need: "answer_metric",
+              reason: "missing_answer_metric",
               question: "Which metric should I use?",
-              factResultId: null,
-              stepId: null,
-              evidenceRefs: ["question_contract:needs_clarification"]
+              requestedFactId: "fact_1",
+              subjects: [
+                {
+                  kind: "metric_phrase",
+                  id: "clarification_1",
+                  label: "metric",
+                  sourceText: "",
+                  options: []
+                }
+              ],
+              evidence: []
             }
           ]
         }
@@ -107,10 +137,166 @@ describe("Fervis API boundary decoder", () => {
       throw new Error("expected clarification result data");
     }
     expect(
-      decoded.value.resultData.details.clarifications[0]?.availableOptions
+      decoded.value.resultData.details.clarifications[0]?.subjects[0]?.options
     ).toEqual([]);
-    expect(decoded.value.resultData.details.clarifications[0]?.factResultId).toBeNull();
-    expect(decoded.value.resultData.details.clarifications[0]?.stepId).toBeNull();
+    expect(decoded.value.resultData.details.clarifications[0]?.evidence).toEqual([]);
+    expect(decoded.value.resultData.details.clarifications[0]?.requestedFactId).toBe(
+      "fact_1"
+    );
+    expect(decoded.value.resultData.details.clarifications[0]?.reason).toBe(
+      "missing_answer_metric"
+    );
+  });
+
+  it("decodes semantic known inputs without lookup text", () => {
+    const decoded = decodeQuestionRunList({
+      questionId: "q_clarify",
+      runs: [
+        {
+          runId: "run_clarify",
+          runNumber: 1,
+          triggerKind: "initial",
+          questionId: "q_clarify",
+          conversationId: "conv_clarify",
+          status: "NEEDS_CLARIFICATION",
+          answer: null,
+          resultData: {
+            kind: "needs_clarification",
+            details: {
+              clarifications: [
+                {
+                  id: "clarification_1",
+                  need: "target_reference",
+                  reason: "unresolved_reference",
+                  question: "Which staff identifier do you mean?",
+                  requestedFactId: "fact_1",
+                  subjects: [
+                    {
+                      kind: "question_input",
+                      id: "q1",
+                      label: "staff identifier",
+                      sourceText: "51515151-0000-0000-0002-000000009999",
+                      options: []
+                    }
+                  ],
+                  evidence: [{ kind: "known_input", id: "known_input:q1" }]
+                }
+              ]
+            }
+          },
+          explanation: null,
+          steps: [
+            {
+              stepId: "step_question_contract",
+              stepKey: "question_contract",
+              decisions: [],
+              semantic: {
+                requestedFacts: [],
+                knownInputs: [
+                  {
+                    inputId: "q1",
+                    text: "staff_id: 51515151-0000-0000-0002-000000009999",
+                    kind: "literal_text",
+                    role: "reference_value",
+                    description: "staff identifier",
+                    resolvedValueText: "51515151-0000-0000-0002-000000009999"
+                  }
+                ],
+                resolverCandidates: [],
+                groundingResults: [],
+                interpretedInputs: [],
+                conversationClauses: []
+              }
+            }
+          ],
+          error: null,
+          nextActions: []
+        }
+      ]
+    });
+
+    if (!decoded.ok) {
+      throw new Error(decoded.error.message);
+    }
+    expect(decoded.value.runs[0]?.steps[0]?.semantic.knownInputs[0]?.lookupText).toBe(
+      "51515151-0000-0000-0002-000000009999"
+    );
+  });
+
+  it("decodes lineage runtime errors using errorKind", () => {
+    const decoded = decodeRun({
+      runId: "run_failed",
+      runNumber: 1,
+      triggerKind: "initial",
+      questionId: "q_failed",
+      conversationId: "conv_failed",
+      status: "FAILED",
+      answer: null,
+      resultData: null,
+      error: "provider_bad_request",
+      explanation: {
+        inputs: { results: [] },
+        lineage: {
+          compact: {
+            questions: [
+              {
+                questionId: "q_failed",
+                conversationId: "conv_failed",
+                text: "How many stores do we have?",
+                runs: [
+                  {
+                    runId: "run_failed",
+                    runNumber: 1,
+                    triggerKind: "initial",
+                    steps: [
+                      {
+                        stepId: "step_1",
+                        stepKey: "question_contract",
+                        sequence: 1,
+                        decisions: [],
+                        semantic: {
+                          requestedFacts: [],
+                          knownInputs: [],
+                          resolverCandidates: [],
+                          groundingResults: [],
+                          interpretedInputs: [],
+                          conversationClauses: []
+                        },
+                        sourceReads: [],
+                        runtimeErrors: [
+                          {
+                            runtimeErrorDetailId: "runtime_error_1",
+                            errorKind: "infrastructure_failed",
+                            message: "provider_bad_request",
+                            failedStepId: "step_1",
+                            failedStepKey: "question_contract"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          verbose: { questions: [] }
+        }
+      },
+      steps: [],
+      worker: null,
+      usage: null,
+      nextActions: null
+    });
+
+    if (!decoded.ok) {
+      throw new Error(decoded.error.message);
+    }
+    const runtimeError =
+      decoded.value.explanation.lineage.compact.questions[0]?.runs[0]?.steps[0]
+        ?.runtimeErrors[0];
+    expect(runtimeError?.code).toBe("infrastructure_failed");
+    expect(runtimeError?.message).toBe("provider_bad_request");
+    expect(runtimeError?.retryable).toBe(false);
   });
 
   it("decodes structured next actions without CLI command text", () => {
@@ -127,11 +313,20 @@ describe("Fervis API boundary decoder", () => {
           clarifications: [
             {
               id: "clarification_1",
-              basis: "missing_answer_metric",
+              need: "answer_metric",
+              reason: "missing_answer_metric",
               question: "Which metric should I use?",
-              factResultId: null,
-              stepId: "step_1",
-              evidenceRefs: []
+              requestedFactId: "fact_1",
+              subjects: [
+                {
+                  kind: "metric_phrase",
+                  id: "clarification_1",
+                  label: "metric",
+                  sourceText: "",
+                  options: []
+                }
+              ],
+              evidence: []
             }
           ]
         }
@@ -248,7 +443,17 @@ describe("Fervis API boundary decoder", () => {
       throw new Error("expected clarification result data");
     }
     expect(firstRun.resultData.details.clarifications[0]?.id).toBe("clar_store");
-    expect(firstRun.resultData.details.clarifications[0]?.availableOptions).toHaveLength(2);
+    const options =
+      firstRun.resultData.details.clarifications[0]?.subjects[0]?.options ?? [];
+    expect(options).toHaveLength(2);
+    expect(options[0]).toMatchObject({
+      entityKind: "location",
+      matchedLabel: "ABC Mall",
+      matchedField: "location_id",
+      matchedValue: "60606060-0000-0000-0001-000000000001",
+      resolverReadId: "list_location_list",
+      resolverLabel: "List Location List"
+    });
   });
 
   it("decodes free-text clarification as the same contract with zero options", () => {
@@ -261,7 +466,7 @@ describe("Fervis API boundary decoder", () => {
     if (decoded.value.resultData?.kind !== "needs_clarification") {
       throw new Error("expected clarification result data");
     }
-    expect(decoded.value.resultData.details.clarifications[0]?.availableOptions).toEqual([]);
+    expect(decoded.value.resultData.details.clarifications[0]?.subjects[0]?.options).toEqual([]);
   });
 
   it("rejects a clarification terminal payload with no clarification objects", () => {
@@ -291,12 +496,20 @@ describe("Fervis API boundary decoder", () => {
           clarifications: [
             {
               id: "",
-              basis: "ambiguous_period",
+              need: "question_interpretation",
+              reason: "ambiguous_interpretation",
               question: "Which March should I use?",
-              availableOptions: [],
-              evidenceRefs: ["ev_period"],
-              factResultId: "fr_period",
-              stepId: "step_clarify"
+              requestedFactId: "rf_sales_count",
+              subjects: [
+                {
+                  kind: "interpretation",
+                  id: "input_period",
+                  label: "period",
+                  sourceText: "March",
+                  options: []
+                }
+              ],
+              evidence: [{ kind: "question_contract", id: "ev_period" }]
             }
           ]
         }
@@ -321,5 +534,22 @@ describe("Fervis API boundary decoder", () => {
     }
     expect(decoded.value.status).toBe("FAILED");
     expect(decoded.value.nextActions[0]?.command).toContain("--debug");
+  });
+
+  it("decodes live failed run string errors", () => {
+    const decoded = decodeRun({
+      ...failedRunFixture,
+      error: "planning_failed"
+    });
+
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) {
+      throw new Error(decoded.error.message);
+    }
+    expect(decoded.value.error).toEqual({
+      code: "planning_failed",
+      message: "planning_failed",
+      retryable: false
+    });
   });
 });

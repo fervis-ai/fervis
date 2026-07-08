@@ -15,6 +15,7 @@ from fervis.lookup.question_contract.answer_output_support import (
 from fervis.lookup.conversation_resolution import (
     conversation_resolution_value_frame_instruction_lines,
 )
+from fervis.lookup.turn_prompts.projections import answer_output_prompt_payload
 from fervis.lookup.query_enrichment.model import (
     QueryEnrichmentRequest,
     query_enrichment_endpoint_names,
@@ -111,18 +112,18 @@ class QueryEnrichmentTurnPrompt(TurnPromptBase):
                 ),
             ),
             builder.instruction_block(
-                "Named Entity Resolver Search Terms",
+                "Reference Value Resolver Search Terms",
                 (
-                    "For each entity target, choose catalog_search_terms that help find the canonical identity record for the named value.",
+                    "For each entity target, choose catalog_search_terms that help find the canonical identity record for the reference value.",
                     "For each term, write basis before term using this template:",
-                    '"{term} can identify {lookup_text} because target_meaning is {target_meaning}."',
+                    '"{term} can identify {resolved_value_text} because value_meaning_hint is {value_meaning_hint}."',
                     "Only include a term when the basis sentence is true.",
-                    "Use target_meaning to choose identity lookup terms.",
+                    "Use value_meaning_hint as evidence for identity lookup terms.",
                     "Order catalog_search_terms from most direct identity class to less direct aliases; resolver recall treats earlier terms as higher priority.",
                     "Prefer terms that name the entity identity class or a close API alias.",
                     "Do not include terms that describe facts about the entity rather than the entity identity.",
                     "Do not repeat catalog_search_terms.",
-                    "Do not copy reference_text or lookup_text into catalog_search_terms.",
+                    "Do not copy reference_text or resolved_value_text into catalog_search_terms.",
                     "Do not output endpoint names, fields, params, IDs, docstrings, invented labels, or paraphrases.",
                     "Return [] only when no catalog wording helps find the entity identity.",
                 ),
@@ -184,10 +185,7 @@ class QueryEnrichmentTurnPrompt(TurnPromptBase):
                     "requested_fact_id": fact.id,
                     "requested_fact_description": fact.description,
                     "answer_outputs": [
-                        {
-                            "answer_output_id": output.id,
-                            "description": output.description or output.id,
-                        }
+                        answer_output_prompt_payload(output)
                         for output in fact.answer_outputs
                     ],
                     "question_text_input_text": [
@@ -202,15 +200,15 @@ class QueryEnrichmentTurnPrompt(TurnPromptBase):
         targets: dict[str, dict[str, object]] = {}
         for fact in self.request.requested_facts:
             for known in fact.known_inputs:
-                if known.kind.value != "named_reference_text":
+                if not known.is_reference_value:
                     continue
                 targets.setdefault(
                     known.id,
                     {
                         "target_id": known.id,
                         "reference_text": known.text,
-                        "lookup_text": known.lookup_text or known.text,
-                        "target_meaning": known.description or known.text,
+                        "resolved_value_text": known.resolved_value_text,
+                        "value_meaning_hint": known.value_meaning_hint,
                     },
                 )
         return {"entity_targets": list(targets.values())}

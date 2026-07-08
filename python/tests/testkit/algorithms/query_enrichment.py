@@ -17,7 +17,11 @@ from fervis.lookup.query_enrichment import (
     parse_query_enrichment,
 )
 
-from tests.testkit.assertions import subset_mismatches
+from tests.testkit.assertions import (
+    expects_rejection,
+    status_mismatches,
+    subset_mismatches,
+)
 from tests.testkit.fixtures import load_conformance_fixture
 from tests.testkit.question_contract import requested_fact_from_payload
 
@@ -27,12 +31,14 @@ def run_query_enrichment_parse_case(payload: dict[str, Any]) -> list[str]:
     try:
         result = parse_query_enrichment(dict(payload["input"]["payload"]), request=request)
     except ValueError as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error and expected_error in str(exc):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {exc}"]
-    if "error_contains" in payload["expect"]:
-        return [f"expected error containing {payload['expect']['error_contains']!r}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     actual = {
         "requested_fact_resource_name_matches": [
             {

@@ -6,7 +6,7 @@ export function formatTriggerKind(value: string): string {
   return titleWords(value);
 }
 
-export function formatClarificationBasis(value: string): string {
+export function formatClarificationReason(value: string): string {
   return titleWords(value);
 }
 

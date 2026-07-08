@@ -393,6 +393,7 @@ def test_common_question_interface_continues_question_for_clarification_response
             "triggerKind": "clarification_response",
             "triggerRunId": "run-1",
             "clarificationId": "clar-1",
+            "selectedOptionId": "store:abc",
         },
         principal=InterfacePrincipal(principal_id="user-1", tenant_id="tenant-1"),
     )
@@ -405,6 +406,7 @@ def test_common_question_interface_continues_question_for_clarification_response
     assert request.previous_run_id is None
     assert request.trigger_clarification_response_run_id == "run-1"
     assert request.trigger_clarification_response_id == "clar-1"
+    assert request.trigger_clarification_selected_option_id == "store:abc"
 
 
 def test_common_question_interface_adds_transport_neutral_clarification_follow_up_actions() -> (
@@ -459,6 +461,7 @@ def test_common_question_interface_adds_transport_neutral_clarification_follow_u
                     "triggerKind": "clarification_response",
                     "triggerRunId": "run-1",
                     "clarificationId": "clar-1",
+                    "selectedOptionId": "<selected-option-id>",
                 },
             },
         }
@@ -500,7 +503,7 @@ def test_fervis_fastapi_router_exposes_question_lifecycle_routes() -> None:
 
     router = FastAPIIntegration(
         config=FervisConfig(
-            host=HostConfig(),
+            host=HostConfig(timezone="UTC"),
             routes=RuntimeRoutes(prefix="/fervis/"),
             model=ModelConfig(
                 default_provider="openai",

@@ -287,7 +287,7 @@ def _run_clarification_requests(
     run: RunRow, *, rows: LineageRows
 ) -> tuple[ClarificationRequestView, ...]:
     return tuple(
-        _clarification_request_view(item)
+        _clarification_request_view(item, rows=rows)
         for item in rows.clarification_requests
         if item.run_id == run.run_id
     )
@@ -592,15 +592,15 @@ def _runtime_error_view(
 
 def _clarification_request_view(
     clarification: ClarificationRequestRow,
+    *,
+    rows: LineageRows,
 ) -> ClarificationRequestView:
+    del rows
     return ClarificationRequestView(
         clarification_id=clarification.clarification_id,
-        basis=clarification.basis.value,
-        question_text=clarification.question_text,
+        payload_json=clarification.payload_json,
         fact_result_id=clarification.fact_result_id,
         step_id=clarification.step_id,
-        options=clarification.options_json,
-        evidence_refs=clarification.evidence_refs_json,
     )
 
 

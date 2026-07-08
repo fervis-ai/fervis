@@ -63,6 +63,29 @@ def _verify_render_references(
     *,
     relation_contracts: dict[str, RelationContract],
 ) -> None:
+    _verify_render_output_targets(answer)
+    render_outputs = tuple(answer.render_spec.relation_outputs)
+    for relation_output in render_outputs:
+        if not relation_output.field_id:
+            raise VerificationError(
+                f"render output {relation_output.id} requires field id"
+            )
+        contract = relation_contracts.get(relation_output.relation_id)
+        if contract is None or relation_output.field_id not in contract.fields:
+            raise VerificationError(
+                f"render output {relation_output.id} references unknown output field"
+            )
+        if FieldBindingRole.OUTPUT not in contract.fields[relation_output.field_id]:
+            raise VerificationError(
+                f"render output {relation_output.id} requires factual output field"
+            )
+
+
+def _verify_render_output_targets(
+    answer: AnswerPlan,
+    *,
+    require_output: bool = True,
+) -> None:
     operation_outputs = {
         operation.output_relation
         for operation in answer.operations
@@ -74,7 +97,9 @@ def _verify_render_references(
     render_outputs = tuple(answer.render_spec.relation_outputs)
     scalar_outputs = tuple(getattr(answer.render_spec, "scalar_outputs", ()) or ())
     _verify_unique_render_output_ids(render_outputs, scalar_outputs)
-    if not render_outputs and not scalar_outputs:
+    if not render_outputs and not scalar_outputs and not require_output:
+        return
+    if not render_outputs and not scalar_outputs and require_output:
         raise VerificationError("render spec requires at least one render output")
     if render_outputs:
         render_relations = {
@@ -93,20 +118,6 @@ def _verify_render_references(
     elif terminal_outputs:
         raise VerificationError("render spec cannot leave terminal relation output")
     _verify_render_scalar_references(answer, scalar_outputs=scalar_outputs)
-    for relation_output in render_outputs:
-        if not relation_output.field_id:
-            raise VerificationError(
-                f"render output {relation_output.id} requires field id"
-            )
-        contract = relation_contracts.get(relation_output.relation_id)
-        if contract is None or relation_output.field_id not in contract.fields:
-            raise VerificationError(
-                f"render output {relation_output.id} references unknown output field"
-            )
-        if FieldBindingRole.OUTPUT not in contract.fields[relation_output.field_id]:
-            raise VerificationError(
-                f"render output {relation_output.id} requires factual output field"
-            )
 
 
 def _verify_unique_render_output_ids(

@@ -24,5 +24,6 @@ PLAN_SELECTION_SHAPES = (
         ("left", "right"),
         distinct_members=True,
         intrinsic_source_requirements=frozenset(("left", "right")),
+        complete_answer_fulfillment_requirements=frozenset(),
     ),
 )

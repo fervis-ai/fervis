@@ -40,5 +40,6 @@ input:
             terminal: needs_clarification
             clarificationQuestions: ["Which day?"]
 expect:
-  error_contains: required conversation memory exceeds projection budget
+  result_contains:
+    status: rejected
 

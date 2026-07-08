@@ -15,5 +15,11 @@ input:
 expect:
   result_contains:
     requested_facts:
-      - answer_outputs:
-          - description: work location
+    - answer_outputs:
+      - description: work location
+  result_exact_fields:
+    question_inputs: []
+    requested_fact_input_handoff:
+    - id: fact_1
+      input_refs: []
+      known_input_refs: []

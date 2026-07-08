@@ -10,4 +10,10 @@ input:
 expect:
   result_contains:
     requested_facts:
-      - answer_expression_family: ranked_selection
+    - answer_expression_family: ranked_selection
+  result_exact_fields:
+    question_inputs: []
+    requested_fact_input_handoff:
+    - id: fact_1
+      input_refs: []
+      known_input_refs: []

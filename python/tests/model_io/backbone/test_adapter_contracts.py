@@ -18,7 +18,9 @@ from fervis.lookup.question_contract import (
     build_missing_input_clarification_schema,
     build_question_contract_decisions_schema,
     parse_question_contract,
+    QuestionContractTurnPrompt,
 )
+from fervis.lookup.question_contract.model import QuestionContractRequest
 from fervis.lookup.fact_planning.schema import build_fact_plan_schema
 from fervis.model_io.structured_output.errors import RequiredToolOutputError
 from fervis.model_io.structured_output.generation import (
@@ -160,7 +162,7 @@ def test_question_contract_schema_is_decisions_only():
             "question_input_inventory_check",
         ],
         "answer_kind_enum": ["question_contract"],
-        "clarification_required": ["kind", "missing", "clarification_question"],
+        "clarification_required": ["kind", "missing"],
         "clarification_kind_enum": ["needs_clarification"],
         "has_prior_answer_references": False,
     }
@@ -216,18 +218,59 @@ def test_provider_native_question_contract_fixture_matches_current_schema():
     )
 
 
-def test_question_contract_parser_rejects_model_authored_requested_facts():
-    with pytest.raises(ValueError, match="unsupported fields"):
+def test_question_contract_schema_accepts_time_value_owned_by_input_decision():
+    from jsonschema import validate
+
+    payload = _question_contract_with_time_value_input()
+
+    validate(instance=payload, schema=build_question_contract_decisions_schema())
+
+
+def test_question_contract_turn_schema_rejects_unavailable_conversation_resolution_inputs():
+    from jsonschema import ValidationError, validate
+
+    prompt = QuestionContractTurnPrompt(
+        QuestionContractRequest(
+            current_question="How many sales happened today?",
+            conversation_context={},
+        )
+    )
+    schema = prompt.tool_contract().tool_specs[0].input_schema
+    payload = _question_contract_with_time_value_input()
+    payload["question_inputs"][0] = {
+        "input_ref": "today_time_1",
+        "source": "conversation_resolution",
+        "reference_text": "today",
+        "occurrence": 1,
+        "resolved_input_ref": "today_time_1",
+        "inventory_check": {
+            "why_this_is_an_input": "This is the time phrase constraining the count."
+        },
+        "kind": "row_set_reference",
+    }
+
+    with pytest.raises(ValidationError):
+        validate(instance=payload, schema=schema)
+
+
+def test_question_contract_parser_fails_on_model_authored_requested_facts():
+    payload = provider_native_test_arguments(
+        tool_name="submit_answer_request_contract",
+        prompt="",
+        tool_specs=(),
+    )
+    payload["requested_facts"] = [
+        {
+            "id": "model_authored_fact",
+            "description": "model-authored facts must not own the contract",
+        }
+    ]
+
+    with pytest.raises(ValueError, match="unparsed fields: requested_facts"):
         parse_question_contract(
             tool_name="submit_answer_request_contract",
-            payload={
-                "kind": "question_contract",
-                "answer_requests_count": 1,
-                "question_inputs": [],
-                "requested_facts": [],
-                "answer_requests": [],
-            },
-            question_context="How much sales did we make?",
+            payload=payload,
+            question_context="What is the test adapter answer?",
         )
 
     with pytest.raises(ValueError, match="answer_requests"):
@@ -253,6 +296,60 @@ def test_question_contract_parser_rejects_model_authored_requested_facts():
         )
 
 
+def _question_contract_with_time_value_input() -> dict[str, object]:
+    return {
+        "kind": "question_contract",
+        "answer_requests_count": 1,
+        "question_inputs": [
+            {
+                "kind": "literal_text",
+                "input_ref": "time_1",
+                "source": "question_context",
+                "value_source_text": "today",
+                "resolved_value_text": "today",
+                "role": "time_value",
+                "inventory_check": {
+                    "why_this_is_an_input": "today constrains the sales count"
+                },
+            }
+        ],
+        "answer_requests": [
+            {
+                "answer_fact": "sales today",
+                "answer_expression": {"family": "scalar_aggregate"},
+                "answer_subject": {
+                    "subject_text": "sales",
+                    "instance_interpretation": {
+                        "kind": "NORMAL_BUSINESS_INSTANCE",
+                    },
+                },
+                "answer_population": {
+                    "population_label": "sales today",
+                    "counted_unit": "sale",
+                    "membership_tests": [
+                        {
+                            "test_id": "test_1",
+                            "kind": "SUBJECT_IDENTITY",
+                            "polarity": "MUST_PASS",
+                            "test_question": "Is this a sale?",
+                            "owned_question_input_refs": [],
+                        }
+                    ],
+                },
+                "answer_outputs": [
+                    {
+                        "description": "sales count",
+                    }
+                ],
+                "used_question_inputs": ["time_1"],
+            }
+        ],
+        "question_input_inventory_check": {
+            "all_input_like_phrases_declared": True,
+        },
+    }
+
+
 def test_question_contract_schema_rejects_answer_text():
     schema = build_question_contract_decisions_schema()
 
@@ -273,7 +370,7 @@ def test_question_contract_schema_rejects_answer_text():
                                 "description": "sales",
                             }
                         ],
-                        "input_decisions": [],
+                        "used_question_inputs": [],
                     }
                 ],
             },
@@ -1178,7 +1275,7 @@ def test_anthropic_adapter_sends_question_contract_tool_contracts():
                 "answer_requests",
                 "question_input_inventory_check",
             ],
-            ["kind", "missing", "clarification_question"],
+            ["kind", "missing"],
         ],
         "tool_choice_type": "any",
         "disable_parallel": True,
@@ -1468,37 +1565,50 @@ def test_openai_adapter_keeps_canonical_source_binding_grammar():
     canonical_invocation_item = spec.input_schema["properties"]["outcome"]["oneOf"][0][
         "properties"
     ]["source_invocations"]["items"]
-    first_invocation_variant = invocation_item["anyOf"][0]
-    canonical_first_invocation_variant = canonical_invocation_item["oneOf"][0]
+    invocation_variants = _schema_variants_by_binding_target(
+        invocation_item,
+        variant_key="anyOf",
+    )
+    canonical_invocation_variants = _schema_variants_by_binding_target(
+        canonical_invocation_item,
+        variant_key="oneOf",
+    )
 
     invocation_item_text = json.dumps(invocation_item)
     assert {
         "canonical_schema_unchanged": json.dumps(spec.input_schema)
         == canonical_schema_text,
-        "candidate_specific_invocation_item": tuple(invocation_item),
-        "canonical_candidate_specific_invocation_item": tuple(
-            canonical_invocation_item
+        "compact_invocation_item": tuple(invocation_item),
+        "canonical_compact_invocation_item": tuple(canonical_invocation_item),
+        "binding_targets": tuple(invocation_variants),
+        "canonical_binding_targets": tuple(canonical_invocation_variants),
+        "source_1_param_decisions": tuple(
+            invocation_variants["target.source_1"]["properties"]["param_decisions"][
+                "properties"
+            ]
         ),
-        "source_candidate_shape": first_invocation_variant["properties"][
-            "source_candidate_id"
-        ],
-        "canonical_source_candidate_shape": canonical_first_invocation_variant[
-            "properties"
-        ]["source_candidate_id"],
-        "canonical_required": canonical_first_invocation_variant["required"],
-        "adapter_required": first_invocation_variant["required"],
-        "finite_choice_reviews_required": first_invocation_variant["properties"][
-            "finite_choice_param_reviews"
-        ]["required"],
-        "canonical_finite_choice_reviews_required": (
-            canonical_first_invocation_variant["properties"][
+        "source_1_finite_choice_reviews": tuple(
+            invocation_variants["target.source_1"]["properties"][
                 "finite_choice_param_reviews"
-            ]["required"]
+            ]["properties"]
+        ),
+        "source_2_param_decisions": tuple(
+            invocation_variants["target.source_2"]["properties"]["param_decisions"][
+                "properties"
+            ]
+        ),
+        "source_2_finite_choice_reviews": tuple(
+            invocation_variants["target.source_2"]["properties"][
+                "finite_choice_param_reviews"
+            ]["properties"]
         ),
         "fulfillment_requires_real_answer_choice": "anyOf"
-        in first_invocation_variant["properties"]["fulfillment_decisions"],
+        in invocation_variants["target.source_1"]["properties"][
+            "fulfillment_decisions"
+        ],
         "has_finite_choice_reviews": (
-            "finite_choice_param_reviews" in first_invocation_variant["properties"]
+            "finite_choice_param_reviews"
+            in invocation_variants["target.source_1"]["properties"]
         ),
         "forbidden_terms_present": [
             term
@@ -1515,35 +1625,29 @@ def test_openai_adapter_keeps_canonical_source_binding_grammar():
         ],
     } == {
         "canonical_schema_unchanged": True,
-        "candidate_specific_invocation_item": ("anyOf",),
-        "canonical_candidate_specific_invocation_item": ("oneOf",),
-        "source_candidate_shape": {"enum": ["source_1"]},
-        "canonical_source_candidate_shape": {"enum": ["source_1"]},
-        "canonical_required": [
-            "requested_fact_id",
-            "source_candidate_id",
-            "answer_population",
-            "fulfillment_decisions",
-            "param_decisions",
-            "row_predicate_reviews",
-            "finite_choice_param_reviews",
-            "source_binding_decision",
-        ],
-        "adapter_required": [
-            "requested_fact_id",
-            "source_candidate_id",
-            "answer_population",
-            "fulfillment_decisions",
-            "param_decisions",
-            "row_predicate_reviews",
-            "finite_choice_param_reviews",
-            "source_binding_decision",
-        ],
-        "finite_choice_reviews_required": ["status"],
-        "canonical_finite_choice_reviews_required": ["status"],
-        "fulfillment_requires_real_answer_choice": True,
+        "compact_invocation_item": ("anyOf",),
+        "canonical_compact_invocation_item": ("oneOf",),
+        "binding_targets": ("target.source_1", "target.source_2"),
+        "canonical_binding_targets": ("target.source_1", "target.source_2"),
+        "source_1_param_decisions": ("start_date",),
+        "source_1_finite_choice_reviews": ("status",),
+        "source_2_param_decisions": (),
+        "source_2_finite_choice_reviews": (),
+        "fulfillment_requires_real_answer_choice": False,
         "has_finite_choice_reviews": True,
         "forbidden_terms_present": [],
+    }
+
+
+def _schema_variants_by_binding_target(
+    schema: dict[str, Any],
+    *,
+    variant_key: str,
+) -> dict[str, dict[str, Any]]:
+    variants = schema[variant_key]
+    return {
+        variant["properties"]["binding_target_id"]["enum"][0]: variant
+        for variant in variants
     }
 
 
@@ -2112,9 +2216,7 @@ def test_opencode_zen_uses_openai_compatible_tool_call_contract():
         "has_tools": "tools" in completion_kwargs,
         "tool_choice": completion_kwargs["tool_choice"],
         "parallel_tool_calls": completion_kwargs["parallel_tool_calls"],
-        "tool_names": [
-            tool["function"]["name"] for tool in completion_kwargs["tools"]
-        ],
+        "tool_names": [tool["function"]["name"] for tool in completion_kwargs["tools"]],
     } == {
         "base_url": "https://opencode.ai/zen/v1",
         "model": "deepseek-v4-pro",

@@ -10,4 +10,5 @@ input:
     requested_fact_resource_name_matches: []
     entity_target_catalog_search_terms: []
 expect:
-  error_contains: missing requested fact
+  result_contains:
+    status: rejected

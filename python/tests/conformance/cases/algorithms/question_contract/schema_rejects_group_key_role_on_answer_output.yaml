@@ -1,0 +1,38 @@
+id: schema_rejects_group_key_role_on_answer_output
+description: Group keys belong on grouped answer expressions, not answer outputs.
+kind: algorithm
+algorithm: question_contract.schema_validate
+input:
+  question_context: How many sales did staff A and staff B sell each today?
+  question_inputs:
+  - input_ref: staff_a
+    kind: literal_text
+    source: question_context
+    value_source_text: staff A
+    resolved_value_text: staff A
+    role: reference_value
+    inventory_check:
+      why_this_is_an_input: staff A is a specified staff reference
+  - input_ref: staff_b
+    kind: literal_text
+    source: question_context
+    value_source_text: staff B
+    resolved_value_text: staff B
+    role: reference_value
+    inventory_check:
+      why_this_is_an_input: staff B is a specified staff reference
+  answer_expression:
+    family: grouped_aggregate
+    group_key:
+      description: specified staff member
+      domain: SPECIFIED_QUESTION_INPUTS
+      question_input_refs: [staff_a, staff_b]
+  answer_outputs:
+  - description: specified staff member
+    role: GROUP_KEY
+  - description: sales count
+    role: ROW_POPULATION
+  used_input_refs: [staff_a, staff_b]
+expect:
+  result_contains:
+    status: rejected

@@ -1,0 +1,67 @@
+id: support_scopes_closed_key_grouped_outputs_by_role
+description: Source-binding fulfillment support scopes closed-key grouped outputs by their question-contract answer-output roles.
+kind: algorithm
+algorithm: source_binding.fulfillment_support
+input:
+  requested_fact:
+    id: fact_1
+    description: sales count for each specified staff member today
+    subject_text: sales
+    answer_expression_family: grouped_aggregate
+    group_key:
+      id: answer_staff
+      description: specified staff member
+      domain: SPECIFIED_QUESTION_INPUTS
+      question_input_refs: [staff_1, staff_2]
+    known_inputs:
+      - id: staff_1
+        source: question_context
+        role: reference_value
+        text: "51515151-0000-0000-0002-000000000001"
+        resolved_value_text: "51515151-0000-0000-0002-000000000001"
+        field_label_text: staff id
+      - id: staff_2
+        source: question_context
+        role: reference_value
+        text: "51515151-0000-0000-0002-000000000002"
+        resolved_value_text: "51515151-0000-0000-0002-000000000002"
+        field_label_text: staff id
+    answer_outputs:
+      - id: answer_sales_count
+        description: sales count
+        role: ROW_POPULATION
+  candidate:
+    source_candidate_id: source_1
+    kind: new_api_read
+    read_id: get_staff_sales
+    result_grains:
+      - grain_id: data
+        row_path_id: data
+        row_source_id: rs_source_1_data
+        cardinality: many
+        evidence_items:
+          - field_id: sale_id
+            type: uuid
+            roles: [identity]
+            identity:
+              entity_ref: sale
+              identity_field: sale_id
+              primary_key: true
+              stable: true
+          - field_id: staff_id
+            type: uuid
+            roles: [output, predicate]
+          - field_id: amount
+            type: decimal
+            roles: [output, predicate]
+expect:
+  result_contains:
+    slot_role_presence_by_answer_output:
+      answer_staff:
+        GROUP_KEY: true
+        ROW_POPULATION: false
+        MEASURED_VALUE: false
+      answer_sales_count:
+        GROUP_KEY: false
+        ROW_POPULATION: true
+        MEASURED_VALUE: false

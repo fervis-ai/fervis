@@ -73,16 +73,28 @@ input:
     clarification_requests:
       - clarification_id: clarification_1
         run_id: run_1
-        basis: unresolved_reference
-        question_text: Which location should I use?
+        need: target_reference
+        reason: unresolved_reference
+        payload_json:
+          id: clarification_1
+          need: target_reference
+          reason: unresolved_reference
+          requestedFactId: fact_1
+          question: Which location should I use?
+          subjects:
+            - kind: question_input
+              id: there
+              label: location
+              sourceText: there
+              options:
+                - id: area:london
+                  label: London
+                  value: area_nairobi
+          evidence:
+            - kind: known_input
+              id: known_input:there
         fact_result_id: fact_result_1
         step_id: step_contract_1
-        options_json:
-          - id: area:london
-            label: London
-            description: area_id=area_nairobi
-        evidence_refs_json:
-          - known_input:there
     clarification_responses:
       - response_id: response_1
         run_id: run_1

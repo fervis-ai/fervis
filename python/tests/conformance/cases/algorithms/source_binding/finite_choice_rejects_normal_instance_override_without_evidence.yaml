@@ -15,4 +15,5 @@ input:
         explicit_user_override_evidence: []
         explicit_user_override_applies: true
 expect:
-  error_contains: override evidence
+  result_contains:
+    status: rejected

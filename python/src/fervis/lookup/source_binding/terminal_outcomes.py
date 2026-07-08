@@ -119,7 +119,7 @@ def _blocked_facts_without_answer_output_candidates(
         for fact in request.requested_facts
         if any(
             output.id not in supported_output_ids_by_fact.get(fact.id, set())
-            for output in fact.answer_outputs
+            for output in fact.support_answer_outputs
         )
     )
 

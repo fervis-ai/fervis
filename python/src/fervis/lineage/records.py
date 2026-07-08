@@ -9,7 +9,6 @@ from typing import Any, Generic, TypeVar
 from fervis.lineage.enums import (
     AnswerValueKind,
     ArtifactKind,
-    ClarificationBasis,
     ConversationOriginKind,
     FactResultKind,
     MemoryArtifactSourceKind,
@@ -26,6 +25,7 @@ from fervis.lineage.enums import (
     RuntimeErrorKind,
     SourceReadStatus,
 )
+from fervis.lookup.clarification import ClarificationNeed, ClarificationReason
 from fervis.lineage.recorder import (
     AnswerOutputWrite,
     AnswerPresentationWrite,
@@ -632,10 +632,9 @@ CLARIFICATION_REQUEST = LineageRowSpec(
         field("run_id"),
         field("fact_result_id"),
         field("step_id"),
-        field("basis", enum_type=ClarificationBasis),
-        field("question_text"),
-        field("options_json", json_value=True),
-        field("evidence_refs_json", json_value=True),
+        field("need", enum_type=ClarificationNeed),
+        field("reason", enum_type=ClarificationReason),
+        field("payload_json", json_value=True),
     ),
     same_run_refs=(
         SameRunReference(

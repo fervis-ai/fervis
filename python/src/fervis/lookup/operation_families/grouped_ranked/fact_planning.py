@@ -52,10 +52,6 @@ def _grouped_ranked_pattern_answer_schema(
         "requested_fact_id": requested_fact_id_schema,
         "pattern": {"enum": [plan_shape]},
         "source_binding_id": {"enum": [_text(choice.get("source_binding_id"))]},
-        "group": _candidate_selection_schema(
-            choice.get("group_candidates"),
-            kind="group",
-        ),
         "metric": _candidate_selection_schema(
             choice.get("metric_candidates"),
             kind="metric",
@@ -69,7 +65,6 @@ def _grouped_ranked_pattern_answer_schema(
         "requested_fact_id",
         "pattern",
         "source_binding_id",
-        "group",
         "metric",
         "function",
     )
@@ -118,10 +113,7 @@ def _candidate_schema(candidate: dict[str, object], *, kind: str) -> dict[str, o
         "id": {"enum": [_text(candidate.get("id"))]},
     }
     required = ("selection_basis", "id")
-    if kind == "group":
-        properties["field_id"] = {"enum": [_text(candidate.get("field_id"))]}
-        required = (*required, "field_id")
-    elif kind == "metric":
+    if kind == "metric":
         metric_kind = _text(candidate.get("kind"))
         properties["kind"] = {"enum": [metric_kind]}
         required = (*required, "kind")
@@ -139,7 +131,7 @@ def _candidate_schema(candidate: dict[str, object], *, kind: str) -> dict[str, o
 def _valid_choice(choice: dict[str, object]) -> bool:
     return bool(
         _text(choice.get("source_binding_id"))
-        and _dict_candidates(choice.get("group_candidates"))
+        and isinstance(choice.get("group"), dict)
         and _dict_candidates(choice.get("metric_candidates"))
         and _dict_candidates(choice.get("function_candidates"))
     )

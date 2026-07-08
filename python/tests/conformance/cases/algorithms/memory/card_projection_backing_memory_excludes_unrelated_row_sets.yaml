@@ -48,7 +48,11 @@ input:
             identity: {item_id: item-1}
             values:
               count: {type: integer, value: "7"}
-expect:
-  text_excludes_from:
+  excludes_from:
     private_backing_ids:
       - turn_multi_fact.relation.inventory_rows
+expect:
+  result_contains:
+    excludes_from:
+      private_backing_ids:
+        turn_multi_fact.relation.inventory_rows: true

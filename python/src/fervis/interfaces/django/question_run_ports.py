@@ -592,6 +592,7 @@ def _spine_clarification_response(response):
         run_id=response.run_id,
         clarification_id=response.clarification_id,
         response_text=response.response_text,
+        selected_option_id=response.selected_option_id,
     )
 
 

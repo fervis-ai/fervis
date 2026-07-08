@@ -1,21 +1,44 @@
 id: time_inputs_preserve_exact_spans
 description: Time known inputs keep their exact question-context text.
 migrates:
-  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_keeps_business_time_inputs_as_exact_spans
+- api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_keeps_business_time_inputs_as_exact_spans
 kind: algorithm
 algorithm: question_contract.parse
 input:
   question_context: How much sales at ABC Mall yesterday?
   question_inputs:
-    - input_ref: period
-      source: question_context
-      kind: time_text
-      reference_text: yesterday
-      inventory_check: {why_this_is_an_input: yesterday is a time scope}
-  used_input_refs: [period]
+  - input_ref: period
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: yesterday is a time scope
+    value_source_text: yesterday
+    resolved_value_text: yesterday
+    role: time_value
+  used_input_refs:
+  - period
 expect:
   result_contains:
     requested_facts:
-      - known_inputs:
-          - kind: time_text
-            text: yesterday
+    - known_inputs:
+      - kind: literal_text
+        text: yesterday
+        resolved_value_text: yesterday
+        role: time_value
+  result_exact_fields:
+    question_inputs:
+    - id: period
+      kind: literal_text
+      source: question_context
+      text: yesterday
+      resolved_input_ref: ''
+      resolved_value_text: yesterday
+      field_label_text: ''
+      value_meaning_hint: ''
+      role: time_value
+    requested_fact_input_handoff:
+    - id: fact_1
+      input_refs:
+      - period
+      known_input_refs:
+      - period

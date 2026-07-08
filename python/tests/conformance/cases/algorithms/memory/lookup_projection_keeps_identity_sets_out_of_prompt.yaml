@@ -24,11 +24,15 @@ input:
             kind: row
             relation: relation.stores
             identity: {store_id: store_2}
+  excludes_from:
+    prompt_context:
+      - identity_sets
+      - identitySets
 expect:
   result_contains:
     identity_sets:
       - values: [store_1, store_2]
-  text_excludes_from:
-    prompt_context:
-      - identity_sets
-      - identitySets
+    excludes_from:
+      prompt_context:
+        identity_sets: true
+        identitySets: true

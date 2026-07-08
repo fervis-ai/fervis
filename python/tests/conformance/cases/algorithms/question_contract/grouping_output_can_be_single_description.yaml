@@ -1,7 +1,7 @@
 id: grouping_output_can_be_single_description
 description: A grouped output can be represented as one answer output description.
 migrates:
-  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_allows_grouping_output_within_one_output
+- api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_allows_grouping_output_within_one_output
 kind: algorithm
 algorithm: question_contract.parse
 input:
@@ -9,25 +9,61 @@ input:
   answer_fact: sales by Alice today
   answer_subject:
     subject_text: products
-    instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
+    instance_interpretation:
+      kind: NORMAL_BUSINESS_INSTANCE
   answer_outputs:
-    - description: the products sold in each sale
+  - description: the products sold in each sale
   question_inputs:
-    - input_ref: staff
-      source: question_context
-      kind: named_reference_text
-      reference_text: Alice
-      target_meaning: staff member
-      lookup_text: Alice
-      inventory_check: {why_this_is_an_input: Alice is a named reference}
-    - input_ref: period
-      source: question_context
-      kind: time_text
-      reference_text: today
-      inventory_check: {why_this_is_an_input: today is a time scope}
-  used_input_refs: [staff, period]
+  - input_ref: staff
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: Alice is a named reference
+    value_source_text: Alice
+    resolved_value_text: Alice
+    value_meaning_hint: staff member
+    role: reference_value
+  - input_ref: period
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: today is a time scope
+    value_source_text: today
+    resolved_value_text: today
+    role: time_value
+  used_input_refs:
+  - staff
+  - period
 expect:
   result_contains:
     requested_facts:
-      - answer_outputs:
-          - description: the products sold in each sale
+    - answer_outputs:
+      - description: the products sold in each sale
+  result_exact_fields:
+    question_inputs:
+    - id: staff
+      kind: literal_text
+      source: question_context
+      text: Alice
+      resolved_input_ref: ''
+      resolved_value_text: Alice
+      field_label_text: ''
+      value_meaning_hint: staff member
+      role: reference_value
+    - id: period
+      kind: literal_text
+      source: question_context
+      text: today
+      resolved_input_ref: ''
+      resolved_value_text: today
+      field_label_text: ''
+      value_meaning_hint: ''
+      role: time_value
+    requested_fact_input_handoff:
+    - id: fact_1
+      input_refs:
+      - staff
+      - period
+      known_input_refs:
+      - staff
+      - period

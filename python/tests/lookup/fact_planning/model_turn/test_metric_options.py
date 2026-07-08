@@ -500,7 +500,7 @@ def test_pattern_prompt_requires_metric_evidence_even_when_answer_value_exists()
     )
 
     assert "Grouped/ranked operation choices:" in prompt
-    assert '<group id="group_1" field="location_name" type="string" />' in prompt
+    assert '<group field="location_name" type="string" source="source_binding" />' in prompt
     assert (
         '<metric id="metric_1" kind="aggregate_field" field="calculated_pay" '
         'type="decimal" allowed_functions="sum min max avg" />'

@@ -26,6 +26,7 @@ def host_api_context_from_config(
         host_context=HostContext(
             organization_name=host.organization_name,
             about_api=host.about_api,
+            timezone=host.timezone,
         ),
     )
 

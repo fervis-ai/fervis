@@ -38,7 +38,7 @@ def _question_contract_payload(
                     ).instance_interpretation,
                 ).to_question_contract_dict(),
                 "answer_outputs": [{"description": part} for part in parts],
-                "input_decisions": [],
+                "used_question_inputs": [],
             }
         ],
         "question_input_inventory_check": {
@@ -67,7 +67,6 @@ def test_question_contract_accepts_semantic_answer_subject_not_copied_from_quest
     )
     request_payload = payload["answer_requests"][0]
     assert isinstance(request_payload, dict)
-    request_payload["input_requirements"] = {"time_requirements": []}
 
     result = parse_question_contract(
         tool_name=ANSWER_REQUEST_CONTRACT_TOOL_NAME,
@@ -81,7 +80,9 @@ def test_question_contract_accepts_semantic_answer_subject_not_copied_from_quest
         context_texts=(question,),
     )
 
-    assert result.outcome.requested_facts[0].answer_subject.subject_text == "staff shift"
+    assert (
+        result.outcome.requested_facts[0].answer_subject.subject_text == "staff shift"
+    )
 
 
 def test_lookup_question_contract_cannot_short_circuit_into_clarification():
@@ -193,7 +194,7 @@ def test_lookup_carries_answer_subject_instance_interpretation_to_source_binding
                             },
                         },
                         "answer_outputs": [{"description": "amount"}],
-                        "input_decisions": [],
+                        "used_question_inputs": [],
                     }
                 ],
                 "question_input_inventory_check": {
@@ -314,7 +315,6 @@ def test_lookup_question_contract_clarification_stops_after_question_contract_tu
                     ),
                 }
             ],
-            "clarification_question": "What should I check?",
         }
     )
 
@@ -333,14 +333,28 @@ def test_lookup_question_contract_clarification_stops_after_question_contract_tu
     )
 
     assert result.status == "NEEDS_CLARIFICATION", result
-    assert result.answer == "What should I check?"
+    assert result.answer == "Which metric should I use?"
     assert planner.tool_names == ["submit_missing_input_clarification"]
     details = result.rendered_fact.details  # type: ignore[union-attr]
     clarification = details["clarifications"][0]  # type: ignore[index]
-    assert clarification["basis"] == "missing_answer_metric"
-    assert clarification["question"] == "What should I check?"
-    assert clarification["ambiguousMetricPhrase"] == "check"
-    assert "requested_fact:question_contract" in clarification["evidenceRefs"]
+    assert clarification["need"] == "answer_metric"
+    assert clarification["reason"] == "missing_answer_metric"
+    assert clarification["question"] == "Which metric should I use?"
+    assert clarification["subjects"] == [
+        {
+            "kind": "metric_phrase",
+            "id": "clarify_question_contract_1",
+            "label": (
+                "The question does not say what business fact or metric "
+                "should be checked."
+            ),
+            "sourceText": "check",
+            "options": [],
+        }
+    ]
+    assert {"kind": "proof_ref", "id": "requested_fact:question_contract"} in (
+        clarification["evidence"]
+    )
 
 
 def test_lookup_question_contract_can_terminally_request_missing_target_reference():
@@ -358,7 +372,6 @@ def test_lookup_question_contract_can_terminally_request_missing_target_referenc
                     ),
                 }
             ],
-            "clarification_question": "Which staff member do you mean?",
         }
     )
 
@@ -377,26 +390,36 @@ def test_lookup_question_contract_can_terminally_request_missing_target_referenc
     )
 
     assert result.status == "NEEDS_CLARIFICATION", result
-    assert result.answer == "Which staff member do you mean?"
+    assert result.answer == 'I could not find staff "her". Which staff should I use?'
     assert planner.tool_names == ["submit_missing_input_clarification"]
     details = result.rendered_fact.details  # type: ignore[union-attr]
     clarification = details["clarifications"][0]  # type: ignore[index]
-    assert clarification["basis"] == "unsupported_reference"
-    assert clarification["knownInputId"] == "question_contract:her"
-    assert "known_input:question_contract:her" in clarification["evidenceRefs"]
+    assert clarification["need"] == "target_reference"
+    assert clarification["reason"] == "unresolved_reference"
+    assert clarification["subjects"] == [
+        {
+            "kind": "question_input",
+            "id": "question_contract:her",
+            "label": "staff",
+            "sourceText": "her",
+            "options": [],
+        }
+    ]
+    assert {"kind": "known_input", "id": "known_input:question_contract:her"} in (
+        clarification["evidence"]
+    )
 
 
 def test_lookup_question_contract_rejects_false_inventory_check():
     payload = _question_contract_payload()
     answer_request = payload["answer_requests"][0]
     assert isinstance(answer_request, dict)
-    answer_request["input_requirements"] = {
-        "time_requirements": [],
-    }
     payload["question_input_inventory_check"] = {
         "all_input_like_phrases_declared": False,
     }
-    with pytest.raises(ValueError, match="all_input_like_phrases_declared must be true"):
+    with pytest.raises(
+        ValueError, match="all_input_like_phrases_declared must be true"
+    ):
         parse_question_contract(
             tool_name=ANSWER_REQUEST_CONTRACT_TOOL_NAME,
             payload=payload,
@@ -540,20 +563,12 @@ def test_lookup_active_clarification_accepts_known_inputs_from_prior_question():
                     ),
                 ),
                 known_inputs=(
-                    RequestedFactKnownInput(
-                        id="store",
-                        kind=KnownInputKind.REFERENCE,
-                        source=KnownInputSource.QUESTION_CONTEXT,
-                        text="ABC Mall",
-                        lookup_text="ABC Mall",
-                        description="location",
+                    _known_reference_input(
+                        "store",
+                        "ABC Mall",
+                        value_meaning_hint="location",
                     ),
-                    RequestedFactKnownInput(
-                        id="date",
-                        kind=KnownInputKind.TIME,
-                        source=KnownInputSource.QUESTION_CONTEXT,
-                        text="yesterday",
-                    ),
+                    _known_time_input("date", "yesterday"),
                 ),
             ),
         )
@@ -751,7 +766,7 @@ def test_lookup_active_clarification_accepts_known_inputs_from_prior_question():
         ports,
     )
 
-    assert result.status == "COMPLETED", (result)
+    assert result.status == "COMPLETED", result
     assert result.answer == "50000"
 
 
@@ -880,7 +895,7 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_as_raw_question_with
                                 "requested_value_frame": "total sales amount",
                             }
                         ],
-                        "input_decisions": [],
+                        "used_question_inputs": [],
                     }
                 ],
                 "question_input_inventory_check": {
@@ -927,13 +942,12 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_as_raw_question_with
                     {
                         "input_ref": "input_period",
                         "source": "question_context",
-                        "kind": "time_text",
-                        "reference_text": "the day before",
-                        "satisfies_requirement_id": "period_scope",
+                        "kind": "literal_text",
+                        "role": "time_value",
+                        "source_text": "the day before",
+                        "resolved_value_text": "the day before",
                         "inventory_check": {
-                            "why_this_is_an_input": (
-                                "the day before is a time scope"
-                            )
+                            "why_this_is_an_input": ("the day before is a time scope")
                         },
                     }
                 ],
@@ -942,17 +956,6 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_as_raw_question_with
                         "answer_fact": "total sales amount for the day before",
                         "answer_expression": {"family": "scalar_aggregate"},
                         "answer_subject": _answer_subject_payload("the day before"),
-                        "input_requirements": {
-                            "time_requirements": [
-                                {
-                                    "requirement_id": "period_scope",
-                                    "source_text": "the day before",
-                                    "why_required": (
-                                        "the day before constrains the sales period"
-                                    ),
-                                }
-                            ]
-                        },
                         "answer_population": {
                             "population_label": "sales for the day before",
                             "counted_unit": "sale",
@@ -970,8 +973,7 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_as_raw_question_with
                                     "kind": "NORMAL_INSTANCE_GUARD",
                                     "polarity": "MUST_PASS",
                                     "test_question": (
-                                        "Is this an ordinary domain instance "
-                                        "of a sale?"
+                                        "Is this an ordinary domain instance of a sale?"
                                     ),
                                 },
                             ],
@@ -981,9 +983,7 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_as_raw_question_with
                                 "description": "total sales amount",
                             }
                         ],
-                        "input_decisions": [
-                            {"input_ref": "input_period", "use_input": True}
-                        ],
+                        "used_question_inputs": ["input_period"],
                     }
                 ],
                 "question_input_inventory_check": {

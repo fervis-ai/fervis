@@ -12,7 +12,7 @@ from fervis.interfaces.django import question_run_ports
 from fervis.run_work.queue.django.models import RunWorkItem
 from fervis.run_work.queue.django.queue import claim_run_work_items
 from fervis.interfaces.django.composition import RUN_CONTEXT_KEY
-from fervis.lineage.enums import ClarificationBasis, RunStepKind, RunTriggerKind
+from fervis.lineage.enums import RunStepKind, RunTriggerKind
 from fervis.lineage.models import (
     ClarificationRequest,
     ClarificationResponse,
@@ -22,6 +22,7 @@ from fervis.lineage.models import (
     RunStep,
     RuntimeErrorDetail,
 )
+from fervis.lookup.clarification import ClarificationNeed, ClarificationReason
 from fervis.questions.contracts import ExecutionMode, QuestionPrincipal
 from fervis.questions.ports import (
     QuestionRunRecord,
@@ -354,8 +355,25 @@ def test_django_question_run_port_persists_clarification_response_continuation(
         clarification_id="clar_1",
         run=run,
         step=step,
-        basis=ClarificationBasis.MULTIPLE_MATCHING_ENTITIES.value,
-        question_text="Which store?",
+        need=ClarificationNeed.TARGET_REFERENCE.value,
+        reason=ClarificationReason.MULTIPLE_MATCHING_ENTITIES.value,
+        payload_json={
+            "id": "clar_1",
+            "need": "target_reference",
+            "reason": "multiple_matching_entities",
+            "requestedFactId": "question_contract",
+            "question": "Which matching store should I use?",
+            "subjects": [
+                {
+                    "kind": "question_input",
+                    "id": "store",
+                    "label": "store",
+                    "sourceText": "",
+                    "options": [],
+                }
+            ],
+            "evidence": [],
+        },
     )
     ClarificationResponse.objects.create(
         response_id="clar_response_1",

@@ -1,19 +1,23 @@
 id: partial_token_input_span_fails_closed
 description: Parser rejects input spans that only match part of a larger token.
 migrates:
-  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_rejects_partial_token_input_spans
+- api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_rejects_partial_token_input_spans
 kind: algorithm
 algorithm: question_contract.parse
 input:
   question_context: Annual sales above 100
   question_inputs:
-    - input_ref: person
-      source: question_context
-      kind: named_reference_text
-      reference_text: Ann
-      target_meaning: named entity
-      lookup_text: Ann
-      inventory_check: {why_this_is_an_input: Ann is a named reference}
-  used_input_refs: [person]
+  - input_ref: person
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: Ann is a named reference
+    value_source_text: Ann
+    resolved_value_text: Ann
+    value_meaning_hint: named entity
+    role: reference_value
+  used_input_refs:
+  - person
 expect:
-  error_contains: input text must come from question context
+  result_contains:
+    status: rejected

@@ -15,6 +15,7 @@ from fervis.lookup.fact_plan.relations import (
     Relation,
     RelationSourceAppliedFilter,
     RelationSourcePopulationChoice,
+    RelationSourceReviewScopeDecision,
     RelationSourceRowFilter,
     SourceKind,
 )
@@ -89,6 +90,7 @@ class CompiledPopulationChoice:
     included_values: tuple[str, ...]
     excluded_values: tuple[str, ...]
     proof_refs: tuple[str, ...] = ()
+    review_scope_decisions: tuple[RelationSourceReviewScopeDecision, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -190,11 +192,48 @@ def compile_value_uses(
 
     return CompiledValueUses(
         endpoint_args=tuple(endpoint_args),
-        row_filters=tuple(row_filters),
+        row_filters=_canonical_row_filters(tuple(row_filters)),
         scalar_inputs=tuple(scalar_inputs),
         rank_limits=tuple(rank_limits),
         population_choices=tuple(population_choices),
     )
+
+
+def _canonical_row_filters(
+    row_filters: tuple[CompiledRowFilter, ...],
+) -> tuple[CompiledRowFilter, ...]:
+    output: list[CompiledRowFilter] = []
+    by_field: dict[tuple[str, str], CompiledRowFilter] = {}
+    for row_filter in row_filters:
+        key = (row_filter.relation_id, row_filter.field_id)
+        existing = by_field.get(key)
+        if existing is None:
+            by_field[key] = row_filter
+            output.append(row_filter)
+            continue
+        if not _same_row_filter_constraint(existing, row_filter):
+            raise VerificationError(
+                "relation "
+                f"{row_filter.relation_id} has conflicting row filters for "
+                f"field {row_filter.field_id}"
+            )
+        merged = CompiledRowFilter(
+            relation_id=existing.relation_id,
+            field_id=existing.field_id,
+            operator=existing.operator,
+            value=existing.value,
+            proof_refs=_dedupe_refs((*existing.proof_refs, *row_filter.proof_refs)),
+        )
+        by_field[key] = merged
+        output[output.index(existing)] = merged
+    return tuple(output)
+
+
+def _same_row_filter_constraint(
+    left: CompiledRowFilter,
+    right: CompiledRowFilter,
+) -> bool:
+    return left.operator == right.operator and left.value == right.value
 
 
 def _append_relation_source_row_filters(
@@ -211,7 +250,7 @@ def _append_relation_source_row_filters(
                     relation_id=relation.id,
                     field_id=source_row_filter.field_id,
                     operator=_source_row_filter_operator(source_row_filter),
-                    value=tuple(source_row_filter.values),
+                    value=_source_row_filter_value(source_row_filter),
                     proof_refs=tuple(source_row_filter.proof_refs),
                 )
             )
@@ -245,6 +284,13 @@ def _source_row_filter_operator(
         ) from exc
 
 
+def _source_row_filter_value(source_filter: RelationSourceRowFilter) -> object:
+    operator = _source_row_filter_operator(source_filter)
+    if operator == ValueFilterOperator.EQUALS and len(source_filter.values) == 1:
+        return source_filter.values[0]
+    return tuple(source_filter.values)
+
+
 def _append_relation_source_population_choices(
     population_choices: list[CompiledPopulationChoice],
     *,
@@ -271,6 +317,7 @@ def _compiled_population_choice(
         included_values=choice.included_values,
         excluded_values=choice.excluded_values,
         proof_refs=choice.proof_refs,
+        review_scope_decisions=choice.review_scope_decisions,
     )
 
 

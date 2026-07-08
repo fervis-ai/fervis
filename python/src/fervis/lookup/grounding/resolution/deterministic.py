@@ -29,7 +29,6 @@ from fervis.lookup.fact_plan.values import (
     TimeComponent,
 )
 from fervis.lookup.question_contract import (
-    KnownInputKind,
     QuestionContract,
     RequestedFactKnownInput,
 )
@@ -45,10 +44,10 @@ def _deterministic_known_inputs(
 ) -> CanonicalInputLedger:
     values: list[FactValue] = []
     for known, requested_fact_ids in _known_input_bindings(question_contract):
-        if known.kind == KnownInputKind.TIME:
+        if known.is_time_value:
             continue
-        if known.kind in {KnownInputKind.LIMIT, KnownInputKind.NUMBER}:
-            literal = _literal_value(
+        if known.is_result_limit:
+            literal = _result_limit_value(
                 known,
                 applies_to_requested_fact_ids=requested_fact_ids,
             )
@@ -69,6 +68,7 @@ def time_resolution_tasks(
             known_input_id=known.id,
             known_input_text=known.text,
             requested_fact_id=requested_fact_ids[0] if requested_fact_ids else "",
+            time_expression=_time_expression(known),
             applies_to_requested_fact_ids=requested_fact_ids,
             requested_facts=tuple(
                 _requested_fact_card(facts_by_id[fact_id])
@@ -77,7 +77,7 @@ def time_resolution_tasks(
             ),
         )
         for known, requested_fact_ids in _known_input_bindings(question_contract)
-        if known.kind == KnownInputKind.TIME
+        if known.is_time_value
     )
 
 
@@ -174,7 +174,7 @@ def _ground_time_value(
         )
     return FactValue.time(
         id=_grounded_value_id(known.id),
-        expression=known.text,
+        expression=_time_expression(known),
         intent=dict(resolved.get(TimeField.INTENT) or {}),
         resolved_start=str(resolved.get(TimeField.START) or ""),
         resolved_end=str(resolved.get(TimeField.END) or ""),
@@ -193,7 +193,7 @@ def _resolve_time(
 ) -> dict[str, Any]:
     try:
         resolved = resolve_time(
-            known.text,
+            _time_expression(known),
             intent=date_intent,
             anchor_date=runtime_values.runtime_date,
             timezone=runtime_values.timezone,
@@ -204,7 +204,7 @@ def _resolve_time(
         ):
             return resolved
         return resolve_time(
-            known.text,
+            _time_expression(known),
             anchor_date=runtime_values.runtime_date,
             timezone=runtime_values.timezone,
             intent={
@@ -214,6 +214,10 @@ def _resolve_time(
         )
     except ValueError:
         return {}
+
+
+def _time_expression(known: RequestedFactKnownInput) -> str:
+    return known.resolved_value_text
 
 
 def time_anchor_period_from_memory_address(address: Any) -> dict[str, str] | None:
@@ -243,25 +247,15 @@ def _time_granularity(resolved: dict[str, Any]) -> str:
     )
 
 
-def _literal_value(
+def _result_limit_value(
     known: RequestedFactKnownInput,
     *,
     applies_to_requested_fact_ids: tuple[str, ...],
 ) -> FactValue:
-    value = known.numeric_value if known.numeric_value is not None else known.text
-    if isinstance(value, bool):
-        literal_type = LiteralType.BOOLEAN
-        text_value = str(value).lower()
-    elif isinstance(value, (int, float)) and not isinstance(value, bool):
-        literal_type = LiteralType.NUMBER
-        text_value = str(value)
-    else:
-        literal_type = LiteralType.STRING
-        text_value = str(value)
     return FactValue.literal(
         id=_grounded_value_id(known.id),
-        literal_type=literal_type,
-        value=text_value,
+        literal_type=LiteralType.NUMBER,
+        value=known.resolved_value_text,
         label=known.text,
         proof_refs=(f"known_input:{known.id}",),
         applies_to_requested_fact_ids=applies_to_requested_fact_ids,

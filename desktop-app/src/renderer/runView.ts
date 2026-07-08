@@ -12,6 +12,12 @@ export function firstClarification(run: RunPayload): ClarificationRequest | null
   return run.resultData.details.clarifications[0] ?? null;
 }
 
+export function clarificationOptions(
+  clarification: ClarificationRequest
+): readonly ClarificationOption[] {
+  return clarification.subjects.flatMap((subject) => subject.options);
+}
+
 export function runSummary(run: RunPayload): string {
   const clarification = firstClarification(run);
   if (clarification !== null) {

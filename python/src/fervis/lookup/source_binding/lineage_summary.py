@@ -84,17 +84,11 @@ def _invocation_decision_items(
     invocation: dict[str, Any],
 ) -> tuple[StepSummaryItem, ...]:
     items: list[StepSummaryItem] = []
-    source = str(invocation.get("source_candidate_id") or "")
-    decision = str(invocation.get("source_binding_decision") or "USE_SOURCE")
-    requested_fact = str(invocation.get("requested_fact_id") or "")
-    if source or decision:
+    binding_target = str(invocation.get("binding_target_id") or "")
+    if binding_target:
         items.append(
             StepSummaryItem(
-                text=_source_binding_header(
-                    source=source,
-                    decision=decision,
-                    requested_fact=requested_fact,
-                ),
+                text=f"Source binding {binding_target}",
                 detail=StepSummaryDetail.VERBOSE,
             )
         )
@@ -103,15 +97,6 @@ def _invocation_decision_items(
     items.extend(_fulfillment_basis_items(invocation.get("fulfillment_decisions")))
     items.extend(_param_basis_items(invocation.get("param_decisions")))
     return tuple(items)
-
-
-def _source_binding_header(*, source: str, decision: str, requested_fact: str) -> str:
-    header = f"Source binding {source}".strip()
-    if decision:
-        header = f"{header}: {decision}"
-    if requested_fact:
-        header = f"{header} for {requested_fact}"
-    return header
 
 
 def _population_basis_item(value: object) -> StepSummaryItem | None:

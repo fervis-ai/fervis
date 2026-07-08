@@ -22,4 +22,5 @@ input:
         fields:
           - {source: display}
 expect:
-  error_contains: conflicting project_to_identity row
+  result_contains:
+    status: rejected

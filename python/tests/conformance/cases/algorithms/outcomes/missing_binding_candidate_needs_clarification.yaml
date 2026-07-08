@@ -17,6 +17,17 @@ expect:
   result_contains:
     outcome_kind: needs_clarification
     clarifications:
-      - basis: unsupported_reference
-        known_input_id: alice
-        evidence_refs: [known_input:alice, read:staff_candidates]
+      - id: unsupported_staff
+        need: target_reference
+        reason: unsupported_reference
+        requestedFactId: rf_staff
+        subjects:
+          - kind: question_input
+            id: alice
+            label: reference
+            sourceText: staff
+        evidence:
+          - kind: known_input
+            id: known_input:alice
+          - kind: proof_ref
+            id: read:staff_candidates

@@ -1,0 +1,74 @@
+id: time_value_owned_by_used_question_inputs
+description: Question-contract parser accepts a supplied time value owned by used_question_inputs.
+migrates:
+- api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_accepts_positive_used_question_inputs
+kind: algorithm
+algorithm: question_contract.parse
+input:
+  question_context: How many shifts do we have today?
+  payload:
+    kind: question_contract
+    answer_requests_count: 1
+    answer_requests:
+    - answer_fact: number of shifts today
+      answer_expression:
+        family: scalar_aggregate
+      answer_subject:
+        subject_text: shifts
+        instance_interpretation:
+          kind: NORMAL_BUSINESS_INSTANCE
+      answer_population:
+        population_label: shifts today
+        counted_unit: shifts
+        membership_tests:
+        - test_id: pop_test_1
+          kind: SUBJECT_IDENTITY
+          polarity: MUST_PASS
+          test_question: Does the row/value represent shifts?
+          owned_question_input_refs: []
+        - test_id: pop_test_2
+          kind: EXPLICIT_USER_CONSTRAINT
+          polarity: MUST_PASS
+          test_question: Does the shift fall within today?
+          owned_question_input_refs: [time_1]
+      answer_outputs:
+      - description: number of shifts
+      used_question_inputs:
+      - time_1
+    question_inputs:
+    - input_ref: time_1
+      source: question_context
+      kind: literal_text
+      inventory_check:
+        why_this_is_an_input: today is a time scope
+      value_source_text: today
+      resolved_value_text: today
+      role: time_value
+    question_input_inventory_check:
+      all_input_like_phrases_declared: true
+expect:
+  result_contains:
+    requested_facts:
+    - input_refs:
+      - time_1
+      known_inputs:
+      - kind: literal_text
+        resolved_value_text: today
+        role: time_value
+  result_exact_fields:
+    question_inputs:
+    - id: time_1
+      kind: literal_text
+      source: question_context
+      text: today
+      resolved_input_ref: ''
+      resolved_value_text: today
+      field_label_text: ''
+      value_meaning_hint: ''
+      role: time_value
+    requested_fact_input_handoff:
+    - id: fact_1
+      input_refs:
+      - time_1
+      known_input_refs:
+      - time_1

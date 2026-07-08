@@ -22,4 +22,5 @@ input:
         aggregations:
           - {function: count, output_field: count}
 expect:
-  error_contains: aggregate carry field
+  result_contains:
+    status: rejected

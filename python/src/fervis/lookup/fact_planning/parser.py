@@ -24,6 +24,7 @@ from fervis.lookup.fact_plan.fact_plan import (
     PlanImpossible,
     PlanOutcomeKind,
 )
+from fervis.lookup.fact_planning import provider_contract as provider_output
 from fervis.lookup.fact_planning.pattern_plan import compile_pattern_answer_plan
 from fervis.lookup.source_binding import BoundSource
 
@@ -43,9 +44,11 @@ def parse_fact_plan(
         bound_sources,
         relation_catalog=relation_catalog,
     )
-    outcome = _dict(payload.get("outcome"), "outcome")
+    output = provider_output.FactPlanOutput.parse(payload)
+    outcome = _dict(output.outcome, "outcome")
     kind = _enum(PlanOutcomeKind, outcome.get("kind"), "outcome.kind")
     if kind == PlanOutcomeKind.FACT_PLAN:
+        provider_output.FactPlanAnswerOutput.parse(outcome)
         return FactPlan(
             outcome=_answer_plan(
                 outcome,
@@ -59,18 +62,20 @@ def parse_fact_plan(
             )
         )
     if kind == PlanOutcomeKind.NEEDS_CLARIFICATION:
+        clarification = provider_output.PlanClarificationOutput.parse(outcome)
         return FactPlan(
             outcome=PlanClarification(
                 missing_catalog_inputs=tuple(
                     _missing_catalog_input(item)
                     for item in _required_dicts(
-                        outcome.get("missing_catalog_inputs"),
+                        clarification.missing_catalog_inputs,
                         "missing_catalog_inputs",
                     )
                 )
             )
         )
     if kind == PlanOutcomeKind.IMPOSSIBLE:
+        impossible = provider_output.PlanImpossibleOutput.parse(outcome)
         return FactPlan(
             outcome=PlanImpossible(
                 blocked_facts=tuple(
@@ -80,7 +85,7 @@ def parse_fact_plan(
                         requested_fact_ids=requested_fact_ids,
                     )
                     for item in _required_dicts(
-                        outcome.get("blocked_facts"),
+                        impossible.blocked_facts,
                         "blocked_facts",
                     )
                 )
@@ -115,28 +120,29 @@ def _answer_plan(
 
 
 def _blocked_fact(
-    payload: dict[str, Any],
+    raw: dict[str, Any],
     *,
     evidence_resolver: dict[str, tuple[str, ...]],
     requested_fact_ids: tuple[str, ...],
 ) -> BlockedFact:
-    basis = _enum(BlockedFactBasis, payload.get("basis"), "blocked_fact.basis")
-    requested_fact_id = _text(payload.get("requested_fact_id"))
+    payload = provider_output.BlockedFactOutput.parse(raw)
+    basis = _enum(BlockedFactBasis, payload.basis, "blocked_fact.basis")
+    requested_fact_id = _text(payload.requested_fact_id)
     if requested_fact_ids and requested_fact_id not in set(requested_fact_ids):
         raise ValueError("blocked fact references unknown requested fact")
     return BlockedFact(
         requested_fact_id=requested_fact_id,
         basis=basis,
         evidence_refs=canonical_blocked_evidence_refs(
-            _required_strings(payload.get("evidence_refs"), "evidence_refs"),
+            _required_strings(payload.evidence_refs, "evidence_refs"),
             source_evidence_refs=evidence_resolver,
             requested_fact_ids=requested_fact_ids,
         ),
-        reviewed_read_ids=tuple(_strings(payload.get("reviewed_read_ids"))),
+        reviewed_read_ids=tuple(_strings(payload.reviewed_read_ids)),
         nearest_fields=tuple(
-            _blocked_fact_field(item) for item in _dicts(payload.get("nearest_fields"))
+            _blocked_fact_field(item) for item in _dicts(payload.nearest_fields)
         ),
-        explanation=_text(payload.get("explanation")),
+        explanation=_text(payload.explanation),
     )
 
 
@@ -153,31 +159,34 @@ def _bound_source_evidence_resolver(
     )
 
 
-def _blocked_fact_field(payload: dict[str, Any]) -> BlockedFactField:
+def _blocked_fact_field(raw: dict[str, Any]) -> BlockedFactField:
+    payload = provider_output.BlockedFactFieldOutput.parse(raw)
     return BlockedFactField(
-        read_id=_text(payload.get("read_id")),
-        field_id=_text(payload.get("field_id")),
+        read_id=_text(payload.read_id),
+        field_id=_text(payload.field_id),
     )
 
 
-def _missing_catalog_input(payload: dict[str, Any]) -> MissingCatalogInput:
+def _missing_catalog_input(raw: dict[str, Any]) -> MissingCatalogInput:
     kind = _enum(
         MissingCatalogInputKind,
-        payload.get("kind"),
+        raw.get("kind"),
         "missing_catalog_input.kind",
     )
     if kind == MissingCatalogInputKind.REQUIRED_INPUT:
+        payload = provider_output.MissingCatalogRequiredInputOutput.parse(raw)
         return MissingCatalogRequiredInput(
-            id=_text(payload.get("id")),
-            requested_fact_id=_text(payload.get("requested_fact_id")),
-            required_catalog_input_id=_text(payload.get("required_catalog_input_id")),
+            id=_text(payload.id),
+            requested_fact_id=_text(payload.requested_fact_id),
+            required_catalog_input_id=_text(payload.required_catalog_input_id),
         )
     if kind == MissingCatalogInputKind.CHOICE_INPUT:
+        payload = provider_output.MissingCatalogChoiceInputOutput.parse(raw)
         return MissingCatalogChoiceInput(
-            id=_text(payload.get("id")),
-            requested_fact_id=_text(payload.get("requested_fact_id")),
+            id=_text(payload.id),
+            requested_fact_id=_text(payload.requested_fact_id),
             required_catalog_choice_input_id=_text(
-                payload.get("required_catalog_choice_input_id")
+                payload.required_catalog_choice_input_id
             ),
         )
     raise ValueError(f"unsupported missing catalog input: {kind.value}")

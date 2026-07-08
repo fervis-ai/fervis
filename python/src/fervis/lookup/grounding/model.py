@@ -13,7 +13,6 @@ from fervis.lookup.relation_catalog import IdentityMetadata
 from fervis.lookup.turn_prompts.context import HostPromptContext
 from fervis.lookup.fact_plan.values import (
     FactValue,
-    IdentityValuePayload,
     TimeComponent,
     ValueComponent,
 )
@@ -30,6 +29,31 @@ class GroundingTerminalKind(StrEnum):
     AMBIGUOUS_BINDING = "ambiguous_binding"
     UNSUPPORTED_REFERENCE = "unsupported_reference"
     TIME_RESOLUTION_FAILED = "time_resolution_failed"
+
+
+class GroundedValueCertificationMethod(StrEnum):
+    RESOLVER_SOURCE_READ = "resolver_source_read"
+    IMPORTED_PRIOR_IDENTITY = "imported_prior_identity"
+
+
+@dataclass(frozen=True)
+class GroundedValueCertification:
+    value_id: str
+    method: GroundedValueCertificationMethod
+    authority_refs: tuple[str, ...] = ()
+    lineage_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.value_id.strip():
+            raise ValueError("grounded value certification requires value id")
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "value_id": self.value_id,
+            "method": self.method.value,
+            "authority_refs": list(self.authority_refs),
+            "lineage_refs": list(self.lineage_refs),
+        }
 
 
 @dataclass(frozen=True)
@@ -84,7 +108,6 @@ class InputBindingOption:
     known_input_id: str
     path: str
     route: InputBindingRoute | None = None
-    resolved_value: FactValue | None = None
 
 
 @dataclass(frozen=True)
@@ -94,10 +117,14 @@ class KnownInputBindingTask:
     known_input_kind: str
     requested_fact_id: str
     options: tuple[InputBindingOption, ...]
+    lookup_text: str
     known_input_description: str = ""
-    lookup_text: str = ""
     applies_to_requested_fact_ids: tuple[str, ...] = ()
     requested_facts: tuple[GroundingRequestedFactCard, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.lookup_text.strip():
+            raise ValueError("known input binding task requires lookup text")
 
 
 @dataclass(frozen=True)
@@ -105,8 +132,13 @@ class KnownTimeResolutionTask:
     known_input_id: str
     known_input_text: str
     requested_fact_id: str
+    time_expression: str
     applies_to_requested_fact_ids: tuple[str, ...] = ()
     requested_facts: tuple[GroundingRequestedFactCard, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.time_expression.strip():
+            raise ValueError("known time resolution task requires time expression")
 
 
 @dataclass(frozen=True)
@@ -144,7 +176,7 @@ def resolver_fit_question_for_option(
 ) -> str:
     return (
         f"Can this resolver search lookup text "
-        f"'{task.lookup_text or task.known_input_text}' and return canonical "
+        f"'{task.lookup_text}' and return canonical "
         f"API identity '{_option_identity_type(option)}' for target meaning "
         f"'{task.known_input_description}'?"
     )
@@ -157,11 +189,6 @@ def option_has_targetable_identity(option: InputBindingOption) -> bool:
 def _targetable_identity_type(option: InputBindingOption) -> str:
     if option.route is not None:
         return option.route.identity_type
-    if isinstance(option.resolved_value, FactValue) and isinstance(
-        option.resolved_value.payload,
-        IdentityValuePayload,
-    ):
-        return option.resolved_value.payload.identity_type
     return ""
 
 
@@ -186,6 +213,12 @@ class GroundedInputUse:
 class GroundingCandidate:
     id: str
     label: str = ""
+    entity_kind: str = ""
+    matched_label: str = ""
+    matched_field: str = ""
+    matched_value: str = ""
+    resolver_read_id: str = ""
+    resolver_label: str = ""
 
     def __post_init__(self) -> None:
         if not self.id:
@@ -203,6 +236,10 @@ class GroundingIssue:
     candidates: tuple[str, ...] = ()
     candidate_options: tuple[GroundingCandidate, ...] = ()
     proof_refs: tuple[str, ...] = ()
+    resolver_read_id: str = ""
+    resolver_endpoint_name: str = ""
+    resolver_field_id: str = ""
+    identity_field: str = ""
 
 
 @dataclass(frozen=True)
@@ -210,6 +247,7 @@ class CanonicalInputLedger:
     values: tuple[FactValue, ...] = ()
     uses: tuple[GroundedInputUse, ...] = ()
     issues: tuple[GroundingIssue, ...] = ()
+    certifications: tuple[GroundedValueCertification, ...] = ()
 
     @property
     def ok(self) -> bool:
