@@ -67,7 +67,26 @@ def _model_visible_evidence_item(
     values = choice_values_by_field.get((field, row_path), ())
     if field_type == "choice" and values:
         output["meaning"] = f"Choices: {', '.join(values)}."
+    identity = _model_visible_identity(item.get("identity"))
+    if identity:
+        output["identity"] = identity
     return {key: value for key, value in output.items() if value}
+
+
+def _model_visible_identity(raw_value: object) -> str:
+    if not isinstance(raw_value, dict):
+        return ""
+    entity_ref = str(raw_value.get("entity_ref") or "")
+    identity_field = str(raw_value.get("identity_field") or "")
+    if not entity_ref or not identity_field:
+        return ""
+    qualifiers = []
+    if raw_value.get("primary_key"):
+        qualifiers.append("primary")
+    if raw_value.get("stable", True):
+        qualifiers.append("stable")
+    qualifier_text = f" {'_'.join(qualifiers)}" if qualifiers else ""
+    return f"{entity_ref}.{identity_field}{qualifier_text}"
 
 
 def _choice_values_by_field(

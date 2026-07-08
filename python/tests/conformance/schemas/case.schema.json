@@ -28,6 +28,7 @@
         "conversation_memory.card_projection",
         "conversation_memory.expand_activated",
         "conversation_resolution.parse",
+        "conversation_resolution.overlay",
         "conversation_resolution.schema",
         "question_contract.parse",
         "question_contract.schema",
@@ -51,6 +52,7 @@
         "source_binding.row_predicates",
         "source_binding.row_predicate_parse",
         "source_binding.row_predicate_schema",
+        "source_binding.review_scope",
         "source_binding.schema_surface",
         "execution.relation_engine",
         "execution.calendar_relation",
@@ -73,6 +75,7 @@
         "planning.value_contract",
         "planning.value_uses",
         "core.capabilities_from_schema",
+        "grounding.contract",
         "memory.activate",
         "memory.build_artifact",
         "memory.lineage_memory_artifacts",
@@ -103,13 +106,7 @@
           "required": ["result_equals"]
         },
         {
-          "required": ["error_contains"]
-        },
-        {
-          "required": ["text_excludes"]
-        },
-        {
-          "required": ["text_excludes_from"]
+          "required": ["result_exact_fields"]
         }
       ],
       "properties": {
@@ -119,23 +116,8 @@
         "result_equals": {
           "type": "object"
         },
-        "error_contains": {
-          "type": "string"
-        },
-        "text_excludes": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "text_excludes_from": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
+        "result_exact_fields": {
+          "type": "object"
         }
       }
     }

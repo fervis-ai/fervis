@@ -12,7 +12,11 @@ from fervis.lookup.relation_catalog.from_host_api import (
 )
 from fervis.lookup.relation_catalog import validate_relation_catalog
 
-from tests.testkit.assertions import subset_mismatches
+from tests.testkit.assertions import (
+    expects_rejection,
+    status_mismatches,
+    subset_mismatches,
+)
 
 
 def run_host_api_projection_case(payload: dict[str, Any]) -> list[str]:
@@ -22,12 +26,14 @@ def run_host_api_projection_case(payload: dict[str, Any]) -> list[str]:
         )
         validate_relation_catalog(catalog)
     except Exception as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error and expected_error in str(exc):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {exc}"]
-    if "error_contains" in payload["expect"]:
-        return [f"expected error containing {payload['expect']['error_contains']!r}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     result = {
         "reads": {
             read.id: {

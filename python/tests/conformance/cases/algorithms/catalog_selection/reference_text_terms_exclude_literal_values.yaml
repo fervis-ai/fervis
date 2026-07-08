@@ -1,54 +1,66 @@
 id: reference_text_terms_exclude_literal_values
-description: Catalog selection can use reference text while excluding literal numeric input text.
+description: Catalog selection can use reference text while excluding literal result-limit input text.
 migrates:
-  - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_uses_reference_text_without_literal_value_contamination
+- api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_uses_reference_text_without_literal_value_contamination
 kind: algorithm
 algorithm: catalog_selection.select
 input:
   catalog:
     reads:
-      - id: generic_field_read
-        endpoint_name: list_records
-        resource_names: [available data]
-        facts: [{ref: available.data.fields}]
-      - id: buyer_profile_read
-        endpoint_name: list_records
-        resource_names: [buyer profile]
-        facts: [{ref: buyer.profile.date_of_birth}]
-      - id: inventory_read
-        endpoint_name: list_records
-        resource_names: [inventory]
-        facts: [{ref: inventory.quantity}]
+    - id: generic_field_read
+      endpoint_name: list_records
+      resource_names:
+      - available data
+      facts:
+      - ref: available.data.fields
+    - id: buyer_profile_read
+      endpoint_name: list_records
+      resource_names:
+      - buyer profile
+      facts:
+      - ref: buyer.profile.date_of_birth
+    - id: inventory_read
+      endpoint_name: list_records
+      resource_names:
+      - inventory
+      facts:
+      - ref: inventory.quantity
   requested_facts:
-    - id: fact_1
-      description: Whether the requested data is exposed
-      answer_outputs:
-        - id: output_1
-          description: Yes or no answer
-      known_inputs:
-        - id: reference_1
-          kind: named_reference_text
-          source: question_context
-          text: age or date of birth fields
-          lookup_text: age or date of birth fields
-        - id: number_1
-          kind: number_text
-          source: question_context
-          text: "125"
-          numeric_value: 125
+  - id: fact_1
+    description: Whether the requested data is exposed
+    answer_outputs:
+    - id: output_1
+      description: Yes or no answer
+    known_inputs:
+    - id: reference_1
+      kind: literal_text
+      source: question_context
+      text: age or date of birth fields
+      resolved_value_text: age or date of birth fields
+      role: reference_value
+    - id: number_1
+      kind: literal_text
+      source: question_context
+      text: top 125
+      resolved_value_text: '125'
+      role: result_limit
   resource_name_matches:
-    - requested_fact_id: fact_1
-      answer_output_resource_lineage:
-        - answer_output_id: output_1
-          support_role: MEASURED_VALUE
-          source_text: age or date of birth fields
-          matching_resource_names: [buyer profile]
+  - requested_fact_id: fact_1
+    answer_output_resource_lineage:
+    - answer_output_id: output_1
+      support_role: MEASURED_VALUE
+      source_text: age or date of birth fields
+      matching_resource_names:
+      - buyer profile
   max_reads_per_fact: 2
 expect:
   result_contains:
-    selected_read_ids: [buyer_profile_read]
+    selected_read_ids:
+    - buyer_profile_read
     requested_fact_selections:
-      - requested_fact_id: fact_1
-        query_terms: [buyer, profile]
-        selected_read_ids: [buyer_profile_read]
-
+    - requested_fact_id: fact_1
+      query_terms:
+      - buyer
+      - profile
+      selected_read_ids:
+      - buyer_profile_read

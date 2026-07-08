@@ -24,4 +24,5 @@ input:
               type: number
               value: "1"
 expect:
-  error_contains: requires outcome
+  result_contains:
+    status: rejected

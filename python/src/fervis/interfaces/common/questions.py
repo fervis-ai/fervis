@@ -40,6 +40,7 @@ _CONTINUE_QUESTION_KEYS = frozenset(
         "triggerKind",
         "triggerRunId",
         "clarificationId",
+        "selectedOptionId",
         "provider",
         "modelKey",
         "maxBudgetUsd",
@@ -360,6 +361,7 @@ class QuestionInterface:
                 field="clarificationId",
                 message="clarificationId is required.",
             )
+        selected_option_id = str(payload.get("selectedOptionId") or "").strip() or None
         model = self.model_policy.admit(
             requested_provider=payload.get("provider"),
             requested_model_key=_optional_string(payload, "modelKey"),
@@ -376,6 +378,7 @@ class QuestionInterface:
             previous_run_id=None,
             trigger_clarification_response_run_id=trigger_run_id,
             trigger_clarification_response_id=clarification_id,
+            trigger_clarification_selected_option_id=selected_option_id,
             max_budget_usd=_optional_float(payload, "maxBudgetUsd"),
             max_thinking_tokens=_optional_int(payload, "maxThinkingTokens"),
             limits=self.limits,
@@ -543,6 +546,7 @@ def _clarification_next_action(
                 "triggerKind": CLARIFICATION_RESPONSE_TRIGGER,
                 "triggerRunId": run_id,
                 "clarificationId": clarification_id,
+                "selectedOptionId": "<selected-option-id>",
             },
         },
     }
@@ -558,4 +562,4 @@ def _first_clarification_id(payload: dict[str, Any]) -> str:
     first = clarifications[0]
     if not isinstance(first, dict):
         return ""
-    return str(first.get("id") or first.get("clarification_id") or "")
+    return str(first.get("id") or "")

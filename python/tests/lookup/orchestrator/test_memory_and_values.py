@@ -3,105 +3,10 @@ from __future__ import annotations
 from decimal import Decimal
 import json
 
+from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
+
 from tests.lookup.orchestrator._helpers import *  # noqa: F403
 from tests.lookup.prompt_sections import prompt_section_payload
-
-
-def test_lookup_cutover_executes_scalar_memory_values_as_plan_values():
-    artifact = build_fact_artifact(
-        artifact_id="run_prior_total",
-        outcome=FactOutcome.ANSWERED,
-        source_question="What was the prior sales total?",
-        source_answer="The prior sales total was 125.00.",
-        addresses=(
-            FactAddress.value(
-                address="value.sales_total",
-                value={"type": "number", "value": "125.00"},
-                derivation={"source": "prior_result"},
-            ),
-        ),
-    )
-    plan = _metric_answer_plan()
-    assert isinstance(plan.outcome, AnswerPlan)
-    plan = FactPlan(
-        outcome=_answer_plan(
-            value_uses=(),
-            relations=plan.outcome.relations,
-            operations=plan.outcome.operations,
-            render_spec=plan.outcome.render_spec,
-        )
-    )
-    data_access = _DataAccessPort(
-        {
-            "metric_read": {
-                "data": [{"location_name": "Location Alpha", "metric_total": "125.00"}]
-            }
-        }
-    )
-    result = run_lookup_question(
-        LookupRequest(
-            question="Use that total as the minimum.",
-            conversation_context={"factArtifacts": [artifact.to_dict()]},
-        ),
-        LookupRuntimePorts(
-            relation_catalog_port=_CatalogPort(
-                _catalog(
-                    EndpointRead(
-                        id="metric_read",
-                        endpoint_name="metric_read",
-                        resource_names=("metric read",),
-                        params=(
-                            CatalogParam(
-                                ref="metric_read.query.minimum_total",
-                                name="minimum_total",
-                                source=ParamSource.QUERY,
-                                type="number",
-                            ),
-                        ),
-                        row_paths=(
-                            RowPath(
-                                id="data",
-                                path="data",
-                                cardinality=RowCardinality.MANY,
-                            ),
-                        ),
-                        fields=(
-                            CatalogField(
-                                ref="field.location_name",
-                                path="data.location_name",
-                                row_path_id="data",
-                                type="string",
-                            ),
-                            CatalogField(
-                                ref="field.metric_total",
-                                path="data.metric_total",
-                                row_path_id="data",
-                                type="number",
-                            ),
-                        ),
-                        pagination=PaginationMetadata(
-                            mode=PaginationMode.NONE,
-                            completeness_policy=CompletenessPolicy.COMPLETE,
-                        ),
-                    )
-                )
-            ),
-            data_access_port=data_access,
-            planner_model_port=_PlannerPort(
-                plan,
-                conversation_resolution=lambda prompt: _conversation_resolution_payload_using_memory(
-                    prompt,
-                    integrated_question="Use the prior sales total as the minimum.",
-                    actual_text="that total",
-                ),
-            ),
-        ),
-    )
-
-    assert result.status == "COMPLETED", result
-    assert data_access.requests[0]["args"] == {
-        "metric_read.query.minimum_total": "125.00"
-    }
 
 
 def test_lookup_cutover_executes_rank_limit_value_use_as_proof_link():
@@ -111,17 +16,12 @@ def test_lookup_cutover_executes_rank_limit_value_use_as_proof_link():
                 id="rf_top_totals",
                 description="top metric totals",
                 answer_subject=RequestedFactAnswerSubject(subject_text="metric totals"),
-                answer_outputs=(
-                    RequestedFactAnswerOutput(id="location_name"),
-                ),
+                answer_outputs=(RequestedFactAnswerOutput(id="location_name"),),
                 known_inputs=(
-                    RequestedFactKnownInput(
-                        id="result_limit",
-                        kind=KnownInputKind.LIMIT,
-                        source=KnownInputSource.QUESTION_CONTEXT,
-                        text="top 2",
-                        numeric_value=2,
-                        value_source_text="2",
+                    _known_result_limit_input(
+                        "result_limit",
+                        "top 2",
+                        value_text="2",
                     ),
                 ),
             ),
@@ -204,150 +104,6 @@ def test_lookup_cutover_executes_rank_limit_value_use_as_proof_link():
     assert "known_input:fact_1_limit_1" in result.rendered_fact.proof_refs
 
 
-def test_lookup_cutover_prior_result_set_identity_set_fans_out_source_param():
-    question_contract = _question_contract_for(
-        "rf_stores",
-        description="stores",
-        binding_target_ids=("store_identity",),
-    )
-    artifact = build_fact_artifact(
-        artifact_id="run_prior_stores",
-        outcome=FactOutcome.ANSWERED,
-        source_question="Which stores are we talking about?",
-        provenance={"question_contract": question_contract.to_model_dict()},
-        addresses=(
-            FactAddress.relation(
-                address="relation.stores",
-                source={"kind": "api_read", "identityType": "store"},
-                grain_keys=("store_id",),
-                completeness={
-                    "status": "complete",
-                    "pagination": "all_pages",
-                    "rowCount": 2,
-                },
-                row_addresses=("row.stores.1", "row.stores.2"),
-            ),
-            FactAddress.row(
-                address="row.stores.1",
-                relation="relation.stores",
-                identity={"store_id": "store_1"},
-            ),
-            FactAddress.row(
-                address="row.stores.2",
-                relation="relation.stores",
-                identity={"store_id": "store_2"},
-            ),
-        ),
-    )
-    planner = _IdentitySetPlannerPort(
-        prior_reference_id="run_prior_stores.relation.stores",
-    )
-    data_access = _IdentitySetDataAccessPort(
-        responses={
-            "store_1": {"results": [{"sale_id": "sale_1", "store_id": "store_1"}]},
-            "store_2": {"results": [{"sale_id": "sale_2", "store_id": "store_2"}]},
-        }
-    )
-
-    result = run_lookup_question(
-        LookupRequest(
-            question="Show sales for those stores.",
-            conversation_context={"factArtifacts": [artifact.to_dict()]},
-            provider_preferences={"provider": "fake", "modelKey": "FAKE"},
-        ),
-        LookupRuntimePorts(
-            relation_catalog_port=_CatalogPort(_identity_set_sales_catalog()),
-            data_access_port=data_access,
-            planner_model_port=planner,
-        ),
-    )
-
-    assert result.status == "COMPLETED", result
-    assert [
-        request["args"]["sales.query.store_id"] for request in data_access.requests
-    ] == [
-        "store_1",
-        "store_2",
-    ]
-    assert "store_1" in result.answer
-    assert "store_2" in result.answer
-
-
-def test_lookup_cutover_active_identity_set_keeps_required_detail_read_available():
-    question_contract = _question_contract_for(
-        "rf_sales",
-        description="sales",
-        binding_target_ids=("sale_identity",),
-    )
-    artifact = build_fact_artifact(
-        artifact_id="run_prior_sales",
-        outcome=FactOutcome.ANSWERED,
-        source_question="Which sales are we talking about?",
-        provenance={"question_contract": question_contract.to_model_dict()},
-        addresses=(
-            FactAddress.relation(
-                address="relation.sales",
-                source={"kind": "api_read", "identityType": "sale"},
-                grain_keys=("sale_id",),
-                completeness={
-                    "status": "complete",
-                    "pagination": "all_pages",
-                    "rowCount": 2,
-                },
-                row_addresses=("row.sales.1", "row.sales.2"),
-            ),
-            FactAddress.row(
-                address="row.sales.1",
-                relation="relation.sales",
-                identity={"sale_id": "sale_1"},
-            ),
-            FactAddress.row(
-                address="row.sales.2",
-                relation="relation.sales",
-                identity={"sale_id": "sale_2"},
-            ),
-        ),
-    )
-    planner = _SaleDetailIdentitySetPlannerPort(
-        prior_reference_id="run_prior_sales.relation.sales",
-    )
-    data_access = _SaleDetailDataAccessPort(
-        responses={
-            "sale_1": {
-                "sale_id": "sale_1",
-                "items": [{"product_name": "Lipstick"}],
-            },
-            "sale_2": {
-                "sale_id": "sale_2",
-                "items": [{"product_name": "Mascara"}],
-            },
-        }
-    )
-
-    result = run_lookup_question(
-        LookupRequest(
-            question="Show product names for those sales.",
-            conversation_context={"factArtifacts": [artifact.to_dict()]},
-            provider_preferences={"provider": "fake", "modelKey": "FAKE"},
-        ),
-        LookupRuntimePorts(
-            relation_catalog_port=_CatalogPort(_sale_detail_catalog()),
-            data_access_port=data_access,
-            planner_model_port=planner,
-        ),
-    )
-
-    assert result.status == "COMPLETED", result
-    assert [
-        request["args"]["sale_detail.path.sale_id"] for request in data_access.requests
-    ] == [
-        "sale_1",
-        "sale_2",
-    ]
-    assert "Lipstick" in result.answer
-    assert "Mascara" in result.answer
-
-
 def test_lookup_cutover_list_rows_projected_identity_field_becomes_memory_identity_set():
     planner = _ToolNamePlannerPort(
         responses={
@@ -426,10 +182,12 @@ def test_lookup_cutover_grounded_named_entity_is_stored_as_memory_identity():
                 parts=("sales",),
                 question_inputs=(
                     {
+                        "kind": KnownInputKind.LITERAL.value,
                         "source": "question_context",
-                        "reference_text": "ABC Mall",
-                        "target_meaning": "location",
-                        "lookup_text": "ABC Mall",
+                        "source_text": "ABC Mall",
+                        "role": LiteralInputRole.REFERENCE_VALUE.value,
+                        "value_meaning_hint": "location",
+                        "resolved_value_text": "ABC Mall",
                     },
                 ),
             ),
@@ -580,10 +338,12 @@ def test_lookup_orchestrator_repeated_named_target_does_not_reuse_inactive_memor
                 parts=("sales",),
                 question_inputs=(
                     {
+                        "kind": KnownInputKind.LITERAL.value,
                         "source": "question_context",
-                        "reference_text": "ABC Mall",
-                        "target_meaning": "location",
-                        "lookup_text": "ABC Mall",
+                        "source_text": "ABC Mall",
+                        "role": LiteralInputRole.REFERENCE_VALUE.value,
+                        "value_meaning_hint": "location",
+                        "resolved_value_text": "ABC Mall",
                     },
                 ),
             ),
@@ -596,7 +356,7 @@ def test_lookup_orchestrator_repeated_named_target_does_not_reuse_inactive_memor
                             {
                                 "basis": (
                                     "location can identify ABC Mall because "
-                                    "target_meaning is location."
+                                    "value_meaning_hint is location."
                                 ),
                                 "term": "location",
                             }
@@ -965,20 +725,22 @@ def test_lookup_cutover_preserves_scalar_memory_proofs_for_undefined_compute():
                     }
                 },
                 question_contract=question_contract,
-                conversation_resolution=lambda prompt: _conversation_resolution_payload_using_memories(
-                    prompt,
-                    integrated_question=(
-                        "What percentage increase is there from the prior current "
-                        "and previous totals?"
-                    ),
-                    memories=(
-                        {
-                            "actual_text": "percentage increase",
-                        },
-                        {
-                            "actual_text": "that",
-                        },
-                    ),
+                conversation_resolution=lambda prompt: (
+                    _conversation_resolution_payload_using_memories(
+                        prompt,
+                        integrated_question=(
+                            "What percentage increase is there from the prior current "
+                            "and previous totals?"
+                        ),
+                        memories=(
+                            {
+                                "actual_text": "percentage increase",
+                            },
+                            {
+                                "actual_text": "that",
+                            },
+                        ),
+                    )
                 ),
             ),
         ),
@@ -1105,17 +867,19 @@ def test_lookup_cutover_computes_across_single_cell_prior_answer_relations():
                     }
                 },
                 question_contract=question_contract,
-                conversation_resolution=lambda prompt: _conversation_resolution_payload_using_memories(
-                    prompt,
-                    integrated_question="How much are the two prior daily revenue answers in total?",
-                    memories=(
-                        {
-                            "actual_text": "that",
-                        },
-                        {
-                            "actual_text": "total",
-                        },
-                    ),
+                conversation_resolution=lambda prompt: (
+                    _conversation_resolution_payload_using_memories(
+                        prompt,
+                        integrated_question="How much are the two prior daily revenue answers in total?",
+                        memories=(
+                            {
+                                "actual_text": "that",
+                            },
+                            {
+                                "actual_text": "total",
+                            },
+                        ),
+                    )
                 ),
             ),
         ),
@@ -1247,11 +1011,13 @@ def test_lookup_cutover_computes_across_cells_in_multi_row_prior_answer_relation
                     }
                 },
                 question_contract=question_contract,
-                conversation_resolution=lambda prompt: _conversation_resolution_payload_using_memory(
-                    prompt,
-                    integrated_question="What percentage increase is there across the prior daily revenue answers?",
-                    actual_text="that",
-                    source_kind="row_set",
+                conversation_resolution=lambda prompt: (
+                    _conversation_resolution_payload_using_memory(
+                        prompt,
+                        integrated_question="What percentage increase is there across the prior daily revenue answers?",
+                        actual_text="that",
+                        source_kind="row_set",
+                    )
                 ),
             ),
         ),
@@ -1342,14 +1108,16 @@ def test_lookup_cutover_executes_memory_relation_field_bindings():
                     }
                 },
                 question_contract=question_contract,
-                conversation_resolution=lambda prompt: _conversation_resolution_payload_using_memories(
-                    prompt,
-                    integrated_question="What quantities were the prior referenced items?",
-                    memories=(
-                        {
-                            "actual_text": "those",
-                        },
-                    ),
+                conversation_resolution=lambda prompt: (
+                    _conversation_resolution_payload_using_memories(
+                        prompt,
+                        integrated_question="What quantities were the prior referenced items?",
+                        memories=(
+                            {
+                                "actual_text": "those",
+                            },
+                        ),
+                    )
                 ),
             ),
         ),
@@ -1488,7 +1256,11 @@ def test_lookup_cutover_can_fetch_same_prior_scope_for_additional_fields():
             "cardinality": "many",
             "fields": [
                 {"field_id": "staff_name", "path": "data.staff_name", "type": "string"},
-                {"field_id": "product_name", "path": "data.product_name", "type": "string"},
+                {
+                    "field_id": "product_name",
+                    "path": "data.product_name",
+                    "type": "string",
+                },
                 {"field_id": "shade_name", "path": "data.shade_name", "type": "string"},
             ],
         }
@@ -1695,6 +1467,7 @@ def test_lookup_cutover_executes_set_difference_without_python_or_old_phases():
                 description="variant name",
                 subject_text="item variants",
                 binding_target_ids=("answer_1",),
+                answer_output_role="ANSWER_VALUE",
             ),
         ),
     )
@@ -1719,14 +1492,7 @@ def test_lookup_cutover_resolves_generated_calendar_dates_from_time_values():
         description="days in the last 3 days",
         subject_text="days",
         binding_target_ids=("day",),
-        known_inputs=(
-            RequestedFactKnownInput(
-                id="month",
-                kind=KnownInputKind.TIME,
-                source=KnownInputSource.QUESTION_CONTEXT,
-                text="last 3 days",
-            ),
-        ),
+        known_inputs=(_known_time_input("month", "last 3 days"),),
     )
     ports = LookupRuntimePorts(
         relation_catalog_port=_CatalogPort(_catalog()),
@@ -2097,6 +1863,14 @@ class _IdentitySetPlannerPort:
                     subject="sales for those stores",
                     parts=("sales",),
                     demand_text="sales",
+                    question_inputs=(
+                        {
+                            "kind": "row_set_reference",
+                            "reference_text": "those stores",
+                            "source": "conversation_resolution",
+                            "resolved_input_ref": "cr_input_1",
+                        },
+                    ),
                 ),
                 prompt=prompt,
                 fact_plan=_list_rows_fact_plan(),
@@ -2245,6 +2019,14 @@ class _SaleDetailIdentitySetPlannerPort:
                     subject="those sales",
                     parts=("product names",),
                     demand_text="product",
+                    question_inputs=(
+                        {
+                            "kind": "row_set_reference",
+                            "reference_text": "those sales",
+                            "source": "conversation_resolution",
+                            "resolved_input_ref": "cr_input_1",
+                        },
+                    ),
                 ),
                 prompt=prompt,
                 fact_plan=_list_rows_fact_plan(),

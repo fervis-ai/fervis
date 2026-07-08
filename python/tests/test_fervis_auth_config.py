@@ -319,7 +319,7 @@ def _write_project_config(
         "schema_version": "v0.1",
         "framework": framework,
         "default_environment": "local",
-        "host": {"organization_name": "", "about_api": ""},
+        "host": {"organization_name": "", "about_api": "", "timezone": "UTC"},
         "routes": {"prefix": "/fervis/" if framework == "django" else "/fervis"},
         "sources": [source],
         "models": {

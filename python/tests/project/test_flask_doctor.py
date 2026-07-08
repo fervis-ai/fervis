@@ -320,6 +320,7 @@ def _write_config(root: Path, *, app_target: str = "app:app") -> None:
                 "host": {
                     "organization_name": "Acme",
                     "about_api": "Acme operations API.",
+                    "timezone": "UTC",
                 },
                 "routes": {"prefix": "/fervis/"},
                 "models": {

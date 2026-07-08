@@ -6,7 +6,6 @@ from fervis.lineage import records
 from fervis.lineage.enums import (
     AnswerValueKind,
     ArtifactKind,
-    ClarificationBasis,
     ConversationOriginKind,
     FactResultKind,
     MemoryArtifactSourceKind,
@@ -24,6 +23,7 @@ from fervis.lineage.enums import (
     SourceReadStatus,
     choices,
 )
+from fervis.lookup.clarification import ClarificationNeed, ClarificationReason
 
 
 def default_conversation_read_context_ref() -> dict[str, str | None]:
@@ -700,10 +700,9 @@ class ClarificationRequest(models.Model):
         on_delete=models.PROTECT,
         related_name="clarification_requests",
     )
-    basis = models.CharField(max_length=64, choices=choices(ClarificationBasis))
-    question_text = models.TextField()
-    options_json = models.JSONField(default=list, blank=True)
-    evidence_refs_json = models.JSONField(default=list, blank=True)
+    need = models.CharField(max_length=64, choices=choices(ClarificationNeed))
+    reason = models.CharField(max_length=64, choices=choices(ClarificationReason))
+    payload_json = models.JSONField(default=dict)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -715,7 +714,8 @@ class ClarificationRequest(models.Model):
             ),
         ]
         indexes = [
-            models.Index(fields=["run", "basis"], name="fervis_clar_req_basis_idx"),
+            models.Index(fields=["run", "need"], name="fervis_clar_req_need_idx"),
+            models.Index(fields=["run", "reason"], name="fervis_clar_req_reason_idx"),
         ]
 
 

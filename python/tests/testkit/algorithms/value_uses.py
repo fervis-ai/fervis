@@ -32,7 +32,11 @@ from fervis.lookup.fact_plan.values import (
 )
 from fervis.lookup.fact_planning.value_validation import verify_value_contract
 
-from tests.testkit.assertions import subset_mismatches
+from tests.testkit.assertions import (
+    expects_rejection,
+    status_mismatches,
+    subset_mismatches,
+)
 from tests.testkit.catalog import catalog_from_payload
 
 
@@ -66,12 +70,14 @@ def run_value_uses_case(payload: dict[str, Any]) -> list[str]:
             ),
         )
     except VerificationError as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error and expected_error in str(exc):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {exc}"]
-    if "error_contains" in payload["expect"]:
-        return [f"expected error containing {payload['expect']['error_contains']!r}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     return subset_mismatches(
         actual=_compiled_payload(compiled),
         expected_subset=payload["expect"]["result_contains"],
@@ -88,12 +94,14 @@ def run_value_contract_case(payload: dict[str, Any]) -> list[str]:
             ),
         )
     except VerificationError as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error and expected_error in str(exc):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {exc}"]
-    if "error_contains" in payload["expect"]:
-        return [f"expected error containing {payload['expect']['error_contains']!r}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     return []
 
 

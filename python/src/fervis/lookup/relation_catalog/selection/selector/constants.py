@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import re
 
-from fervis.lookup.question_contract import KnownInputKind
-
 DEFAULT_MAX_CATALOG_READS_PER_FACT = 5
 MIN_CATALOG_READS_PER_FACT = 3
 _CATALOG_TERM_SCORE = 1
@@ -216,9 +214,4 @@ _ENDPOINT_SELECTION_STOPWORDS = (
     | _QUESTION_CONTRACT_BOILERPLATE_TERMS
     | _REST_API_ENDPOINT_GENERIC_TERMS
     | _ENDPOINT_SELECTION_NON_IDENTITY_TERMS
-)
-_KNOWN_TEXT_QUERY_KINDS = frozenset(
-    {
-        KnownInputKind.REFERENCE,
-    }
 )

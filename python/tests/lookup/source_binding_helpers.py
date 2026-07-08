@@ -2,10 +2,26 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from typing import Any
 from xml.etree import ElementTree
 
 from tests.lookup.prompt_sections import prompt_section_payload
+
+
+@dataclass(frozen=True)
+class _PromptBindingTarget:
+    binding_target_id: str
+    requested_fact_id: str
+    source_candidate_id: str
+    plan_shape: str
+    requirement_id: str
+    answer_output_ids: tuple[str, ...]
+    payload: dict[str, Any]
+
+    @property
+    def requires_answer_fulfillment(self) -> bool:
+        return bool(self.answer_output_ids)
 
 
 def source_fulfills_for_candidate(
@@ -97,6 +113,7 @@ def source_candidate_answer_population(
 def source_candidate_with_fields(
     prompt_or_payload: str | dict[str, Any],
     *,
+    requested_fact_id: str | None = None,
     kind: str | None = None,
     read_id: str | None = None,
     required: tuple[str, ...],
@@ -107,12 +124,22 @@ def source_candidate_with_fields(
         if isinstance(prompt_or_payload, str)
         else prompt_or_payload
     )
+    eligible_candidate_ids = _binding_target_source_ids_for_requested_fact(
+        prompt_or_payload,
+        requested_fact_id=requested_fact_id,
+    )
     for candidate in _all_source_candidates(payload):
+        candidate_id = _candidate_id(candidate)
+        if (
+            eligible_candidate_ids is not None
+            and candidate_id not in eligible_candidate_ids
+        ):
+            continue
         if kind is not None and candidate.get("kind") != kind:
             continue
         if read_id is not None and str(candidate.get("read_id") or "") != read_id:
             continue
-        field_ids = _source_candidate_field_ids(candidate)
+        field_ids = _candidate_field_ids(candidate)
         if set(required) <= field_ids and not (set(forbidden) & field_ids):
             return candidate
     raise AssertionError(
@@ -121,7 +148,51 @@ def source_candidate_with_fields(
     )
 
 
-def _source_candidate_field_ids(candidate: dict[str, Any]) -> set[str]:
+def _binding_target_source_ids_for_requested_fact(
+    prompt_or_payload: str | dict[str, Any],
+    *,
+    requested_fact_id: str | None,
+) -> frozenset[str] | None:
+    if not requested_fact_id or not isinstance(prompt_or_payload, str):
+        return None
+    return frozenset(
+        target.source_candidate_id
+        for target in _binding_targets(prompt_or_payload)
+        if target.requested_fact_id == requested_fact_id
+    )
+
+
+def source_candidate_with_kind(
+    prompt_or_payload: str | dict[str, Any],
+    *,
+    kind: str,
+) -> dict[str, Any]:
+    payload = (
+        _source_candidate_prompt_payload(prompt_or_payload)
+        if isinstance(prompt_or_payload, str)
+        else prompt_or_payload
+    )
+    for candidate in _all_source_candidates(payload):
+        if candidate.get("kind") == kind:
+            return candidate
+    raise AssertionError(f"prompt missing {kind} candidate")
+
+
+def _candidate_id(candidate: dict[str, Any]) -> str:
+    value = candidate.get("source_candidate_id")
+    if not isinstance(value, str) or not value:
+        raise AssertionError("source candidate requires source_candidate_id")
+    return value
+
+
+def _required_prompt_text(payload: dict[str, Any], *, key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise AssertionError(f"prompt payload requires {key}")
+    return value
+
+
+def _candidate_field_ids(candidate: dict[str, Any]) -> set[str]:
     surface = _candidate_binding_surface(candidate)
     field_ids = {
         str(item.get("field_id") or item.get("id") or "")
@@ -351,6 +422,19 @@ def _source_binding_payload_from_fact_plan_raw(
     }
 
 
+_NON_OUTPUT_SOURCE_ROLES = frozenset({"observed"})
+_SOURCE_BINDING_INVOCATION_FIELDS = frozenset(
+    {
+        "binding_target_id",
+        "answer_population",
+        "fulfillment_decisions",
+        "param_decisions",
+        "row_predicate_reviews",
+        "finite_choice_param_reviews",
+    }
+)
+
+
 def source_binding_payload_from_fact_plan_with_invocation_overrides(
     fact_plan: dict[str, Any],
     *,
@@ -365,12 +449,19 @@ def source_binding_payload_from_fact_plan_with_invocation_overrides(
         invocation = _source_binding_invocation_for_override(
             invocations,
             override=override,
+            prompt=prompt,
         )
         invocation.update(
             {
                 field: value
                 for field, value in override.items()
-                if field not in {"requested_fact_id", "source_candidate_id"}
+                if field
+                not in {
+                    "binding_target_id",
+                    "requested_fact_id",
+                    "source_candidate_id",
+                    "plan_shape",
+                }
             }
         )
     return source_binding_payload_for_one_call(payload, prompt=prompt)
@@ -380,17 +471,35 @@ def _source_binding_invocation_for_override(
     invocations: list[Any],
     *,
     override: dict[str, Any],
+    prompt: str,
 ) -> dict[str, Any]:
-    requested_fact_id = str(override.get("requested_fact_id") or "")
-    source_candidate_id = str(override.get("source_candidate_id") or "")
+    if "binding_target_id" in override:
+        binding_target_id = _required_fixture_text(
+            override,
+            key="binding_target_id",
+        )
+        matches = [
+            invocation
+            for invocation in invocations
+            if isinstance(invocation, dict)
+            and invocation.get("binding_target_id") == binding_target_id
+        ]
+        if len(matches) != 1:
+            raise AssertionError(
+                f"source binding invocation not found: {binding_target_id}"
+            )
+        return matches[0]
+    requested_fact_id = _required_fixture_text(override, key="requested_fact_id")
+    source_candidate_id = _optional_fixture_text(override, key="source_candidate_id")
     matches = [
         invocation
         for invocation in invocations
         if isinstance(invocation, dict)
-        and str(invocation.get("requested_fact_id") or "") == requested_fact_id
+        for target in (_binding_target_for_invocation(prompt, invocation),)
+        if target.requested_fact_id == requested_fact_id
         and (
             not source_candidate_id
-            or str(invocation.get("source_candidate_id") or "") == source_candidate_id
+            or target.source_candidate_id == source_candidate_id
         )
     ]
     if len(matches) != 1:
@@ -410,12 +519,18 @@ def _first_source_binding_payload_from_prompt(prompt: str) -> dict[str, Any]:
             continue
         support_set = _first_fulfillment_support_set(candidate)
         answer_output_id = str(support_set.get("answer_output_id") or "answer_1")
+        requested_fact_id = _required_prompt_text(
+            fact_sources,
+            key="requested_fact_id",
+        )
+        source_candidate_id = _candidate_id(candidate)
         source_invocations.append(
             {
-                "requested_fact_id": str(
-                    fact_sources.get("requested_fact_id") or "fact_1"
+                "binding_target_id": _binding_target_id_for_candidate(
+                    prompt,
+                    requested_fact_id=requested_fact_id,
+                    source_candidate_id=source_candidate_id,
                 ),
-                "source_candidate_id": str(candidate.get("source_candidate_id") or ""),
                 "answer_population": {
                     "population_binding_id": _first_population_binding_id(candidate),
                     "intent_text": "fixture-selected source population",
@@ -509,17 +624,19 @@ def source_binding_payload_for_one_call(
     for invocation in output["outcome"].get("source_invocations") or ():
         if not isinstance(invocation, dict):
             continue
-        candidate_id = str(invocation.get("source_candidate_id") or "")
+        unsupported = set(invocation) - _SOURCE_BINDING_INVOCATION_FIELDS
+        if unsupported:
+            raise AssertionError(
+                "source binding fixture invocation uses unsupported fields: "
+                f"{sorted(unsupported)}"
+            )
+        target = _binding_target_for_invocation(prompt, invocation)
+        candidate_id = target.source_candidate_id
         requested_fact_id = _canonical_prompt_requested_fact_id(
             prompt,
-            requested_fact_id=str(invocation.get("requested_fact_id") or ""),
+            requested_fact_id=target.requested_fact_id,
         )
-        requested_fact_id = _requested_fact_id_for_source_candidate(
-            prompt,
-            source_candidate_id=candidate_id,
-            default=requested_fact_id,
-        )
-        invocation["requested_fact_id"] = requested_fact_id
+        invocation["binding_target_id"] = target.binding_target_id
         _canonicalize_invocation_fulfillment_support_sets(
             invocation,
             fulfillment_support_sets=fulfillment_support_sets.get(candidate_id, ()),
@@ -558,7 +675,6 @@ def source_binding_payload_for_one_call(
                 ).items()
             }
         invocation["param_decisions"] = param_decisions
-        invocation["source_binding_decision"] = "USE_SOURCE"
     return output
 
 
@@ -612,6 +728,206 @@ def _canonical_fulfillment_choice_id(
         fulfillment_support_sets=support_sets,
         source_candidate_id="",
     )
+
+
+def _binding_target_for_invocation(
+    prompt: str,
+    invocation: dict[str, Any],
+) -> _PromptBindingTarget:
+    binding_target_id = _required_fixture_text(
+        invocation,
+        key="binding_target_id",
+    )
+    target = _binding_target_by_id(prompt).get(binding_target_id)
+    if target is None:
+        raise AssertionError(f"source binding target not found: {binding_target_id}")
+    return target
+
+
+def source_binding_target_id_for_candidate(
+    prompt: str,
+    *,
+    requested_fact_id: str,
+    source_candidate_id: str,
+    source_role: str = "",
+    plan_shape: str = "",
+    requires_fulfillment: bool | None = None,
+) -> str:
+    return _binding_target_id_for_candidate(
+        prompt,
+        requested_fact_id=requested_fact_id,
+        source_candidate_id=source_candidate_id,
+        source_role=source_role,
+        plan_shape=plan_shape,
+        requires_fulfillment=requires_fulfillment,
+    )
+
+
+def _binding_target_id_for_candidate(
+    prompt: str,
+    *,
+    requested_fact_id: str,
+    source_candidate_id: str,
+    source_role: str = "",
+    plan_shape: str = "",
+    requires_fulfillment: bool | None = None,
+    allow_equivalent_targets: bool = False,
+) -> str:
+    target = _binding_target_for_candidate(
+        prompt,
+        requested_fact_id=requested_fact_id,
+        source_candidate_id=source_candidate_id,
+        source_role=source_role,
+        plan_shape=plan_shape,
+        requires_fulfillment=requires_fulfillment,
+        allow_equivalent_targets=allow_equivalent_targets,
+    )
+    return target.binding_target_id
+
+
+def _binding_target_for_candidate(
+    prompt: str,
+    *,
+    requested_fact_id: str,
+    source_candidate_id: str,
+    source_role: str = "",
+    plan_shape: str = "",
+    requires_fulfillment: bool | None = None,
+    allow_equivalent_targets: bool = False,
+) -> _PromptBindingTarget:
+    matches = [
+        target
+        for target in _binding_targets(prompt)
+        if target.requested_fact_id == requested_fact_id
+        and (
+            not source_candidate_id
+            or target.source_candidate_id == source_candidate_id
+        )
+    ]
+    if requires_fulfillment is not None:
+        matches = [
+            target
+            for target in matches
+            if target.requires_answer_fulfillment == requires_fulfillment
+        ]
+    if source_role:
+        matches = _targets_for_source_role(matches, source_role=source_role)
+    if plan_shape:
+        matches = [
+            target
+            for target in matches
+            if target.plan_shape == plan_shape
+        ]
+    if len(matches) > 1 and allow_equivalent_targets:
+        equivalent = _equivalent_binding_targets(matches)
+        if equivalent:
+            return equivalent
+    if len(matches) != 1:
+        target = (requested_fact_id, source_candidate_id or "<only-source-for-fact>")
+        raise AssertionError(f"source binding target not found: {target}")
+    return matches[0]
+
+
+def _equivalent_binding_targets(
+    targets: list[_PromptBindingTarget],
+) -> _PromptBindingTarget | None:
+    signatures = {_binding_target_signature(target) for target in targets}
+    if len(signatures) != 1:
+        return None
+    return sorted(targets, key=lambda target: target.binding_target_id)[0]
+
+
+def _binding_target_signature(
+    target: _PromptBindingTarget,
+) -> tuple[tuple[str, str], ...]:
+    ignored = {"binding_target_id", "plan_selection_id", "source_strategy_id"}
+    return tuple(
+        sorted(
+            (key, json.dumps(value, sort_keys=True))
+            for key, value in target.payload.items()
+            if key not in ignored
+        )
+    )
+
+
+def _targets_for_source_role(
+    targets: list[_PromptBindingTarget],
+    *,
+    source_role: str,
+) -> list[_PromptBindingTarget]:
+    if not source_role:
+        return []
+    role_terms = {source_role, f"{source_role}_set"}
+    return [
+        target
+        for target in targets
+        if target.requirement_id in role_terms
+    ]
+
+
+def _binding_target_by_id(prompt: str) -> dict[str, _PromptBindingTarget]:
+    return {target.binding_target_id: target for target in _binding_targets(prompt)}
+
+
+def _binding_targets(prompt: str) -> tuple[_PromptBindingTarget, ...]:
+    try:
+        payload = _prompt_json_section(prompt, label="Binding targets")
+    except (AssertionError, ValueError):
+        return ()
+    return tuple(
+        _prompt_binding_target(target)
+        for target in payload.get("binding_targets") or ()
+    )
+
+
+def _prompt_binding_target(raw_value: Any) -> _PromptBindingTarget:
+    if not isinstance(raw_value, dict):
+        raise AssertionError("binding target must be an object")
+    payload = dict(raw_value)
+    return _PromptBindingTarget(
+        binding_target_id=_required_target_text(payload, "binding_target_id"),
+        requested_fact_id=_required_target_text(payload, "requested_fact_id"),
+        source_candidate_id=_required_target_text(payload, "source_candidate_id"),
+        plan_shape=_required_target_text(payload, "plan_shape"),
+        requirement_id=_required_target_text(payload, "requirement_id"),
+        answer_output_ids=_target_answer_output_ids(payload),
+        payload=payload,
+    )
+
+
+def _required_target_text(payload: dict[str, Any], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise AssertionError(f"binding target requires {key}")
+    return value
+
+
+def _target_answer_output_ids(payload: dict[str, Any]) -> tuple[str, ...]:
+    raw_values = payload.get("answer_output_ids")
+    if not isinstance(raw_values, list | tuple):
+        raise AssertionError("binding target requires answer_output_ids")
+    output: list[str] = []
+    for raw_value in raw_values:
+        if not isinstance(raw_value, str) or not raw_value:
+            raise AssertionError("binding target answer_output_ids must be strings")
+        output.append(raw_value)
+    return tuple(output)
+
+
+def _required_fixture_text(payload: dict[str, Any], *, key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise AssertionError(f"source binding fixture requires {key}")
+    return value
+
+
+def _optional_fixture_text(payload: dict[str, Any], *, key: str) -> str:
+    if key not in payload:
+        return ""
+    value = payload[key]
+    if not isinstance(value, str):
+        raise AssertionError(f"source binding fixture {key} must be text")
+    return value
 
 
 def _evidence_ids_referenced_by_text(
@@ -1572,6 +1888,7 @@ def extract_source_bindings(
         source: dict[str, Any],
         *,
         answer: dict[str, Any],
+        source_role: str = "",
     ) -> str:
         key = json.dumps(source, sort_keys=True)
         requested_fact_id = _canonical_prompt_requested_fact_id(
@@ -1587,47 +1904,66 @@ def extract_source_bindings(
             raise AssertionError(
                 f"source candidate evidence missing for {source_candidate_id}"
             )
-        candidate_evidence_ids = source_field_ids[source_candidate_id]
-        selected_evidence_ids = _answer_evidence_ids_for_answer(
+        requires_fulfillment = _source_role_requires_fulfillment(
             answer,
-            source=source,
-            candidate_evidence_ids=candidate_evidence_ids,
-            candidate_evidence_items=source_evidence_items.get(
-                source_candidate_id,
-                (),
-            ),
+            source_role=source_role,
         )
-        if key in replacements:
-            _append_source_fulfillments(
-                bindings,
-                source_binding_id=replacements[key],
-                answer=answer,
+        binding_target_id = _binding_target_id_for_candidate(
+            prompt,
+            requested_fact_id=requested_fact_id,
+            source_candidate_id=source_candidate_id,
+            source_role=source_role,
+            plan_shape=_required_prompt_text(answer, key="pattern"),
+            requires_fulfillment=requires_fulfillment,
+            allow_equivalent_targets=True,
+        )
+        candidate_evidence_ids = source_field_ids[source_candidate_id]
+        selected_evidence_ids: tuple[str, ...] = ()
+        if requires_fulfillment:
+            selected_evidence_ids = _answer_evidence_ids_for_answer(
+                answer,
                 source=source,
-                evidence_ids=selected_evidence_ids,
-                fulfillment_support_sets=source_fulfillment_support_sets.get(
+                candidate_evidence_ids=candidate_evidence_ids,
+                candidate_evidence_items=source_evidence_items.get(
                     source_candidate_id,
                     (),
                 ),
-                source_candidate_id=source_candidate_id,
-                prompt=prompt,
             )
+        if key in replacements:
+            if requires_fulfillment:
+                _append_source_fulfillments(
+                    bindings,
+                    source_binding_id=replacements[key],
+                    answer=answer,
+                    source=source,
+                    evidence_ids=selected_evidence_ids,
+                    fulfillment_support_sets=source_fulfillment_support_sets.get(
+                        source_candidate_id,
+                        (),
+                    ),
+                    source_candidate_id=source_candidate_id,
+                    prompt=prompt,
+                )
             return replacements[key]
         binding_id = f"sb_{len(bindings) + 1}"
         answer_population = _answer_population(prompt, source_candidate_id)
         item = {
-            "requested_fact_id": requested_fact_id,
-            "source_candidate_id": source_candidate_id,
+            "binding_target_id": binding_target_id,
             "answer_population": answer_population,
-            "fulfillment_decisions": _source_fulfillments(
-                answer=answer,
-                source=source,
-                evidence_ids=selected_evidence_ids,
-                fulfillment_support_sets=source_fulfillment_support_sets.get(
-                    source_candidate_id,
-                    (),
-                ),
-                source_candidate_id=source_candidate_id,
-                prompt=prompt,
+            "fulfillment_decisions": (
+                _source_fulfillments(
+                    answer=answer,
+                    source=source,
+                    evidence_ids=selected_evidence_ids,
+                    fulfillment_support_sets=source_fulfillment_support_sets.get(
+                        source_candidate_id,
+                        (),
+                    ),
+                    source_candidate_id=source_candidate_id,
+                    prompt=prompt,
+                )
+                if requires_fulfillment
+                else {}
             ),
             "param_decisions": _param_decisions_for_prompt(
                 _source_param_decision_items(
@@ -1647,8 +1983,8 @@ def extract_source_bindings(
         return binding_id
 
     for answer in fact_plan["outcome"]["answers"]:
-        for source in _answer_sources(answer):
-            add_source(source, answer=answer)
+        for source_role, source in _answer_source_entries(answer):
+            add_source(source, answer=answer, source_role=source_role)
         if answer.get("pattern") == "computed_scalar":
             for scalar_input in answer.get("scalar_inputs") or ():
                 source = _source_for_scalar_value(
@@ -1662,6 +1998,17 @@ def extract_source_bindings(
     return bindings, replacements
 
 
+def _source_role_requires_fulfillment(
+    answer: dict[str, Any],
+    *,
+    source_role: str,
+) -> bool:
+    return not (
+        _required_prompt_text(answer, key="pattern") == "set_difference"
+        and source_role in _NON_OUTPUT_SOURCE_ROLES
+    )
+
+
 def _source_candidate_id_for_requested_fact(
     source: dict[str, Any],
     *,
@@ -1670,15 +2017,10 @@ def _source_candidate_id_for_requested_fact(
 ) -> str:
     if prompt:
         payload = _source_candidate_prompt_payload(prompt)
-        for fact_sources in payload.get("requested_fact_sources") or ():
-            if not isinstance(fact_sources, dict):
-                continue
-            if str(fact_sources.get("requested_fact_id") or "") != requested_fact_id:
-                continue
-            for candidate in _source_options_for_fact_sources(fact_sources):
-                matched = _source_candidate_id_for_candidate(source, candidate)
-                if matched:
-                    return matched
+        for candidate in _all_source_candidates(payload):
+            matched = _source_candidate_id_for_candidate(source, candidate)
+            if matched:
+                return matched
         matched = _source_candidate_id_from_prompt(source, payload=payload)
         if matched:
             return matched
@@ -1730,6 +2072,9 @@ def _canonical_prompt_requested_fact_id(
             return requested_fact_id
         if str(fact.get("evidence_ref") or "") == f"requested_fact:{requested_fact_id}":
             return str(fact.get("requested_fact_id") or requested_fact_id)
+    facts = tuple(fact for fact in requested_facts if isinstance(fact, dict))
+    if len(facts) == 1:
+        return str(facts[0].get("requested_fact_id") or requested_fact_id)
     return requested_fact_id
 
 
@@ -1759,14 +2104,20 @@ def _requested_fact_id_for_source_candidate(
 
 
 def _answer_sources(answer: dict[str, Any]) -> tuple[dict[str, Any], ...]:
-    output: list[dict[str, Any]] = []
+    return tuple(source for _role, source in _answer_source_entries(answer))
+
+
+def _answer_source_entries(
+    answer: dict[str, Any],
+) -> tuple[tuple[str, dict[str, Any]], ...]:
+    output: list[tuple[str, dict[str, Any]]] = []
     source = answer.get("source") or answer.get("source_hint")
     if isinstance(source, dict) and source.get("kind") != "values":
-        output.append(source)
+        output.append(("", source))
     for key in ("candidate", "observed", "left", "right"):
         nested = answer.get(key)
         if isinstance(nested, dict) and isinstance(nested.get("source"), dict):
-            output.append(nested["source"])
+            output.append((key, nested["source"]))
     return tuple(output)
 
 
@@ -2545,10 +2896,10 @@ def _source_scoped_answer_field_ids(
             continue
         if scoped.get("source") != source:
             continue
-        field_ids = _field_ids_from_values(scoped.get("identity_fields"))
+        field_ids = set(_field_ids_from_items(scoped.get("output_fields")))
         if field_ids:
             return field_ids
-        field_ids = set(_field_ids_from_items(scoped.get("output_fields")))
+        field_ids = _field_ids_from_values(scoped.get("identity_fields"))
         if field_ids:
             return field_ids
     return set()
@@ -3094,6 +3445,9 @@ def _source_candidate_fulfillment_support_sets(
 def _source_candidate_prompt_payload(prompt: str) -> dict[str, Any]:
     for label in ("Candidate evidence sources", "Chosen evidence sources"):
         if f"{label}:\n" in prompt:
+            text = _prompt_text_section(prompt, label=label)
+            if text.startswith("<candidate_evidence_sources>"):
+                return _candidate_evidence_sources_payload_from_xml(text)
             payload = _prompt_json_section(prompt, label=label)
             if "chosen_source_candidates" in payload:
                 return {
@@ -3122,6 +3476,235 @@ def _source_candidate_prompt_payload(prompt: str) -> dict[str, Any]:
             ]
         }
     return {}
+
+
+def _candidate_evidence_sources_payload_from_xml(text: str) -> dict[str, Any]:
+    root = ElementTree.fromstring(text)
+    payload: dict[str, Any] = {"requested_fact_sources": []}
+    for fact_node in root.findall("requested_fact"):
+        fact_payload = {
+            "requested_fact_id": fact_node.attrib.get("id", ""),
+            "source_contexts": [],
+        }
+        for context_node in fact_node.findall("source_context"):
+            fact_payload["source_contexts"].append(
+                {
+                    "context_id": context_node.attrib.get("id", ""),
+                    "kind": context_node.attrib.get("kind", ""),
+                    "source_options": tuple(
+                        _source_candidate_from_xml(candidate_node)
+                        for candidate_node in context_node
+                        if candidate_node.tag in {"api_read", "source"}
+                    ),
+                }
+            )
+        payload["requested_fact_sources"].append(fact_payload)
+    for tag, key in (
+        ("memory_sources", "memory_source_candidates"),
+        ("utility_sources", "utility_source_candidates"),
+        ("value_sources", "value_source_candidates"),
+    ):
+        candidates = tuple(
+            _source_candidate_from_xml(candidate_node)
+            for group_node in root.findall(tag)
+            for candidate_node in group_node
+            if candidate_node.tag in {"api_read", "source"}
+        )
+        if candidates:
+            payload[key] = candidates
+    return payload
+
+
+def _source_candidate_from_xml(node: ElementTree.Element) -> dict[str, Any]:
+    attrs = node.attrib
+    candidate = {
+        "source_candidate_id": attrs.get("id", ""),
+        "kind": attrs.get("kind", ""),
+    }
+    for xml_key, payload_key in (
+        ("read", "read_id"),
+        ("row_source", "row_source_id"),
+        ("value", "value_id"),
+        ("relation", "source_relation_id"),
+        ("memory_relation", "memory_relation_id"),
+        ("field", "source_field_id"),
+        ("calendar", "calendar_id"),
+        ("cardinality", "cardinality"),
+    ):
+        if attrs.get(xml_key):
+            candidate[payload_key] = attrs[xml_key]
+    description = node.findtext("description", default="").strip()
+    if description:
+        candidate["description"] = description
+    for key, value in _source_binding_surface_from_xml(node).items():
+        if value:
+            candidate[key] = value
+    response_rows = tuple(_response_row_from_xml(row) for row in node.findall("response/row"))
+    if response_rows:
+        candidate["response_rows"] = response_rows
+    row_predicates = tuple(
+        _row_predicate_from_xml(predicate)
+        for predicate in node.findall("row_predicates/predicate")
+    )
+    if row_predicates:
+        candidate["row_predicates"] = row_predicates
+    return {key: value for key, value in candidate.items() if value != ""}
+
+
+def _source_binding_surface_from_xml(node: ElementTree.Element) -> dict[str, Any]:
+    return {
+        "fields": tuple(
+            _field_item_from_xml(field)
+            for fields_node in node.findall("fields")
+            for field in fields_node.findall("field")
+        ),
+        "evidence_items": tuple(
+            _field_item_from_xml(evidence)
+            for evidence_node in node.findall("evidence_items")
+            for evidence in evidence_node.findall("evidence")
+        ),
+        "params": tuple(_binding_param_from_xml(param) for param in node.findall("binding_params/param")),
+        "population_bindings": tuple(
+            dict(population.attrib)
+            for population in node.findall("population_bindings/population")
+        ),
+        "population_roles": tuple(
+            _population_role_from_xml(role)
+            for role in node.findall("population_roles/role")
+        ),
+        "fulfillment_support_sets": tuple(
+            _fulfillment_choice_from_xml(choice)
+            for choice in node.findall("fulfillment_choices/choice")
+        ),
+    }
+
+
+def _field_item_from_xml(node: ElementTree.Element) -> dict[str, Any]:
+    return {
+        "field_id": node.attrib.get("name", ""),
+        "id": node.attrib.get("name", ""),
+        "evidence_id": node.attrib.get("id", ""),
+        "field_path": node.attrib.get("path", ""),
+        "path": node.attrib.get("path", ""),
+        "type": node.attrib.get("type", ""),
+    }
+
+
+def _response_row_from_xml(node: ElementTree.Element) -> dict[str, Any]:
+    return {
+        "path": node.attrib.get("path", ""),
+        "cardinality": node.attrib.get("cardinality", ""),
+        "evidence_token": node.attrib.get("evidence_token", ""),
+        "fields": tuple(
+            {
+                "field_id": field.attrib.get("name", ""),
+                "path": field.attrib.get("path", ""),
+                "type": field.attrib.get("type", ""),
+                "evidence_token": field.attrib.get("evidence_token", ""),
+            }
+            for field in node.findall("field")
+        ),
+    }
+
+
+def _row_predicate_from_xml(node: ElementTree.Element) -> dict[str, Any]:
+    return {
+        "predicate_id": node.attrib.get("id", ""),
+        "field_id": node.attrib.get("field", ""),
+        "field_path": node.attrib.get("path", ""),
+        "row_path_id": node.attrib.get("row", ""),
+        "type": node.attrib.get("type", ""),
+        "operator": node.attrib.get("operator", ""),
+        "default": node.attrib.get("default", ""),
+        "allowed_values": tuple(
+            str(value.text or "").strip()
+            for value in node.findall("values/value")
+            if str(value.text or "").strip()
+        ),
+    }
+
+
+def _binding_param_from_xml(node: ElementTree.Element) -> dict[str, Any]:
+    param = {
+        "param_id": node.attrib.get("param_id", ""),
+        "name": node.attrib.get("name", ""),
+        "type": node.attrib.get("type", ""),
+        "required": node.attrib.get("required") == "True",
+        "decision_surface": node.attrib.get("decision_surface", ""),
+        "choices": tuple(
+            choice.attrib.get("value", "")
+            for choice in node.findall("choices/choice")
+            if choice.attrib.get("value")
+        ),
+        "decision_options": tuple(
+            _decision_option_from_xml(option)
+            for option in node.findall("decision_options/option")
+        ),
+    }
+    population_contract = node.find("population_contract")
+    if population_contract is not None:
+        param["population_contract"] = dict(population_contract.attrib)
+    return param
+
+
+def _decision_option_from_xml(node: ElementTree.Element) -> dict[str, Any]:
+    return {
+        "param_decision_id": node.attrib.get("id", ""),
+        "decision": node.attrib.get("decision", ""),
+        "value": node.attrib.get("value", ""),
+        "value_component": node.attrib.get("value_component", ""),
+        "meaning": node.attrib.get("meaning", ""),
+    }
+
+
+def _population_role_from_xml(node: ElementTree.Element) -> dict[str, str]:
+    return {
+        "role_id": node.attrib.get("id", ""),
+        "row_path_id": node.attrib.get("row_path", ""),
+        "role_kind": node.attrib.get("kind", ""),
+        "role_text": node.attrib.get("text", ""),
+    }
+
+
+def _fulfillment_choice_from_xml(node: ElementTree.Element) -> dict[str, Any]:
+    return {
+        "fulfillment_choice_id": node.attrib.get("id", ""),
+        "answer_output_id": node.attrib.get("answer_output", ""),
+        "fulfillment_slots": (
+            {
+                "scope_evidence": tuple(
+                    _fulfillment_evidence_from_xml(evidence)
+                    for evidence in node.findall("evidence")
+                    if evidence.attrib.get("kind") == "scope"
+                ),
+                "metric_measure_evidence": tuple(
+                    _fulfillment_evidence_from_xml(evidence)
+                    for evidence in node.findall("evidence")
+                    if evidence.attrib.get("kind") == "metric"
+                ),
+                "row_count_basis_evidence": tuple(
+                    _fulfillment_evidence_from_xml(evidence)
+                    for evidence in node.findall("evidence")
+                    if evidence.attrib.get("kind") == "row_count_basis"
+                ),
+                "group_key_evidence": tuple(
+                    _fulfillment_evidence_from_xml(evidence)
+                    for evidence in node.findall("evidence")
+                    if evidence.attrib.get("kind") == "group_key"
+                ),
+            },
+        ),
+    }
+
+
+def _fulfillment_evidence_from_xml(node: ElementTree.Element) -> dict[str, Any]:
+    return {
+        "evidence_id": node.attrib.get("evidence_id", ""),
+        "field_id": node.attrib.get("field", ""),
+        "label": node.attrib.get("label", ""),
+        "row_path_id": node.attrib.get("row_path", ""),
+        "type": node.attrib.get("type", ""),
+    }
 
 
 def _source_options_for_fact_sources(
@@ -3434,7 +4017,9 @@ def _candidate_binding_surface(candidate: dict[str, Any]) -> dict[str, Any]:
         )
         if key in candidate
     }
-    if "fulfillment_choices" in candidate:
+    if "fulfillment_support_sets" in candidate:
+        output["fulfillment_support_sets"] = candidate["fulfillment_support_sets"]
+    elif "fulfillment_choices" in candidate:
         output["fulfillment_support_sets"] = candidate["fulfillment_choices"]
     fields = [
         field
@@ -3657,11 +4242,6 @@ def _matching_grouped_ranked_selection(
         if group and metric and function:
             return {
                 "source_binding_id": choice["source_binding_id"],
-                "group": {
-                    "selection_basis": "Selected from grouped/ranked operation choices.",
-                    "id": group["id"],
-                    "field_id": group["field"],
-                },
                 "metric": {
                     "selection_basis": "Selected from grouped/ranked operation choices.",
                     "id": metric["id"],
@@ -3744,7 +4324,6 @@ def _grouped_ranked_choices_from_prompt(prompt: str) -> tuple[dict[str, Any], ..
                 "source_binding_id": source_match.group(1),
                 "groups": tuple(
                     {
-                        "id": attrs.get("id", ""),
                         "field": attrs.get("field", ""),
                     }
                     for attrs in _xml_tag_attrs(body, "group")
@@ -3920,6 +4499,7 @@ def _all_source_candidates(payload: dict[str, Any]) -> tuple[dict[str, Any], ...
         "memory_source_candidates",
         "utility_source_candidates",
         "value_source_candidates",
+        "source_invocations",
     ):
         output.extend(
             candidate

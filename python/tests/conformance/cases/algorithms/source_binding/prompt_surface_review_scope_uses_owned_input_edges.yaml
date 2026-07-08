@@ -1,0 +1,35 @@
+id: prompt_surface_review_scope_uses_owned_input_edges
+description: Source-binding review surfaces include only membership tests not already owned by grounded question inputs.
+kind: algorithm
+algorithm: source_binding.prompt_surface
+input:
+  request:
+    mode: scoped_review_owned_input
+expect:
+  result_contains:
+    finite_choice_review_param_ids: [status]
+    row_predicate_field_ids: [is_deleted]
+    schema_review_test_ids:
+      finite_choice:
+        status:
+          - subject_identity
+          - normal_instance_guard
+      row_predicate:
+        rp.source_1.row.root.is_deleted:
+          - subject_identity
+          - normal_instance_guard
+    schema_review_test_id_counts:
+      finite_choice:
+        status: 2
+      row_predicate:
+        rp.source_1.row.root.is_deleted: 2
+  result_exact_fields:
+    schema_review_test_ids:
+      finite_choice:
+        status:
+          - subject_identity
+          - normal_instance_guard
+      row_predicate:
+        rp.source_1.row.root.is_deleted:
+          - subject_identity
+          - normal_instance_guard

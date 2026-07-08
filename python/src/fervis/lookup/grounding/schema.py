@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from fervis.lookup.grounding import provider_contract as provider_output
 from fervis.lookup.grounding.model import (
     GroundingRequest,
     LookupTextResolutionDecision,
@@ -13,18 +14,15 @@ from fervis.lookup.grounding.time_intents import TIME_INTENT_FIELDS
 def build_grounding_schema(request: GroundingRequest) -> dict[str, object]:
     review_properties: dict[str, object] = {}
     for task in request.tasks:
-        review_properties[task.known_input_id] = {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
+        review_properties[task.known_input_id] = (
+            provider_output.KnownInputBindingReviewOutput.schema(
+                {
                 "option_reviews": {
                     "type": "object",
                     "additionalProperties": False,
                     "properties": {
-                        option.id: {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
+                        option.id: provider_output.OptionReviewOutput.schema(
+                            {
                                 "resolver_fit_question": {
                                     "type": "string",
                                     "enum": [
@@ -43,44 +41,33 @@ def build_grounding_schema(request: GroundingRequest) -> dict[str, object]:
                                     ],
                                 },
                             },
-                            "required": [
-                                "resolver_fit_question",
-                                "because",
-                                "decision",
-                            ],
-                        }
+                        )
                         for option in task.options
                     },
                     "required": [option.id for option in task.options],
                 }
-            },
-            "required": ["option_reviews"],
-        }
+                }
+            )
+        )
     time_resolution_properties: dict[str, object] = {}
     for task in request.time_tasks:
-        time_resolution_properties[task.known_input_id] = {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "date_intent": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
+        time_resolution_properties[task.known_input_id] = (
+            provider_output.KnownTimeResolutionOutput.schema(
+                {
+                "date_intent": provider_output.DateIntentOutput.schema(
+                    {
                         "expression": {
                             "type": "string",
-                            "enum": [task.known_input_text],
+                            "enum": [task.time_expression],
                         },
                         "intent": _time_intent_schema(),
-                    },
-                    "required": ["expression", "intent"],
+                    }
+                )
                 }
-            },
-            "required": ["date_intent"],
-        }
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
+            )
+        )
+    return provider_output.GroundingOutput.schema(
+        {
             "known_time_resolutions": {
                 "type": "object",
                 "additionalProperties": False,
@@ -94,8 +81,7 @@ def build_grounding_schema(request: GroundingRequest) -> dict[str, object]:
                 "required": [task.known_input_id for task in request.tasks],
             },
         },
-        "required": ["known_time_resolutions", "known_input_binding_reviews"],
-    }
+    )
 
 
 def _time_intent_schema() -> dict[str, object]:

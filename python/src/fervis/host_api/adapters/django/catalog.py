@@ -173,12 +173,9 @@ def _build_contract(
         query_serializer_class=query_serializer_class,
         response_serializer_class=response_serializer_class,
     )
-    response_fields = _with_identity_metadata(
-        response_fields_from_serializer(response_serializer_class),
-        endpoint_identities=_primary_key_identities_for_endpoint(
-            view_class=view_class,
-            response_serializer_class=response_serializer_class,
-        ),
+    response_fields = response_fields_from_serializer(
+        response_serializer_class,
+        model_context=_view_queryset_model(view_class),
     )
     query_params = _with_framework_param_semantics(
         query_params,
@@ -564,68 +561,6 @@ def _with_conditional_requirements(
             )
         )
     return tuple(updated)
-
-
-def _with_identity_metadata(
-    response_fields: tuple[ResponseFieldContract, ...],
-    *,
-    endpoint_identities: dict[str, dict[str, Any]] | None = None,
-) -> tuple[ResponseFieldContract, ...]:
-    endpoint_identities = dict(endpoint_identities or {})
-    if not endpoint_identities and not any(field.identity for field in response_fields):
-        return response_fields
-    updated: list[ResponseFieldContract] = []
-    for field in response_fields:
-        identity = field.identity or endpoint_identities.get(field.path)
-        if not identity:
-            updated.append(field)
-            continue
-        updated.append(
-            ResponseFieldContract(
-                name=field.name,
-                type=field.type,
-                path=field.path,
-                description=field.description,
-                choices=field.choices,
-                requires=field.requires,
-                identity=identity,
-            )
-        )
-    return tuple(updated)
-
-
-def _primary_key_identities_for_endpoint(
-    *,
-    view_class: type,
-    response_serializer_class: type | None,
-) -> dict[str, dict[str, Any]]:
-    serializer_model = _serializer_model(response_serializer_class)
-    if serializer_model is not None:
-        return {}
-    model = _view_queryset_model(view_class)
-    if model is None:
-        return {}
-    pk = getattr(getattr(model, "_meta", None), "pk", None)
-    pk_name = str(getattr(pk, "name", "") or "").strip()
-    if not pk_name:
-        return {}
-    return {
-        pk_name: {
-            "entityRef": _model_identity_type(model),
-            "idField": pk_name,
-            "primaryKey": True,
-        }
-    }
-
-
-def _model_identity_type(model: type) -> str:
-    object_name = str(
-        getattr(getattr(model, "_meta", None), "object_name", "")
-        or getattr(model, "__name__", "")
-    )
-    return "_".join(_camel_words(object_name).split()) or str(
-        getattr(getattr(model, "_meta", None), "model_name", "") or ""
-    )
 
 
 def _capability_sources(capabilities: EndpointCapabilities) -> tuple[str, ...]:

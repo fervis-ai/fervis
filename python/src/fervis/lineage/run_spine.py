@@ -46,6 +46,7 @@ class ClarificationResponseStart:
     run_id: str
     clarification_id: str
     response_text: str
+    selected_option_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -99,6 +100,9 @@ def record_question_run_start(
                         f"{request.clarification_response.response_id}"
                     ),
                     response_text=request.clarification_response.response_text,
+                    selected_option_id=(
+                        request.clarification_response.selected_option_id
+                    ),
                 )
             )
         recorder.start_run(

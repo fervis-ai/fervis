@@ -252,10 +252,37 @@ def _append_clarifications(lines: list[str], clarifications, *, indent: int) -> 
     for clarification in clarifications:
         lines.append(
             f"{prefix}Clarification request {clarification.clarification_id}: "
-            f"{clarification.question_text}"
+            f"{_clarification_question(clarification.payload_json)}"
         )
-        for option in clarification.options:
+        for option in _clarification_options(clarification.payload_json):
             lines.append(f"{prefix}  option: {_clarification_option(option)}")
+
+
+def _clarification_question(payload: dict[str, object]) -> str:
+    question = payload.get("question")
+    return question if isinstance(question, str) else ""
+
+
+def _clarification_options(
+    payload: dict[str, object],
+) -> tuple[dict[str, object], ...]:
+    return tuple(
+        dict(option)
+        for subject in _clarification_subjects(payload)
+        for option in _payload_objects(subject.get("options"))
+    )
+
+
+def _clarification_subjects(
+    payload: dict[str, object],
+) -> tuple[dict[str, object], ...]:
+    return _payload_objects(payload.get("subjects"))
+
+
+def _payload_objects(value: object) -> tuple[dict[str, object], ...]:
+    if not isinstance(value, list | tuple):
+        return ()
+    return tuple(dict(item) for item in value if isinstance(item, dict))
 
 
 def _append_run_trigger(lines: list[str], run, *, indent: int) -> None:

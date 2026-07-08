@@ -1,5 +1,5 @@
 id: schema_surface_fulfillment_branches_are_strict
-description: Source-binding fulfillment-decision anyOf branches are strict object schemas.
+description: Source-binding schema uses one compact invocation shape; target-specific fulfillment requirements are parser-owned.
 migrates:
   - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_fulfillment_decision_anyof_branches_are_strict_objects
 kind: algorithm
@@ -9,4 +9,4 @@ input:
     mode: choice_param
 expect:
   result_contains:
-    fulfillment_anyof_branches_are_strict: true
+    compact_invocation_shape: true

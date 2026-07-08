@@ -7,7 +7,6 @@ from typing import Protocol
 
 from fervis.lineage.enums import (
     AnswerValueKind,
-    ClarificationBasis,
     FactResultKind,
     PresentationClientKey,
     PresentationKind,
@@ -19,6 +18,7 @@ from fervis.lineage.enums import (
     SourceReadStatus,
 )
 from fervis.lineage.memory_artifacts import MemoryArtifactRow
+from fervis.lookup.clarification import ClarificationNeed, ClarificationReason
 
 JsonObject = dict[str, object]
 
@@ -82,12 +82,11 @@ class RuntimeErrorRow:
 class ClarificationRequestRow:
     clarification_id: str
     run_id: str
-    basis: ClarificationBasis
-    question_text: str
+    need: ClarificationNeed
+    reason: ClarificationReason
+    payload_json: JsonObject
     fact_result_id: str | None = None
     step_id: str | None = None
-    options_json: tuple[JsonObject, ...] = ()
-    evidence_refs_json: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

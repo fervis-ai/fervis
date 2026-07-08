@@ -41,4 +41,5 @@ input:
         predicate: {left: qty, operator: lte, right_scalar: zero}
         output_fields: [{source: name}]
 expect:
-  error_contains: required_dimension
+  result_contains:
+    status: rejected

@@ -1,0 +1,32 @@
+id: prompt_does_not_synthesize_missing_value_meaning_hint
+description: Query-enrichment prompt does not synthesize value_meaning_hint from raw reference text.
+kind: algorithm
+algorithm: query_enrichment.prompt
+input:
+  request:
+    question: How much did staff_id 51515151-0000-0000-0002-000000000001 make today?
+    reads:
+      - id: staff_read
+        endpoint_name: list_staff
+        resource_names: [staff]
+    requested_facts:
+      - id: fact_1
+        description: sales for specified staff member
+        answer_outputs:
+          - id: answer_1
+        known_inputs:
+          - id: staff_id
+            kind: literal_text
+            source: question_context
+            text: staff_id 51515151-0000-0000-0002-000000000001
+            field_label_text: staff_id
+            resolved_value_text: 51515151-0000-0000-0002-000000000001
+            role: reference_value
+expect:
+  result_contains:
+    entity_targets_payload:
+      entity_targets:
+        - target_id: staff_id
+          reference_text: staff_id 51515151-0000-0000-0002-000000000001
+          resolved_value_text: 51515151-0000-0000-0002-000000000001
+          value_meaning_hint: ""

@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Any, Mapping
 
 from fervis.lookup.answer_rendering.model import RenderedFact
+from fervis.lookup.clarification import render_clarification_question
 from fervis.lookup.outcomes.model import (
     AnswerResult,
     FactResult,
@@ -175,7 +176,9 @@ def _terminal_message(outcome: object) -> str:
 
 
 def _clarification_message(outcome: NeedsClarification) -> str:
-    questions = [item.question for item in outcome.clarifications if item.question]
+    questions = [
+        render_clarification_question(item) for item in outcome.clarifications
+    ]
     return "\n".join(questions) if questions else "Can you clarify the requested value?"
 
 

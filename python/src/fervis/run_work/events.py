@@ -136,9 +136,7 @@ def _actionable_clarifications(
                 "NEEDS_CLARIFICATION terminal event requires clarification objects"
             )
         clarification = dict(item)
-        clarification_id = str(
-            clarification.get("id") or clarification.get("clarification_id") or ""
-        ).strip()
+        clarification_id = str(clarification.get("id") or "").strip()
         if not clarification_id:
             raise ValueError(
                 "NEEDS_CLARIFICATION terminal event requires clarification id"

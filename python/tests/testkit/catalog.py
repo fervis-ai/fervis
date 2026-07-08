@@ -9,6 +9,7 @@ from fervis.lookup.relation_catalog import (
     CatalogParam,
     FieldRequirement,
     EndpointRead,
+    IdentityMetadata,
     ParamSource,
     RelationCatalog,
     RowCardinality,
@@ -132,14 +133,13 @@ def _field_requirement(payload: dict[str, Any]) -> FieldRequirement:
     )
 
 
-def _identity(payload: Any) -> Any:
+def _identity(payload: object) -> IdentityMetadata | None:
     if not isinstance(payload, dict):
         return None
-    from fervis.lookup.relation_catalog import IdentityMetadata
-
     return IdentityMetadata(
         entity_ref=str(payload.get("entity_ref") or ""),
         identity_field=str(payload.get("identity_field") or ""),
         primary_key=bool(payload.get("primary_key") or False),
         stable=bool(payload.get("stable", True)),
+        display_fields=tuple(str(item) for item in payload.get("display_fields") or ()),
     )

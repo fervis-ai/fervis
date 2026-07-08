@@ -11,7 +11,10 @@ from fervis.lookup.turn_prompts import (
     TurnPromptBase,
     TurnPromptBuilder,
 )
-from fervis.lookup.turn_prompts.projections import source_alignment_reviews_xml
+from fervis.lookup.turn_prompts.projections import (
+    answer_output_prompt_payload,
+    source_alignment_reviews_xml,
+)
 from fervis.lookup.plan_selection.source_strategies import (
     source_alignment_candidate_payload,
     source_alignment_candidates_by_fact,
@@ -61,7 +64,7 @@ class PlanSelectionTurnPrompt(TurnPromptBase):
                     "For each requested_fact in the XML, review every source_candidate inside it.",
                     "Write exactly one alignment review for every source_candidate shown under that requested_fact.",
                     "Assess source alignment only; executable choices are made in later turns.",
-                    "The backend will forward aligned sources to source binding.",
+                    "The backend deterministically derives forwarded source strategies from your DIRECT, PARTIAL, and NOT_ALIGNED reviews.",
                     "If no shown candidate is aligned, review every source as NOT_ALIGNED; the backend derives the terminal outcome.",
                 ),
             ),
@@ -70,11 +73,10 @@ class PlanSelectionTurnPrompt(TurnPromptBase):
                 (
                     "Compare each source_candidate against the fact_text and answer_outputs in the same requested_fact block.",
                     "Use the source response rows, field names, row cardinality, input params, and read description to assess business meaning alignment.",
-                    "Use source_alignment=DIRECT when the source can plausibly answer the requested fact by itself.",
-                    "Use source_alignment=PARTIAL when the source contains concrete evidence needed for the requested fact, but needs another source or later computation to complete the answer.",
-                    "Use source_alignment=NOT_ALIGNED when the source is only related or shape-compatible; do not forward it.",
+                    "Use source_alignment=DIRECT when this source contains the complete raw ingredient set needed to answer the requested fact by itself, even if subsequent steps must choose params, filters, metrics, groups, aggregation, ranking, or rendering.",
+                    "Use source_alignment=PARTIAL when this source contains a necessary raw ingredient for the requested fact, but the fact cannot be answered without combining it with another source.",
+                    "Use source_alignment=NOT_ALIGNED when the source is only related, adjacent, or shape-compatible, or lacks the raw ingredients needed for the requested fact; do not forward it.",
                     "For each review, write basis before source_alignment.",
-                    "A source can be DIRECT even if source binding still needs to choose params, filters, metrics, or groups later.",
                 ),
             ),
             builder.instruction_block(
@@ -120,11 +122,8 @@ class PlanSelectionTurnPrompt(TurnPromptBase):
                 {
                     "requested_fact_id": fact.id,
                     "answer_outputs": [
-                        {
-                            "answer_output_id": output.id,
-                            "description": output.description,
-                        }
-                        for output in fact.answer_outputs
+                        answer_output_prompt_payload(output)
+                        for output in fact.support_answer_outputs
                     ],
                     "source_strategies": [
                         source_strategy_payload(source_strategy)
@@ -149,11 +148,8 @@ class PlanSelectionTurnPrompt(TurnPromptBase):
                     "requested_fact_id": fact.id,
                     "fact_text": fact.description,
                     "answer_outputs": [
-                        {
-                            "answer_output_id": output.id,
-                            "description": output.description,
-                        }
-                        for output in fact.answer_outputs
+                        answer_output_prompt_payload(output)
+                        for output in fact.support_answer_outputs
                     ],
                     "source_candidates": [
                         source_alignment_candidate_payload(candidate)

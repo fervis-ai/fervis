@@ -836,25 +836,25 @@ fervis_clarification_request = sa.Table(
         ),
         nullable=True,
     ),
-    sa.Column("basis", sa.String(64), nullable=False),
-    sa.Column("question_text", sa.Text(), nullable=False),
-    sa.Column("options_json", sa.JSON(), nullable=False),
-    sa.Column("evidence_refs_json", sa.JSON(), nullable=False),
+    sa.Column("need", sa.String(64), nullable=False),
+    sa.Column("reason", sa.String(64), nullable=False),
+    sa.Column("payload_json", sa.JSON(), nullable=False),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     sa.UniqueConstraint("run_id", "clarification_id", name="fervis_clar_req_run_id_uq"),
     sa.CheckConstraint(
-        "JSON_VALID(options_json)",
-        name="fervis_clarification_request_options_json_json_valid_ck",
-    ),
-    sa.CheckConstraint(
-        "JSON_VALID(evidence_refs_json)",
-        name="fervis_clarification_request_evidence_refs_json_json_valid_ck",
+        "JSON_VALID(payload_json)",
+        name="fervis_clarification_request_payload_json_json_valid_ck",
     ),
 )
 sa.Index(
-    "fervis_clar_req_basis_idx",
+    "fervis_clar_req_need_idx",
     fervis_clarification_request.c.run_id,
-    fervis_clarification_request.c.basis,
+    fervis_clarification_request.c.need,
+)
+sa.Index(
+    "fervis_clar_req_reason_idx",
+    fervis_clarification_request.c.run_id,
+    fervis_clarification_request.c.reason,
 )
 sa.Index(
     "fervis_clarification_request_run_id_idx", fervis_clarification_request.c.run_id

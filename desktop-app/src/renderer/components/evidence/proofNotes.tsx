@@ -15,12 +15,20 @@ import {
   sentenceWithPeriod,
   titleWords
 } from "../../textFormat";
+import { StepInputSummary } from "../StepSignalContent";
 import type { ProofMode, ProofNote } from "./types";
 
 const PROOF_NOTE_PREVIEW_CHARS = 150;
 
 export function ProofNoteView({ note }: { readonly note: ProofNote }) {
   const [expanded, setExpanded] = useState(false);
+  if (note.inputs !== undefined) {
+    return (
+      <div className="proof-note">
+        <StepInputSummary inputs={note.inputs} />
+      </div>
+    );
+  }
   const preview = proofNotePreview(note.text);
   const expandable = preview !== note.text;
   return (
@@ -109,7 +117,8 @@ function verboseProofNotes(
 function stepSignalNotes(step: LineageStep): readonly ProofNote[] {
   return semanticStepSignalsFor(step.stepKey, step.semantic).map((signal) => ({
     label: signal.label,
-    text: signal.text
+    text: signal.text,
+    inputs: signal.kind === "inputs" ? signal.inputs : undefined
   }));
 }
 

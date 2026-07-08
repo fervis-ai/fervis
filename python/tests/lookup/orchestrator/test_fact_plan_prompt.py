@@ -10,14 +10,7 @@ def test_lookup_cutover_renders_runtime_values_in_fact_plan_prompt():
         question_contract=_question_contract_for(
             "rf_answer",
             description="sales today",
-            known_inputs=(
-                RequestedFactKnownInput(
-                    id="time_today",
-                    kind=KnownInputKind.TIME,
-                    source=KnownInputSource.QUESTION_CONTEXT,
-                    text="today",
-                ),
-            ),
+            known_inputs=(_known_time_input("time_today", "today"),),
         ),
         query_enrichment=_query_enrichment_payload(("metric",)),
         read_eligibility_retention_specs=(
@@ -71,10 +64,12 @@ def test_lookup_cutover_renders_scalar_memory_values_in_fact_plan_prompt():
     plan = FactPlan(outcome=_plan_clarification("follow_up"))
     planner = _PlannerPort(
         plan,
-        conversation_resolution=lambda prompt: _conversation_resolution_payload_using_memory(
-            prompt,
-            integrated_question="What percentage increase is there from the prior sales total?",
-            actual_text="that",
+        conversation_resolution=lambda prompt: (
+            _conversation_resolution_payload_using_memory(
+                prompt,
+                integrated_question="What percentage increase is there from the prior sales total?",
+                actual_text="that",
+            )
         ),
         query_enrichment=_query_enrichment_payload(),
     )
@@ -122,10 +117,12 @@ def test_lookup_cutover_projects_terminal_outcome_memory_into_resolution_prompt(
             description="metric total",
             binding_target_ids=("answer_1",),
         ),
-        conversation_resolution=lambda prompt: _conversation_resolution_payload_using_memory(
-            prompt,
-            integrated_question="What is the metric total for ABC?",
-            actual_text="ABC",
+        conversation_resolution=lambda prompt: (
+            _conversation_resolution_payload_using_memory(
+                prompt,
+                integrated_question="What is the metric total for ABC?",
+                actual_text="ABC",
+            )
         ),
     )
 
@@ -186,10 +183,12 @@ def test_lookup_cutover_renders_memory_relation_fields_in_fact_plan_prompt():
     plan = FactPlan(outcome=_plan_clarification("follow_up"))
     planner = _PlannerPort(
         plan,
-        conversation_resolution=lambda prompt: _conversation_resolution_payload_using_memory(
-            prompt,
-            integrated_question="What quantities were in the prior items?",
-            actual_text="those",
+        conversation_resolution=lambda prompt: (
+            _conversation_resolution_payload_using_memory(
+                prompt,
+                integrated_question="What quantities were in the prior items?",
+                actual_text="those",
+            )
         ),
     )
 

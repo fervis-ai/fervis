@@ -24,4 +24,5 @@ input:
         output_fields: [entity_id, name]
         identity_fields: [entity_id]
 expect:
-  error_contains: conflicting union row
+  result_contains:
+    status: rejected

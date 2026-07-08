@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from types import NoneType, UnionType
+from typing import Any, Union, get_args, get_origin, get_type_hints
 
 from rest_framework import serializers
 
@@ -30,7 +31,9 @@ _FIELD_TYPE_MAP = {
     "PrimaryKeyRelatedField": "pk",
     "ReadOnlyField": "any",
     "SerializerMethodField": "any",
+    "SlugField": "string",
     "TimeField": "time",
+    "URLField": "string",
     "UUIDField": "uuid",
 }
 
@@ -65,6 +68,8 @@ def query_params_from_serializer(
 
 def response_fields_from_serializer(
     serializer_class: type | None,
+    *,
+    model_context: type | None,
 ) -> tuple[ResponseFieldContract, ...]:
     if serializer_class is None:
         return ()
@@ -74,7 +79,12 @@ def response_fields_from_serializer(
         return ()
 
     fields: list[ResponseFieldContract] = []
-    _collect_response_fields(instance, fields, prefix="")
+    _collect_response_fields(
+        instance,
+        fields,
+        prefix="",
+        model_context=model_context,
+    )
     return tuple(fields)
 
 
@@ -121,22 +131,43 @@ def _collect_response_fields(
     fields: list[ResponseFieldContract],
     *,
     prefix: str,
+    model_context: type | None,
     depth: int = 0,
 ) -> None:
     if depth > 4:
         return
-    model = _serializer_model(serializer.__class__)
+    model = _serializer_model(serializer.__class__) or model_context
     for name, field in serializer.fields.items():
         path = f"{prefix}.{name}" if prefix else name
         if isinstance(field, serializers.ListSerializer):
             fields.append(ResponseFieldContract(name=name, type="array", path=path))
             child = getattr(field, "child", None)
             if isinstance(child, serializers.Serializer):
-                _collect_response_fields(child, fields, prefix=path, depth=depth + 1)
+                _collect_response_fields(
+                    child,
+                    fields,
+                    prefix=path,
+                    model_context=_related_model_for_serializer_field(
+                        model,
+                        output_name=name,
+                        field=field,
+                    ),
+                    depth=depth + 1,
+                )
             continue
         if isinstance(field, serializers.Serializer):
             fields.append(ResponseFieldContract(name=name, type="object", path=path))
-            _collect_response_fields(field, fields, prefix=path, depth=depth + 1)
+            _collect_response_fields(
+                field,
+                fields,
+                prefix=path,
+                model_context=_related_model_for_serializer_field(
+                    model,
+                    output_name=name,
+                    field=field,
+                ),
+                depth=depth + 1,
+            )
             continue
         fields.append(
             ResponseFieldContract(
@@ -200,11 +231,24 @@ def _serializer_method_field_type(field: serializers.SerializerMethodField) -> s
         getattr(field, "method_name", "") or f"get_{getattr(field, 'field_name', '')}"
     )
     method = getattr(parent, method_name, None)
-    annotation = getattr(method, "__annotations__", {}).get("return")
+    annotation = _return_annotation(method)
     return _python_type_name(annotation)
 
 
+def _return_annotation(method: Any) -> Any:
+    try:
+        return get_type_hints(method).get("return")
+    except Exception:
+        return getattr(method, "__annotations__", {}).get("return")
+
+
 def _python_type_name(annotation: Any) -> str:
+    origin = get_origin(annotation)
+    if origin in {Union, UnionType}:
+        members = tuple(item for item in get_args(annotation) if item is not NoneType)
+        if len(members) == 1:
+            return _python_type_name(members[0])
+        return ""
     if annotation is bool:
         return "boolean"
     if annotation is str:
@@ -213,6 +257,10 @@ def _python_type_name(annotation: Any) -> str:
         return "integer"
     if annotation is float:
         return "float"
+    if annotation is dict:
+        return "object"
+    if annotation in {list, tuple}:
+        return "array"
     return ""
 
 
@@ -271,6 +319,9 @@ def _field_identity(
     output_name: str,
     field: serializers.Field,
 ) -> dict[str, Any]:
+    explicit = _explicit_identity(field, output_name=output_name)
+    if explicit:
+        return explicit
     if model is None:
         return {}
     raw_source = str(getattr(field, "source", "") or "")
@@ -280,6 +331,21 @@ def _field_identity(
         source_path=source,
         output_name=output_name,
     )
+
+
+def _explicit_identity(
+    field: serializers.Field,
+    *,
+    output_name: str,
+) -> dict[str, Any]:
+    explicit = getattr(field, "fervis_identity", None)
+    if not isinstance(explicit, dict):
+        return {}
+    entity_ref = str(explicit.get("entityRef") or "")
+    id_field = str(explicit.get("idField") or output_name)
+    if not entity_ref or not id_field:
+        return {}
+    return {"entityRef": entity_ref, "idField": id_field, "primaryKey": True}
 
 
 def _identity_for_model_path(
@@ -317,6 +383,41 @@ def _identity_for_model_path(
         if related_model is not None:
             return _identity_payload(model=related_model, id_field=output_name)
     return {}
+
+
+def _related_model_for_serializer_field(
+    model: type | None,
+    *,
+    output_name: str,
+    field: serializers.Field,
+) -> type | None:
+    if model is None:
+        return None
+    raw_source = str(getattr(field, "source", "") or "")
+    source = output_name if not raw_source or raw_source == "*" else raw_source
+    return _related_model_for_model_path(model=model, source_path=source)
+
+
+def _related_model_for_model_path(
+    *,
+    model: type,
+    source_path: str,
+) -> type | None:
+    meta = getattr(model, "_meta", None)
+    if meta is None:
+        return None
+    if "." in source_path:
+        relation_name, remainder = source_path.split(".", 1)
+        relation_field = _model_field(meta, relation_name)
+        related_model = _related_model(relation_field)
+        if related_model is None:
+            return None
+        return _related_model_for_model_path(
+            model=related_model,
+            source_path=remainder,
+        )
+    field = _model_field(meta, source_path) or _model_field_by_attname(meta, source_path)
+    return _related_model(field)
 
 
 def _model_field(meta: Any, name: str) -> Any:

@@ -5,23 +5,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 import re
-from typing import Any
+from typing import Any, TypeAlias
 
 from fervis.lookup.conversation_resolution.overlay import (
     ConversationResolutionOverlay,
 )
-from fervis.lookup.turn_prompts.context import HostPromptContext
-from fervis.lookup.question_contract._normalization import (
-    number_text,
+from fervis.lookup.question_contract.answer_output_support import (
+    ANSWER_OUTPUT_SUPPORT_ROLE_VALUES,
 )
-
-
-class KnownInputKind(StrEnum):
-    REFERENCE = "named_reference_text"
-    ROW_SET_REFERENCE = "row_set_reference"
-    TIME = "time_text"
-    NUMBER = "number_text"
-    LIMIT = "explicit_numeric_limit_text"
+from fervis.lookup.question_contract._text_spans import contains_copied_span
+from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
+from fervis.lookup.turn_prompts.context import HostPromptContext
 
 
 class KnownInputSource(StrEnum):
@@ -86,6 +80,11 @@ class RequestedFactAnswerExpressionFamily(StrEnum):
 class MissingQuestionInputType(StrEnum):
     TARGET_REFERENCE = "target_reference"
     ANSWER_DEFINITION = "answer_definition"
+
+
+class GroupKeyDomainKind(StrEnum):
+    SPECIFIED_QUESTION_INPUTS = "SPECIFIED_QUESTION_INPUTS"
+    SOURCE_RESULT_VALUES = "SOURCE_RESULT_VALUES"
 
 
 NORMAL_INSTANCE_EXPLICIT_USER_OVERRIDE_POLICY = (
@@ -201,50 +200,196 @@ def normal_instance_guard_question(subject_text: str) -> str:
 
 
 @dataclass(frozen=True)
+class RequestedFactGroupKey:
+    description: str
+    domain: GroupKeyDomainKind
+    question_input_refs: tuple[str, ...] = ()
+    id: str = "group_key"
+
+    def __post_init__(self) -> None:
+        if not self.id.strip():
+            raise ValueError("group key requires id")
+        if not self.description.strip():
+            raise ValueError("group key requires description")
+        if not isinstance(self.domain, GroupKeyDomainKind):
+            raise ValueError("group key requires structured domain")
+        refs = tuple(
+            str(item).strip()
+            for item in self.question_input_refs
+            if str(item).strip()
+        )
+        if refs != self.question_input_refs:
+            object.__setattr__(self, "question_input_refs", refs)
+        if self.domain == GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS and not refs:
+            raise ValueError("specified group key requires question inputs")
+        if self.domain == GroupKeyDomainKind.SOURCE_RESULT_VALUES and refs:
+            raise ValueError("source-result group key cannot carry input refs")
+
+    def to_model_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "id": self.id,
+            "description": self.description,
+            "domain": self.domain.value,
+        }
+        if self.question_input_refs:
+            payload["question_input_refs"] = list(self.question_input_refs)
+        return payload
+
+    def to_answer_request_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "description": self.description,
+            "domain": self.domain.value,
+        }
+        if self.question_input_refs:
+            payload["question_input_refs"] = list(self.question_input_refs)
+        return payload
+
+
+@dataclass(frozen=True)
 class RequestedFactAnswerOutput:
     id: str
     description: str = ""
+    role: str = ""
 
     def __post_init__(self) -> None:
         if not self.id.strip():
             raise ValueError("answer output requires id")
         if not self.description.strip():
             object.__setattr__(self, "description", self.id)
+        role = self.role.strip()
+        if role and role not in ANSWER_OUTPUT_SUPPORT_ROLE_VALUES:
+            raise ValueError("answer output role is invalid")
+        if role != self.role:
+            object.__setattr__(self, "role", role)
 
     def to_model_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
             "id": self.id,
             "description": self.description,
         }
+        if self.role:
+            payload["role"] = self.role
         return payload
 
     def to_answer_request_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "description": self.description,
         }
+        if self.role:
+            payload["role"] = self.role
+        return payload
 
 
 @dataclass(frozen=True)
 class RequestedFactAnswerExpression:
     family: RequestedFactAnswerExpressionFamily
+    group_key: RequestedFactGroupKey | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            self.family == RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE
+            and self.group_key is None
+        ):
+            raise ValueError("grouped_aggregate requires group key")
+        if (
+            self.family != RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE
+            and self.group_key is not None
+        ):
+            raise ValueError("group key requires grouped_aggregate answer expression")
 
     def to_answer_request_dict(self) -> dict[str, object]:
-        return {"family": self.family.value}
+        payload: dict[str, object] = {"family": self.family.value}
+        if self.group_key is not None:
+            payload["group_key"] = self.group_key.to_answer_request_dict()
+        return payload
 
 
 @dataclass(frozen=True)
-class RequestedFactKnownInput:
+class RequestedFactLiteralInput:
     id: str
-    kind: KnownInputKind
     source: KnownInputSource
-    description: str = ""
+    role: LiteralInputRole
     text: str = ""
-    satisfies_requirement_id: str = ""
-    numeric_value: object | None = None
-    value_source_text: str = ""
-    lookup_text: str = ""
-    occurrence: int = 1
+    resolved_value_text: str = ""
+    field_label_text: str = ""
+    value_meaning_hint: str = ""
     resolved_input_ref: str = ""
+    occurrence: int = 1
+
+    def __post_init__(self) -> None:
+        if not self.id.strip():
+            raise ValueError("known input requires id")
+        if self.occurrence < 1:
+            raise ValueError("known input occurrence must be positive")
+        if not self.text.strip():
+            raise ValueError("known input requires text")
+        if not self.resolved_value_text.strip():
+            raise ValueError("literal known input requires resolved value text")
+        if self.role == LiteralInputRole.RESULT_LIMIT:
+            if (
+                not self.resolved_value_text.isdigit()
+                or int(self.resolved_value_text) < 1
+            ):
+                raise ValueError(
+                    "result_limit literal requires canonical positive integer digits"
+                )
+            object.__setattr__(
+                self,
+                "resolved_value_text",
+                str(int(self.resolved_value_text)),
+            )
+        if self.source == KnownInputSource.CONVERSATION_RESOLUTION:
+            if not self.resolved_input_ref.strip():
+                raise ValueError(
+                    "conversation-resolution literal requires resolved input ref"
+                )
+        elif self.resolved_input_ref:
+            raise ValueError(
+                "question-context literal must not include resolved input ref"
+            )
+
+    @property
+    def kind(self) -> KnownInputKind:
+        return KnownInputKind.LITERAL
+
+    @property
+    def is_reference_value(self) -> bool:
+        return self.role == LiteralInputRole.REFERENCE_VALUE
+
+    @property
+    def is_time_value(self) -> bool:
+        return self.role == LiteralInputRole.TIME_VALUE
+
+    @property
+    def is_result_limit(self) -> bool:
+        return self.role == LiteralInputRole.RESULT_LIMIT
+
+    def to_model_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "id": self.id,
+            "kind": KnownInputKind.LITERAL.value,
+            "source": self.source.value,
+            "text": self.text,
+        }
+        if self.resolved_input_ref:
+            payload["resolved_input_ref"] = self.resolved_input_ref
+        if self.occurrence != 1:
+            payload["occurrence"] = self.occurrence
+        payload["resolved_value_text"] = self.resolved_value_text
+        if self.field_label_text:
+            payload["field_label_text"] = self.field_label_text
+        if self.value_meaning_hint:
+            payload["value_meaning_hint"] = self.value_meaning_hint
+        payload["role"] = self.role.value
+        return payload
+
+
+@dataclass(frozen=True)
+class RequestedFactRowSetReferenceInput:
+    id: str
+    text: str
+    resolved_input_ref: str
+    occurrence: int = 1
 
     def __post_init__(self) -> None:
         if not self.id.strip():
@@ -253,130 +398,43 @@ class RequestedFactKnownInput:
             raise ValueError("known input requires text")
         if self.occurrence < 1:
             raise ValueError("known input occurrence must be positive")
-        if self.kind == KnownInputKind.LIMIT and (
-            self.numeric_value is None
-            or isinstance(self.numeric_value, bool)
-            or not isinstance(self.numeric_value, int)
-            or self.numeric_value < 1
-        ):
-            raise ValueError("limit known input requires positive integer value")
-        if self.kind == KnownInputKind.LIMIT and not self.value_source_text.strip():
-            raise ValueError("limit known input requires value source text")
-        if self.kind == KnownInputKind.NUMBER and (
-            self.numeric_value is None
-            or isinstance(self.numeric_value, bool)
-            or not isinstance(self.numeric_value, int | float)
-        ):
-            raise ValueError("number known input requires numeric value")
-        if self.kind not in {KnownInputKind.LIMIT, KnownInputKind.NUMBER} and (
-            self.numeric_value is not None
-        ):
-            raise ValueError(
-                f"{self.kind.value} known input must not include numeric value"
-            )
-        if self.kind != KnownInputKind.LIMIT and self.value_source_text:
-            raise ValueError(
-                f"{self.kind.value} known input must not include value source text"
-            )
-        if self.kind == KnownInputKind.TIME:
-            if self.lookup_text:
-                raise ValueError("time known input must not include lookup text")
-            if self.resolved_input_ref:
-                raise ValueError("time known input must not include resolved input ref")
-            return
-        if self.satisfies_requirement_id:
-            raise ValueError(
-                f"{self.kind.value} known input must not include requirement id"
-            )
-        if self.kind == KnownInputKind.REFERENCE:
-            if not str(self.lookup_text or "").strip():
-                raise ValueError("reference lookup text must not be empty")
-            if self.resolved_input_ref:
-                raise ValueError(
-                    "reference known input must not include resolved input ref"
-                )
-        elif self.kind == KnownInputKind.ROW_SET_REFERENCE:
-            if self.source != KnownInputSource.CONVERSATION_RESOLUTION:
-                raise ValueError(
-                    "row set reference must come from conversation resolution"
-                )
-            if self.lookup_text:
-                raise ValueError("row set reference must not include lookup text")
-            if not self.resolved_input_ref.strip():
-                raise ValueError("row set reference requires resolved input ref")
-        elif self.lookup_text:
-            raise ValueError(
-                f"{self.kind.value} known input must not include lookup text"
-            )
-        elif self.resolved_input_ref:
-            raise ValueError(
-                f"{self.kind.value} known input must not include resolved input ref"
-            )
+        if not self.resolved_input_ref.strip():
+            raise ValueError("row set reference requires resolved input ref")
+
+    @property
+    def kind(self) -> KnownInputKind:
+        return KnownInputKind.ROW_SET_REFERENCE
+
+    @property
+    def source(self) -> KnownInputSource:
+        return KnownInputSource.CONVERSATION_RESOLUTION
+
+    @property
+    def is_reference_value(self) -> bool:
+        return False
+
+    @property
+    def is_time_value(self) -> bool:
+        return False
+
+    @property
+    def is_result_limit(self) -> bool:
+        return False
 
     def to_model_dict(self) -> dict[str, object]:
-        payload: dict[str, object] = {
+        return {
             "id": self.id,
-            "kind": self.kind.value,
-            "source": self.source.value,
+            "kind": KnownInputKind.ROW_SET_REFERENCE.value,
+            "source": KnownInputSource.CONVERSATION_RESOLUTION.value,
             "text": self.text,
-        }
-        if self.description:
-            payload["description"] = self.description
-        if self.satisfies_requirement_id:
-            payload["satisfies_requirement_id"] = self.satisfies_requirement_id
-        if self.numeric_value is not None:
-            payload["numeric_value"] = self.numeric_value
-        if self.value_source_text:
-            payload["value_source_text"] = self.value_source_text
-        if self.lookup_text:
-            payload["lookup_text"] = self.lookup_text
-        if self.occurrence != 1 or self.kind == KnownInputKind.ROW_SET_REFERENCE:
-            payload["occurrence"] = self.occurrence
-        if self.resolved_input_ref:
-            payload["resolved_input_ref"] = self.resolved_input_ref
-        return payload
-
-
-@dataclass(frozen=True)
-class RequestedFactTimeRequirement:
-    id: str
-    source_text: str
-    why_required: str
-
-    def __post_init__(self) -> None:
-        if not self.id.strip():
-            raise ValueError("time requirement requires id")
-        if not self.source_text.strip():
-            raise ValueError("time requirement requires source text")
-        if not self.why_required.strip():
-            raise ValueError("time requirement requires reason")
-
-    def to_answer_request_dict(self) -> dict[str, object]:
-        return {
-            "requirement_id": self.id,
-            "source_text": self.source_text,
-            "why_required": self.why_required,
+            "occurrence": self.occurrence,
+            "resolved_input_ref": self.resolved_input_ref,
         }
 
 
-@dataclass(frozen=True)
-class RequestedFactInputRequirements:
-    time_requirements: tuple[RequestedFactTimeRequirement, ...] = ()
-
-    def __post_init__(self) -> None:
-        seen: set[str] = set()
-        for requirement in self.time_requirements:
-            if requirement.id in seen:
-                raise ValueError("duplicate time requirement")
-            seen.add(requirement.id)
-
-    def to_answer_request_dict(self) -> dict[str, object]:
-        return {
-            "time_requirements": [
-                requirement.to_answer_request_dict()
-                for requirement in self.time_requirements
-            ],
-        }
+RequestedFactKnownInput: TypeAlias = (
+    RequestedFactLiteralInput | RequestedFactRowSetReferenceInput
+)
 
 
 @dataclass(frozen=True)
@@ -442,6 +500,7 @@ class RequestedFactAnswerPopulationMembershipTest:
     kind: AnswerPopulationMembershipTestKind
     polarity: AnswerPopulationMembershipTestPolarity
     test_question: str
+    owned_question_input_refs: tuple[str, ...] = ()
     normal_instance_profile: NormalInstanceProfile | None = None
 
     def __post_init__(self) -> None:
@@ -449,6 +508,15 @@ class RequestedFactAnswerPopulationMembershipTest:
             raise ValueError("answer population test requires id")
         if not self.test_question.strip():
             raise ValueError("answer population test requires question")
+        owned_refs = tuple(
+            str(item).strip()
+            for item in self.owned_question_input_refs
+            if str(item).strip()
+        )
+        if len(owned_refs) != len(set(owned_refs)):
+            raise ValueError("answer population test owner refs must be unique")
+        if owned_refs != self.owned_question_input_refs:
+            object.__setattr__(self, "owned_question_input_refs", owned_refs)
         if (
             self.kind != AnswerPopulationMembershipTestKind.NORMAL_INSTANCE_GUARD
             and self.normal_instance_profile is not None
@@ -461,6 +529,7 @@ class RequestedFactAnswerPopulationMembershipTest:
             "kind": self.kind.value,
             "polarity": self.polarity.value,
             "test_question": self.test_question,
+            "owned_question_input_refs": list(self.owned_question_input_refs),
         }
         if self.normal_instance_profile is not None:
             payload["normal_instance_profile"] = (
@@ -474,6 +543,7 @@ class RequestedFactAnswerPopulationMembershipTest:
             "kind": self.kind.value,
             "polarity": self.polarity.value,
             "test_question": self.test_question,
+            "owned_question_input_refs": list(self.owned_question_input_refs),
         }
 
 
@@ -544,6 +614,7 @@ def _normalized_population_membership_test(
         kind=test.kind,
         polarity=test.polarity,
         test_question=normal_instance_guard_question(counted_unit),
+        owned_question_input_refs=test.owned_question_input_refs,
         normal_instance_profile=profile,
     )
 
@@ -605,9 +676,6 @@ class RequestedFact:
     description: str
     answer_expression: RequestedFactAnswerExpression | None = None
     answer_subject: RequestedFactAnswerSubject | None = None
-    input_requirements: RequestedFactInputRequirements = field(
-        default_factory=RequestedFactInputRequirements
-    )
     answer_population: RequestedFactAnswerPopulation | None = None
     answer_outputs: tuple[RequestedFactAnswerOutput, ...] = ()
     known_inputs: tuple[RequestedFactKnownInput, ...] = ()
@@ -619,6 +687,13 @@ class RequestedFact:
             raise ValueError("requested fact requires id and description")
         if not self.answer_outputs:
             raise ValueError("requested fact requires answer outputs")
+        row_population_outputs = tuple(
+            output for output in self.answer_outputs if output.role == "ROW_POPULATION"
+        )
+        if len(row_population_outputs) > 1:
+            raise ValueError(
+                "requested fact can have at most one row population answer output"
+            )
         if self.answer_population is None and self.answer_subject is not None:
             object.__setattr__(
                 self,
@@ -636,6 +711,62 @@ class RequestedFact:
         )
         if input_refs != self.input_refs:
             object.__setattr__(self, "input_refs", input_refs)
+        if self.answer_population is not None:
+            input_ref_set = set(input_refs)
+            for test in self.answer_population.membership_tests:
+                unknown_refs = tuple(
+                    ref
+                    for ref in test.owned_question_input_refs
+                    if ref not in input_ref_set
+                )
+                if unknown_refs:
+                    raise ValueError(
+                        "answer population test owner refs must be used by requested fact"
+                    )
+        if (
+            self.answer_expression is not None
+            and self.answer_expression.family
+            == RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE
+            and self.answer_expression.group_key is None
+        ):
+            raise ValueError("grouped_aggregate requires group key")
+        if (
+            self.answer_expression is not None
+            and self.answer_expression.group_key is not None
+            and self.answer_expression.group_key.domain
+            == GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS
+        ):
+            input_ref_set = set(input_refs)
+            unknown_refs = tuple(
+                ref
+                for ref in self.answer_expression.group_key.question_input_refs
+                if ref not in input_ref_set
+            )
+            if unknown_refs:
+                raise ValueError(
+                    "answer expression group key refs must be used by requested fact"
+                )
+        for output in self.answer_outputs:
+            if output.role == "GROUP_KEY":
+                raise ValueError("GROUP_KEY belongs to answer_expression.group_key")
+
+    @property
+    def support_answer_outputs(self) -> tuple[RequestedFactAnswerOutput, ...]:
+        group_key = (
+            self.answer_expression.group_key
+            if self.answer_expression is not None
+            else None
+        )
+        if group_key is None:
+            return self.answer_outputs
+        return (
+            RequestedFactAnswerOutput(
+                id=group_key.id,
+                description=group_key.description,
+                role="GROUP_KEY",
+            ),
+            *self.answer_outputs,
+        )
 
     def answer_request_model_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -647,7 +778,6 @@ class RequestedFact:
             )
         if self.answer_subject is not None:
             payload["answer_subject"] = self.answer_subject.to_answer_request_dict()
-        payload["input_requirements"] = self.input_requirements.to_answer_request_dict()
         if self.answer_population is not None:
             payload["answer_population"] = (
                 self.answer_population.to_answer_request_dict()
@@ -714,7 +844,7 @@ class QuestionContract:
                     )
             requested_facts.append(materialized_fact)
             output_ids: set[str] = set()
-            for output in materialized_fact.answer_outputs:
+            for output in materialized_fact.support_answer_outputs:
                 if output.id in output_ids:
                     raise ValueError("duplicate requested fact answer output")
                 output_ids.add(output.id)
@@ -764,15 +894,15 @@ class QuestionContract:
         return {
             "kind": "question_contract",
             "answer_requests_count": len(self.requested_facts),
+            "question_inputs": [
+                known.to_model_dict() for known in self.question_inputs
+            ],
             "answer_requests": [
                 _answer_request_contract_dict(
                     fact,
                     question_input_ids=question_input_ids,
                 )
                 for fact in self.requested_facts
-            ],
-            "question_inputs": [
-                known.to_model_dict() for known in self.question_inputs
             ],
         }
 
@@ -804,19 +934,15 @@ class MissingQuestionInput:
 @dataclass(frozen=True)
 class QuestionContractNeedsClarification:
     missing: tuple[MissingQuestionInput, ...]
-    clarification_question: str
 
     def __post_init__(self) -> None:
         if not self.missing:
             raise ValueError("question-contract clarification requires missing inputs")
-        if not self.clarification_question.strip():
-            raise ValueError("question-contract clarification requires question")
 
     def to_model_dict(self) -> dict[str, object]:
         return {
             "kind": "needs_clarification",
             "missing": [item.to_model_dict() for item in self.missing],
-            "clarification_question": self.clarification_question,
         }
 
 
@@ -844,12 +970,8 @@ def _answer_request_contract_dict(
     return {
         "id": fact.id,
         **fact.answer_request_model_dict(),
-        "input_decisions": [
-            {
-                "input_ref": input_id,
-                "use_input": input_id in fact.input_refs,
-            }
-            for input_id in question_input_ids
+        "used_question_inputs": [
+            input_id for input_id in question_input_ids if input_id in fact.input_refs
         ],
     }
 
@@ -878,32 +1000,6 @@ def validate_question_contract_against_question(
     for known in known_inputs:
         if not _text_in_any_context(known.text, known_input_texts):
             raise ValueError("known input text must come from question context")
-        _validate_known_input_value_matches_text(
-            known,
-            question_context_texts=known_input_texts,
-        )
-
-
-def _validate_known_input_value_matches_text(
-    known: RequestedFactKnownInput,
-    *,
-    question_context_texts: tuple[str, ...],
-) -> None:
-    if known.kind == KnownInputKind.LIMIT:
-        if not _text_in_any_context(
-            known.value_source_text,
-            (_normalized_text(known.text),),
-        ):
-            raise ValueError("limit known input value source text must match text")
-        return
-    if known.kind == KnownInputKind.NUMBER:
-        if number_text(known.text) != number_text(known.numeric_value):
-            raise ValueError("number known input value must match text")
-        return
-    if known.kind == KnownInputKind.REFERENCE:
-        if not _text_in_any_context(known.lookup_text, question_context_texts):
-            raise ValueError("reference lookup text must come from question context")
-        return
 
 
 def _normalized_text(value: object) -> str:
@@ -914,27 +1010,5 @@ def _text_in_any_context(text: object, contexts: tuple[str, ...]) -> bool:
     normalized = _normalized_text(text)
     return bool(
         normalized
-        and any(_contains_text_span(context, normalized) for context in contexts)
+        and any(contains_copied_span(context, normalized) for context in contexts)
     )
-
-
-def _contains_text_span(container: str, text: str) -> bool:
-    for match in re.finditer(re.escape(text), container):
-        start = match.start()
-        end = match.end()
-        if _has_alnum_edge(text, at_start=True) and start > 0:
-            if container[start - 1].isalnum():
-                continue
-        if _has_alnum_edge(text, at_start=False) and end < len(container):
-            if container[end].isalnum():
-                continue
-        return True
-    return False
-
-
-def _has_alnum_edge(text: str, *, at_start: bool) -> bool:
-    value = text.strip()
-    if not value:
-        return False
-    char = value[0] if at_start else value[-1]
-    return char.isalnum()

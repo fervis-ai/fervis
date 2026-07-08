@@ -20,8 +20,13 @@ input:
   scalar_aggregate_choices_by_requested_fact_id: {}
   field_ids_by_source_binding_id:
     sb_1: [amount]
-expect:
-  text_excludes:
+  excludes:
     - grounded_input_use
     - endpoint_param
     - enum_param
+expect:
+  result_contains:
+    excludes:
+      grounded_input_use: true
+      endpoint_param: true
+      enum_param: true

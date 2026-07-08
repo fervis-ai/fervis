@@ -17,4 +17,5 @@ input:
             retention_basis: The read exposes sales count evidence.
             retention_decision: RETAIN
 expect:
-  error_contains: is too short
+  result_contains:
+    status: rejected

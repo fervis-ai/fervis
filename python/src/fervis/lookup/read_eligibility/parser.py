@@ -14,6 +14,7 @@ from fervis.lookup.read_eligibility.model import (
     ReadEligibilityRequest,
     ReadEligibilityResult,
 )
+from fervis.lookup.read_eligibility import provider_contract as provider_output
 from fervis.lookup.read_eligibility.surface import (
     read_eligibility_candidate_surface,
 )
@@ -109,14 +110,10 @@ def parse_read_eligibility(
     *,
     request: ReadEligibilityRequest,
 ) -> ReadEligibilityResult:
-    _reject_unexpected_keys(
-        payload,
-        {"requested_fact_assessments"},
-        path="read_eligibility",
-    )
+    output = provider_output.ReadEligibilityOutput.parse(payload)
     context = _ReadEligibilityParseContext.for_request(request)
     assessments_by_key = _read_assessments_by_key(
-        payload.get("requested_fact_assessments"),
+        output.requested_fact_assessments,
         context=context,
     )
     return ReadEligibilityResult(
@@ -139,14 +136,8 @@ def _read_assessments_by_key(
     seen_requested_fact_order: list[str] = []
     output: dict[tuple[str, str], ReadAssessment] = {}
     for raw in raw_items:
-        if not isinstance(raw, dict):
-            raise ValueError("requested fact assessment must be an object")
-        _reject_unexpected_keys(
-            raw,
-            {"requested_fact_id", "read_candidate_reviews"},
-            path="requested_fact_assessments[]",
-        )
-        requested_fact_id = _text(raw.get("requested_fact_id"))
+        item = provider_output.RequestedFactAssessmentOutput.parse(raw)
+        requested_fact_id = _text(item.requested_fact_id)
         if requested_fact_id not in context.requested_fact_ids:
             raise ValueError("requested fact assessment references unknown fact")
         if requested_fact_id in seen_requested_facts:
@@ -154,7 +145,7 @@ def _read_assessments_by_key(
         seen_requested_facts.add(requested_fact_id)
         seen_requested_fact_order.append(requested_fact_id)
         fact_assessments = _read_candidate_reviews(
-            raw.get("read_candidate_reviews"),
+            item.read_candidate_reviews,
             context=context,
             requested_fact_id=requested_fact_id,
         )
@@ -189,41 +180,28 @@ def _read_candidate_reviews(
     if not isinstance(raw_items, list):
         raise ValueError("read_candidate_reviews must be an array")
     output: dict[str, ReadAssessment] = {}
-    for index, raw in enumerate(raw_items):
-        if not isinstance(raw, dict):
-            raise ValueError("read candidate review must be an object")
-        _reject_unexpected_keys(
-            raw,
-            {
-                "source_candidate_id",
-                "read_id",
-                "relevant_row_path_tokens",
-                "relevant_field_tokens",
-                "retention_basis",
-                "retention_decision",
-            },
-            path=f"read_candidate_reviews[{index}]",
-        )
-        source_candidate_id = _text(raw.get("source_candidate_id"))
+    for raw in raw_items:
+        item = provider_output.ReadCandidateReviewOutput.parse(raw)
+        source_candidate_id = _text(item.source_candidate_id)
         if source_candidate_id in output:
             raise ValueError("read candidate assessed more than once")
-        read_id = _text(raw.get("read_id"))
+        read_id = _text(item.read_id)
         expected = context.expected_candidate(requested_fact_id, source_candidate_id)
         if expected is None:
             raise ValueError("read candidate review references unknown candidate")
         if expected.read_id != read_id:
             raise ValueError("read candidate review read_id does not match candidate")
         row_path_ids = _row_path_ids(
-            raw.get("relevant_row_path_tokens"),
+            item.relevant_row_path_tokens,
             context=context,
             expected=expected,
         )
         field_refs = _field_refs(
-            raw.get("relevant_field_tokens"),
+            item.relevant_field_tokens,
             context=context,
             expected=expected,
         )
-        retention_decision = _text(raw.get("retention_decision"))
+        retention_decision = _text(item.retention_decision)
         if retention_decision not in RETENTION_DECISION_VALUES:
             raise ValueError("read candidate review has unsupported retention decision")
         output[source_candidate_id] = ReadAssessment(
@@ -233,7 +211,7 @@ def _read_candidate_reviews(
             read_id=expected.read_id,
             relevant_row_path_ids=row_path_ids,
             relevant_field_refs=field_refs,
-            retention_basis=_text(raw.get("retention_basis")),
+            retention_basis=_text(item.retention_basis),
             retention_decision=retention_decision,
         )
     return output
@@ -336,14 +314,3 @@ def _string_tuple(
     if not isinstance(value, list):
         raise ValueError(f"{path} must be an array")
     return tuple(_text(item) for item in value)
-
-
-def _reject_unexpected_keys(
-    raw: dict[str, Any],
-    allowed: set[str],
-    *,
-    path: str,
-) -> None:
-    unexpected = sorted(set(raw) - allowed)
-    if unexpected:
-        raise ValueError(f"{path} contains unexpected keys: {', '.join(unexpected)}")

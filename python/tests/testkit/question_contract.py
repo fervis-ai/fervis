@@ -3,13 +3,20 @@ from __future__ import annotations
 from typing import Any
 
 from fervis.lookup.question_contract import (
+    GroupKeyDomainKind,
     KnownInputKind,
     KnownInputSource,
+    LiteralInputRole,
     QuestionContract,
     RequestedFact,
+    RequestedFactAnswerExpression,
+    RequestedFactAnswerExpressionFamily,
+    RequestedFactGroupKey,
     RequestedFactAnswerOutput,
     RequestedFactAnswerSubject,
     RequestedFactKnownInput,
+    RequestedFactLiteralInput,
+    RequestedFactRowSetReferenceInput,
 )
 
 
@@ -31,12 +38,17 @@ def requested_fact_from_payload(payload: dict[str, Any]) -> RequestedFact:
         description=str(payload.get("description") or payload["id"]),
         required_for=str(payload.get("required_for") or ""),
         answer_subject=answer_subject_from_payload(payload.get("answer_subject")),
+        answer_expression=answer_expression_from_payload(
+            payload.get("answer_expression")
+        ),
         answer_outputs=tuple(
             answer_output_from_payload(item)
             for item in payload.get("answer_outputs") or ()
         ),
         known_inputs=known_inputs,
-        input_refs=tuple(payload.get("input_refs") or (item.id for item in known_inputs)),
+        input_refs=tuple(
+            payload.get("input_refs") or (item.id for item in known_inputs)
+        ),
     )
 
 
@@ -60,18 +72,54 @@ def answer_output_from_payload(payload: Any) -> RequestedFactAnswerOutput:
     return RequestedFactAnswerOutput(
         id=str(payload["id"]),
         description=str(payload.get("description") or ""),
+        role=str(payload.get("role") or ""),
+    )
+
+
+def answer_expression_from_payload(
+    payload: Any,
+) -> RequestedFactAnswerExpression | None:
+    if payload is None:
+        return None
+    if not isinstance(payload, dict):
+        raise ValueError("answer_expression must be an object")
+    return RequestedFactAnswerExpression(
+        family=RequestedFactAnswerExpressionFamily(str(payload["family"])),
+        group_key=group_key_from_payload(payload.get("group_key")),
+    )
+
+
+def group_key_from_payload(payload: Any) -> RequestedFactGroupKey | None:
+    if payload is None:
+        return None
+    if not isinstance(payload, dict):
+        raise ValueError("group_key must be an object")
+    return RequestedFactGroupKey(
+        id=str(payload.get("id") or "group_key"),
+        description=str(payload["description"]),
+        domain=GroupKeyDomainKind(str(payload["domain"])),
+        question_input_refs=tuple(
+            str(item) for item in payload.get("question_input_refs") or ()
+        ),
     )
 
 
 def known_input_from_payload(payload: dict[str, Any]) -> RequestedFactKnownInput:
-    return RequestedFactKnownInput(
+    kind = KnownInputKind(str(payload["kind"]))
+    if kind == KnownInputKind.LITERAL:
+        return RequestedFactLiteralInput(
+            id=str(payload["id"]),
+            source=KnownInputSource(str(payload.get("source") or "question_context")),
+            text=str(payload.get("text") or ""),
+            resolved_input_ref=str(payload.get("resolved_input_ref") or ""),
+            resolved_value_text=str(payload.get("resolved_value_text") or ""),
+            field_label_text=str(payload.get("field_label_text") or ""),
+            value_meaning_hint=str(payload.get("value_meaning_hint") or ""),
+            role=LiteralInputRole(str(payload["role"])),
+        )
+    return RequestedFactRowSetReferenceInput(
         id=str(payload["id"]),
-        kind=KnownInputKind(str(payload.get("kind") or "named_reference_text")),
-        source=KnownInputSource(str(payload.get("source") or "question_context")),
-        description=str(payload.get("description") or ""),
         text=str(payload.get("text") or ""),
-        numeric_value=payload.get("numeric_value"),
-        value_source_text=str(payload.get("value_source_text") or ""),
-        lookup_text=str(payload.get("lookup_text") or ""),
+        occurrence=int(payload.get("occurrence") or 1),
         resolved_input_ref=str(payload.get("resolved_input_ref") or ""),
     )

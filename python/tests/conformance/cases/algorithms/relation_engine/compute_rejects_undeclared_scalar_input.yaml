@@ -17,4 +17,5 @@ input:
         scalar_inputs: [declared]
         output_scalar: result
 expect:
-  error_contains: undeclared scalar input
+  result_contains:
+    status: rejected

@@ -9,14 +9,23 @@ input:
       kind: needs_clarification
       clarifications:
         - id: which_staff
-          requested_fact_id: rf_staff
-          basis: multiple_matching_entities
-          question: Which staff do you mean?
-          known_input_id: staff_name
-          candidate_refs: [staff:1, staff:2]
-          evidence_refs: [resolve:alice]
+          requestedFactId: rf_staff
+          need: target_reference
+          reason: multiple_matching_entities
+          question: Which matching staff member should I use?
+          subjects:
+            - kind: question_input
+              id: staff_name
+              label: staff member
+              sourceText: Alice
+              options:
+                - {id: staff:1, label: Staff 1}
+                - {id: staff:2, label: Staff 2}
+          evidence:
+            - {kind: known_input, id: known_input:staff_name}
+            - {kind: proof_ref, id: resolve:alice}
 expect:
   result_contains:
     address:
       evidence:
-        stepIds: [resolve:alice]
+        stepIds: [known_input:staff_name, resolve:alice]

@@ -1,7 +1,7 @@
-id: read_context_reference_duplicate_removed
-description: Question-contract parser removes a named-reference input that duplicates the answer subject.
+id: answer_subject_literal_input_fails_closed
+description: Question-contract parser rejects a declared literal input that duplicates the answer subject.
 migrates:
-  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_removes_answer_subject_named_reference_duplicate
+- api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_rejects_answer_subject_literal_input
 kind: algorithm
 algorithm: question_contract.parse
 input:
@@ -9,30 +9,31 @@ input:
   answer_fact: count of unverified cash deposits
   answer_subject:
     subject_text: cash deposits
-    instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
+    instance_interpretation:
+      kind: NORMAL_BUSINESS_INSTANCE
   answer_population:
     population_label: cash deposits
     counted_unit: cash deposits
     membership_tests:
-      - test_id: pop_test_1
-        kind: SUBJECT_IDENTITY
-        polarity: MUST_PASS
-        test_question: Does the row/value represent cash deposits?
+    - test_id: pop_test_1
+      kind: SUBJECT_IDENTITY
+      polarity: MUST_PASS
+      test_question: Does the row/value represent cash deposits?
+      owned_question_input_refs: []
   answer_outputs:
-    - description: number of unverified cash deposits
+  - description: number of unverified cash deposits
   question_inputs:
-    - input_ref: subject
-      source: question_context
-      kind: named_reference_text
-      reference_text: cash deposits
-      target_meaning: cash deposits
-      lookup_text: cash deposits
-      inventory_check: {why_this_is_an_input: cash deposits is a named reference}
-  used_input_refs: [subject]
+  - input_ref: subject
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: cash deposits is a named reference
+    value_source_text: cash deposits
+    resolved_value_text: cash deposits
+    value_meaning_hint: cash deposits
+    role: reference_value
+  used_input_refs:
+  - subject
 expect:
   result_contains:
-    question_inputs: []
-    requested_facts:
-      - input_refs: []
-        known_inputs: []
-
+    status: rejected

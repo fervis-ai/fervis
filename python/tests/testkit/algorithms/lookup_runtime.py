@@ -31,11 +31,12 @@ from fervis.lookup.fact_planning.request import RuntimeValueContext
 from fervis.lookup.question_contract import (
     KnownInputKind,
     KnownInputSource,
+    LiteralInputRole,
     QuestionContract,
     RequestedFact,
     RequestedFactAnswerSubject,
     RequestedFactAnswerOutput,
-    RequestedFactKnownInput,
+    RequestedFactLiteralInput,
     default_answer_population,
 )
 from fervis.memory.addresses import fact_address_from_payload
@@ -61,8 +62,10 @@ from tests.lookup.source_binding_helpers import (
     source_binding_payload_from_fact_plan,
     source_binding_payload_from_fact_plan_with_invocation_overrides,
     source_binding_payload_for_one_call,
+    source_binding_target_id_for_candidate,
     source_fulfills_for_candidate,
 )
+from fervis.lookup.clarification import clarification_payload
 from tests.testkit.assertions import subset_mismatches
 from tests.testkit.catalog import catalog_from_payload
 
@@ -129,15 +132,7 @@ def _run_scripted_pattern(payload: dict[str, Any]) -> list[str]:
             "answer": result.answer,
             "outcome_kind": getattr(getattr(outcome, "kind", ""), "value", ""),
             "clarifications": [
-                {
-                    "question": item.question,
-                    "candidate_refs": list(item.candidate_refs),
-                    "available_options": [
-                        {"id": option.id, "label": option.label}
-                        for option in item.available_options
-                    ],
-                }
-                for item in clarifications
+                clarification_payload(item) for item in clarifications
             ],
             "rendered_rows": rendered_rows,
             "rendered_scalars": rendered_scalars,
@@ -327,8 +322,12 @@ class _VariantGroundingPlannerPort:
                 "kind": "source_bindings",
                 "source_invocations": [
                     {
-                        "requested_fact_id": "fact_1",
-                        "source_candidate_id": relation["source_candidate_id"],
+                        "binding_target_id": source_binding_target_id_for_candidate(
+                            prompt,
+                            requested_fact_id="fact_1",
+                            source_candidate_id=str(relation["source_candidate_id"]),
+                            plan_shape="list_rows",
+                        ),
                         "answer_population": {
                             "population_binding_id": _candidate_binding_surface(
                                 relation
@@ -352,7 +351,6 @@ class _VariantGroundingPlannerPort:
                         ),
                         "row_predicate_reviews": {},
                         "finite_choice_param_reviews": {},
-                        "source_binding_decision": "USE_SOURCE",
                     }
                 ],
             }
@@ -512,13 +510,8 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
         "answer_requests": [
             {
                 "answer_fact": fact_description,
-                "answer_expression": {
-                    "family": str(
-                        payload.get("answer_expression_family") or "list_rows"
-                    )
-                },
+                "answer_expression": _scripted_answer_expression(payload),
                 "answer_subject": _answer_subject_payload(subject_text),
-                "input_requirements": {"time_requirements": []},
                 "answer_population": default_answer_population(
                     description=fact_description,
                     subject_text=subject_text,
@@ -527,12 +520,11 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
                     ).instance_interpretation,
                 ).to_question_contract_dict(),
                 "answer_outputs": [
-                    {"description": str(answer_output)}
+                    _scripted_answer_output(answer_output)
                     for answer_output in answer_outputs
                 ],
-                "input_decisions": [
-                    {"input_ref": item["input_ref"], "use_input": True}
-                    for item in question_inputs
+                "used_question_inputs": [
+                    str(item["input_ref"]) for item in question_inputs
                 ],
             }
         ],
@@ -542,26 +534,64 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
     }
 
 
+def _scripted_answer_expression(payload: dict[str, Any]) -> dict[str, Any]:
+    output = {
+        "family": str(payload.get("answer_expression_family") or "list_rows")
+    }
+    if isinstance(payload.get("group_key"), dict):
+        output["group_key"] = dict(payload["group_key"])
+    return output
+
+
+def _scripted_answer_output(payload: object) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {"description": str(payload)}
+    output: dict[str, Any] = {"description": str(payload.get("description") or "")}
+    if payload.get("role"):
+        output["role"] = str(payload["role"])
+    return output
+
+
+def _scripted_answer_output_description(payload: object) -> str:
+    if isinstance(payload, dict):
+        return str(payload.get("description") or "")
+    return str(payload)
+
+
+def _scripted_answer_output_support_role(payload: object, *, default: str) -> str:
+    if isinstance(payload, dict):
+        return str(payload.get("support_role") or payload.get("role") or default)
+    return default
+
+
 def _scripted_question_input(*, index: int, payload: dict[str, Any]) -> dict[str, Any]:
-    kind = str(payload["kind"])
+    kind = KnownInputKind(str(payload["kind"]))
     text = str(payload["text"])
+    source = str(payload.get("source") or "question_context")
     output: dict[str, Any] = {
         "input_ref": str(payload.get("input_ref") or f"input_{index}"),
-        "source": "question_context",
-        "kind": kind,
-        "reference_text": text,
+        "source": source,
+        "kind": kind.value,
         "inventory_check": {
             "why_this_is_an_input": f"{text} is a declared question input",
         },
     }
-    if kind in {"number_text", "explicit_numeric_limit_text"}:
-        output["numeric_value"] = payload["numeric_value"]
-    if kind == "explicit_numeric_limit_text":
-        output["value_source_text"] = str(payload.get("value_source_text") or text)
-    if kind == "named_reference_text":
-        output["target_meaning"] = str(payload.get("target_meaning") or text)
-        output["lookup_text"] = str(payload.get("lookup_text") or text)
-    if kind == "row_set_reference":
+    if kind == KnownInputKind.LITERAL:
+        role = LiteralInputRole(str(payload["role"]))
+        output["value_source_text"] = text
+        output["resolved_value_text"] = str(payload.get("resolved_value_text") or text)
+        output["role"] = role.value
+        if payload.get("value_meaning_hint"):
+            output["value_meaning_hint"] = str(payload["value_meaning_hint"])
+        if payload.get("field_label_text"):
+            output["field_label_text"] = str(payload["field_label_text"])
+        if source == KnownInputSource.CONVERSATION_RESOLUTION.value:
+            output["occurrence"] = int(payload.get("occurrence") or 1)
+            output["resolved_input_ref"] = str(
+                payload.get("resolved_input_ref") or f"cr_input_{index}"
+            )
+    if kind == KnownInputKind.ROW_SET_REFERENCE:
+        output["reference_text"] = text
         output["source"] = "conversation_resolution"
         output["occurrence"] = int(payload.get("occurrence") or 1)
         output["resolved_input_ref"] = str(
@@ -579,10 +609,13 @@ def _scripted_query_enrichment_payload(payload: dict[str, Any]) -> dict[str, Any
                 "answer_output_resource_lineage": [
                     {
                         "answer_output_id": f"answer_{index}",
-                        "support_role": str(
-                            payload.get("support_role") or "ROW_POPULATION"
+                        "support_role": _scripted_answer_output_support_role(
+                            answer_output,
+                            default=str(payload.get("support_role") or "ROW_POPULATION"),
                         ),
-                        "source_text": str(answer_output),
+                        "source_text": _scripted_answer_output_description(
+                            answer_output
+                        ),
                         "matching_resource_names": resource_terms,
                     }
                     for index, answer_output in enumerate(
@@ -693,6 +726,7 @@ def _scripted_conversation_resolution_payload(
         return _conversation_resolution_selecting_visible_memory(
             prompt,
             memory_id=str(payload.get("memory_id") or ""),
+            anchor_text=str(payload.get("anchor_text") or ""),
             integrated_question=str(payload.get("integrated_question") or ""),
             resolved_text=str(payload.get("resolved_text") or ""),
         )
@@ -782,10 +816,12 @@ def _conversation_resolution_selecting_visible_memory(
     prompt: str,
     *,
     memory_id: str,
+    anchor_text: str,
     integrated_question: str,
     resolved_text: str,
 ) -> dict[str, Any]:
     current_question = _current_question_from_prompt(prompt)
+    anchor = anchor_text or current_question
     if not memory_id:
         raise AssertionError("select_visible_memory requires memory_id")
     component = _meaning_component_for_memory_id(
@@ -811,7 +847,7 @@ def _conversation_resolution_selecting_visible_memory(
                 },
                 "dependencies": [
                     {
-                        "anchor_text": current_question,
+                        "anchor_text": anchor,
                         "occurrence": 1,
                         "kind": "reference",
                         "meaning_components": [component],
@@ -1148,10 +1184,11 @@ def _question_contract_decisions_payload() -> dict[str, Any]:
             {
                 "input_ref": "input_1",
                 "source": "question_context",
-                "kind": KnownInputKind.REFERENCE.value,
-                "reference_text": "Alice",
-                "target_meaning": "Alice",
-                "lookup_text": "Alice",
+                "kind": KnownInputKind.LITERAL.value,
+                "value_source_text": "Alice",
+                "resolved_value_text": "Alice",
+                "value_meaning_hint": "staff member",
+                "role": LiteralInputRole.REFERENCE_VALUE.value,
                 "inventory_check": {
                     "why_this_is_an_input": "Alice is a declared question input"
                 },
@@ -1159,8 +1196,10 @@ def _question_contract_decisions_payload() -> dict[str, Any]:
             {
                 "input_ref": "input_2",
                 "source": "question_context",
-                "kind": KnownInputKind.TIME.value,
-                "reference_text": "today",
+                "kind": KnownInputKind.LITERAL.value,
+                "value_source_text": "today",
+                "resolved_value_text": "today",
+                "role": LiteralInputRole.TIME_VALUE.value,
                 "inventory_check": {
                     "why_this_is_an_input": "today is a declared question input"
                 },
@@ -1171,7 +1210,6 @@ def _question_contract_decisions_payload() -> dict[str, Any]:
                 "answer_fact": fact.description,
                 "answer_expression": {"family": "list_rows"},
                 "answer_subject": _answer_subject_payload("products"),
-                "input_requirements": {"time_requirements": []},
                 "answer_population": default_answer_population(
                     description=fact.description,
                     subject_text="products",
@@ -1182,10 +1220,7 @@ def _question_contract_decisions_payload() -> dict[str, Any]:
                 "answer_outputs": [
                     {"description": "products sold by sale, sale grouping"}
                 ],
-                "input_decisions": [
-                    {"input_ref": "input_1", "use_input": True},
-                    {"input_ref": "input_2", "use_input": True},
-                ],
+                "used_question_inputs": ["input_1", "input_2"],
             }
         ],
         "question_input_inventory_check": {
@@ -1214,18 +1249,20 @@ def _variant_grounding_question_contract() -> QuestionContract:
                     ),
                 ),
                 known_inputs=(
-                    RequestedFactKnownInput(
+                    RequestedFactLiteralInput(
                         id="fact_1_input_1",
-                        kind=KnownInputKind.REFERENCE,
                         source=KnownInputSource.QUESTION_CONTEXT,
                         text="Alice",
-                        lookup_text="Alice",
+                        resolved_value_text="Alice",
+                        value_meaning_hint="staff member",
+                        role=LiteralInputRole.REFERENCE_VALUE,
                     ),
-                    RequestedFactKnownInput(
+                    RequestedFactLiteralInput(
                         id="fact_1_input_2",
-                        kind=KnownInputKind.TIME,
                         source=KnownInputSource.QUESTION_CONTEXT,
                         text="today",
+                        resolved_value_text="today",
+                        role=LiteralInputRole.TIME_VALUE,
                     ),
                 ),
             ),

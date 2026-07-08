@@ -108,6 +108,7 @@ describe("ExplanationProof", () => {
                 {
                   inputId: "fact_1_entity_1",
                   inputText: "ABC Mall",
+                  entityKind: "location",
                   matchedField: "location_id",
                   matchedLabel: "ABC Mall",
                   matchedValue: "60606060-0000-0000-0001-000000000001",
@@ -139,6 +140,7 @@ describe("ExplanationProof", () => {
                 {
                   inputId: "fact_1_entity_1",
                   inputText: "ABC Mall",
+                  entityKind: "location",
                   matchedField: "location_id",
                   matchedLabel: "ABC Mall",
                   matchedValue: "60606060-0000-0000-0001-000000000001",
@@ -159,10 +161,9 @@ describe("ExplanationProof", () => {
     expect(screen.getByText("Resolver")).toBeInTheDocument();
     expect(screen.getByText(/List Location List:/)).toBeInTheDocument();
     expect(screen.getByText("Grounding")).toBeInTheDocument();
-    expect(screen.getByText("Matched entity")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "ABC Mall: List Location List matched location_id=60606060-0000-0000-0001-000000000001"
+        "\"ABC Mall\": Location (location_id: 60606060-0000-0000-0001-000000000001 via List Location List)"
       )
     ).toBeInTheDocument();
     expect(screen.queryByText("Business context")).not.toBeInTheDocument();
@@ -180,6 +181,7 @@ describe("ExplanationProof", () => {
                   {
                     inputId: "fact_1_entity_1",
                     inputText: "ABC Mall",
+                    entityKind: "location",
                     matchedField: "location_id",
                     matchedLabel: "ABC Mall",
                     matchedValue: "60606060-0000-0000-0001-000000000001",
@@ -215,11 +217,47 @@ describe("ExplanationProof", () => {
     );
 
     expect(screen.getByText("Grounding")).toBeInTheDocument();
-    expect(screen.getByText("Interpreted input")).toBeInTheDocument();
+    expect(screen.getByText("Inputs:")).toBeInTheDocument();
     expect(
-      screen.getByText("this month: 2026-06-01 to 2026-06-30")
+      screen.getByText("\"this month\": 2026-06-01 to 2026-06-30")
     ).toBeInTheDocument();
-    expect(screen.getByText("Matched entity")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "\"ABC Mall\": Location (location_id: 60606060-0000-0000-0001-000000000001 via List Location List)"
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("renders source-selection rationale without model-facing row or field prefixes", () => {
+    const step = lineageStepWithDecisions([
+      "source_1 list_sale_list: RETAIN - rows=2 - fields=7 - Exposes sale rows with sold_at, status, is_deleted, and sale_type, which can support counting."
+    ]);
+
+    render(<ExplanationProof mode="verbose" run={runWithLineageSteps([step], [step])} />);
+
+    expect(screen.getByText("source_1 (List Sale List) · used")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Exposes sale rows with sold at, status, is deleted, and sale type, which can support counting."
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("labels reviewed source handles with endpoint names", () => {
+    const step = lineageStepWithDecisions([
+      "source_1 list_sale_list: RETAIN - rows=2 - fields=7 - Exposes sale rows.",
+      "source_2 list_sales_summary: RETAIN - rows=3 - fields=12 - Exposes sales summaries.",
+      "Reviewed source candidates: source_1, source_2"
+    ]);
+
+    render(<ExplanationProof mode="verbose" run={runWithLineageSteps([step], [step])} />);
+
+    expect(screen.getByText("Source candidates")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Reviewed source_1 (List Sale List), source_2 (List Sales Summary)."
+      )
+    ).toBeInTheDocument();
   });
 
   it("keeps all semantic conversation-resolution signals in compact evidence", () => {

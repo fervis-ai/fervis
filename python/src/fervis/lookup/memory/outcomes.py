@@ -6,6 +6,7 @@ from dataclasses import replace
 from decimal import Decimal
 from typing import Any
 
+from fervis.lookup.clarification import render_clarification_question
 from fervis.lookup.outcomes.model import (
     AnswerResult,
     FactResult,
@@ -15,8 +16,8 @@ from fervis.lookup.outcomes.model import (
     Undefined,
 )
 from fervis.lookup.outcomes.terminal_details import (
-    clarification_payload,
     empty_relation_payload,
+    needs_clarification_payload,
     undefined_operation_payload,
 )
 from fervis.lookup.fact_plan.values import (
@@ -299,9 +300,10 @@ def fact_result_outcome_address(
             address="outcome.needs_clarification",
             terminal=FactOutcome.NEEDS_CLARIFICATION.value,
             clarification_questions=tuple(
-                item.question for item in outcome.clarifications
+                render_clarification_question(item)
+                for item in outcome.clarifications
             ),
-            proof=clarification_payload(outcome),
+            proof=needs_clarification_payload(outcome),
             evidence=EvidenceRef(step_ids=_clarification_proof_refs(outcome)),
         )
     if isinstance(outcome, Impossible):
@@ -365,7 +367,7 @@ def _relation_field_answer_output_payload(
 def _clarification_proof_refs(outcome: NeedsClarification) -> tuple[str, ...]:
     refs = [*outcome.proof_refs]
     for item in outcome.clarifications:
-        refs.extend(item.evidence_refs)
+        refs.extend(evidence.id for evidence in item.evidence)
     return tuple(dict.fromkeys(refs))
 
 

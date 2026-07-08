@@ -1,0 +1,38 @@
+id: unowned_literal_inputs_fail_closed
+description: Declared literal inputs not owned by any answer request are rejected.
+migrates:
+- api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_rejects_unowned_literal_input
+kind: algorithm
+algorithm: question_contract.parse
+input:
+  question_context: Which staff has the highest calculated pay this month?
+  answer_fact: staff with the highest calculated pay this month
+  answer_subject:
+    subject_text: staff
+    instance_interpretation:
+      kind: NORMAL_BUSINESS_INSTANCE
+  answer_outputs:
+  - description: staff with the highest calculated pay
+  - description: calculated pay
+  question_inputs:
+  - input_ref: period
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: this month is a time scope
+    value_source_text: this month
+    resolved_value_text: this month
+    role: time_value
+  - input_ref: ranking
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: highest is a ranking phrase
+    value_source_text: highest
+    resolved_value_text: highest
+    role: time_value
+  used_input_refs:
+  - period
+expect:
+  result_contains:
+    status: rejected

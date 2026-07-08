@@ -8,13 +8,29 @@ input:
   mode: clarification
   clarifications:
     - id: clarify_location
-      requested_fact_id: rf_answer
-      basis: catalog_requires_choice
-      question: Which location?
+      requestedFactId: rf_answer
+      need: catalog_input
+      reason: catalog_requires_choice
+      question: Which location should I use?
+      subjects:
+        - kind: catalog_choice
+          id: location
+          label: location
+          sourceText: ""
+          options: []
+      evidence: []
     - id: clarify_metric
-      requested_fact_id: rf_answer
-      basis: catalog_requires_choice
-      question: Which metric?
+      requestedFactId: rf_answer
+      need: catalog_input
+      reason: catalog_requires_choice
+      question: Which metric should I use?
+      subjects:
+        - kind: catalog_choice
+          id: metric
+          label: metric
+          sourceText: ""
+          options: []
+      evidence: []
 expect:
   result_contains:
-    rendered_message: "Which location?\nWhich metric?"
+    rendered_message: "Which location should I use?\nWhich metric should I use?"

@@ -40,10 +40,13 @@ input:
             value: {type: decimal, value: "100.00"}
             display: total for turn_1
             evidence: {stepIds: [turn_1.value_proof]}
+  excludes_from:
+    public_cards:
+      - memory_id
 expect:
   result_contains:
     public_card_keys:
       - [card_id, details, display, kind]
-  text_excludes_from:
-    public_cards:
-      - memory_id
+    excludes_from:
+      public_cards:
+        memory_id: true

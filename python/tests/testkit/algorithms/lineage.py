@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 from fervis.lineage.enums import (
     AnswerValueKind,
-    ClarificationBasis,
     FactResultKind,
     MemoryArtifactSourceKind,
     PresentationClientKey,
@@ -37,6 +36,7 @@ from fervis.lineage.views.query import (
     SourceReadRow,
     StepRow,
 )
+from fervis.lookup.clarification import ClarificationNeed, ClarificationReason
 from fervis.lineage.views.input_lineage import (
     input_lineage_view,
     render_input_lineage,
@@ -120,9 +120,14 @@ def _compare_rendered(rendered: str, expect: dict, *, line_key: str) -> list[str
     for line in expect.get("result_contains", {}).get(line_key, ()):
         if line not in rendered:
             errors.append(f"missing compact lineage line: {line}")
-    for text in expect.get("text_excludes", ()):
-        if text in rendered:
-            errors.append(f"compact lineage included excluded text: {text}")
+    expected_excludes = expect.get("result_contains", {}).get("excludes", {})
+    if expected_excludes:
+        errors.extend(
+            subset_mismatches(
+                actual={"excludes": {text: text not in rendered for text in expected_excludes}},
+                expected_subset={"excludes": expected_excludes},
+            )
+        )
     return errors
 
 
@@ -319,12 +324,11 @@ def _rows(payload: dict) -> LineageRows:
             ClarificationRequestRow(
                 clarification_id=str(item["clarification_id"]),
                 run_id=str(item["run_id"]),
-                basis=ClarificationBasis(str(item["basis"])),
-                question_text=str(item["question_text"]),
+                need=ClarificationNeed(str(item["need"])),
+                reason=ClarificationReason(str(item["reason"])),
+                payload_json=dict(item["payload_json"]),
                 fact_result_id=item.get("fact_result_id"),
                 step_id=item.get("step_id"),
-                options_json=tuple(item.get("options_json") or ()),
-                evidence_refs_json=tuple(item.get("evidence_refs_json") or ()),
             )
             for item in payload.get("clarification_requests", ())
         ),

@@ -1,6 +1,6 @@
 """Build typed source-candidate registries from canonical candidate cards."""
 
-from ._shared import Any, RelationSource, SourceKind
+from ._shared import Any, RelationSource, RelationSourceAppliedFilter, SourceKind
 from .bindings import _bound_param_bindings
 from .model import SourceCandidate
 
@@ -97,6 +97,7 @@ def _new_api_candidate(
         ),
         params=tuple(payload.get("params") or ()),
         applied_param_bindings=(*_bound_param_bindings(payload.get("bound_params")),),
+        applied_filters=_applied_filters(payload),
         fields=tuple(payload.get("fields") or ()),
         population_bindings=tuple(payload.get("population_bindings") or ()),
         payload=payload,
@@ -124,6 +125,7 @@ def _same_scope_candidate(
         ),
         applied_param_bindings=applied_sets[0] if applied_sets else (),
         applied_param_binding_sets=applied_sets,
+        applied_filters=_applied_filters(payload),
         fields=tuple(payload.get("fields") or ()),
         applies_to_requested_fact_ids=_candidate_applies_to_requested_facts(payload),
         population_bindings=tuple(payload.get("population_bindings") or ()),
@@ -334,6 +336,16 @@ def _candidate_applied_param_binding_sets(
         )
     bindings = _bound_param_bindings(candidate.get("bound_params"))
     return (bindings,) if bindings else ()
+
+
+def _applied_filters(
+    candidate: dict[str, Any],
+) -> tuple[RelationSourceAppliedFilter, ...]:
+    return RelationSourceAppliedFilter.from_payloads(
+        item
+        for item in candidate.get("applied_filters") or ()
+        if isinstance(item, dict)
+    )
 
 
 def _candidate_applies_to_requested_facts(

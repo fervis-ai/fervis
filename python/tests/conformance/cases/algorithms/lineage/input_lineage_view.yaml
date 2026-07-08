@@ -213,6 +213,6 @@ expect:
       - "Applied in execution"
       - "- area_id=area_123 was used as an endpoint argument."
       - "- is_open=true was applied as a row filter."
-  text_excludes:
-    - "last month"
-    - "month=2026-05"
+    excludes:
+      last month: true
+      month=2026-05: true

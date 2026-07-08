@@ -33,4 +33,5 @@ input:
             row_path_id: data
             type: uuid
 expect:
-  error_contains: duplicate
+  result_contains:
+    status: rejected

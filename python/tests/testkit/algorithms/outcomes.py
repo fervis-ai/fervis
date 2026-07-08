@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fervis.lookup.outcomes.clarifications import Clarification, ClarificationBasis
+from fervis.lookup.clarification import (
+    clarification_from_payload,
+    clarification_payload,
+)
 from fervis.lookup.plan_execution.operation_runtime import RelationEngineOutput
 from fervis.lookup.plan_execution.operation_engine import execute_operations
 from fervis.lookup.outcomes.model import (
@@ -10,6 +13,7 @@ from fervis.lookup.outcomes.model import (
     FactResult,
     NeedsClarification,
 )
+from fervis.lookup.outcomes.errors import ExecutionIssue
 from fervis.lookup.outcomes.answerability import classify_plan_impossible
 from fervis.lookup.outcomes.classification import (
     classify_answer_result,
@@ -37,7 +41,11 @@ from fervis.lookup.answer_rendering import (
 from tests.testkit.algorithms.relation_engine import (
     engine_input_from_payload,
 )
-from tests.testkit.assertions import subset_mismatches
+from tests.testkit.assertions import (
+    expects_rejection,
+    status_mismatches,
+    subset_mismatches,
+)
 from tests.testkit.question_contract import question_contract_from_payload
 
 
@@ -83,19 +91,7 @@ def run_outcomes_classify_case(payload: dict[str, Any]) -> list[str]:
             result = FactResult(
                 outcome=NeedsClarification(
                     clarifications=tuple(
-                        Clarification(
-                            id=str(item["id"]),
-                            requested_fact_id=str(item["requested_fact_id"]),
-                            basis=ClarificationBasis(str(item["basis"])),
-                            question=str(item["question"]),
-                            known_input_id=str(item.get("known_input_id") or ""),
-                            candidate_refs=tuple(
-                                str(ref) for ref in item.get("candidate_refs") or ()
-                            ),
-                            evidence_refs=tuple(
-                                str(ref) for ref in item.get("evidence_refs") or ()
-                            ),
-                        )
+                        clarification_from_payload(item)
                         for item in input_payload.get("clarifications") or ()
                     )
                 )
@@ -104,12 +100,14 @@ def run_outcomes_classify_case(payload: dict[str, Any]) -> list[str]:
             return [f"unsupported outcomes mode: {mode}"]
         rendered = render_fact_result(result) if isinstance(result, FactResult) else None
     except Exception as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error and expected_error in str(exc):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {exc}"]
-    if "error_contains" in payload["expect"]:
-        return [f"expected error containing {payload['expect']['error_contains']!r}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     actual = _result_payload(result, rendered)
     return subset_mismatches(
         actual=actual,
@@ -188,6 +186,12 @@ def _question_contract(payload: dict[str, Any]) -> Any:
 def _result_payload(result: Any, rendered: Any) -> dict[str, Any]:
     if result is None:
         return {"result": None}
+    if isinstance(result, ExecutionIssue):
+        return {
+            "issue_kind": result.kind.value,
+            "relation_id": result.relation_id,
+            "proof_refs": list(result.proof_refs),
+        }
     if isinstance(result, FactResult):
         outcome = result.outcome
         actual: dict[str, Any] = {"outcome_kind": outcome.kind.value}
@@ -220,13 +224,7 @@ def _result_payload(result: Any, rendered: Any) -> dict[str, Any]:
             }
         if hasattr(outcome, "clarifications"):
             actual["clarifications"] = [
-                {
-                    "basis": clarification.basis,
-                    "known_input_id": clarification.known_input_id,
-                    "candidate_refs": list(clarification.candidate_refs),
-                    "evidence_refs": list(clarification.evidence_refs),
-                    "question": clarification.question,
-                }
+                clarification_payload(clarification)
                 for clarification in outcome.clarifications
             ]
         if rendered is not None:
@@ -237,10 +235,6 @@ def _result_payload(result: Any, rendered: Any) -> dict[str, Any]:
             actual["rendered_details"] = dict(rendered.details or {})
             actual["proof_refs"] = list(rendered.proof_refs)
         return actual
-    return {
-        "issue_kind": result.kind.value,
-        "relation_id": result.relation_id,
-    }
 
 
 def _engine_output_payload(output: Any) -> dict[str, Any]:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from fervis.lookup.relation_catalog import (
     CatalogFact,
@@ -309,11 +309,14 @@ def _rankings_for_resource_name(
         ranked_matches.append(
             _ResourceNameRanking(
                 is_exact_resource_name=match.is_exact_resource_name,
-                ranking=_rank_resource_read(
-                    read,
-                    match.query_terms,
-                    read_facts=read_facts.get(read.id, ()),
-                    active_memory_signals=active_memory_signals,
+                ranking=_resource_name_match_ranking(
+                    _rank_resource_read(
+                        read,
+                        match.query_terms,
+                        read_facts=read_facts.get(read.id, ()),
+                        active_memory_signals=active_memory_signals,
+                    ),
+                    match=match,
                 ),
             )
         )
@@ -356,6 +359,17 @@ def _round_robin_unique_rankings(
             if limit is not None and len(selected) >= limit:
                 return tuple(selected)
     return tuple(selected)
+
+
+def _resource_name_match_ranking(
+    ranking: CatalogSelectionRanking,
+    *,
+    match: _ResourceNameMatch,
+) -> CatalogSelectionRanking:
+    if match.is_exact_resource_name:
+        return ranking
+    resource_score = _RESOURCE_TERM_SCORE * max(1, len(match.query_terms))
+    return replace(ranking, score=max(1, ranking.score - resource_score))
 
 
 def _merge_positive_rankings(

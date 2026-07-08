@@ -31,4 +31,5 @@ input:
         join_keys: [{left: entity_id, right: observed_id}]
         output_fields: [{source: display, output: name}]
 expect:
-  error_contains: candidate grain
+  result_contains:
+    status: rejected

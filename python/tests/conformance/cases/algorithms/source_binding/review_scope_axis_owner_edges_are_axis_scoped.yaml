@@ -1,0 +1,109 @@
+id: review_scope_axis_owner_edges_are_axis_scoped
+description: Source-binding review scope applies typed axis-owner edges per review axis, not at target level.
+kind: algorithm
+algorithm: source_binding.review_scope
+input:
+  request:
+    mode: scoped_review_axis_owned_test
+  finite_choice_axis_owners:
+    sale_type:
+      - explicit_user_constraint:sale_type_constraint
+expect:
+  result_equals:
+    finite_choice:
+      status:
+        - subject_identity
+        - normal_instance_guard
+      sale_type:
+        - subject_identity
+        - explicit_user_constraint:sale_type_constraint
+        - normal_instance_guard
+    row_predicate:
+      rp.source_1.row.root.is_deleted:
+        - subject_identity
+        - normal_instance_guard
+    decisions:
+      finite_choice_param:status:
+        - membership_test_id: subject_identity
+          decision: in_scope
+          owner_surface_id: ""
+          owner_surface_ids: []
+          proof_refs: []
+        - membership_test_id: explicit_user_constraint:specified_staff
+          decision: out_of_scope
+          owner_surface_id: applied_filter:staff_id:staff_id_1
+          owner_surface_ids:
+            - applied_filter:staff_id:staff_id_1
+          proof_refs:
+            - membership_test:explicit_user_constraint:specified_staff
+            - known_input:staff_id_1
+            - applied_filter:staff_id:staff_id_1
+            - read:staff_lookup
+        - membership_test_id: explicit_user_constraint:sale_type_constraint
+          decision: out_of_scope
+          owner_surface_id: review_axis:finite_choice_param:sale_type
+          owner_surface_ids:
+            - review_axis:finite_choice_param:sale_type
+          proof_refs:
+            - membership_test:explicit_user_constraint:sale_type_constraint
+            - review_axis:finite_choice_param:sale_type
+        - membership_test_id: normal_instance_guard
+          decision: in_scope
+          owner_surface_id: ""
+          owner_surface_ids: []
+          proof_refs: []
+      finite_choice_param:sale_type:
+        - membership_test_id: subject_identity
+          decision: in_scope
+          owner_surface_id: ""
+          owner_surface_ids: []
+          proof_refs: []
+        - membership_test_id: explicit_user_constraint:specified_staff
+          decision: out_of_scope
+          owner_surface_id: applied_filter:staff_id:staff_id_1
+          owner_surface_ids:
+            - applied_filter:staff_id:staff_id_1
+          proof_refs:
+            - membership_test:explicit_user_constraint:specified_staff
+            - known_input:staff_id_1
+            - applied_filter:staff_id:staff_id_1
+            - read:staff_lookup
+        - membership_test_id: explicit_user_constraint:sale_type_constraint
+          decision: in_scope
+          owner_surface_id: ""
+          owner_surface_ids: []
+          proof_refs: []
+        - membership_test_id: normal_instance_guard
+          decision: in_scope
+          owner_surface_id: ""
+          owner_surface_ids: []
+          proof_refs: []
+      row_predicate:rp.source_1.row.root.is_deleted:
+        - membership_test_id: subject_identity
+          decision: in_scope
+          owner_surface_id: ""
+          owner_surface_ids: []
+          proof_refs: []
+        - membership_test_id: explicit_user_constraint:specified_staff
+          decision: out_of_scope
+          owner_surface_id: applied_filter:staff_id:staff_id_1
+          owner_surface_ids:
+            - applied_filter:staff_id:staff_id_1
+          proof_refs:
+            - membership_test:explicit_user_constraint:specified_staff
+            - known_input:staff_id_1
+            - applied_filter:staff_id:staff_id_1
+            - read:staff_lookup
+        - membership_test_id: explicit_user_constraint:sale_type_constraint
+          decision: out_of_scope
+          owner_surface_id: review_axis:finite_choice_param:sale_type
+          owner_surface_ids:
+            - review_axis:finite_choice_param:sale_type
+          proof_refs:
+            - membership_test:explicit_user_constraint:sale_type_constraint
+            - review_axis:finite_choice_param:sale_type
+        - membership_test_id: normal_instance_guard
+          decision: in_scope
+          owner_surface_id: ""
+          owner_surface_ids: []
+          proof_refs: []

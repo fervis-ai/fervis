@@ -75,6 +75,7 @@ def run_catalog_selection_case(payload: dict[str, Any]) -> list[str]:
                 "rankings": [
                     {
                         "read_id": ranking.read_id,
+                        "score": ranking.score,
                         "matched_terms": list(ranking.matched_terms),
                         "matched_fact_refs": list(ranking.matched_fact_refs),
                         "matched_field_refs": list(ranking.matched_field_refs),

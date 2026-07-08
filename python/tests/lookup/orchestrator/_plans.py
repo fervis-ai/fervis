@@ -118,12 +118,58 @@ def _default_question_contract(*, description: str = "answer") -> QuestionContra
     return _question_contract_for("rf_answer", description=description)
 
 
+def _known_reference_input(
+    input_id: str,
+    text: str,
+    *,
+    value_meaning_hint: str = "",
+    resolved_value_text: str | None = None,
+) -> RequestedFactKnownInput:
+    return RequestedFactLiteralInput(
+        id=input_id,
+        source=KnownInputSource.QUESTION_CONTEXT,
+        text=text,
+        role=LiteralInputRole.REFERENCE_VALUE,
+        resolved_value_text=resolved_value_text or text,
+        value_meaning_hint=value_meaning_hint,
+    )
+
+
+def _known_time_input(
+    input_id: str,
+    text: str,
+) -> RequestedFactKnownInput:
+    return RequestedFactLiteralInput(
+        id=input_id,
+        source=KnownInputSource.QUESTION_CONTEXT,
+        text=text,
+        role=LiteralInputRole.TIME_VALUE,
+        resolved_value_text=text,
+    )
+
+
+def _known_result_limit_input(
+    input_id: str,
+    text: str,
+    *,
+    value_text: str,
+) -> RequestedFactKnownInput:
+    return RequestedFactLiteralInput(
+        id=input_id,
+        source=KnownInputSource.QUESTION_CONTEXT,
+        text=text,
+        role=LiteralInputRole.RESULT_LIMIT,
+        resolved_value_text=value_text,
+    )
+
+
 def _question_contract_for(
     requested_fact_id: str,
     *,
     description: str | None = None,
     subject_text: str | None = None,
     binding_target_ids: tuple[str, ...] = ("answer",),
+    answer_output_role: str = "",
     known_inputs: tuple[RequestedFactKnownInput, ...] = (),
     answer_expression_family: RequestedFactAnswerExpressionFamily = (
         RequestedFactAnswerExpressionFamily.SCALAR_AGGREGATE
@@ -135,19 +181,38 @@ def _question_contract_for(
             RequestedFact(
                 id=requested_fact_id,
                 description=text,
-                answer_expression=RequestedFactAnswerExpression(
-                    family=answer_expression_family
+                answer_expression=_requested_fact_answer_expression(
+                    answer_expression_family
                 ),
                 answer_subject=RequestedFactAnswerSubject(
                     subject_text=subject_text or text
                 ),
                 answer_outputs=tuple(
-                    RequestedFactAnswerOutput(id=binding_target_id)
+                    RequestedFactAnswerOutput(
+                        id=binding_target_id,
+                        role=answer_output_role,
+                    )
                     for binding_target_id in binding_target_ids
                 ),
                 known_inputs=known_inputs,
             ),
         )
+    )
+
+
+def _requested_fact_answer_expression(
+    family: RequestedFactAnswerExpressionFamily,
+) -> RequestedFactAnswerExpression:
+    return RequestedFactAnswerExpression(
+        family=family,
+        group_key=(
+            RequestedFactGroupKey(
+                description="group",
+                domain=GroupKeyDomainKind.SOURCE_RESULT_VALUES,
+            )
+            if family == RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE
+            else None
+        ),
     )
 
 

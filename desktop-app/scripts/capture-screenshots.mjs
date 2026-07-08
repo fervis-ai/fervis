@@ -67,7 +67,9 @@ async function captureCompletedTabletDark(browser) {
 async function captureRunning(browser) {
   const page = await newPage(browser, { width: 1440, height: 900 });
   await page.getByText("Which store has the most inventory at risk today?").click();
-  await page.getByText("Selecting the sales endpoint for this month.").waitFor();
+  await page.locator(".run-status.running", { hasText: "RUNNING" }).waitFor();
+  await page.locator(".answer-zone", { hasText: "grounding" }).waitFor();
+  await page.getByText("\"ABC Mall\": Location").waitFor();
   await screenshot(page, "desktop-light-running.png");
   await page.close();
 }
@@ -75,7 +77,8 @@ async function captureRunning(browser) {
 async function captureChoiceClarification(browser) {
   const page = await newPage(browser, { width: 1440, height: 900 });
   await page.getByText("run_clarify").click();
-  await page.locator(".clar-question", { hasText: "Which store do you mean?" }).waitFor();
+  await page.locator(".clar-question", { hasText: "Which matching store should I use?" }).waitFor();
+  await page.getByText("Reference: ABC Mall").first().waitFor();
   await screenshot(page, "desktop-light-choice-clarification.png");
   await page.close();
 }

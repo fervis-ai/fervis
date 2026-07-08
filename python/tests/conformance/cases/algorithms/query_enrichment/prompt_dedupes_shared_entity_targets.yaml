@@ -1,7 +1,7 @@
 id: prompt_dedupes_shared_entity_targets
 description: Query-enrichment prompt deduplicates shared named entity targets across requested facts.
 migrates:
-  - api/tests/fervis/lookup/query_enrichment/test_query_enrichment.py::test_query_enrichment_prompt_dedupes_shared_question_input_entity_targets
+- api/tests/fervis/lookup/query_enrichment/test_query_enrichment.py::test_query_enrichment_prompt_dedupes_shared_question_input_entity_targets
 kind: algorithm
 algorithm: query_enrichment.prompt
 input:
@@ -9,31 +9,35 @@ input:
   request:
     question: How much did Jane Doe sell, and where?
     requested_facts:
-      - id: fact_1
-        description: sales amount for Jane Doe
-        answer_outputs: [{id: answer_1}]
-        known_inputs:
-          - id: staff
-            kind: named_reference_text
-            source: question_context
-            text: Jane Doe
-            lookup_text: Jane Doe
-            description: staff member
-      - id: fact_2
-        description: store for Jane Doe sales
-        answer_outputs: [{id: answer_1}]
-        known_inputs:
-          - id: staff
-            kind: named_reference_text
-            source: question_context
-            text: Jane Doe
-            lookup_text: Jane Doe
-            description: staff member
+    - id: fact_1
+      description: sales amount for Jane Doe
+      answer_outputs:
+      - id: answer_1
+      known_inputs:
+      - id: staff
+        kind: literal_text
+        source: question_context
+        text: Jane Doe
+        value_meaning_hint: staff member
+        resolved_value_text: Jane Doe
+        role: reference_value
+    - id: fact_2
+      description: store for Jane Doe sales
+      answer_outputs:
+      - id: answer_1
+      known_inputs:
+      - id: staff
+        kind: literal_text
+        source: question_context
+        text: Jane Doe
+        value_meaning_hint: staff member
+        resolved_value_text: Jane Doe
+        role: reference_value
 expect:
   result_contains:
     entity_targets_payload:
       entity_targets:
-        - target_id: staff
-          reference_text: Jane Doe
-          lookup_text: Jane Doe
-          target_meaning: staff member
+      - target_id: staff
+        reference_text: Jane Doe
+        resolved_value_text: Jane Doe
+        value_meaning_hint: staff member

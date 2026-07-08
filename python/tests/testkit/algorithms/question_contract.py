@@ -9,6 +9,7 @@ from fervis.lookup.question_contract import (
     MISSING_INPUT_CLARIFICATION_TOOL_NAME,
     QuestionContractRequest,
     QuestionContractTurnPrompt,
+    RequestedFactKnownInput,
     build_question_contract_decisions_schema,
     parse_question_contract,
 )
@@ -16,18 +17,26 @@ from fervis.lookup.conversation_resolution import (
     ConversationDependencyOverlay,
     ConversationResolutionOverlay,
     ConversationValueFrameOverlay,
+    LiteralQuestionInputOverlay,
+    ResolvedQuestionInputOverlay,
+    RowSetQuestionInputOverlay,
     conversation_resolution_question_contract_prompt_payload,
 )
+from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 from fervis.lookup.turn_prompts import build_turn_prompt_context
 
-from tests.testkit.assertions import subset_mismatches
+from tests.testkit.assertions import (
+    exact_mismatches,
+    expects_rejection,
+    status_mismatches,
+    subset_mismatches,
+)
 
 
 def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
     input_payload = payload["input"]
     model_payload = dict(
-        input_payload.get("payload")
-        or _model_payload_from_case_input(input_payload)
+        input_payload.get("payload") or _model_payload_from_case_input(input_payload)
     )
     tool_name = str(input_payload.get("tool_name") or "")
     if not tool_name:
@@ -41,28 +50,25 @@ def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
             tool_name=tool_name,
             payload=model_payload,
             question_context=str(input_payload["question_context"]),
-            question_context_texts=tuple(input_payload.get("question_context_texts") or ()),
+            question_context_texts=tuple(
+                input_payload.get("question_context_texts") or ()
+            ),
+            conversation_resolution_overlay=_optional_conversation_overlay(
+                input_payload.get("conversation_resolution_overlay")
+            ),
         )
     except ValueError as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error and expected_error in str(exc):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {exc}"]
-    if "error_contains" in payload["expect"]:
-        return [f"expected error containing {payload['expect']['error_contains']!r}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     actual = {
         "question_inputs": [
-            {
-                "id": item.id,
-                "kind": item.kind.value,
-                "source": item.source.value,
-                "text": item.text,
-                "description": item.description,
-                "numeric_value": item.numeric_value,
-                "value_source_text": item.value_source_text,
-                "lookup_text": item.lookup_text,
-                "resolved_input_ref": item.resolved_input_ref,
-            }
+            _known_input_actual(item)
             for item in result.outcome.question_inputs
         ],
         "requested_facts": [
@@ -81,17 +87,11 @@ def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
                 ),
                 "input_refs": list(fact.input_refs),
                 "known_inputs": [
-                    {
-                        "id": item.id,
-                        "kind": item.kind.value,
-                        "text": item.text,
-                        "numeric_value": item.numeric_value,
-                        "lookup_text": item.lookup_text,
-                    }
+                    _known_input_actual(item)
                     for item in fact.known_inputs
                 ],
                 "answer_outputs": [
-                    {"id": output.id, "description": output.description}
+                    output.to_model_dict()
                     for output in fact.answer_outputs
                 ],
                 "answer_request": fact.answer_request_model_dict(),
@@ -99,30 +99,98 @@ def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
             for fact in result.outcome.requested_facts
         ],
     }
-    return subset_mismatches(
+    if "result_equals" in payload["expect"]:
+        return exact_mismatches(
+            actual=actual,
+            expected=payload["expect"]["result_equals"],
+        )
+    actual["requested_fact_input_handoff"] = [
+        {
+            "id": fact["id"],
+            "input_refs": fact["input_refs"],
+            "known_input_refs": [item["id"] for item in fact["known_inputs"]],
+        }
+        for fact in actual["requested_facts"]
+    ]
+    errors = subset_mismatches(
         actual=actual,
-        expected_subset=payload["expect"]["result_contains"],
+        expected_subset=payload["expect"].get("result_contains") or {},
     )
+    for field, expected_value in (
+        payload["expect"].get("result_exact_fields") or {}
+    ).items():
+        errors.extend(
+            exact_mismatches(
+                actual=actual.get(field),
+                expected=expected_value,
+                path=field,
+            )
+        )
+    return errors
+
+
+def _known_input_actual(item: RequestedFactKnownInput) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "id": item.id,
+        "kind": item.kind.value,
+        "source": item.source.value,
+        "text": item.text,
+        "resolved_input_ref": item.resolved_input_ref,
+    }
+    if item.kind == KnownInputKind.ROW_SET_REFERENCE:
+        payload["occurrence"] = item.occurrence
+        return payload
+    payload["resolved_value_text"] = item.resolved_value_text
+    payload["field_label_text"] = item.field_label_text
+    payload["value_meaning_hint"] = item.value_meaning_hint
+    payload["role"] = item.role.value
+    return payload
 
 
 def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
     schema = build_question_contract_decisions_schema()
     branches = {
-        branch["properties"]["kind"]["enum"][0]: branch
-        for branch in schema["oneOf"]
+        branch["properties"]["kind"]["enum"][0]: branch for branch in schema["oneOf"]
     }
     answer_contract_schema = branches["question_contract"]
     clarification_schema = branches["needs_clarification"]
     answer_request_schema = answer_contract_schema["properties"]["answer_requests"][
         "items"
     ]
+    answer_output_item_schema = answer_request_schema["properties"]["answer_outputs"][
+        "items"
+    ]
+    answer_expression_schema = answer_request_schema["properties"][
+        "answer_expression"
+    ]
     question_input_item = answer_contract_schema["properties"]["question_inputs"][
         "items"
     ]
+    question_input_variants = tuple(question_input_item["oneOf"])
     variants = {
         variant["properties"]["kind"]["enum"][0]: variant
-        for variant in question_input_item["oneOf"]
+        for variant in question_input_variants
+        if variant["properties"]["kind"]["enum"][0] != KnownInputKind.LITERAL.value
     }
+    literal_variants = tuple(
+        variant
+        for variant in question_input_variants
+        if variant["properties"]["kind"]["enum"][0] == KnownInputKind.LITERAL.value
+    )
+    literal_properties = sorted(
+        {
+            property_name
+            for variant in literal_variants
+            for property_name in variant["properties"]
+        }
+    )
+    literal_role_values = sorted(
+        {
+            role
+            for variant in literal_variants
+            for role in variant["properties"]["role"]["enum"]
+        }
+    )
     actual = {
         "has_root_one_of": "oneOf" in schema,
         "branch_kinds": sorted(branches),
@@ -133,13 +201,11 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
         ],
         "answer_contract_has_clarification_fields": any(
             field in answer_contract_schema["properties"]
-            for field in ("missing", "clarification_question")
+            for field in ("missing",)
         ),
         "clarification_required": list(clarification_schema["required"]),
         "clarification_properties": list(clarification_schema["properties"]),
-        "clarification_kind_values": clarification_schema["properties"]["kind"][
-            "enum"
-        ],
+        "clarification_kind_values": clarification_schema["properties"]["kind"]["enum"],
         "clarification_has_answer_fields": any(
             field in clarification_schema["properties"]
             for field in (
@@ -150,27 +216,52 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
             )
         ),
         "answer_request_required": answer_request_schema["required"],
-        "answer_output_required": answer_request_schema["properties"][
-            "answer_outputs"
-        ]["items"]["required"],
-        "answer_output_properties": sorted(
-            answer_request_schema["properties"]["answer_outputs"]["items"][
-                "properties"
-            ]
+        "answer_expression_schema_kind": _branching_schema_kind(
+            answer_expression_schema
         ),
-        "question_input_kinds": sorted(variants),
-        "question_input_kind_membership": {
-            "time_text": "time_text" in variants,
-            "explicit_numeric_limit_text": "explicit_numeric_limit_text" in variants,
-            "named_reference_text": "named_reference_text" in variants,
-            "number_text": "number_text" in variants,
-            "row_set_reference": "row_set_reference" in variants,
+        "answer_expression_one_of_branch_count": len(
+            answer_expression_schema.get("oneOf") or ()
+        ),
+        "grouped_answer_expression_branch": _answer_expression_branch_summary(
+            _answer_expression_grouped_branch(answer_expression_schema)
+        ),
+        "ordinary_answer_expression_branch": _answer_expression_branch_summary(
+            _answer_expression_ordinary_branch(answer_expression_schema)
+        ),
+        "answer_output_schema_kind": _answer_output_schema_kind(
+            answer_output_item_schema
+        ),
+        "answer_output_one_of_branch_count": len(
+            answer_output_item_schema.get("oneOf") or ()
+        ),
+        "answer_output_branch": _answer_output_branch_summary(answer_output_item_schema),
+        "question_input_kinds": sorted(
+            {
+                variant["properties"]["kind"]["enum"][0]
+                for variant in question_input_variants
+            }
+        ),
+        "literal_text_role_values": literal_role_values,
+        "literal_text_properties": literal_properties,
+        "literal_text_property_membership": {
+            name: name in literal_properties
+            for name in (
+                "input_ref",
+                "kind",
+                "source",
+                "value_source_text",
+                "resolved_value_text",
+                "field_label_text",
+                "value_meaning_hint",
+                "role",
+                "inventory_check",
+            )
         },
         "row_set_reference_properties": sorted(
-            variants["row_set_reference"]["properties"]
+            variants[KnownInputKind.ROW_SET_REFERENCE.value]["properties"]
         ),
         "row_set_reference_property_membership": {
-            name: name in variants["row_set_reference"]["properties"]
+            name: name in variants[KnownInputKind.ROW_SET_REFERENCE.value]["properties"]
             for name in (
                 "input_ref",
                 "source",
@@ -179,20 +270,101 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
                 "resolved_input_ref",
                 "inventory_check",
                 "kind",
-                "target_meaning",
             )
         },
-        "row_set_reference_required": variants["row_set_reference"]["required"],
+        "row_set_reference_required": variants[
+            KnownInputKind.ROW_SET_REFERENCE.value
+        ]["required"],
         "schema_text": repr(schema),
     }
-    errors = subset_mismatches(
-        actual=actual,
-        expected_subset=payload["expect"].get("result_contains") or {},
-    )
-    for text in payload["expect"].get("text_excludes") or ():
-        if text in actual["schema_text"]:
-            errors.append(f"unexpected text present: {text!r}")
+    if payload.get("input", {}).get("projection") == "question_input_contract":
+        actual = {
+            "question_input_kinds": actual["question_input_kinds"],
+            "literal_text_role_values": actual["literal_text_role_values"],
+            "literal_text_properties": actual["literal_text_properties"],
+            "row_set_reference_properties": actual["row_set_reference_properties"],
+            "row_set_reference_required": actual["row_set_reference_required"],
+        }
+    if "result_equals" in payload["expect"]:
+        errors = exact_mismatches(
+            actual=actual,
+            expected=payload["expect"]["result_equals"],
+        )
+    else:
+        errors = subset_mismatches(
+            actual=actual,
+            expected_subset=payload["expect"].get("result_contains") or {},
+        )
+    for field, expected_value in (
+        payload["expect"].get("result_exact_fields") or {}
+    ).items():
+        errors.extend(
+            exact_mismatches(
+                actual=actual.get(field),
+                expected=expected_value,
+                path=field,
+            )
+        )
     return errors
+
+
+def _answer_output_schema_kind(schema: dict[str, Any]) -> str:
+    return _branching_schema_kind(schema)
+
+
+def _branching_schema_kind(schema: dict[str, Any]) -> str:
+    if "oneOf" in schema:
+        return "oneOf"
+    return "object"
+
+
+def _answer_expression_grouped_branch(schema: dict[str, Any]) -> dict[str, Any]:
+    return next(
+        (
+            branch
+            for branch in schema.get("oneOf") or ()
+            if branch.get("properties", {}).get("family", {}).get("enum")
+            == ["grouped_aggregate"]
+        ),
+        {},
+    )
+
+
+def _answer_expression_ordinary_branch(schema: dict[str, Any]) -> dict[str, Any]:
+    return next(
+        (
+            branch
+            for branch in schema.get("oneOf") or ()
+            if branch.get("properties", {}).get("family", {}).get("enum")
+            != ["grouped_aggregate"]
+        ),
+        {},
+    )
+
+
+def _answer_expression_branch_summary(branch: dict[str, Any]) -> dict[str, object]:
+    properties = branch.get("properties") or {}
+    group_key_schema = properties.get("group_key") or {}
+    return {
+        "required": list(branch.get("required") or ()),
+        "properties": sorted(properties),
+        "family_enum": list((properties.get("family") or {}).get("enum") or ()),
+        "allows_group_key": "group_key" in properties,
+        "additional_properties": bool(branch.get("additionalProperties", True)),
+        "group_key_schema_kind": _branching_schema_kind(group_key_schema),
+        "group_key_branch_count": len(group_key_schema.get("oneOf") or ()),
+    }
+
+
+def _answer_output_branch_summary(branch: dict[str, Any]) -> dict[str, object]:
+    properties = branch.get("properties") or {}
+    role_schema = properties.get("role") or {}
+    return {
+        "required": list(branch.get("required") or ()),
+        "properties": sorted(properties),
+        "role_enum": list(role_schema.get("enum") or ()),
+        "additional_properties": bool(branch.get("additionalProperties", True)),
+    }
 
 
 def run_question_contract_schema_validate_case(payload: dict[str, Any]) -> list[str]:
@@ -203,13 +375,15 @@ def run_question_contract_schema_validate_case(payload: dict[str, Any]) -> list[
     schema = build_question_contract_decisions_schema()
     errors = list(Draft7Validator(schema).iter_errors(instance))
     if errors:
-        expected_error = payload["expect"].get("error_contains")
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         error_text = " | ".join(_validation_error_text(error) for error in errors)
-        if expected_error and expected_error in error_text:
-            return []
         return [f"unexpected validation error: {error_text}"]
-    if "error_contains" in payload["expect"]:
-        return [f"expected validation error containing {payload['expect']['error_contains']!r}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     return []
 
 
@@ -260,13 +434,6 @@ def run_question_contract_prompt_case(payload: dict[str, Any]) -> list[str]:
         },
     }
     errors: list[str] = []
-    for field, excluded_values in (
-        payload["expect"].get("text_excludes_from") or {}
-    ).items():
-        text = str(actual.get(field) or "")
-        for value in excluded_values:
-            if value in text:
-                errors.append(f"{field} contains excluded text: {value!r}")
     expected_subset = payload["expect"].get("result_contains") or {}
     if expected_subset:
         errors.extend(subset_mismatches(actual=actual, expected_subset=expected_subset))
@@ -301,14 +468,50 @@ def _conversation_overlay(payload: dict[str, Any]) -> ConversationResolutionOver
         scopes=(),
         activated_memory_ids=(),
         used_source_card_ids=(),
+        resolved_question_inputs=tuple(
+            _resolved_question_input_overlay(item)
+            for item in payload.get("resolved_question_inputs") or ()
+        ),
     )
 
 
+def _optional_conversation_overlay(raw: object) -> ConversationResolutionOverlay | None:
+    if raw is None:
+        return None
+    return _conversation_overlay(raw)
+
+
+def _resolved_question_input_overlay(
+    item: dict[str, Any],
+) -> ResolvedQuestionInputOverlay:
+    kind = KnownInputKind(str(item["kind"]))
+    if kind == KnownInputKind.LITERAL:
+        return LiteralQuestionInputOverlay(
+            source_text=str(item["source_text"]),
+            occurrence=int(item.get("occurrence") or 1),
+            resolved_input_ref=str(item["resolved_input_ref"]),
+            resolved_value_text=str(item["resolved_value_text"]),
+            value_meaning_hint=str(item.get("value_meaning_hint") or ""),
+            field_label_text=str(item.get("field_label_text") or ""),
+            role=LiteralInputRole(str(item["role"])),
+        )
+    if kind == KnownInputKind.ROW_SET_REFERENCE:
+        return RowSetQuestionInputOverlay(
+            reference_text=str(item["reference_text"]),
+            occurrence=int(item.get("occurrence") or 1),
+            resolved_input_ref=str(item["resolved_input_ref"]),
+            memory_ids=tuple(str(ref) for ref in item.get("memory_ids") or ()),
+        )
+    raise ValueError(f"unsupported resolved question input kind: {kind}")
+
+
 def _model_payload_from_case_input(input_payload: dict[str, Any]) -> dict[str, object]:
-    question_inputs = list(input_payload.get("question_inputs") or ())
+    question_inputs = _question_inputs_from_case_input(input_payload)
     answer_requests = list(input_payload.get("answer_requests") or ())
     if not answer_requests:
-        answer_requests = [_answer_request(input_payload)]
+        answer_requests = [
+            _answer_request(input_payload, question_inputs=question_inputs)
+        ]
     return {
         "kind": "question_contract",
         "answer_requests_count": int(
@@ -323,8 +526,17 @@ def _model_payload_from_case_input(input_payload: dict[str, Any]) -> dict[str, o
     }
 
 
-def _answer_request(input_payload: dict[str, Any]) -> dict[str, object]:
-    question_inputs = list(input_payload.get("question_inputs") or ())
+def _question_inputs_from_case_input(
+    input_payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    return [dict(item) for item in input_payload.get("question_inputs") or ()]
+
+
+def _answer_request(
+    input_payload: dict[str, Any],
+    *,
+    question_inputs: list[dict[str, Any]],
+) -> dict[str, object]:
     used_input_refs = set(input_payload.get("used_input_refs") or ())
     request = {
         "answer_fact": str(input_payload.get("answer_fact") or "sales at ABC Mall"),
@@ -338,10 +550,6 @@ def _answer_request(input_payload: dict[str, Any]) -> dict[str, object]:
                 "instance_interpretation": {"kind": "NORMAL_BUSINESS_INSTANCE"},
             }
         ),
-        "input_requirements": dict(
-            input_payload.get("input_requirements")
-            or {"time_requirements": []}
-        ),
         "answer_population": dict(
             input_payload.get("answer_population")
             or {
@@ -353,6 +561,7 @@ def _answer_request(input_payload: dict[str, Any]) -> dict[str, object]:
                         "kind": "SUBJECT_IDENTITY",
                         "polarity": "MUST_PASS",
                         "test_question": "Does the row/value represent sales?",
+                        "owned_question_input_refs": [],
                     }
                 ],
             }
@@ -360,13 +569,12 @@ def _answer_request(input_payload: dict[str, Any]) -> dict[str, object]:
         "answer_outputs": list(
             input_payload.get("answer_outputs") or [{"description": "sales total"}]
         ),
-        "input_decisions": [
-            {
-                "input_ref": str(item["input_ref"]),
-                "use_input": str(item["input_ref"]) in used_input_refs,
-            }
+        "used_question_inputs": [
+            input_ref
             for item in question_inputs
-            if isinstance(item, dict) and str(item.get("input_ref") or "").strip()
+            if isinstance(item, dict)
+            and (input_ref := str(item.get("input_ref") or "").strip())
+            and input_ref in used_input_refs
         ],
     }
     request.update(dict(input_payload.get("answer_request_overrides") or {}))

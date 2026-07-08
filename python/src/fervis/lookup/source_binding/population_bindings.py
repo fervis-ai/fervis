@@ -10,7 +10,7 @@ from fervis.lookup.fact_plan.values import (
     ValueKind,
     known_input_id_for_value,
 )
-from fervis.lookup.question_contract import KnownInputKind
+from fervis.lookup.question_inputs import KnownInputKind
 from fervis.lookup.source_binding.model import (
     SourceBindingRequest,
     SourceCandidateDiscoveryRequest,
@@ -188,7 +188,7 @@ def _conversation_resolution_row_set_requirements(
     }
     output: list[RowSetPopulationRequirement] = []
     for item in overlay.resolved_question_inputs:
-        if item.kind != KnownInputKind.ROW_SET_REFERENCE.value:
+        if item.kind != KnownInputKind.ROW_SET_REFERENCE:
             continue
         known = known_by_resolved_ref.get(item.resolved_input_ref)
         if known is None:

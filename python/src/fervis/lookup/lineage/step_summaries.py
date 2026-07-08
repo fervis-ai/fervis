@@ -177,7 +177,9 @@ def _question_contract_semantic_items(
     payload: dict[str, Any],
 ) -> tuple[StepSemanticItem, ...]:
     items: list[StepSemanticItem] = []
-    for index, answer_request in enumerate(_dicts(payload.get("answer_requests")), start=1):
+    for index, answer_request in enumerate(
+        _dicts(payload.get("answer_requests")), start=1
+    ):
         description = _text(answer_request.get("answer_fact"))
         if description:
             items.append(
@@ -191,7 +193,11 @@ def _question_contract_semantic_items(
             )
     for raw_input in _dicts(payload.get("question_inputs")):
         input_id = _text(raw_input.get("input_ref") or raw_input.get("id"))
-        text = _text(raw_input.get("reference_text") or raw_input.get("text"))
+        text = _text(
+            raw_input.get("source_text")
+            or raw_input.get("reference_text")
+            or raw_input.get("text")
+        )
         if not input_id or not text:
             continue
         items.append(
@@ -201,11 +207,12 @@ def _question_contract_semantic_items(
                     "input_id": input_id,
                     "text": text,
                     "kind": _text(raw_input.get("kind")),
+                    "role": _text(raw_input.get("role")),
                     "description": _text(
-                        raw_input.get("target_meaning")
+                        raw_input.get("value_meaning_hint")
                         or raw_input.get("description")
                     ),
-                    "lookup_text": _text(raw_input.get("lookup_text")),
+                    "resolved_value_text": _text(raw_input.get("resolved_value_text")),
                 },
             )
         )
@@ -236,7 +243,9 @@ def _grounding_semantic_items(payload: dict[str, Any]) -> tuple[StepSemanticItem
     items: list[StepSemanticItem] = []
     for input_id, raw_review in reviews.items():
         review = _dict_or_empty(raw_review)
-        for option_id, raw_option in _dict_or_empty(review.get("option_reviews")).items():
+        for option_id, raw_option in _dict_or_empty(
+            review.get("option_reviews")
+        ).items():
             option = _dict_or_empty(raw_option)
             basis = _text(option.get("because"))
             if not basis:
@@ -323,7 +332,9 @@ def _grounding_result_semantic_item(
     if not isinstance(payload, IdentityValuePayload):
         return None
     resolver_read_id = value.source_refs[0] if value.source_refs else ""
-    resolver_endpoint_name = value.source_refs[1] if len(value.source_refs) > 1 else resolver_read_id
+    resolver_endpoint_name = (
+        value.source_refs[1] if len(value.source_refs) > 1 else resolver_read_id
+    )
     return StepSemanticItem(
         kind="grounding_result",
         payload={
@@ -331,6 +342,7 @@ def _grounding_result_semantic_item(
             "input_text": _text(getattr(known_input, "text", "")),
             "resolver_read_id": resolver_read_id,
             "resolver_label": _title_words(resolver_read_id or resolver_endpoint_name),
+            "entity_kind": payload.identity_type,
             "matched_field": payload.identity_field,
             "matched_value": payload.value,
             "matched_label": payload.display_value or value.label or payload.value,

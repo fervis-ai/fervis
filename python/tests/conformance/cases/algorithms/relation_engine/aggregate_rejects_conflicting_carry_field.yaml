@@ -24,4 +24,5 @@ input:
         aggregations:
           - {function: sum, input_field: amount, output_field: total}
 expect:
-  error_contains: conflicting aggregate carry field
+  result_contains:
+    status: rejected

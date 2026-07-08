@@ -28,7 +28,6 @@ from fervis.interfaces.django.question_run_ports import (
 )
 from fervis.lineage.enums import (
     AnswerValueKind,
-    ClarificationBasis,
     FactResultKind,
     MemoryArtifactSourceKind,
     ModelCallStatus,
@@ -39,6 +38,7 @@ from fervis.lineage.enums import (
     RunStepKind,
     RunTriggerKind,
 )
+from fervis.lookup.clarification import ClarificationNeed, ClarificationReason
 from fervis.lineage.django.recorder import DjangoLineageRecorder
 from fervis.lineage.models import (
     Answer,
@@ -560,7 +560,6 @@ def test_worker_fails_before_answer_synthesis_when_budget_is_exceeded(
                                                 "kind": "NORMAL_BUSINESS_INSTANCE"
                                             },
                                         },
-                                        "input_requirements": {"time_requirements": []},
                                         "answer_population": {
                                             "population_label": "restricted fact",
                                             "counted_unit": "restricted fact",
@@ -569,18 +568,19 @@ def test_worker_fails_before_answer_synthesis_when_budget_is_exceeded(
                                                     "test_id": "pop_test_1",
                                                     "kind": "SUBJECT_IDENTITY",
                                                     "polarity": "MUST_PASS",
-                                                    "test_question": (
-                                                        "Does the row/value represent restricted fact?"
-                                                    ),
-                                                }
-                                            ],
-                                        },
+                                                        "test_question": (
+                                                            "Does the row/value represent restricted fact?"
+                                                        ),
+                                                        "owned_question_input_refs": [],
+                                                    }
+                                                ],
+                                            },
                                         "answer_outputs": [
                                             {
                                                 "description": "restricted fact",
                                             }
                                         ],
-                                        "input_decisions": [],
+                                        "used_question_inputs": [],
                                     }
                                 ],
                                 "question_input_inventory_check": {
@@ -745,10 +745,25 @@ def test_run_view_projects_needs_clarification_result_data_in_canonical_shape(
         clarification_id="clarification_1",
         run=run,
         fact_result=fact_result,
-        basis=ClarificationBasis.UNRESOLVED_REFERENCE.value,
-        question_text="Which store do you mean?",
-        options_json=[{"id": "store_1", "label": "ABC Mall"}],
-        evidence_refs_json=["known_input:store"],
+        need=ClarificationNeed.TARGET_REFERENCE.value,
+        reason=ClarificationReason.UNRESOLVED_REFERENCE.value,
+        payload_json={
+            "id": "clarification_1",
+            "need": "target_reference",
+            "reason": "unresolved_reference",
+            "requestedFactId": "run_clarification_result_data.fact",
+            "question": "Which store should I use?",
+            "subjects": [
+                {
+                    "kind": "question_input",
+                    "id": "store",
+                    "label": "store",
+                    "sourceText": "",
+                    "options": [{"id": "store_1", "label": "ABC Mall"}],
+                }
+            ],
+            "evidence": [{"kind": "known_input", "id": "known_input:store"}],
+        },
     )
 
     run_view = get_run_view("run_clarification_result_data")
@@ -761,12 +776,20 @@ def test_run_view_projects_needs_clarification_result_data_in_canonical_shape(
             "clarifications": [
                 {
                     "id": "clarification_1",
-                    "basis": "unresolved_reference",
-                    "question": "Which store do you mean?",
-                    "availableOptions": [{"id": "store_1", "label": "ABC Mall"}],
-                    "evidenceRefs": ["known_input:store"],
-                    "factResultId": "run_clarification_result_data.fact_result",
-                    "stepId": None,
+                    "need": "target_reference",
+                    "reason": "unresolved_reference",
+                    "requestedFactId": "run_clarification_result_data.fact",
+                    "question": "Which store should I use?",
+                    "subjects": [
+                        {
+                            "kind": "question_input",
+                            "id": "store",
+                            "label": "store",
+                            "sourceText": "",
+                            "options": [{"id": "store_1", "label": "ABC Mall"}],
+                        }
+                    ],
+                    "evidence": [{"kind": "known_input", "id": "known_input:store"}],
                 }
             ]
         },

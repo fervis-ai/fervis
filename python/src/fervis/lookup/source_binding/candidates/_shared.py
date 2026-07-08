@@ -17,6 +17,7 @@ from fervis.lookup.fact_planning.available_relations import (
 )
 from fervis.lookup.fact_plan.relations import (
     EndpointParamBinding,
+    RelationSourceAppliedFilter,
     RelationSource,
     SourceKind,
 )

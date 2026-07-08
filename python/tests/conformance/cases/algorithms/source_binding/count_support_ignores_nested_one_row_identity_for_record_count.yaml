@@ -31,7 +31,7 @@ input:
         row_source_id: rs_source_1_root
         cardinality: one
     evidence_items:
-      - evidence_id: row_population.data
+      - evidence_id: row_population.rs_source_1_data
         field_id: data
         row_path_id: data
         row_source_id: rs_source_1_data
@@ -48,4 +48,4 @@ input:
         identity: {entity_ref: merch, identity_field: merch_id, primary_key: true, stable: true}
 expect:
   result_contains:
-    row_count_evidence_ids: [row_population.data]
+    row_count_evidence_ids: [row_population.rs_source_1_data]

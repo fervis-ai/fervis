@@ -25,10 +25,11 @@ from fervis.lookup.memory.projection import project_lookup_memory
 from fervis.lookup.memory.projection import project_conversation_memory_cards
 from fervis.lookup.memory.available_values import (
     active_memory_operation_values,
-    active_memory_source_binding_values,
 )
 from fervis.lookup.memory.projection import LookupMemory, MemoryValue
-from fervis.lookup.outcomes.clarifications import Clarification, ClarificationBasis
+from fervis.lookup.clarification import (
+    clarification_from_payload,
+)
 from fervis.lookup.plan_execution.relations import RelationRows
 from fervis.lookup.memory.outcomes import (
     fact_result_answer_addresses,
@@ -54,7 +55,12 @@ from fervis.lookup.fact_plan.render_spec import (
     RenderSpec,
 )
 
-from tests.testkit.assertions import exact_mismatches, subset_mismatches
+from tests.testkit.assertions import (
+    exact_mismatches,
+    expects_rejection,
+    status_mismatches,
+    subset_mismatches,
+)
 from tests.testkit.serialization import portable_value
 
 
@@ -78,12 +84,14 @@ def run_memory_activate_case(payload: dict[str, Any]) -> list[str]:
             ),
         )
     except ValueError as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error and expected_error in str(exc):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {exc}"]
-    if "error_contains" in payload["expect"]:
-        return [f"expected error containing {payload['expect']['error_contains']!r}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     return subset_mismatches(
         actual={
             "activated": memory.to_dict(),
@@ -153,12 +161,14 @@ def run_conversation_memory_card_projection_case(
             max_cards=int(input_payload.get("max_cards") or 12),
         )
     except ValueError as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error and expected_error in str(exc):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {exc}"]
-    if "error_contains" in payload["expect"]:
-        return [f"expected error containing {payload['expect']['error_contains']!r}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     actual = portable_value(
         {
             "cards": [card.to_model_dict() for card in projection.cards],
@@ -199,6 +209,9 @@ def run_conversation_memory_card_projection_case(
             ),
         }
     )
+    excludes_from = input_payload.get("excludes_from") or {}
+    if excludes_from:
+        actual["excludes_from"] = _excludes_from(actual, excludes_from)
     errors: list[str] = []
     expected = payload["expect"]
     if "result_contains" in expected:
@@ -208,15 +221,6 @@ def run_conversation_memory_card_projection_case(
                 expected_subset=expected["result_contains"],
             )
         )
-    serialized = repr(actual)
-    for text in expected.get("text_excludes") or ():
-        if text in serialized:
-            errors.append(f"unexpected text present: {text!r}")
-    for field, excluded_values in (expected.get("text_excludes_from") or {}).items():
-        field_text = repr(actual.get(field))
-        for text in excluded_values or ():
-            if text in field_text:
-                errors.append(f"{field}: unexpected text present: {text!r}")
     return errors
 
 
@@ -261,12 +265,14 @@ def run_memory_lineage_memory_artifacts_case(payload: dict[str, Any]) -> list[st
             limit=int(input_payload.get("limit") or 5),
         )
     except ValueError as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error and expected_error in str(exc):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {exc}"]
-    if "error_contains" in payload["expect"]:
-        return [f"expected error containing {payload['expect']['error_contains']!r}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     actual = {"artifacts": [artifact.to_dict() for artifact in artifacts]}
     if "result_equals" in payload["expect"]:
         return exact_mismatches(
@@ -335,17 +341,12 @@ def run_memory_available_values_case(payload: dict[str, Any]) -> list[str]:
     active_memory_ids = frozenset(
         str(item) for item in payload["input"].get("active_memory_ids") or ()
     )
-    source_binding_values = active_memory_source_binding_values(
-        memory=memory,
-        active_memory_ids=active_memory_ids,
-    )
     operation_values = active_memory_operation_values(
         memory=memory,
         active_memory_ids=active_memory_ids,
     )
     return subset_mismatches(
         actual={
-            "source_binding_values": _fact_values(source_binding_values),
             "operation_values": _fact_values(operation_values),
         },
         expected_subset=payload["expect"]["result_contains"],
@@ -361,12 +362,14 @@ def run_memory_project_conversation_case(payload: dict[str, Any]) -> list[str]:
             max_index_items=int(input_payload.get("max_index_items") or 16),
         )
     except ValueError as exc:
-        expected_error = payload["expect"].get("error_contains")
-        if expected_error and expected_error in str(exc):
-            return []
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
         return [f"unexpected error: {exc}"]
-    if "error_contains" in payload["expect"]:
-        return [f"expected error containing {payload['expect']['error_contains']!r}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     return subset_mismatches(
         actual={
             "prompt_context": projection.prompt_context,
@@ -417,18 +420,27 @@ def run_memory_lookup_projection_case(payload: dict[str, Any]) -> list[str]:
         "prompt_context": memory.prompt_context,
         "prompt_context_keys": sorted((memory.prompt_context or {}).keys()),
     }
+    excludes_from = payload["input"].get("excludes_from") or {}
+    if excludes_from:
+        actual["excludes_from"] = _excludes_from(actual, excludes_from)
     errors = subset_mismatches(
         actual=actual,
         expected_subset=payload["expect"]["result_contains"],
     )
-    for field, excluded_values in (
-        payload["expect"].get("text_excludes_from") or {}
-    ).items():
-        field_text = repr(actual.get(field))
-        for text in excluded_values or ():
-            if text in field_text:
-                errors.append(f"{field}: unexpected text present: {text!r}")
     return errors
+
+
+def _excludes_from(
+    actual: dict[str, Any],
+    excludes_from: dict[str, list[str]],
+) -> dict[str, dict[str, bool]]:
+    return {
+        field: {
+            text: text not in repr(actual.get(field))
+            for text in excluded_values
+        }
+        for field, excluded_values in excludes_from.items()
+    }
 
 
 def run_memory_identity_projection_case(payload: dict[str, Any]) -> list[str]:
@@ -588,15 +600,7 @@ def _undefined(payload: dict[str, Any]) -> Undefined:
 def _needs_clarification(payload: dict[str, Any]) -> NeedsClarification:
     return NeedsClarification(
         clarifications=tuple(
-            Clarification(
-                id=item["id"],
-                requested_fact_id=item["requested_fact_id"],
-                basis=ClarificationBasis(item["basis"]),
-                question=item["question"],
-                known_input_id=item.get("known_input_id") or "",
-                candidate_refs=tuple(item.get("candidate_refs") or ()),
-                evidence_refs=tuple(item.get("evidence_refs") or ()),
-            )
+            clarification_from_payload(item)
             for item in payload.get("clarifications") or ()
         ),
         proof_refs=tuple(payload.get("proof_refs") or ()),

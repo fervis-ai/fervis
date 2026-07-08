@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
-import time
+from dataclasses import dataclass, replace
 from typing import Any
 
-from fervis.lookup.errors import ErrorCode
 from fervis.lookup.lineage.explanation_metadata import (
     lineage_explanation_metadata,
 )
@@ -15,9 +13,14 @@ from fervis.lookup.conversation_resolution import (
 )
 from fervis.model_io.turn_artifacts import (
     ModelTurnArtifact,
-    model_turn_artifact,
 )
 from fervis.lookup.fact_plan.fact_plan import PlanImpossible
+from fervis.lookup.model_turn import (
+    LookupModelTurnError,
+    ModelTurnGenerationFailure,
+    generation_error_kwargs,
+    run_one_of_tool_model_turn,
+)
 from fervis.lookup.turn_prompts import build_turn_prompt_context
 from fervis.lookup.source_binding.model import (
     SourceBindingRequest,
@@ -33,16 +36,8 @@ from fervis.lookup.source_binding.prompt import (
 from fervis.lookup.source_binding.terminal_outcomes import (
     backend_impossible_without_answer_candidates,
 )
-from fervis.model_io.structured_output.errors import RequiredToolOutputError
-from fervis.model_io.structured_output.generation import (
-    generate_one_of_tool_output,
-)
 from fervis.model_io.structured_output.provider_budget import (
     provider_budget_tool_specs,
-)
-from fervis.model_io.telemetry import (
-    ModelTurnPromptBudgetError,
-    enforce_model_turn_prompt_budget,
 )
 
 
@@ -62,17 +57,8 @@ class SourceBindingSubturnResult:
     artifact: ModelTurnArtifact
 
 
-@dataclass(frozen=True)
-class SourceBindingGenerationError(Exception):
-    message: str
-    usage: dict[str, Any]
-    duration_ms: int
-    artifact: ModelTurnArtifact
-    error_code: str = ErrorCode.PLANNING_FAILED
-    error_context: dict[str, Any] = field(default_factory=dict)
-
-    def __str__(self) -> str:
-        return self.message
+class SourceBindingGenerationError(LookupModelTurnError):
+    pass
 
 
 def generate_source_binding(
@@ -91,17 +77,35 @@ def generate_source_binding(
             request=request,
             prompt=prompt,
         )
-    output = _run_source_binding_model_turn(
-        request=request,
-        prompt=prompt,
-        model_port=model_port,
-        provider=provider,
-        max_thinking_tokens=max_thinking_tokens,
-        error_label="source binding",
+    invocation = prompt.to_model_invocation(
+        build_turn_prompt_context(
+            current_question=request.question,
+            conversation_context=request.conversation_context,
+            host=request.host,
+            memory_payload=request.memory_inputs,
+            conversation_resolution_overlay=conversation_resolution_source_binding_prompt_payload(
+                request.conversation_resolution_overlay
+            ),
+        )
     )
     try:
+        output = run_one_of_tool_model_turn(
+            invocation=invocation,
+            model_port=model_port,
+            provider=provider,
+            max_thinking_tokens=max_thinking_tokens,
+            prompt_budget_error_message="source binding prompt budget exceeded",
+            model_error_message="source binding model turn failed",
+            prompt_budget_tool_specs=provider_budget_tool_specs(
+                provider=provider,
+                tool_specs=invocation.tool_specs,
+            ),
+        )
+    except ModelTurnGenerationFailure as exc:
+        raise SourceBindingGenerationError(**generation_error_kwargs(exc)) from exc
+    try:
         result = parse_source_binding(
-            output.raw_arguments,
+            output.arguments,
             request=request,
         )
     except Exception as exc:
@@ -114,7 +118,7 @@ def generate_source_binding(
         ) from exc
     artifact = replace(
         output.artifact,
-        parsed_payload=output.raw_arguments,
+        parsed_payload=output.arguments,
         derived_payload=lineage_explanation_metadata(
             (
                 "outcome",
@@ -205,103 +209,4 @@ def _backend_impossible_turn_result(
             selected_tool_name=SOURCE_BINDING_TOOL_NAME,
         ),
         subturns=(),
-    )
-
-
-@dataclass(frozen=True)
-class _SourceBindingModelTurnOutput:
-    raw_arguments: dict[str, Any]
-    usage: dict[str, Any]
-    duration_ms: int
-    artifact: ModelTurnArtifact
-
-
-def _run_source_binding_model_turn(
-    *,
-    request: SourceBindingRequest,
-    prompt: Any,
-    model_port: Any,
-    provider: str,
-    max_thinking_tokens: int,
-    error_label: str,
-) -> _SourceBindingModelTurnOutput:
-    invocation = prompt.to_model_invocation(
-        build_turn_prompt_context(
-            current_question=request.question,
-            conversation_context=request.conversation_context,
-            host=request.host,
-            memory_payload=request.memory_inputs,
-            conversation_resolution_overlay=conversation_resolution_source_binding_prompt_payload(
-                request.conversation_resolution_overlay
-            ),
-        )
-    )
-    prompt = invocation.prompt_text
-    system_prompt = invocation.system_prompt
-    schema = invocation.provider_schema
-    tool_specs = invocation.tool_specs
-    try:
-        enforce_model_turn_prompt_budget(
-            prompt=prompt,
-            tool_specs=provider_budget_tool_specs(
-                provider=provider,
-                tool_specs=tool_specs,
-            ),
-        )
-    except ModelTurnPromptBudgetError as exc:
-        raise SourceBindingGenerationError(
-            message=f"{error_label} prompt budget exceeded",
-            usage={},
-            duration_ms=0,
-            artifact=ModelTurnArtifact(
-                system_prompt=system_prompt,
-                prompt_text=prompt,
-                provider_schema=schema,
-                tool_specs=tool_specs,
-                submitted_payload={},
-            ),
-        ) from exc
-    started = time.monotonic()
-    try:
-        output = generate_one_of_tool_output(
-            model_port=model_port,
-            provider=provider,
-            system_prompt=system_prompt,
-            prompt=prompt,
-            max_thinking_tokens=max_thinking_tokens,
-            tool_specs=tool_specs,
-        )
-    except RequiredToolOutputError as exc:
-        duration_ms = int((time.monotonic() - started) * 1000)
-        raise SourceBindingGenerationError(
-            message=f"{error_label} model turn failed",
-            usage=dict(exc.output.get("usage") or {}),
-            duration_ms=duration_ms,
-            artifact=model_turn_artifact(
-                system_prompt=system_prompt,
-                prompt_text=prompt,
-                provider_schema=schema,
-                tool_specs=tool_specs,
-                submitted_payload=exc.arguments,
-                raw_output=exc.raw_output,
-            ),
-            error_code=exc.error_code or ErrorCode.PLANNING_FAILED,
-            error_context=dict(exc.error_context or {}),
-        ) from exc
-    duration_ms = int((time.monotonic() - started) * 1000)
-    raw_arguments = output.arguments
-    artifact = model_turn_artifact(
-        system_prompt=system_prompt,
-        prompt_text=prompt,
-        provider_schema=schema,
-        tool_specs=tool_specs,
-        submitted_payload=raw_arguments,
-        raw_output=output.raw_output,
-        selected_tool_name=output.tool_spec.name,
-    )
-    return _SourceBindingModelTurnOutput(
-        raw_arguments=raw_arguments,
-        usage=dict(output.output.get("usage") or {}),
-        duration_ms=duration_ms,
-        artifact=artifact,
     )

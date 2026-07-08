@@ -1,5 +1,5 @@
 id: grouped_ranked_choices_exclude_display_fields
-description: Grouped/ranked planning does not expose display labels as group candidates when a canonical identity is available.
+description: Grouped/ranked planning uses the source-binding selected canonical group key instead of re-exposing display labels.
 migrates:
   - api/tests/fervis/lookup/test_source_binding_one_call.py::test_grouped_ranked_choices_do_not_include_display_fields_as_group_candidates
 kind: algorithm
@@ -29,7 +29,6 @@ input:
       - answer_output_id: answer_1
         group_key_evidence_ids:
           - source_1.data.location_id
-          - source_1.data.location_name
         metric_measure_evidence_ids:
           - source_1.data.calculated_pay
 expect:

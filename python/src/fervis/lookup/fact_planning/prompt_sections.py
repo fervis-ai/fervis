@@ -100,8 +100,9 @@ def fact_plan_instruction_sections(
         if plan_shapes_use_grouped_ranked_choices(plan_shapes):
             metric_lines.extend(
                 (
-                    "For aggregate_by_group and ranked_aggregate, choose group, metric, function, and rank from Grouped/ranked operation choices.",
-                    "For each selected grouped/ranked part, write selection_basis before copying the selected id and field/value.",
+                    "For aggregate_by_group and ranked_aggregate, use the source-binding group shown in Grouped/ranked operation choices.",
+                    "For aggregate_by_group and ranked_aggregate, choose metric, function, and rank from Grouped/ranked operation choices.",
+                    "For each selected grouped/ranked metric, function, or rank, write selection_basis before copying the selected id and field/value.",
                     "Do not output separate group fields, answer fields, or source evidence for grouped/ranked patterns.",
                 )
             )
@@ -116,8 +117,8 @@ def fact_plan_instruction_sections(
             builder.instruction_block(
                 "Grouped Metric Patterns",
                 (
-                    "For aggregate_by_group, group defines the answer grouping, metric defines the measured value, and function defines the aggregate computation.",
-                    "For ranked_aggregate, group defines the answer grouping, metric and function define the computed ranking value, and rank defines which groups to return.",
+                    "For aggregate_by_group, the source-binding group defines the answer grouping, metric defines the measured value, and function defines the aggregate computation.",
+                    "For ranked_aggregate, the source-binding group defines the answer grouping, metric and function define the computed ranking value, and rank defines which groups to return.",
                     "rank.sort=desc returns larger metric values before smaller metric values.",
                     "rank.sort=asc returns smaller metric values before larger metric values.",
                     "rank.limit is the number of ranked groups to return.",

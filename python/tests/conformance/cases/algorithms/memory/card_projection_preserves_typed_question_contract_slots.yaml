@@ -22,15 +22,18 @@ input:
                     requested_value_frame: total sales amount
                 known_inputs:
                   - id: fact_1_entity_1
-                    kind: named_reference_text
+                    kind: literal_text
+                    role: reference_value
                     source: question_context
                     text: Staff One
-                    lookup_text: Staff One
-                    description: staff member
+                    resolved_value_text: Staff One
+                    value_meaning_hint: staff member
                   - id: fact_1_time_1
-                    kind: time_text
+                    kind: literal_text
+                    role: time_value
                     source: question_context
                     text: yesterday
+                    resolved_value_text: yesterday
         addresses:
           - address: entity.grounded_fact_1_entity_1
             kind: entity
@@ -82,4 +85,3 @@ expect:
               resolved_end: "2026-05-14"
               granularity: day
               source_lineage: [turn_sales.value.grounded_fact_1_time_1]
-

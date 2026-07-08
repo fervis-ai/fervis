@@ -18,7 +18,8 @@
   "framework": "django",
   "host": {
     "about_api": "The Fervis Django test API exposes generic operational records for adapter contract tests.",
-    "organization_name": "Fervis"
+    "organization_name": "Fervis",
+    "timezone": "UTC"
   },
   "models": {
     "providers": [

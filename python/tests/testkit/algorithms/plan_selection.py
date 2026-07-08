@@ -9,10 +9,12 @@ from fervis.lookup.operation_families.plan_selection_registry import (
 )
 from fervis.lookup.plan_selection.source_strategies import source_strategies_by_fact
 from fervis.lookup.question_contract import (
+    GroupKeyDomainKind,
     QuestionContract,
     RequestedFact,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
+    RequestedFactGroupKey,
     RequestedFactAnswerOutput,
     RequestedFactAnswerSubject,
 )
@@ -162,9 +164,10 @@ def _requested_fact(payload: dict[str, Any]) -> RequestedFact:
         id=str(payload.get("id") or "fact_1"),
         description=str(payload["description"]),
         answer_expression=RequestedFactAnswerExpression(
-            RequestedFactAnswerExpressionFamily(
+            family=RequestedFactAnswerExpressionFamily(
                 str(payload["answer_expression_family"])
-            )
+            ),
+            group_key=_group_key(payload.get("group_key")),
         ),
         answer_subject=RequestedFactAnswerSubject(
             subject_text=str(payload["subject_text"])
@@ -175,6 +178,21 @@ def _requested_fact(payload: dict[str, Any]) -> RequestedFact:
                 description=str(item.get("description") or item["id"]),
             )
             for item in payload["answer_outputs"]
+        ),
+    )
+
+
+def _group_key(raw_value: object) -> RequestedFactGroupKey | None:
+    if raw_value is None:
+        return None
+    if not isinstance(raw_value, dict):
+        raise ValueError("group_key must be an object")
+    return RequestedFactGroupKey(
+        id=str(raw_value.get("id") or "group_key"),
+        description=str(raw_value.get("description") or "group"),
+        domain=GroupKeyDomainKind(str(raw_value.get("domain") or "")),
+        question_input_refs=tuple(
+            str(item) for item in raw_value.get("question_input_refs") or ()
         ),
     )
 

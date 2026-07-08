@@ -38,16 +38,18 @@ from fervis.lineage.recorder import (
     ClarificationRequestWrite,
     ExecutionProofGraphWrite,
     FactResultWrite,
+    FactualTerminalRunResultWrite,
     LineageRecorderConflict,
     ModelCallAuditWrite,
     ModelCallWrite,
     RequestedFactWrite,
+    RunResultWrite,
     RunStepWrite,
 )
 from fervis.lineage.enums import (
-    ClarificationBasis,
     FactResultKind,
     ModelCallStatus,
+    RunResultKind,
     RunStepKey,
     RunStepKind,
 )
@@ -437,8 +439,23 @@ def test_sql_storage_clarification_continuation_authorizes_trigger_run(
             clarification_id="owner-clarification",
             run_id=owner_result.run_id,
             step_id="owner-clarification-step",
-            basis=ClarificationBasis.MULTIPLE_MATCHING_ENTITIES,
-            question_text="Which store do you mean?",
+            payload_json={
+                "id": "owner-clarification",
+                "need": "target_reference",
+                "reason": "multiple_matching_entities",
+                "requestedFactId": "question_contract",
+                "question": "Which matching store should I use?",
+                "subjects": [
+                    {
+                        "kind": "question_input",
+                        "id": "store",
+                        "label": "store",
+                        "sourceText": "",
+                        "options": [],
+                    }
+                ],
+                "evidence": [],
+            },
         )
     )
     other_result = bundle.questions.ask(
@@ -952,6 +969,105 @@ def test_sql_storage_terminal_result_reads_active_transaction(
     assert terminal.status == "FAILED"
     assert terminal.error == "transaction_visible_error"
     assert _count_rows(root, "fervis_run_result") == 0
+
+
+def test_sql_storage_terminal_result_projects_clarification_payload(
+    tmp_path: Path,
+) -> None:
+    root = _migrated_fastapi_project(tmp_path)
+    bundle = _storage_bundle(root)
+    result = bundle.questions.ask(
+        AskRequest(
+            question="How many orders came in today?",
+            principal=QuestionPrincipal(principal_id="u1", tenant_id="t1"),
+            execution_mode=ExecutionMode.QUEUED,
+            conversation_id="c1",
+        )
+    )
+    run_id = result.run_id
+    clarification_id = f"{run_id}:clarification"
+    clarification_details = {
+        "clarifications": [
+            {
+                "id": clarification_id,
+                "requestedFactId": "fact_1",
+                "need": "target_reference",
+                "reason": "unresolved_reference",
+                "question": "Which store should I use?",
+                "subjects": [
+                    {
+                        "kind": "question_input",
+                        "id": "q1_store",
+                        "label": "store",
+                        "sourceText": "",
+                        "options": [],
+                    }
+                ],
+                "evidence": [
+                    {"kind": "known_input", "id": "known_input:q1_store"}
+                ],
+            }
+        ]
+    }
+
+    recorder = LineageRecorder(SQLLineageRecorderStore(bundle.engine))
+    recorder.record_step(
+        RunStepWrite(
+            step_id=f"{run_id}:render",
+            run_id=run_id,
+            sequence=1,
+            step_key=RunStepKey.RENDER,
+            kind=RunStepKind.DETERMINISTIC,
+        )
+    )
+    recorder.record_factual_terminal_result(
+        FactualTerminalRunResultWrite(
+            result=RunResultWrite(
+                run_result_id=f"{run_id}:result",
+                run_id=run_id,
+                result_kind=RunResultKind.FACTUAL_TERMINAL,
+            ),
+            requested_facts=(
+                RequestedFactWrite(
+                    requested_fact_id=f"{run_id}:fact",
+                    run_id=run_id,
+                    produced_by_step_id=f"{run_id}:render",
+                    fact_key="fact_1",
+                    answer_expression_family="scalar_aggregate",
+                ),
+            ),
+            fact_results=(
+                FactResultWrite(
+                    fact_result_id=f"{run_id}:fact-result",
+                    run_id=run_id,
+                    requested_fact_id=f"{run_id}:fact",
+                    produced_by_step_id=f"{run_id}:render",
+                    result_kind=FactResultKind.NEEDS_CLARIFICATION,
+                    evidence_refs_json=["known_input:q1_store"],
+                    payload_schema="fervis.fact_terminal",
+                    payload_schema_rev=1,
+                    payload_json={"clarificationIds": [clarification_id]},
+                ),
+            ),
+            clarifications=(
+                ClarificationRequestWrite(
+                    clarification_id=clarification_id,
+                    run_id=run_id,
+                    fact_result_id=f"{run_id}:fact-result",
+                    payload_json=clarification_details["clarifications"][0],
+                ),
+            ),
+        )
+    )
+
+    terminal = terminal_result_for_run(bundle.engine, run_id)
+
+    assert terminal is not None
+    assert terminal.status == "NEEDS_CLARIFICATION"
+    assert terminal.result_data == {
+        "kind": "needs_clarification",
+        "details": clarification_details,
+    }
 
 
 def test_fervis_runtime_ask_queued_uses_sqlite_storage_and_explain_reads_it(
@@ -1608,6 +1724,7 @@ def _write_order_count_fastapi_app(root: Path) -> None:
     schema["host"] = {
         "organization_name": "Test Shop",
         "about_api": "The Test Shop API exposes order records.",
+        "timezone": "UTC",
     }
     schema["models"] = {
         "providers": [

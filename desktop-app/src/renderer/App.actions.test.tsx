@@ -54,10 +54,9 @@ describe("Ledger app actions", () => {
       "How many in-person sales happened this month?"
     );
     expect(labels.length).toBeGreaterThan(0);
+    expect(await screen.findByText("Inputs:")).toBeInTheDocument();
     expect(
-      await screen.findByText(
-        "Interpreted input: this month: 2026-06-01 to 2026-06-30"
-      )
+      screen.getByText("\"this month\": 2026-06-01 to 2026-06-30")
     ).toBeInTheDocument();
     expect(askQuestion).toHaveBeenCalledWith({
       conversationId: null,
@@ -82,10 +81,9 @@ describe("Ledger app actions", () => {
       conversationId: null,
       question: "How many in-person sales happened this month?"
     });
+    expect(await screen.findByText("Inputs:")).toBeInTheDocument();
     expect(
-      await screen.findByText(
-        "Interpreted input: this month: 2026-06-01 to 2026-06-30"
-      )
+      screen.getByText("\"this month\": 2026-06-01 to 2026-06-30")
     ).toBeInTheDocument();
   });
 
@@ -101,6 +99,7 @@ describe("Ledger app actions", () => {
     expect(answerClarification).toHaveBeenCalledWith("q_sales", {
       clarificationId: "clar_store",
       question: "BBS Outlet",
+      selectedOptionId: "store:store_id:70707070-0000-0000-0001-000000000002",
       triggerKind: "clarification_response",
       triggerRunId: "run_clarify"
     } satisfies ClarificationResponseRequest);
@@ -129,7 +128,7 @@ describe("Ledger app actions", () => {
 
     fireEvent.click(await screen.findByText("run_clarify"));
 
-    expect(await screen.findByText("Which store do you mean?")).toBeInTheDocument();
+    expect(await screen.findByText("Which matching store should I use?")).toBeInTheDocument();
     expect(screen.queryByText(/POST \/questions/)).not.toBeInTheDocument();
     expect(screen.queryByText(/triggerKind/)).not.toBeInTheDocument();
   });
@@ -139,7 +138,7 @@ describe("Ledger app actions", () => {
     render(<App initialClient={createInteractiveTextClarificationClient(answerClarification)} />);
 
     await screen.findByText("Which March should I use?");
-    expect(screen.getByText("Ambiguous Period · text answer requested")).toBeInTheDocument();
+    expect(screen.getByText("Ambiguous Interpretation · text answer requested")).toBeInTheDocument();
     expect(screen.queryByText(/step_clarify/)).not.toBeInTheDocument();
     expect(screen.queryByText(/fact_result/)).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Clarification answer"), {

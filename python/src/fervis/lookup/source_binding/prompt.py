@@ -15,17 +15,21 @@ from fervis.lookup.turn_prompts import (
     TurnPromptBuilder,
 )
 from fervis.lookup.turn_prompts.projections import source_binding_candidates_xml
-from fervis.lookup.question_contract import (
-    AnswerPopulationMembershipTestKind,
-    requested_fact_evidence_ref,
-)
+from fervis.lookup.question_contract import requested_fact_evidence_ref
 from fervis.lookup.source_binding.candidates import (
+    SourceCandidateRegistry,
     source_binding_candidate_payload,
     source_binding_prompt_candidate_fulfillment_support_set_ids_by_answer_output,
     source_binding_prompt_candidate_population_binding_ids,
-    source_binding_prompt_candidate_requested_fact_ids,
-    source_candidate_required_param_decision_ids,
     source_candidate_registry,
+)
+from fervis.lookup.source_binding.candidates.candidate_tree import (
+    CandidateTreeContext,
+    map_source_candidate_tree,
+)
+from fervis.lookup.source_binding.closed_key_params import (
+    ClosedKeyParamBindingIndex,
+    closed_key_param_binding_index,
 )
 from fervis.lookup.source_binding.memory_context import (
     source_binding_memory_context_payload as source_binding_memory_context_input_payload,
@@ -37,14 +41,16 @@ from fervis.lookup.operation_families.source_binding_registry import (
 from fervis.lookup.source_binding.model import (
     SourceBindingRequest,
 )
-from fervis.lookup.source_binding.membership_tests import (
-    membership_test_key,
-)
 from fervis.lookup.source_binding.param_surface import (
-    choice_values_for_effective_params,
     param_decision_ids_by_effective_param,
-    param_requires_finite_choice_review,
 )
+from fervis.lookup.source_binding.plan_targets import (
+    SourceBindingTarget,
+    SourceBindingTargetIndex,
+    source_binding_target_index,
+)
+from fervis.lookup.source_binding.review_scope import source_binding_review_scope
+from fervis.lookup.source_binding.review_surface import source_binding_review_surface
 from fervis.lookup.source_binding.schema import (
     build_source_binding_schema,
 )
@@ -72,7 +78,7 @@ def source_binding_requested_facts_payload(
                         "id": output.id,
                         "description": output.description,
                     }
-                    for output in fact.answer_outputs
+                    for output in fact.support_answer_outputs
                 ],
             }
             for fact in request.requested_facts
@@ -102,22 +108,33 @@ def source_binding_transport_context_payload(
     request: SourceBindingRequest,
 ) -> dict[str, object]:
     registry = source_candidate_registry(request)
+    targets = _prompt_binding_targets(request, registry=registry)
     return {
         "current_question": request.question,
         "requested_facts": source_binding_requested_facts_payload(request),
         "grounded_values": source_binding_grounded_values_payload(request),
         "memory_context": source_binding_memory_context_payload(request),
-        "source_candidate_requested_fact_ids_by_id": {
-            candidate_id: candidate.requested_fact_id
-            for candidate_id, candidate in registry.candidates_by_id.items()
-            if candidate_id in registry.prompt_candidate_ids
-        },
+        "binding_targets": [target.to_payload() for target in targets],
         "source_candidates_by_id": {
             candidate_id: candidate.payload or {}
             for candidate_id, candidate in registry.candidates_by_id.items()
             if candidate_id in registry.prompt_candidate_ids
         },
     }
+
+
+def _prompt_binding_targets(
+    request: SourceBindingRequest,
+    *,
+    registry: Any,
+    target_index: SourceBindingTargetIndex | None = None,
+) -> tuple[SourceBindingTarget, ...]:
+    targets = target_index or source_binding_target_index(request)
+    return tuple(
+        target
+        for target in targets.targets
+        if target.source_candidate_id in registry.prompt_candidate_ids
+    )
 
 
 class SourceBindingTurnPrompt(TurnPromptBase):
@@ -135,6 +152,10 @@ class SourceBindingTurnPrompt(TurnPromptBase):
     ) -> tuple[PromptSection, ...]:
         return (
             builder.json_section("Requested facts:", self.requested_facts_payload()),
+            builder.json_section(
+                "Binding targets:",
+                self.binding_targets_payload(),
+            ),
             builder.json_section("Grounded values:", self.grounded_values_payload()),
             builder.json_section("Memory context:", self.memory_context_payload()),
             builder.text_section(
@@ -157,23 +178,26 @@ class SourceBindingTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Source Binding",
                 (
-                    "For each requested fact, select the least number of source invocations required to answer its outputs.",
-                    "A source invocation chooses the source candidate, answer population, fulfillment choice, scalar param bindings, and finite-choice population reviews.",
-                    "Do not bind backup alternatives or invocations that are not required for an answer output.",
+                    "For each requested fact, select one complete compatible set of source invocations required by the selected operation plan.",
+                    "Bind every operation-required role target in that set, including targets with no answer outputs.",
+                    "A source invocation chooses one binding_target, answer population, fulfillment choice when required by that target, scalar param bindings, and finite-choice population reviews.",
+                    "Do not bind backup alternatives or invocations outside the selected operation plan.",
                 ),
             ),
             builder.instruction_block(
                 "Source Population And Fulfillment",
                 (
+                    "binding_target_id identifies the selected plan member and source candidate role for this invocation.",
                     "answer_population.population_binding_id is the source candidate's population handle that this invocation uses.",
                     "applied_filters are backend-derived grounded-value filters already attached to this source candidate.",
                     "Do not reinterpret, rematch, remove, or rewrite applied_filters.",
-                    "For each fulfilled answer output key, choose fulfillment_choice_id from the selected source candidate's fulfillment_choices.",
+                    "For each answer output shown under the selected binding target, choose fulfillment_choice_id from that source candidate's fulfillment_choices; for entity/group computation keys, prefer stable primary identity evidence when available, because display labels are presentation context unless no stable identity is available.",
                     "Before choosing fulfillment, write metric_fit_bases for every metric candidate.",
                     "Metric contexts are read-only interpretation context for metric candidates.",
                     "Use metric_contexts to understand what a metric field is likely measuring from its row path, same-row sibling fields, and scope fields.",
                     "Do not copy metric_context_id, same_row_field_paths, or scope_field_paths into output.",
                     "Do not treat metric context fields as selectable fulfillment evidence.",
+                    "Consider each api_read selection_note before choosing an invocation, but treat it as advisory guidance to evaluate against the read's evidence, not as source truth.",
                     "metric_fit_bases is keyed by requested_fact_id, then metric_evidence_id from Metric fit candidates.",
                     "metric_meaning states what the reviewed metric_evidence_id appears to measure from field_path, field_type, resource_names, and the referenced metric_context.",
                     "fit_basis evaluates whether the metric is the row-level or scalar measure that should be aggregated, ranked, compared, or otherwise computed to determine the requested answer output.",
@@ -191,6 +215,7 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                 "Param Binding",
                 (
                     "Bind every catalog-required param in param_decisions unless that param appears in binding_params with population_contract.",
+                    "Do not author param_decisions for backend_owned_param_bindings; the backend compiles those keyed bindings.",
                     "You may bind an optional non-choice param in param_decisions only when the requested fact needs that param value.",
                     "For params with decision_surface=single_decision and no population_contract, choose exactly one decision_options item.",
                     "Do not author param_decisions for params with population_contract; write finite_choice_param_reviews keyed by param_id instead.",
@@ -200,16 +225,16 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                 "Row Predicates",
                 (
                     "row_predicates filter response rows when the requested population is not fully controlled by query params.",
-                    "For every shown row_predicate on a selected source candidate, write row_predicate_reviews keyed by predicate_id.",
-                    "Review every shown predicate value exactly once and independently against the requested answer population tests.",
+                    "For every shown row_predicate review entry, write row_predicate_reviews keyed by predicate_id.",
+                    "Review every shown predicate value exactly once against the membership tests exposed for that predicate.",
                     "The backend derives executable row filters from row_predicate_reviews.",
                 ),
             ),
             builder.instruction_block(
                 "Finite Choice Review Shape",
                 (
-                    "For every binding_params param with population_contract, write finite_choice_param_reviews[param_id].",
-                    "Review every shown choice exactly once and independently as one member of a choice set.",
+                    "For every shown finite-choice review entry, write finite_choice_param_reviews[param_id].",
+                    "Review every shown choice exactly once as one member of a choice set.",
                     "Use the XML response rows to understand the source row grains before applying membership tests.",
                     "Write each finite-choice param review in this order: controlled_population_role_id, role_selection_basis, population_test_basis, choice_reviews.",
                     "Choose controlled_population_role_id from population_roles for the source row population whose rows this param controls.",
@@ -219,7 +244,7 @@ class SourceBindingTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Population Test Basis",
                 (
-                    "In population_test_basis, write one entry for every shown answer_population.membership_tests key.",
+                    "In population_test_basis, write one entry for every membership-test key exposed by that review entry.",
                     "Each population_test_basis item copies test_question.",
                     "Each population_test_basis item writes role_scoped_test_question by applying test_question to the selected role's role_text.",
                     "Use population_test_basis as local context before reviewing choices.",
@@ -233,8 +258,8 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                     "choice_domain_meaning states what the source returns when this choice value is applied, read against the source candidate description and the answer subject. Do not paraphrase the choice token alone.",
                     "choice_inclusion_basis explains why rows with this choice value should be included or excluded from the answer computation, read against the requested fact and the source candidate description.",
                     "choice_inclusion states whether rows with this choice value should be included in the answer computation: INCLUDE or EXCLUDE.",
-                    "population_test_results is keyed by answer_population.membership_tests; write every shown key exactly once.",
-                    "Do not add population_test_results keys that are not shown in answer_population.membership_tests.",
+                    "population_test_results is keyed only by the membership-test keys exposed for this review entry; write every exposed key exactly once.",
+                    "Do not add population_test_results keys that are not exposed for this review entry.",
                     "For non-NORMAL_INSTANCE_GUARD tests, write test_basis, population_consequence, then test_effect.",
                     "test_basis compares this choice value to the matching population_test_basis item.",
                     "population_consequence states whether and how this choice affects the requested answer population for that test.",
@@ -303,7 +328,7 @@ class SourceBindingTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Copying And Validity",
                 (
-                    "Copy requested_fact_id, source_candidate_id, population_binding_id, fulfillment_choice_id, param_decision_id, param_id, and choice_option_id values verbatim from the prompt JSON.",
+                    "Copy binding_target_id, population_binding_id, fulfillment_choice_id, param_decision_id, param_id, and choice_option_id values verbatim from the prompt JSON.",
                     "For metric_fit_bases and fit_basis_interpretations, copy requested_fact_id and metric_evidence_id keys from Metric fit candidates.",
                     "Do not invent endpoints, params, values, fields, formulas, labels, or calculations.",
                 ),
@@ -341,7 +366,32 @@ class SourceBindingTurnPrompt(TurnPromptBase):
         return source_binding_memory_context_payload(self.request)
 
     def source_invocation_candidate_payload(self) -> dict[str, object]:
-        return source_binding_candidate_payload(self.request)
+        registry = source_candidate_registry(self.request)
+        targets = _prompt_binding_targets(self.request, registry=registry)
+        closed_key_bindings = self._closed_key_bindings(targets, registry=registry)
+        payload = _candidate_payload_with_selection_notes(
+            source_binding_candidate_payload(self.request),
+            self.request,
+        )
+        return closed_key_bindings.model_visible_candidate_payload(
+            payload
+        )
+
+    def binding_targets_payload(self) -> dict[str, object]:
+        registry = source_candidate_registry(self.request)
+        target_index = source_binding_target_index(self.request)
+        targets = _prompt_binding_targets(
+            self.request,
+            registry=registry,
+            target_index=target_index,
+        )
+        closed_key_bindings = self._closed_key_bindings(targets, registry=registry)
+        return {
+            "binding_targets": [
+                closed_key_bindings.model_visible_target_payload(target)
+                for target in targets
+            ]
+        }
 
     def metric_fit_surface_payload(self) -> dict[str, object]:
         return source_binding_metric_fit_surface_payload(self.request)
@@ -351,153 +401,226 @@ class SourceBindingTurnPrompt(TurnPromptBase):
 
     def _schema(self) -> dict[str, Any]:
         registry = source_candidate_registry(self.request)
-        candidate_ids = registry.prompt_candidate_ids
-        candidate_param_decision_ids_by_param: dict[
-            str, dict[str, tuple[str, ...]]
+        target_index = source_binding_target_index(self.request)
+        targets = _prompt_binding_targets(
+            self.request,
+            registry=registry,
+            target_index=target_index,
+        )
+        review_scope = source_binding_review_scope(
+            self.request,
+            candidates_by_id=registry.candidates_by_id,
+            target_index=target_index,
+        )
+        closed_key_bindings = self._closed_key_bindings(targets, registry=registry)
+        target_param_decision_ids_by_param: dict[str, dict[str, tuple[str, ...]]] = {}
+        target_finite_choice_values: dict[str, dict[str, tuple[str, ...]]] = {}
+        target_row_predicate_values: dict[str, dict[str, tuple[str, ...]]] = {}
+        target_finite_choice_test_ids: dict[str, dict[str, tuple[str, ...]]] = {}
+        target_finite_choice_normal_test_ids: dict[
+            str,
+            dict[str, tuple[str, ...]],
         ] = {}
-        candidate_required_param_ids: dict[str, tuple[str, ...]] = {}
-        candidate_finite_choice_values: dict[str, dict[str, tuple[str, ...]]] = {}
-        candidate_row_predicate_values: dict[str, dict[str, tuple[str, ...]]] = {}
-        candidate_membership_test_ids: dict[str, tuple[str, ...]] = {}
-        candidate_normal_instance_test_ids: dict[str, tuple[str, ...]] = {}
-        candidate_population_roles: dict[str, tuple[dict[str, object], ...]] = {}
-        for candidate_id in candidate_ids:
-            candidate = registry.candidates_by_id[candidate_id]
-            finite_choice_param_ids = set(_finite_choice_review_param_ids(candidate))
-            requested_fact_id = candidate.requested_fact_id
-            candidate_param_decision_ids_by_param[candidate_id] = {
-                param_id: decision_ids
-                for param_id, decision_ids in param_decision_ids_by_effective_param(
+        target_row_predicate_test_ids: dict[str, dict[str, tuple[str, ...]]] = {}
+        target_population_roles: dict[str, tuple[dict[str, object], ...]] = {}
+        target_requested_fact_ids: dict[str, str] = {}
+        candidate_fulfillment_supports = source_binding_prompt_candidate_fulfillment_support_set_ids_by_answer_output(
+            self.request
+        )
+        candidate_population_bindings = (
+            source_binding_prompt_candidate_population_binding_ids(self.request)
+        )
+        target_fulfillment_supports: dict[str, dict[str, tuple[str, ...]]] = {}
+        target_required_fulfillment_output_ids: dict[str, tuple[str, ...]] = {}
+        target_population_binding_ids: dict[str, tuple[str, ...]] = {}
+        for target in targets:
+            candidate = registry.candidates_by_id[target.source_candidate_id]
+            review_surface = source_binding_review_surface(candidate)
+            target_id = target.binding_target_id
+            finite_choice_param_ids = set(review_surface.finite_choice_params)
+            requested_fact_id = target.requested_fact_id
+            target_requested_fact_ids[target_id] = requested_fact_id
+            target_param_decision_ids_by_param[target_id] = (
+                closed_key_bindings.model_visible_param_map(
+                    target_id,
+                    {
+                        param_id: decision_ids
+                        for param_id, decision_ids in param_decision_ids_by_effective_param(
+                            candidate,
+                            effective_param_ids=tuple(
+                                str(param.get("param_id") or "")
+                                for param in candidate.params
+                                if isinstance(param, dict)
+                            ),
+                        ).items()
+                        if param_id not in finite_choice_param_ids
+                    },
+                )
+            )
+            target_finite_choice_values[target_id] = {
+                param_id: axis.choices
+                for param_id, axis in review_surface.finite_choice_params.items()
+            }
+            target_finite_choice_test_ids[target_id] = {
+                param_id: review_scope.finite_choice_param_test_ids(
+                    target_id,
+                    param_id,
+                )
+                for param_id in target_finite_choice_values[target_id]
+            }
+            target_finite_choice_normal_test_ids[target_id] = {
+                param_id: review_scope.finite_choice_param_normal_instance_test_ids(
+                    target_id,
+                    param_id,
+                )
+                for param_id in target_finite_choice_values[target_id]
+            }
+            target_row_predicate_values[target_id] = {
+                predicate_id: axis.allowed_values
+                for predicate_id, axis in review_surface.row_predicates.items()
+            }
+            target_row_predicate_test_ids[target_id] = {
+                predicate_id: review_scope.row_predicate_test_ids(
+                    target_id,
+                    predicate_id,
+                )
+                for predicate_id in target_row_predicate_values[target_id]
+            }
+            target_population_roles[target_id] = tuple(
+                {"role_id": role.role_id} for role in review_surface.population_roles
+            )
+            target_fulfillment_supports[target_id] = (
+                closed_key_bindings.model_visible_fulfillment_supports(
                     candidate,
-                    effective_param_ids=tuple(
-                        str(param.get("param_id") or "")
-                        for param in candidate.params
-                        if isinstance(param, dict)
+                    target=target,
+                    candidate_fulfillment_supports=candidate_fulfillment_supports.get(
+                        candidate.id,
+                        {},
                     ),
-                ).items()
-                if param_id not in finite_choice_param_ids
-            }
-            required_param_ids = source_candidate_required_param_decision_ids(candidate)
-            candidate_required_param_ids[candidate_id] = required_param_ids
-            candidate_finite_choice_values[candidate_id] = {
-                param_id: choices
-                for param_id, choices in choice_values_for_effective_params(
-                    candidate,
-                    effective_param_ids=tuple(finite_choice_param_ids),
-                ).items()
-            }
-            candidate_row_predicate_values[candidate_id] = _row_predicate_values(
-                candidate.payload
+                )
             )
-            candidate_membership_test_ids[candidate_id] = _membership_test_ids(
-                self.request,
-                requested_fact_id=requested_fact_id,
+            target_required_fulfillment_output_ids[target_id] = (
+                target.required_answer_output_ids
             )
-            normal_instance_test_ids = _normal_instance_membership_test_ids(
-                self.request,
-                requested_fact_id=requested_fact_id,
-            )
-            candidate_normal_instance_test_ids[candidate_id] = normal_instance_test_ids
-            candidate_population_roles[candidate_id] = _population_roles(
-                candidate.payload
+            target_population_binding_ids[target_id] = (
+                candidate_population_bindings.get(
+                    candidate.id,
+                    (),
+                )
             )
         return build_source_binding_schema(
             **source_binding_clarification_input_ids(self.request),
-            source_candidate_param_decision_ids_by_param=(
-                candidate_param_decision_ids_by_param
+            target_param_decision_ids_by_param=target_param_decision_ids_by_param,
+            target_finite_choice_values=target_finite_choice_values,
+            target_row_predicate_values=target_row_predicate_values,
+            target_finite_choice_test_ids=target_finite_choice_test_ids,
+            target_finite_choice_normal_instance_test_ids=(
+                target_finite_choice_normal_test_ids
             ),
-            source_candidate_required_param_ids=candidate_required_param_ids,
-            source_candidate_finite_choice_values=candidate_finite_choice_values,
-            source_candidate_row_predicate_values=candidate_row_predicate_values,
-            source_candidate_membership_test_ids=candidate_membership_test_ids,
-            source_candidate_normal_instance_test_ids=(
-                candidate_normal_instance_test_ids
-            ),
-            source_candidate_population_roles=candidate_population_roles,
+            target_row_predicate_test_ids=target_row_predicate_test_ids,
+            target_population_roles=target_population_roles,
+            target_requested_fact_ids=target_requested_fact_ids,
             metric_evidence_ids_by_requested_fact=(
                 source_binding_metric_evidence_ids_by_requested_fact(self.request)
             ),
-            source_candidate_requested_fact_ids=(
-                source_binding_prompt_candidate_requested_fact_ids(self.request)
+            target_fulfillment_support_set_ids_by_answer_output=target_fulfillment_supports,
+            target_required_fulfillment_answer_output_ids=(
+                target_required_fulfillment_output_ids
             ),
-            source_candidate_fulfillment_support_set_ids_by_answer_output=(
-                source_binding_prompt_candidate_fulfillment_support_set_ids_by_answer_output(
-                    self.request
-                )
-            ),
-            source_candidate_population_binding_ids=(
-                source_binding_prompt_candidate_population_binding_ids(self.request)
+            target_population_binding_ids=target_population_binding_ids,
+            source_invocations_max_items=_source_invocations_max_items(
+                target_index=target_index,
+                visible_targets=targets,
             ),
         )
 
+    def _closed_key_bindings(
+        self,
+        targets: tuple[SourceBindingTarget, ...],
+        *,
+        registry: SourceCandidateRegistry,
+    ) -> ClosedKeyParamBindingIndex:
+        return closed_key_param_binding_index(
+            self.request,
+            targets=targets,
+            candidates_by_id=registry.candidates_by_id,
+        )
 
-def _finite_choice_review_param_ids(candidate: Any) -> tuple[str, ...]:
-    return tuple(
-        param_id
-        for param in candidate.params
-        if isinstance(param, dict) and param_requires_finite_choice_review(param)
-        for param_id in (str(param.get("param_id") or ""),)
-        if param_id
+
+def _candidate_payload_with_selection_notes(
+    payload: dict[str, object],
+    request: SourceBindingRequest,
+) -> dict[str, object]:
+    notes = _selection_notes_by_fact_source(request)
+    if not notes:
+        return payload
+
+    def apply_note(
+        candidate: dict[str, Any],
+        context: CandidateTreeContext,
+    ) -> dict[str, Any]:
+        note = notes.get(
+            (
+                context.requested_fact_id,
+                str(candidate.get("source_candidate_id") or ""),
+            ),
+            "",
+        )
+        return {**candidate, "selection_note": note} if note else candidate
+
+    return map_source_candidate_tree(
+        payload,
+        apply_note,
+        top_level_keys=(),
     )
 
 
-def _row_predicate_values(payload: dict[str, Any] | None) -> dict[str, tuple[str, ...]]:
-    if not isinstance(payload, dict):
-        return {}
-    output: dict[str, tuple[str, ...]] = {}
-    for item in payload.get("row_predicates") or ():
-        if not isinstance(item, dict):
+def _selection_notes_by_fact_source(
+    request: SourceBindingRequest,
+) -> dict[tuple[str, str], str]:
+    grouped: dict[tuple[str, str], list[str]] = {}
+    for plan in request.plan_selection.plan_selections:
+        basis = plan.basis.strip()
+        if not basis:
             continue
-        predicate_id = str(item.get("predicate_id") or "")
-        values = tuple(
-            str(value) for value in item.get("allowed_values") or () if str(value)
-        )
-        if predicate_id and values:
-            output[predicate_id] = values
-    return output
+        for member in plan.source_members:
+            key = (plan.requested_fact_id, member.source_candidate_id)
+            notes = grouped.setdefault(key, [])
+            if basis not in notes:
+                notes.append(basis)
+    return {
+        key: " | ".join(notes)
+        for key, notes in grouped.items()
+        if notes
+    }
 
 
-def _membership_test_ids(
-    request: SourceBindingRequest,
+def _source_invocations_max_items(
     *,
-    requested_fact_id: str,
-) -> tuple[str, ...]:
-    fact = next(
-        (item for item in request.requested_facts if item.id == requested_fact_id),
-        None,
+    target_index: SourceBindingTargetIndex,
+    visible_targets: tuple[SourceBindingTarget, ...],
+) -> int:
+    visible_target_ids = {target.binding_target_id for target in visible_targets}
+    plan_target_ids = tuple(
+        target_ids
+        for target_ids in target_index.target_ids_by_plan().values()
+        if target_ids <= visible_target_ids
     )
-    if fact is None or fact.answer_population is None:
-        return ()
-    return tuple(
-        membership_test_key(test) for test in fact.answer_population.membership_tests
-    )
-
-
-def _normal_instance_membership_test_ids(
-    request: SourceBindingRequest,
-    *,
-    requested_fact_id: str,
-) -> tuple[str, ...]:
-    fact = next(
-        (item for item in request.requested_facts if item.id == requested_fact_id),
-        None,
-    )
-    if fact is None or fact.answer_population is None:
-        return ()
-    return tuple(
-        membership_test_key(test)
-        for test in fact.answer_population.membership_tests
-        if test.kind == AnswerPopulationMembershipTestKind.NORMAL_INSTANCE_GUARD
-    )
-
-
-def _population_roles(payload: dict[str, Any]) -> tuple[dict[str, object], ...]:
-    return tuple(
-        {
-            "role_id": role_id,
+    if not plan_target_ids:
+        return len(visible_targets)
+    target_requested_fact_ids = {
+        target.binding_target_id: target.requested_fact_id for target in visible_targets
+    }
+    max_items_by_fact: dict[str, int] = {}
+    for target_ids in plan_target_ids:
+        requested_fact_ids = {
+            target_requested_fact_ids[target_id] for target_id in target_ids
         }
-        for item in payload.get("population_roles") or ()
-        if isinstance(item, dict)
-        for role_id in (str(item.get("role_id") or ""),)
-        if role_id
-    )
+        if len(requested_fact_ids) != 1:
+            continue
+        requested_fact_id = next(iter(requested_fact_ids))
+        max_items_by_fact[requested_fact_id] = max(
+            max_items_by_fact.get(requested_fact_id, 0),
+            len(target_ids),
+        )
+    return sum(max_items_by_fact.values()) or len(visible_targets)

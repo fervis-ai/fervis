@@ -9,7 +9,7 @@ export interface ConversationSummary {
   readonly conversationId: string;
   readonly firstQuestion: string;
   readonly latestQuestionId: string;
-  readonly currentRunId: string;
+  readonly currentRunId: string | null;
   readonly status: RunStatus;
   readonly runCount: number;
   readonly updatedAt: string;
@@ -57,6 +57,7 @@ export interface ClarificationResponseRequest {
   readonly triggerKind: "clarification_response";
   readonly triggerRunId: string;
   readonly clarificationId: string;
+  readonly selectedOptionId?: string;
 }
 
 export interface RunPayload {
@@ -112,17 +113,41 @@ export interface ClarificationDetails {
 
 export interface ClarificationRequest {
   readonly id: string;
-  readonly basis: string;
+  readonly need: string;
+  readonly reason: string;
   readonly question: string;
-  readonly availableOptions: readonly ClarificationOption[];
-  readonly evidenceRefs: readonly string[];
-  readonly factResultId: string | null;
-  readonly stepId: string | null;
+  readonly requestedFactId: string;
+  readonly subjects: readonly ClarificationSubject[];
+  readonly evidence: readonly ClarificationEvidence[];
+}
+
+export interface ClarificationSubject {
+  readonly kind: string;
+  readonly id: string;
+  readonly label: string;
+  readonly sourceText: string;
+  readonly options: readonly ClarificationOption[];
 }
 
 export interface ClarificationOption {
   readonly id: string;
   readonly label: string;
+  readonly value: string | null;
+  readonly entityKind: string | null;
+  readonly matchedLabel: string | null;
+  readonly matchedField: string | null;
+  readonly matchedValue: string | null;
+  readonly resolverReadId: string | null;
+  readonly resolverLabel: string | null;
+}
+
+export interface ClarificationEvidence {
+  readonly kind: string;
+  readonly id: string;
+  readonly readId: string | null;
+  readonly endpointName: string | null;
+  readonly fieldId: string | null;
+  readonly identityField: string | null;
 }
 
 export interface ExplanationPayload {
@@ -220,6 +245,7 @@ export interface SemanticGroundingResult {
   readonly inputText: string;
   readonly resolverReadId: string;
   readonly resolverLabel: string;
+  readonly entityKind: string;
   readonly matchedField: string;
   readonly matchedValue: string;
   readonly matchedLabel: string;

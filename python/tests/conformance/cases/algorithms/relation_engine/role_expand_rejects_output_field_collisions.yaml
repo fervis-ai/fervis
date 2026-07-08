@@ -21,4 +21,5 @@ input:
           - {role: owner, source_field: owner_id, output_field: record_id}
         output_fields: [record_id, role]
 expect:
-  error_contains: field conflict
+  result_contains:
+    status: rejected

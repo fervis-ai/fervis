@@ -250,6 +250,7 @@ _CONFIG_SCALAR_PATHS = frozenset(
     {
         "host.organization_name",
         "host.about_api",
+        "host.timezone",
         "routes.prefix",
     }
 )

@@ -22,6 +22,10 @@ from .contracts import (
 )
 
 
+class GoldsetPreflightError(ValueError):
+    pass
+
+
 def run_goldset_suite(
     suite: GoldsetSuite,
     *,
@@ -41,6 +45,7 @@ def run_goldset_suite(
         case_ids=case_ids,
         limit=limit,
     )
+    _run_suite_preflight(suite)
     results = tuple(
         _run_case(
             case,
@@ -100,7 +105,7 @@ def _run_case(
     wait_seconds: float,
 ) -> GoldsetCaseResult:
     if suite.prepare_case is not None:
-        suite.prepare_case(case)
+        _run_case_setup(suite, case)
     admitted_model = model_policy.admit(
         requested_provider="",
         requested_model_key=model_key,
@@ -142,7 +147,20 @@ def _run_case(
         principal=principal,
         wait_seconds=wait_seconds,
     )
-    match = suite.match_answer(case, result)
+    try:
+        match = suite.match_answer(case, result)
+    except Exception as exc:
+        return GoldsetCaseResult(
+            case_id=case.case_id,
+            status="failed",
+            question=case.question,
+            conversation_id=result.conversation_id,
+            question_id=result.question_id,
+            run_id=result.run_id,
+            answer=result.answer,
+            message=f"goldset oracle failed: {exc}",
+            details={"failure_class": "goldset_oracle_failed"},
+        )
     return GoldsetCaseResult(
         case_id=case.case_id,
         status="passed" if match.passed else "failed",
@@ -154,6 +172,26 @@ def _run_case(
         message=match.message,
         details=dict(match.details),
     )
+
+
+def _run_suite_preflight(suite: GoldsetSuite) -> None:
+    if suite.preflight is None:
+        return
+    try:
+        suite.preflight()
+    except Exception as exc:
+        raise GoldsetPreflightError(f"goldset preflight failed: {exc}") from exc
+
+
+def _run_case_setup(suite: GoldsetSuite, case: GoldsetCase) -> None:
+    if suite.prepare_case is None:
+        return
+    try:
+        suite.prepare_case(case)
+    except Exception as exc:
+        raise GoldsetPreflightError(
+            f"goldset case setup failed for {case.case_id}: {exc}"
+        ) from exc
 
 
 def _ask_and_follow(

@@ -13,6 +13,7 @@ from fervis.lookup.plan_execution.relations import (
     RelationRows,
     RelationSetKind,
 )
+from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 from fervis.memory.answer_outputs import (
     prior_answer_request_artifacts,
     PriorAnswerKnownInput,
@@ -1035,13 +1036,11 @@ def _answer_request_known_input_slot_kinds(
 
 def _prior_request_slot(known: PriorAnswerKnownInput) -> dict[str, str] | None:
     slot_id = known.id
-    kind = known.kind
-    slot_kind = {
-        "named_reference_text": "entity_identity",
-        "time_text": "time_scope",
-        "number_text": "number",
-        "explicit_numeric_limit_text": "limit",
-    }.get(kind)
+    slot_kind = (
+        _literal_role_slot_kind(known.role)
+        if known.kind == KnownInputKind.LITERAL.value
+        else ""
+    )
     if not slot_id or not slot_kind:
         return None
     output = {
@@ -1055,6 +1054,14 @@ def _prior_request_slot(known: PriorAnswerKnownInput) -> dict[str, str] | None:
     if description:
         output["description"] = description
     return output
+
+
+def _literal_role_slot_kind(role: str) -> str:
+    return {
+        LiteralInputRole.REFERENCE_VALUE.value: "entity_identity",
+        LiteralInputRole.TIME_VALUE.value: "time_scope",
+        LiteralInputRole.RESULT_LIMIT.value: "limit",
+    }.get(role, "")
 
 
 def _prior_slot_bindings(
@@ -1265,6 +1272,13 @@ def _memory_card_pair(
         "artifact_id": artifact.artifact_id,
         "address": address.address,
     }
+    proof_refs = tuple(
+        str(item).strip()
+        for item in getattr(getattr(address, "evidence", None), "step_ids", ()) or ()
+        if str(item).strip()
+    )
+    if proof_refs:
+        private["proof_refs"] = proof_refs
     if details:
         private.update(details)
     card_kwargs: dict[str, Any] = {

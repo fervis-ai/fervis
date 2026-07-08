@@ -47,28 +47,6 @@ def active_memory_operation_values(
     )
 
 
-def active_memory_source_binding_values(
-    *,
-    memory: LookupMemory,
-    active_memory_ids: frozenset[str],
-) -> tuple[FactValue, ...]:
-    if not active_memory_ids:
-        return ()
-    return _dedupe_values(
-        (
-            *active_memory_reference_values(
-                memory=memory,
-                active_memory_ids=active_memory_ids,
-            ),
-            *_active_literal_values(
-                memory=memory,
-                active_memory_ids=active_memory_ids,
-                include_relation_literals=False,
-            ),
-        )
-    )
-
-
 def _active_identity_values(
     *,
     memory: LookupMemory,

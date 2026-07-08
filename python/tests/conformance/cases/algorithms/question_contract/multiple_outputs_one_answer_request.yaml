@@ -1,34 +1,69 @@
 id: multiple_outputs_one_answer_request
 description: Multiple requested outputs for one business request stay inside one answer request.
 migrates:
-  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_keeps_multiple_outputs_within_one_answer_request
+- api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_keeps_multiple_outputs_within_one_answer_request
 kind: algorithm
 algorithm: question_contract.parse
 input:
   question_context: List all salespeople who had sales at Westlands Beauty Hub on December 3, 2025, the products they sold, and total sales per person.
   answer_fact: salespeople who had sales at Westlands Beauty Hub on December 3, 2025
   answer_outputs:
-    - description: salespeople
-    - description: products they sold
-    - description: total sales per person
+  - description: salespeople
+  - description: products they sold
+  - description: total sales per person
   question_inputs:
-    - input_ref: store
-      source: question_context
-      kind: named_reference_text
-      reference_text: Westlands Beauty Hub
-      target_meaning: store location
-      lookup_text: Westlands Beauty Hub
-      inventory_check: {why_this_is_an_input: Westlands Beauty Hub is a named reference}
-    - input_ref: period
-      source: question_context
-      kind: time_text
-      reference_text: December 3, 2025
-      inventory_check: {why_this_is_an_input: "December 3, 2025 is a time scope"}
-  used_input_refs: [store, period]
+  - input_ref: store
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: Westlands Beauty Hub is a named reference
+    value_source_text: Westlands Beauty Hub
+    resolved_value_text: Westlands Beauty Hub
+    value_meaning_hint: store location
+    role: reference_value
+  - input_ref: period
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: December 3, 2025 is a time scope
+    value_source_text: December 3, 2025
+    resolved_value_text: December 3, 2025
+    role: time_value
+  used_input_refs:
+  - store
+  - period
 expect:
   result_contains:
     requested_facts:
-      - answer_outputs:
-          - description: salespeople
-          - description: products they sold
-          - description: total sales per person
+    - answer_outputs:
+      - description: salespeople
+      - description: products they sold
+      - description: total sales per person
+  result_exact_fields:
+    question_inputs:
+    - id: store
+      kind: literal_text
+      source: question_context
+      text: Westlands Beauty Hub
+      resolved_input_ref: ''
+      resolved_value_text: Westlands Beauty Hub
+      field_label_text: ''
+      value_meaning_hint: store location
+      role: reference_value
+    - id: period
+      kind: literal_text
+      source: question_context
+      text: December 3, 2025
+      resolved_input_ref: ''
+      resolved_value_text: December 3, 2025
+      field_label_text: ''
+      value_meaning_hint: ''
+      role: time_value
+    requested_fact_input_handoff:
+    - id: fact_1
+      input_refs:
+      - store
+      - period
+      known_input_refs:
+      - store
+      - period

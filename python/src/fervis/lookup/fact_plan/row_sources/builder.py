@@ -50,6 +50,8 @@ from .model import (
     RowSourceKind,
     RowSourceParam,
     RowSourceParamSemantics,
+    RowSourceValueType,
+    row_source_value_type,
 )
 
 if TYPE_CHECKING:
@@ -273,7 +275,7 @@ def _api_fields(
                 row_path=_field_row_path(field, row_paths=row_paths),
                 field_id=ids[field.ref],
             ),
-            type=field.type,
+            type=row_source_value_type(field.type),
             choices=field.choices,
             allowed_roles=_allowed_roles(field),
             identity=field.identity,
@@ -358,7 +360,7 @@ def _api_params(
             id=ids[param.ref],
             param_ref=param.ref,
             name=param.name,
-            type=param.type,
+            type=row_source_value_type(param.type),
             source=param.source,
             required=param.required,
             choices=param.choices,
@@ -538,7 +540,7 @@ def _memory_row_source(relation: "RelationRows") -> RowSource:
                 id=field_id,
                 field_ref=field_id,
                 label=field_id,
-                type="unknown",
+                type=RowSourceValueType.UNKNOWN,
                 allowed_roles=_memory_roles(field_id, relation=relation),
                 identity=None,
             )
@@ -559,7 +561,7 @@ def _generated_calendar_row_source() -> RowSource:
                 id=CALENDAR_DATE_FIELD_ID,
                 field_ref=CALENDAR_DATE_FIELD_ID,
                 label="runtime date",
-                type="date",
+                type=RowSourceValueType.DATE,
                 allowed_roles=(
                     FieldBindingRole.IDENTITY,
                     FieldBindingRole.OUTPUT,
@@ -573,7 +575,7 @@ def _generated_calendar_row_source() -> RowSource:
                 id=CALENDAR_START_PARAM_ID,
                 param_ref=CALENDAR_START_PARAM_REF,
                 name="interval start",
-                type="date",
+                type=RowSourceValueType.DATE,
                 source="generated",
                 required=True,
             ),
@@ -581,7 +583,7 @@ def _generated_calendar_row_source() -> RowSource:
                 id=CALENDAR_END_PARAM_ID,
                 param_ref=CALENDAR_END_PARAM_REF,
                 name="interval end",
-                type="date",
+                type=RowSourceValueType.DATE,
                 source="generated",
                 required=True,
             ),

@@ -51,6 +51,15 @@ describe("Ledger app rendering", () => {
     expect(screen.getByText("Fact used")).toBeInTheDocument();
     expect(screen.getByText("Read source data")).toBeInTheDocument();
     expect(screen.getByText(/GET \/api\/sales\/ returned 18 rows/)).toBeInTheDocument();
+    expect(screen.getByText("Inputs:")).toBeInTheDocument();
+    expect(
+      screen.getByText("\"this month\": 2026-06-01 to 2026-06-30")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "\"ABC Mall\": Location (location_id: 60606060-0000-0000-0001-000000000001 via List Location List)"
+      )
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("More"));
     expect(screen.getByText("Decision")).toBeInTheDocument();
@@ -78,8 +87,14 @@ describe("Ledger app rendering", () => {
     renderDemoApp();
 
     fireEvent.click(await screen.findByRole("button", { name: /run_clarify/ }));
-    expect(screen.getByText("Which store do you mean?")).toBeInTheDocument();
-    expect(screen.getByText("ABC Mall")).toBeInTheDocument();
+    expect(screen.getByText("Which matching store should I use?")).toBeInTheDocument();
+    expect(screen.getAllByText("Reference: ABC Mall")[0]).toBeInTheDocument();
+    expect(screen.getByText("Matched entity: Location")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "location_id: 60606060-0000-0000-0001-000000000001 (via List Location List)"
+      )
+    ).toBeInTheDocument();
 
     fireEvent.click(
       screen.getByRole("button", { name: /What were sales for BBS last month?/ })
@@ -98,7 +113,7 @@ describe("Ledger app rendering", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /run_clarify/ }));
 
-    expect(await screen.findByText("Which store do you mean?")).toBeInTheDocument();
+    expect(await screen.findByText("Which matching store should I use?")).toBeInTheDocument();
     expect(
       screen.queryByText("18 in-person sales happened this month.")
     ).not.toBeInTheDocument();
@@ -110,14 +125,14 @@ describe("Ledger app rendering", () => {
     fireEvent.click(
       await screen.findByText("Which store has the most inventory at risk today?")
     );
+    expect(await screen.findByText("conversation · conv_running")).toBeInTheDocument();
+    expect(await screen.findByText("Inputs:")).toBeInTheDocument();
     expect(
-      await screen.findByText(
-        "Interpreted input: this month: 2026-06-01 to 2026-06-30"
-      )
+      screen.getByText("\"this month\": 2026-06-01 to 2026-06-30")
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Matched entity: ABC Mall: List Location List matched location_id=60606060-0000-0000-0001-000000000001"
+        "\"ABC Mall\": Location (location_id: 60606060-0000-0000-0001-000000000001 via List Location List)"
       )
     ).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
@@ -162,7 +177,7 @@ describe("Ledger app rendering", () => {
 
     fireEvent.click(screen.getByLabelText("Open connection settings"));
     expect(screen.getByLabelText("Base API URL")).toHaveValue(
-      "http://127.0.0.1:8000/v1"
+      "http://127.0.0.1:8000/fervis"
     );
     fireEvent.change(screen.getByLabelText("Base API URL"), {
       target: { value: "http://127.0.0.1:9000/fervis" }

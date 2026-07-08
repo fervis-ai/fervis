@@ -453,4 +453,5 @@ def _clarification_response_start(
         run_id=trigger_run_id,
         clarification_id=clarification_id,
         response_text=request.question,
+        selected_option_id=request.trigger_clarification_selected_option_id or "",
     )

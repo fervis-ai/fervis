@@ -1,29 +1,77 @@
 id: interpreted_numeric_limit_value_with_source
-description: Numeric limit values may be interpreted when the source text is present in the reference.
+description: Numeric limit values use copied source text plus canonical digit text.
 migrates:
-  - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_accepts_model_interpreted_limit_value_with_source
+- api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_parser_accepts_model_interpreted_limit_value_with_source
 kind: algorithm
 algorithm: question_contract.parse
 input:
   question_context: Show top five stores
   answer_subject:
     subject_text: stores
-    instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
+    instance_interpretation:
+      kind: NORMAL_BUSINESS_INSTANCE
   answer_outputs:
-    - description: sales total
+  - description: sales total
   question_inputs:
-    - input_ref: limit
-      source: question_context
-      kind: explicit_numeric_limit_text
-      reference_text: top five
-      numeric_value: 5
-      value_source_text: five
-      inventory_check: {why_this_is_an_input: top five is a rank limit}
-  used_input_refs: [limit]
+  - input_ref: limit
+    source: question_context
+    kind: literal_text
+    inventory_check:
+      why_this_is_an_input: top five is a rank limit
+    value_source_text: top five
+    resolved_value_text: '5'
+    role: result_limit
+  used_input_refs:
+  - limit
 expect:
-  result_contains:
+  result_equals:
+    question_inputs:
+    - id: limit
+      kind: literal_text
+      source: question_context
+      text: top five
+      resolved_input_ref: ''
+      resolved_value_text: '5'
+      field_label_text: ''
+      value_meaning_hint: ''
+      role: result_limit
     requested_facts:
-      - known_inputs:
-          - kind: explicit_numeric_limit_text
-            text: top five
-            numeric_value: 5
+    - id: fact_1
+      description: sales at ABC Mall
+      answer_expression_family: scalar_aggregate
+      answer_subject_text: stores
+      input_refs: [limit]
+      known_inputs:
+      - id: limit
+        kind: literal_text
+        source: question_context
+        text: top five
+        resolved_input_ref: ''
+        resolved_value_text: '5'
+        field_label_text: ''
+        value_meaning_hint: ''
+        role: result_limit
+      answer_outputs:
+      - id: answer_1
+        description: sales total
+      answer_request:
+        answer_fact: sales at ABC Mall
+        answer_expression:
+          family: scalar_aggregate
+        answer_subject:
+          subject_text: stores
+          instance_interpretation:
+            kind: NORMAL_BUSINESS_INSTANCE
+            short_label: ordinary business meaning of stores
+            meaning: Answer over ordinary business instances of 'stores' as they are normally understood in business operations and reporting. Do not assume this includes every persisted representation the host API may expose for 'stores'. Explicit user wording may narrow or override this normal instance interpretation.
+        answer_population:
+          population_label: sales
+          counted_unit: sales
+          membership_tests:
+          - test_id: pop_test_1
+            kind: SUBJECT_IDENTITY
+            polarity: MUST_PASS
+            test_question: Does the row/value represent sales?
+            owned_question_input_refs: []
+        answer_outputs:
+        - description: sales total

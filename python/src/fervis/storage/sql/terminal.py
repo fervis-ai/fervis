@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from typing import Any
 
 import sqlalchemy as sa
@@ -49,6 +50,7 @@ def terminal_result_for_run(engine: Engine, run_id: str) -> TerminalResult | Non
     runtime_error = metadata.tables["fervis_runtime_error_detail"]
     answer = metadata.tables["fervis_answer"]
     presentation = metadata.tables["fervis_answer_presentation"]
+    clarification_request = metadata.tables["fervis_clarification_request"]
     with sql_connection(engine) as connection:
         result = connection.execute(
             sa.select(run_result).where(run_result.c.run_id == run_id)
@@ -72,13 +74,57 @@ def terminal_result_for_run(engine: Engine, run_id: str) -> TerminalResult | Non
             )
             .order_by(presentation.c.created_at)
         ).scalar()
+        result_data = _terminal_result_data(
+            connection,
+            clarification_request=clarification_request,
+            run_id=run_id,
+            run_result_id=str(result_values["run_result_id"]),
+        )
     error_values = row_mapping(error_row) if error_row is not None else {}
     return TerminalResult(
         status=_terminal_status(str(result_values["result_kind"])),
         answer=answer_text,
-        result_data={"run_result_id": result_values["run_result_id"]},
+        result_data=result_data,
         error=str(error_values["message"]) if error_values else None,
     )
+
+
+def _terminal_result_data(
+    connection,
+    *,
+    clarification_request,
+    run_id: str,
+    run_result_id: str,
+) -> dict[str, Any]:
+    clarification_rows = connection.execute(
+        sa.select(clarification_request.c.payload_json)
+        .where(
+            clarification_request.c.run_id == run_id,
+            clarification_request.c.payload_json.is_not(None),
+        )
+        .order_by(
+            clarification_request.c.created_at,
+            clarification_request.c.clarification_id,
+        )
+    ).scalars()
+    clarifications = [
+        payload for row in clarification_rows for payload in (_dict(row),) if payload
+    ]
+    if clarifications:
+        return {
+            "kind": "needs_clarification",
+            "details": {"clarifications": clarifications},
+        }
+    return {"run_result_id": run_result_id}
+
+
+def _dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        raw = json.loads(value)
+        return raw if isinstance(raw, dict) else {}
+    return {}
 
 
 def record_runtime_error_result(

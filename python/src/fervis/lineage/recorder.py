@@ -13,7 +13,6 @@ from fervis.lineage.enums import (
     ARTIFACT_KINDS_REQUIRING_MODEL_CALL,
     AnswerValueKind,
     ArtifactKind,
-    ClarificationBasis,
     ConversationOriginKind,
     FactResultKind,
     MemoryArtifactSourceKind,
@@ -30,6 +29,7 @@ from fervis.lineage.enums import (
     RuntimeErrorKind,
     SourceReadStatus,
 )
+from fervis.lookup.clarification import ClarificationNeed, ClarificationReason
 
 
 JsonObject = dict[str, Any]
@@ -476,14 +476,25 @@ class MemoryArtifactWrite:
 class ClarificationRequestWrite:
     clarification_id: str
     run_id: str
-    basis: ClarificationBasis
-    question_text: str
+    payload_json: JsonObject
     fact_result_id: str | None = None
     step_id: str | None = None
-    options_json: list[JsonObject] = field(default_factory=list)
-    evidence_refs_json: list[str] = field(default_factory=list)
+    need: ClarificationNeed = field(init=False)
+    reason: ClarificationReason = field(init=False)
 
     def __post_init__(self) -> None:
+        if not self.payload_json:
+            raise ValueError("clarification request requires payload")
+        object.__setattr__(
+            self,
+            "need",
+            ClarificationNeed(_required_payload_text(self.payload_json, "need")),
+        )
+        object.__setattr__(
+            self,
+            "reason",
+            ClarificationReason(_required_payload_text(self.payload_json, "reason")),
+        )
         _canonicalize_optional_str(self, "fact_result_id")
         _canonicalize_optional_str(self, "step_id")
         if (self.fact_result_id is None) == (self.step_id is None):
@@ -615,6 +626,13 @@ def _require_absent(value: str | None, field_name: str) -> None:
 def _canonicalize_optional_str(instance: object, field_name: str) -> None:
     if getattr(instance, field_name) == "":
         object.__setattr__(instance, field_name, None)
+
+
+def _required_payload_text(payload: JsonObject, key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"clarification payload requires {key}")
+    return value
 
 
 def _require_same_run_id(run_id: str, writes: tuple[object, ...]) -> None:

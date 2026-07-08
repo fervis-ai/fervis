@@ -101,10 +101,12 @@ from fervis.lookup.fact_plan.values import LiteralType
 from fervis.lookup.question_contract import (
     KnownInputKind,
     KnownInputSource,
+    LiteralInputRole,
     QuestionContract,
     RequestedFact,
     RequestedFactAnswerOutput,
     RequestedFactKnownInput,
+    RequestedFactLiteralInput,
 )
 from fervis.lookup.fact_plan.render_spec import (
     RenderRelationOutput,
@@ -143,6 +145,44 @@ def _question_contract(
                 known_inputs=known_inputs,
             ),
         )
+    )
+
+
+def _known_reference(
+    input_id: str,
+    text: str,
+    *,
+    value_meaning_hint: str = "",
+) -> RequestedFactKnownInput:
+    return RequestedFactLiteralInput(
+        id=input_id,
+        source=KnownInputSource.QUESTION_CONTEXT,
+        text=text,
+        resolved_value_text=text,
+        value_meaning_hint=value_meaning_hint,
+        role=LiteralInputRole.REFERENCE_VALUE,
+    )
+
+
+def _known_time(input_id: str, text: str) -> RequestedFactKnownInput:
+    return RequestedFactLiteralInput(
+        id=input_id,
+        source=KnownInputSource.QUESTION_CONTEXT,
+        text=text,
+        resolved_value_text=text,
+        role=LiteralInputRole.TIME_VALUE,
+    )
+
+
+def _known_result_limit(
+    input_id: str, text: str, value: int
+) -> RequestedFactKnownInput:
+    return RequestedFactLiteralInput(
+        id=input_id,
+        source=KnownInputSource.QUESTION_CONTEXT,
+        text=text,
+        resolved_value_text=str(value),
+        role=LiteralInputRole.RESULT_LIMIT,
     )
 
 
@@ -212,27 +252,17 @@ def _available_values_for_contract(
             for known in fact.known_inputs
         )
     for known in known_inputs:
-        if known.kind == KnownInputKind.LIMIT:
+        if known.is_result_limit:
             values.append(
                 FactValue.literal(
                     id=known.id,
                     literal_type=LiteralType.NUMBER,
-                    value=str(known.numeric_value),
+                    value=known.resolved_value_text,
                     proof_refs=(f"known_input:{known.id}",),
                 )
             )
             continue
-        if known.kind == KnownInputKind.NUMBER:
-            values.append(
-                FactValue.literal(
-                    id=known.id,
-                    literal_type=LiteralType.NUMBER,
-                    value=str(known.numeric_value),
-                    proof_refs=(f"known_input:{known.id}",),
-                )
-            )
-            continue
-        if known.kind == KnownInputKind.TIME:
+        if known.is_time_value:
             values.append(
                 FactValue.time(
                     id=known.id,
@@ -629,27 +659,13 @@ def test_value_use_can_reference_known_question_input():
     verify_fact_plan(
         plan,
         question_contract=_question_contract(
-            known_inputs=(
-                RequestedFactKnownInput(
-                    id="person_name",
-                    kind=KnownInputKind.REFERENCE,
-                    source=KnownInputSource.QUESTION_CONTEXT,
-                    text="Alice",
-                    lookup_text="Alice",
-                ),
-            )
+            known_inputs=(_known_reference("person_name", "Alice"),)
         ),
     )
 
 
 def test_known_inputs_are_inventory_not_automatic_obligations():
-    prior_context = RequestedFactKnownInput(
-        id="prior_sales_context",
-        kind=KnownInputKind.REFERENCE,
-        source=KnownInputSource.QUESTION_CONTEXT,
-        text="KES 80k yesterday",
-        lookup_text="KES 80k yesterday",
-    )
+    prior_context = _known_reference("prior_sales_context", "KES 80k yesterday")
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(_rows_relation(),),
@@ -766,12 +782,7 @@ def test_plan_authored_literal_cannot_supply_endpoint_param_value():
 
 
 def test_unused_known_time_input_does_not_require_runtime_anchors():
-    prior_context = RequestedFactKnownInput(
-        id="prior_day_context",
-        kind=KnownInputKind.TIME,
-        source=KnownInputSource.QUESTION_CONTEXT,
-        text="yesterday",
-    )
+    prior_context = _known_time("prior_day_context", "yesterday")
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(_rows_relation(),),
@@ -1128,13 +1139,7 @@ def test_duplicate_value_use_ids_are_rejected():
 
 
 def test_fact_local_known_inputs_are_canonicalized_to_shared_question_inputs():
-    person = RequestedFactKnownInput(
-        id="person_name",
-        kind=KnownInputKind.REFERENCE,
-        source=KnownInputSource.QUESTION_CONTEXT,
-        text="Alice",
-        lookup_text="Alice",
-    )
+    person = _known_reference("person_name", "Alice")
     question_contract = QuestionContract(
         requested_facts=(
             RequestedFact(
@@ -1160,12 +1165,7 @@ def test_fact_local_known_inputs_are_canonicalized_to_shared_question_inputs():
 
 
 def test_shared_question_input_refs_are_valid_across_answer_requests():
-    period = RequestedFactKnownInput(
-        id="period",
-        kind=KnownInputKind.TIME,
-        source=KnownInputSource.QUESTION_CONTEXT,
-        text="yesterday",
-    )
+    period = _known_time("period", "yesterday")
     question_contract = QuestionContract(
         question_inputs=(period,),
         requested_facts=(
@@ -1265,16 +1265,7 @@ def test_known_limit_input_must_match_rank_limit():
     verify_fact_plan(
         plan,
         question_contract=_question_contract(
-            known_inputs=(
-                RequestedFactKnownInput(
-                    id="result_limit",
-                    kind=KnownInputKind.LIMIT,
-                    source=KnownInputSource.QUESTION_CONTEXT,
-                    text="top 5",
-                    numeric_value=5,
-                    value_source_text="5",
-                ),
-            )
+            known_inputs=(_known_result_limit("result_limit", "top 5", 5),)
         ),
     )
 
@@ -1314,14 +1305,54 @@ def test_rank_limit_allows_literal_limit_without_bound_known_input():
 
 
 def test_known_limit_input_requires_positive_integer_value():
-    for value in (0, -1, 5.5):
-        with pytest.raises(ValueError, match="positive integer"):
-            RequestedFactKnownInput(
-                id="result_limit",
-                kind=KnownInputKind.LIMIT,
-                source=KnownInputSource.QUESTION_CONTEXT,
-                text="top 5",
-                numeric_value=value,
+    for value in ("0", "-1", "5.5"):
+        with pytest.raises(VerificationError, match="rank limit does not match value"):
+            plan = FactPlan(
+                outcome=_answer_plan(
+                    value_uses=(
+                        ValueUse(
+                            id="use_result_limit",
+                            value_id="result_limit",
+                            target=RankLimitUse(operation_id="top_rows"),
+                        ),
+                    ),
+                    relations=(_rows_relation(),),
+                    operations=(
+                        Operation(
+                            id="top_rows",
+                            spec=RankSpec(
+                                input_relation="rows",
+                                order_by=(
+                                    SortKey(
+                                        field="name",
+                                        direction=SortDirection.DESC,
+                                    ),
+                                ),
+                                tie_policy=TiePolicy.FIELD,
+                                tie_breakers=(
+                                    SortKey(
+                                        field="name",
+                                        direction=SortDirection.ASC,
+                                    ),
+                                ),
+                                limit=5,
+                            ),
+                            output_relation="result",
+                        ),
+                    ),
+                    render_spec=RenderSpec(relation_outputs=()),
+                )
+            )
+            verify_fact_plan(
+                plan,
+                available_values=(
+                    FactValue.literal(
+                        id="result_limit",
+                        literal_type=LiteralType.NUMBER,
+                        value=value,
+                        proof_refs=("known_input:result_limit",),
+                    ),
+                ),
             )
 
 
@@ -1367,15 +1398,7 @@ def test_rank_limit_rejects_number_value_that_does_not_match_plan_limit():
         verify_fact_plan(
             plan,
             question_contract=_question_contract(
-                known_inputs=(
-                    RequestedFactKnownInput(
-                        id="result_limit",
-                        kind=KnownInputKind.NUMBER,
-                        source=KnownInputSource.QUESTION_CONTEXT,
-                        text="4",
-                        numeric_value=4,
-                    ),
-                )
+                known_inputs=(_known_result_limit("result_limit", "top 4", 4),)
             ),
         )
 
@@ -1422,16 +1445,7 @@ def test_known_limit_input_rejects_rank_limit_mismatch():
         verify_fact_plan(
             plan,
             question_contract=_question_contract(
-                known_inputs=(
-                    RequestedFactKnownInput(
-                        id="result_limit",
-                        kind=KnownInputKind.LIMIT,
-                        source=KnownInputSource.QUESTION_CONTEXT,
-                        text="top 5",
-                        numeric_value=5,
-                        value_source_text="5",
-                    ),
-                )
+                known_inputs=(_known_result_limit("result_limit", "top 5", 5),)
             ),
         )
 
@@ -1629,23 +1643,12 @@ def test_proof_backed_scalar_output_can_satisfy_requested_derived_fact():
         proof_refs=("question.target",),
     )
 
-    question_contract = _question_contract(
-        "remaining",
-        known_inputs=(
-            RequestedFactKnownInput(
-                id="target_value",
-                kind=KnownInputKind.NUMBER,
-                source=KnownInputSource.QUESTION_CONTEXT,
-                text="100",
-                numeric_value=100,
-            ),
-        ),
-    )
+    question_contract = _question_contract("remaining")
     assert (
         verify_fact_plan(
             plan,
             question_contract=question_contract,
-            available_values=(current_sales,),
+            available_values=(current_sales, target_value),
             catalog=_catalog(),
         )
         is plan
@@ -1741,23 +1744,18 @@ def test_chained_compute_scalar_output_preserves_evidence_proof():
         value="35",
         proof_refs=("prior.sales_total",),
     )
+    target_value = FactValue.literal(
+        id="target_value",
+        literal_type=LiteralType.NUMBER,
+        value="100",
+        proof_refs=("question.target",),
+    )
 
     assert (
         verify_fact_plan(
             plan,
-            question_contract=_question_contract(
-                "remaining",
-                known_inputs=(
-                    RequestedFactKnownInput(
-                        id="target_value",
-                        kind=KnownInputKind.NUMBER,
-                        source=KnownInputSource.QUESTION_CONTEXT,
-                        text="100",
-                        numeric_value=100,
-                    ),
-                ),
-            ),
-            available_values=(current_sales,),
+            question_contract=_question_contract("remaining"),
+            available_values=(current_sales, target_value),
             catalog=_catalog(),
         )
         is plan
@@ -2194,9 +2192,15 @@ def test_api_execution_records_source_read_lineage():
     assert source_read.run_id == "run_1"
     assert source_read.step_id == "step_execute"
     UUID(source_read.catalog_endpoint_id)
-    assert source_read.catalog_endpoint_id == recorder.catalog_endpoints[0].catalog_endpoint_id
+    assert (
+        source_read.catalog_endpoint_id
+        == recorder.catalog_endpoints[0].catalog_endpoint_id
+    )
     assert recorder.catalog_endpoints[0].endpoint_name == "list_records"
-    assert recorder.catalog_endpoints[0].catalog_endpoint_key == "django_tests_list_records:test"
+    assert (
+        recorder.catalog_endpoints[0].catalog_endpoint_key
+        == "django_tests_list_records:test"
+    )
     assert source_read.args_json == {}
     assert source_read.row_count == 1
     assert source_read.completeness_json == {
@@ -2370,7 +2374,10 @@ def test_api_execution_records_failed_source_read_when_response_shape_is_invalid
     assert len(recorder.source_reads) == 1
     source_read = recorder.source_reads[0]
     UUID(source_read.catalog_endpoint_id)
-    assert source_read.catalog_endpoint_id == recorder.catalog_endpoints[0].catalog_endpoint_id
+    assert (
+        source_read.catalog_endpoint_id
+        == recorder.catalog_endpoints[0].catalog_endpoint_id
+    )
     assert recorder.catalog_endpoints[0].endpoint_name == "list_records"
     assert source_read.status == SourceReadStatus.SUCCEEDED
     assert source_read.error_json == {}
@@ -2842,15 +2849,7 @@ def test_value_use_targets_are_verified_against_catalog_and_relations():
             plan,
             catalog=_catalog(),
             question_contract=_question_contract(
-                known_inputs=(
-                    RequestedFactKnownInput(
-                        id="known",
-                        kind=KnownInputKind.REFERENCE,
-                        source=KnownInputSource.QUESTION_CONTEXT,
-                        text="Known",
-                        lookup_text="Known",
-                    ),
-                )
+                known_inputs=(_known_reference("known", "Known"),)
             ),
         )
 
@@ -2927,15 +2926,7 @@ def test_fulfillment_rejects_known_input_proof_from_unrelated_join_branch():
                         id="rf_answer",
                         description="records in area",
                         input_refs=("input_1",),
-                        known_inputs=(
-                            RequestedFactKnownInput(
-                                id="input_1",
-                                kind=KnownInputKind.REFERENCE,
-                                source=KnownInputSource.QUESTION_CONTEXT,
-                                text="London",
-                                lookup_text="London",
-                            ),
-                        ),
+                        known_inputs=(_known_reference("input_1", "London"),),
                         answer_outputs=(RequestedFactAnswerOutput(id="answer"),),
                     ),
                 )
@@ -3029,15 +3020,7 @@ def test_count_fulfillment_does_not_inherit_unrelated_field_proof():
                         id="rf_answer",
                         description="count rows for named input",
                         input_refs=("input_1",),
-                        known_inputs=(
-                            RequestedFactKnownInput(
-                                id="input_1",
-                                kind=KnownInputKind.REFERENCE,
-                                source=KnownInputSource.QUESTION_CONTEXT,
-                                text="Name",
-                                lookup_text="Name",
-                            ),
-                        ),
+                        known_inputs=(_known_reference("input_1", "Name"),),
                         answer_outputs=(RequestedFactAnswerOutput(id="answer"),),
                     ),
                 )
@@ -3631,16 +3614,13 @@ def test_scalar_input_targets_existing_scalar_input():
         verify_fact_plan(
             plan,
             catalog=_catalog(),
-            question_contract=_question_contract(
-                known_inputs=(
-                    RequestedFactKnownInput(
-                        id="number",
-                        kind=KnownInputKind.NUMBER,
-                        source=KnownInputSource.QUESTION_CONTEXT,
-                        text="5",
-                        numeric_value=5,
-                    ),
-                )
+            available_values=(
+                FactValue.literal(
+                    id="number",
+                    literal_type=LiteralType.NUMBER,
+                    value="5",
+                    proof_refs=("known_input:number",),
+                ),
             ),
         )
 
@@ -3727,14 +3707,13 @@ def test_predicate_scalar_rhs_requires_bound_value_use():
         bound,
         question_contract=_question_contract(
             binding_target_ids=("name",),
-            known_inputs=(
-                RequestedFactKnownInput(
-                    id="max_amount",
-                    kind=KnownInputKind.NUMBER,
-                    source=KnownInputSource.QUESTION_CONTEXT,
-                    text="5",
-                    numeric_value=5,
-                ),
+        ),
+        available_values=(
+            FactValue.literal(
+                id="max_amount",
+                literal_type=LiteralType.NUMBER,
+                value="5",
+                proof_refs=("known_input:max_amount",),
             ),
         ),
     )
@@ -3908,16 +3887,7 @@ def test_operation_field_references_must_exist_on_input_relation_contracts():
         )
         question_contract = (
             _question_contract(
-                known_inputs=(
-                    RequestedFactKnownInput(
-                        id="result_limit",
-                        kind=KnownInputKind.LIMIT,
-                        source=KnownInputSource.QUESTION_CONTEXT,
-                        text="top 5",
-                        numeric_value=5,
-                        value_source_text="5",
-                    ),
-                )
+                known_inputs=(_known_result_limit("result_limit", "top 5", 5),)
             )
             if operation.id == "rank"
             else _question_contract()

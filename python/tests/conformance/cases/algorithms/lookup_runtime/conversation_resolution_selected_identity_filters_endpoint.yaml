@@ -1,110 +1,136 @@
 id: conversation_resolution_selected_identity_filters_endpoint
 description: A resolved pronoun activates only the selected prior entity identity and uses it as the endpoint filter.
 migrates:
-  - api/tests/fervis/lookup/test_conversation_resolution_pipeline.py::test_clause_resolution_integrates_and_activates_selected_identity_only
+- api/tests/fervis/lookup/test_conversation_resolution_pipeline.py::test_clause_resolution_integrates_and_activates_selected_identity_only
 kind: algorithm
 algorithm: lookup.orchestration
 input:
   scenario: scripted_pattern
   question: How much did she sell yesterday?
   runtime_values:
-    runtime_date: "2026-05-09"
+    runtime_date: '2026-05-09'
     timezone: Africa/London
   memory_artifacts:
-    - artifact_id: turn_alice
-      outcome: answered
-      source_question: Who is Alice Smith?
-      addresses:
-        - address: entity.staff.alice
-          kind: entity
-          resource: staff
-          referenceText: Alice Smith
-          identity: {staff_id: staff_alice}
-    - artifact_id: turn_jane
-      outcome: answered
-      source_question: Who is Jane Doe?
-      addresses:
-        - address: entity.staff.jane
-          kind: entity
-          resource: staff
-          referenceText: Jane Doe
-          identity: {staff_id: staff_jane}
+  - artifact_id: turn_alice
+    outcome: answered
+    source_question: Who is Alice Smith?
+    addresses:
+    - address: entity.staff.alice
+      kind: entity
+      resource: staff
+      referenceText: Alice Smith
+      identity:
+        staff_id: staff_alice
+      evidence:
+        stepIds: [prior_source_read:staff:list:row_1]
+  - artifact_id: turn_jane
+    outcome: answered
+    source_question: Who is Jane Doe?
+    addresses:
+    - address: entity.staff.jane
+      kind: entity
+      resource: staff
+      referenceText: Jane Doe
+      identity:
+        staff_id: staff_jane
+      evidence:
+        stepIds: [prior_source_read:staff:list:row_2]
   conversation_resolution:
     mode: select_visible_memory
     memory_id: turn_alice.entity.staff.alice
+    anchor_text: she
     resolved_text: Alice Smith
     integrated_question: How much did Alice Smith sell yesterday?
   question_contract:
     fact_description: staff sales yesterday
     subject_text: she
     answer_expression_family: scalar_aggregate
-    answer_outputs: [sales_amount]
-    resource_terms: [staff sales]
+    answer_outputs:
+    - sales_amount
+    resource_terms:
+    - staff sales
     support_role: ROW_POPULATION
     entity_target_catalog_search_terms:
-      - target_id: input_1
-        catalog_search_terms:
-          - basis: staff can identify Alice Smith because target_meaning is staff member.
-            term: staff
+    - target_id: input_1
+      catalog_search_terms:
+      - basis: staff can identify Alice Smith because value_meaning_hint is staff member.
+        term: staff
     known_inputs:
-      - kind: named_reference_text
-        text: she
-        target_meaning: staff member
-        lookup_text: Alice Smith
-      - kind: time_text
-        text: yesterday
+    - kind: literal_text
+      text: she
+      source: conversation_resolution
+      resolved_input_ref: cr_input_1
+      resolved_value_text: Alice Smith
+      value_meaning_hint: staff identity
+      role: reference_value
+    - kind: literal_text
+      text: yesterday
+      resolved_value_text: yesterday
+      role: time_value
   catalog:
     reads:
-      - id: staff_sales_read
-        endpoint_name: staff_sales_read
-        resource_names: [staff, staff sales]
-        params:
-          - ref: staff_sales_read.query.staff_id
-            name: staff_id
-            source: query
-            type: string
-            identity: {entity_ref: staff, identity_field: staff_id, primary_key: true}
-          - ref: staff_sales_read.query.business_date
-            name: business_date
-            source: query
-            type: date
-        row_paths:
-          - id: data
-            path: data
-            cardinality: many
-        fields:
-          - ref: field.staff_id
-            path: data.staff_id
-            row_path_id: data
-            type: string
-            identity: {entity_ref: staff, identity_field: staff_id, primary_key: true}
-          - ref: field.amount
-            path: data.amount
-            row_path_id: data
-            type: number
+    - id: staff_sales_read
+      endpoint_name: staff_sales_read
+      resource_names:
+      - staff
+      - staff sales
+      params:
+      - ref: staff_sales_read.query.staff_id
+        name: staff_id
+        source: query
+        type: string
+        identity:
+          entity_ref: staff
+          identity_field: staff_id
+          primary_key: true
+      - ref: staff_sales_read.query.business_date
+        name: business_date
+        source: query
+        type: date
+      row_paths:
+      - id: data
+        path: data
+        cardinality: many
+      fields:
+      - ref: field.staff_id
+        path: data.staff_id
+        row_path_id: data
+        type: string
+        identity:
+          entity_ref: staff
+          identity_field: staff_id
+          primary_key: true
+      - ref: field.amount
+        path: data.amount
+        row_path_id: data
+        type: number
   fact_plan:
     outcome:
       kind: fact_plan
       answers:
-        - requested_fact_id: fact_1
-          answer_output_ids: [answer_1]
-          pattern: aggregate_scalar
-          source: {kind: read, read_id: staff_sales_read}
-          metric:
-            kind: aggregate_field
-            function: sum
-            field_id: amount
-            label: sales_amount
+      - requested_fact_id: fact_1
+        answer_output_ids:
+        - answer_1
+        pattern: aggregate_scalar
+        source:
+          kind: read
+          read_id: staff_sales_read
+        metric:
+          kind: aggregate_field
+          function: sum
+          field_id: amount
+          label: sales_amount
   responses:
     staff_sales_read:
       data:
-        - {staff_id: staff_alice, amount: "12.00"}
+      - staff_id: staff_alice
+        amount: '12.00'
 expect:
   result_contains:
     status: COMPLETED
     endpoint_args:
       staff_sales_read:
         staff_sales_read.query.staff_id: staff_alice
-        staff_sales_read.query.business_date: "2026-05-08"
+        staff_sales_read.query.business_date: '2026-05-08'
     rendered_rows:
-      - amount: "12.00"
+    - amount: '12.00'

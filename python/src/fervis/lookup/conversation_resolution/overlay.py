@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Literal, NotRequired, TypeAlias, TypedDict
 
 from fervis.memory.conversation_context import ConversationMemoryCardProjection
 from fervis.lookup.conversation_resolution.model import (
@@ -12,31 +12,249 @@ from fervis.lookup.conversation_resolution.model import (
     ContextFrameChoiceKind,
     DependencyKind,
 )
+from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
+
+
+class ResolvedCanonicalIdentityPayload(TypedDict):
+    kind: Literal["identity"]
+    identity_type: str
+    identity_field: str
+    value: str
+    authority_refs: list[str]
+    lineage_refs: list[str]
+
+
+class LiteralQuestionInputPromptPayload(TypedDict):
+    kind: Literal["literal_text"]
+    occurrence: int
+    source_text: str
+    resolved_input_ref: str
+    resolved_value_text: str
+    role: str
+    value_meaning_hint: NotRequired[str]
+    field_label_text: NotRequired[str]
+
+
+class LiteralQuestionInputBackendPayload(LiteralQuestionInputPromptPayload):
+    evidence_refs: NotRequired[list[str]]
+    resolved_canonical_identity: NotRequired[ResolvedCanonicalIdentityPayload]
+
+
+class RowSetQuestionInputPromptPayload(TypedDict):
+    kind: Literal["row_set_reference"]
+    reference_text: str
+    occurrence: int
+    resolved_input_ref: str
+
+
+class RowSetQuestionInputBackendPayload(RowSetQuestionInputPromptPayload):
+    memory_ids: NotRequired[list[str]]
+
+
+ResolvedQuestionInputPromptPayload: TypeAlias = (
+    LiteralQuestionInputPromptPayload | RowSetQuestionInputPromptPayload
+)
+ResolvedQuestionInputBackendPayload: TypeAlias = (
+    LiteralQuestionInputBackendPayload | RowSetQuestionInputBackendPayload
+)
+
+
+class ConversationValueFramePayload(TypedDict):
+    current_clause_text: str
+    current_value_text: str
+    current_value_kind: str
+    resolved_frame_text: str
+    must_preserve_terms: list[str]
+    used_context_frame_ids: list[str]
+    annotation_id: NotRequired[str]
+
+
+class ConversationDependencyPayload(TypedDict):
+    current_clause_text: str
+    anchor_text: str
+    occurrence: int
+    resolved_text: str
+    must_preserve_terms: list[str]
+    source_ids: list[str]
+    memory_ids: list[str]
+
+
+class ConversationResolutionPromptPayload(TypedDict):
+    current_question: str
+    value_frames: list[ConversationValueFramePayload]
+    references: list[ConversationDependencyPayload]
+    scopes: list[ConversationDependencyPayload]
+    activated_memory_ids: list[str]
+    used_source_card_ids: list[str]
+    resolved_question_inputs: NotRequired[list[ResolvedQuestionInputPromptPayload]]
+
+
+class ConversationResolutionBackendPayload(ConversationResolutionPromptPayload):
+    resolved_question_inputs: NotRequired[list[ResolvedQuestionInputBackendPayload]]
+
+
+class ValueFramePromptPayload(TypedDict):
+    current_question: str
+    value_frames: list[ConversationValueFramePayload]
 
 
 @dataclass(frozen=True)
-class ResolvedQuestionInputOverlay:
-    kind: str
+class ResolvedCanonicalIdentityOverlay:
+    identity_type: str
+    identity_field: str
+    value: str
+    authority_refs: tuple[str, ...]
+    lineage_refs: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.identity_type.strip():
+            raise ValueError("resolved canonical identity requires identity type")
+        if not self.identity_field.strip():
+            raise ValueError("resolved canonical identity requires identity field")
+        if not self.value.strip():
+            raise ValueError("resolved canonical identity requires value")
+        if not self.authority_refs:
+            raise ValueError("resolved canonical identity requires authority refs")
+        if not all(_is_identity_authority_ref(ref) for ref in self.authority_refs):
+            raise ValueError("resolved canonical identity authority refs are invalid")
+        if not self.lineage_refs:
+            raise ValueError("resolved canonical identity requires lineage refs")
+
+    def to_payload(self) -> ResolvedCanonicalIdentityPayload:
+        return {
+            "kind": "identity",
+            "identity_type": self.identity_type,
+            "identity_field": self.identity_field,
+            "value": self.value,
+            "authority_refs": list(self.authority_refs),
+            "lineage_refs": list(self.lineage_refs),
+        }
+
+
+@dataclass(frozen=True)
+class LiteralQuestionInputOverlay:
+    source_text: str
+    resolved_input_ref: str
+    resolved_value_text: str
+    role: LiteralInputRole
+    occurrence: int = 1
+    value_meaning_hint: str = ""
+    field_label_text: str = ""
+    evidence_refs: tuple[str, ...] = ()
+    resolved_canonical_identity: ResolvedCanonicalIdentityOverlay | None = None
+
+    @property
+    def kind(self) -> KnownInputKind:
+        return KnownInputKind.LITERAL
+
+    def __post_init__(self) -> None:
+        if self.occurrence < 1:
+            raise ValueError("resolved question input occurrence must be positive")
+        if not self.source_text.strip():
+            raise ValueError("literal resolved question input requires source text")
+        if not self.resolved_input_ref.strip():
+            raise ValueError("literal resolved question input requires resolved ref")
+        if not self.resolved_value_text.strip():
+            raise ValueError("literal resolved question input requires resolved value")
+
+    def to_prompt_payload(self) -> LiteralQuestionInputPromptPayload:
+        payload: LiteralQuestionInputPromptPayload = {
+            "kind": self.kind.value,
+            "occurrence": self.occurrence,
+            "source_text": self.source_text,
+            "resolved_input_ref": self.resolved_input_ref,
+            "resolved_value_text": self.resolved_value_text,
+            "role": self.role.value,
+        }
+        if self.value_meaning_hint:
+            payload["value_meaning_hint"] = self.value_meaning_hint
+        if self.field_label_text:
+            payload["field_label_text"] = self.field_label_text
+        return payload
+
+    def to_backend_payload(self) -> LiteralQuestionInputBackendPayload:
+        payload: LiteralQuestionInputBackendPayload = {**self.to_prompt_payload()}
+        if self.evidence_refs:
+            payload["evidence_refs"] = list(self.evidence_refs)
+        if self.resolved_canonical_identity:
+            payload["resolved_canonical_identity"] = (
+                self.resolved_canonical_identity.to_payload()
+            )
+        return payload
+
+
+@dataclass(frozen=True)
+class RowSetQuestionInputOverlay:
     reference_text: str
-    occurrence: int
-    target_meaning: str = ""
-    lookup_text: str = ""
-    resolved_input_ref: str = ""
+    resolved_input_ref: str
+    occurrence: int = 1
     memory_ids: tuple[str, ...] = ()
 
-    def to_prompt_payload(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "kind": self.kind,
+    @property
+    def kind(self) -> KnownInputKind:
+        return KnownInputKind.ROW_SET_REFERENCE
+
+    def __post_init__(self) -> None:
+        if self.occurrence < 1:
+            raise ValueError("resolved question input occurrence must be positive")
+        if not self.reference_text.strip():
+            raise ValueError("row-set resolved question input requires reference text")
+        if not self.resolved_input_ref.strip():
+            raise ValueError("row-set resolved question input requires resolved ref")
+
+    def to_prompt_payload(self) -> RowSetQuestionInputPromptPayload:
+        return {
+            "kind": self.kind.value,
             "reference_text": self.reference_text,
             "occurrence": self.occurrence,
+            "resolved_input_ref": self.resolved_input_ref,
         }
-        if self.target_meaning:
-            payload["target_meaning"] = self.target_meaning
-        if self.lookup_text:
-            payload["lookup_text"] = self.lookup_text
-        if self.resolved_input_ref:
-            payload["resolved_input_ref"] = self.resolved_input_ref
+
+    def to_backend_payload(self) -> RowSetQuestionInputBackendPayload:
+        payload: RowSetQuestionInputBackendPayload = {**self.to_prompt_payload()}
+        if self.memory_ids:
+            payload["memory_ids"] = list(self.memory_ids)
         return payload
+
+
+ResolvedQuestionInputOverlay: TypeAlias = (
+    LiteralQuestionInputOverlay | RowSetQuestionInputOverlay
+)
+
+
+@dataclass(frozen=True)
+class _CanonicalIdentity:
+    field: str
+    value: str
+
+
+@dataclass(frozen=True)
+class _EntityIdentityMemory:
+    memory_id: str
+    identity_type: str
+    display: str
+    canonical_identity: _CanonicalIdentity | None
+    authority_refs: tuple[str, ...]
+
+    @property
+    def value_meaning_hint(self) -> str:
+        return f"{self.identity_type} identity"
+
+    def resolved_canonical_identity(self) -> ResolvedCanonicalIdentityOverlay | None:
+        if self.canonical_identity is None or not self.authority_refs:
+            return None
+        return ResolvedCanonicalIdentityOverlay(
+            identity_type=self.identity_type,
+            identity_field=self.canonical_identity.field,
+            value=self.canonical_identity.value,
+            authority_refs=self.authority_refs,
+            lineage_refs=(f"memory:{self.memory_id}",),
+        )
+
+
+@dataclass(frozen=True)
+class _TimeScopeMemory:
+    expression: str
 
 
 @dataclass(frozen=True)
@@ -48,7 +266,7 @@ class ConversationValueFrameOverlay:
     must_preserve_terms: tuple[str, ...]
     used_context_frame_ids: tuple[str, ...]
 
-    def to_prompt_payload(self) -> dict[str, Any]:
+    def to_prompt_payload(self) -> ConversationValueFramePayload:
         return {
             "current_clause_text": self.current_clause_text,
             "current_value_text": self.current_value_text,
@@ -69,7 +287,7 @@ class ConversationDependencyOverlay:
     source_ids: tuple[str, ...]
     memory_ids: tuple[str, ...] = ()
 
-    def to_prompt_payload(self) -> dict[str, Any]:
+    def to_prompt_payload(self) -> ConversationDependencyPayload:
         return {
             "current_clause_text": self.current_clause_text,
             "anchor_text": self.anchor_text,
@@ -91,8 +309,8 @@ class ConversationResolutionOverlay:
     used_source_card_ids: tuple[str, ...]
     resolved_question_inputs: tuple[ResolvedQuestionInputOverlay, ...] = ()
 
-    def to_prompt_payload(self) -> dict[str, Any]:
-        payload = {
+    def to_prompt_payload(self) -> ConversationResolutionPromptPayload:
+        payload: ConversationResolutionPromptPayload = {
             "current_question": self.current_question,
             "value_frames": [item.to_prompt_payload() for item in self.value_frames],
             "references": [item.to_prompt_payload() for item in self.references],
@@ -103,6 +321,16 @@ class ConversationResolutionOverlay:
         if self.resolved_question_inputs:
             payload["resolved_question_inputs"] = [
                 item.to_prompt_payload() for item in self.resolved_question_inputs
+            ]
+        return payload
+
+    def to_backend_payload(self) -> ConversationResolutionBackendPayload:
+        payload: ConversationResolutionBackendPayload = {
+            **self.to_prompt_payload(),
+        }
+        if self.resolved_question_inputs:
+            payload["resolved_question_inputs"] = [
+                item.to_backend_payload() for item in self.resolved_question_inputs
             ]
         return payload
 
@@ -152,6 +380,7 @@ def conversation_resolution_overlay_from(
         resolved_question_inputs=_resolved_question_inputs(
             dependencies=tuple(dependencies),
             references=tuple(references),
+            scopes=tuple(scopes),
             memory_projection=memory_projection,
         ),
     )
@@ -159,7 +388,7 @@ def conversation_resolution_overlay_from(
 
 def conversation_resolution_question_contract_prompt_payload(
     overlay: ConversationResolutionOverlay | None,
-) -> dict[str, Any] | None:
+) -> ValueFramePromptPayload | None:
     if overlay is None:
         return None
 
@@ -177,13 +406,13 @@ def conversation_resolution_question_contract_prompt_payload(
 
 def conversation_resolution_query_enrichment_prompt_payload(
     overlay: ConversationResolutionOverlay | None,
-) -> dict[str, Any] | None:
+) -> ValueFramePromptPayload | None:
     return _value_frame_prompt_payload(overlay)
 
 
 def conversation_resolution_source_binding_prompt_payload(
     overlay: ConversationResolutionOverlay | None,
-) -> dict[str, Any] | None:
+) -> ValueFramePromptPayload | None:
     return _value_frame_prompt_payload(overlay)
 
 
@@ -207,8 +436,8 @@ def conversation_resolution_question_contract_context_texts(
     for item in overlay.value_frames:
         output.extend(_value_frame_evidence_texts(item))
     for item in overlay.resolved_question_inputs:
-        _append_text(output, item.lookup_text)
-        _append_text(output, item.reference_text)
+        for text in _resolved_question_input_context_texts(item):
+            _append_text(output, text)
     return tuple(dict.fromkeys(output))
 
 
@@ -225,7 +454,7 @@ def conversation_resolution_value_frame_instruction_lines() -> tuple[str, ...]:
 
 def _value_frame_prompt_payload(
     overlay: ConversationResolutionOverlay | None,
-) -> dict[str, Any] | None:
+) -> ValueFramePromptPayload | None:
     if overlay is None:
         return None
     return {
@@ -262,6 +491,14 @@ def _append_text(output: list[str], value: str) -> None:
         output.append(text)
 
 
+def _resolved_question_input_context_texts(
+    item: ResolvedQuestionInputOverlay,
+) -> tuple[str, ...]:
+    if item.kind == KnownInputKind.LITERAL:
+        return (item.resolved_value_text, item.source_text)
+    return (item.reference_text,)
+
+
 def _dependency_overlay(
     dependency: ClauseDependency,
     *,
@@ -290,6 +527,7 @@ def _resolved_question_inputs(
     *,
     dependencies: tuple[ConversationDependencyOverlay, ...],
     references: tuple[ConversationDependencyOverlay, ...],
+    scopes: tuple[ConversationDependencyOverlay, ...],
     memory_projection: ConversationMemoryCardProjection | None,
 ) -> tuple[ResolvedQuestionInputOverlay, ...]:
     if memory_projection is None:
@@ -307,8 +545,7 @@ def _resolved_question_inputs(
             if key not in seen:
                 seen.add(key)
                 output.append(
-                    ResolvedQuestionInputOverlay(
-                        kind="row_set_reference",
+                    RowSetQuestionInputOverlay(
                         reference_text=reference.anchor_text,
                         occurrence=reference.occurrence,
                         resolved_input_ref=f"cr_input_{len(output) + 1}",
@@ -323,27 +560,51 @@ def _resolved_question_inputs(
         )
         if not entity_memory_id:
             continue
-        if reference.resolved_text not in reference.must_preserve_terms:
-            continue
         key = (reference.anchor_text, reference.occurrence, reference.resolved_text)
         if key in seen:
             continue
         seen.add(key)
+        entity_memory = _entity_identity_memory(
+            entity_memory_id,
+            memory_projection=memory_projection,
+        )
         output.append(
-            ResolvedQuestionInputOverlay(
-                kind="named_reference_text",
-                reference_text=reference.anchor_text,
+            LiteralQuestionInputOverlay(
+                source_text=reference.anchor_text,
                 occurrence=reference.occurrence,
-                lookup_text=_entity_lookup_text(
-                    entity_memory_id,
-                    default_text=reference.resolved_text,
-                    memory_projection=memory_projection,
-                ),
-                target_meaning=_entity_target_meaning(
-                    entity_memory_id,
-                    memory_projection=memory_projection,
-                ),
-                memory_ids=(entity_memory_id,),
+                resolved_input_ref=f"cr_input_{len(output) + 1}",
+                resolved_value_text=entity_memory.display,
+                value_meaning_hint=entity_memory.value_meaning_hint,
+                role=LiteralInputRole.REFERENCE_VALUE,
+                evidence_refs=(entity_memory_id,),
+                resolved_canonical_identity=entity_memory.resolved_canonical_identity(),
+            )
+        )
+    for scope in scopes:
+        time_scope_memory_id = _single_memory_id_by_kind(
+            scope.memory_ids,
+            kind="time_scope",
+            memory_projection=memory_projection,
+        )
+        if not time_scope_memory_id:
+            continue
+        key = (scope.anchor_text, scope.occurrence, scope.resolved_text)
+        if key in seen:
+            continue
+        seen.add(key)
+        time_scope_memory = _time_scope_memory(
+            time_scope_memory_id,
+            memory_projection=memory_projection,
+        )
+        output.append(
+            LiteralQuestionInputOverlay(
+                source_text=scope.anchor_text,
+                occurrence=scope.occurrence,
+                resolved_input_ref=f"cr_input_{len(output) + 1}",
+                resolved_value_text=time_scope_memory.expression,
+                value_meaning_hint="time scope",
+                role=LiteralInputRole.TIME_VALUE,
+                evidence_refs=(time_scope_memory_id,),
             )
         )
     return tuple(output)
@@ -358,12 +619,23 @@ def _single_memory_id_by_kind(
     matches = tuple(
         memory_id
         for memory_id in memory_ids
-        if _private_card(memory_id, memory_projection=memory_projection).get("kind")
-        == kind
+        if _memory_kind(memory_id, memory_projection=memory_projection) == kind
     )
     if len(matches) != 1:
         return ""
     return matches[0]
+
+
+def _memory_kind(
+    memory_id: str,
+    *,
+    memory_projection: ConversationMemoryCardProjection,
+) -> str:
+    for card in memory_projection.cards:
+        if card.memory_id == memory_id:
+            return card.kind
+    private = memory_projection.private_card(memory_id)
+    return str(private.get("kind") or "").strip()
 
 
 def _single_entity_memory_id(
@@ -378,54 +650,78 @@ def _single_entity_memory_id(
     return matches[0]
 
 
-def _entity_target_meaning(
+def _entity_identity_memory(
     memory_id: str,
     *,
     memory_projection: ConversationMemoryCardProjection,
-) -> str:
-    for card in memory_projection.cards:
-        if card.memory_id != memory_id or card.kind != "entity_identity":
-            continue
-        private = {}
-        try:
-            private = memory_projection.private_card(card.memory_id)
-        except KeyError:
-            pass
-        identity_type = str(private.get("identity_type") or "").strip()
-        if identity_type:
-            return f"{identity_type} identity"
-    private = _private_card(memory_id, memory_projection=memory_projection)
-    identity_type = str(private.get("identity_type") or "").strip()
-    if identity_type:
-        return f"{identity_type} identity"
-    return "entity_identity"
+) -> _EntityIdentityMemory:
+    private = memory_projection.private_card(memory_id)
+    return _EntityIdentityMemory(
+        memory_id=memory_id,
+        identity_type=_required_memory_text(
+            private.get("identity_type"),
+            "entity memory input requires identity type",
+        ),
+        display=_required_memory_text(
+            private.get("display"),
+            "entity memory input requires display",
+        ),
+        canonical_identity=_canonical_identity(private.get("canonical_values")),
+        authority_refs=_authority_refs(private.get("proof_refs")),
+    )
 
 
-def _entity_lookup_text(
-    memory_id: str,
-    *,
-    default_text: str,
-    memory_projection: ConversationMemoryCardProjection,
-) -> str:
-    private = _private_card(memory_id, memory_projection=memory_projection)
-    display = str(private.get("display") or "").strip()
-    if display:
-        return display
-    for card in memory_projection.cards:
-        if card.memory_id == memory_id and card.display.strip():
-            return card.display
-    return default_text
-
-
-def _private_card(
+def _time_scope_memory(
     memory_id: str,
     *,
     memory_projection: ConversationMemoryCardProjection,
-) -> dict[str, Any]:
-    try:
-        return memory_projection.private_card(memory_id)
-    except KeyError:
-        return {}
+) -> _TimeScopeMemory:
+    private = memory_projection.private_card(memory_id)
+    return _TimeScopeMemory(
+        expression=_required_memory_text(
+            private.get("expression"),
+            "time scope memory input requires expression",
+        ),
+    )
+
+
+def _required_memory_text(raw_value: object, error_message: str) -> str:
+    text = str(raw_value or "").strip()
+    if not text:
+        raise ValueError(error_message)
+    return text
+
+
+def _canonical_identity(raw_value: object) -> _CanonicalIdentity | None:
+    if raw_value is None:
+        return None
+    if not isinstance(raw_value, dict):
+        raise ValueError("entity memory canonical values must be an object")
+    canonical_values = tuple(
+        _CanonicalIdentity(field=field, value=value)
+        for raw_field, raw_item in raw_value.items()
+        if (field := str(raw_field or "").strip())
+        and (value := str(raw_item or "").strip())
+    )
+    if len(canonical_values) != 1:
+        return None
+    return canonical_values[0]
+
+
+def _authority_refs(raw_value: object) -> tuple[str, ...]:
+    if raw_value is None:
+        return ()
+    if isinstance(raw_value, str) or not isinstance(raw_value, (list, tuple)):
+        raise ValueError("entity memory proof refs must be a sequence")
+    return tuple(
+        ref
+        for raw_item in raw_value
+        if (ref := str(raw_item or "").strip()) and _is_identity_authority_ref(ref)
+    )
+
+
+def _is_identity_authority_ref(ref: str) -> bool:
+    return ref.startswith("source_read:") or ref.startswith("prior_source_read:")
 
 
 def _entity_memory_ids(

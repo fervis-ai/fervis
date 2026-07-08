@@ -3,6 +3,7 @@
 from ._shared import Any
 from .candidate_tree import CandidateTreeContext, map_source_candidate_tree
 from .evidence import _candidate_with_evidence_items
+from .field_scope import SourceBindingFieldScope
 from .fulfillment_slots import _candidate_with_fulfillment_slots
 from .params import (
     _candidate_with_param_decision_options,
@@ -92,17 +93,16 @@ def _with_fulfillment_slots(
     payload: dict[str, Any],
     *,
     requested_facts: tuple[Any, ...] = (),
-    support_field_refs_by_candidate_id: dict[str, frozenset[str]] | None = None,
+    field_scope: SourceBindingFieldScope | None = None,
 ) -> dict[str, Any]:
+    resolved_field_scope = field_scope or SourceBindingFieldScope.unscoped()
     return map_source_candidate_tree(
         payload,
         lambda candidate, context: _candidate_with_fulfillment_slots_for_tree(
             candidate,
             context=context,
             requested_facts=requested_facts,
-            support_field_refs_by_candidate_id=(
-                support_field_refs_by_candidate_id or {}
-            ),
+            field_scope=resolved_field_scope,
         ),
         top_level_keys=("utility_source_candidates", "value_source_candidates"),
     )
@@ -113,7 +113,7 @@ def _candidate_with_fulfillment_slots_for_tree(
     *,
     context: CandidateTreeContext,
     requested_facts: tuple[Any, ...],
-    support_field_refs_by_candidate_id: dict[str, frozenset[str]],
+    field_scope: SourceBindingFieldScope,
 ) -> dict[str, Any]:
     if context.top_level_key and not _should_project_fulfillment_slots(
         key=context.top_level_key,
@@ -134,7 +134,7 @@ def _candidate_with_fulfillment_slots_for_tree(
     return _candidate_with_fulfillment_slots(
         candidate,
         requested_facts=slot_requested_facts,
-        support_field_refs=support_field_refs_by_candidate_id.get(
+        support_field_refs=field_scope.field_refs_for_candidate(
             str(candidate.get("source_candidate_id") or "")
         ),
     )
