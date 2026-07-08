@@ -89,6 +89,9 @@ def parse_param_decision_binding_sets(
                 )
             )
             continue
+        if decision == "omit":
+            output.append(((),))
+            continue
         if decision != "bind":
             raise ValueError("unsupported source param decision")
         value = str(option.get("value") or "")

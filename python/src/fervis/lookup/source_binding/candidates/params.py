@@ -128,6 +128,8 @@ def _param_with_population_contract(
     evidence_items: tuple[dict[str, Any], ...],
     requested_facts: tuple[Any, ...],
 ) -> dict[str, Any]:
+    if _param_has_omit_decision(param):
+        return param
     if not _param_has_population_contract(param):
         return param
     param_id = str(param.get("param_id") or "")
@@ -153,6 +155,13 @@ def _param_with_population_contract(
         }
     output["population_contract"] = contract
     return output
+
+
+def _param_has_omit_decision(param: dict[str, Any]) -> bool:
+    return any(
+        isinstance(option, dict) and option.get("decision") == "omit"
+        for option in param.get("decision_options") or ()
+    )
 
 
 def _param_has_population_contract(param: dict[str, Any]) -> bool:
@@ -363,6 +372,8 @@ def _param_omit_option(
     bind_options: list[dict[str, str]],
 ) -> dict[str, str]:
     param_id = str(param.get("param_id") or "")
+    if param.get("required") is True:
+        return {}
     default_value = canonical_param_value(param.get("default"))
     if default_value:
         default_label = _param_option_label(default_value, bind_options=bind_options)
@@ -379,9 +390,31 @@ def _param_omit_option(
         for item in bind_options
         if str(item.get("label") or item.get("value") or "")
     )
-    if labels:
-        return {}
+    if _param_has_exhaustive_static_boolean_options(param):
+        return {
+            "decision": "omit",
+            "meaning": (
+                f"Omitting {param_id} includes records across {_joined_labels(labels)}."
+            ),
+        }
     return {}
+
+
+def _param_has_exhaustive_static_boolean_options(param: dict[str, Any]) -> bool:
+    binding_values = tuple(
+        item
+        for item in param.get("binding_values") or ()
+        if isinstance(item, dict)
+    )
+    values = {str(item.get("value") or "") for item in binding_values}
+    sources = {str(item.get("source") or "") for item in binding_values}
+    return (
+        not param.get("choices")
+        and str(param.get("type") or "") == "boolean"
+        and _param_supports_static_boolean_options(param)
+        and values == {"true", "false"}
+        and sources == {"static_choice"}
+    )
 
 
 def _param_option_label(
