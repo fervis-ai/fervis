@@ -29,6 +29,7 @@ from .contract_types import (
     _union_field_roles,
 )
 from .execution_proof import ExecutionProofContext
+from fervis.lookup.answer_program.operations import JoinKey, Predicate
 
 
 def _operation_relation_contract(
@@ -134,12 +135,11 @@ def _fields_dependency_proof(
 
 def _predicate_dependency_proof(
     contract: RelationContract,
-    predicate: object,
+    predicate: Predicate,
 ) -> ProofLineage:
-    fields = [str(getattr(predicate, "left", "") or "")]
-    right = str(getattr(predicate, "right", "") or "")
-    if right:
-        fields.append(right)
+    fields = [predicate.left]
+    if predicate.right:
+        fields.append(predicate.right)
     return _fields_dependency_proof(
         contract,
         tuple(field for field in fields if field),
@@ -241,13 +241,13 @@ def _join_contract(
 def _join_dependency_proof(
     left: RelationContract,
     right: RelationContract,
-    join_keys: tuple[object, ...],
+    join_keys: tuple[JoinKey, ...],
 ) -> ProofLineage:
     proof = ProofLineage()
     for key in join_keys:
         proof = proof.merge(
-            _field_proof(left, str(getattr(key, "left", "") or ""), "join"),
-            _field_proof(right, str(getattr(key, "right", "") or ""), "join"),
+            _field_proof(left, key.left, "join"),
+            _field_proof(right, key.right, "join"),
         )
     return proof
 

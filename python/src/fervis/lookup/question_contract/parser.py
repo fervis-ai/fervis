@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from fervis.lookup.conversation_resolution import ConversationResolutionOverlay
+from fervis.lookup.conversation_resolution import ConversationInputProvenanceSet
 from fervis.lookup.question_contract._text_spans import copied_span
 from fervis.lookup.question_contract import provider_contract as provider_output
 from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
@@ -46,7 +46,7 @@ def parse_question_contract(
     question_context: str,
     question_context_texts: tuple[str, ...] = (),
     current_question_context_texts: tuple[str, ...] = (),
-    conversation_resolution_overlay: ConversationResolutionOverlay | None = None,
+    conversation_input_provenance: ConversationInputProvenanceSet | None = None,
 ) -> QuestionContractResult:
     question_text = _text(question_context)
     if not question_text:
@@ -81,7 +81,7 @@ def parse_question_contract(
     )
     _validate_conversation_resolution_question_inputs(
         question_inputs,
-        conversation_resolution_overlay=conversation_resolution_overlay,
+        conversation_input_provenance=conversation_input_provenance,
     )
     requested_facts = _requested_facts(
         parsed.answer_requests,
@@ -398,59 +398,17 @@ def _reject_unowned_question_inputs(
 def _validate_conversation_resolution_question_inputs(
     question_inputs: tuple[RequestedFactKnownInput, ...],
     *,
-    conversation_resolution_overlay: ConversationResolutionOverlay | None,
+    conversation_input_provenance: ConversationInputProvenanceSet | None,
 ) -> None:
-    resolved_inputs = (
-        conversation_resolution_overlay.resolved_question_inputs
-        if conversation_resolution_overlay is not None
-        else ()
-    )
-    resolved_by_ref = {
-        item.resolved_input_ref: item
-        for item in resolved_inputs
-        if item.resolved_input_ref
-    }
+    provenance = conversation_input_provenance or ConversationInputProvenanceSet()
     for known in question_inputs:
         if known.source != KnownInputSource.CONVERSATION_RESOLUTION:
             continue
-        resolved = resolved_by_ref.get(known.resolved_input_ref)
-        if resolved is None or not _conversation_resolution_input_matches(
-            known,
-            resolved,
-        ):
-            raise ValueError(
-                "conversation_resolution question input must match "
-                "resolved_question_inputs"
-            )
-
-
-def _conversation_resolution_input_matches(
-    known: RequestedFactKnownInput,
-    resolved: Any,
-) -> bool:
-    resolved_text = (
-        resolved.source_text
-        if resolved.kind == KnownInputKind.LITERAL
-        else resolved.reference_text
-    )
-    if known.text != resolved_text:
-        return False
-    if known.kind == KnownInputKind.ROW_SET_REFERENCE:
-        return (
-            resolved.kind == KnownInputKind.ROW_SET_REFERENCE
-            and known.occurrence == resolved.occurrence
+        if provenance.accepts_question_input(known):
+            continue
+        raise ValueError(
+            "conversation_resolution question input must match conversation input provenance"
         )
-    if known.kind == KnownInputKind.LITERAL:
-        return (
-            resolved.kind == KnownInputKind.LITERAL
-            and known.occurrence == resolved.occurrence
-            and known.resolved_value_text == resolved.resolved_value_text
-            and known.field_label_text == resolved.field_label_text
-            and known.value_meaning_hint == resolved.value_meaning_hint
-            and known.role is not None
-            and known.role == resolved.role
-        )
-    return False
 
 
 def _reject_answer_subject_question_inputs(

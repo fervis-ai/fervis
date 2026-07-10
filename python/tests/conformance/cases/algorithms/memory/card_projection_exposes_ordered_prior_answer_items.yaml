@@ -14,12 +14,14 @@ input:
         sourceAnswer: The top selling products this week are Alpha, Beta, and Cinder.
         provenance:
           question_contract:
+            question_inputs: []
             answer_requests:
               - id: fact_1
                 answer_fact: top selling products this week
                 answer_outputs:
                   - id: answer_1
                     description: product name
+                used_question_inputs: []
         addresses:
           - address: relation.answer_rows
             kind: relation
@@ -52,4 +54,3 @@ expect:
       - kind: prior_user_question
       - kind: prior_fervis_answer
         text: The top selling products this week are Alpha, Beta, and Cinder.
-

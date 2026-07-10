@@ -1,0 +1,35 @@
+id: run_without_answered_program_is_not_reusable
+kind: algorithm
+algorithm: questions.lifecycle
+description: A run with no persisted answered program invocation cannot become a deterministic base.
+input:
+  schema_revision: 1
+  operation: rerun_eligibility
+  attempts:
+    - id: no_answered_program
+      state:
+        question_count: 1
+        run_count: 1
+        questions:
+          - question_id: question_1
+            conversation_id: conversation_1
+            original_question: How many sales did we make today?
+            principal: &principal {principal_id: user_1, tenant_id: tenant_1}
+        program_invocations: []
+      command:
+        question_id: question_1
+        base_run_id: run_without_answered_program
+        principal: *principal
+        patch:
+          operations:
+            - kind: set
+              parameter_id: semantic.sale_states
+              value: {kind: string_set, values: [COMPLETED, PLACED]}
+expect:
+  result_contains:
+    outcomes:
+      - id: no_answered_program
+        status: rejected
+        code: rerun_base_not_reusable
+        new_runs: 0
+        model_calls: 0

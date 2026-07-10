@@ -9,17 +9,17 @@ from fervis.lookup.fact_planning.grouped_ranked_choices import (
     GroupedRankedSelection,
     selected_grouped_ranked_operation,
 )
-from fervis.lookup.fact_plan.relations import (
+from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
     RelationField,
     SourceKind,
 )
 from fervis.lookup.fact_planning.metric_options import metric_for_selection
 from fervis.lookup.source_binding import BoundSource
+from fervis.lookup.answer_program.compiler_inputs import CompilerInputContext
 
 from .aggregate_operations import (
     _aggregate_operations,
-    _rank_value_uses,
     _ranked_aggregate_operations,
 )
 from .aggregate_outputs import (
@@ -27,6 +27,7 @@ from .aggregate_outputs import (
     _grouped_ranked_relation_outputs,
 )
 from .shared import (
+    RelationBuilder,
     _bound_source,
     _compiled_pattern,
     _dict,
@@ -49,6 +50,7 @@ def _compile_aggregate_pattern_answer(
     payload: dict[str, Any],
     namespace_render_outputs: bool,
     bound_sources: dict[str, BoundSource],
+    relation_builder: RelationBuilder,
 ) -> dict[str, Any]:
     if _text(payload.get("pattern")) == "aggregate_by_group":
         return _compile_grouped_ranked_aggregate_answer(
@@ -56,6 +58,7 @@ def _compile_aggregate_pattern_answer(
             payload=payload,
             namespace_render_outputs=namespace_render_outputs,
             bound_sources=bound_sources,
+            relation_builder=relation_builder,
         )
     relation_id = _pattern_relation_id(index)
     output_relation_id = _pattern_output_relation_id(index)
@@ -138,6 +141,7 @@ def _compile_aggregate_pattern_answer(
             metric=metric,
         ),
         bound_sources={**bound_sources, bound.id: bound},
+        relation_builder=relation_builder,
         selected_metric=metric,
     )
 
@@ -174,12 +178,16 @@ def _compile_ranked_aggregate_answer(
     payload: dict[str, Any],
     namespace_render_outputs: bool,
     bound_sources: dict[str, BoundSource],
+    input_context: CompilerInputContext,
+    relation_builder: RelationBuilder,
 ) -> dict[str, Any]:
     return _compile_grouped_ranked_ranked_aggregate_answer(
         index=index,
         payload=payload,
         namespace_render_outputs=namespace_render_outputs,
         bound_sources=bound_sources,
+        input_context=input_context,
+        relation_builder=relation_builder,
     )
 
 
@@ -189,6 +197,7 @@ def _compile_grouped_ranked_aggregate_answer(
     payload: dict[str, Any],
     namespace_render_outputs: bool,
     bound_sources: dict[str, BoundSource],
+    relation_builder: RelationBuilder,
 ) -> dict[str, Any]:
     relation_id = _pattern_relation_id(index)
     output_relation_id = _pattern_output_relation_id(index)
@@ -266,6 +275,7 @@ def _compile_grouped_ranked_aggregate_answer(
             relation_outputs=relation_outputs,
         ),
         bound_sources=bound_sources,
+        relation_builder=relation_builder,
         required_answer_evidence_ids_by_output=(
             _grouped_ranked_answer_evidence_ids_by_output(selection)
         ),
@@ -279,6 +289,8 @@ def _compile_grouped_ranked_ranked_aggregate_answer(
     payload: dict[str, Any],
     namespace_render_outputs: bool,
     bound_sources: dict[str, BoundSource],
+    input_context: CompilerInputContext,
+    relation_builder: RelationBuilder,
 ) -> dict[str, Any]:
     relation_id = _pattern_relation_id(index)
     aggregate_relation_id = f"{_pattern_output_relation_id(index)}_aggregate"
@@ -350,6 +362,7 @@ def _compile_grouped_ranked_ranked_aggregate_answer(
             carry_fields=aggregate_carry_fields,
             metric=metric,
             rank=rank,
+            input_context=input_context,
             required_group_fields=_answer_rendered_group_fields(
                 selection=selection,
                 group_fields=group_fields,
@@ -360,8 +373,8 @@ def _compile_grouped_ranked_ranked_aggregate_answer(
             selection=selection,
             relation_outputs=relation_outputs,
         ),
-        value_uses=_rank_value_uses(rank_operation_id=rank_operation_id, rank=rank),
         bound_sources=bound_sources,
+        relation_builder=relation_builder,
         required_answer_evidence_ids_by_output=(
             _grouped_ranked_answer_evidence_ids_by_output(selection)
         ),

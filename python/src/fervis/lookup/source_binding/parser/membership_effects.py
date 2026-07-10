@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fervis.lookup.fact_plan.relations import RelationSourceReviewScopeDecision, ReviewScopeDecisionKind as RelationReviewScopeDecisionKind
+from fervis.lookup.answer_program.relations import RelationSourceReviewScopeDecision, ReviewScopeDecisionKind as RelationReviewScopeDecisionKind
 from fervis.lookup.question_contract import AnswerPopulationMembershipTestKind, AnswerPopulationMembershipTestPolarity, NormalInstanceExplicitOverrideReason
 from fervis.lookup.source_binding import provider_contract as provider_output
 from fervis.lookup.source_binding.membership_tests import membership_test_key, membership_tests_by_key

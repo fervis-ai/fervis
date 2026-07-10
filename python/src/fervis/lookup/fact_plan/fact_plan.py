@@ -5,10 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from fervis.lookup.fact_plan.operations import Operation
-from fervis.lookup.fact_plan.relations import Relation
-from fervis.lookup.fact_plan.render_spec import RenderSpec
-from fervis.lookup.fact_plan.values import FactValue, ValueUse
+from fervis.lookup.answer_program.model import AnswerProgram
+from fervis.lookup.answer_program.values import BindingSet
 
 
 class PlanOutcomeKind(StrEnum):
@@ -41,23 +39,6 @@ class BlockedFact:
     reviewed_read_ids: tuple[str, ...] = ()
     nearest_fields: tuple[BlockedFactField, ...] = ()
     explanation: str = ""
-
-
-@dataclass(frozen=True)
-class FactFulfillment:
-    requested_fact_id: str
-    answer_output_id: str
-    render_output_id: str
-
-
-@dataclass(frozen=True)
-class AnswerPlan:
-    fulfillment: tuple[FactFulfillment, ...] = ()
-    values: tuple[FactValue, ...] = ()
-    value_uses: tuple[ValueUse, ...] = ()
-    relations: tuple[Relation, ...] = ()
-    operations: tuple[Operation, ...] = ()
-    render_spec: RenderSpec | None = None
 
 
 @dataclass(frozen=True)
@@ -117,9 +98,10 @@ class PlanImpossible:
             raise ValueError("plan impossible requires blocked facts")
 
 
-PlanOutcome = AnswerPlan | PlanClarification | PlanImpossible
+PlanOutcome = AnswerProgram | PlanClarification | PlanImpossible
 
 
 @dataclass(frozen=True)
 class FactPlan:
     outcome: PlanOutcome
+    bindings: BindingSet = BindingSet()

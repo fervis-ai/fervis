@@ -7,8 +7,7 @@ from typing import Callable, Protocol, TypeVar
 
 class RunChainNode(Protocol):
     run_id: str
-    previous_run_id: str | None
-    trigger_clarification_response_run_id: str | None
+    base_run_id: str | None
 
 
 RunNodeT = TypeVar("RunNodeT", bound=RunChainNode)
@@ -54,8 +53,4 @@ def _append_run_chain(
 
 
 def _run_prerequisites(run: RunChainNode) -> tuple[str, ...]:
-    return tuple(
-        run_id
-        for run_id in (run.previous_run_id, run.trigger_clarification_response_run_id)
-        if run_id
-    )
+    return (run.base_run_id,) if run.base_run_id else ()

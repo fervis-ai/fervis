@@ -5,6 +5,7 @@ migrates:
 kind: algorithm
 algorithm: conversation_memory.expand_activated
 input:
+  current_question: What about those sales?
   conversation_context:
     factArtifacts:
       - artifactId: turn_1
@@ -26,16 +27,10 @@ input:
             relation: relation.sales_rows
             identity: {sale_key: sale-2}
             values: {amount: {type: decimal, value: "150.00"}}
-  memory_cards:
-    mem.rows:
-      kind: row_set
-      artifact_id: turn_1
-      address: relation.sales_rows
-  used_memory_ids: [mem.rows]
+  used_memory_ids: [turn_1.relation.sales_rows]
 expect:
   result_contains:
     activatedMemory:
-      mem.rows:
+      turn_1.relation.sales_rows:
         kind: row_set
         canonical_ids: [sale-1, sale-2]
-

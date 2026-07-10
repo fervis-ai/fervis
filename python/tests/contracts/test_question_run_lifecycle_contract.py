@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from fervis.host_api.contracts.authority import ReadAuthority
+from fervis.interfaces.django.question_run_ports import DjangoQuestionStateReaderPort
 from fervis.questions import (
     AskRequest,
     ContinueQuestionRequest,
@@ -10,8 +12,38 @@ from fervis.questions import (
 )
 from fervis.lineage.enums import RunTriggerKind
 from fervis.run_work import QueuedRunRequest
+from fervis.storage.sql.question_run_ports import SQLQuestionStateReaderPort
 
 pytestmark = pytest.mark.django_db
+
+_CANONICAL_ANSWER_RESULT = {
+    "kind": "answer",
+    "outputs": [{"key": "answer_1", "valueKind": "number", "value": "42"}],
+}
+
+_DESKTOP_RUN_FIELDS = frozenset(
+    {
+        "runId",
+        "questionId",
+        "conversationId",
+        "runNumber",
+        "kind",
+        "triggerKind",
+        "baseRunId",
+        "programId",
+        "invocationId",
+        "patchId",
+        "revisionId",
+        "status",
+        "answer",
+        "resultData",
+        "explanation",
+        "steps",
+        "error",
+        "worker",
+        "usage",
+    }
+)
 
 
 def test_queued_ask_records_run_without_lookup(adapter):
@@ -49,15 +81,23 @@ def test_inline_terminal_lookup_returns_answer(adapter):
 
     assert result.status == "COMPLETED", result.error
     assert result.answer == "42"
-    assert result.result_data == {"value": 42}
+    assert result.result_data == _CANONICAL_ANSWER_RESULT
     assert adapter.lookup.call_count() == 1
     assert adapter.probe.work_item_status(result.run_id) == "COMPLETED"
-    assert adapter.probe.terminal_result(result.run_id) == {
-        "status": "COMPLETED",
-        "answer": "42",
-        "result_data": {"value": 42},
-        "error": None,
-    }
+
+
+def test_terminal_answer_projection_survives_reload(adapter):
+    adapter.lookup.complete_with_terminal(answer="42")
+    result = adapter.questions.ask(
+        _ask(adapter, execution_mode=ExecutionMode.INLINE)
+    )
+
+    persisted = _persisted_run(adapter, result.question_id, result.run_id)
+
+    assert _DESKTOP_RUN_FIELDS <= persisted.keys()
+    assert persisted["status"] == "COMPLETED"
+    assert persisted["answer"] == "42"
+    assert persisted["resultData"] == _CANONICAL_ANSWER_RESULT
 
 
 def test_inline_failed_lookup_without_terminal_lineage_records_fallback(adapter):
@@ -121,24 +161,25 @@ def test_idempotent_inline_retry_returns_persisted_terminal_answer(adapter):
     )
 
     first = adapter.questions.ask(request)
+    first_persisted = _persisted_run(adapter, first.question_id, first.run_id)
     second = adapter.questions.ask(request)
+    second_persisted = _persisted_run(adapter, second.question_id, second.run_id)
 
     assert first.status == "COMPLETED", first.error
     assert second.status == "COMPLETED"
     assert second.run_id == first.run_id
     assert second.answer == "42"
-    assert adapter.probe.terminal_result(second.run_id) == {
-        "status": "COMPLETED",
-        "answer": "42",
-        "result_data": {"value": 42},
-        "error": None,
-    }
+    assert second.result_data == _CANONICAL_ANSWER_RESULT
+    assert first.result_data == second.result_data
+    assert _DESKTOP_RUN_FIELDS <= first_persisted.keys()
+    assert _DESKTOP_RUN_FIELDS <= second_persisted.keys()
+    assert _stable_run_fields(second_persisted) == _stable_run_fields(first_persisted)
     assert adapter.lookup.call_count() == 1
     assert adapter.probe.question_count("conversation_1") == 1
     assert adapter.probe.run_count("conversation_1") == 1
 
 
-def test_idempotent_ask_replays_when_conversation_id_is_generated(adapter):
+def test_idempotent_ask_returns_existing_when_conversation_id_is_generated(adapter):
     first = adapter.questions.ask(
         _ask(
             adapter,
@@ -218,7 +259,7 @@ def test_question_continuation_creates_next_run_under_same_question(adapter):
             ),
             trigger_kind=RunTriggerKind.RETRY,
             execution_mode=ExecutionMode.QUEUED,
-            previous_run_id=first.run_id,
+            base_run_id=first.run_id,
             provider=adapter.provider,
             model_key=adapter.model_key,
         )
@@ -289,3 +330,28 @@ def _ask(
         model_key=adapter.model_key,
         idempotency_key=idempotency_key,
     )
+
+
+def _persisted_run(adapter, question_id: str, run_id: str) -> dict[str, object]:
+    principal = QuestionPrincipal(
+        principal_id=adapter.principal_id,
+        tenant_id=adapter.tenant_id,
+    )
+    access = adapter.questions.runs.get_question(
+        question_id=question_id,
+        authority=ReadAuthority.from_principal(principal),
+    )
+    assert access is not None
+    if adapter.name == "django":
+        reader = DjangoQuestionStateReaderPort()
+    elif adapter.name == "sql":
+        reader = SQLQuestionStateReaderPort(adapter.probe.engine)
+    else:
+        raise AssertionError(f"unsupported contract adapter {adapter.name}")
+    persisted = reader.get_question_run(run_id, access=access)
+    assert persisted is not None
+    return persisted
+
+
+def _stable_run_fields(run: dict[str, object]) -> dict[str, object]:
+    return {key: run.get(key) for key in _DESKTOP_RUN_FIELDS}

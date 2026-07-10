@@ -1,0 +1,23 @@
+id: terminal_result_dominates_stale_work
+kind: algorithm
+algorithm: questions.projection
+description: Terminal lineage prevents stale RUNNING work state from remaining active or replacing an older answered model run.
+input:
+  runs:
+    - run_id: run_answered
+      run_number: 1
+      kind: model_assisted
+      status: COMPLETED
+      answered: true
+      terminal: true
+    - run_id: run_failed_variant
+      run_number: 2
+      kind: deterministic
+      status: RUNNING
+      answered: false
+      terminal: true
+expect:
+  result_equals:
+    primary_run_id: run_answered
+    latest_run_id: run_failed_variant
+    active_run_id: null

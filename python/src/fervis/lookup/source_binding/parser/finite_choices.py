@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fervis.lookup.fact_plan.relations import PopulationChoiceControllerKind, RelationSourcePopulationChoice
+from fervis.lookup.source_binding.compiler_ir import (
+    DraftRelationSourcePopulationChoice,
+)
+from fervis.lookup.answer_program.relations import PopulationChoiceControllerKind
 from fervis.lookup.source_binding import provider_contract as provider_output
 from fervis.lookup.source_binding.model import SourceBindingRequest
 from fervis.lookup.source_binding.parser.membership_effects import (
@@ -62,7 +65,7 @@ def derive_finite_choice_param_decisions(
             "finite-choice population params must be derived from choice reviews"
         )
     output: dict[str, dict[str, Any]] = {}
-    population_choices: list[RelationSourcePopulationChoice] = []
+    population_choices: list[DraftRelationSourcePopulationChoice] = []
     population_roles_by_id = _candidate_population_roles_by_id(candidate)
     for param_id, axis in finite_choice_axes.items():
         out_of_scope_decisions = (
@@ -87,12 +90,17 @@ def derive_finite_choice_param_decisions(
             tests_by_id=tests_by_id,
         )
         population_choices.append(
-            RelationSourcePopulationChoice(
+            DraftRelationSourcePopulationChoice(
                 controller_kind=PopulationChoiceControllerKind.QUERY_PARAM,
                 controller_id=param_id,
                 field_id=param_id,
+                requested_fact_ids=(requested_fact_id,),
                 included_values=include_values,
                 excluded_values=exclude_values,
+                parameter_id=(
+                    f"semantic.{requested_fact_id}.{binding_target_id}."
+                    f"param.{param_id}"
+                ),
                 proof_refs=population_choice_proof_refs(
                     f"population_choice:{param_id}",
                     out_of_scope_decisions,

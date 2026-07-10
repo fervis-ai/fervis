@@ -1,5 +1,5 @@
 id: conflicting_grounded_time_values_do_not_compile_param
-description: Conflicting grounded values for the same endpoint param do not compile an endpoint argument.
+description: Conflicting grounded values for the same endpoint param fail closed.
 migrates:
   - api/tests/fervis/lookup/fact_planning/test_values.py::test_conflicting_grounded_time_values_do_not_compile_endpoint_param
 kind: algorithm
@@ -23,11 +23,13 @@ input:
       expression: January 1
       resolved_start: "2030-01-01"
       resolved_end: "2030-01-01"
+      granularity: day
     - id: jan_2
       kind: time
       expression: January 2
       resolved_start: "2030-01-02"
       resolved_end: "2030-01-02"
+      granularity: day
   grounded_input_uses:
     - id: grounded_use_jan_1_start_date_start
       value_id: jan_1
@@ -41,4 +43,4 @@ input:
       value_component: start
 expect:
   result_contains:
-    endpoint_args: []
+    status: rejected

@@ -1,0 +1,41 @@
+id: set_values_have_one_canonical_identity
+kind: algorithm
+algorithm: answer_program.canonicalize
+description: Member order does not change binding, patch, or invocation identity for a semantic set.
+input:
+  schema_revision: 1
+  programs:
+    - {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/canonical_a}
+  binding_sets:
+    - bindings:
+        - parameter_id: semantic.sale_states
+          value: {kind: string_set, values: [COMPLETED, PLACED]}
+          provenance: {kind: semantic_choice}
+    - bindings:
+        - parameter_id: semantic.sale_states
+          value: {kind: string_set, values: [PLACED, COMPLETED]}
+          provenance: {kind: semantic_choice}
+  patches:
+    - operations:
+        - kind: set
+          parameter_id: semantic.sale_states
+          value: {kind: string_set, values: [COMPLETED, PLACED]}
+    - operations:
+        - kind: set
+          parameter_id: semantic.sale_states
+          value: {kind: string_set, values: [PLACED, COMPLETED]}
+  constants:
+    - constant_id: sale_states
+      version_ref: sales-calculation@1
+      value: {kind: string_set, values: [COMPLETED, PLACED]}
+    - constant_id: sale_states
+      version_ref: sales-calculation@1
+      value: {kind: string_set, values: [PLACED, COMPLETED]}
+  run_id: run_same_fact
+expect:
+  result_contains:
+    same_binding_json: true
+    same_patch_json: true
+    same_patch_id: true
+    same_invocation_id: true
+    same_constant_fingerprint: true

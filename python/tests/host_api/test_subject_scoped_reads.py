@@ -35,6 +35,11 @@ def test_read_context_ref_rejects_raw_auth_material() -> None:
         )
 
 
+def test_read_context_ref_rejects_removed_unmigrated_scheme() -> None:
+    with pytest.raises(ValueError, match="unsupported ReadContextRef scheme"):
+        ReadContextRef.from_storage_dict({"scheme": "unmigrated"})
+
+
 def test_framework_adapters_do_not_import_host_application_packages() -> None:
     fervis_root = Path(__file__).resolve().parents[3] / "apps" / "fervis"
     adapter_roots = (

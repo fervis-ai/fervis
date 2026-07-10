@@ -60,12 +60,23 @@ export function replaceConversationRun(
   const runs = conversation.runs.map((run) =>
     run.runId === nextRun.runId ? nextRun : run
   );
+  const activeRunId =
+    nextRun.status === "QUEUED" || nextRun.status === "RUNNING"
+      ? nextRun.runId
+      : conversation.summary.activeRunId === nextRun.runId
+        ? null
+        : conversation.summary.activeRunId;
+  const projectedRun =
+    runs.find((run) => run.runId === activeRunId) ??
+    runs.find((run) => run.runId === conversation.summary.primaryRunId) ??
+    nextRun;
   return {
     ...conversation,
     summary: {
       ...conversation.summary,
-      currentRunId: nextRun.runId,
-      status: nextRun.status,
+      latestRunId: nextRun.runId,
+      activeRunId,
+      status: projectedRun.status,
       updatedAt: new Date().toISOString()
     },
     runs: requireRuns(runs)

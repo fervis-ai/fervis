@@ -10,6 +10,7 @@ from typing import Any
 from fervis.host_api.contracts.authority import ReadContextRef
 from fervis.host_api.contracts.credentials import DelegatedReadCredential
 from fervis.lineage.enums import RunTriggerKind
+from fervis.lookup.answer_program import BindingPatch, CapabilityApplication
 
 
 DEFAULT_MAX_BUDGET_USD = Decimal("0.5")
@@ -17,6 +18,12 @@ DEFAULT_MAX_BUDGET_USD_LIMIT = Decimal("10.0")
 DEFAULT_MAX_THINKING_TOKENS = 64
 MAX_THINKING_TOKENS = 4096
 DEFAULT_MODEL_KEY = "HAIKU"
+
+
+class QuestionLifecycleError(ValueError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class ExecutionMode(str, Enum):
@@ -81,6 +88,7 @@ class AskRequest:
     principal: QuestionPrincipal
     execution_mode: ExecutionMode = ExecutionMode.QUEUED
     conversation_id: str = ""
+    context_run_id: str | None = None
     provider: str | None = None
     model_key: str = ""
     idempotency_key: str | None = None
@@ -90,6 +98,11 @@ class AskRequest:
     limits: AskRequestLimits = field(default_factory=AskRequestLimits)
 
     def __post_init__(self) -> None:
+        if self.context_run_id is not None and (
+            not isinstance(self.context_run_id, str)
+            or not self.context_run_id.strip()
+        ):
+            raise ValueError("context_run_id must be a non-empty string")
         if not isinstance(self.execution_mode, ExecutionMode):
             object.__setattr__(
                 self,
@@ -114,6 +127,9 @@ class AskRequest:
             _normalize_max_thinking_tokens(self.max_thinking_tokens, self.limits),
         )
 
+    def accepted_trigger(self) -> dict[str, object] | None:
+        return None
+
 
 @dataclass(frozen=True)
 class ContinueQuestionRequest:
@@ -121,12 +137,11 @@ class ContinueQuestionRequest:
     question: str
     principal: QuestionPrincipal
     trigger_kind: RunTriggerKind
+    base_run_id: str
     execution_mode: ExecutionMode = ExecutionMode.QUEUED
     provider: str | None = None
     model_key: str = ""
     idempotency_key: str | None = None
-    previous_run_id: str | None = None
-    trigger_clarification_response_run_id: str | None = None
     trigger_clarification_response_id: str | None = None
     trigger_clarification_selected_option_id: str | None = None
     max_budget_usd: Any = None
@@ -147,6 +162,13 @@ class ContinueQuestionRequest:
                 "trigger_kind",
                 RunTriggerKind(str(self.trigger_kind)),
             )
+        if self.trigger_kind not in {
+            RunTriggerKind.CLARIFICATION_RESPONSE,
+            RunTriggerKind.RETRY,
+        }:
+            raise ValueError("continue request requires clarification_response or retry")
+        if not str(self.base_run_id or "").strip():
+            raise ValueError("continue request requires base_run_id")
         if not isinstance(self.limits, AskRequestLimits):
             raise ValueError("limits must be an AskRequestLimits instance")
         object.__setattr__(
@@ -165,6 +187,43 @@ class ContinueQuestionRequest:
             _normalize_max_thinking_tokens(self.max_thinking_tokens, self.limits),
         )
 
+    def accepted_trigger(self) -> dict[str, object]:
+        trigger: dict[str, object] = {
+            "kind": self.trigger_kind.value,
+            "base_run_id": self.base_run_id,
+        }
+        if self.trigger_clarification_response_id:
+            trigger["clarification_id"] = self.trigger_clarification_response_id
+        return trigger
+
+
+@dataclass(frozen=True)
+class RerunQuestionRequest:
+    question_id: str
+    base_run_id: str
+    principal: QuestionPrincipal
+    patch: BindingPatch | None = None
+    capability_application: CapabilityApplication | None = None
+    execution_mode: ExecutionMode = ExecutionMode.QUEUED
+    idempotency_key: str | None = None
+    runtime_context: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.patch is not None and self.capability_application is not None:
+            raise ValueError(
+                "rerun request accepts a patch or capability application, not both"
+            )
+        if not self.question_id.strip():
+            raise ValueError("rerun request requires question_id")
+        if not self.base_run_id.strip():
+            raise ValueError("rerun request requires base_run_id")
+
+    def accepted_trigger(self) -> dict[str, object]:
+        return {
+            "kind": RunTriggerKind.RERUN.value,
+            "base_run_id": self.base_run_id,
+        }
+
 
 @dataclass(frozen=True)
 class AskResult:
@@ -176,6 +235,7 @@ class AskResult:
     result_data: dict[str, Any] | None = None
     error: str | None = None
     active_run_id: str | None = None
+    duration_ms: int | None = None
 
 
 def _normalize_max_budget_usd(value: Any, limits: AskRequestLimits) -> Decimal:

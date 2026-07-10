@@ -25,11 +25,22 @@ export function ConversationLedger({
   ) => Promise<void>;
 }) {
   const latestRun = conversation.runs[conversation.runs.length - 1];
-  const [openRunId, setOpenRunId] = useState<string | null>(latestRun.runId);
+  const defaultRunId =
+    conversation.runs.find(
+      (run) => run.runId === conversation.summary.primaryRunId
+    )?.runId ?? latestRun.runId;
+  const [openRunId, setOpenRunId] = useState<string | null>(defaultRunId);
+  const selectedContextRun = conversation.runs.find(
+    (run) => run.runId === openRunId && run.answer !== null
+  );
+  const contextRunId =
+    selectedContextRun?.runId === conversation.summary.primaryRunId
+      ? undefined
+      : selectedContextRun?.runId;
 
   useEffect(() => {
-    setOpenRunId(latestRun.runId);
-  }, [latestRun.runId]);
+    setOpenRunId(defaultRunId);
+  }, [defaultRunId]);
 
   return (
     <main className="conversation-main ledger-main">
@@ -60,7 +71,7 @@ export function ConversationLedger({
                   }
                   onClarificationState={async (question) => {
                     await onQuestionState(question, conversation.summary.firstQuestion);
-                    setOpenRunId(question.currentRunId);
+                    setOpenRunId(question.primaryRunId ?? question.latestRunId);
                   }}
                   onActionError={onActionError}
                   apiClient={apiClient}
@@ -74,6 +85,7 @@ export function ConversationLedger({
       <AskBar
         apiClient={apiClient}
         conversationId={conversation.summary.conversationId}
+        contextRunId={contextRunId}
         status={conversation.summary.status}
         onActionError={onActionError}
         onQuestionState={(question, submittedQuestion) =>

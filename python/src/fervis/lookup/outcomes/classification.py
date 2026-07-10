@@ -8,8 +8,8 @@ from fervis.lookup.clarification import (
     TargetReferenceUnsupported,
     clarify,
 )
-from fervis.lookup.fact_plan.fact_plan import AnswerPlan
-from fervis.lookup.fact_plan.operations import AggregateSpec
+from fervis.lookup.answer_program.model import AnswerProgram
+from fervis.lookup.answer_program.operations import AggregateSpec
 from fervis.lookup.plan_execution.operation_runtime import RelationEngineOutput
 from fervis.lookup.plan_execution.relations import (
     CompletenessStatus,
@@ -33,7 +33,7 @@ from fervis.lookup.outcomes.operation_semantics import (
 
 
 def classify_answer_result(
-    answer: AnswerPlan,
+    answer: AnswerProgram,
     *,
     engine_output: RelationEngineOutput,
     final_relation_id: str = "",
@@ -224,7 +224,7 @@ def _empty_relation_outcome(
 
 
 def _undefined_empty_aggregation_outcome(
-    answer: AnswerPlan,
+    answer: AnswerProgram,
     *,
     engine_output: RelationEngineOutput,
 ) -> FactResult | ExecutionIssue | None:
@@ -252,7 +252,7 @@ def _undefined_empty_aggregation_outcome(
     )
 
 
-def _render_relation_id(answer: AnswerPlan) -> str:
+def _render_relation_id(answer: AnswerProgram) -> str:
     if answer.render_spec is None or not answer.render_spec.relation_outputs:
         return ""
     relations = {
@@ -265,7 +265,7 @@ def _render_relation_id(answer: AnswerPlan) -> str:
 
 
 def _fulfilled_requested_fact_ids(
-    answer: AnswerPlan,
+    answer: AnswerProgram,
     relation_id: str,
 ) -> tuple[str, ...]:
     if answer.render_spec is None:
@@ -286,14 +286,14 @@ def _fulfilled_requested_fact_ids(
 
 
 def _empty_relation_kind(
-    answer: AnswerPlan,
+    answer: AnswerProgram,
     relation_id: str,
 ) -> EmptyRelationKind:
     return empty_relation_kind_for_output_relation(answer.operations, relation_id)
 
 
 def _rendered_scalars(
-    answer: AnswerPlan,
+    answer: AnswerProgram,
     *,
     engine_output: RelationEngineOutput,
 ) -> dict[str, object]:
@@ -307,7 +307,7 @@ def _rendered_scalars(
 
 
 def _rendered_scalar_proofs(
-    answer: AnswerPlan,
+    answer: AnswerProgram,
     *,
     engine_output: RelationEngineOutput,
 ) -> tuple[tuple[str, ...], ...]:

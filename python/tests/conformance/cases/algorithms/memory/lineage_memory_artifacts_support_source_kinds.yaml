@@ -3,11 +3,9 @@ description: Memory artifact reads support requested-fact framing and known-inpu
 kind: algorithm
 algorithm: memory.lineage_memory_artifacts
 input:
-  conversation_id: conversation_1
-  limit: 5
+  selected_run_ids: [run_1]
   memory_artifacts:
     - memory_artifact_id: mem_requested_fact_1
-      conversation_id: conversation_1
       run_id: run_1
       produced_by_step_id: step_question_contract
       source_kind: requested_fact
@@ -25,7 +23,6 @@ input:
               - id: fact_1
                 answer_fact: count open stores
     - memory_artifact_id: mem_known_input_1
-      conversation_id: conversation_1
       run_id: run_1
       produced_by_step_id: step_grounding
       source_kind: known_input

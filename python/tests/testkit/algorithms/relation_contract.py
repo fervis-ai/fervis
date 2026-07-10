@@ -9,7 +9,7 @@ from fervis.lookup.relation_catalog import (
     PaginationMode,
 )
 from fervis.lookup.plan_execution.relations import api_read_completeness_proof
-from fervis.lookup.fact_plan.relations import (
+from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
     Relation,
     RelationField,

@@ -15,12 +15,14 @@ input:
         sourceAnswer: We made 100.
         provenance:
           question_contract:
+            question_inputs: []
             answer_requests:
               - id: fact_1
                 answer_fact: money we made yesterday
                 answer_outputs:
-                  - description: total sales amount
-                    requested_value_frame: total sales amount
+                  - id: answer_1
+                    description: total sales amount
+                used_question_inputs: []
         addresses:
           - address: value.total
             kind: value
@@ -32,12 +34,14 @@ input:
         sourceAnswer: Staff One sold two products.
         provenance:
           question_contract:
+            question_inputs: []
             answer_requests:
               - id: fact_1
                 answer_fact: products Staff One sold today
                 answer_outputs:
-                  - description: product list
-                    requested_value_frame: product list
+                  - id: answer_1
+                    description: product list
+                used_question_inputs: []
         addresses:
           - address: entity.staff_1
             kind: entity
@@ -64,4 +68,3 @@ expect:
     private_cards:
       turn_latest.relation.answer_rows:
         kind: row_set
-

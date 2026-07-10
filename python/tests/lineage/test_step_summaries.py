@@ -7,7 +7,7 @@ from fervis.lineage.step_summary import (
     step_summary_json,
     step_semantic_items_from_json,
 )
-from fervis.lookup.fact_plan.values import FactValue, LiteralType
+from fervis.lookup.answer_program.values import FactValue, LiteralType
 from fervis.lookup.grounding.model import CanonicalInputLedger
 from fervis.lookup.lineage.explanation_metadata import (
     lineage_explanation_metadata,

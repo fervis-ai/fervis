@@ -159,6 +159,10 @@ class ScriptedLookup(QuestionLookupPort):
     def call_count(self) -> int:
         return len(self.calls)
 
+    def run_program(self, request, *, progress_sink=None) -> LookupExecutionResult:
+        del request, progress_sink
+        raise RuntimeError("scripted model lookup cannot execute answer programs")
+
     def last_request(self) -> LookupExecutionRequest | None:
         return self.calls[-1] if self.calls else None
 
@@ -219,6 +223,7 @@ def django_adapter(tmp_path: Path) -> ContractAdapter:
         lineage=DjangoQuestionLineagePort(),
         runs=DjangoQuestionLifecyclePort(),
         lookup=lookup,
+        program=lookup,
         ids=DeterministicIds(),
         adapter_ref="django_drf:test",
         runtime_version="test-runtime",

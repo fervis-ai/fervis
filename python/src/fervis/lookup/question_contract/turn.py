@@ -56,6 +56,7 @@ def generate_question_contract(
         current_question=request.current_question,
         conversation_context=request.conversation_context,
         conversation_resolution_overlay=request.conversation_resolution_overlay,
+        conversation_input_provenance=request.conversation_input_provenance,
         host=request.host,
     )
     invocation = QuestionContractTurnPrompt(prompt_request).to_model_invocation(
@@ -88,7 +89,7 @@ def generate_question_contract(
             current_question_context_texts=(
                 _question_contract_active_clarification_texts(request)
             ),
-            conversation_resolution_overlay=request.conversation_resolution_overlay,
+            conversation_input_provenance=request.conversation_input_provenance,
         )
         if isinstance(result.outcome, QuestionContract):
             validate_question_contract_against_question(
@@ -123,6 +124,7 @@ def _question_contract_context_texts(
             request.conversation_resolution_overlay
         )
     )
+    output.extend(request.conversation_input_provenance.context_texts())
     active = active_clarification_context(
         request.conversation_context,
         current_question=request.current_question,

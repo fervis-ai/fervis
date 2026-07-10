@@ -15,6 +15,7 @@ from fervis.lookup.conversation_resolution.model import (
     CandidateInterpretation,
     ClauseDependency,
     ClauseResolution,
+    ContinuationReplacement,
     ContextFrameChoice,
     ContextFrameChoiceKind,
     ConversationResolution,
@@ -25,6 +26,7 @@ from fervis.lookup.conversation_resolution.model import (
     DependencyKind,
     MeaningComponent,
     MeaningComponentKind,
+    PriorQuestionContinuation,
     RequestedValueFrame,
     SelectedFrameStatus,
     SourceEvidence,
@@ -237,6 +239,13 @@ def _clause_resolution(
         current_clause_text=current_clause_text,
         resolved_clause_text=resolved_clause_text,
     )
+    continuation = _continuation(
+        item.continuation,
+        context=context,
+        current_clause_text=current_clause_text,
+        selected_frame_id=requested_value_frame.selected_context_frame_id,
+        path=f"{path}.continuation",
+    )
     dependencies = _dependencies(
         item.dependencies,
         context=context,
@@ -250,6 +259,7 @@ def _clause_resolution(
         requested_value_frame=requested_value_frame,
         dependencies=dependencies,
         resolved_clause_text=resolved_clause_text,
+        continuation=continuation,
     )
 
 
@@ -429,6 +439,75 @@ def _dependencies(
         )
         for index, item in enumerate(_required_dicts(raw, path))
     )
+
+
+def _continuation(
+    raw: object,
+    *,
+    context: _ParseContext,
+    current_clause_text: str,
+    selected_frame_id: str | None,
+    path: str,
+) -> PriorQuestionContinuation | None:
+    if raw is None:
+        return None
+    item = provider_output.ContinuationOutput.parse(raw)
+    frame_id = _required_string(item.frame_id, path=f"{path}.frame_id")
+    frame = context.frames.get(frame_id)
+    if frame is None:
+        raise ValueError(f"{path}.frame_id is not an available frame")
+    if frame_id != selected_frame_id:
+        raise ValueError(f"{path}.frame_id must match selected context frame")
+    part_ids = {part.part_id for part in frame.replaceable_parts}
+    replacements = _continuation_replacements(
+        item.replacements,
+        part_ids=part_ids,
+        current_clause_text=current_clause_text,
+        path=f"{path}.replacements",
+    )
+    return PriorQuestionContinuation(
+        kind=_required_string(item.kind, path=f"{path}.kind"),
+        frame_id=frame_id,
+        replacements=replacements,
+    )
+
+
+def _continuation_replacements(
+    raw: object,
+    *,
+    part_ids: set[str],
+    current_clause_text: str,
+    path: str,
+) -> tuple[ContinuationReplacement, ...]:
+    output: list[ContinuationReplacement] = []
+    seen: set[str] = set()
+    for index, raw_item in enumerate(_required_dicts(raw, path)):
+        item_path = f"{path}[{index}]"
+        item = provider_output.ContinuationReplacementOutput.parse(raw_item)
+        part_id = _required_string(item.part_id, path=f"{item_path}.part_id")
+        if part_id not in part_ids:
+            raise ValueError(f"{item_path}.part_id is not replaceable on frame")
+        if part_id in seen:
+            raise ValueError(f"{item_path}.part_id is duplicated")
+        seen.add(part_id)
+        current_text = _required_string(
+            item.current_text,
+            path=f"{item_path}.current_text",
+        )
+        _require_copied_text(
+            text=current_text,
+            source=current_clause_text,
+            path=f"{item_path}.current_text",
+        )
+        output.append(
+            ContinuationReplacement(
+                part_id=part_id,
+                current_text=current_text,
+            )
+        )
+    if not output:
+        raise ValueError(f"{path} requires at least one replacement")
+    return tuple(output)
 
 
 def _dependency(
@@ -713,6 +792,16 @@ def _require_occurrence(
 ) -> None:
     if _occurrence_count(source, text) < occurrence:
         raise ValueError(f"{path} occurrence does not appear in source text")
+
+
+def _require_copied_text(
+    *,
+    text: str,
+    source: str,
+    path: str,
+) -> None:
+    if text not in source:
+        raise ValueError(f"{path} does not appear in source text")
 
 
 def _occurrence_count(source: str, text: str) -> int:

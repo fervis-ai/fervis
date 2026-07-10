@@ -19,7 +19,7 @@ from fervis.lookup.read_eligibility.recall import (
 from fervis.lookup.read_eligibility.surface import (
     read_eligibility_candidate_surface,
 )
-from fervis.lookup.fact_plan.values import FactValue
+from fervis.lookup.answer_program.values import FactValue
 
 from tests.testkit.assertions import (
     expects_rejection,

@@ -75,7 +75,7 @@ def test_common_question_interface_creates_question_with_canonical_payload() -> 
         ),
         question={
             "questionId": "question-1",
-            "currentRunId": "run-1",
+            "latestRunId": "run-1",
             "conversationId": "conv-1",
             "status": "RUNNING",
             "answer": None,
@@ -98,7 +98,7 @@ def test_common_question_interface_creates_question_with_canonical_payload() -> 
     assert response.status_code == 202
     assert response.payload == {
         "questionId": "question-1",
-        "currentRunId": "run-1",
+        "latestRunId": "run-1",
         "conversationId": "conv-1",
         "status": "RUNNING",
         "answer": None,
@@ -112,6 +112,117 @@ def test_common_question_interface_creates_question_with_canonical_payload() -> 
     assert questions.requests[0].idempotency_key == "idem-1"
 
 
+def test_common_question_interface_requires_persisted_state_after_admission() -> None:
+    from fervis.interfaces.common.questions import InterfacePrincipal
+    from fervis.questions import AskResult
+
+    questions = _FakeQuestions(
+        AskResult(
+            status="QUEUED",
+            conversation_id="conv-1",
+            question_id="question-1",
+            run_id="run-1",
+        ),
+        question=None,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="admitted question is missing its persisted projection",
+    ):
+        _question_interface(questions).create_question(
+            {"question": "How many orders were placed today?"},
+            principal=InterfacePrincipal(
+                principal_id="user-1",
+                tenant_id="tenant-1",
+            ),
+        )
+
+
+def test_common_question_interface_parses_explicit_context_run_id() -> None:
+    from fervis.interfaces.common.questions import InterfacePrincipal
+    from fervis.questions import AskResult
+
+    questions = _FakeQuestions(
+        AskResult(
+            status="RUNNING",
+            conversation_id="conv-1",
+            question_id="question-2",
+            run_id="run-3",
+        ),
+        question={"questionId": "question-2", "status": "RUNNING"},
+    )
+
+    _question_interface(questions).create_question(
+        {
+            "question": "Break that down by store.",
+            "conversationId": "conv-1",
+            "contextRunId": "run-variant",
+        },
+        principal=InterfacePrincipal(
+            principal_id="user-1",
+            tenant_id="tenant-1",
+        ),
+    )
+
+    assert questions.requests[0].context_run_id == "run-variant"
+
+
+def test_common_question_interface_rejects_non_string_context_run_id() -> None:
+    from fervis.interfaces.common.questions import (
+        InterfacePrincipal,
+        QuestionInterfaceValidationError,
+    )
+
+    with pytest.raises(QuestionInterfaceValidationError) as error:
+        _question_interface(_FakeQuestions()).create_question(
+            {
+                "question": "Break that down by store.",
+                "conversationId": "conv-1",
+                "contextRunId": 42,
+            },
+            principal=InterfacePrincipal(
+                principal_id="user-1",
+                tenant_id="tenant-1",
+            ),
+        )
+
+    assert (error.value.field, error.value.message) == (
+        "contextRunId",
+        "contextRunId must be a non-empty string.",
+    )
+
+
+def test_common_question_interface_maps_unavailable_context_run_to_its_field() -> None:
+    from fervis.interfaces.common.questions import (
+        InterfacePrincipal,
+        QuestionInterfaceValidationError,
+    )
+
+    class _UnavailableContextQuestions(_FakeQuestions):
+        def ask(self, request, *, event_sink=None):
+            del request, event_sink
+            raise PermissionError("context run is not an authorized answered run")
+
+    with pytest.raises(QuestionInterfaceValidationError) as error:
+        _question_interface(_UnavailableContextQuestions()).create_question(
+            {
+                "question": "Break that down by store.",
+                "conversationId": "conv-1",
+                "contextRunId": "run-unavailable",
+            },
+            principal=InterfacePrincipal(
+                principal_id="user-1",
+                tenant_id="tenant-1",
+            ),
+        )
+
+    assert (error.value.field, error.value.message) == (
+        "contextRunId",
+        "context run is not an authorized answered run",
+    )
+
+
 def test_common_question_interface_lists_subject_conversations() -> None:
     from fervis.interfaces.common.questions import InterfacePrincipal
 
@@ -121,7 +232,7 @@ def test_common_question_interface_lists_subject_conversations() -> None:
                 "conversationId": "conv-2",
                 "firstQuestion": "How many orders today?",
                 "latestQuestionId": "question-2",
-                "currentRunId": "run-3",
+                "latestRunId": "run-3",
                 "status": "RUNNING",
                 "runCount": 1,
                 "updatedAt": "2026-06-27T10:15:00Z",
@@ -130,7 +241,7 @@ def test_common_question_interface_lists_subject_conversations() -> None:
                 "conversationId": "conv-1",
                 "firstQuestion": "How many sales yesterday?",
                 "latestQuestionId": "question-1",
-                "currentRunId": "run-2",
+                "latestRunId": "run-2",
                 "status": "COMPLETED",
                 "runCount": 2,
                 "updatedAt": "2026-06-26T09:00:00Z",
@@ -150,7 +261,7 @@ def test_common_question_interface_lists_subject_conversations() -> None:
                 "conversationId": "conv-2",
                 "firstQuestion": "How many orders today?",
                 "latestQuestionId": "question-2",
-                "currentRunId": "run-3",
+                "latestRunId": "run-3",
                 "status": "RUNNING",
                 "runCount": 1,
                 "updatedAt": "2026-06-27T10:15:00Z",
@@ -159,7 +270,7 @@ def test_common_question_interface_lists_subject_conversations() -> None:
                 "conversationId": "conv-1",
                 "firstQuestion": "How many sales yesterday?",
                 "latestQuestionId": "question-1",
-                "currentRunId": "run-2",
+                "latestRunId": "run-2",
                 "status": "COMPLETED",
                 "runCount": 2,
                 "updatedAt": "2026-06-26T09:00:00Z",
@@ -379,19 +490,19 @@ def test_common_question_interface_continues_question_for_clarification_response
         ),
         question={
             "questionId": "question-1",
-            "currentRunId": "run-2",
+            "latestRunId": "run-2",
             "conversationId": "conv-1",
             "status": "RUNNING",
         },
     )
     interface = _question_interface(questions)
 
-    response = interface.continue_question(
+    response = interface.create_question_run(
         "question-1",
         {
             "question": "ABC Mall",
             "triggerKind": "clarification_response",
-            "triggerRunId": "run-1",
+            "baseRunId": "run-1",
             "clarificationId": "clar-1",
             "selectedOptionId": "store:abc",
         },
@@ -400,13 +511,153 @@ def test_common_question_interface_continues_question_for_clarification_response
 
     request = questions.continue_requests[0]
     assert response.status_code == 202
-    assert response.payload["currentRunId"] == "run-2"
+    assert response.payload["latestRunId"] == "run-2"
     assert request.question_id == "question-1"
     assert request.trigger_kind is RunTriggerKind.CLARIFICATION_RESPONSE
-    assert request.previous_run_id is None
-    assert request.trigger_clarification_response_run_id == "run-1"
+    assert request.base_run_id == "run-1"
     assert request.trigger_clarification_response_id == "clar-1"
     assert request.trigger_clarification_selected_option_id == "store:abc"
+
+
+def test_common_question_interface_parses_typed_deterministic_rerun() -> None:
+    from fervis.interfaces.common.questions import InterfacePrincipal
+    from fervis.lookup.answer_program.values import StringSetValuePayload
+    from fervis.questions import AskResult
+
+    questions = _FakeQuestions(
+        AskResult(
+            status="QUEUED",
+            conversation_id="conv-1",
+            question_id="question-1",
+            run_id="run-2",
+        ),
+        question={
+            "questionId": "question-1",
+            "primaryRunId": "run-1",
+            "latestRunId": "run-2",
+            "activeRunId": "run-2",
+            "conversationId": "conv-1",
+            "status": "COMPLETED",
+        },
+    )
+
+    response = _question_interface(questions).create_question_run(
+        "question-1",
+        {
+            "triggerKind": "rerun",
+            "baseRunId": "run-1",
+            "patch": {
+                "operations": [
+                    {
+                        "kind": "set",
+                        "parameterId": "population.sale_states",
+                        "value": {
+                            "kind": "string_set",
+                            "values": ["COMPLETED", "PLACED"],
+                        },
+                    }
+                ]
+            },
+        },
+        principal=InterfacePrincipal(principal_id="user-1", tenant_id="tenant-1"),
+        idempotency_key="rerun-1",
+    )
+
+    request = questions.rerun_requests[0]
+    operation = request.patch.operations[0]
+    assert response.status_code == 202
+    assert request.question_id == "question-1"
+    assert request.base_run_id == "run-1"
+    assert request.idempotency_key == "rerun-1"
+    assert operation.parameter_id == "population.sale_states"
+    assert isinstance(operation.value.payload, StringSetValuePayload)
+    assert operation.value.payload.values == ("COMPLETED", "PLACED")
+
+
+def test_common_question_interface_accepts_same_binding_rerun_without_patch() -> None:
+    from fervis.interfaces.common.questions import InterfacePrincipal
+    from fervis.questions import AskResult
+
+    questions = _FakeQuestions(
+        AskResult(
+            status="QUEUED",
+            conversation_id="conv-1",
+            question_id="question-1",
+            run_id="run-2",
+        ),
+        question={
+            "questionId": "question-1",
+            "primaryRunId": "run-1",
+            "latestRunId": "run-2",
+            "activeRunId": "run-2",
+            "conversationId": "conv-1",
+            "status": "COMPLETED",
+        },
+    )
+
+    response = _question_interface(questions).create_question_run(
+        "question-1",
+        {"triggerKind": "rerun", "baseRunId": "run-1"},
+        principal=InterfacePrincipal(
+            principal_id="user-1",
+            tenant_id="tenant-1",
+        ),
+    )
+
+    assert response.status_code == 202
+    assert questions.rerun_requests[0].patch is None
+
+
+def test_common_question_interface_parses_declared_capability_application() -> None:
+    from fervis.interfaces.common.questions import InterfacePrincipal
+    from fervis.lookup.answer_program import canonical_fact_value
+    from fervis.questions import AskResult
+
+    questions = _FakeQuestions(
+        AskResult(
+            status="QUEUED",
+            conversation_id="conv-1",
+            question_id="question-1",
+            run_id="run-2",
+        ),
+        question={
+            "questionId": "question-1",
+            "primaryRunId": "run-1",
+            "latestRunId": "run-2",
+            "activeRunId": "run-2",
+            "conversationId": "conv-1",
+            "status": "COMPLETED",
+        },
+    )
+
+    response = _question_interface(questions).create_question_run(
+        "question-1",
+        {
+            "triggerKind": "rerun",
+            "baseRunId": "run-1",
+            "capabilityApplication": {
+                "capabilityId": "filter_by_sale_channel",
+                "binding": {
+                    "parameterId": "semantic.sale_channels",
+                    "value": {"kind": "string_set", "values": ["STORE"]},
+                },
+            },
+        },
+        principal=InterfacePrincipal(
+            principal_id="user-1",
+            tenant_id="tenant-1",
+        ),
+    )
+
+    application = questions.rerun_requests[0].capability_application
+    assert response.status_code == 202
+    assert application is not None
+    assert application.capability_id == "filter_by_sale_channel"
+    assert application.binding.parameter_id == "semantic.sale_channels"
+    assert canonical_fact_value(application.binding.value) == ["STORE"]
+    assert application.binding.provenance.refs == (
+        "capability:filter_by_sale_channel",
+    )
 
 
 def test_common_question_interface_adds_transport_neutral_clarification_follow_up_actions() -> (
@@ -426,7 +677,7 @@ def test_common_question_interface_adds_transport_neutral_clarification_follow_u
         ),
         question={
             "questionId": "question-1",
-            "currentRunId": "run-1",
+            "latestRunId": "run-1",
             "conversationId": "conv-1",
             "status": "NEEDS_CLARIFICATION",
             "resultData": {
@@ -451,7 +702,7 @@ def test_common_question_interface_adds_transport_neutral_clarification_follow_u
             "kind": "provide_clarification",
             "questionId": "question-1",
             "conversationId": "conv-1",
-            "previousRunId": "run-1",
+            "baseRunId": "run-1",
             "clarificationId": "clar-1",
             "request": {
                 "method": "POST",
@@ -459,7 +710,7 @@ def test_common_question_interface_adds_transport_neutral_clarification_follow_u
                 "body": {
                     "question": "<clarification-answer>",
                     "triggerKind": "clarification_response",
-                    "triggerRunId": "run-1",
+                    "baseRunId": "run-1",
                     "clarificationId": "clar-1",
                     "selectedOptionId": "<selected-option-id>",
                 },
@@ -606,7 +857,7 @@ def test_fervis_fastapi_router_uses_configured_common_question_interface() -> No
     assert response.status_code == 202
     assert response.json() == {
         "questionId": "question-1",
-        "currentRunId": "run-1",
+        "latestRunId": "run-1",
         "status": "RUNNING",
     }
     assert interface.created == [
@@ -631,7 +882,7 @@ def test_fervis_fastapi_router_uses_configured_common_question_interface() -> No
                 "conversationId": "conv-1",
                 "firstQuestion": "How many orders?",
                 "latestQuestionId": "question-1",
-                "currentRunId": "run-1",
+                "latestRunId": "run-1",
                 "status": "RUNNING",
                 "runCount": 1,
                 "updatedAt": "2026-06-27T10:15:00Z",
@@ -652,7 +903,7 @@ def test_fervis_fastapi_router_uses_configured_common_question_interface() -> No
         json={
             "question": "ABC Mall",
             "triggerKind": "clarification_response",
-            "triggerRunId": "run-1",
+            "baseRunId": "run-1",
             "clarificationId": "clar-1",
         },
         headers={"Idempotency-Key": "idem-2"},
@@ -660,7 +911,7 @@ def test_fervis_fastapi_router_uses_configured_common_question_interface() -> No
     assert response.status_code == 202
     assert response.json() == {
         "questionId": "question-1",
-        "currentRunId": "run-2",
+        "latestRunId": "run-2",
         "status": "RUNNING",
     }
     assert interface.continued == [
@@ -669,7 +920,7 @@ def test_fervis_fastapi_router_uses_configured_common_question_interface() -> No
             "payload": {
                 "question": "ABC Mall",
                 "triggerKind": "clarification_response",
-                "triggerRunId": "run-1",
+                "baseRunId": "run-1",
                 "clarificationId": "clar-1",
             },
             "principal_id": "user-1",
@@ -682,6 +933,41 @@ def test_fervis_fastapi_router_uses_configured_common_question_interface() -> No
             "idempotency_key": "idem-2",
         }
     ]
+
+    rerun_payload = {
+        "triggerKind": "rerun",
+        "baseRunId": "run-1",
+        "patch": {
+            "operations": [
+                {
+                    "kind": "set",
+                    "parameterId": "population.sale_states",
+                    "value": {
+                        "kind": "string_set",
+                        "values": ["COMPLETED", "PLACED"],
+                    },
+                }
+            ]
+        },
+    }
+    rerun_response = client.post(
+        "/fervis/questions/question-1/runs/",
+        json=rerun_payload,
+        headers={"Idempotency-Key": "idem-rerun"},
+    )
+    assert rerun_response.status_code == 202
+    assert interface.continued[1] == {
+        "question_id": "question-1",
+        "payload": rerun_payload,
+        "principal_id": "user-1",
+        "tenant_id": "default",
+        "read_context_ref": {
+            "scheme": "fastapi_principal",
+            "key": "user-1",
+            "tenant_key": None,
+        },
+        "idempotency_key": "idem-rerun",
+    }
 
     response = client.get("/fervis/questions/question-1/runs/run-1/")
     assert response.status_code == 200
@@ -722,7 +1008,7 @@ def test_fervis_fastapi_router_captures_configured_dependency_principal() -> Non
         json={
             "question": "ABC Mall",
             "triggerKind": "clarification_response",
-            "triggerRunId": "run-1",
+            "baseRunId": "run-1",
             "clarificationId": "clar-1",
         },
     )
@@ -829,7 +1115,7 @@ def test_fervis_flask_blueprint_uses_configured_common_question_interface() -> N
     assert response.status_code == 202
     assert response.get_json() == {
         "questionId": "question-1",
-        "currentRunId": "run-1",
+        "latestRunId": "run-1",
         "status": "RUNNING",
     }
     assert interface.created == [
@@ -854,7 +1140,7 @@ def test_fervis_flask_blueprint_uses_configured_common_question_interface() -> N
                 "conversationId": "conv-1",
                 "firstQuestion": "How many orders?",
                 "latestQuestionId": "question-1",
-                "currentRunId": "run-1",
+                "latestRunId": "run-1",
                 "status": "RUNNING",
                 "runCount": 1,
                 "updatedAt": "2026-06-27T10:15:00Z",
@@ -875,7 +1161,7 @@ def test_fervis_flask_blueprint_uses_configured_common_question_interface() -> N
         json={
             "question": "ABC Mall",
             "triggerKind": "clarification_response",
-            "triggerRunId": "run-1",
+            "baseRunId": "run-1",
             "clarificationId": "clar-1",
         },
         headers={"Idempotency-Key": "idem-2"},
@@ -887,7 +1173,7 @@ def test_fervis_flask_blueprint_uses_configured_common_question_interface() -> N
             "payload": {
                 "question": "ABC Mall",
                 "triggerKind": "clarification_response",
-                "triggerRunId": "run-1",
+                "baseRunId": "run-1",
                 "clarificationId": "clar-1",
             },
             "principal_id": "user-1",
@@ -961,7 +1247,7 @@ def test_agent_run_event_projection_adds_follow_up_actions_once() -> None:
         provide_clarification_action(
             "conv-1",
             question_id="question-1",
-            previous_run_id="run-1",
+            base_run_id="run-1",
             clarification_id="clar-1",
             tenant_id="tenant-1",
             principal_id="user-1",
@@ -1066,6 +1352,7 @@ class _FakeQuestions:
     def __post_init__(self) -> None:
         self.requests = []
         self.continue_requests = []
+        self.rerun_requests = []
         self.conversation_requests = []
         self.state_requests = []
         self.list_requests = []
@@ -1083,6 +1370,13 @@ class _FakeQuestions:
         self.continue_requests.append(request)
         if self.result is None:
             raise AssertionError("questions.continue_question should not be called")
+        return self.result
+
+    def rerun_question(self, request, *, event_sink=None):
+        del event_sink
+        self.rerun_requests.append(request)
+        if self.result is None:
+            raise AssertionError("questions.rerun_question should not be called")
         return self.result
 
     def list_conversations(self, *, principal):
@@ -1176,7 +1470,7 @@ class _FakeQuestionInterface:
                         "conversationId": "conv-1",
                         "firstQuestion": "How many orders?",
                         "latestQuestionId": "question-1",
-                        "currentRunId": "run-1",
+                        "latestRunId": "run-1",
                         "status": "RUNNING",
                         "runCount": 1,
                         "updatedAt": "2026-06-27T10:15:00Z",
@@ -1199,12 +1493,12 @@ class _FakeQuestionInterface:
             202,
             {
                 "questionId": "question-1",
-                "currentRunId": "run-1",
+                "latestRunId": "run-1",
                 "status": "RUNNING",
             },
         )
 
-    def continue_question(
+    def create_question_run(
         self,
         question_id,
         payload,
@@ -1226,7 +1520,7 @@ class _FakeQuestionInterface:
             202,
             {
                 "questionId": question_id,
-                "currentRunId": "run-2",
+                "latestRunId": "run-2",
                 "status": "RUNNING",
             },
         )

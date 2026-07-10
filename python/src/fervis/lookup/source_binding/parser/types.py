@@ -5,10 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from fervis.lookup.fact_plan.relations import (
-    EndpointParamBinding,
-    RelationSourcePopulationChoice,
-    RelationSourceRowFilter,
+from fervis.lookup.source_binding.compiler_ir import (
+    DraftEndpointParamBinding,
+    DraftRelationSourcePopulationChoice,
 )
 
 
@@ -22,13 +21,12 @@ __all__ = [
 
 @dataclass(frozen=True)
 class ParamDecisionParse:
-    binding_sets: tuple[tuple[EndpointParamBinding, ...], ...]
+    binding_sets: tuple[tuple[DraftEndpointParamBinding, ...], ...]
 
 
 @dataclass(frozen=True)
 class RowPredicateParse:
-    filters: tuple[RelationSourceRowFilter, ...] = ()
-    population_choices: tuple[RelationSourcePopulationChoice, ...] = ()
+    population_choices: tuple[DraftRelationSourcePopulationChoice, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -40,4 +38,4 @@ class PopulationChoiceSet:
 @dataclass(frozen=True)
 class DerivedFiniteChoiceParamDecisions:
     param_decisions: dict[str, dict[str, Any]]
-    population_choices: tuple[RelationSourcePopulationChoice, ...]
+    population_choices: tuple[DraftRelationSourcePopulationChoice, ...]

@@ -1,0 +1,29 @@
+id: decoder_rejects_wrong_container_kind
+kind: algorithm
+algorithm: answer_program.decode
+description: Canonical decoding parses collection fields according to their declared contract types.
+input:
+  schema_revision: 1
+  program:
+    schema_revision: 1
+    program:
+      $type: AnswerProgram
+      fields:
+        fact_template: {$tuple: []}
+        fulfillment: {$tuple: []}
+        parameters: {$tuple: []}
+        capabilities: {$tuple: []}
+        relations: {$tuple: []}
+        operations: {$list: []}
+        render_spec: null
+        compatibility:
+          $type: ProgramCompatibility
+          fields:
+            schema_revision: 1
+            compiler_version: ""
+            function_semantics: {$tuple: []}
+            source_contracts: {$tuple: []}
+expect:
+  result_equals:
+    status: rejected
+    code: invalid_answer_program

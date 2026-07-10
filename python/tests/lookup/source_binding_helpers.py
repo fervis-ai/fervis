@@ -445,11 +445,19 @@ def source_binding_payload_from_fact_plan_with_invocation_overrides(
     invocations = payload.get("outcome", {}).get("source_invocations")
     if not isinstance(invocations, list):
         raise AssertionError("source binding payload does not contain invocations")
+    default_decisions_by_override: list[dict[str, dict[str, str]]] = []
     for override in invocation_overrides:
         invocation = _source_binding_invocation_for_override(
             invocations,
             override=override,
             prompt=prompt,
+        )
+        default_decisions_by_override.append(
+            _default_param_decisions(
+                prompt=prompt,
+                invocation=invocation,
+                param_ids=tuple(override.get("use_default_param_ids") or ()),
+            )
         )
         invocation.update(
             {
@@ -461,10 +469,96 @@ def source_binding_payload_from_fact_plan_with_invocation_overrides(
                     "requested_fact_id",
                     "source_candidate_id",
                     "plan_shape",
+                    "row_predicate_choices",
+                    "use_default_param_ids",
                 }
             }
         )
-    return source_binding_payload_for_one_call(payload, prompt=prompt)
+    normalized = source_binding_payload_for_one_call(payload, prompt=prompt)
+    normalized_invocations = normalized.get("outcome", {}).get("source_invocations")
+    if not isinstance(normalized_invocations, list):
+        raise AssertionError("source binding payload does not contain invocations")
+    for override, default_decisions in zip(
+        invocation_overrides,
+        default_decisions_by_override,
+        strict=True,
+    ):
+        invocation = _source_binding_invocation_for_override(
+            normalized_invocations,
+            override=override,
+            prompt=prompt,
+        )
+        invocation.setdefault("param_decisions", {}).update(default_decisions)
+        reviews = invocation.get("finite_choice_param_reviews")
+        if isinstance(reviews, dict):
+            for param_id in default_decisions:
+                reviews.pop(param_id, None)
+        _apply_row_predicate_choices(
+            invocation,
+            choices=dict(override.get("row_predicate_choices") or {}),
+        )
+    return normalized
+
+
+def _apply_row_predicate_choices(
+    invocation: dict[str, Any],
+    *,
+    choices: dict[str, tuple[str, ...]],
+) -> None:
+    reviews = invocation.get("row_predicate_reviews")
+    if not isinstance(reviews, dict):
+        raise AssertionError("source binding invocation requires row predicate reviews")
+    for field_id, included_values in choices.items():
+        matching_ids = tuple(
+            predicate_id
+            for predicate_id in reviews
+            if predicate_id.rsplit(".", 1)[-1] == field_id
+        )
+        if len(matching_ids) != 1:
+            raise AssertionError(
+                f"source binding row predicate not found: {field_id}"
+            )
+        review = reviews[matching_ids[0]]
+        for choice_review in review.get("choice_reviews") or ():
+            included = str(choice_review.get("choice_option_id") or "") in set(
+                included_values
+            )
+            for result in (choice_review.get("population_test_results") or {}).values():
+                result["test_effect"] = (
+                    "SATISFIES_TEST" if included else "CONFLICTS_WITH_TEST"
+                )
+                result["because"] = (
+                    f"The conformance scenario {'includes' if included else 'excludes'} "
+                    f"{field_id}={choice_review.get('choice_option_id')}."
+                )
+
+
+def _default_param_decisions(
+    *,
+    prompt: str,
+    invocation: dict[str, Any],
+    param_ids: tuple[str, ...],
+) -> dict[str, dict[str, str]]:
+    if not param_ids:
+        return {}
+    target = _binding_target_for_invocation(prompt, invocation)
+    options_by_param = _source_candidate_param_decision_options(prompt).get(
+        target.source_candidate_id,
+        {},
+    )
+    decisions: dict[str, dict[str, str]] = {}
+    for param_id in param_ids:
+        option = options_by_param.get(param_id) or {}
+        if option.get("omit_decision") != "use_default":
+            raise AssertionError(
+                f"source binding param has no catalog default: {param_id}"
+            )
+        decisions[param_id] = {
+            "population_intent": f"Use the declared default for {param_id}.",
+            "match_basis_explanation": str(option.get("omit_meaning") or ""),
+            "param_decision_id": str(option.get("non_bind_decision_id") or ""),
+        }
+    return decisions
 
 
 def _source_binding_invocation_for_override(

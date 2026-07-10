@@ -31,7 +31,7 @@ from fervis.model_io.structured_output.specs import required_tool_spec
 
 class ConversationResolutionTurnPrompt(TurnPromptBase):
     turn_name = "conversation resolution"
-    turn_task = "resolve the current utterance into a standalone factual question"
+    turn_task = "resolve how the current utterance depends on prior conversation context"
 
     def __init__(
         self,
@@ -148,9 +148,8 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                     "that clause.",
                     "Use ambiguous when the frame could be the intended value frame "
                     "but visible context is insufficient to choose it.",
-                    "Changed entity, row set, time, place, or other scope does not "
-                    "make the value frame different. Put those changes in "
-                    "dependencies.",
+                    "Use dependencies only for context-dependent references or "
+                    "scopes that are not replacement of a visible prior part.",
                     "Broad value wording is not conflict evidence. Broad value "
                     "wording cannot be used in current_conflict_quotes.",
                     "Do not create an unsupported domain-specific value frame from broad "
@@ -160,6 +159,17 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                     "For resolved clauses, do not use ambiguous. If a clause cannot "
                     "choose one value frame from current text and available context, "
                     "return unresolved with clause_resolutions=[].",
+                ),
+            ),
+            builder.instruction_block(
+                "Prior Question Continuation",
+                (
+                    "Use continuation only when the current clause is a follow-up to exactly one selected context frame, and the clause provides new text that replaces one or more visible replaceable_parts on that frame.",
+                    "List only changed parts. Each replacement must copy a visible replaceable_parts[].part_id and exact current_text from current_clause_text.",
+                    "Omitted replaceable_parts are carried by the backend.",
+                    "Replacement current_text is current-turn evidence, not a dependency or meaning_component.",
+                    "If the continued frame or replaced part is not clear, return unresolved.",
+                    "When continuation is present, resolved_clause_text must state the compact resolved factual request after applying replacements.",
                 ),
             ),
             builder.instruction_block(

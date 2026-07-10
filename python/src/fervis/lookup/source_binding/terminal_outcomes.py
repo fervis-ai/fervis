@@ -10,7 +10,7 @@ from fervis.lookup.fact_plan.fact_plan import (
     BlockedFactBasis,
     PlanImpossible,
 )
-from fervis.lookup.fact_plan.values import known_input_id_for_value
+from fervis.lookup.answer_program.values import known_input_id_for_value
 from fervis.lookup.fact_planning.fact_requirements import (
     fact_endpoint_requirements,
 )

@@ -8,6 +8,7 @@ from fervis.lineage.views.detail import (
     include_step_decision,
 )
 from fervis.lineage.enums import ContributionOrigin
+from fervis.lineage.views.json_payload import view_json
 from fervis.lineage.views.model import (
     AnswerPresentationView,
     CatalogEndpointView,
@@ -189,12 +190,12 @@ def _run_json(
         {
             "run_id": run.run_id,
             "run_number": run.run_number,
+            "kind": run.kind,
             "trigger_kind": run.trigger_kind,
             "result_kind": run.result_kind,
-            "trigger_clarification_response_run_id": (
-                run.trigger_clarification_response_run_id
-            ),
+            "base_run_id": run.base_run_id,
             "trigger_clarification_response_id": run.trigger_clarification_response_id,
+            "program_derivation": view_json(run.program_derivation),
             "activated_memory_ids": run.activated_memory_ids,
             "memory_artifacts": tuple(
                 _memory_artifact_json(artifact) for artifact in run.memory_artifacts
@@ -513,7 +514,7 @@ def _clarification_json(
             provide_clarification_action(
                 conversation_id,
                 question_id=question_id,
-                previous_run_id=run_id,
+                base_run_id=run_id,
                 clarification_id=clarification.clarification_id,
             ),
         ),

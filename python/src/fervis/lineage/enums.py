@@ -17,7 +17,11 @@ class RunTriggerKind(StrEnum):
     CLARIFICATION_RESPONSE = "clarification_response"
     RETRY = "retry"
     RERUN = "rerun"
-    REPLAY = "replay"
+
+
+class QuestionRunKind(StrEnum):
+    MODEL_ASSISTED = "model_assisted"
+    DETERMINISTIC = "deterministic"
 
 
 class RunResultKind(StrEnum):
@@ -176,7 +180,6 @@ class ArtifactKind(StrEnum):
     DETERMINISTIC_OUTPUT = "deterministic_output"
     SOURCE_RESPONSE = "source_response"
     ROW_CONTEXT = "row_context"
-    COMPILED_EXECUTION = "compiled_execution"
 
 
 ARTIFACT_KINDS_REQUIRING_MODEL_CALL = (

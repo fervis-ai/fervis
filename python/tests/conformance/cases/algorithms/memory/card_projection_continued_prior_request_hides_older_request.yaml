@@ -14,19 +14,20 @@ input:
       sourceAnswer: Staff One answer.
       provenance:
         question_contract:
+          question_inputs:
+          - id: fact_1_entity_1
+            kind: literal_text
+            source: question_context
+            text: Staff One
+            resolved_value_text: Staff One
+            role: reference_value
           answer_requests:
           - id: fact_1
             answer_fact: products Staff One sold today
             answer_outputs:
-            - description: answer
-              requested_value_frame: answer
-            known_inputs:
-            - id: fact_1_entity_1
-              kind: literal_text
-              source: question_context
-              text: Staff One
-              resolved_value_text: Staff One
-              role: reference_value
+            - id: answer_1
+              description: answer
+            used_question_inputs: [fact_1_entity_1]
       addresses:
       - address: entity.grounded_fact_1_entity_1
         kind: entity
@@ -43,19 +44,20 @@ input:
           activated_memory_ids:
           - turn_products.prior_request.fact_1
         question_contract:
+          question_inputs:
+          - id: fact_1_entity_1
+            kind: literal_text
+            source: question_context
+            text: Staff One
+            resolved_value_text: Staff One
+            role: reference_value
           answer_requests:
           - id: fact_1
             answer_fact: total sales for products Staff One sold today
             answer_outputs:
-            - description: answer
-              requested_value_frame: answer
-            known_inputs:
-            - id: fact_1_entity_1
-              kind: literal_text
-              source: question_context
-              text: Staff One
-              resolved_value_text: Staff One
-              role: reference_value
+            - id: answer_1
+              description: answer
+            used_question_inputs: [fact_1_entity_1]
       addresses:
       - address: entity.grounded_fact_1_entity_1
         kind: entity

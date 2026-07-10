@@ -15,9 +15,19 @@ ClauseResolutionOutput = provider_output_type(
         "current_clause_text",
         "occurrence",
         "requested_value_frame",
+        "continuation",
         "dependencies",
         "resolved_clause_text",
     ),
+    optional_fields=("continuation",),
+)
+ContinuationOutput = provider_output_type(
+    "ContinuationOutput",
+    ("kind", "frame_id", "replacements"),
+)
+ContinuationReplacementOutput = provider_output_type(
+    "ContinuationReplacementOutput",
+    ("part_id", "current_text"),
 )
 RequestedValueFrameOutput = provider_output_type(
     "RequestedValueFrameOutput",

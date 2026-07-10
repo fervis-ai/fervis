@@ -434,7 +434,7 @@ def test_fervis_explain_clarifications_include_followup_next_actions() -> None:
         provide_clarification_action(
             "conversation_1",
             question_id="question_1",
-            previous_run_id="run_1",
+            base_run_id="run_1",
             clarification_id="clar_1",
         )
     ]

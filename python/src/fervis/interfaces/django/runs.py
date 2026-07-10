@@ -7,11 +7,7 @@ from typing import Any
 from fervis.run_work import FailQueuedRunRequest, QueuedRunRequest
 
 from .question_run_ports import django_run_work_service
-from .run_views import (
-    get_run_view,
-    with_lineage_usage,
-    with_worker_snapshot,
-)
+from .run_views import get_run_view
 
 
 def process_run_work(
@@ -30,7 +26,7 @@ def process_run_work(
     run = get_run_view(run_id)
     if run is None:
         raise RuntimeError("fervis interface view was not finalized")
-    return with_lineage_usage(with_worker_snapshot(run))
+    return run
 
 
 def fail_run_work(
@@ -51,11 +47,11 @@ def fail_run_work(
     run = get_run_view(run_id)
     if run is None:
         raise RuntimeError("fervis interface view was not failed")
-    return with_lineage_usage(with_worker_snapshot(run))
+    return run
 
 
 def get_run(run_id: str, *, tenant_id: str | None = None) -> dict[str, Any] | None:
     run = get_run_view(run_id, tenant_id=tenant_id)
     if run is None:
         return None
-    return with_lineage_usage(with_worker_snapshot(run))
+    return run

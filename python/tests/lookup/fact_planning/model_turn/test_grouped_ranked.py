@@ -1,7 +1,11 @@
 from ._helpers import *  # noqa: F403
 
 from fervis.lookup.plan_execution.operation_engine import execute_operations
-from fervis.lookup.plan_execution.operation_runtime import RelationEngineInput
+from fervis.lookup.plan_execution.operation_runtime import (
+    ExecutableOperation,
+    RelationEngineInput,
+    ResolvedRankSpec,
+)
 from fervis.lookup.plan_execution.relations import (
     CompletenessProof,
     CompletenessStatus,
@@ -10,6 +14,9 @@ from fervis.lookup.plan_execution.relations import (
 from fervis.lookup.fact_planning.grouped_ranked_choices import (
     selected_grouped_ranked_operation,
 )
+from fervis.lookup.answer_program.inputs import resolve_value_expression
+from fervis.lookup.answer_program import BindingSet
+from fervis.lookup.answer_program.operations import RankSpec
 
 
 def _ranked_payload(*, metric_id="metric_1", metric_field_id="metric_total", function_id="function_sum", function_value="sum"):
@@ -550,7 +557,31 @@ def test_ranked_aggregate_excludes_null_answer_group_keys_before_ranking():
                     completeness=CompletenessProof(status=CompletenessStatus.COMPLETE),
                 ),
             ),
-            operations=plan.operations,
+            operations=tuple(
+                ExecutableOperation(
+                    id=operation.id,
+                    spec=ResolvedRankSpec(
+                        input_relation=operation.spec.input_relation,
+                        order_by=operation.spec.order_by,
+                        tie_policy=operation.spec.tie_policy,
+                        limit=int(
+                            resolve_value_expression(
+                                operation.spec.limit,
+                                bindings=BindingSet(),
+                            ).value
+                        ),
+                        tie_breakers=operation.spec.tie_breakers,
+                    ),
+                    output_relation=operation.output_relation,
+                )
+                if isinstance(operation.spec, RankSpec)
+                else ExecutableOperation(
+                    id=operation.id,
+                    spec=operation.spec,
+                    output_relation=operation.output_relation,
+                )
+                for operation in plan.operations
+            ),
         )
     )
 

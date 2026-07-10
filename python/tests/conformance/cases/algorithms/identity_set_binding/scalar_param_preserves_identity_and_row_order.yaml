@@ -1,5 +1,5 @@
 id: scalar_param_preserves_identity_and_row_order
-description: Repeated singleton invocations preserve identity order and per-response row order.
+description: Repeated singleton invocations use canonical identity order and preserve per-response row order.
 migrates:
   - api/tests/fervis/lookup/plan_execution/test_memory_identity_set_compilation.py::test_identity_set_binding_preserves_identity_order_and_row_order
 kind: algorithm
@@ -20,5 +20,5 @@ input:
           - {sale_id: sale_1b, store_id: store_1}
 expect:
   result_contains:
-    request_param_values: [store_2, store_1]
-    sale_ids: [sale_2a, sale_2b, sale_1a, sale_1b]
+    request_param_values: [store_1, store_2]
+    sale_ids: [sale_1a, sale_1b, sale_2a, sale_2b]

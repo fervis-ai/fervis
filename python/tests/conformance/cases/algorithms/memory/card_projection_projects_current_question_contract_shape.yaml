@@ -27,7 +27,6 @@ input:
                 answer_outputs:
                   - id: answer_1
                     description: total sales amount
-                    requested_value_frame: total sales amount
                 used_question_inputs:
                   - input_period
         addresses:

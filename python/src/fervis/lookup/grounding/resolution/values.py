@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 import re
 
-from fervis.lookup.fact_plan.values import FactValue
+from fervis.lookup.answer_program.values import FactValue
 
 
 def _dedupe_values(values: tuple[FactValue, ...]) -> tuple[FactValue, ...]:

@@ -1,6 +1,6 @@
 """Build typed source-candidate registries from canonical candidate cards."""
 
-from ._shared import Any, RelationSource, RelationSourceAppliedFilter, SourceKind
+from ._shared import Any, DraftRelationSource, DraftRelationSourceAppliedFilter, SourceKind
 from .bindings import _bound_param_bindings
 from .model import SourceCandidate
 
@@ -90,7 +90,7 @@ def _new_api_candidate(
         id=str(payload.get("source_candidate_id") or ""),
         requested_fact_id=requested_fact_id,
         kind="new_api_read",
-        source=RelationSource(
+        source=DraftRelationSource(
             kind=SourceKind.API_READ,
             read_id=str(payload.get("read_id") or ""),
             row_source_id=str(payload.get("row_source_id") or ""),
@@ -118,7 +118,7 @@ def _same_scope_candidate(
         id=str(payload.get("source_candidate_id") or ""),
         requested_fact_id=requested_fact_id,
         kind="same_scope_api_read",
-        source=RelationSource(
+        source=DraftRelationSource(
             kind=SourceKind.API_READ,
             read_id=str(payload.get("read_id") or ""),
             row_source_id=str(payload.get("row_source_id") or ""),
@@ -266,7 +266,7 @@ def _prior_rows_candidate(
         id=str(candidate.get("source_candidate_id") or ""),
         requested_fact_id=requested_fact_id,
         kind="prior_answer_rows",
-        source=RelationSource(
+        source=DraftRelationSource(
             kind=SourceKind.MEMORY_READ,
             memory_relation_id=str(candidate.get("memory_relation_id") or ""),
         ),
@@ -290,8 +290,9 @@ def _calendar_candidate(
         id=str(candidate.get("source_candidate_id") or ""),
         requested_fact_id=requested_fact_id,
         kind="calendar",
-        source=RelationSource(
+        source=DraftRelationSource(
             kind=SourceKind.GENERATED_CALENDAR,
+            row_source_id=str(candidate.get("row_source_id") or ""),
             calendar_id=str(candidate.get("calendar_id") or ""),
         ),
         params=tuple(candidate.get("params") or ()),
@@ -340,8 +341,8 @@ def _candidate_applied_param_binding_sets(
 
 def _applied_filters(
     candidate: dict[str, Any],
-) -> tuple[RelationSourceAppliedFilter, ...]:
-    return RelationSourceAppliedFilter.from_payloads(
+) -> tuple[DraftRelationSourceAppliedFilter, ...]:
+    return DraftRelationSourceAppliedFilter.from_payloads(
         item
         for item in candidate.get("applied_filters") or ()
         if isinstance(item, dict)

@@ -1,13 +1,11 @@
 id: lineage_memory_artifacts_keeps_run_artifacts_together
-description: Memory lookup limits the recent run window, not individual artifacts within a selected run.
+description: Memory lookup keeps all artifacts within an explicitly selected primary run.
 kind: algorithm
 algorithm: memory.lineage_memory_artifacts
 input:
-  conversation_id: conversation_1
-  limit: 1
+  selected_run_ids: [run_1]
   memory_artifacts:
     - memory_artifact_id: mem_requested_fact_1
-      conversation_id: conversation_1
       run_id: run_1
       source_kind: requested_fact
       requested_fact_id: fact_1
@@ -24,7 +22,6 @@ input:
               - id: fact_1
                 answer_fact: count open stores
     - memory_artifact_id: mem_fact_result_1
-      conversation_id: conversation_1
       run_id: run_1
       source_kind: fact_result
       fact_result_id: result_1

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from fervis.lookup.fact_plan.relations import RelationSourceRowFilter
+from fervis.lookup.source_binding.compiler_ir import (
+    DraftRelationSourceRowFilter,
+)
 from fervis.lookup.relation_catalog import IdentityMetadata
 from fervis.lookup.source_binding.evidence_types import evidence_item_can_measure
 from fervis.lookup.source_binding.model import BoundSource, SourceEvidenceItem, SourceField, SourceFulfillment
@@ -135,7 +137,7 @@ def candidate_source_fields(
     *,
     evidence_items: tuple[SourceEvidenceItem, ...] = (),
     fulfillments: tuple[SourceFulfillment, ...] = (),
-    row_filters: tuple[RelationSourceRowFilter, ...] = (),
+    row_filters: tuple[DraftRelationSourceRowFilter, ...] = (),
 ) -> tuple[SourceField, ...]:
     fields = [
         SourceField(

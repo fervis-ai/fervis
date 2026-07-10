@@ -32,14 +32,16 @@ describe("Fervis API boundary decoder", () => {
     );
   });
 
-  it("decodes conversation summaries without a current run id", () => {
+  it("decodes an empty primary-run projection", () => {
     const decoded = decodeConversationList({
       conversations: [
         {
           conversationId: "conv_pending",
           firstQuestion: "Which staff person made the most sales this month?",
           latestQuestionId: "q_pending",
-          currentRunId: null,
+          primaryRunId: null,
+          latestRunId: null,
+          activeRunId: null,
           status: "RUNNING",
           runCount: 1,
           updatedAt: "2026-06-29T08:36:00.438620+00:00"
@@ -50,7 +52,7 @@ describe("Fervis API boundary decoder", () => {
     if (!decoded.ok) {
       throw new Error(decoded.error.message);
     }
-    expect(decoded.value.conversations[0]?.currentRunId).toBeNull();
+    expect(decoded.value.conversations[0]?.primaryRunId).toBeNull();
   });
 
   it("decodes question state without requiring worker or usage diagnostics", () => {
@@ -60,7 +62,7 @@ describe("Fervis API boundary decoder", () => {
       throw new Error(decoded.error.message);
     }
     expect(decoded.ok).toBe(true);
-    expect(decoded.value.currentRunId).toBe("run_sales");
+    expect(decoded.value.primaryRunId).toBe("run_sales");
     expect(decoded.value.resultData?.kind).toBe("answer");
   });
 
@@ -70,7 +72,9 @@ describe("Fervis API boundary decoder", () => {
       conversationId: "conv_live",
       tenantId: "default",
       status: "COMPLETED",
-      currentRunId: "run_live",
+      primaryRunId: "run_live",
+      latestRunId: "run_live",
+      activeRunId: null,
       question: "How many in-person sales happened this month?",
       answer: "1",
       resultData: {
@@ -100,7 +104,9 @@ describe("Fervis API boundary decoder", () => {
       questionId: "q_clarify",
       conversationId: "conv_clarify",
       status: "NEEDS_CLARIFICATION",
-      currentRunId: "run_clarify",
+      primaryRunId: "run_clarify",
+      latestRunId: "run_clarify",
+      activeRunId: null,
       question: "Show me performance for ABC Mall yesterday.",
       answer: null,
       resultData: {
@@ -155,7 +161,13 @@ describe("Fervis API boundary decoder", () => {
         {
           runId: "run_clarify",
           runNumber: 1,
+          kind: "model_assisted",
           triggerKind: "initial",
+          baseRunId: null,
+          programId: null,
+          invocationId: null,
+          patchId: null,
+          revisionId: null,
           questionId: "q_clarify",
           conversationId: "conv_clarify",
           status: "NEEDS_CLARIFICATION",
@@ -227,7 +239,13 @@ describe("Fervis API boundary decoder", () => {
     const decoded = decodeRun({
       runId: "run_failed",
       runNumber: 1,
+      kind: "model_assisted",
       triggerKind: "initial",
+      baseRunId: null,
+      programId: null,
+      invocationId: null,
+      patchId: null,
+      revisionId: null,
       questionId: "q_failed",
       conversationId: "conv_failed",
       status: "FAILED",
@@ -304,7 +322,9 @@ describe("Fervis API boundary decoder", () => {
       questionId: "q_clarify",
       conversationId: "conv_clarify",
       status: "NEEDS_CLARIFICATION",
-      currentRunId: "run_clarify",
+      primaryRunId: "run_clarify",
+      latestRunId: "run_clarify",
+      activeRunId: null,
       question: "Show me performance.",
       answer: null,
       resultData: {
@@ -336,7 +356,7 @@ describe("Fervis API boundary decoder", () => {
           kind: "provide_clarification",
           questionId: "q_clarify",
           conversationId: "conv_clarify",
-          previousRunId: "run_clarify",
+          baseRunId: "run_clarify",
           clarificationId: "clarification_1",
           request: {
             method: "POST",
@@ -344,7 +364,7 @@ describe("Fervis API boundary decoder", () => {
             body: {
               question: "<clarification-answer>",
               triggerKind: "clarification_response",
-              triggerRunId: "run_clarify",
+              baseRunId: "run_clarify",
               clarificationId: "clarification_1"
             }
           }
@@ -376,6 +396,70 @@ describe("Fervis API boundary decoder", () => {
     expect(decoded.value.usage).toBeNull();
   });
 
+  it("decodes deterministic rerun identity and lineage", () => {
+    const decoded = decodeRun({
+      ...completedRunFixture,
+      runId: "run_rerun",
+      kind: "deterministic",
+      triggerKind: "rerun",
+      baseRunId: "run_sales",
+      programId: "ap_sales",
+      invocationId: "pi_rerun",
+      patchId: "bp_rerun",
+      revisionId: null
+    });
+
+    if (!decoded.ok) {
+      throw new Error(decoded.error.message);
+    }
+    expect(decoded.value).toMatchObject({
+      kind: "deterministic",
+      triggerKind: "rerun",
+      baseRunId: "run_sales",
+      programId: "ap_sales",
+      invocationId: "pi_rerun",
+      patchId: "bp_rerun",
+      revisionId: null
+    });
+  });
+
+  it("rejects a deterministic run whose trigger is not rerun", () => {
+    const decoded = decodeRun({
+      ...completedRunFixture,
+      kind: "deterministic",
+      triggerKind: "initial"
+    });
+
+    expect(decoded).toEqual({
+      ok: false,
+      error: {
+        message: "deterministic run requires triggerKind rerun"
+      }
+    });
+  });
+
+  it.each([
+    ["baseRunId", { baseRunId: null }, "baseRunId must be a string"],
+    ["programId", { programId: null }, "programId must be a string"],
+    ["invocationId", { invocationId: null }, "invocationId must be a string"]
+  ] as const)("rejects a deterministic rerun without %s", (_field, missing, message) => {
+    const decoded = decodeRun({
+      ...completedRunFixture,
+      runId: "run_rerun",
+      kind: "deterministic",
+      triggerKind: "rerun",
+      baseRunId: "run_sales",
+      programId: "ap_sales",
+      invocationId: "pi_rerun",
+      ...missing
+    });
+
+    expect(decoded).toEqual({
+      ok: false,
+      error: { message }
+    });
+  });
+
   it("decodes queued live runs before explanation and steps exist", () => {
     const decoded = decodeQuestionRunList({
       questionId: "ee69a71a-2ee9-4609-b083-04dc5c5e4298",
@@ -390,9 +474,15 @@ describe("Fervis API boundary decoder", () => {
           resultData: null,
           runId: "2f118c8b-c973-47e0-b993-262a07164669",
           runNumber: 1,
+          kind: "model_assisted",
           status: "QUEUED",
           tenantId: "default",
-          triggerKind: "initial"
+          triggerKind: "initial",
+          baseRunId: null,
+          programId: null,
+          invocationId: null,
+          patchId: null,
+          revisionId: null
         }
       ]
     });

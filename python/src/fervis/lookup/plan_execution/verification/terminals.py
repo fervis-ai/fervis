@@ -30,6 +30,8 @@ from .blocked import (
     _required_reviewed_read_ids,
 )
 from .question_contract import _verify_question_contract
+from fervis.lookup.fact_planning.required_inputs import RequiredInput
+from fervis.lookup.grounding.model import GroundedInputUse
 
 
 def _verify_plan_clarification(
@@ -38,7 +40,7 @@ def _verify_plan_clarification(
     question_contract: QuestionContract,
     catalog: RelationCatalog | None,
     available_values: tuple[FactValue, ...],
-    available_value_uses: tuple[object, ...],
+    available_value_uses: tuple[GroundedInputUse, ...],
     memory_relations: tuple[RelationRows, ...],
 ) -> None:
     _verify_question_contract(question_contract)
@@ -78,7 +80,7 @@ def _verify_missing_catalog_input(
     item,
     *,
     fact: RequestedFact,
-    required_inputs_by_id: dict[str, object],
+    required_inputs_by_id: dict[str, RequiredInput],
     satisfied_required_input_ids: frozenset[str],
 ) -> None:
     protected_ids = {
@@ -97,7 +99,7 @@ def _verify_missing_catalog_input(
             raise VerificationError(
                 "missing catalog input references unknown required input"
             )
-        if tuple(getattr(required_input, "choices", ()) or ()):
+        if required_input.choices:
             raise VerificationError(
                 "missing catalog input must use choice input for choices"
             )
@@ -116,7 +118,7 @@ def _verify_missing_catalog_input(
             raise VerificationError(
                 "missing catalog choice input references unknown required input"
             )
-        if not tuple(getattr(required_input, "choices", ()) or ()):
+        if not required_input.choices:
             raise VerificationError(
                 "missing catalog choice input requires choice-bearing required input"
             )

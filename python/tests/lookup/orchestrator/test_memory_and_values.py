@@ -718,7 +718,11 @@ def test_lookup_cutover_preserves_scalar_memory_proofs_for_undefined_compute():
                                         "value_id": ("run_prior_totals.value.previous"),
                                     },
                                 ],
-                                "expression": "current / previous",
+                                "expression": [
+                                    {"input_id": "current"},
+                                    {"input_id": "previous"},
+                                    {"operator": "divide"},
+                                ],
                                 "output": {"scalar_id": "ratio", "label": "ratio"},
                             }
                         ],
@@ -749,7 +753,9 @@ def test_lookup_cutover_preserves_scalar_memory_proofs_for_undefined_compute():
     assert result.status == "COMPLETED", result
     assert result.answer == "division_by_zero"
     assert result.fact_outcome_addresses[0]["evidence"]["stepIds"] == [
+        "memory:run_prior_totals.value.current",
         "prior_current",
+        "memory:run_prior_totals.value.previous",
         "prior_previous",
         "answer_1_rows_compute",
     ]
@@ -860,7 +866,11 @@ def test_lookup_cutover_computes_across_single_cell_prior_answer_relations():
                                         ),
                                     },
                                 ],
-                                "expression": "day_1 + day_2",
+                                "expression": [
+                                    {"input_id": "day_1"},
+                                    {"input_id": "day_2"},
+                                    {"operator": "add"},
+                                ],
                                 "output": {"scalar_id": "total", "label": "total"},
                             }
                         ],
@@ -893,7 +903,7 @@ def test_lookup_cutover_computes_across_single_cell_prior_answer_relations():
     assert result.rendered_fact.scalars == {"total": Decimal("9000.00")}
 
 
-def test_lookup_cutover_computes_across_cells_in_multi_row_prior_answer_relation():
+def test_lookup_cutover_computes_increase_across_multi_row_prior_answer_relation():
     artifact = build_fact_artifact(
         artifact_id="run_two_date_totals",
         outcome=FactOutcome.ANSWERED,
@@ -955,13 +965,11 @@ def test_lookup_cutover_computes_across_cells_in_multi_row_prior_answer_relation
         requested_facts=(
             RequestedFact(
                 id="rf_answer",
-                description="percentage increase across the prior daily revenue answers",
-                answer_subject=RequestedFactAnswerSubject(
-                    subject_text="percentage increase"
-                ),
+                description="increase across the prior daily revenue answers",
+                answer_subject=RequestedFactAnswerSubject(subject_text="increase"),
                 answer_outputs=(
                     RequestedFactAnswerOutput(
-                        id="percentage_increase",
+                        id="increase",
                     ),
                 ),
             ),
@@ -969,7 +977,7 @@ def test_lookup_cutover_computes_across_cells_in_multi_row_prior_answer_relation
     )
     result = run_lookup_question(
         LookupRequest(
-            question="What percentage increase is that?",
+            question="What is the increase between those values?",
             conversation_context={"factArtifacts": [artifact.to_dict()]},
         ),
         LookupRuntimePorts(
@@ -982,7 +990,7 @@ def test_lookup_cutover_computes_across_cells_in_multi_row_prior_answer_relation
                         "answers": [
                             {
                                 "requested_fact_id": "rf_answer",
-                                "answer_output_ids": ["percentage_increase"],
+                                "answer_output_ids": ["increase"],
                                 "pattern": "computed_scalar",
                                 "source": {"kind": "values"},
                                 "scalar_inputs": [
@@ -1001,10 +1009,14 @@ def test_lookup_cutover_computes_across_cells_in_multi_row_prior_answer_relation
                                         ),
                                     },
                                 ],
-                                "expression": "(current - previous) / previous * 100",
+                                "expression": [
+                                    {"input_id": "current"},
+                                    {"input_id": "previous"},
+                                    {"operator": "subtract"},
+                                ],
                                 "output": {
-                                    "scalar_id": "percentage_increase",
-                                    "label": "percentage_increase",
+                                    "scalar_id": "increase",
+                                    "label": "increase",
                                 },
                             }
                         ],
@@ -1014,7 +1026,7 @@ def test_lookup_cutover_computes_across_cells_in_multi_row_prior_answer_relation
                 conversation_resolution=lambda prompt: (
                     _conversation_resolution_payload_using_memory(
                         prompt,
-                        integrated_question="What percentage increase is there across the prior daily revenue answers?",
+                        integrated_question="What is the increase across the prior daily revenue answers?",
                         actual_text="that",
                         source_kind="row_set",
                     )
@@ -1028,7 +1040,7 @@ def test_lookup_cutover_computes_across_cells_in_multi_row_prior_answer_relation
         result,
     )
     assert result.rendered_fact is not None
-    assert result.rendered_fact.scalars == {"percentage_increase": Decimal("25.00")}
+    assert result.rendered_fact.scalars == {"increase": Decimal("1000.00")}
 
 
 def test_lookup_cutover_executes_memory_relation_field_bindings():

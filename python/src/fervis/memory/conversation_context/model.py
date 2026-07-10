@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
+
+from fervis.memory.prior_requests import PriorRequestMemory
 
 VALID_CONTEXT_SOURCE_KINDS = frozenset(
     {
@@ -85,11 +88,34 @@ class ConversationContextSource:
 
 
 @dataclass(frozen=True)
+class ConversationReplaceablePart:
+    part_id: str
+    kind: str
+    text: str
+
+    def __post_init__(self) -> None:
+        if not self.part_id.strip():
+            raise ValueError("replaceable part requires part_id")
+        if not self.kind.strip():
+            raise ValueError("replaceable part requires kind")
+        if not self.text.strip():
+            raise ValueError("replaceable part requires text")
+
+    def to_model_dict(self) -> dict[str, Any]:
+        return {
+            "part_id": self.part_id,
+            "kind": self.kind,
+            "text": self.text,
+        }
+
+
+@dataclass(frozen=True)
 class ConversationContextFrame:
     frame_id: str
     source_ids: tuple[str, ...]
     requested_frame: str
     prior_answer_fact: str
+    replaceable_parts: tuple[ConversationReplaceablePart, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.frame_id.strip():
@@ -102,12 +128,21 @@ class ConversationContextFrame:
             raise ValueError("context frame requires requested_frame")
         if not self.prior_answer_fact.strip():
             raise ValueError("context frame requires prior_answer_fact")
+        seen: set[str] = set()
+        for part in self.replaceable_parts:
+            if part.part_id in seen:
+                raise ValueError("duplicate context frame replaceable part")
+            seen.add(part.part_id)
 
     def to_model_dict(self) -> dict[str, Any]:
         return {
             "frame_id": self.frame_id,
             "source_ids": list(self.source_ids),
             "requested_frame": self.requested_frame,
+            "prior_answer_fact": self.prior_answer_fact,
+            "replaceable_parts": [
+                part.to_model_dict() for part in self.replaceable_parts
+            ],
         }
 
 
@@ -142,11 +177,52 @@ class ConversationMemoryCard:
         return payload
 
 
+class ConversationMemoryActivationKind(StrEnum):
+    PRIOR_REQUEST = "prior_answer_request"
+    ROW_SET = "row_set"
+    ENTITY_IDENTITY = "entity_identity"
+    SCALAR_VALUE = "scalar_value"
+    TIME_SCOPE = "time_scope"
+    CLARIFICATION_ANSWER = "clarification_answer"
+
+
+@dataclass(frozen=True)
+class ConversationMemoryActivation:
+    card: ConversationMemoryCard
+    kind: ConversationMemoryActivationKind
+    artifact_id: str
+    address_id: str = ""
+    prior_request: PriorRequestMemory | None = None
+
+    def __post_init__(self) -> None:
+        if not self.artifact_id:
+            raise ValueError("memory activation requires artifact identity")
+        if self.card.kind != self.kind.value:
+            raise ValueError("memory activation kind does not match its card")
+        if self.kind is ConversationMemoryActivationKind.PRIOR_REQUEST:
+            if (
+                self.prior_request is None
+                or self.address_id
+                or self.prior_request.memory_id != self.card.memory_id
+                or self.prior_request.artifact_id != self.artifact_id
+            ):
+                raise ValueError("prior-request activation contract is inconsistent")
+            return
+        if self.prior_request is not None or not self.address_id:
+            raise ValueError("address activation contract is inconsistent")
+
+    @property
+    def memory_id(self) -> str:
+        return self.card.memory_id
+
+
 @dataclass(frozen=True)
 class ConversationMemoryCardProjection:
     context_sources: tuple[ConversationContextSource, ...] = ()
     context_frames: tuple[ConversationContextFrame, ...] = ()
     cards: tuple[ConversationMemoryCard, ...] = ()
+    activations: tuple[ConversationMemoryActivation, ...] = ()
+    prior_requests: tuple[PriorRequestMemory, ...] = ()
     private_cards: dict[str, dict[str, Any]] | None = None
     omitted_counts_by_kind: dict[str, int] | None = None
 
@@ -155,3 +231,9 @@ class ConversationMemoryCardProjection:
         if memory_id not in private_cards:
             raise KeyError(memory_id)
         return dict(private_cards[memory_id])
+
+    def prior_request(self, memory_id: str) -> PriorRequestMemory:
+        for request in self.prior_requests:
+            if request.memory_id == memory_id:
+                return request
+        raise KeyError(memory_id)

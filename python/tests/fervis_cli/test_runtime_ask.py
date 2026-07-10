@@ -887,7 +887,7 @@ def test_fervis_runtime_ask_streams_actionable_clarification() -> None:
                 provide_clarification_action(
                     "conv_123",
                     question_id="q_1",
-                    previous_run_id="r_1",
+                    base_run_id="r_1",
                     clarification_id="clar_1",
                     tenant_id="tenant_1",
                     principal_id="user_1",
@@ -968,7 +968,7 @@ def test_fervis_runtime_ask_clarification_does_not_depend_on_explain_lineage() -
                 provide_clarification_action(
                     "conv_123",
                     question_id="q_1",
-                    previous_run_id="r_1",
+                    base_run_id="r_1",
                     clarification_id="clar_1",
                     tenant_id="tenant_1",
                     principal_id="user_1",
@@ -1001,7 +1001,7 @@ def test_fervis_runtime_ask_streams_clarification_response_followup() -> None:
         ),
         accepted_trigger={
             "kind": "clarification_response",
-            "previous_run_id": "r_1",
+            "base_run_id": "r_1",
             "clarification_id": "clar_1",
         },
     )
@@ -1019,7 +1019,7 @@ def test_fervis_runtime_ask_streams_clarification_response_followup() -> None:
             "conv_123",
             "--question-id",
             "q_1",
-            "--previous-run-id",
+            "--base-run-id",
             "r_1",
             "--clarification-id",
             "clar_1",
@@ -1036,9 +1036,8 @@ def test_fervis_runtime_ask_streams_clarification_response_followup() -> None:
     assert len(questions.continue_requests) == 1
     continued = questions.continue_requests[0]
     assert continued.question_id == "q_1"
-    assert continued.previous_run_id is None
     assert continued.trigger_kind is RunTriggerKind.CLARIFICATION_RESPONSE
-    assert continued.trigger_clarification_response_run_id == "r_1"
+    assert continued.base_run_id == "r_1"
     assert continued.trigger_clarification_response_id == "clar_1"
     assert _jsonl_events(stdout.getvalue()) == [
         {
@@ -1049,7 +1048,7 @@ def test_fervis_runtime_ask_streams_clarification_response_followup() -> None:
             "status": "RUNNING",
             "trigger": {
                 "kind": "clarification_response",
-                "previous_run_id": "r_1",
+                "base_run_id": "r_1",
                 "clarification_id": "clar_1",
             },
         },

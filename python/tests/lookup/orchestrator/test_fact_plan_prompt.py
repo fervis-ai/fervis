@@ -89,7 +89,7 @@ def test_lookup_cutover_renders_scalar_memory_values_in_fact_plan_prompt():
     assert result.status == "FAILED"
     assert result.error == "planning_failed"
     fact_plan_prompt = _fact_plan_prompt(planner)
-    assert "125.00" in fact_plan_prompt
+    assert '"value": "125"' in fact_plan_prompt
 
 
 def test_lookup_cutover_projects_terminal_outcome_memory_into_resolution_prompt():

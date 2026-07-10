@@ -24,7 +24,7 @@ def test_pattern_prompt_projects_scalar_aggregate_choices_for_numeric_summary_ev
                     id="sb_1",
                     requested_fact_id="fact_1",
                     answer_population=_answer_population(),
-                    source=RelationSource(
+                    source=DraftRelationSource(
                         kind=SourceKind.API_READ,
                         read_id="list_sales_summary",
                     ),
@@ -139,7 +139,7 @@ def test_pattern_prompt_projects_scalar_aggregate_choices_for_one_row_summary_ev
                 id="sb_1",
                 requested_fact_id="fact_1",
                 answer_population=_answer_population(),
-                source=RelationSource(
+                source=DraftRelationSource(
                     kind=SourceKind.API_READ,
                     read_id="list_sales_summary",
                 ),
@@ -226,7 +226,7 @@ def test_pattern_prompt_uses_metric_measure_evidence_not_generic_scope_for_metri
                     id="sb_1",
                     requested_fact_id="fact_1",
                     answer_population=_answer_population(),
-                    source=RelationSource(
+                    source=DraftRelationSource(
                         kind=SourceKind.API_READ,
                         read_id="list_shift_compensation",
                     ),
@@ -333,7 +333,7 @@ def test_pattern_prompt_requires_metric_evidence_not_count_basis_for_aggregate_m
                     id="sb_1",
                     requested_fact_id="fact_1",
                     answer_population=_answer_population(),
-                    source=RelationSource(
+                    source=DraftRelationSource(
                         kind=SourceKind.API_READ,
                         read_id="list_cash_deposit_list",
                     ),
@@ -441,7 +441,7 @@ def test_pattern_prompt_requires_metric_evidence_even_when_answer_value_exists()
                     id="sb_1",
                     requested_fact_id="fact_1",
                     answer_population=_answer_population(),
-                    source=RelationSource(
+                    source=DraftRelationSource(
                         kind=SourceKind.API_READ,
                         read_id="list_shift_compensation",
                     ),
@@ -533,7 +533,7 @@ def test_pattern_prompt_does_not_offer_identity_source_numeric_fields_as_metrics
                 id="sb_1",
                 requested_fact_id="fact_1",
                 answer_population=_answer_population(),
-                source=RelationSource(kind=SourceKind.API_READ, read_id="list_staff"),
+                source=DraftRelationSource(kind=SourceKind.API_READ, read_id="list_staff"),
                 cardinality="many",
                 available_field_ids=("staff_id", "full_name", "daily_base_pay"),
                 available_fields=(
@@ -562,7 +562,7 @@ def test_pattern_prompt_does_not_offer_identity_source_numeric_fields_as_metrics
                     id="sb_2",
                     requested_fact_id="fact_1",
                     answer_population=_answer_population(),
-                    source=RelationSource(
+                    source=DraftRelationSource(
                         kind=SourceKind.API_READ,
                         read_id="list_shift_compensation",
                     ),

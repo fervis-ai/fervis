@@ -28,7 +28,7 @@ def agent_run_event(
                 provide_clarification_action(
                     conversation_id,
                     question_id=question_id or None,
-                    previous_run_id=run_id or None,
+                    base_run_id=run_id or None,
                     clarification_id=clarification_id or None,
                     tenant_id=tenant_id,
                     principal_id=principal_id,

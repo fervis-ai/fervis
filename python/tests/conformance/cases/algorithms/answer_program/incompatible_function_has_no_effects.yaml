@@ -1,0 +1,23 @@
+id: incompatible_function_has_no_effects
+kind: algorithm
+algorithm: answer_program.instantiate
+description: A function-semantics mismatch rejects before source reads.
+input:
+  schema_revision: 1
+  attempts:
+    - id: function
+      program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/incompatible_function}
+      catalog: {$ref: ../../../fixtures/answer_program_v1.yaml#/catalogs/sales}
+      environment: {$ref: ../../../fixtures/answer_program_v1.yaml#/environments/invocation}
+      bindings:
+        - parameter_id: question.store_ids
+          value: {kind: identity_set, identity_type: store, identity_field: store_id, values: [store_1]}
+          provenance: {kind: question_input}
+        - parameter_id: semantic.sale_states
+          value: {kind: string_set, values: [COMPLETED]}
+          provenance: {kind: semantic_choice}
+expect:
+  result_equals:
+    attempts:
+      - {id: function, status: rejected, code: incompatible_function_semantics, reads: 0}
+

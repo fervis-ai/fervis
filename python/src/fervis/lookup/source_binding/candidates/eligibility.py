@@ -157,8 +157,4 @@ def _memory_relation(
 
 
 def _known_input_id_for_value(value: FactValue) -> str:
-    for proof_ref in value.proof_refs:
-        text = str(proof_ref)
-        if text.startswith("known_input:"):
-            return text.removeprefix("known_input:")
-    return ""
+    return value.known_input_id

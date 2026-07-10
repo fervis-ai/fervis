@@ -4,13 +4,21 @@ from __future__ import annotations
 
 from typing import Any
 
-from fervis.lookup.fact_plan.fact_plan import FactFulfillment
-from fervis.lookup.fact_plan.operations import ComputeSpec, Operation
-from fervis.lookup.fact_plan.render_spec import RenderScalarOutput
-from fervis.lookup.fact_plan.values import ScalarInputUse, ValueUse
+from fervis.lookup.answer_program.model import FactFulfillment
+from fervis.lookup.answer_program.operations import (
+    ComputeBinary,
+    ComputeBinaryOperator,
+    ComputeNegation,
+    ComputeSpec,
+    Operation,
+)
+from fervis.lookup.answer_program.render_spec import RenderScalarOutput
+from fervis.lookup.answer_program.values import ValueExpression
 from fervis.lookup.source_binding import BoundSource
+from fervis.lookup.answer_program.compiler_inputs import CompilerInputContext
 
 from .shared import (
+    RelationBuilder,
     _dict,
     _pattern_output_relation_id,
     _required_strings,
@@ -27,7 +35,10 @@ def _compile_computed_scalar_answer(
     payload: dict[str, Any],
     namespace_render_outputs: bool,
     bound_sources: dict[str, BoundSource],
+    input_context: CompilerInputContext,
+    relation_builder: RelationBuilder,
 ) -> dict[str, Any]:
+    del relation_builder
     output = _scalar_output_spec(_dict(payload.get("output"), "output"))
     render_output_id = _render_output_id(
         index,
@@ -51,25 +62,20 @@ def _compile_computed_scalar_answer(
             )
             for answer_output_id in answer_output_ids
         ),
-        "values": (),
-        "value_uses": tuple(
-            ValueUse(
-                id=f"{operation_id}_{item['input_id']}",
-                value_id=item["value_id"],
-                target=ScalarInputUse(
-                    operation_id=operation_id,
-                    input_id=item["input_id"],
-                ),
-            )
-            for item in scalar_inputs
-        ),
         "relations": (),
         "operations": (
             Operation(
                 id=operation_id,
                 spec=ComputeSpec(
-                    expression=_text(payload.get("expression")),
-                    scalar_inputs=tuple(item["input_id"] for item in scalar_inputs),
+                    expression=_compute_expression(
+                        payload.get("expression"),
+                        inputs={
+                            item["input_id"]: input_context.expression_for_value(
+                                item["value_id"]
+                            )
+                            for item in scalar_inputs
+                        },
+                    ),
                     output_scalar=output["scalar_id"],
                 ),
             ),
@@ -84,3 +90,36 @@ def _compile_computed_scalar_answer(
             ),
         ),
     }
+
+
+def _compute_expression(
+    payload: object,
+    *,
+    inputs: dict[str, ValueExpression],
+):
+    if not isinstance(payload, list) or not payload:
+        raise ValueError("computed scalar expression must be a non-empty token array")
+    stack: list[object] = []
+    for token in payload:
+        if not isinstance(token, dict) or len(token) != 1:
+            raise ValueError("computed scalar expression token is invalid")
+        if "input_id" in token:
+            input_id = _text(token["input_id"])
+            if input_id not in inputs:
+                raise ValueError("computed scalar expression input is not declared")
+            stack.append(inputs[input_id])
+            continue
+        if str(token["operator"]) == "negate":
+            if not stack:
+                raise ValueError("computed scalar negation requires one operand")
+            stack.append(ComputeNegation(operand=stack.pop()))
+            continue
+        operator = ComputeBinaryOperator(str(token.get("operator") or ""))
+        if len(stack) < 2:
+            raise ValueError("computed scalar operator requires two operands")
+        right = stack.pop()
+        left = stack.pop()
+        stack.append(ComputeBinary(operator=operator, left=left, right=right))
+    if len(stack) != 1:
+        raise ValueError("computed scalar expression must produce one value")
+    return stack[0]

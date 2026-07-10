@@ -21,7 +21,7 @@ from fervis.questions.ports import (
 
 from .engine import resolve_sql_storage_target
 from .lineage_query import SQLLineageQuery
-from .lookup_runtime import sql_configured_lookup_port
+from .lookup_runtime import sql_configured_lookup_port, sql_configured_program_port
 from .observability_query import SQLObservabilityQuery
 from .prompt_captures import SQLPromptCaptureQuery
 from .question_run_ports import sql_question_service, sql_run_work_service
@@ -54,6 +54,11 @@ def sql_storage_bundle(
         loaded_config=loaded_config,
         engine=target.engine,
     )
+    program_port = sql_configured_program_port(
+        project=project,
+        loaded_config=loaded_config,
+        engine=target.engine,
+    )
     return SQLStorageBundle(
         engine=target.engine,
         kind=target.kind,
@@ -64,10 +69,12 @@ def sql_storage_bundle(
         questions=sql_question_service(
             engine=target.engine,
             lookup=lookup_port,
+            program=program_port,
         ),
         run_work=sql_run_work_service(
             engine=target.engine,
             lookup=lookup_port,
+            program=program_port,
         ),
     )
 

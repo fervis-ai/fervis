@@ -38,6 +38,8 @@ from fervis.lineage.recorder import (
     ModelCallUsageWrite,
     ModelCallWrite,
     QuestionRunWrite,
+    ProgramInvocationBundleWrite,
+    ProgramRevisionBundleWrite,
     QuestionWrite,
     RequestedFactWrite,
     RunArtifactWrite,
@@ -91,6 +93,52 @@ class LineageRecorder:
             run,
             "different lineage root fields",
         )
+
+    def record_program_invocation(
+        self,
+        bundle: ProgramInvocationBundleWrite,
+    ) -> ProgramInvocationBundleWrite:
+        self._require_row(
+            records.QUESTION_RUN,
+            {"run_id": bundle.invocation.run_id},
+            label="program invocation run",
+        )
+        if bundle.invocation.program_id != bundle.program.program_id:
+            raise LineageRecorderConflict("invocation must reference its answer program")
+        if bundle.invocation.revision_id is not None:
+            revision = self._require_row(
+                records.PROGRAM_REVISION,
+                {"revision_id": bundle.invocation.revision_id},
+                label="program invocation revision",
+            )
+            if revision.values["revised_program_id"] != bundle.invocation.program_id:
+                raise LineageRecorderConflict(
+                    "program invocation revision must produce its answer program"
+                )
+        with self._store.transaction():
+            self._record_idempotent(records.ANSWER_PROGRAM, bundle.program)
+            self._record_idempotent(records.PROGRAM_INVOCATION, bundle.invocation)
+        return bundle
+
+    def record_program_revision(
+        self,
+        bundle: ProgramRevisionBundleWrite,
+    ) -> ProgramRevisionBundleWrite:
+        self._require_row(
+            records.ANSWER_PROGRAM,
+            {"program_id": bundle.revision.base_program_id},
+            label="program revision base program",
+        )
+        if bundle.revision.revised_program_id != bundle.program.program_id:
+            raise LineageRecorderConflict(
+                "program revision must reference its revised answer program"
+            )
+        if bundle.revision.base_program_id == bundle.revision.revised_program_id:
+            raise LineageRecorderConflict("program revision must change program identity")
+        with self._store.transaction():
+            self._record_idempotent(records.ANSWER_PROGRAM, bundle.program)
+            self._record_idempotent(records.PROGRAM_REVISION, bundle.revision)
+        return bundle
 
     def record_step(self, step: RunStepWrite) -> RunStepWrite:
         return self._record_idempotent(records.RUN_STEP, step)
@@ -198,6 +246,11 @@ class LineageRecorder:
         self,
         answered_result: AnsweredRunResultWrite,
     ) -> AnsweredRunResultWrite:
+        self._require_row(
+            records.PROGRAM_INVOCATION,
+            {"run_id": answered_result.result.run_id},
+            label="answered run program invocation",
+        )
         with self._store.transaction():
             self.record_run_result(answered_result.result)
             for requested_fact in answered_result.requested_facts:
@@ -404,35 +457,21 @@ class LineageRecorder:
                     raise LineageRecorderConflict(f"{expectation.label} must match")
 
     def _validate_run_trigger(self, run: QuestionRunWrite) -> None:
-        if run.trigger_kind in {
-            RunTriggerKind.RETRY,
-            RunTriggerKind.RERUN,
-            RunTriggerKind.REPLAY,
-        }:
-            previous = self._require_row(
+        if run.base_run_id:
+            base = self._require_row(
                 records.QUESTION_RUN,
-                {"run_id": run.previous_run_id},
-                label="previous run",
+                {"run_id": run.base_run_id},
+                label="base run",
             )
-            if previous.values["question_id"] != run.question_id:
+            if base.values["question_id"] != run.question_id:
                 raise LineageRecorderConflict(
-                    f"previous run {run.previous_run_id!r} must belong to question {run.question_id!r}"
+                    f"base run {run.base_run_id!r} must belong to question {run.question_id!r}"
                 )
-            return
         if run.trigger_kind is not RunTriggerKind.CLARIFICATION_RESPONSE:
             return
-        trigger_run = self._require_row(
-            records.QUESTION_RUN,
-            {"run_id": run.trigger_clarification_response_run_id},
-            label="clarification trigger run",
-        )
-        if trigger_run.values["question_id"] != run.question_id:
-            raise LineageRecorderConflict(
-                "clarification trigger run must belong to the same question"
-            )
         self._require_same_run_row(
             records.CLARIFICATION_RESPONSE,
-            run_id=run.trigger_clarification_response_run_id or "",
+            run_id=run.base_run_id or "",
             identity_field="response_id",
             identity_value=run.trigger_clarification_response_id,
             label="clarification trigger response",

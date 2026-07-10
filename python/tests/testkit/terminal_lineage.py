@@ -14,11 +14,14 @@ from fervis.lineage.enums import (
 from fervis.lineage.ports import LineageRecorderPort
 from fervis.lineage.recorder import (
     AnsweredRunResultWrite,
+    AnswerProgramWrite,
     AnswerOutputWrite,
     AnswerPresentationWrite,
     AnswerWrite,
     ExecutionProofGraphWrite,
     FactResultWrite,
+    ProgramInvocationBundleWrite,
+    ProgramInvocationWrite,
     RequestedFactWrite,
     RunResultWrite,
     RunStepWrite,
@@ -36,6 +39,21 @@ def make_terminal_answer_writer(recorder: LineageRecorderPort) -> TerminalAnswer
         result_data: dict[str, object],
     ) -> None:
         run_id = request.run_id
+        recorder.record_program_invocation(
+            ProgramInvocationBundleWrite(
+                program=AnswerProgramWrite(
+                    program_id=f"{run_id}:program",
+                    schema_revision=1,
+                    canonical_json="{}",
+                ),
+                invocation=ProgramInvocationWrite(
+                    invocation_id=f"{run_id}:invocation",
+                    run_id=run_id,
+                    program_id=f"{run_id}:program",
+                    bindings_json="{}",
+                ),
+            )
+        )
         for step in (
             RunStepWrite(
                 step_id=f"{run_id}:contract",

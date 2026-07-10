@@ -419,7 +419,15 @@ def test_lookup_source_binding_can_bind_required_finite_choice_param():
                         param_bindings=(
                             EndpointParamBinding(
                                 param_id="group_by",
-                                value="location",
+                                value_expr=ConstantRef(
+                                    constant_id="group_by.location",
+                                    version_ref="test-fixture-v1",
+                                    value=FactValue.literal(
+                                        id="group_by.location",
+                                        literal_type=LiteralType.STRING,
+                                        value="location",
+                                    ),
+                                ),
                             ),
                         ),
                     ),
@@ -1084,6 +1092,7 @@ class _LineageRecorder:
     terminal_results: list[FactualTerminalRunResultWrite] = field(default_factory=list)
     runtime_error_results: list[RuntimeErrorResultWrite] = field(default_factory=list)
     model_call_audits: list[object] = field(default_factory=list)
+    program_invocations: list[object] = field(default_factory=list)
 
     def record_step(self, step: RunStepWrite) -> RunStepWrite:
         self.steps.append(step)
@@ -1131,6 +1140,10 @@ class _LineageRecorder:
     def record_model_call_audit(self, audit: object) -> object:
         self.model_call_audits.append(audit)
         return audit
+
+    def record_program_invocation(self, invocation: object) -> object:
+        self.program_invocations.append(invocation)
+        return invocation
 
 
 class _FailingRuntimeErrorLineageRecorder(_LineageRecorder):
@@ -3465,7 +3478,6 @@ def test_lookup_cutover_no_data_is_tied_to_fulfilled_requested_fact():
                     render_output_id="ticket_id",
                 ),
             ),
-            value_uses=(),
             relations=(
                 Relation(
                     id="ticket_rows",

@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
-from decimal import Decimal
-from typing import Any
-
+from datetime import datetime, timedelta
 import sqlalchemy as sa
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
@@ -16,11 +13,12 @@ from fervis.host_api.credentials import (
     runtime_context_with_delegated_credential,
 )
 from fervis.project.persistence.schema import metadata
-from fervis.questions.contracts import (
-    DEFAULT_MAX_BUDGET_USD,
-    DEFAULT_MAX_THINKING_TOKENS,
+from fervis.questions.execution_specs import (
+    execution_spec_from_storage,
+    execution_spec_kind,
+    execution_spec_to_storage_dict,
 )
-from fervis.questions.ports import RunSubmission
+from fervis.questions.ports import RunExecutionSpec, RunSubmission
 
 from .rows import normalize_json_value, now_utc, row_mapping
 from .terminal import record_runtime_error_result, terminal_result_for_run
@@ -54,19 +52,17 @@ class SQLRunWorkItem:
     tenant_id: str
     user_id: str
     status: str
-    provider: str | None
-    model_key: str
-    question: str
-    conversation_context: dict[str, Any]
-    runtime_context: dict[str, Any]
+    spec: RunExecutionSpec
     read_context_ref: ReadContextRef
     idempotency_key: str | None
-    max_budget_usd: Decimal
-    max_thinking_tokens: int
     attempt_count: int
     active_attempt: int
     lease_owner: str | None
+    lease_expires_at: datetime | None
     last_error: str
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
 
 
 @dataclass(frozen=True)
@@ -143,34 +139,21 @@ class SQLWorkItemQueue:
 
             now = now_utc()
             inline = submission.execution_mode.value == "inline"
+            execution_spec = execution_spec_to_storage_dict(submission.spec)
+            execution_spec["runtime_context"] = normalize_json_value(
+                runtime_context_with_delegated_credential(
+                    submission.spec.runtime_context,
+                    submission.principal.delegated_credential,
+                )
+            )
             values = {
                 "run_id": submission.run_id,
                 "conversation_id": submission.conversation_id,
                 "tenant_id": submission.tenant_id,
                 "user_id": str(submission.principal.principal_id),
                 "status": "RUNNING" if inline else "QUEUED",
-                "provider": submission.provider,
-                "model_key": submission.model_key,
-                "question": submission.question,
-                "session_mode": "continue",
-                "session_id": None,
-                "approval_mode": "auto_allow",
-                "approval_decision": None,
-                "max_budget_usd": Decimal(
-                    str(submission.max_budget_usd or DEFAULT_MAX_BUDGET_USD)
-                ),
-                "max_thinking_tokens": (
-                    submission.max_thinking_tokens or DEFAULT_MAX_THINKING_TOKENS
-                ),
-                "conversation_context": normalize_json_value(
-                    submission.conversation_context or {}
-                ),
-                "runtime_context": normalize_json_value(
-                    runtime_context_with_delegated_credential(
-                        submission.runtime_context,
-                        submission.principal.delegated_credential,
-                    )
-                ),
+                "spec_kind": execution_spec_kind(submission.spec).value,
+                "execution_spec": normalize_json_value(execution_spec),
                 "read_context_ref": normalize_json_value(
                     submission.principal.read_context_ref.to_storage_dict()
                 ),
@@ -562,21 +545,22 @@ def _work_item(row) -> SQLRunWorkItem | None:
         tenant_id=str(values["tenant_id"]),
         user_id=str(values["user_id"]),
         status=str(values["status"]),
-        provider=values["provider"],
-        model_key=str(values["model_key"]),
-        question=str(values["question"]),
-        conversation_context=dict(values["conversation_context"] or {}),
-        runtime_context=dict(values["runtime_context"] or {}),
+        spec=execution_spec_from_storage(
+            str(values["spec_kind"]),
+            values["execution_spec"] or {},
+        ),
         read_context_ref=ReadContextRef.from_storage_dict(
             values["read_context_ref"] or {}
         ),
         idempotency_key=values["idempotency_key"],
-        max_budget_usd=Decimal(str(values["max_budget_usd"])),
-        max_thinking_tokens=int(values["max_thinking_tokens"]),
         attempt_count=int(values["attempt_count"]),
         active_attempt=int(values["active_attempt"]),
         lease_owner=values["lease_owner"],
+        lease_expires_at=values["lease_expires_at"],
         last_error=str(values["last_error"] or ""),
+        created_at=values["created_at"],
+        started_at=values["started_at"],
+        completed_at=values["completed_at"],
     )
 
 

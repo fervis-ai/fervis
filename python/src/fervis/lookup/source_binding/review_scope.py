@@ -5,8 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from fervis.lookup.fact_plan.relations import EndpointParamBinding
-from fervis.lookup.fact_plan.values import FactValue, known_input_id_for_value
+from fervis.lookup.source_binding.compiler_ir import (
+    DraftEndpointParamBinding,
+)
+from fervis.lookup.answer_program.values import FactValue, known_input_id_for_value
 from fervis.lookup.question_contract import (
     AnswerPopulationMembershipTestKind,
     RequestedFact,
@@ -573,7 +575,7 @@ def _candidate_applied_param_binding_proofs(
 
 
 def _matching_binding_proofs(
-    bindings: tuple[EndpointParamBinding, ...],
+    bindings: tuple[DraftEndpointParamBinding, ...],
     known_ref: str,
 ) -> tuple[_OwnerSurfaceProof, ...]:
     return tuple(

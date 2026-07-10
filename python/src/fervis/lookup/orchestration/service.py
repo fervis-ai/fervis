@@ -11,17 +11,13 @@ from fervis.host_api.context import (
 )
 from fervis.host_api.contracts.authority import ReadAuthority, ReadContextRef
 from fervis.host_api.contracts.credentials import DelegatedReadCredential
-from fervis.host_api.contracts.read import ReadInvocation
 from fervis.lookup.orchestration.result import AnswerSource
-from fervis.lookup.relation_catalog.from_host_api import (
-    relation_catalog_from_endpoint_contracts,
-)
-from fervis.lookup.relation_catalog import RelationCatalog
 from fervis.lookup.orchestration.request import (
     LookupRequest,
     LookupProgressSink,
     LookupRuntimePorts,
 )
+from fervis.lookup.answer_program.persistence import LineageProgramInvocationBinding
 from fervis.lookup.turn_prompts.context import HostPromptContext
 from fervis.lineage.ports import LineageRecorderPort
 from fervis.model_io.backbone.factory import (
@@ -34,6 +30,10 @@ from fervis.lookup.orchestration.limits import RunLimitTracker
 from fervis.lookup.orchestration.result import (
     PlannerRunResult,
     delivery_result_data,
+)
+from fervis.lookup.orchestration.host_runtime import (
+    HostRelationDataAccess,
+    host_relation_catalog,
 )
 
 if TYPE_CHECKING:
@@ -116,12 +116,18 @@ class LookupService:
             requested_provider=provider,
             model_key=model_key,
         )
+        authority = ReadAuthority(
+            tenant_id=tenant_id,
+            read_context_ref=read_context_ref,
+            delegated_credential=delegated_credential,
+        )
         result = run_lookup_question(
             LookupRequest(
                 question=question,
                 conversation_context=conversation_context,
                 run_id=run_id,
                 tenant_id=tenant_id,
+                authority_ref=authority.evidence_ref,
                 user_context={
                     **dict(user_context or {}),
                     "conversationId": conversation_id,
@@ -139,17 +145,17 @@ class LookupService:
                 relation_catalog_port=_ConfiguredRelationCatalogProvider(
                     host_api_context=self.host_api_context,
                 ),
-                data_access_port=_EndpointRelationDataAccess(
+                data_access_port=HostRelationDataAccess(
                     host_api_context=self.host_api_context,
-                    authority=ReadAuthority(
-                        tenant_id=tenant_id,
-                        read_context_ref=read_context_ref,
-                        delegated_credential=delegated_credential,
-                    ),
+                    authority=authority,
                 ),
                 planner_model_port=_SelectedModelPort(
                     model_port=self.model_router,
                     model_key=model_key,
+                ),
+                program_invocation_binding=LineageProgramInvocationBinding(
+                    run_id=run_id,
+                    recorder=self.lineage_recorder,
                 ),
                 lineage_step_sink=_lineage_step_sink(
                     run_id=run_id,
@@ -186,10 +192,8 @@ class _SelectedModelPort:
 class _ConfiguredRelationCatalogProvider:
     host_api_context: HostApiContext
 
-    def build_relation_catalog(self) -> RelationCatalog:
-        return relation_catalog_from_endpoint_contracts(
-            self.host_api_context.describe_sources()
-        )
+    def build_relation_catalog(self):
+        return host_relation_catalog(self.host_api_context)
 
 
 def _runtime_values(
@@ -210,44 +214,6 @@ def _host_prompt_context(host_api_context: HostApiContext) -> HostPromptContext:
         organization_name=host.organization_name,
         about_api=host.about_api,
     )
-
-
-@dataclass(frozen=True)
-class _EndpointRelationDataAccess:
-    host_api_context: HostApiContext
-    authority: ReadAuthority
-
-    def read(self, *, endpoint_name: str, args: dict[str, Any]) -> dict[str, Any]:
-        contract = self.host_api_context.endpoint_contract(endpoint_name)
-        if contract is None:
-            raise ValueError(f"Unknown endpoint contract: {endpoint_name}")
-        path_params: dict[str, Any] = {}
-        query_params: dict[str, Any] = {}
-        params = {
-            f"{endpoint_name}.{param.source}.{param.name}": param
-            for param in (*contract.path_params, *contract.query_params)
-        }
-        for param_ref, value in args.items():
-            param = params.get(str(param_ref))
-            if param is None:
-                raise ValueError(f"Unknown endpoint parameter: {param_ref}")
-            if param.source == "path":
-                path_params[param.name] = value
-            elif param.source == "query":
-                query_params[param.name] = value
-            else:
-                raise ValueError(f"Unsupported endpoint parameter source: {param_ref}")
-        return self.host_api_context.execute_read(
-            authority=self.authority,
-            invocation=ReadInvocation(
-                endpoint_name=endpoint_name,
-                path_params=path_params,
-                query_params=query_params,
-                page_policy={
-                    "mode": "all_pages" if contract.paginated else "single_page"
-                },
-            ),
-        ).to_public_dict()
 
 
 def _lineage_step_sink(

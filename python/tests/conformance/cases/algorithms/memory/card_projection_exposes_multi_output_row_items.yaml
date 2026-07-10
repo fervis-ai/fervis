@@ -14,6 +14,7 @@ input:
         sourceAnswer: "Alpha: 10, Beta: 8."
         provenance:
           question_contract:
+            question_inputs: []
             answer_requests:
               - id: fact_1
                 answer_fact: products sold best this week
@@ -22,6 +23,7 @@ input:
                     description: product name
                   - id: answer_2
                     description: units sold
+                used_question_inputs: []
         addresses:
           - address: relation.answer_rows
             kind: relation
@@ -52,4 +54,3 @@ expect:
       - kind: prior_user_question
       - kind: prior_fervis_answer
         text: "Alpha: 10, Beta: 8."
-

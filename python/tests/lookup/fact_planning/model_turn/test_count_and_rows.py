@@ -3,7 +3,7 @@ from ._helpers import *  # noqa: F403
 from dataclasses import dataclass, field
 from typing import Any
 
-from fervis.lookup.plan_execution.runner import execute_fact_plan
+from tests.lookup.plan_execution.invocation_helpers import compile_and_invoke
 from fervis.lookup.memory.projection import LookupMemory
 from fervis.lookup.fact_plan.fact_plan import FactPlan
 
@@ -67,7 +67,7 @@ def test_pattern_prompt_count_metric_uses_source_identity_not_predicate_fulfillm
                 id="sb_1",
                 requested_fact_id="fact_1",
                 answer_population=_answer_population(),
-                source=RelationSource(
+                source=DraftRelationSource(
                     kind=SourceKind.API_READ,
                     read_id="list_records",
                 ),
@@ -162,7 +162,7 @@ def test_count_metric_options_allow_concrete_row_population_count_without_identi
         id="sb_1",
         requested_fact_id="fact_1",
         answer_population=_answer_population(),
-        source=RelationSource(
+        source=DraftRelationSource(
             kind=SourceKind.API_READ,
             read_id="list_summary",
             row_source_id=row_source_id,
@@ -231,7 +231,7 @@ def test_count_metric_options_allow_nested_many_row_population_under_one_row_sou
         id="sb_1",
         requested_fact_id="fact_1",
         answer_population=_answer_population(),
-        source=RelationSource(
+        source=DraftRelationSource(
             kind=SourceKind.API_READ,
             read_id="list_summary",
             row_source_id=row_source_id,
@@ -310,7 +310,7 @@ def test_structural_row_count_metric_satisfies_answer_output_without_raw_field()
                 id="sb_1",
                 requested_fact_id="fact_1",
                 answer_population=_answer_population(),
-                source=RelationSource(
+                source=DraftRelationSource(
                     kind=SourceKind.API_READ,
                     read_id="list_records",
                     row_source_id=api_row_source_id("list_records", "data"),
@@ -363,7 +363,7 @@ def test_structural_row_count_metric_binds_relation_to_selected_row_population()
                 id="sb_1",
                 requested_fact_id="fact_1",
                 answer_population=_answer_population(),
-                source=RelationSource(
+                source=DraftRelationSource(
                     kind=SourceKind.API_READ,
                     read_id="list_records",
                     row_source_id=api_row_source_id("list_records", "data"),
@@ -404,26 +404,26 @@ def test_structural_row_count_metric_executes_count_over_selected_row_population
         id="sb_1",
         requested_fact_id="fact_1",
         answer_population=_answer_population(),
-        source=RelationSource(
+        source=DraftRelationSource(
             kind=SourceKind.API_READ,
             read_id="list_records",
             row_source_id=row_source_id,
         ),
         source_invocations=(
-            RelationSource(
+            DraftRelationSource(
                 kind=SourceKind.API_READ,
                 read_id="list_records",
                 row_source_id=row_source_id,
                 param_bindings=(
-                    EndpointParamBinding(param_id="status", value="OPEN"),
+                    DraftEndpointParamBinding(param_id="status", value="OPEN"),
                 ),
             ),
-            RelationSource(
+            DraftRelationSource(
                 kind=SourceKind.API_READ,
                 read_id="list_records",
                 row_source_id=row_source_id,
                 param_bindings=(
-                    EndpointParamBinding(param_id="status", value="CLOSED"),
+                    DraftEndpointParamBinding(param_id="status", value="CLOSED"),
                 ),
             ),
         ),
@@ -485,7 +485,7 @@ def test_structural_row_count_metric_executes_count_over_selected_row_population
         )
     )
 
-    result = execute_fact_plan(
+    result = compile_and_invoke(
         plan=FactPlan(outcome=plan),
         question_contract=QuestionContract(
             requested_facts=(
@@ -526,12 +526,12 @@ def test_structural_row_count_metric_preserves_selected_executable_row_source():
         id="sb_1",
         requested_fact_id="fact_1",
         answer_population=_answer_population(),
-        source=RelationSource(
+        source=DraftRelationSource(
             kind=SourceKind.API_READ,
             read_id="list_records",
             row_source_id=selected_row_source_id,
             param_bindings=(
-                EndpointParamBinding(
+                DraftEndpointParamBinding(
                     param_id="include_items",
                     value=True,
                 ),
@@ -628,7 +628,7 @@ def test_pattern_prompt_does_not_require_raw_record_fields_for_count_metric_answ
                 id="sb_1",
                 requested_fact_id="fact_1",
                 answer_population=_answer_population(),
-                source=RelationSource(kind=SourceKind.API_READ, read_id="list_records"),
+                source=DraftRelationSource(kind=SourceKind.API_READ, read_id="list_records"),
                 cardinality="many",
                 available_field_ids=("record_key", "name", "is_active"),
                 available_fields=(
@@ -713,7 +713,7 @@ def test_list_rows_preserves_source_identity_field_as_relation_grain():
                 id="sb_sales",
                 requested_fact_id="fact_1",
                 answer_population=_answer_population(),
-                source=RelationSource(kind=SourceKind.API_READ, read_id="sales"),
+                source=DraftRelationSource(kind=SourceKind.API_READ, read_id="sales"),
                 cardinality="many",
                 available_field_ids=("sale_id",),
                 available_fields=(
@@ -768,7 +768,7 @@ def test_grouped_rows_deduplicates_output_fields_that_repeat_group_fields():
                 id="sb_sales",
                 requested_fact_id="fact_1",
                 answer_population=_answer_population(),
-                source=RelationSource(kind=SourceKind.API_READ, read_id="sales"),
+                source=DraftRelationSource(kind=SourceKind.API_READ, read_id="sales"),
                 cardinality="many",
                 available_field_ids=("sale_id", "item_count"),
                 fulfillments=(
@@ -824,7 +824,7 @@ def test_grouped_rows_fulfillment_tracks_answer_value_field_after_output_dedupe(
                 id="sb_sales",
                 requested_fact_id="fact_1",
                 answer_population=_answer_population(),
-                source=RelationSource(kind=SourceKind.API_READ, read_id="sales"),
+                source=DraftRelationSource(kind=SourceKind.API_READ, read_id="sales"),
                 cardinality="many",
                 available_field_ids=("sale_id", "snapshot_merch_name"),
                 fulfillments=(

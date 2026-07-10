@@ -14,26 +14,27 @@ input:
         sourceAnswer: Staff One sold 100 yesterday.
         provenance:
           question_contract:
+            question_inputs:
+              - id: fact_1_entity_1
+                kind: literal_text
+                role: reference_value
+                source: question_context
+                text: Staff One
+                resolved_value_text: Staff One
+                value_meaning_hint: staff member
+              - id: fact_1_time_1
+                kind: literal_text
+                role: time_value
+                source: question_context
+                text: yesterday
+                resolved_value_text: yesterday
             answer_requests:
               - id: fact_1
                 answer_fact: sales by Staff One yesterday
                 answer_outputs:
-                  - description: total sales amount
-                    requested_value_frame: total sales amount
-                known_inputs:
-                  - id: fact_1_entity_1
-                    kind: literal_text
-                    role: reference_value
-                    source: question_context
-                    text: Staff One
-                    resolved_value_text: Staff One
-                    value_meaning_hint: staff member
-                  - id: fact_1_time_1
-                    kind: literal_text
-                    role: time_value
-                    source: question_context
-                    text: yesterday
-                    resolved_value_text: yesterday
+                  - id: answer_1
+                    description: total sales amount
+                used_question_inputs: [fact_1_entity_1, fact_1_time_1]
         addresses:
           - address: entity.grounded_fact_1_entity_1
             kind: entity
@@ -66,10 +67,12 @@ expect:
               - slot_id: fact_1_entity_1
                 slot_kind: entity_identity
                 text: Staff One
-                description: staff member
+                resolved_value_text: Staff One
+                value_meaning_hint: staff member
               - slot_id: fact_1_time_1
                 slot_kind: time_scope
                 text: yesterday
+                resolved_value_text: yesterday
           prior_slot_bindings:
             fact_1_entity_1:
               value_kind: entity_identity
@@ -80,7 +83,7 @@ expect:
             fact_1_time_1:
               value_kind: time_scope
               value: yesterday
-              expression: yesterday
+              display: yesterday
               resolved_start: "2026-05-14"
               resolved_end: "2026-05-14"
               granularity: day

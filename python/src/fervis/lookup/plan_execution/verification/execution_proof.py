@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from fervis.lookup.plan_execution.compiled_execution import (
-    CompiledFactExecution,
-)
+if TYPE_CHECKING:
+    from fervis.lookup.answer_program.instantiation import _MaterializedExecution
 
 
 @dataclass(frozen=True)
@@ -16,15 +16,15 @@ class ExecutionProofContext:
     row_filter_scope_refs: dict[str, frozenset[str]]
 
     @classmethod
-    def from_compiled_execution(
+    def from_materialized_execution(
         cls,
-        compiled: CompiledFactExecution,
+        materialized: _MaterializedExecution,
     ) -> "ExecutionProofContext":
         return cls(
-            endpoint_arg_scope_refs=compiled.endpoint_arg_scope_refs,
+            endpoint_arg_scope_refs=materialized.endpoint_arg_scope_refs,
             operation_refs={
                 operation_id: frozenset(proof_refs)
-                for operation_id, proof_refs in compiled.operation_proof_refs.items()
+                for operation_id, proof_refs in materialized.operation_proof_refs.items()
             },
-            row_filter_scope_refs=compiled.row_filter_scope_refs,
+            row_filter_scope_refs=materialized.row_filter_scope_refs,
         )

@@ -35,7 +35,7 @@ from fervis.lookup.fact_plan.row_sources import (
 from fervis.lookup.fact_planning.row_set_filters import (
     row_set_filters_for_sources_payload,
 )
-from fervis.lookup.fact_plan.values import (
+from fervis.lookup.answer_program.values import (
     FactValue,
     IdentitySetValuePayload,
     IdentityValuePayload,
@@ -45,6 +45,7 @@ from fervis.lookup.fact_plan.values import (
     ValueKind,
     known_input_id_for_value,
 )
+from fervis.lookup.grounding.model import GroundedInputUse
 
 
 def available_relation_catalog_payload(
@@ -53,7 +54,7 @@ def available_relation_catalog_payload(
     catalog_selection: CatalogSelectionResult,
     memory_inputs: dict[str, Any],
     available_values: tuple[FactValue, ...],
-    available_value_uses: tuple[object, ...],
+    available_value_uses: tuple[GroundedInputUse, ...],
 ) -> dict[str, Any]:
     """Project selected catalog rows into executable row sets for the fact planner."""
 
@@ -418,7 +419,7 @@ def _generated_relation_payload(
 def operation_input_values_payload(
     *,
     available_values: tuple[FactValue, ...],
-    available_value_uses: tuple[object, ...],
+    available_value_uses: tuple[GroundedInputUse, ...],
 ) -> dict[str, Any]:
     """Return canonical values that still need a model-authored operation sink."""
 

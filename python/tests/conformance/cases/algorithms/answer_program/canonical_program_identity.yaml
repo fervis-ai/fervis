@@ -1,0 +1,16 @@
+id: canonical_program_identity
+kind: algorithm
+algorithm: answer_program.canonicalize
+description: Equivalent declaration order has one portable canonical payload and identity.
+input:
+  schema_revision: 1
+  programs:
+    - {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/canonical_a}
+    - {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/canonical_b}
+expect:
+  result_contains:
+    same_program_id: true
+    same_program: true
+    programs:
+      - program_id: ap_0f442771fa78320decc808b459ab470bfa2b39753444587eb837a8245f50a10a
+      - program_id: ap_0f442771fa78320decc808b459ab470bfa2b39753444587eb837a8245f50a10a

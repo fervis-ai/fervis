@@ -18,7 +18,13 @@ input:
             type: string
   relations:
     - id: records_rows
-      source: {kind: api_read, read_id: records}
+      source:
+        kind: api_read
+        read_id: records
+        row_filters:
+          - field_id: data_entity_label
+            operator: equals
+            value_id: alpha
       fields:
         - field_id: data_group_label
           roles: [output]
@@ -26,14 +32,6 @@ input:
     - id: alpha
       kind: named
       text: Alpha
-  value_uses:
-    - id: use_alpha_row_filter
-      value_id: alpha
-      target:
-        kind: row_filter
-        relation_id: records_rows
-        field_id: data_entity_label
-        operator: equals
 expect:
   result_contains:
     status: rejected

@@ -6,17 +6,16 @@ from fervis.lookup.plan_execution.verification import (
     verify_fact_plan as verify_fact_plan_impl,
 )
 from fervis.lookup.plan_execution.relations import RelationRows
-from fervis.lookup.fact_plan.fact_plan import (
-    AnswerPlan,
-    FactFulfillment,
-    FactPlan,
-)
-from fervis.lookup.fact_plan.operations import (
+from fervis.lookup.answer_program.model import AnswerProgram, FactFulfillment
+from fervis.lookup.fact_plan.fact_plan import FactPlan
+from fervis.lookup.answer_program.operations import (
     AggregateSpec,
     AggregationFunction,
     AggregationSpec,
     AntiJoinSpec,
     ComputeSpec,
+    ComputeBinary,
+    ComputeBinaryOperator,
     FilterSpec,
     JoinKey,
     Operation,
@@ -32,31 +31,66 @@ from fervis.lookup.fact_plan.operations import (
     TiePolicy,
     UniversalConditionSpec,
 )
-from fervis.lookup.fact_plan.relations import (
+from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
     Relation,
     RelationField,
     RelationSource,
     SourceKind,
 )
-from fervis.lookup.fact_plan.row_sources import memory_row_source_id
-from fervis.lookup.fact_plan.values import (
+from fervis.lookup.answer_program.values import (
+    ConstantRef,
     FactValue,
     LiteralType,
-    RankLimitUse,
-    ScalarInputUse,
-    ValueUse,
 )
 from fervis.lookup.question_contract import (
     QuestionContract,
     RequestedFact,
     RequestedFactAnswerOutput,
 )
-from fervis.lookup.fact_plan.render_spec import (
+from fervis.lookup.answer_program.render_spec import (
     RenderRelationOutput,
     RenderScalarOutput,
     RenderSpec,
 )
+
+
+def _rank_limit(value: int) -> ConstantRef:
+    return ConstantRef(
+        constant_id=f"rank-limit.{value}",
+        version_ref="rank@1",
+        value=FactValue.literal(
+            id=f"rank-limit.{value}",
+            literal_type=LiteralType.NUMBER,
+            value=str(value),
+        ),
+    )
+
+
+def _number_ref(
+    *,
+    input_id: str,
+    value: str,
+    proof_refs: tuple[str, ...] = (),
+) -> ConstantRef:
+    return ConstantRef(
+        constant_id=f"test.{input_id}",
+        version_ref="test@1",
+        value=FactValue.literal(
+            id=f"value.{input_id}",
+            literal_type=LiteralType.NUMBER,
+            value=value,
+            proof_refs=proof_refs,
+        ),
+    )
+
+
+def _subtract(left, right) -> ComputeBinary:
+    return ComputeBinary(
+        operator=ComputeBinaryOperator.SUBTRACT,
+        left=left,
+        right=right,
+    )
 
 
 def _plan_with(operation: Operation) -> FactPlan:
@@ -64,7 +98,7 @@ def _plan_with(operation: Operation) -> FactPlan:
     render_field = _render_field(operation)
     fulfillment = _fulfillment(operation, render_field)
     return FactPlan(
-        outcome=AnswerPlan(
+        outcome=AnswerProgram(
             fulfillment=fulfillment,
             relations=tuple(_relation(item) for item in sorted(relation_ids)),
             operations=(operation,),
@@ -106,19 +140,44 @@ def _question_contract(
 
 def verify_fact_plan(plan: FactPlan, **kwargs):
     catalog = kwargs.pop("catalog", RelationCatalog())
-    return verify_fact_plan_impl(
-        plan,
-        question_contract=kwargs.pop(
-            "question_contract",
-            _question_contract(
-                _default_description(plan),
-                binding_target_ids=_render_output_ids(plan),
-            ),
+    question_contract = kwargs.pop(
+        "question_contract",
+        _question_contract(
+            _default_description(plan),
+            binding_target_ids=_render_output_ids(plan),
         ),
-        catalog=catalog,
-        memory_relations=kwargs.pop("memory_relations", _memory_relations(plan)),
-        **kwargs,
     )
+    memory_relations = kwargs.pop("memory_relations", _memory_relations(plan))
+    from fervis.lookup.answer_program.compilation import compile_answer_program
+    from fervis.lookup.answer_program.instantiation import (
+        ExecutionEnvironment,
+        instantiate_answer_program,
+    )
+
+    if not isinstance(plan.outcome, AnswerProgram):
+        return verify_fact_plan_impl(
+            plan,
+            question_contract=question_contract,
+            catalog=catalog,
+            memory_relations=memory_relations,
+            **kwargs,
+        )
+    program, bindings = compile_answer_program(
+        plan.outcome,
+        question_contract=question_contract,
+        catalog=catalog,
+        bindings=plan.bindings,
+        memory_relations=memory_relations,
+    )
+    instantiate_answer_program(
+        program,
+        bindings,
+        ExecutionEnvironment(
+            catalog=catalog,
+            memory_relations=memory_relations,
+        ),
+    )
+    return plan
 
 
 def _default_description(plan: FactPlan) -> str:
@@ -204,7 +263,7 @@ def _input_relation_ids(operation: Operation) -> set[str]:
 
 def _memory_relations(plan: FactPlan) -> tuple[RelationRows, ...]:
     outcome = plan.outcome
-    if not isinstance(outcome, AnswerPlan):
+    if not isinstance(outcome, AnswerProgram):
         return ()
     return tuple(
         RelationRows(
@@ -397,7 +456,12 @@ def test_universal_condition_requires_subject_dimension_and_predicate():
 def test_rank_requires_ordering_and_deterministic_tie_policy():
     invalid = Operation(
         id="ranked",
-        spec=RankSpec(input_relation="totals", order_by=(), tie_policy="", limit=1),
+        spec=RankSpec(
+            input_relation="totals",
+            order_by=(),
+            tie_policy="",
+            limit=_rank_limit(1),
+        ),
         output_relation="result",
     )
     valid = Operation(
@@ -407,62 +471,39 @@ def test_rank_requires_ordering_and_deterministic_tie_policy():
             order_by=(SortKey(field="total", direction=SortDirection.DESC),),
             tie_policy=TiePolicy.FIELD,
             tie_breakers=(SortKey(field="name", direction=SortDirection.ASC),),
-            limit=1,
+            limit=_rank_limit(1),
         ),
         output_relation="result",
     )
 
     with pytest.raises(VerificationError, match="tie policy"):
         verify_fact_plan(_plan_with(invalid))
-    valid_plan = _plan_with(valid)
-    valid_plan = FactPlan(
-        outcome=AnswerPlan(
-            fulfillment=valid_plan.outcome.fulfillment,
-            value_uses=(
-                ValueUse(
-                    id="use_rank_limit",
-                    value_id="rank_limit",
-                    target=RankLimitUse(operation_id="ranked"),
-                ),
-            ),
-            relations=valid_plan.outcome.relations,
-            operations=valid_plan.outcome.operations,
-            render_spec=valid_plan.outcome.render_spec,
-        )
-    )
-    verify_fact_plan(
-        valid_plan,
-        available_values=(
-            FactValue.literal(
-                id="rank_limit",
-                literal_type=LiteralType.NUMBER,
-                value="1",
-            ),
-        ),
-    )
+    verify_fact_plan(_plan_with(valid))
 
 
-def test_compute_references_scalar_inputs_only():
-    invalid = Operation(
-        id="remaining",
-        spec=ComputeSpec(
-            expression="target - total", scalar_inputs=(), output_scalar="x"
-        ),
-    )
+def test_compute_references_declared_value_origins_only():
     valid = Operation(
         id="remaining",
         spec=ComputeSpec(
-            expression="target - total",
-            scalar_inputs=("target", "total"),
+            expression=_subtract(
+                _number_ref(
+                    input_id="target",
+                    value="100",
+                    proof_refs=("known_input:target_value",),
+                ),
+                _number_ref(
+                    input_id="total",
+                    value="40",
+                    proof_refs=("prior:total_value",),
+                ),
+            ),
             output_scalar="remaining",
         ),
     )
 
-    with pytest.raises(VerificationError, match="scalar inputs"):
-        verify_fact_plan(_plan_with(invalid))
     verify_fact_plan(
         FactPlan(
-            outcome=AnswerPlan(
+            outcome=AnswerProgram(
                 fulfillment=(
                     FactFulfillment(
                         requested_fact_id="rf_answer",
@@ -476,24 +517,6 @@ def test_compute_references_scalar_inputs_only():
                     ),
                 ),
                 relations=(_relation("rows"),),
-                value_uses=(
-                    ValueUse(
-                        id="use_target",
-                        value_id="target_value",
-                        target=ScalarInputUse(
-                            operation_id="remaining",
-                            input_id="target",
-                        ),
-                    ),
-                    ValueUse(
-                        id="use_total",
-                        value_id="total_value",
-                        target=ScalarInputUse(
-                            operation_id="remaining",
-                            input_id="total",
-                        ),
-                    ),
-                ),
                 operations=(
                     Operation(
                         id="project_answer",
@@ -522,26 +545,12 @@ def test_compute_references_scalar_inputs_only():
                 ),
             )
         ),
-        available_values=(
-            FactValue.literal(
-                id="target_value",
-                literal_type=LiteralType.NUMBER,
-                value="100",
-                proof_refs=("known_input:target_value",),
-            ),
-            FactValue.literal(
-                id="total_value",
-                literal_type=LiteralType.NUMBER,
-                value="40",
-                proof_refs=("prior:total_value",),
-            ),
-        ),
     )
 
 
 def test_one_answer_output_can_be_fulfilled_by_multiple_distinct_render_outputs():
     plan = FactPlan(
-        outcome=AnswerPlan(
+        outcome=AnswerProgram(
             fulfillment=(
                 FactFulfillment(
                     requested_fact_id="rf_answer",
@@ -634,70 +643,9 @@ def test_one_answer_output_can_be_fulfilled_by_multiple_distinct_render_outputs(
     assert verify_fact_plan(plan, question_contract=question_contract) is plan
 
 
-def test_compute_expression_allows_numeric_constants():
-    operation = Operation(
-        id="remaining",
-        spec=ComputeSpec(
-            expression="target - 1",
-            scalar_inputs=("target",),
-            output_scalar="remaining",
-        ),
-    )
-    plan = _plan_with(operation)
-    plan = FactPlan(
-        outcome=AnswerPlan(
-            fulfillment=plan.outcome.fulfillment,
-            value_uses=(
-                ValueUse(
-                    id="use_target",
-                    value_id="target_value",
-                    target=ScalarInputUse(
-                        operation_id="remaining",
-                        input_id="target",
-                    ),
-                ),
-            ),
-            relations=plan.outcome.relations,
-            operations=plan.outcome.operations,
-            render_spec=RenderSpec(
-                relation_outputs=(),
-                scalar_outputs=(
-                    RenderScalarOutput(id="answer", scalar_id="remaining"),
-                ),
-            ),
-        )
-    )
-
-    assert verify_fact_plan(
-        plan,
-        available_values=(
-            FactValue.literal(
-                id="target_value",
-                literal_type=LiteralType.NUMBER,
-                value="100",
-                proof_refs=("known_input:target",),
-            ),
-        ),
-    )
-
-
-def test_compute_expression_rejects_unsupported_ast_forms():
-    operation = Operation(
-        id="remaining",
-        spec=ComputeSpec(
-            expression="max(target, total)",
-            scalar_inputs=("target", "total"),
-            output_scalar="remaining",
-        ),
-    )
-
-    with pytest.raises(VerificationError, match="unsupported compute expression"):
-        verify_fact_plan(_plan_with(operation))
-
-
 def test_compute_only_literal_answer_requires_evidence_proof():
     plan = FactPlan(
-        outcome=AnswerPlan(
+        outcome=AnswerProgram(
             fulfillment=(
                 FactFulfillment(
                     requested_fact_id="rf_answer",
@@ -705,30 +653,14 @@ def test_compute_only_literal_answer_requires_evidence_proof():
                     render_output_id="answer",
                 ),
             ),
-            value_uses=(
-                ValueUse(
-                    id="use_target",
-                    value_id="target_value",
-                    target=ScalarInputUse(
-                        operation_id="remaining",
-                        input_id="target",
-                    ),
-                ),
-                ValueUse(
-                    id="use_total",
-                    value_id="total_value",
-                    target=ScalarInputUse(
-                        operation_id="remaining",
-                        input_id="total",
-                    ),
-                ),
-            ),
             operations=(
                 Operation(
                     id="remaining",
                     spec=ComputeSpec(
-                        expression="target - total",
-                        scalar_inputs=("target", "total"),
+                        expression=_subtract(
+                            _number_ref(input_id="target", value="100"),
+                            _number_ref(input_id="total", value="40"),
+                        ),
                         output_scalar="remaining",
                     ),
                 ),
@@ -743,26 +675,12 @@ def test_compute_only_literal_answer_requires_evidence_proof():
     )
 
     with pytest.raises(VerificationError, match="evidence proof"):
-        verify_fact_plan(
-            plan,
-            available_values=(
-                FactValue.literal(
-                    id="target_value",
-                    literal_type=LiteralType.NUMBER,
-                    value="100",
-                ),
-                FactValue.literal(
-                    id="total_value",
-                    literal_type=LiteralType.NUMBER,
-                    value="40",
-                ),
-            ),
-        )
+        verify_fact_plan(plan)
 
 
 def test_scalar_only_terminal_answer_cannot_launder_unrelated_relation_evidence():
     plan = FactPlan(
-        outcome=AnswerPlan(
+        outcome=AnswerProgram(
             fulfillment=(
                 FactFulfillment(
                     requested_fact_id="rf_answer",
@@ -771,24 +689,6 @@ def test_scalar_only_terminal_answer_cannot_launder_unrelated_relation_evidence(
                 ),
             ),
             relations=(_relation("rows"),),
-            value_uses=(
-                ValueUse(
-                    id="use_target",
-                    value_id="target_value",
-                    target=ScalarInputUse(
-                        operation_id="remaining",
-                        input_id="target",
-                    ),
-                ),
-                ValueUse(
-                    id="use_total",
-                    value_id="total_value",
-                    target=ScalarInputUse(
-                        operation_id="remaining",
-                        input_id="total",
-                    ),
-                ),
-            ),
             operations=(
                 Operation(
                     id="project_unrelated_evidence",
@@ -801,8 +701,10 @@ def test_scalar_only_terminal_answer_cannot_launder_unrelated_relation_evidence(
                 Operation(
                     id="remaining",
                     spec=ComputeSpec(
-                        expression="target - total",
-                        scalar_inputs=("target", "total"),
+                        expression=_subtract(
+                            _number_ref(input_id="target", value="100"),
+                            _number_ref(input_id="total", value="40"),
+                        ),
                         output_scalar="remaining",
                     ),
                 ),
@@ -817,26 +719,12 @@ def test_scalar_only_terminal_answer_cannot_launder_unrelated_relation_evidence(
     )
 
     with pytest.raises(VerificationError, match="terminal relation output"):
-        verify_fact_plan(
-            plan,
-            available_values=(
-                FactValue.literal(
-                    id="target_value",
-                    literal_type=LiteralType.NUMBER,
-                    value="100",
-                ),
-                FactValue.literal(
-                    id="total_value",
-                    literal_type=LiteralType.NUMBER,
-                    value="40",
-                ),
-            ),
-        )
+        verify_fact_plan(plan)
 
 
 def test_unrendered_compute_outputs_are_not_legal_answer_work():
     plan = FactPlan(
-        outcome=AnswerPlan(
+        outcome=AnswerProgram(
             fulfillment=(
                 FactFulfillment(
                     requested_fact_id="rf_answer",
@@ -845,16 +733,6 @@ def test_unrendered_compute_outputs_are_not_legal_answer_work():
                 ),
             ),
             relations=(_relation("rows"),),
-            value_uses=(
-                ValueUse(
-                    id="use_target",
-                    value_id="target_value",
-                    target=ScalarInputUse(
-                        operation_id="unused_compute",
-                        input_id="target",
-                    ),
-                ),
-            ),
             operations=(
                 Operation(
                     id="project_answer",
@@ -867,8 +745,7 @@ def test_unrendered_compute_outputs_are_not_legal_answer_work():
                 Operation(
                     id="unused_compute",
                     spec=ComputeSpec(
-                        expression="target",
-                        scalar_inputs=("target",),
+                        expression=_number_ref(input_id="target", value="100"),
                         output_scalar="unused_total",
                     ),
                 ),
@@ -884,21 +761,12 @@ def test_unrendered_compute_outputs_are_not_legal_answer_work():
     )
 
     with pytest.raises(VerificationError, match="unrendered scalar output"):
-        verify_fact_plan(
-            plan,
-            available_values=(
-                FactValue.literal(
-                    id="target_value",
-                    literal_type=LiteralType.NUMBER,
-                    value="100",
-                ),
-            ),
-        )
+        verify_fact_plan(plan)
 
 
 def test_render_output_ids_must_be_unique():
     plan = FactPlan(
-        outcome=AnswerPlan(
+        outcome=AnswerProgram(
             fulfillment=(
                 FactFulfillment(
                     requested_fact_id="rf_answer",
@@ -948,9 +816,9 @@ def test_relation_answer_requires_render_outputs():
             output_relation="result",
         )
     )
-    assert isinstance(plan.outcome, AnswerPlan)
+    assert isinstance(plan.outcome, AnswerProgram)
     plan = FactPlan(
-        outcome=AnswerPlan(
+        outcome=AnswerProgram(
             fulfillment=(
                 FactFulfillment(
                     requested_fact_id="rf_answer",
@@ -1034,7 +902,7 @@ def test_predicate_rejects_rhs_for_unary_operators():
 
 def test_count_aggregate_can_fulfill_requested_answer_output():
     plan = FactPlan(
-        outcome=AnswerPlan(
+        outcome=AnswerProgram(
             fulfillment=(
                 FactFulfillment(
                     requested_fact_id="rf_answer",
@@ -1130,7 +998,7 @@ def test_rank_rejects_non_positive_limit():
                 tie_breakers=(
                     SortKey(field="field.value", direction=SortDirection.ASC),
                 ),
-                limit=0,
+                limit=_rank_limit(0),
             ),
             output_relation="result",
         )

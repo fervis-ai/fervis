@@ -1,0 +1,56 @@
+id: prompt_includes_conversation_input_provenance
+description: Question-contract prompt receives canonical CR-owned input provenance.
+kind: algorithm
+algorithm: question_contract.prompt
+input:
+  current_question: What about Mombasa?
+  conversation_input_provenance:
+    question_context_kind: prior_question_continuation
+    resolved_request_text: How many sales did we make in Mombasa on Tuesday?
+    inputs:
+      - input_ref: q_place
+        kind: literal_text
+        value_source_text: Mombasa
+        resolved_value_text: Mombasa
+        role: reference_value
+        sources:
+          - kind: continuation_replacement
+            part_id: q_place
+            prior_text: Nairobi
+            current_text: Mombasa
+      - input_ref: q_time
+        kind: literal_text
+        value_source_text: Tuesday
+        resolved_value_text: Tuesday
+        value_meaning_hint: time scope
+        role: time_value
+        sources:
+          - kind: continuation_carried
+            part_id: q_time
+            prior_text: Tuesday
+  contains:
+    - "Conversation input provenance:"
+    - '"question_context_kind": "prior_question_continuation"'
+    - '"resolved_request_text": "How many sales did we make in Mombasa on Tuesday?"'
+    - '"question_input_source": "question_context"'
+    - '"question_input_source": "conversation_resolution"'
+    - '"sources": ['
+    - '"continuation_replacement"'
+    - '"continuation_carried"'
+    - "When conversation input provenance includes resolved_request_text, use it as the factual meaning of the current question."
+    - "Use conversation input provenance as authoritative input provenance; do not recreate carried prior inputs from resolved_request_text."
+expect:
+  result_contains:
+    contains:
+      "Conversation input provenance:": true
+      '"question_context_kind": "prior_question_continuation"': true
+      '"resolved_request_text": "How many sales did we make in Mombasa on Tuesday?"': true
+      '"question_input_source": "question_context"': true
+      '"question_input_source": "conversation_resolution"': true
+      '"sources": [': true
+      '"continuation_replacement"': true
+      '"continuation_carried"': true
+      ? "When conversation input provenance includes resolved_request_text, use it as the factual meaning of the current question."
+      : true
+      ? "Use conversation input provenance as authoritative input provenance; do not recreate carried prior inputs from resolved_request_text."
+      : true

@@ -14,12 +14,14 @@ input:
         sourceAnswer: "2468"
         provenance:
           question_contract:
+            question_inputs: []
             answer_requests:
               - id: fact_1
                 answer_fact: products Staff One sold today
                 answer_outputs:
                   - id: answer_1
                     description: total sales amount
+                used_question_inputs: []
         addresses:
           - address: value.total_sales
             kind: value
@@ -29,4 +31,3 @@ expect:
     context_sources:
       - kind: prior_user_question
         text: What was the total sales amount for products Staff One sold today?
-

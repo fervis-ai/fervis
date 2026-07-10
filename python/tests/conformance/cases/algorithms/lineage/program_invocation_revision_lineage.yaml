@@ -1,0 +1,118 @@
+id: program_invocation_revision_lineage
+kind: algorithm
+algorithm: lineage.explain
+description: Program, invocation, patch, and revision derivation remain first-class in canonical run lineage.
+input:
+  root:
+    kind: question
+    id: question_sales
+  dataset:
+    conversations:
+      - conversation_id: conversation_sales
+        tenant_id: tenant_1
+    questions:
+      - question_id: question_sales
+        conversation_id: conversation_sales
+        conversation_sequence: 1
+        original_question: How many sales did we make today?
+    runs:
+      - run_id: run_base
+        question_id: question_sales
+        run_number: 1
+        kind: model_assisted
+        trigger_kind: initial
+      - run_id: run_patch
+        question_id: question_sales
+        run_number: 2
+        kind: deterministic
+        trigger_kind: rerun
+        base_run_id: run_base
+      - run_id: run_revision
+        question_id: question_sales
+        run_number: 3
+        kind: deterministic
+        trigger_kind: rerun
+        base_run_id: run_base
+    run_results:
+      - run_result_id: result_base
+        run_id: run_base
+        result_kind: answered
+      - run_result_id: result_patch
+        run_id: run_patch
+        result_kind: answered
+      - run_result_id: result_revision
+        run_id: run_revision
+        result_kind: answered
+    answer_programs:
+      - program_id: ap_sales
+        schema_revision: 1
+      - program_id: ap_sales_by_channel
+        schema_revision: 1
+    program_invocations:
+      - invocation_id: pi_base
+        run_id: run_base
+        program_id: ap_sales
+        bindings:
+          - parameter_id: semantic.sale_states
+            value: {kind: string_set, values: [COMPLETED]}
+      - invocation_id: pi_patch
+        run_id: run_patch
+        program_id: ap_sales
+        bindings:
+          - parameter_id: semantic.sale_states
+            value: {kind: string_set, values: [COMPLETED, PLACED]}
+        patch:
+          patch_id: bp_include_placed
+          operations:
+            - kind: set
+              parameter_id: semantic.sale_states
+              value: {kind: string_set, values: [COMPLETED, PLACED]}
+      - invocation_id: pi_revision
+        run_id: run_revision
+        program_id: ap_sales_by_channel
+        bindings:
+          - parameter_id: semantic.sale_states
+            value: {kind: string_set, values: [COMPLETED]}
+          - parameter_id: semantic.sale_channels
+            value: {kind: string_set, values: [STORE]}
+        revision_id: pr_filter_channel
+    program_revisions:
+      - revision_id: pr_filter_channel
+        base_program_id: ap_sales
+        revised_program_id: ap_sales_by_channel
+        capability_id: filter_by_sale_channel
+        application:
+          binding:
+            parameter_id: semantic.sale_channels
+            value: {kind: string_set, values: [STORE]}
+expect:
+  result_contains:
+    lines:
+      - "Program invocation pi_base uses ap_sales"
+      - "Program invocation pi_patch uses ap_sales"
+      - "Binding patch bp_include_placed"
+      - "Program revision pr_filter_channel: ap_sales -> ap_sales_by_channel via filter_by_sale_channel"
+    view:
+      runs:
+        run_base:
+          program_derivation:
+            invocation_id: pi_base
+            program: {program_id: ap_sales, schema_revision: 1}
+            patch: null
+            revision: null
+        run_patch:
+          program_derivation:
+            invocation_id: pi_patch
+            program: {program_id: ap_sales, schema_revision: 1}
+            patch: {patch_id: bp_include_placed}
+            revision: null
+        run_revision:
+          program_derivation:
+            invocation_id: pi_revision
+            program: {program_id: ap_sales_by_channel, schema_revision: 1}
+            patch: null
+            revision:
+              revision_id: pr_filter_channel
+              base_program_id: ap_sales
+              revised_program_id: ap_sales_by_channel
+              capability_id: filter_by_sale_channel

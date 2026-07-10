@@ -10,7 +10,7 @@ from fervis.lookup.clarification import Clarification
 
 if TYPE_CHECKING:
     from fervis.lookup.plan_execution.relations import RelationRows
-    from fervis.lookup.fact_plan.render_spec import RenderSpec
+    from fervis.lookup.answer_program.render_spec import RenderSpec
 
 
 class OutcomeKind(StrEnum):

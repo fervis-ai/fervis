@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 from fervis.questions.ports import (
+    DeterministicRunSpec,
     LookupExecutionRequest,
     LookupExecutionResult,
+    ModelAssistedRunSpec,
+    ProgramExecutionRequest,
     QueuedRun,
     RunSubmission,
+    RunExecutionSpec,
+    fold_run_execution_spec,
     QuestionLifecyclePort,
     QuestionLineagePort,
     QuestionLookupPort,
+    QuestionProgramPort,
 )
+from fervis.host_api.contracts.authority import ReadAuthority
 
 from .contracts import FailQueuedRunRequest, QueuedRunRequest, QueuedRunResult
 from .events import (
@@ -28,10 +35,12 @@ class RunWorkService:
         lineage: QuestionLineagePort,
         runs: QuestionLifecyclePort,
         lookup: QuestionLookupPort,
+        program: QuestionProgramPort,
     ) -> None:
         self.lineage = lineage
         self.runs = runs
         self.lookup = lookup
+        self.program = program
 
     def process_queued_run(
         self,
@@ -55,14 +64,15 @@ class RunWorkService:
             )
             return result
         try:
+            stage, message = _run_start_progress(queued.submission.spec)
             events.emit(
                 run_progress_event(
                     run_id=queued.submission.run_id,
-                    stage="lookup",
-                    message="starting lookup",
+                    stage=stage,
+                    message=message,
                 )
             )
-            lookup_result = self._run_lookup(
+            lookup_result = self._execute_submission(
                 queued.submission,
                 active_attempt=request.active_attempt,
                 event_sink=events,
@@ -97,7 +107,7 @@ class RunWorkService:
             queued.submission.run_id,
             lookup_result,
         )
-        self.runs.terminalize(
+        terminal = self.runs.terminalize(
             run_id=queued.submission.run_id,
             status=lookup_result.status,
             answer=lookup_result.answer,
@@ -106,13 +116,7 @@ class RunWorkService:
             worker_id=request.worker_id,
             active_attempt=request.active_attempt,
         )
-        result = QueuedRunResult(
-            status=lookup_result.status,
-            run_id=queued.submission.run_id,
-            answer=lookup_result.answer,
-            result_data=lookup_result.result_data,
-            error=lookup_result.error,
-        )
+        result = _queued_result(terminal)
         _emit_queued_result_events(
             result,
             conversation_id=queued.submission.conversation_id,
@@ -152,6 +156,7 @@ class RunWorkService:
         self,
         submission: RunSubmission,
         *,
+        spec: ModelAssistedRunSpec,
         active_attempt: int | None,
         event_sink: QuestionRunEventSink | None = None,
     ) -> LookupExecutionResult:
@@ -160,7 +165,7 @@ class RunWorkService:
                 run_id=submission.run_id,
                 conversation_id=submission.conversation_id,
                 tenant_id=submission.tenant_id,
-                question=submission.question,
+                question=spec.integrated_question,
                 read_context_ref=submission.principal.read_context_ref,
                 delegated_credential=submission.principal.delegated_credential,
                 principal=(
@@ -168,12 +173,78 @@ class RunWorkService:
                     if submission.principal.raw is not None
                     else submission.principal.principal_id
                 ),
-                provider=submission.provider,
-                model_key=submission.model_key,
-                conversation_context=dict(submission.conversation_context),
-                runtime_context=dict(submission.runtime_context),
-                max_budget_usd=submission.max_budget_usd,
-                max_thinking_tokens=submission.max_thinking_tokens,
+                provider=spec.provider,
+                model_key=spec.model_key,
+                conversation_context=dict(spec.conversation_context),
+                runtime_context=dict(spec.runtime_context),
+                max_budget_usd=spec.max_budget_usd,
+                max_thinking_tokens=spec.max_thinking_tokens,
+                active_attempt=active_attempt,
+            ),
+            progress_sink=event_sink,
+        )
+
+    def _execute_submission(
+        self,
+        submission: RunSubmission,
+        *,
+        active_attempt: int | None,
+        event_sink: QuestionRunEventSink | None = None,
+    ) -> LookupExecutionResult:
+        return fold_run_execution_spec(
+            submission.spec,
+            model_assisted=lambda spec: self._run_lookup(
+                submission,
+                spec=spec,
+                active_attempt=active_attempt,
+                event_sink=event_sink,
+            ),
+            deterministic=lambda spec: self._run_program(
+                submission,
+                spec=spec,
+                active_attempt=active_attempt,
+                event_sink=event_sink,
+            ),
+        )
+
+    def _run_program(
+        self,
+        submission: RunSubmission,
+        *,
+        spec: DeterministicRunSpec,
+        active_attempt: int | None,
+        event_sink: QuestionRunEventSink | None = None,
+    ) -> LookupExecutionResult:
+        authority = ReadAuthority.from_principal(submission.principal)
+        question = self.runs.get_question(
+            question_id=submission.question_id,
+            authority=authority,
+        )
+        if question is None:
+            raise PermissionError("deterministic run question is not authorized")
+        invocation = self.runs.load_program_invocation_for_execution(
+            invocation_id=spec.invocation_id,
+            run_id=submission.run_id,
+            question_id=submission.question_id,
+            tenant_id=submission.tenant_id,
+        )
+        if invocation is None:
+            raise RuntimeError("deterministic run invocation is not executable")
+        return self.program.run_program(
+            ProgramExecutionRequest(
+                run_id=submission.run_id,
+                conversation_id=submission.conversation_id,
+                tenant_id=submission.tenant_id,
+                question=question.original_question,
+                read_context_ref=submission.principal.read_context_ref,
+                delegated_credential=submission.principal.delegated_credential,
+                principal=(
+                    submission.principal.raw
+                    if submission.principal.raw is not None
+                    else submission.principal.principal_id
+                ),
+                invocation=invocation,
+                runtime_context=dict(spec.runtime_context),
                 active_attempt=active_attempt,
             ),
             progress_sink=event_sink,
@@ -232,6 +303,18 @@ def _queued_result(queued: QueuedRun) -> QueuedRunResult:
         answer=queued.answer,
         result_data=queued.result_data,
         error=queued.error,
+        duration_ms=queued.duration_ms,
+    )
+
+
+def _run_start_progress(spec: RunExecutionSpec) -> tuple[str, str]:
+    return fold_run_execution_spec(
+        spec,
+        model_assisted=lambda _spec: ("lookup", "starting lookup"),
+        deterministic=lambda _spec: (
+            "program",
+            "starting deterministic program",
+        ),
     )
 
 

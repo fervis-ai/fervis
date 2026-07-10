@@ -25,6 +25,7 @@ from fervis.lookup.plan_selection import BoundPlanSelectionSet
 from fervis.lookup.fact_planning.grouped_ranked_choices import (
     GROUPED_RANKED_PLAN_SHAPES,
 )
+from fervis.lookup.answer_program.compiler_inputs import compiler_input_context
 
 
 @dataclass(frozen=True)
@@ -82,8 +83,11 @@ def generate_pattern_fact_plan(
                 plan_selection.source_binding_ids_by_requirement_by_requested_fact_id()
             ),
             relation_catalog=request.relation_catalog,
-            requested_fact_ids=tuple(
-                fact.id for fact in request.question_contract.requested_facts
+            question_contract=request.question_contract,
+            memory_relations=request.memory_relations,
+            input_context=compiler_input_context(
+                values=request.available_values,
+                question_contract=request.question_contract,
             ),
         )
     except Exception as exc:

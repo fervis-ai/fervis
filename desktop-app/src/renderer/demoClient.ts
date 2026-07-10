@@ -18,7 +18,9 @@ export function createDemoFervisClient(): FervisApiClient {
         questionId,
         conversationId: conversation.summary.conversationId,
         question: conversation.question,
-        currentRunId: latestRun.runId,
+        primaryRunId: conversation.summary.primaryRunId,
+        latestRunId: conversation.summary.latestRunId,
+        activeRunId: conversation.summary.activeRunId,
         status: latestRun.status,
         answer: latestRun.answer,
         resultData: latestRun.resultData,
@@ -43,6 +45,8 @@ export function createDemoFervisClient(): FervisApiClient {
     askQuestion: async (): Promise<QuestionStatePayload> =>
       createDemoFervisClient().getQuestion(demoConversations[0].summary.latestQuestionId),
     answerClarification: async (): Promise<QuestionStatePayload> =>
+      createDemoFervisClient().getQuestion(demoConversations[0].summary.latestQuestionId),
+    rerunQuestion: async (): Promise<QuestionStatePayload> =>
       createDemoFervisClient().getQuestion(demoConversations[0].summary.latestQuestionId)
   };
 }

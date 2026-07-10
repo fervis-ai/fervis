@@ -12,7 +12,7 @@ from fervis.lineage.step_summary import (
     merge_step_summary_json,
     step_summary_json,
 )
-from fervis.lookup.fact_plan.values import (
+from fervis.lookup.answer_program.values import (
     FactValue,
     IdentitySetValuePayload,
     IdentityValuePayload,

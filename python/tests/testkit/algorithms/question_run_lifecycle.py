@@ -7,27 +7,215 @@ from fervis.questions import (
     AskRequest,
     ExecutionMode,
     QuestionPrincipal,
+    RerunQuestionRequest,
+)
+from fervis.questions.contracts import QuestionLifecycleError
+from fervis.lookup.answer_program.codec import decode_answer_program
+from fervis.lookup.answer_program.persistence import (
+    StoredProgramInvocation,
+    parse_stored_program_invocation,
+    program_invocation,
 )
 from fervis.questions.service import QuestionService
+from fervis.questions.execution_specs import execution_spec_kind
 from fervis.run_work import FailQueuedRunRequest, QueuedRunRequest
 from fervis.questions.ports import (
     AuthorizedQuestionAccess,
     LookupExecutionRequest,
     LookupExecutionResult,
+    ParsedQuestionRunSubmission,
     QuestionRunRecord,
     QuestionRunSubmissionKind,
     QuestionRunSubmissionResult,
     QueuedRun,
     RunSubmission,
 )
+from tests.testkit.answer_program_contracts import (
+    binding_patch_from_payload,
+    binding_set_from_payload,
+    capability_application_from_payload,
+)
 from tests.testkit.assertions import subset_mismatches
 
 
 def run_question_run_lifecycle_case(payload: dict[str, Any]) -> list[str]:
-    scenario = str(payload["input"]["scenario"])
-    if scenario != "ask":
-        return [f"unsupported question-run lifecycle scenario: {scenario}"]
-    return _run_ask_case(payload)
+    input_payload = payload["input"]
+    if input_payload.get("schema_revision") == 1:
+        operation = str(input_payload["operation"])
+        if operation == "rerun":
+            return _run_portable_rerun_case(payload)
+        if operation == "rerun_eligibility":
+            return _run_portable_rerun_eligibility_case(payload)
+        return [f"unsupported portable question lifecycle operation: {operation}"]
+    scenario = str(input_payload["scenario"])
+    if scenario == "ask":
+        return _run_ask_case(payload)
+    return [f"unsupported question-run lifecycle scenario: {scenario}"]
+
+
+def _run_portable_rerun_eligibility_case(
+    payload: dict[str, Any],
+) -> list[str]:
+    outcomes: list[dict[str, Any]] = []
+    for attempt in payload["input"]["attempts"]:
+        service, runs, lineage, execution = _portable_rerun_state(attempt["state"])
+        initial_run_count = lineage.run_count
+        initial_invocation_count = len(runs.stored_invocations)
+        initial_revision_count = len(runs.revision_ids)
+        initial_queue_count = len(runs.runs)
+        try:
+            service.rerun_question(
+                _portable_rerun_request(attempt["command"])
+            )
+        except QuestionLifecycleError as exc:
+            outcome = {
+                "id": str(attempt["id"]),
+                "status": "rejected",
+                "code": exc.code,
+            }
+        else:
+            outcome = {"id": str(attempt["id"]), "status": "accepted"}
+        outcome.update(
+            {
+                "new_runs": lineage.run_count - initial_run_count,
+                "new_invocations": (
+                    len(runs.stored_invocations) - initial_invocation_count
+                ),
+                "new_revisions": len(runs.revision_ids) - initial_revision_count,
+                "queued_work": len(runs.runs) - initial_queue_count,
+                "model_calls": len(execution.calls),
+                "program_calls": execution.program_call_count,
+                "memory_calls": lineage.memory_call_count,
+                "read_calls": execution.read_call_count,
+            }
+        )
+        outcomes.append(outcome)
+    return subset_mismatches(
+        actual={"outcomes": outcomes},
+        expected_subset=payload["expect"]["result_contains"],
+    )
+
+
+def _run_portable_rerun_case(payload: dict[str, Any]) -> list[str]:
+    input_payload = payload["input"]
+    service, runs, lineage, execution = _portable_rerun_state(
+        input_payload["state"]
+    )
+    result = service.rerun_question(
+        _portable_rerun_request(input_payload["command"])
+    )
+    created = runs.runs[result.run_id]
+    invocation = runs.stored_invocations[result.run_id]
+    base_run_id = str(input_payload["command"]["base_run_id"])
+    base_before = runs.stored_invocations.get(base_run_id)
+    after_enqueue = input_payload.get("after_enqueue") or {}
+    if after_enqueue.get("revoke_question"):
+        runs.questions.pop(str(input_payload["command"]["question_id"]), None)
+    executed = None
+    if after_enqueue.get("process"):
+        executed = service.run_work.process_queued_run(
+            QueuedRunRequest(
+                run_id=result.run_id,
+                worker_id=str(after_enqueue.get("worker_id") or "worker_1"),
+                active_attempt=int(after_enqueue.get("active_attempt") or 1),
+            )
+        )
+    actual = {
+        "result": _result_payload(result),
+        "execution_result": _result_payload(executed),
+        "question_count": lineage.question_count,
+        "run_count": lineage.run_count,
+        "run": {
+            "kind": execution_spec_kind(created.submission.spec).value,
+            "lineage_kind": lineage.last_run_kind,
+            "trigger_kind": lineage.trigger_kind,
+            "base_run_id": lineage.base_run_id,
+            "program_id": invocation.invocation.program_id,
+            "patch_id_present": invocation.invocation.patch_id is not None,
+            "revision_id_present": invocation.invocation.revision_id is not None,
+            "binding_ids": list(invocation.bindings.parameter_ids),
+        },
+        "memory_call_count": lineage.memory_call_count,
+        "model_call_count": len(execution.calls),
+        "program_call_count": execution.program_call_count,
+        "base_run_unchanged": runs.stored_invocations.get(base_run_id) is base_before,
+    }
+    return subset_mismatches(
+        actual=actual,
+        expected_subset=payload["expect"]["result_contains"],
+    )
+
+
+def _portable_rerun_state(
+    payload: dict[str, Any],
+) -> tuple[QuestionService, "_InMemoryRuns", "_InMemoryLineage", "_FakeLookup"]:
+    lineage = _InMemoryLineage(
+        question_count=int(payload.get("question_count") or 0),
+        run_count=int(payload.get("run_count") or 0),
+    )
+    runs = _InMemoryRuns(lineage=lineage)
+    for question in payload.get("questions") or ():
+        principal = _principal(question["principal"])
+        runs.questions[str(question["question_id"])] = AuthorizedQuestionAccess._issue(
+            question_id=str(question["question_id"]),
+            conversation_id=str(question["conversation_id"]),
+            tenant_id=principal.tenant_id,
+            original_question=str(question["original_question"]),
+            read_context_ref=principal.read_context_ref,
+        )
+    for base in payload.get("program_invocations") or ():
+        program = decode_answer_program(base["program"])
+        bindings = binding_set_from_payload(base)
+        invocation = program_invocation(
+            run_id=str(base["run_id"]),
+            program_id=str(base["program_id"]),
+            bindings=bindings,
+        )
+        runs.stored_invocations[str(base["run_id"])] = StoredProgramInvocation(
+            invocation=invocation,
+            program=program,
+        )
+    execution = _FakeLookup(
+        {},
+        program_result_payload=dict(payload.get("program_result") or {}),
+    )
+    service = QuestionService(
+        lineage=lineage,
+        runs=runs,
+        lookup=execution,
+        program=execution,
+        ids=_DeterministicIds(),
+        adapter_ref="conformance",
+        runtime_version="test-runtime",
+    )
+    return service, runs, lineage, execution
+
+
+def _portable_rerun_request(payload: dict[str, Any]) -> RerunQuestionRequest:
+    return RerunQuestionRequest(
+        question_id=str(payload["question_id"]),
+        base_run_id=str(payload["base_run_id"]),
+        patch=(
+            binding_patch_from_payload(payload["patch"])
+            if "patch" in payload
+            else None
+        ),
+        capability_application=(
+            capability_application_from_payload(payload["capability_application"])
+            if "capability_application" in payload
+            else None
+        ),
+        principal=_principal(payload["principal"]),
+        execution_mode=ExecutionMode.QUEUED,
+        idempotency_key=payload.get("idempotency_key"),
+    )
+
+
+def _principal(payload: dict[str, Any]) -> QuestionPrincipal:
+    return QuestionPrincipal(
+        principal_id=str(payload["principal_id"]),
+        tenant_id=str(payload["tenant_id"]),
+    )
 
 
 def _run_ask_case(payload: dict[str, Any]) -> list[str]:
@@ -42,6 +230,7 @@ def _run_ask_case(payload: dict[str, Any]) -> list[str]:
         lineage=lineage,
         runs=runs,
         lookup=lookup,
+        program=lookup,
         ids=_DeterministicIds(),
         adapter_ref="conformance",
         runtime_version="test-runtime",
@@ -170,6 +359,8 @@ class _InMemoryLineage:
     failed_runtime_fallback_count: int = 0
     first_question_sequence: int | None = None
     trigger_kind: str | None = None
+    last_run_kind: str | None = None
+    base_run_id: str | None = None
     memory_by_conversation: dict[tuple[str, str], dict[str, Any]] = field(
         default_factory=dict
     )
@@ -184,7 +375,10 @@ class _InMemoryLineage:
         *,
         conversation_id: str,
         authority,
+        context_run_id: str | None = None,
+        continuation_run_id: str | None = None,
     ) -> dict[str, Any]:
+        del context_run_id, continuation_run_id
         self.memory_call_count += 1
         if (
             self.fail_memory_after_calls is not None
@@ -211,7 +405,9 @@ class _InMemoryLineage:
             self.question_count += 1
             self.first_question_sequence = self.first_question_sequence or sequence
         self.run_count += 1
-        self.trigger_kind = self.trigger_kind or record.run.trigger_kind.value
+        self.trigger_kind = record.run.trigger_kind.value
+        self.last_run_kind = record.run.kind.value
+        self.base_run_id = record.run.base_run_id
 
     def record_failed_runtime_fallback(
         self,
@@ -242,6 +438,10 @@ class _InMemoryRuns:
     lineage: _InMemoryLineage
     runs: dict[str, QueuedRun] = field(default_factory=dict)
     questions: dict[str, AuthorizedQuestionAccess] = field(default_factory=dict)
+    stored_invocations: dict[str, StoredProgramInvocation] = field(
+        default_factory=dict
+    )
+    revision_ids: set[str] = field(default_factory=set)
 
     def get_question(
         self,
@@ -256,6 +456,35 @@ class _InMemoryRuns:
 
     def authorize_conversation(self, *, conversation_id: str, authority) -> None:
         del conversation_id, authority
+
+    def load_answered_program_invocation(
+        self,
+        *,
+        run_id: str,
+        access: AuthorizedQuestionAccess,
+    ) -> StoredProgramInvocation | None:
+        if access.question_id not in self.questions:
+            return None
+        return self.stored_invocations.get(run_id)
+
+    def load_program_invocation_for_execution(
+        self,
+        *,
+        invocation_id: str,
+        run_id: str,
+        question_id: str,
+        tenant_id: str,
+    ) -> StoredProgramInvocation | None:
+        invocation = self.stored_invocations.get(run_id)
+        question = self.questions.get(question_id)
+        if (
+            invocation is None
+            or invocation.invocation.invocation_id != invocation_id
+            or question is None
+            or question.tenant_id != tenant_id
+        ):
+            return None
+        return invocation
 
     def find_idempotent_run(
         self,
@@ -277,6 +506,9 @@ class _InMemoryRuns:
         submission: RunSubmission,
         record: QuestionRunRecord,
     ) -> QuestionRunSubmissionResult:
+        parsed = ParsedQuestionRunSubmission(submission=submission, record=record)
+        submission = parsed.submission
+        record = parsed.record
         existing = self._idempotent_run(
             tenant_id=submission.tenant_id,
             read_context_ref=submission.principal.read_context_ref,
@@ -311,6 +543,22 @@ class _InMemoryRuns:
                 read_context_ref=submission.principal.read_context_ref,
             )
         self.lineage.record_question_run(record)
+        if record.program_revision is not None:
+            self.revision_ids.add(record.program_revision.revision.revision_id)
+        if record.program_invocation is not None:
+            bundle = record.program_invocation
+            self.stored_invocations[submission.run_id] = (
+                parse_stored_program_invocation(
+                    invocation_id=bundle.invocation.invocation_id,
+                    run_id=bundle.invocation.run_id,
+                    program_id=bundle.invocation.program_id,
+                    canonical_json=bundle.program.canonical_json,
+                    bindings_json=bundle.invocation.bindings_json,
+                    patch_id=bundle.invocation.patch_id,
+                    binding_patch_json=bundle.invocation.binding_patch_json,
+                    revision_id=bundle.invocation.revision_id,
+                )
+            )
         run = QueuedRun(
             submission=submission,
             status="RUNNING"
@@ -428,7 +676,10 @@ class _InMemoryRuns:
 @dataclass
 class _FakeLookup:
     result_payload: dict[str, Any]
+    program_result_payload: dict[str, Any] = field(default_factory=dict)
     calls: list[LookupExecutionRequest] = field(default_factory=list)
+    program_call_count: int = 0
+    read_call_count: int = 0
 
     def run_lookup(
         self,
@@ -450,6 +701,24 @@ class _FakeLookup:
             result_data=self.result_payload.get("result_data"),
             error=self.result_payload.get("error"),
             terminal_lineage_recorded=bool(terminal_lineage_recorded),
+        )
+
+    def run_program(self, request, *, progress_sink=None) -> LookupExecutionResult:
+        del request, progress_sink
+        self.program_call_count += 1
+        self.read_call_count += 1
+        if not self.program_result_payload:
+            raise RuntimeError(
+                "question lifecycle fixture did not configure a program run"
+            )
+        return LookupExecutionResult(
+            status=str(self.program_result_payload.get("status") or "COMPLETED"),
+            answer=self.program_result_payload.get("answer"),
+            result_data=self.program_result_payload.get("result_data"),
+            error=self.program_result_payload.get("error"),
+            terminal_lineage_recorded=bool(
+                self.program_result_payload.get("terminal_lineage_recorded", True)
+            ),
         )
 
     def summary(self) -> dict[str, Any]:

@@ -1,7 +1,7 @@
 """Relation contract construction for fact-plan verification."""
 
 from ._shared import (
-    AnswerPlan,
+    AnswerProgram,
     Relation,
     RelationCatalog,
     RowSourceCatalog,
@@ -18,7 +18,7 @@ from .sources import _row_source_for_relation
 
 
 def _relation_contracts(
-    answer: AnswerPlan,
+    answer: AnswerProgram,
     *,
     catalog: RelationCatalog | None,
     row_sources: RowSourceCatalog,
@@ -100,8 +100,6 @@ def _relation_source_population_proof(
         value_refs.add(read_evidence_ref(row_source.read_id))
     else:
         value_refs.add(row_source_evidence_ref(row_source.id))
-    for source_filter in relation.source.applied_filters:
-        scope_refs.add(f"known_input:{source_filter.known_input_id}")
     for source_filter in relation.source.row_filters:
         scope_refs.update(str(ref) for ref in source_filter.proof_refs if str(ref))
     for binding in relation.source.param_bindings:

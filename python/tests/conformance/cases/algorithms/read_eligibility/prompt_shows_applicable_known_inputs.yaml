@@ -7,6 +7,7 @@ input:
   request:
     available_values:
       - id: value_area_nairobi
+        known_input_id: qi1
         kind: identity
         identity_type: area
         identity_field: area_id

@@ -389,19 +389,7 @@ def conversation_resolution_overlay_from(
 def conversation_resolution_question_contract_prompt_payload(
     overlay: ConversationResolutionOverlay | None,
 ) -> ValueFramePromptPayload | None:
-    if overlay is None:
-        return None
-
-    payload = _value_frame_prompt_payload(overlay)
-    if payload is None:
-        return None
-
-    if overlay.resolved_question_inputs:
-        payload["resolved_question_inputs"] = [
-            item.to_prompt_payload() for item in overlay.resolved_question_inputs
-        ]
-
-    return payload
+    return _value_frame_prompt_payload(overlay)
 
 
 def conversation_resolution_query_enrichment_prompt_payload(
@@ -435,9 +423,6 @@ def conversation_resolution_question_contract_context_texts(
     output: list[str] = []
     for item in overlay.value_frames:
         output.extend(_value_frame_evidence_texts(item))
-    for item in overlay.resolved_question_inputs:
-        for text in _resolved_question_input_context_texts(item):
-            _append_text(output, text)
     return tuple(dict.fromkeys(output))
 
 
@@ -483,20 +468,6 @@ def _value_frame_evidence_texts(
     return tuple(
         dict.fromkeys(text for value in values if (text := str(value).strip()))
     )
-
-
-def _append_text(output: list[str], value: str) -> None:
-    text = str(value or "").strip()
-    if text:
-        output.append(text)
-
-
-def _resolved_question_input_context_texts(
-    item: ResolvedQuestionInputOverlay,
-) -> tuple[str, ...]:
-    if item.kind == KnownInputKind.LITERAL:
-        return (item.resolved_value_text, item.source_text)
-    return (item.reference_text,)
 
 
 def _dependency_overlay(

@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
-import ast
-
 from fervis.lookup.plan_execution.errors import VerificationError
-from fervis.lookup.fact_plan.operations import (
+from fervis.lookup.answer_program.values import (
+    ConstantRef,
+    EnvironmentRef,
+    NodeOutputRef,
+    ParameterRef,
+)
+from fervis.lookup.answer_program.operations import (
     AggregateSpec,
     AggregationFunction,
     AntiJoinSpec,
     ComputeSpec,
+    compute_expression_leaves,
     CrossJoinSpec,
     FilterSpec,
     JoinSpec,
@@ -195,21 +200,21 @@ def _require_rank(spec: RankSpec) -> None:
     _require_sort_keys(spec.order_by, "rank")
     if spec.tie_policy not in set(TiePolicy):
         raise VerificationError("rank requires deterministic tie policy")
-    if spec.limit < 1:
-        raise VerificationError("rank requires positive limit")
+    if not isinstance(
+        spec.limit,
+        (ParameterRef, NodeOutputRef, ConstantRef, EnvironmentRef),
+    ):
+        raise VerificationError("rank limit has unclassified value origin")
     if not spec.tie_breakers:
         raise VerificationError("field tie policy requires tie breakers")
     _require_sort_keys(spec.tie_breakers, "rank")
 
 
 def _require_compute(spec: ComputeSpec) -> None:
-    if not spec.expression:
-        raise VerificationError("compute requires expression")
-    if not spec.scalar_inputs:
+    if not compute_expression_leaves(spec.expression):
         raise VerificationError("compute requires scalar inputs")
     if not spec.output_scalar:
         raise VerificationError("compute requires output scalar")
-    _require_compute_expression_inputs(spec)
 
 
 def _require_predicate(predicate: Predicate, label: str) -> None:
@@ -229,41 +234,6 @@ def _require_predicate(predicate: Predicate, label: str) -> None:
         raise VerificationError(f"{label} does not accept a right-hand side")
 
 
-def _require_compute_expression_inputs(spec: ComputeSpec) -> None:
-    try:
-        expression = ast.parse(spec.expression, mode="eval")
-    except SyntaxError as exc:
-        raise VerificationError("compute requires valid expression") from exc
-    _require_compute_expression_node(expression, scalar_inputs=set(spec.scalar_inputs))
-
-
-def _require_compute_expression_node(
-    node: ast.AST,
-    *,
-    scalar_inputs: set[str],
-) -> None:
-    if isinstance(node, ast.Expression):
-        _require_compute_expression_node(node.body, scalar_inputs=scalar_inputs)
-        return
-    if isinstance(node, ast.Name):
-        if node.id not in scalar_inputs:
-            raise VerificationError("compute expression references undeclared input")
-        return
-    if isinstance(node, ast.Constant):
-        if isinstance(node.value, (int, float)):
-            return
-        raise VerificationError("unsupported compute expression")
-    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
-        _require_compute_expression_node(node.operand, scalar_inputs=scalar_inputs)
-        return
-    if isinstance(node, ast.BinOp) and isinstance(
-        node.op,
-        ast.Add | ast.Sub | ast.Mult | ast.Div,
-    ):
-        _require_compute_expression_node(node.left, scalar_inputs=scalar_inputs)
-        _require_compute_expression_node(node.right, scalar_inputs=scalar_inputs)
-        return
-    raise VerificationError("unsupported compute expression")
 
 
 def _require_aggregations(spec: AggregateSpec) -> None:

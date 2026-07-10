@@ -6,6 +6,7 @@ from fervis.memory.conversation_context import (
     ConversationContextFrame,
     ConversationContextSource,
     ConversationMeaningAnchor,
+    ConversationReplaceablePart,
 )
 from fervis.lookup.conversation_resolution import (
     CONVERSATION_RESOLUTION_TOOL_NAME,
@@ -50,6 +51,11 @@ def run_conversation_resolution_parse_case(payload: dict[str, Any]) -> list[str]
             {
                 "current_clause_text": clause.current_clause_text,
                 "resolved_clause_text": clause.resolved_clause_text,
+                "continuation": (
+                    clause.continuation.to_model_dict()
+                    if clause.continuation is not None
+                    else None
+                ),
                 "dependencies": [
                     {
                         "anchor_text": dependency.anchor_text,
@@ -94,6 +100,17 @@ def run_conversation_resolution_schema_case(payload: dict[str, Any]) -> list[str
     schema = schemas[CONVERSATION_RESOLUTION_TOOL_NAME]
     clause_schema = schema["properties"]["clause_resolutions"]["items"]
     dependency_schema = clause_schema["properties"]["dependencies"]["items"]
+    continuation_schema = clause_schema["properties"].get("continuation")
+    replacement_schema = (
+        continuation_schema["properties"]["replacements"]["items"]
+        if isinstance(continuation_schema, dict)
+        else {}
+    )
+    replacement_properties = (
+        replacement_schema.get("properties")
+        if isinstance(replacement_schema, dict)
+        else None
+    )
     no_context_dependencies_schema = build_conversation_resolution_tool_schemas()[
         CONVERSATION_RESOLUTION_TOOL_NAME
     ]["properties"]["clause_resolutions"]["items"]["properties"]["dependencies"]
@@ -104,6 +121,17 @@ def run_conversation_resolution_schema_case(payload: dict[str, Any]) -> list[str
         "dependency_source_ids": dependency_schema["properties"]["meaning_components"][
             "items"
         ]["properties"]["source_id"]["enum"],
+        "has_continuation": isinstance(continuation_schema, dict),
+        "continuation_frame_ids": (
+            continuation_schema["properties"]["frame_id"].get("enum", [])
+            if isinstance(continuation_schema, dict)
+            else []
+        ),
+        "continuation_part_ids": (
+            replacement_properties["part_id"].get("enum", [])
+            if isinstance(replacement_properties, dict)
+            else []
+        ),
         "unresolved_evidence_source_ids": schema["properties"]["unresolved"][
             "properties"
         ]["candidate_interpretations"]["items"]["properties"]["supporting_evidence"][
@@ -221,4 +249,12 @@ def _context_frame(payload: dict[str, Any]) -> ConversationContextFrame:
         source_ids=tuple(payload.get("source_ids") or ()),
         requested_frame=str(payload["requested_frame"]),
         prior_answer_fact=str(payload.get("prior_answer_fact") or ""),
+        replaceable_parts=tuple(
+            ConversationReplaceablePart(
+                part_id=str(part["part_id"]),
+                kind=str(part["kind"]),
+                text=str(part["text"]),
+            )
+            for part in payload.get("replaceable_parts") or ()
+        ),
     )

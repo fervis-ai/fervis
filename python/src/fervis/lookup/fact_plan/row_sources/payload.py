@@ -8,7 +8,7 @@ from fervis.lookup.relation_catalog.model import (
     IdentityMetadata,
     RowCardinality,
 )
-from fervis.lookup.fact_plan.relations import FieldBindingRole
+from fervis.lookup.answer_program.relations import FieldBindingRole
 from fervis.lookup.fact_planning.required_inputs import required_input_id
 
 from .builder import memory_row_source_id

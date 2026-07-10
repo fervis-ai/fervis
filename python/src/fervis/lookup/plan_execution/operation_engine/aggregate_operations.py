@@ -11,13 +11,13 @@ from fervis.lookup.plan_execution.relations import (
     Row,
 )
 from fervis.lookup.outcomes.errors import IncompleteEvidenceError
-from fervis.lookup.fact_plan.operations import (
+from fervis.lookup.answer_program.operations import (
     AggregateSpec,
     Operation,
-    RankSpec,
     SortDirection,
     TiePolicy,
 )
+from fervis.lookup.plan_execution.operation_runtime import ResolvedRankSpec
 
 from .shared import (
     _Descending,
@@ -84,7 +84,7 @@ def _consistent_carry_value(rows: list[Row], field: str) -> object:
 
 def _rank(
     operation: Operation,
-    spec: RankSpec,
+    spec: ResolvedRankSpec,
     relations: dict[str, RelationRows],
     *,
     operation_refs: tuple[str, ...] = (),

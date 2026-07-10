@@ -6,6 +6,7 @@ from fervis.lookup.conversation_resolution import (
     ConversationResolutionOverlay,
     LiteralQuestionInputOverlay,
     RowSetQuestionInputOverlay,
+    conversation_input_provenance_from,
 )
 from fervis.lookup.question_contract import (
     KnownInputSource,
@@ -376,6 +377,7 @@ def test_question_contract_serializes_fact_local_known_inputs_as_question_inputs
                 "answer_expression": {"family": "scalar_aggregate"},
                 "answer_outputs": [
                     {
+                        "id": "answer_1",
                         "description": "answer_1",
                     }
                 ],
@@ -939,7 +941,10 @@ def test_question_contract_parser_rejects_unowned_row_set_reference_input():
             payload=payload,
             question_context="What about those?",
             question_context_texts=("those",),
-            conversation_resolution_overlay=overlay,
+            conversation_input_provenance=conversation_input_provenance_from(
+                overlay=overlay,
+                continuation_plan=None,
+            ),
         )
 
 
@@ -993,5 +998,8 @@ def test_question_contract_parser_requires_complete_cr_literal_handoff_match(
             payload=_single_input_payload(question_input),
             question_context="How much did she sell today?",
             question_context_texts=("Alice Smith", "staff_id", "customer_id"),
-            conversation_resolution_overlay=overlay,
+            conversation_input_provenance=conversation_input_provenance_from(
+                overlay=overlay,
+                continuation_plan=None,
+            ),
         )
