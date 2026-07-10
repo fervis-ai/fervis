@@ -76,9 +76,9 @@ def run_worker_until_terminal(api_client, response, *, timeout_seconds=30.0):
     return latest_response
 
 
-def current_run_detail(api_client, question: dict):
+def primary_run_detail(api_client, question: dict):
     return api_client.get(
-        question_run_detail_url(question["questionId"], question["currentRunId"]),
+        question_run_detail_url(question["questionId"], question["latestRunId"]),
         HTTP_X_REQUESTER_SCOPES="fervis:read",
     )
 

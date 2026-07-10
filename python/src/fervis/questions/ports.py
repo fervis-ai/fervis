@@ -4,13 +4,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Protocol
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, TypeVar, assert_never
 
 from fervis.host_api.contracts.authority import ReadAuthority, ReadContextRef
 from fervis.host_api.contracts.credentials import DelegatedReadCredential
-from fervis.lineage.enums import RunTriggerKind
+from fervis.lineage.enums import QuestionRunKind, RunTriggerKind
+from fervis.lineage.recorder import (
+    ProgramInvocationBundleWrite,
+    ProgramRevisionBundleWrite,
+)
 
 from .contracts import ExecutionMode, QuestionPrincipal
+
+if TYPE_CHECKING:
+    from fervis.lookup.answer_program.persistence import StoredProgramInvocation
 
 _AUTHORIZED_QUESTION_ACCESS_SIGNATURE = object()
 
@@ -35,12 +43,11 @@ class QuestionStart:
 class QuestionRunStart:
     question_id: str
     run_id: str
+    kind: QuestionRunKind
     trigger_kind: RunTriggerKind
-    integrated_question: str
     adapter_ref: str
     runtime_version: str
-    previous_run_id: str | None = None
-    trigger_clarification_response_run_id: str | None = None
+    base_run_id: str | None = None
     trigger_clarification_response_id: str | None = None
     trigger_clarification_selected_option_id: str | None = None
 
@@ -59,6 +66,55 @@ class QuestionRunRecord:
     run: QuestionRunStart
     question: QuestionStart | None = None
     clarification_response: ClarificationResponseStart | None = None
+    program_invocation: ProgramInvocationBundleWrite | None = None
+    program_revision: ProgramRevisionBundleWrite | None = None
+
+
+@dataclass(frozen=True)
+class ModelAssistedRunSpec:
+    integrated_question: str
+    provider: str | None
+    model_key: str
+    context_run_id: str | None = None
+    conversation_context: dict[str, Any] = field(default_factory=dict)
+    runtime_context: dict[str, Any] = field(default_factory=dict)
+    max_budget_usd: Any = None
+    max_thinking_tokens: int | None = None
+
+    def __post_init__(self) -> None:
+        if not self.integrated_question.strip():
+            raise ValueError("model-assisted run requires integrated_question")
+        if self.context_run_id is not None and not self.context_run_id.strip():
+            raise ValueError("model-assisted context_run_id must be non-empty")
+
+
+@dataclass(frozen=True)
+class DeterministicRunSpec:
+    invocation_id: str
+    runtime_context: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.invocation_id.strip():
+            raise ValueError("deterministic run requires invocation_id")
+
+
+RunExecutionSpec: TypeAlias = ModelAssistedRunSpec | DeterministicRunSpec
+_RunSpecResult = TypeVar("_RunSpecResult")
+
+
+def fold_run_execution_spec(
+    spec: RunExecutionSpec,
+    *,
+    model_assisted: Callable[[ModelAssistedRunSpec], _RunSpecResult],
+    deterministic: Callable[[DeterministicRunSpec], _RunSpecResult],
+) -> _RunSpecResult:
+    """Apply one exhaustive operation over the closed run-spec union."""
+
+    if isinstance(spec, ModelAssistedRunSpec):
+        return model_assisted(spec)
+    if isinstance(spec, DeterministicRunSpec):
+        return deterministic(spec)
+    assert_never(spec)
 
 
 @dataclass(frozen=True)
@@ -67,16 +123,95 @@ class RunSubmission:
     tenant_id: str
     question_id: str
     run_id: str
-    question: str
     principal: QuestionPrincipal
-    provider: str | None
-    model_key: str
+    spec: RunExecutionSpec
     execution_mode: ExecutionMode = ExecutionMode.QUEUED
-    conversation_context: dict[str, Any] = field(default_factory=dict)
-    runtime_context: dict[str, Any] = field(default_factory=dict)
     idempotency_key: str | None = None
-    max_budget_usd: Any = None
-    max_thinking_tokens: int | None = None
+
+
+@dataclass(frozen=True)
+class ParsedQuestionRunSubmission:
+    submission: RunSubmission
+    record: QuestionRunRecord
+
+    def __post_init__(self) -> None:
+        submission = self.submission
+        record = self.record
+        if record.run.run_id != submission.run_id:
+            raise ValueError("submission and lineage run ids must match")
+        if record.run.question_id != submission.question_id:
+            raise ValueError("submission and lineage question ids must match")
+        if submission.principal.tenant_id != submission.tenant_id:
+            raise ValueError("submission principal and tenant must match")
+        if record.question is not None:
+            if (
+                record.question.question_id != submission.question_id
+                or record.question.conversation_id != submission.conversation_id
+                or record.question.tenant_id != submission.tenant_id
+            ):
+                raise ValueError("submission and question lineage must match")
+            if record.question.read_context_ref != submission.principal.read_context_ref:
+                raise ValueError("submission and question authority must match")
+        fold_run_execution_spec(
+            submission.spec,
+            model_assisted=lambda spec: _validate_model_assisted_record(
+                spec,
+                record=record,
+            ),
+            deterministic=lambda spec: _validate_deterministic_record(
+                spec,
+                submission=submission,
+                record=record,
+            ),
+        )
+
+
+def _validate_model_assisted_record(
+    spec: ModelAssistedRunSpec,
+    *,
+    record: QuestionRunRecord,
+) -> None:
+    del spec
+    if record.run.kind is not QuestionRunKind.MODEL_ASSISTED:
+        raise ValueError("model-assisted spec requires model-assisted run")
+    if record.program_invocation is not None:
+        raise ValueError("model-assisted admission cannot include an invocation")
+    if record.program_revision is not None:
+        raise ValueError("model-assisted admission cannot include a revision")
+
+
+def _validate_deterministic_record(
+    spec: DeterministicRunSpec,
+    *,
+    submission: RunSubmission,
+    record: QuestionRunRecord,
+) -> None:
+    if record.run.kind is not QuestionRunKind.DETERMINISTIC:
+        raise ValueError("deterministic spec requires deterministic run")
+    if record.run.trigger_kind is not RunTriggerKind.RERUN:
+        raise ValueError("deterministic run requires rerun trigger")
+    bundle = record.program_invocation
+    if bundle is None:
+        raise ValueError("deterministic run requires program invocation")
+    if (
+        bundle.invocation.run_id != submission.run_id
+        or bundle.invocation.invocation_id != spec.invocation_id
+        or bundle.invocation.program_id != bundle.program.program_id
+    ):
+        raise ValueError("deterministic invocation must match submission")
+    revision = record.program_revision
+    if bundle.invocation.revision_id is None:
+        if revision is not None:
+            raise ValueError("program revision requires a revised invocation")
+        return
+    if revision is None:
+        raise ValueError("revised invocation requires its program revision")
+    if (
+        bundle.invocation.revision_id != revision.revision.revision_id
+        or bundle.invocation.program_id != revision.revision.revised_program_id
+        or bundle.program.program_id != revision.program.program_id
+    ):
+        raise ValueError("program revision must match deterministic invocation")
 
 
 @dataclass(frozen=True)
@@ -119,20 +254,13 @@ class QueuedRun:
     answer: str | None = None
     result_data: dict[str, Any] | None = None
     error: str | None = None
+    duration_ms: int | None = None
 
 
 @dataclass(frozen=True)
 class QuestionRunSubmissionResult:
     kind: QuestionRunSubmissionKind
     run: QueuedRun
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.kind, QuestionRunSubmissionKind):
-            object.__setattr__(
-                self,
-                "kind",
-                QuestionRunSubmissionKind(str(self.kind)),
-            )
 
 
 @dataclass(frozen=True)
@@ -163,6 +291,20 @@ class LookupExecutionResult:
     usage: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class ProgramExecutionRequest:
+    run_id: str
+    conversation_id: str
+    tenant_id: str
+    question: str
+    read_context_ref: ReadContextRef
+    principal: Any
+    invocation: StoredProgramInvocation
+    runtime_context: dict[str, Any]
+    active_attempt: int | None = None
+    delegated_credential: DelegatedReadCredential | None = None
+
+
 class QuestionIdPort(Protocol):
     def new_conversation_id(self) -> str: ...
 
@@ -179,6 +321,8 @@ class QuestionLineagePort(Protocol):
         *,
         conversation_id: str,
         authority: ReadAuthority,
+        context_run_id: str | None = None,
+        continuation_run_id: str | None = None,
     ) -> dict[str, Any]: ...
 
     def record_failed_runtime_fallback(
@@ -206,6 +350,22 @@ class QuestionLifecyclePort(Protocol):
         conversation_id: str,
         authority: ReadAuthority,
     ) -> None: ...
+
+    def load_answered_program_invocation(
+        self,
+        *,
+        run_id: str,
+        access: AuthorizedQuestionAccess,
+    ) -> StoredProgramInvocation | None: ...
+
+    def load_program_invocation_for_execution(
+        self,
+        *,
+        invocation_id: str,
+        run_id: str,
+        question_id: str,
+        tenant_id: str,
+    ) -> StoredProgramInvocation | None: ...
 
     def find_idempotent_run(
         self,
@@ -282,6 +442,15 @@ class QuestionLookupPort(Protocol):
     def run_lookup(
         self,
         request: LookupExecutionRequest,
+        *,
+        progress_sink: Any = None,
+    ) -> LookupExecutionResult: ...
+
+
+class QuestionProgramPort(Protocol):
+    def run_program(
+        self,
+        request: ProgramExecutionRequest,
         *,
         progress_sink: Any = None,
     ) -> LookupExecutionResult: ...

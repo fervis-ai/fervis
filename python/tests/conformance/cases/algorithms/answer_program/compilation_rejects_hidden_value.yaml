@@ -1,0 +1,23 @@
+id: compilation_rejects_hidden_value
+kind: algorithm
+algorithm: answer_program.compile
+description: Canonical identity rejects an unfinished program whose answer-affecting value is still raw.
+input:
+  schema_revision: 1
+  program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/compile_hidden_value}
+  question_contract: {$ref: ../../../fixtures/answer_program_v1.yaml#/question_contracts/sales_for_store}
+  catalog: {$ref: ../../../fixtures/answer_program_v1.yaml#/catalogs/sales}
+  bindings:
+    - parameter_id: question.store_ids
+      value:
+        kind: identity_set
+        identity_type: store
+        identity_field: store_id
+        values: [store_1]
+      provenance: {kind: question_input}
+expect:
+  result_equals:
+    status: rejected
+    code: invalid_answer_program
+    reads: 0
+    reusable: false

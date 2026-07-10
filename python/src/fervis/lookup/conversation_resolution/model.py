@@ -70,6 +70,9 @@ class ContextFrameChoiceKind(StrEnum):
     AMBIGUOUS = "ambiguous"
 
 
+CONTINUE_PRIOR_QUESTION = "continue_prior_question"
+
+
 @dataclass(frozen=True)
 class CurrentValueSurface:
     text: str
@@ -227,12 +230,55 @@ class ClauseDependency:
 
 
 @dataclass(frozen=True)
+class ContinuationReplacement:
+    part_id: str
+    current_text: str
+
+    def __post_init__(self) -> None:
+        if not self.part_id.strip():
+            raise ValueError("continuation replacement requires part_id")
+        if not self.current_text.strip():
+            raise ValueError("continuation replacement requires current_text")
+
+    def to_model_dict(self) -> dict[str, Any]:
+        return {
+            "part_id": self.part_id,
+            "current_text": self.current_text,
+        }
+
+
+@dataclass(frozen=True)
+class PriorQuestionContinuation:
+    kind: str
+    frame_id: str
+    replacements: tuple[ContinuationReplacement, ...]
+
+    def __post_init__(self) -> None:
+        if self.kind != CONTINUE_PRIOR_QUESTION:
+            raise ValueError("unsupported conversation continuation kind")
+        if not self.frame_id.strip():
+            raise ValueError("conversation continuation requires frame_id")
+        if not self.replacements:
+            raise ValueError("conversation continuation requires replacements")
+
+    def to_model_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "frame_id": self.frame_id,
+            "replacements": [
+                replacement.to_model_dict() for replacement in self.replacements
+            ],
+        }
+
+
+@dataclass(frozen=True)
 class ClauseResolution:
     current_clause_text: str
     occurrence: int
     requested_value_frame: RequestedValueFrame
     dependencies: tuple[ClauseDependency, ...]
     resolved_clause_text: str
+    continuation: PriorQuestionContinuation | None = None
 
     def __post_init__(self) -> None:
         if not self.current_clause_text.strip():
@@ -243,13 +289,16 @@ class ClauseResolution:
             raise ValueError("clause resolution requires resolved_clause_text")
 
     def to_model_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "current_clause_text": self.current_clause_text,
             "occurrence": self.occurrence,
             "requested_value_frame": self.requested_value_frame.to_model_dict(),
             "dependencies": [item.to_model_dict() for item in self.dependencies],
             "resolved_clause_text": self.resolved_clause_text,
         }
+        if self.continuation is not None:
+            payload["continuation"] = self.continuation.to_model_dict()
+        return payload
 
 
 @dataclass(frozen=True)

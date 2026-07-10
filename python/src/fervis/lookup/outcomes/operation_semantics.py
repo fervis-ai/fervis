@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fervis.lookup.fact_plan.operations import (
+from fervis.lookup.answer_program.operations import (
     AggregationFunction,
     AntiJoinSpec,
     FilterSpec,

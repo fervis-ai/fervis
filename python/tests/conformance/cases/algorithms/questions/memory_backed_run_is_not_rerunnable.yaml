@@ -1,0 +1,98 @@
+id: memory_backed_run_is_not_rerunnable
+kind: algorithm
+algorithm: questions.lifecycle
+description: An answered program that still depends on conversation memory is not admitted to the memory-free deterministic worker.
+input:
+  schema_revision: 1
+  operation: rerun_eligibility
+  attempts:
+    - id: memory_backed_base
+      state:
+        question_count: 1
+        run_count: 1
+        questions:
+          - question_id: question_1
+            conversation_id: conversation_1
+            original_question: How many of those sales were returned?
+            principal: &principal {principal_id: user_1, tenant_id: tenant_1}
+        program_invocations:
+          - run_id: run_base
+            program_id: ap_36bb7f114624d4a9aaf7522f8a3236cf5f2a6e749aa9c286422911edb8810cb2
+            program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/memory_backed}
+            bindings: []
+      command:
+        question_id: question_1
+        base_run_id: run_base
+        principal: *principal
+    - id: memory_constant_base
+      state:
+        question_count: 1
+        run_count: 1
+        questions:
+          - question_id: question_1
+            conversation_id: conversation_1
+            original_question: How many more sales was that?
+            principal: *principal
+        program_invocations:
+          - run_id: run_base
+            program_id: ap_0368e27547b3a53e76a342eefc8564946b2d239820a5edfddd8b0e9de7488e3f
+            program: {$ref: ../../../fixtures/answer_program_memory_constant_v1.yaml}
+            bindings: []
+      command:
+        question_id: question_1
+        base_run_id: run_base
+        principal: *principal
+    - id: memory_rank_limit_base
+      state:
+        question_count: 1
+        run_count: 1
+        questions:
+          - question_id: question_1
+            conversation_id: conversation_1
+            original_question: Show the top that many products.
+            principal: *principal
+        program_invocations:
+          - run_id: run_base
+            program_id: ap_63856fc42e749c05124673568f425709e1c64e8db3539d7ae628da9941a515ec
+            program: {$ref: ../../../fixtures/answer_program_memory_rank_limit_v1.yaml}
+            bindings: []
+      command:
+        question_id: question_1
+        base_run_id: run_base
+        principal: *principal
+expect:
+  result_contains:
+    outcomes:
+      - id: memory_backed_base
+        status: rejected
+        code: rerun_base_not_reusable
+        new_runs: 0
+        new_invocations: 0
+        new_revisions: 0
+        queued_work: 0
+        model_calls: 0
+        program_calls: 0
+        memory_calls: 0
+        read_calls: 0
+      - id: memory_constant_base
+        status: rejected
+        code: rerun_base_not_reusable
+        new_runs: 0
+        new_invocations: 0
+        new_revisions: 0
+        queued_work: 0
+        model_calls: 0
+        program_calls: 0
+        memory_calls: 0
+        read_calls: 0
+      - id: memory_rank_limit_base
+        status: rejected
+        code: rerun_base_not_reusable
+        new_runs: 0
+        new_invocations: 0
+        new_revisions: 0
+        queued_work: 0
+        model_calls: 0
+        program_calls: 0
+        memory_calls: 0
+        read_calls: 0

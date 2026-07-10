@@ -3,11 +3,9 @@ description: Requested-fact memory preserves request framing and cannot carry re
 kind: algorithm
 algorithm: memory.lineage_memory_artifacts
 input:
-  conversation_id: conversation_1
-  limit: 1
+  selected_run_ids: [run_1]
   memory_artifacts:
     - memory_artifact_id: mem_requested_fact_1
-      conversation_id: conversation_1
       run_id: run_1
       source_kind: requested_fact
       requested_fact_id: fact_1

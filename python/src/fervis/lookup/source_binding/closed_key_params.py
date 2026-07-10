@@ -5,8 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, TypeVar
 
-from fervis.lookup.fact_plan.relations import EndpointParamBinding
-from fervis.lookup.fact_plan.values import (
+from fervis.lookup.source_binding.compiler_ir import (
+    DraftEndpointParamBinding,
+    RelationInputOrigin,
+)
+from fervis.lookup.answer_program.values import (
     FactValue,
     IdentityValuePayload,
     ValueKind,
@@ -72,12 +75,14 @@ class _ClosedKeyParamBinding:
         )
 
     @property
-    def param_binding_sets(self) -> tuple[tuple[EndpointParamBinding, ...], ...]:
+    def param_binding_sets(self) -> tuple[tuple[DraftEndpointParamBinding, ...], ...]:
         return tuple(
             (
-                EndpointParamBinding(
+                DraftEndpointParamBinding(
                     param_id=self.param_id,
                     value=binding.value,
+                    origin_kind=RelationInputOrigin.QUESTION_INPUT,
+                    value_id=binding.value_id,
                     proof_refs=binding.proof_refs,
                 ),
             )
@@ -163,11 +168,15 @@ class ClosedKeyParamBindingIndex:
     def backend_param_binding_sets(
         self,
         target_id: str,
-    ) -> tuple[tuple[EndpointParamBinding, ...], ...]:
+    ) -> tuple[tuple[DraftEndpointParamBinding, ...], ...]:
         binding = self._binding_for_target(target_id)
         if binding is None:
             return ((),)
         return binding.param_binding_sets
+
+    def owned_param_ids(self, target_id: str) -> frozenset[str]:
+        param_id = self._owned_param_id(target_id)
+        return frozenset((param_id,)) if param_id else frozenset()
 
     def source_level_applied_filters(
         self,

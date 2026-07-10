@@ -668,11 +668,29 @@ def _source_binding_invocation_override(item: dict[str, Any]) -> dict[str, Any]:
     requested_fact_id = str(item.get("requested_fact_id") or "")
     if not requested_fact_id:
         raise AssertionError("source_binding item requires requested_fact_id")
-    choices = item.get("param_value_choices")
+    choices = item.get("param_value_choices") or {}
+    default_param_ids = item.get("default_params") or []
+    row_predicate_choices = item.get("row_predicate_choices") or {}
     if not isinstance(choices, dict):
-        raise AssertionError("source_binding item requires param_value_choices")
+        raise AssertionError("source_binding param_value_choices must be an object")
+    if not isinstance(default_param_ids, list):
+        raise AssertionError("source_binding default_params must be a list")
+    if not isinstance(row_predicate_choices, dict):
+        raise AssertionError(
+            "source_binding row_predicate_choices must be an object"
+        )
+    if not choices and not default_param_ids and not row_predicate_choices:
+        raise AssertionError(
+            "source_binding item requires param_value_choices, default_params, "
+            "or row_predicate_choices"
+        )
     return {
         "requested_fact_id": requested_fact_id,
+        "use_default_param_ids": tuple(str(item) for item in default_param_ids),
+        "row_predicate_choices": {
+            str(field_id): tuple(str(value) for value in values)
+            for field_id, values in row_predicate_choices.items()
+        },
         "param_decisions": {
             str(param_id): _param_value_choice_decision(
                 param_id=str(param_id),

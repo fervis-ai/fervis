@@ -2,6 +2,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from tests.testkit.algorithms.answer_program import (
+    run_answer_program_apply_capability_case,
+    run_answer_program_canonicalize_case,
+    run_answer_program_compile_case,
+    run_answer_program_decode_case,
+    run_answer_program_instantiate_case,
+    run_answer_program_invoke_case,
+    run_answer_program_patch_case,
+)
+
 from tests.testkit.algorithms.business_time import run_business_time_case
 from tests.testkit.algorithms.catalog_selection import (
     run_catalog_selection_case,
@@ -48,6 +58,10 @@ from tests.testkit.algorithms.relation_catalog import (
 )
 from tests.testkit.algorithms.question_run_lifecycle import (
     run_question_run_lifecycle_case,
+)
+from tests.testkit.algorithms.questions_projection import (
+    run_questions_memory_projection_case,
+    run_questions_projection_case,
 )
 from tests.testkit.algorithms.relation_contract import (
     run_relation_contract_case,
@@ -109,6 +123,19 @@ from tests.testkit.case_loader import ConformanceCase
 CaseRunner = Callable[[dict], list[str]]
 
 _RUNNERS: dict[tuple[str, str], CaseRunner] = {
+    ("algorithm", "answer_program.apply_capability"): (
+        run_answer_program_apply_capability_case
+    ),
+    ("algorithm", "answer_program.canonicalize"): (
+        run_answer_program_canonicalize_case
+    ),
+    ("algorithm", "answer_program.compile"): run_answer_program_compile_case,
+    ("algorithm", "answer_program.decode"): run_answer_program_decode_case,
+    ("algorithm", "answer_program.instantiate"): (
+        run_answer_program_instantiate_case
+    ),
+    ("algorithm", "answer_program.invoke"): run_answer_program_invoke_case,
+    ("algorithm", "answer_program.patch"): run_answer_program_patch_case,
     ("adapter", "host_api.endpoint_contract_projection"): run_host_api_projection_case,
     ("algorithm", "business_time.resolve"): run_business_time_case,
     (
@@ -187,6 +214,8 @@ _RUNNERS: dict[tuple[str, str], CaseRunner] = {
     ),
     ("algorithm", "relation_catalog.row_source_projection"): run_relation_catalog_case,
     ("algorithm", "questions.lifecycle"): run_question_run_lifecycle_case,
+    ("algorithm", "questions.projection"): run_questions_projection_case,
+    ("algorithm", "questions.memory_projection"): run_questions_memory_projection_case,
     ("algorithm", "source_binding.bound_params"): (
         run_source_binding_bound_params_case
     ),

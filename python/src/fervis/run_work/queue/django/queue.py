@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import timedelta
-from decimal import Decimal
 from typing import Any
 
 from django.db import IntegrityError, models, transaction
@@ -15,6 +14,12 @@ from fervis.lineage.django.runtime_failures import (
 from fervis.lineage.django.terminal_results import (
     terminal_status_for_run,
 )
+from fervis.host_api.credentials import runtime_context_with_delegated_credential
+from fervis.questions.execution_specs import (
+    execution_spec_kind,
+    execution_spec_to_storage_dict,
+)
+from fervis.questions.ports import RunSubmission
 from .models import RunWorkItem, RunWorkStatus
 
 INLINE_RUN_LEASE_SECONDS = 300
@@ -95,21 +100,12 @@ def queue_counts() -> dict[str, int]:
 
 def enqueue_run_work_item(
     *,
-    run_id: str,
-    conversation_id: str,
-    tenant_id: str,
-    user_id: str,
-    question: str,
-    provider: str | None,
-    model_key: str,
-    execution_mode: str,
-    conversation_context: dict[str, Any],
-    runtime_context: dict[str, Any],
-    read_context_ref: dict[str, Any],
-    idempotency_key: str | None,
-    max_budget_usd: float | Decimal,
-    max_thinking_tokens: int,
+    submission: RunSubmission,
 ) -> EnqueuedRunWorkItem:
+    run_id = submission.run_id
+    conversation_id = submission.conversation_id
+    tenant_id = submission.tenant_id
+    idempotency_key = submission.idempotency_key
     existing_run = RunWorkItem.objects.filter(run_id=run_id).first()
     if existing_run is not None:
         if (
@@ -146,31 +142,29 @@ def enqueue_run_work_item(
 
     try:
         with transaction.atomic():
-            inline = execution_mode == "inline"
+            inline = submission.execution_mode.value == "inline"
             now = timezone.now()
             lease_until = now + timedelta(seconds=INLINE_RUN_LEASE_SECONDS)
+            execution_spec = execution_spec_to_storage_dict(submission.spec)
+            execution_spec["runtime_context"] = runtime_context_with_delegated_credential(
+                submission.spec.runtime_context,
+                submission.principal.delegated_credential,
+            )
             return EnqueuedRunWorkItem(
                 item=RunWorkItem.objects.create(
                     run_id=run_id,
                     conversation_id=conversation_id,
                     tenant_id=tenant_id,
-                    user_id=user_id,
-                    provider=provider,
-                    model_key=model_key,
-                    question=question,
+                    user_id=submission.principal.principal_id,
                     status=RunWorkStatus.RUNNING
                     if inline
                     else RunWorkStatus.QUEUED,
-                    conversation_context=conversation_context,
-                    runtime_context=dict(runtime_context or {}),
-                    read_context_ref=dict(read_context_ref or {}),
+                    spec_kind=execution_spec_kind(submission.spec).value,
+                    execution_spec=execution_spec,
+                    read_context_ref=(
+                        submission.principal.read_context_ref.to_storage_dict()
+                    ),
                     idempotency_key=idempotency_key or None,
-                    session_mode="continue",
-                    session_id=None,
-                    approval_mode="auto_allow",
-                    approval_decision=None,
-                    max_budget_usd=Decimal(str(max_budget_usd)),
-                    max_thinking_tokens=max_thinking_tokens,
                     attempt_count=1 if inline else 0,
                     active_attempt=1 if inline else 0,
                     lease_owner="inline" if inline else None,

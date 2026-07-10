@@ -14,27 +14,31 @@ input:
       sourceAnswer: Salespeople, products, and totals.
       provenance:
         question_contract:
+          question_inputs:
+          - id: fact_1_entity_1
+            kind: literal_text
+            source: question_context
+            text: Westlands Beauty Hub
+            value_meaning_hint: store location
+            resolved_value_text: Westlands Beauty Hub
+            role: reference_value
+          - id: fact_1_time_1
+            kind: literal_text
+            source: question_context
+            text: December 3, 2025
+            resolved_value_text: December 3, 2025
+            role: time_value
           answer_requests:
           - id: fact_1
             answer_fact: salespeople who had sales at Westlands Beauty Hub on December 3, 2025
             answer_outputs:
-            - description: salesperson name
-            - description: products they sold
-            - description: total sales per person
-            known_inputs:
-            - id: fact_1_entity_1
-              kind: literal_text
-              source: question_context
-              text: Westlands Beauty Hub
-              description: store location
-              resolved_value_text: Westlands Beauty Hub
-              role: reference_value
-            - id: fact_1_time_1
-              kind: literal_text
-              source: question_context
-              text: December 3, 2025
-              resolved_value_text: December 3, 2025
-              role: time_value
+            - id: answer_1
+              description: salesperson name
+            - id: answer_2
+              description: products they sold
+            - id: answer_3
+              description: total sales per person
+            used_question_inputs: [fact_1_entity_1, fact_1_time_1]
       addresses:
       - address: entity.grounded_fact_1_entity_1
         kind: entity

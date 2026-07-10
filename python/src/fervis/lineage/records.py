@@ -22,6 +22,7 @@ from fervis.lineage.enums import (
     RunStepKind,
     RunStepScopeType,
     RunTriggerKind,
+    QuestionRunKind,
     RuntimeErrorKind,
     SourceReadStatus,
 )
@@ -40,6 +41,9 @@ from fervis.lineage.recorder import (
     ModelCallUsageWrite,
     ModelCallWrite,
     QuestionRunWrite,
+    AnswerProgramWrite,
+    ProgramInvocationWrite,
+    ProgramRevisionWrite,
     QuestionWrite,
     RequestedFactWrite,
     RunArtifactWrite,
@@ -334,15 +338,54 @@ QUESTION_RUN = LineageRowSpec(
     fields=(
         field("question_id"),
         field("run_number"),
+        field("kind", enum_type=QuestionRunKind),
         field("trigger_kind", enum_type=RunTriggerKind),
-        field("previous_run_id"),
-        field("trigger_clarification_response_run_id"),
+        field("base_run_id"),
         field("trigger_clarification_response_id", none_as_blank=True),
-        field("integrated_question"),
         field("adapter_ref"),
         field("runtime_version"),
     ),
     conflict_lookup=("question_id", "run_number"),
+)
+
+ANSWER_PROGRAM = LineageRowSpec(
+    key="answer_program",
+    label="answer program",
+    write_type=AnswerProgramWrite,
+    identity=field("program_id"),
+    fields=(
+        field("schema_revision"),
+        field("canonical_json"),
+    ),
+)
+
+PROGRAM_INVOCATION = LineageRowSpec(
+    key="program_invocation",
+    label="program invocation",
+    write_type=ProgramInvocationWrite,
+    identity=field("invocation_id"),
+    fields=(
+        field("run_id"),
+        field("program_id"),
+        field("bindings_json"),
+        field("patch_id"),
+        field("binding_patch_json"),
+        field("revision_id"),
+    ),
+    conflict_lookup=("run_id",),
+)
+
+PROGRAM_REVISION = LineageRowSpec(
+    key="program_revision",
+    label="program revision",
+    write_type=ProgramRevisionWrite,
+    identity=field("revision_id"),
+    fields=(
+        field("base_program_id"),
+        field("revised_program_id"),
+        field("capability_id"),
+        field("application_json"),
+    ),
 )
 
 RUN_STEP = LineageRowSpec(
@@ -763,6 +806,9 @@ ALL_RECORD_SPECS = (
     CONVERSATION,
     QUESTION,
     QUESTION_RUN,
+    ANSWER_PROGRAM,
+    PROGRAM_INVOCATION,
+    PROGRAM_REVISION,
     RUN_STEP,
     MODEL_CALL,
     MODEL_CALL_USAGE,

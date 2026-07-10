@@ -1,5 +1,5 @@
-id: literal_value_requires_scalar_sink
-description: A literal value cannot be compiled as a row filter and must use a scalar sink.
+id: literal_value_cannot_filter_an_identity_field
+description: A scalar literal cannot be compiled as an identity-field row filter.
 migrates:
   - api/tests/fervis/lookup/fact_planning/test_values.py::test_literal_value_does_not_compile_to_row_filter
 kind: algorithm
@@ -15,7 +15,13 @@ input:
             type: uuid
   relations:
     - id: records_rows
-      source: {kind: api_read, read_id: records}
+      source:
+        kind: api_read
+        read_id: records
+        row_filters:
+          - field_id: data_entity_id
+            operator: equals
+            value_id: threshold
       fields:
         - field_id: data_entity_id
           roles: [identity]
@@ -24,14 +30,6 @@ input:
       kind: literal
       literal_type: number
       value: "5"
-  value_uses:
-    - id: use_threshold_filter
-      value_id: threshold
-      target:
-        kind: row_filter
-        relation_id: records_rows
-        field_id: data_entity_id
-        operator: equals
 expect:
   result_contains:
     status: rejected

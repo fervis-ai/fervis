@@ -243,7 +243,7 @@ def provide_clarification_action(
     conversation_id: str,
     *,
     question_id: str | None = None,
-    previous_run_id: str | None = None,
+    base_run_id: str | None = None,
     clarification_id: str | None = None,
     tenant_id: str | None = None,
     principal_id: str | None = None,
@@ -254,12 +254,12 @@ def provide_clarification_action(
     tenant = tenant_id or "<tenant_id>"
     principal = principal_id or "<principal_id>"
     question = question_id or "<question_id>"
-    previous_run = previous_run_id or "<previous_run_id>"
+    base_run = base_run_id or "<base_run_id>"
     required_inputs = ["answer"]
     if question_id is None:
         required_inputs.append("question_id")
-    if previous_run_id is None:
-        required_inputs.append("previous_run_id")
+    if base_run_id is None:
+        required_inputs.append("base_run_id")
     if tenant_id is None:
         required_inputs.append("tenant_id")
     if principal_id is None:
@@ -268,13 +268,13 @@ def provide_clarification_action(
         "kind": "provide_clarification",
         "conversation_id": conversation_id,
         "question_id": question_id or "",
-        "previous_run_id": previous_run_id or "",
+        "base_run_id": base_run_id or "",
         "clarification_id": clarification_value,
         "command": render_command(
             commands.runtime_ask(
                 Placeholder("answer", quoted=True),
                 question_id=question,
-                previous_run_id=previous_run,
+                base_run_id=base_run,
                 clarification_id=clarification_value,
                 conversation_id=conversation_id,
                 tenant_id=tenant,

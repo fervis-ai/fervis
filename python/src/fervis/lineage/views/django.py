@@ -13,11 +13,13 @@ from fervis.lineage.enums import (
     RunStepKey,
     RunStepKind,
     RunTriggerKind,
+    QuestionRunKind,
     RuntimeErrorKind,
     SourceReadStatus,
 )
 from fervis.lookup.clarification import ClarificationNeed, ClarificationReason
 from fervis.lineage.views.query import (
+    AnswerProgramRow,
     AnswerOutputRow,
     AnswerPresentationRow,
     AnswerRow,
@@ -25,11 +27,14 @@ from fervis.lineage.views.query import (
     ClarificationRequestRow,
     ClarificationResponseRow,
     ConversationRow,
+    BindingPatchRow,
     FactResultRow,
     LineageQueryPort,
     LineageRows,
     MemoryArtifactRow,
     ProofGraphRow,
+    ProgramInvocationRow,
+    ProgramRevisionRow,
     QuestionRow,
     RequestedFactRow,
     RunResultRow,
@@ -87,6 +92,23 @@ class DjangoLineageQuery(LineageQueryPort):
         )
         question_ids = {run.question_id for run in runs}
         conversation_ids = {run.question.conversation_id for run in runs}
+        invocations = tuple(
+            models.ProgramInvocation.objects.filter(run_id__in=run_id_set)
+            .select_related("program")
+            .order_by("run_id")
+        )
+        revision_ids = {
+            item.revision_id for item in invocations if item.revision_id is not None
+        }
+        revisions = tuple(
+            models.ProgramRevision.objects.filter(revision_id__in=revision_ids)
+            .order_by("revision_id")
+        )
+        program_ids = {
+            *(item.program_id for item in invocations),
+            *(item.base_program_id for item in revisions),
+            *(item.revised_program_id for item in revisions),
+        }
         return LineageRows(
             conversations=tuple(
                 _conversation_row(item)
@@ -101,6 +123,18 @@ class DjangoLineageQuery(LineageQueryPort):
                 ).order_by("conversation_sequence")
             ),
             runs=tuple(_run_row(item) for item in runs),
+            answer_programs=tuple(
+                _answer_program_row(item)
+                for item in models.AnswerProgram.objects.filter(
+                    program_id__in=program_ids
+                ).order_by("program_id")
+            ),
+            program_invocations=tuple(
+                _program_invocation_row(item) for item in invocations
+            ),
+            program_revisions=tuple(
+                _program_revision_row(item) for item in revisions
+            ),
             steps=tuple(
                 _step_row(item)
                 for item in models.RunStep.objects.filter(
@@ -187,18 +221,10 @@ class DjangoLineageQuery(LineageQueryPort):
             ),
         )
 
-    def memory_artifact_rows_for_conversation(
+    def memory_artifact_rows_for_run_ids(
         self,
-        conversation_id: str,
-        *,
-        limit: int,
+        run_ids: tuple[str, ...],
     ) -> tuple[MemoryArtifactRow, ...]:
-        if limit <= 0:
-            return ()
-        run_ids = _recent_artifact_bearing_run_ids(
-            conversation_id=conversation_id,
-            limit=limit,
-        )
         if not run_ids:
             return ()
         run_id_set = frozenset(run_ids)
@@ -215,35 +241,6 @@ class DjangoLineageQuery(LineageQueryPort):
             )
         )
         return tuple(_memory_artifact_row(item) for item in rows)
-
-
-def _recent_artifact_bearing_run_ids(
-    *,
-    conversation_id: str,
-    limit: int,
-) -> tuple[str, ...]:
-    run_ids: list[str] = []
-    seen: set[str] = set()
-    rows = (
-        models.MemoryArtifact.objects.filter(
-            run__question__conversation_id=conversation_id,
-        )
-        .select_related("run", "run__question")
-        .order_by(
-            "-run__question__conversation_sequence",
-            "-run__run_number",
-            "-created_at",
-            "-memory_artifact_id",
-        )
-    )
-    for row in rows:
-        if row.run_id in seen:
-            continue
-        seen.add(row.run_id)
-        run_ids.append(row.run_id)
-        if len(run_ids) >= limit:
-            break
-    return tuple(run_ids)
 
 
 def _conversation_row(item: models.Conversation) -> ConversationRow:
@@ -266,15 +263,53 @@ def _run_row(item: models.QuestionRun) -> RunRow:
         run_id=item.run_id,
         question_id=item.question_id,
         run_number=item.run_number,
+        kind=QuestionRunKind(item.kind),
         trigger_kind=RunTriggerKind(item.trigger_kind),
-        integrated_question=item.integrated_question,
-        previous_run_id=item.previous_run_id,
-        trigger_clarification_response_run_id=(
-            item.trigger_clarification_response_run_id
-        ),
+        base_run_id=item.base_run_id,
         trigger_clarification_response_id=(
             item.trigger_clarification_response_id or None
         ),
+    )
+
+
+def _answer_program_row(item: models.AnswerProgram) -> AnswerProgramRow:
+    return AnswerProgramRow(
+        program_id=item.program_id,
+        schema_revision=item.schema_revision,
+        canonical_json=item.canonical_json,
+    )
+
+
+def _program_invocation_row(
+    item: models.ProgramInvocation,
+) -> ProgramInvocationRow:
+    patch = None
+    if item.patch_id is not None:
+        if item.binding_patch_json is None:
+            raise ValueError(
+                f"program invocation {item.invocation_id} has no binding patch"
+            )
+        patch = BindingPatchRow(
+            patch_id=item.patch_id,
+            canonical_json=item.binding_patch_json,
+        )
+    return ProgramInvocationRow(
+        invocation_id=item.invocation_id,
+        run_id=item.run_id,
+        program_id=item.program_id,
+        bindings_json=item.bindings_json,
+        patch=patch,
+        revision_id=item.revision_id,
+    )
+
+
+def _program_revision_row(item: models.ProgramRevision) -> ProgramRevisionRow:
+    return ProgramRevisionRow(
+        revision_id=item.revision_id,
+        base_program_id=item.base_program_id,
+        revised_program_id=item.revised_program_id,
+        capability_id=item.capability_id,
+        application_json=item.application_json,
     )
 
 

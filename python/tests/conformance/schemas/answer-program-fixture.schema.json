@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fervis.test/conformance/answer-program-fixture.schema.json",
+  "title": "Fervis portable answer-program conformance fixture bundle",
+  "type": "object",
+  "required": [
+    "schema_revision",
+    "programs",
+    "binding_sets",
+    "catalogs",
+    "question_contracts",
+    "environments"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_revision": {"const": 1},
+    "programs": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"type": "object"}
+    },
+    "binding_sets": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"type": "array"}
+    },
+    "catalogs": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"type": "object"}
+    },
+    "question_contracts": {
+      "type": "object",
+      "additionalProperties": {"type": "object"}
+    },
+    "environments": {
+      "type": "object",
+      "additionalProperties": {"type": "object"}
+    }
+  }
+}

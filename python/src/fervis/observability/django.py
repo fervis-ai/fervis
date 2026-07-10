@@ -37,8 +37,7 @@ class DjangoObservabilityQuery(ObservabilityQueryPort):
             models.QuestionRun.objects.filter(run_id=run_id)
             .only(
                 "run_id",
-                "previous_run_id",
-                "trigger_clarification_response_run_id",
+                "base_run_id",
             )
             .first()
         )
@@ -46,10 +45,7 @@ class DjangoObservabilityQuery(ObservabilityQueryPort):
             return None
         return ObservabilityRun(
             run_id=run.run_id,
-            previous_run_id=run.previous_run_id,
-            trigger_clarification_response_run_id=(
-                run.trigger_clarification_response_run_id
-            ),
+            base_run_id=run.base_run_id,
         )
 
     def run_ids_for_run(self, run_id: str) -> tuple[str, ...]:

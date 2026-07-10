@@ -22,7 +22,14 @@ from fervis.lineage.django.runtime_spine import (
     record_question_run_start,
     runtime_version_from_settings,
 )
-from fervis.lineage.models import Conversation, Question, QuestionRun
+from fervis.lineage.enums import QuestionRunKind, RunResultKind
+from fervis.lineage.models import (
+    Conversation,
+    ProgramInvocation,
+    Question,
+    QuestionRun,
+    RunResult,
+)
 from fervis.lineage.run_spine import (
     ClarificationResponseStart as SpineClarificationResponseStart,
     QuestionRunStart as SpineQuestionRunStart,
@@ -30,6 +37,7 @@ from fervis.lineage.run_spine import (
     QuestionStart as SpineQuestionStart,
 )
 from fervis.lineage.django.runtime_failures import record_worker_runtime_error
+from fervis.lineage.django.recorder import DjangoLineageRecorder
 from fervis.lineage.django.terminal_results import run_has_terminal_result
 from fervis.lineage.views.django import DjangoLineageQuery
 from fervis.host_api.contracts.authority import (
@@ -39,17 +47,36 @@ from fervis.host_api.contracts.authority import (
 )
 from fervis.host_api.credentials import (
     delegated_credential_from_runtime_context,
-    runtime_context_with_delegated_credential,
 )
 from fervis.lookup.orchestration.question_lookup_port import (
     LookupServiceQuestionLookupPort,
 )
-from fervis.memory.lineage import LineageMemoryArtifactService
+from fervis.lookup.orchestration.question_program_port import AnswerProgramQuestionPort
+from fervis.lookup.orchestration.program_service import AnswerProgramService
+from fervis.host_api.context import get_host_api_context
+from fervis.lookup.answer_program.persistence import (
+    StoredProgramInvocation,
+    parse_stored_program_invocation,
+)
+from fervis.memory.lineage import (
+    DEFAULT_RECENT_MEMORY_RUN_LIMIT,
+    LineageMemoryArtifactService,
+)
 from fervis.questions.contracts import QuestionPrincipal
+from fervis.questions.execution_specs import execution_spec_from_storage
+from fervis.questions.projection import (
+    QuestionMemoryRunSelection,
+    QuestionRunProjection,
+    QuestionRunStatus,
+    QuestionRunSummary,
+    project_question_runs,
+    select_conversation_memory_runs,
+)
 from fervis.questions.ports import (
     AuthorizedQuestionAccess,
     QueuedRun,
     QuestionRunRecord,
+    ParsedQuestionRunSubmission,
     QuestionRunSubmissionKind,
     QuestionRunSubmissionResult,
     RunSubmission,
@@ -58,12 +85,11 @@ from fervis.questions.service import QuestionService
 from fervis.run_work.service import RunWorkService
 
 from .composition import (
-    RUN_CONTEXT_KEY,
     get_runtime,
     lookup_conversation_context,
     runtime_context_from_conversation,
 )
-from .run_views import get_run_view, with_lineage_usage, with_worker_snapshot
+from .run_views import get_run_view
 
 
 class DjangoQuestionLineagePort:
@@ -72,7 +98,11 @@ class DjangoQuestionLineagePort:
         *,
         conversation_id: str,
         authority: ReadAuthority,
+        context_run_id: str | None = None,
+        continuation_run_id: str | None = None,
     ) -> dict[str, Any]:
+        if context_run_id is not None and continuation_run_id is not None:
+            raise ValueError("memory context accepts one selected run")
         if not Conversation.objects.filter(
             conversation_id=conversation_id,
             tenant_id=authority.tenant_id,
@@ -83,8 +113,26 @@ class DjangoQuestionLineagePort:
             authority=authority,
         ):
             return {}
-        artifacts = LineageMemoryArtifactService(DjangoLineageQuery()).for_conversation(
-            conversation_id
+        if context_run_id is not None and not QuestionRun.objects.filter(
+            run_id=context_run_id,
+            question__conversation_id=conversation_id,
+            question__conversation__tenant_id=authority.tenant_id,
+            run_result__result_kind=RunResultKind.ANSWERED.value,
+        ).exists():
+            raise PermissionError("context run is not an authorized answered run")
+        if continuation_run_id is not None and not QuestionRun.objects.filter(
+            run_id=continuation_run_id,
+            question__conversation_id=conversation_id,
+            question__conversation__tenant_id=authority.tenant_id,
+            run_result__isnull=False,
+        ).exists():
+            raise PermissionError("continuation run is not an authorized terminal run")
+        selected_run_id = context_run_id or continuation_run_id
+        artifacts = LineageMemoryArtifactService(DjangoLineageQuery()).for_runs(
+            _primary_run_ids_for_conversation(
+                conversation_id,
+                context_run_id=selected_run_id,
+            )
         )
         if not artifacts:
             return {}
@@ -153,6 +201,49 @@ class DjangoQuestionLifecyclePort:
         ):
             raise PermissionError("conversation is not owned by read authority")
 
+    def load_answered_program_invocation(
+        self,
+        *,
+        run_id: str,
+        access: AuthorizedQuestionAccess,
+    ) -> StoredProgramInvocation | None:
+        access.require_valid()
+        record = (
+            ProgramInvocation.objects.select_related("program")
+            .filter(
+                run_id=run_id,
+                run__question_id=access.question_id,
+                run__question__conversation__tenant_id=access.tenant_id,
+                run__run_result__result_kind=RunResultKind.ANSWERED.value,
+            )
+            .first()
+        )
+        if record is None:
+            return None
+        return _stored_program_invocation(record)
+
+    def load_program_invocation_for_execution(
+        self,
+        *,
+        invocation_id: str,
+        run_id: str,
+        question_id: str,
+        tenant_id: str,
+    ) -> StoredProgramInvocation | None:
+        record = (
+            ProgramInvocation.objects.select_related("program")
+            .filter(
+                invocation_id=invocation_id,
+                run_id=run_id,
+                run__question_id=question_id,
+                run__question__conversation__tenant_id=tenant_id,
+                run__base_run__question_id=question_id,
+                run__base_run__run_result__result_kind=RunResultKind.ANSWERED.value,
+            )
+            .first()
+        )
+        return _stored_program_invocation(record) if record is not None else None
+
     def find_idempotent_run(
         self,
         *,
@@ -180,33 +271,28 @@ class DjangoQuestionLifecyclePort:
         submission: RunSubmission,
         record: QuestionRunRecord,
     ) -> QuestionRunSubmissionResult:
+        parsed = ParsedQuestionRunSubmission(submission=submission, record=record)
+        submission = parsed.submission
+        record = parsed.record
         try:
             with transaction.atomic():
+                recorder = DjangoLineageRecorder()
                 enqueued = enqueue_run_work_item(
-                    run_id=submission.run_id,
-                    conversation_id=submission.conversation_id,
-                    tenant_id=submission.tenant_id,
-                    user_id=_principal_user_id(submission.principal),
-                    question=submission.question,
-                    provider=submission.provider,
-                    model_key=submission.model_key,
-                    execution_mode=submission.execution_mode.value,
-                    conversation_context=_conversation_context(submission),
-                    runtime_context=runtime_context_with_delegated_credential(
-                        submission.runtime_context,
-                        submission.principal.delegated_credential,
-                    ),
-                    read_context_ref=submission.principal.read_context_ref.to_storage_dict(),
-                    idempotency_key=submission.idempotency_key,
-                    max_budget_usd=submission.max_budget_usd,
-                    max_thinking_tokens=submission.max_thinking_tokens,
+                    submission=submission,
                 )
                 if not enqueued.created:
                     return QuestionRunSubmissionResult(
                         kind=QuestionRunSubmissionKind.EXISTING,
                         run=_queued_run_from_work_item(enqueued.item),
                     )
-                record_question_run_start(_spine_question_run_start(record))
+                record_question_run_start(
+                    _spine_question_run_start(record),
+                    recorder=recorder,
+                )
+                if record.program_revision is not None:
+                    recorder.record_program_revision(record.program_revision)
+                if record.program_invocation is not None:
+                    recorder.record_program_invocation(record.program_invocation)
         except ActiveRunConflict as exc:
             return QuestionRunSubmissionResult(
                 kind=QuestionRunSubmissionKind.ACTIVE_CONFLICT,
@@ -323,10 +409,21 @@ class DjangoQuestionStateReaderPort:
                 .order_by("-run_number", "-created_at")
                 .first()
             )
-            current = (
-                _run_state(str(latest_run.run_id), access=access)
-                if latest_run is not None
+            projection = _question_run_projection(latest_question)
+            primary = (
+                _run_state(projection.primary_run_id, access=access)
+                if projection.primary_run_id is not None
                 else None
+            )
+            active = (
+                _run_state(projection.active_run_id, access=access)
+                if projection.active_run_id is not None
+                else None
+            )
+            projected_state = _required_projected_run_state(
+                projection,
+                primary=primary,
+                active=active,
             )
             items.append(
                 {
@@ -337,8 +434,10 @@ class DjangoQuestionStateReaderPort:
                         else latest_question.original_question
                     ),
                     "latestQuestionId": str(latest_question.question_id),
-                    "currentRunId": (current or {}).get("runId"),
-                    "status": str((current or {}).get("status") or "RUNNING"),
+                    "primaryRunId": projection.primary_run_id,
+                    "latestRunId": projection.latest_run_id,
+                    "activeRunId": projection.active_run_id,
+                    "status": str(projected_state["status"]),
                     "runCount": QuestionRun.objects.filter(
                         question=latest_question
                     ).count(),
@@ -366,18 +465,17 @@ class DjangoQuestionStateReaderPort:
         question = _question(access)
         if question is None:
             return None
-        latest_run = (
-            QuestionRun.objects.filter(question=question)
-            .order_by("-run_number", "-created_at")
-            .first()
+        projection = _question_run_projection(question)
+        primary = (
+            _run_state(projection.primary_run_id, access=access)
+            if projection.primary_run_id is not None
+            else None
         )
-        if latest_run is None:
-            return _question_state_payload(question, current_run=None)
-        current = _run_state(
-            str(latest_run.run_id),
-            access=access,
+        return _question_state_payload(
+            question,
+            primary_run=primary,
+            projection=projection,
         )
-        return _question_state_payload(question, current_run=current)
 
     def list_question_runs(
         self,
@@ -439,11 +537,29 @@ class DjangoQuestionLookupPort:
         )
 
 
+class DjangoQuestionProgramPort:
+    def run_program(self, request, *, progress_sink=None):
+        return self._adapter().run_program(request, progress_sink=progress_sink)
+
+    def _adapter(self) -> AnswerProgramQuestionPort:
+        return AnswerProgramQuestionPort(
+            program_service=AnswerProgramService(
+                host_api_context=get_host_api_context(),
+                lineage_recorder=DjangoLineageRecorder(),
+            ),
+            terminal_lineage_recorded=lambda request: run_has_terminal_result(
+                request.run_id,
+                tenant_id=request.tenant_id,
+            ),
+        )
+
+
 def django_question_service() -> QuestionService:
     return QuestionService(
         lineage=DjangoQuestionLineagePort(),
         runs=DjangoQuestionLifecyclePort(),
         lookup=DjangoQuestionLookupPort(),
+        program=DjangoQuestionProgramPort(),
         state_reader=DjangoQuestionStateReaderPort(),
         adapter_ref=DJANGO_DRF_ADAPTER_REF,
         runtime_version=runtime_version_from_settings(),
@@ -455,14 +571,8 @@ def django_run_work_service() -> RunWorkService:
         lineage=DjangoQuestionLineagePort(),
         runs=DjangoQuestionLifecyclePort(),
         lookup=DjangoQuestionLookupPort(),
+        program=DjangoQuestionProgramPort(),
     )
-
-
-def _conversation_context(submission: RunSubmission) -> dict[str, Any]:
-    output = dict(submission.conversation_context or {})
-    if submission.runtime_context:
-        output[RUN_CONTEXT_KEY] = dict(submission.runtime_context)
-    return output
 
 
 def _question(access: AuthorizedQuestionAccess) -> Question | None:
@@ -471,6 +581,21 @@ def _question(access: AuthorizedQuestionAccess) -> Question | None:
         conversation__tenant_id=access.tenant_id,
     )
     return rows.first()
+
+
+def _stored_program_invocation(
+    record: ProgramInvocation,
+) -> StoredProgramInvocation:
+    return parse_stored_program_invocation(
+        invocation_id=record.invocation_id,
+        run_id=record.run_id,
+        program_id=record.program_id,
+        canonical_json=record.program.canonical_json,
+        bindings_json=record.bindings_json,
+        patch_id=record.patch_id,
+        binding_patch_json=record.binding_patch_json,
+        revision_id=record.revision_id,
+    )
 
 
 def _run_state(
@@ -493,7 +618,7 @@ def _run_state(
         return None
     if str(run.get("questionId") or "") != access.question_id:
         return None
-    return with_lineage_usage(with_worker_snapshot(run))
+    return run
 
 
 def _conversation_owned_by_authority(
@@ -528,20 +653,111 @@ def _read_context_ref_matches(stored, expected) -> bool:
 def _question_state_payload(
     question: Question,
     *,
-    current_run: dict[str, Any] | None,
+    primary_run: dict[str, Any] | None,
+    projection: QuestionRunProjection,
 ) -> dict[str, Any]:
-    status = str((current_run or {}).get("status") or "RUNNING")
+    if primary_run is None:
+        raise RuntimeError("question projection is missing its primary run state")
+    status = str(primary_run["status"])
     return {
         "questionId": str(question.question_id),
         "conversationId": str(question.conversation_id),
         "tenantId": str(question.conversation.tenant_id),
         "status": status,
-        "currentRunId": (current_run or {}).get("runId"),
+        "primaryRunId": projection.primary_run_id,
+        "latestRunId": projection.latest_run_id,
+        "activeRunId": projection.active_run_id,
         "question": question.original_question,
-        "answer": (current_run or {}).get("answer"),
-        "resultData": (current_run or {}).get("resultData"),
-        "error": (current_run or {}).get("error"),
+        "answer": (primary_run or {}).get("answer"),
+        "resultData": (primary_run or {}).get("resultData"),
+        "error": (primary_run or {}).get("error"),
     }
+
+
+def _question_run_projection(question: Question) -> QuestionRunProjection:
+    runs = tuple(
+        QuestionRun.objects.filter(question=question).order_by("run_number", "run_id")
+    )
+    if not runs:
+        return project_question_runs(())
+    result_kinds = {
+        str(run_id): str(result_kind)
+        for run_id, result_kind in RunResult.objects.filter(
+            run_id__in={run.run_id for run in runs},
+        ).values_list("run_id", "result_kind")
+    }
+    statuses = {
+        str(run_id): str(status)
+        for run_id, status in RunWorkItem.objects.filter(
+            run_id__in={run.run_id for run in runs}
+        ).values_list("run_id", "status")
+    }
+    run_ids = {str(run.run_id) for run in runs}
+    missing_work_ids = run_ids - set(statuses)
+    if missing_work_ids:
+        raise RuntimeError("question run is missing its persisted work state")
+    return project_question_runs(
+        tuple(
+            QuestionRunSummary(
+                run_id=str(run.run_id),
+                run_number=run.run_number,
+                kind=QuestionRunKind(run.kind),
+                status=QuestionRunStatus(statuses[str(run.run_id)]),
+                answered=(
+                    result_kinds.get(str(run.run_id))
+                    == RunResultKind.ANSWERED.value
+                ),
+                terminal=str(run.run_id) in result_kinds,
+            )
+            for run in runs
+        )
+    )
+
+
+def _required_projected_run_state(
+    projection: QuestionRunProjection,
+    *,
+    primary: dict[str, Any] | None,
+    active: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if projection.primary_run_id is None or primary is None:
+        raise RuntimeError("question projection is missing its primary run state")
+    if projection.active_run_id is not None:
+        if active is None:
+            raise RuntimeError("question projection is missing its active run state")
+        return active
+    return primary
+
+
+def _primary_run_ids_for_conversation(
+    conversation_id: str,
+    *,
+    context_run_id: str | None = None,
+) -> tuple[str, ...]:
+    questions = tuple(
+        Question.objects.filter(conversation_id=conversation_id)
+        .order_by("-conversation_sequence")[:DEFAULT_RECENT_MEMORY_RUN_LIMIT]
+    )
+    context_question_id = (
+        str(
+            QuestionRun.objects.values_list("question_id", flat=True).get(
+                run_id=context_run_id
+            )
+        )
+        if context_run_id is not None
+        else None
+    )
+    return select_conversation_memory_runs(
+        tuple(
+            QuestionMemoryRunSelection(
+                question_id=str(question.question_id),
+                primary_run_id=_question_run_projection(question).primary_run_id,
+            )
+            for question in reversed(questions)
+        ),
+        selected_run_id=context_run_id,
+        selected_question_id=context_question_id,
+    )
 
 
 def _iso_datetime(value) -> str:
@@ -569,14 +785,11 @@ def _spine_question_run_start(record: QuestionRunRecord) -> QuestionRunStartRequ
         run=SpineQuestionRunStart(
             question_id=record.run.question_id,
             run_id=record.run.run_id,
+            kind=record.run.kind,
             trigger_kind=record.run.trigger_kind,
-            integrated_question=record.run.integrated_question,
             adapter_ref=record.run.adapter_ref,
             runtime_version=record.run.runtime_version,
-            previous_run_id=record.run.previous_run_id,
-            trigger_clarification_response_run_id=(
-                record.run.trigger_clarification_response_run_id
-            ),
+            base_run_id=record.run.base_run_id,
             trigger_clarification_response_id=(
                 record.run.trigger_clarification_response_id
             ),
@@ -612,7 +825,23 @@ def _queued_run_from_work_item(
         answer=(run_view or {}).get("answer"),
         result_data=(run_view or {}).get("resultData"),
         error=(run_view or {}).get("error") or item.last_error or None,
+        duration_ms=_queued_run_duration_ms(item=item, run_view=run_view),
     )
+
+
+def _queued_run_duration_ms(
+    *,
+    item,
+    run_view: dict[str, Any] | None,
+) -> int | None:
+    projected_duration = (run_view or {}).get("durationMs")
+    if projected_duration is not None:
+        return int(projected_duration)
+    started_at = getattr(item, "started_at", None)
+    completed_at = getattr(item, "completed_at", None)
+    if started_at is None or completed_at is None:
+        return None
+    return max(0, int((completed_at - started_at).total_seconds() * 1000))
 
 
 def _terminal_run_from_lineage(item) -> QueuedRun | None:
@@ -629,35 +858,24 @@ def _terminal_run_from_lineage(item) -> QueuedRun | None:
 
 
 def _submission_from_work_item(item) -> RunSubmission:
+    spec = execution_spec_from_storage(item.spec_kind, item.execution_spec or {})
     return RunSubmission(
         conversation_id=item.conversation_id,
         tenant_id=item.tenant_id,
         question_id=_question_id_for_run(item.run_id),
         run_id=item.run_id,
-        question=item.question,
         principal=QuestionPrincipal(
             principal_id=str(item.user_id),
             tenant_id=item.tenant_id,
             raw=None,
             read_context_ref=item.read_context_ref,
             delegated_credential=delegated_credential_from_runtime_context(
-                item.runtime_context
+                spec.runtime_context
             ),
         ),
-        provider=item.provider,
-        model_key=item.model_key,
-        conversation_context=dict(item.conversation_context or {}),
-        runtime_context=dict(item.runtime_context or {}),
+        spec=spec,
         idempotency_key=item.idempotency_key,
-        max_budget_usd=item.max_budget_usd,
-        max_thinking_tokens=item.max_thinking_tokens,
     )
-
-
-def _principal_user_id(principal: QuestionPrincipal) -> str:
-    raw = principal.raw
-    pk = getattr(raw, "pk", None)
-    return str(pk or principal.principal_id)
 
 
 def _question_id_for_run(run_id: str) -> str:

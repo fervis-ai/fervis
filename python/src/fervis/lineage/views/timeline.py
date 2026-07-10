@@ -51,14 +51,16 @@ def _timeline_run(run, *, model_calls: tuple[ModelCallInspectionView, ...]):
     return TimelineRunView(
         run_id=run.run_id,
         run_number=run.run_number,
+        kind=run.kind,
         trigger_kind=run.trigger_kind,
         result_kind=run.result_kind,
         activated_memory_ids=run.activated_memory_ids,
         memory_artifacts=run.memory_artifacts,
+        program_derivation=run.program_derivation,
         steps=tuple(
             _timeline_step(step, run, model_calls=model_calls) for step in run.steps
         ),
-        trigger_clarification_response_run_id=run.trigger_clarification_response_run_id,
+        base_run_id=run.base_run_id,
         trigger_clarification_response_id=run.trigger_clarification_response_id,
         clarification_responses=run.clarification_responses,
     )

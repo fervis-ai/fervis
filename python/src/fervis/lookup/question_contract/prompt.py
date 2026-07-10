@@ -35,8 +35,18 @@ class QuestionContractTurnPrompt(TurnPromptBase):
         self,
         builder: TurnPromptBuilder,
     ) -> tuple[PromptSection, ...]:
-        del builder
-        return ()
+        provenance_payload = (
+            self.request.conversation_input_provenance.to_prompt_payload()
+        )
+        if not provenance_payload:
+            return ()
+        return (
+            builder.json_section(
+                "Conversation input provenance:",
+                provenance_payload,
+                indent=2,
+            ),
+        )
 
     def instruction_sections(
         self,
@@ -59,9 +69,11 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                 "Question Boundary",
                 (
                     "Author the contract for the factual intent expressed by the current question in its resolved conversation context.",
+                    "When conversation input provenance includes resolved_request_text, use it as the factual meaning of the current question.",
+                    "Use conversation input provenance as authoritative input provenance; do not recreate carried prior inputs from resolved_request_text.",
                     "Use conversation resolution annotations as the resolved context for current-question words that depend on prior turns.",
                     "If active clarification context is shown, it is also part of the allowed question context for this turn.",
-                    "Use only the current question, conversation resolution annotations, and shown active clarification context as question context.",
+                    "Use only the current question, conversation input provenance, conversation resolution annotations, and shown active clarification context as question context.",
                     "Return needs_clarification only when visible context is insufficient to author one complete factual question contract.",
                 ),
             ),
@@ -124,7 +136,7 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                     "Use MEASURED_VALUE for a numeric measured output, such as sales total, average amount, max duration, or payroll total.",
                     "Use ANSWER_VALUE for a direct requested value that is not a row count or measured numeric aggregate.",
                     "Use POPULATION_SCOPE only when the user explicitly asks to return the population or scope itself as an answer output.",
-                    "Conversation resolution resolved_question_inputs clarify referenced inputs, not answer outputs.",
+                    "Conversation input provenance clarifies referenced inputs, not answer outputs.",
                     "For list or table questions with multiple requested columns about the same rows or groups, use one answer_request and put each requested column in answer_outputs.",
                 ),
             ),
@@ -158,16 +170,17 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                 "Question Input Sources",
                 (
                     "Use source=question_context for inputs copied directly from the current question.",
-                    "Use source=conversation_resolution only for a resolved_question_inputs item whose kind is literal_text or row_set_reference.",
-                    "Every value_source_text or reference_text must be copied verbatim from the current question or conversation resolution annotations.",
+                    "Use source=question_context for conversation input provenance items marked question_input_source=question_context.",
+                    "Use source=conversation_resolution only for conversation input provenance items marked question_input_source=conversation_resolution.",
+                    "Every value_source_text or reference_text must be copied verbatim from the current question, conversation input provenance, or conversation resolution annotations.",
                 ),
             ),
             builder.instruction_block(
                 "Conversation Resolution Inputs",
                 (
-                    "When conversation resolution annotations include resolved_question_inputs, use those items as the allowed resolved lookup meaning for matching current-question references.",
-                    "When resolved_question_inputs includes kind=row_set_reference and that current-question phrase constrains an answer_request, copy it as a row_set_reference input with the same reference_text, occurrence, and resolved_input_ref.",
-                    "When resolved_question_inputs includes kind=literal_text and that current-question phrase constrains an answer_request, copy its source_text into value_source_text and keep the same resolved_value_text, role, and resolved_input_ref.",
+                    "When conversation input provenance includes kind=row_set_reference and that input constrains an answer_request, copy it as a row_set_reference input with the same value_source_text and input_ref as resolved_input_ref.",
+                    "When conversation input provenance includes kind=literal_text and that input constrains an answer_request, copy value_source_text, resolved_value_text, role, input_ref as resolved_input_ref, and any field_label_text or value_meaning_hint.",
+                    "Only new replacement text marked question_input_source=question_context should be treated as current-turn input evidence.",
                     "Do not convert a row_set_reference into literal_text, and do not convert a literal_text into row_set_reference.",
                 ),
             ),
@@ -193,7 +206,7 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                 "Literal Time Inputs",
                 (
                     "Use kind=literal_text with role=time_value for calendar dates, calendar date ranges, relative time, calendar periods, quarters, months, years, rolling windows, and open calendar ranges.",
-                    "For each time input, copy only the exact value span into value_source_text from the question context or resolved_question_inputs.",
+                    "For each time input, copy only the exact value span into value_source_text from the question context or conversation input provenance.",
                     "Set resolved_value_text to the copied time phrase or resolved conversation text, without compiling it into dates.",
                     "When a time input constrains an answer_request, include its input_ref in that answer_request's used_question_inputs.",
                     "Do not compile date ranges, calendar dates, relative offsets, or time shapes in this turn.",
@@ -251,9 +264,10 @@ class QuestionContractTurnPrompt(TurnPromptBase):
     def _answer_request_contract_schema(self) -> dict[str, object]:
         return build_answer_request_contract_schema(
             include_conversation_resolution_inputs=(
-                self.request.conversation_resolution_overlay is not None
-                and bool(
-                    self.request.conversation_resolution_overlay.resolved_question_inputs
-                )
+                _has_conversation_resolution_inputs(self.request)
             )
         )
+
+
+def _has_conversation_resolution_inputs(request: QuestionContractRequest) -> bool:
+    return request.conversation_input_provenance.has_conversation_resolution_inputs

@@ -28,8 +28,7 @@ class ObservabilityUsage:
 @dataclass(frozen=True)
 class ObservabilityRun:
     run_id: str
-    previous_run_id: str | None = None
-    trigger_clarification_response_run_id: str | None = None
+    base_run_id: str | None = None
 
 
 @dataclass(frozen=True)

@@ -23,7 +23,7 @@ from fervis.lookup.fact_plan.row_sources import (
     CALENDAR_ROW_SOURCE_ID,
     CALENDAR_START_PARAM_ID,
 )
-from fervis.lookup.fact_plan.values import (
+from fervis.lookup.answer_program.values import (
     FactValue,
     LiteralType,
     TimeComponent,
@@ -174,6 +174,7 @@ def _ground_time_value(
         )
     return FactValue.time(
         id=_grounded_value_id(known.id),
+        known_input_id=known.id,
         expression=_time_expression(known),
         intent=dict(resolved.get(TimeField.INTENT) or {}),
         resolved_start=str(resolved.get(TimeField.START) or ""),
@@ -254,6 +255,7 @@ def _result_limit_value(
 ) -> FactValue:
     return FactValue.literal(
         id=_grounded_value_id(known.id),
+        known_input_id=known.id,
         literal_type=LiteralType.NUMBER,
         value=known.resolved_value_text,
         label=known.text,

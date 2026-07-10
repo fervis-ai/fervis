@@ -9,7 +9,7 @@ from fervis.lookup.relation_catalog.selection import CatalogSelectionResult
 from fervis.lookup.conversation_resolution.overlay import (
     ConversationResolutionOverlay,
 )
-from fervis.lookup.fact_plan.values import FactValue
+from fervis.lookup.answer_program.values import FactValue
 from fervis.lookup.question_contract import QuestionContract, RequestedFact
 from fervis.lookup.turn_prompts.context import HostPromptContext
 

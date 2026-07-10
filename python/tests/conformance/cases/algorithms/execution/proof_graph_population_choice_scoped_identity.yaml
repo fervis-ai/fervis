@@ -26,7 +26,7 @@ expect:
         label: "Included status values [OPEN]. Excluded: CLOSED"
       - id: population_choice:source_1:row_predicate:rp.source_1.items.status
         kind: population_choice
-        label: "Included status values [OPEN, CLOSED]"
+        label: "Included status values [CLOSED, OPEN]"
     edges:
       - source: population_choice:source_1:row_predicate:rp.source_1.root.status
         target: relation:source_1

@@ -2,27 +2,31 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, Mapping
 
-from fervis.lookup.fact_plan.fact_plan import FactFulfillment, FactValue
-from fervis.lookup.fact_plan.operations import (
+from fervis.lookup.answer_program.model import FactFulfillment
+from fervis.lookup.answer_program.operations import (
     Operation,
     SortDirection,
     UnionSpec,
 )
-from fervis.lookup.fact_plan.relations import (
+from fervis.lookup.source_binding.compiler_ir import (
+    DraftRelationSource,
+    DraftRelationSourceAppliedFilter,
+    DraftRelationSourcePopulationChoice,
+    DraftRelationSourceRowFilter,
+)
+from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
+    PopulationChoiceControllerKind,
     Relation,
     RelationField,
-    RelationSource,
-    RelationSourceAppliedFilter,
-    RelationSourceRowFilter,
 )
-from fervis.lookup.fact_plan.render_spec import (
+from fervis.lookup.answer_program.render_spec import (
     RenderRelationOutput,
 )
-from fervis.lookup.fact_plan.values import ValueUse
 from fervis.lookup.fact_planning.fulfillment_evidence import (
     evidence_is_compatible_with_plan_shape,
     field_id_for_fulfillment_evidence,
@@ -37,6 +41,12 @@ from fervis.lookup.source_binding import BoundSource
 from .render_ids import _safe_field_id
 
 
+RelationBuilder = Callable[
+    [str, DraftRelationSource, tuple[RelationField, ...]],
+    Relation,
+]
+
+
 def _compiled_pattern(
     *,
     payload: dict[str, Any],
@@ -46,8 +56,7 @@ def _compiled_pattern(
     relation_outputs: tuple[RenderRelationOutput, ...],
     fulfillment_render_ids: tuple[str, ...],
     bound_sources: dict[str, BoundSource],
-    values: tuple[FactValue, ...] = (),
-    value_uses: tuple[ValueUse, ...] = (),
+    relation_builder: RelationBuilder,
     required_answer_evidence_ids_by_output: Mapping[str, tuple[str, ...]] | None = None,
     selected_metric: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -78,13 +87,12 @@ def _compiled_pattern(
         payload=payload,
         relation_fields=relation_fields,
         bound_sources=bound_sources,
+        relation_builder=relation_builder,
         required_answer_evidence_ids_by_output=(required_answer_evidence_ids_by_output),
         selected_metric=selected_metric,
     )
     return {
         "fulfillment": fulfillment,
-        "values": values,
-        "value_uses": value_uses,
         "relations": relation_inputs["relations"],
         "operations": (*relation_inputs["operations"], *operations),
         "relation_outputs": relation_outputs,
@@ -143,6 +151,7 @@ def _relations_for_bound_source(
     payload: dict[str, Any],
     relation_fields: tuple[RelationField, ...],
     bound_sources: dict[str, BoundSource],
+    relation_builder: RelationBuilder,
     required_answer_evidence_ids_by_output: Mapping[str, tuple[str, ...]] | None = None,
     selected_metric: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -162,6 +171,7 @@ def _relations_for_bound_source(
                         required_answer_evidence_ids_by_output
                     ),
                     selected_metric=selected_metric,
+                    relation_builder=relation_builder,
                 ),
             ),
             "operations": (),
@@ -176,6 +186,7 @@ def _relations_for_bound_source(
                 required_answer_evidence_ids_by_output
             ),
             selected_metric=selected_metric,
+            relation_builder=relation_builder,
         )
         for index, source in enumerate(invocations, start=1)
     )
@@ -205,6 +216,7 @@ def _relation_for_bound_source(
     payload: dict[str, Any],
     relation_fields: tuple[RelationField, ...],
     bound_sources: dict[str, BoundSource],
+    relation_builder: RelationBuilder,
     required_answer_evidence_ids_by_output: Mapping[str, tuple[str, ...]] | None = None,
     selected_metric: Mapping[str, Any] | None = None,
 ) -> Relation:
@@ -216,6 +228,7 @@ def _relation_for_bound_source(
         relation_fields=relation_fields,
         required_answer_evidence_ids_by_output=required_answer_evidence_ids_by_output,
         selected_metric=selected_metric,
+        relation_builder=relation_builder,
     )
 
 
@@ -242,6 +255,7 @@ def _relation_for_bound(
     payload: dict[str, Any],
     bound: BoundSource,
     relation_fields: tuple[RelationField, ...],
+    relation_builder: RelationBuilder,
     required_answer_evidence_ids_by_output: Mapping[str, tuple[str, ...]] | None = None,
     selected_metric: Mapping[str, Any] | None = None,
 ) -> Relation:
@@ -249,10 +263,11 @@ def _relation_for_bound(
         raise ValueError("fact plan references unknown relation source binding")
     source_filters = _relation_source_filters(bound.applied_filters)
     row_filters = tuple(bound.source.row_filters) if bound.source is not None else ()
-    relation_fields = _relation_fields_with_source_filters(
+    relation_fields = _relation_fields_with_source_requirements(
         relation_fields,
         source_filters=source_filters,
         row_filters=row_filters,
+        population_choices=bound.source.population_choices,
     )
     source = _source_with_filters(
         bound.source,
@@ -266,15 +281,15 @@ def _relation_for_bound(
         required_answer_evidence_ids_by_output=required_answer_evidence_ids_by_output,
         selected_metric=selected_metric,
     )
-    return Relation(id=relation_id, source=source, fields=relation_fields)
+    return relation_builder(relation_id, source, relation_fields)
 
 
 def _source_with_filters(
-    source: RelationSource,
+    source: DraftRelationSource,
     *,
-    source_filters: tuple[RelationSourceAppliedFilter, ...],
-    row_filters: tuple[RelationSourceRowFilter, ...],
-) -> RelationSource:
+    source_filters: tuple[DraftRelationSourceAppliedFilter, ...],
+    row_filters: tuple[DraftRelationSourceRowFilter, ...],
+) -> DraftRelationSource:
     if not source_filters and not row_filters:
         return source
     return replace(source, applied_filters=source_filters, row_filters=row_filters)
@@ -282,17 +297,18 @@ def _source_with_filters(
 
 def _relation_source_filters(
     applied_filters: tuple[dict[str, Any], ...],
-) -> tuple[RelationSourceAppliedFilter, ...]:
-    return RelationSourceAppliedFilter.from_payloads(applied_filters)
+) -> tuple[DraftRelationSourceAppliedFilter, ...]:
+    return DraftRelationSourceAppliedFilter.from_payloads(applied_filters)
 
 
-def _relation_fields_with_source_filters(
+def _relation_fields_with_source_requirements(
     relation_fields: tuple[RelationField, ...],
     *,
-    source_filters: tuple[RelationSourceAppliedFilter, ...],
-    row_filters: tuple[RelationSourceRowFilter, ...],
+    source_filters: tuple[DraftRelationSourceAppliedFilter, ...],
+    row_filters: tuple[DraftRelationSourceRowFilter, ...],
+    population_choices: tuple[DraftRelationSourcePopulationChoice, ...],
 ) -> tuple[RelationField, ...]:
-    if not source_filters and not row_filters:
+    if not source_filters and not row_filters and not population_choices:
         return relation_fields
     output = list(relation_fields)
     existing = {field.field_id for field in output}
@@ -321,6 +337,18 @@ def _relation_fields_with_source_filters(
             )
         )
         existing.add(field_id)
+    for choice in population_choices:
+        if choice.controller_kind is not PopulationChoiceControllerKind.ROW_PREDICATE:
+            continue
+        if choice.field_id in existing:
+            continue
+        output.append(
+            RelationField(
+                field_id=choice.field_id,
+                roles=(FieldBindingRole.PREDICATE,),
+            )
+        )
+        existing.add(choice.field_id)
     return tuple(output)
 
 

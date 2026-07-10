@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fervis.lookup.fact_plan.relations import PopulationChoiceControllerKind, RelationSourcePopulationChoice, RelationSourceRowFilter
+from fervis.lookup.source_binding.compiler_ir import (
+    DraftRelationSourcePopulationChoice,
+)
+from fervis.lookup.answer_program.relations import PopulationChoiceControllerKind
 from fervis.lookup.source_binding import provider_contract as provider_output
 from fervis.lookup.source_binding.model import SourceBindingRequest
 from fervis.lookup.source_binding.parser.membership_effects import answer_population_tests_by_id, choice_is_included, population_choice_proof_refs, population_tests_allow_choice, relation_review_scope_decisions
@@ -49,8 +52,7 @@ def parse_row_predicate_filters(
     missing_predicate_ids = set(predicates_by_id) - set(reviews)
     if missing_predicate_ids:
         raise ValueError("source binding missing row predicate review")
-    filters: list[RelationSourceRowFilter] = []
-    population_choices: list[RelationSourcePopulationChoice] = []
+    population_choices: list[DraftRelationSourcePopulationChoice] = []
     for predicate_id, raw in reviews.items():
         predicate = predicates_by_id.get(predicate_id)
         if predicate is None:
@@ -78,12 +80,17 @@ def parse_row_predicate_filters(
         if not field_id:
             raise ValueError("row predicate missing field")
         population_choices.append(
-            RelationSourcePopulationChoice(
+            DraftRelationSourcePopulationChoice(
                 controller_kind=PopulationChoiceControllerKind.ROW_PREDICATE,
                 controller_id=predicate_id,
                 field_id=field_id,
+                requested_fact_ids=(requested_fact_id,),
                 included_values=values,
                 excluded_values=excluded_values,
+                parameter_id=(
+                    f"semantic.{requested_fact_id}.{binding_target_id}."
+                    f"row_predicate.{predicate_id}"
+                ),
                 proof_refs=population_choice_proof_refs(
                     f"row_predicate:{predicate_id}",
                     out_of_scope_decisions,
@@ -93,18 +100,7 @@ def parse_row_predicate_filters(
                 ),
             )
         )
-        if set(values) == set(allowed_values):
-            continue
-        filters.append(
-            RelationSourceRowFilter(
-                field_id=field_id,
-                operator=predicate.operator,
-                values=values,
-                proof_refs=(f"row_predicate:{predicate_id}",),
-            )
-        )
     return RowPredicateParse(
-        filters=tuple(filters),
         population_choices=tuple(population_choices),
     )
 

@@ -8,6 +8,7 @@ from fervis.lineage.enums import (
     ModelCallStatus,
     ModelUsageKind,
     ModelUsageUnit,
+    QuestionRunKind,
     RunStepKey,
     RunStepKind,
     RunTriggerKind,
@@ -43,8 +44,8 @@ def test_lineage_spine_persists_source_read_without_response_body() -> None:
         run_id="run_1",
         question=question,
         run_number=1,
+        kind=QuestionRunKind.MODEL_ASSISTED.value,
         trigger_kind=RunTriggerKind.INITIAL.value,
-        integrated_question="How many stores are open?",
         adapter_ref="django_drf:test",
         runtime_version="test-runtime",
     )
@@ -172,15 +173,15 @@ def test_lineage_persistence_accepts_clarification_triggered_run() -> None:
         run_id="run_test_2",
         question=previous_run.question,
         run_number=2,
+        kind=QuestionRunKind.MODEL_ASSISTED.value,
         trigger_kind=RunTriggerKind.CLARIFICATION_RESPONSE.value,
-        trigger_clarification_response_run=previous_run,
+        base_run=previous_run,
         trigger_clarification_response_id="response_1",
-        integrated_question="Question with clarification.",
         adapter_ref="django_drf:test",
         runtime_version="test-runtime",
     )
 
-    assert clarification_run.trigger_clarification_response_run_id == "run_test_1"
+    assert clarification_run.base_run_id == "run_test_1"
     assert clarification_run.trigger_clarification_response_id == "response_1"
 
 
@@ -224,8 +225,8 @@ def _create_run(
         run_id=run_id,
         question=question,
         run_number=1,
+        kind=QuestionRunKind.MODEL_ASSISTED.value,
         trigger_kind=RunTriggerKind.INITIAL.value,
-        integrated_question="Question?",
         adapter_ref="django_drf:test",
         runtime_version="test-runtime",
     )

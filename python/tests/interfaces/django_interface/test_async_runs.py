@@ -26,6 +26,7 @@ from fervis.interfaces.django import runs as runs_module
 from fervis.interfaces.django.question_run_ports import (
     DjangoQuestionLineagePort,
 )
+from fervis.interfaces.django import question_run_ports
 from fervis.lineage.enums import (
     AnswerValueKind,
     FactResultKind,
@@ -33,11 +34,14 @@ from fervis.lineage.enums import (
     ModelCallStatus,
     ModelUsageKind,
     ModelUsageUnit,
+    QuestionRunKind,
     RunResultKind,
     RunStepKey,
     RunStepKind,
     RunTriggerKind,
 )
+from fervis.questions.contracts import ExecutionMode, QuestionPrincipal
+from fervis.questions.ports import ModelAssistedRunSpec, RunSubmission
 from fervis.lookup.clarification import ClarificationNeed, ClarificationReason
 from fervis.lineage.django.recorder import DjangoLineageRecorder
 from fervis.lineage.models import (
@@ -85,10 +89,6 @@ def test_django_question_run_lineage_port_uses_canonical_lineage_artifacts():
         question="First question",
         value="first",
     )
-    _work_item_for_memory_run(
-        run_id="run_1",
-        read_context_ref=read_context_ref,
-    )
     _answered_lineage_run(
         conversation=conversation,
         question_id="question_2",
@@ -96,10 +96,6 @@ def test_django_question_run_lineage_port_uses_canonical_lineage_artifacts():
         sequence=2,
         question="Second question",
         value="second",
-    )
-    _work_item_for_memory_run(
-        run_id="run_2",
-        read_context_ref=read_context_ref,
     )
 
     context = DjangoQuestionLineagePort().conversation_memory_context(
@@ -119,6 +115,138 @@ def test_django_question_run_lineage_port_uses_canonical_lineage_artifacts():
     ]
 
 
+@pytest.mark.django_db
+def test_django_question_memory_uses_primary_run_unless_context_run_is_selected():
+    read_context_ref = ReadContextRef(scheme="django_principal", key="user-memory")
+    conversation = Conversation.objects.create(
+        conversation_id="conversation_memory_variant",
+        tenant_id="tenant-1",
+        read_context_ref=read_context_ref.to_storage_dict(),
+    )
+    _answered_lineage_run(
+        conversation=conversation,
+        question_id="question_variant",
+        run_id="run_primary",
+        sequence=1,
+        question="How many sales?",
+        value="primary answer",
+    )
+    question = Question.objects.get(question_id="question_variant")
+    _answered_lineage_variant(
+        question=question,
+        run_id="run_variant",
+        run_number=2,
+        kind=QuestionRunKind.DETERMINISTIC,
+        trigger_kind=RunTriggerKind.RERUN,
+        base_run_id="run_primary",
+        value="deterministic variant",
+    )
+    authority = ReadAuthority(
+        tenant_id="tenant-1",
+        read_context_ref=read_context_ref,
+    )
+    port = DjangoQuestionLineagePort()
+
+    default_context = port.conversation_memory_context(
+        conversation_id=conversation.conversation_id,
+        authority=authority,
+    )
+    selected_context = port.conversation_memory_context(
+        conversation_id=conversation.conversation_id,
+        context_run_id="run_variant",
+        authority=authority,
+    )
+
+    assert [
+        artifact["sourceAnswer"] for artifact in default_context["factArtifacts"]
+    ] == ["primary answer"]
+    assert [
+        artifact["sourceAnswer"] for artifact in selected_context["factArtifacts"]
+    ] == ["deterministic variant"]
+
+
+@pytest.mark.django_db
+def test_django_question_memory_rejects_unavailable_context_run():
+    read_context_ref = ReadContextRef(scheme="django_principal", key="user-memory")
+    conversation = Conversation.objects.create(
+        conversation_id="conversation_memory_rejection",
+        tenant_id="tenant-1",
+        read_context_ref=read_context_ref.to_storage_dict(),
+    )
+    _answered_lineage_run(
+        conversation=conversation,
+        question_id="question_primary",
+        run_id="run_primary",
+        sequence=1,
+        question="How many sales?",
+        value="primary answer",
+    )
+
+    with pytest.raises(
+        PermissionError,
+        match="context run is not an authorized answered run",
+    ):
+        DjangoQuestionLineagePort().conversation_memory_context(
+            conversation_id=conversation.conversation_id,
+            context_run_id="run_missing",
+            authority=ReadAuthority(
+                tenant_id="tenant-1",
+                read_context_ref=read_context_ref,
+            ),
+        )
+
+
+@pytest.mark.django_db
+def test_django_question_memory_keeps_explicit_context_outside_recent_window(
+    monkeypatch,
+):
+    read_context_ref = ReadContextRef(scheme="django_principal", key="user-memory")
+    conversation = Conversation.objects.create(
+        conversation_id="conversation_old_context",
+        tenant_id="tenant-1",
+        read_context_ref=read_context_ref.to_storage_dict(),
+    )
+    _answered_lineage_run(
+        conversation=conversation,
+        question_id="question_old",
+        run_id="run_old_primary",
+        sequence=1,
+        question="Old question",
+        value="old primary",
+    )
+    _answered_lineage_variant(
+        question=Question.objects.get(question_id="question_old"),
+        run_id="run_old_variant",
+        run_number=2,
+        kind=QuestionRunKind.DETERMINISTIC,
+        trigger_kind=RunTriggerKind.RERUN,
+        base_run_id="run_old_primary",
+        value="old selected variant",
+    )
+    _answered_lineage_run(
+        conversation=conversation,
+        question_id="question_latest",
+        run_id="run_latest",
+        sequence=2,
+        question="Latest question",
+        value="latest primary",
+    )
+    monkeypatch.setattr(question_run_ports, "DEFAULT_RECENT_MEMORY_RUN_LIMIT", 1)
+
+    context = DjangoQuestionLineagePort().conversation_memory_context(
+        conversation_id=conversation.conversation_id,
+        context_run_id="run_old_variant",
+        authority=ReadAuthority(
+            tenant_id="tenant-1",
+            read_context_ref=read_context_ref,
+        ),
+    )
+
+    assert [
+        artifact["sourceAnswer"] for artifact in context["factArtifacts"]
+    ] == ["old selected variant", "latest primary"]
+
+
 def _answered_lineage_run(
     *,
     conversation: Conversation,
@@ -134,14 +262,45 @@ def _answered_lineage_run(
         conversation_sequence=sequence,
         original_question=question,
     )
+    _answered_lineage_variant(
+        question=question_row,
+        run_id=run_id,
+        run_number=1,
+        kind=QuestionRunKind.MODEL_ASSISTED,
+        trigger_kind=RunTriggerKind.INITIAL,
+        value=value,
+    )
+
+
+def _answered_lineage_variant(
+    *,
+    question: Question,
+    run_id: str,
+    run_number: int,
+    kind: QuestionRunKind,
+    trigger_kind: RunTriggerKind,
+    value: str,
+    base_run_id: str | None = None,
+) -> None:
     run = QuestionRun.objects.create(
         run_id=run_id,
-        question=question_row,
-        run_number=1,
-        trigger_kind=RunTriggerKind.INITIAL.value,
-        integrated_question=question,
+        question=question,
+        run_number=run_number,
+        kind=kind.value,
+        trigger_kind=trigger_kind.value,
+        base_run_id=base_run_id,
         adapter_ref="django_drf:test",
         runtime_version="test-runtime",
+    )
+    RunWorkItem.objects.create(
+        run_id=run_id,
+        conversation_id=str(question.conversation_id),
+        tenant_id=str(question.conversation.tenant_id),
+        user_id="user-memory",
+        spec_kind=kind.value,
+        execution_spec=_model_execution_spec(question.original_question),
+        read_context_ref=question.conversation.read_context_ref,
+        status=RunWorkStatus.COMPLETED,
     )
     step = RunStep.objects.create(
         step_id=f"{run_id}.question_contract",
@@ -160,11 +319,11 @@ def _answered_lineage_run(
         run=run,
         produced_by_step=step,
         fact_key="fact_1",
-        description=f"answer for {question}",
+        description=f"answer for {question.original_question}",
         answer_expression_family="scalar",
         requested_fact_json={
             "id": "fact_1",
-            "answer_fact": f"answer for {question}",
+            "answer_fact": f"answer for {question.original_question}",
             "answer_outputs": [{"id": "answer_1", "description": "answer"}],
         },
     )
@@ -210,30 +369,61 @@ def _answered_lineage_run(
                 }
             ],
             "provenance": {"runId": run_id},
-            "sourceQuestion": question,
+            "sourceQuestion": question.original_question,
             "sourceAnswer": value,
         },
     )
 
 
-def _work_item_for_memory_run(
+def _model_execution_spec(
+    question: str,
+    *,
+    runtime_context: dict[str, object] | None = None,
+) -> dict[str, object]:
+    return {
+        "integrated_question": question,
+        "provider": "anthropic",
+        "model_key": "HAIKU",
+        "conversation_context": {},
+        "runtime_context": dict(runtime_context or {}),
+        "max_budget_usd": "0.5",
+        "max_thinking_tokens": 64,
+    }
+
+
+def _model_submission(
     *,
     run_id: str,
-    read_context_ref: ReadContextRef,
-) -> None:
-    RunWorkItem.objects.create(
+    conversation_id: str,
+    tenant_id: str,
+    user_id: str,
+    question: str,
+    idempotency_key: str | None = None,
+    runtime_context: dict[str, object] | None = None,
+) -> RunSubmission:
+    return RunSubmission(
+        conversation_id=conversation_id,
+        tenant_id=tenant_id,
+        question_id=f"question:{run_id}",
         run_id=run_id,
-        conversation_id="conversation_memory_lineage",
-        tenant_id="tenant-1",
-        user_id=str(read_context_ref.key),
-        provider="anthropic",
-        model_key="HAIKU",
-        question=f"question for {run_id}",
-        conversation_context={},
-        runtime_context={},
-        read_context_ref=read_context_ref.to_storage_dict(),
-        status=RunWorkStatus.COMPLETED,
-        max_budget_usd=0.5,
+        principal=QuestionPrincipal(
+            principal_id=user_id,
+            tenant_id=tenant_id,
+            read_context_ref=ReadContextRef(
+                scheme="django_principal",
+                key=user_id,
+            ),
+        ),
+        spec=ModelAssistedRunSpec(
+            integrated_question=question,
+            provider="anthropic",
+            model_key="HAIKU",
+            runtime_context=dict(runtime_context or {}),
+            max_budget_usd="0.5",
+            max_thinking_tokens=64,
+        ),
+        execution_mode=ExecutionMode.QUEUED,
+        idempotency_key=idempotency_key,
     )
 
 
@@ -259,7 +449,7 @@ def test_enqueued_message_creates_canonical_lineage_root(
         "How many stores are open?",
     )
 
-    run_id = response.json()["currentRunId"]
+    run_id = response.json()["latestRunId"]
     question = Question.objects.get(conversation_id=conversation["conversationId"])
     run = QuestionRun.objects.get(run_id=run_id)
     assert {
@@ -269,7 +459,6 @@ def test_enqueued_message_creates_canonical_lineage_root(
         "run_question_id": run.question_id,
         "run_number": run.run_number,
         "trigger_kind": run.trigger_kind,
-        "integrated_question": run.integrated_question,
     } == {
         "question_text": "How many stores are open?",
         "origin_message_ref_present": True,
@@ -277,7 +466,6 @@ def test_enqueued_message_creates_canonical_lineage_root(
         "run_question_id": question.question_id,
         "run_number": 1,
         "trigger_kind": RunTriggerKind.INITIAL.value,
-        "integrated_question": "How many stores are open?",
     }
 
 
@@ -316,7 +504,7 @@ def test_runtime_model_turn_failure_records_canonical_run_step(
         conversation["conversationId"],
         "list all active staff alphabetically",
     )
-    run_id = response.json()["currentRunId"]
+    run_id = response.json()["latestRunId"]
 
     process_run_batch(
         worker_id="test-worker",
@@ -462,8 +650,8 @@ def test_message_post_enqueues_without_running_planner_runtime(
         response.status_code,
         body["status"],
         body["answer"],
-        RunWorkItem.objects.filter(run_id=body["currentRunId"]).exists(),
-    ) == (202, "RUNNING", None, True)
+        RunWorkItem.objects.filter(run_id=body["latestRunId"]).exists(),
+    ) == (202, "QUEUED", None, True)
 
 
 @pytest.mark.django_db
@@ -494,7 +682,7 @@ def test_worker_records_question_contract_failure_before_execution(
         conversation["conversationId"],
         "list all active staff alphabetically",
     )
-    run_id = response.json()["currentRunId"]
+    run_id = response.json()["latestRunId"]
 
     process_run_batch(
         worker_id="test-worker",
@@ -507,15 +695,13 @@ def test_worker_records_question_contract_failure_before_execution(
     assert {
         "run_status": run["status"],
         "run_error": run["error"],
-        "step_names": [step["toolName"] for step in run["steps"]],
-        "step_error": run["steps"][0]["responseBody"]["errorCode"],
+        "step_names": [step["stepKey"] for step in run["steps"]],
         "failure_error_code": failure.error_kind,
         "failure_message": failure.message,
     } == {
         "run_status": "FAILED",
         "run_error": ErrorCode.PROVIDER_RUNTIME_FAILED,
         "step_names": ["question_contract"],
-        "step_error": ErrorCode.PROVIDER_RUNTIME_FAILED,
         "failure_error_code": ErrorCode.PROVIDER_RUNTIME_FAILED,
         "failure_message": ErrorCode.PROVIDER_RUNTIME_FAILED,
     }
@@ -609,7 +795,7 @@ def test_worker_fails_before_answer_synthesis_when_budget_is_exceeded(
         "what is the restricted fact?",
         payload={"maxBudgetUsd": 0.01},
     )
-    run_id = response.json()["currentRunId"]
+    run_id = response.json()["latestRunId"]
 
     process_run_batch(
         worker_id="test-worker",
@@ -661,7 +847,7 @@ def test_worker_terminal_result_data_excludes_audit_handles(
         conversation["conversationId"],
         "what was the metric total?",
     )
-    run_id = response.json()["currentRunId"]
+    run_id = response.json()["latestRunId"]
 
     process_run_batch(
         worker_id="test-worker",
@@ -704,10 +890,29 @@ def test_run_view_projects_needs_clarification_result_data_in_canonical_shape(
         run_id="run_clarification_result_data",
         question=question,
         run_number=1,
+        kind=QuestionRunKind.MODEL_ASSISTED.value,
         trigger_kind=RunTriggerKind.INITIAL.value,
-        integrated_question="How many sales happened there?",
         adapter_ref="django_drf:test",
         runtime_version="test-runtime",
+    )
+    RunWorkItem.objects.create(
+        run_id=run.run_id,
+        conversation_id=conversation.conversation_id,
+        tenant_id=conversation.tenant_id,
+        user_id="user-1",
+        status=RunWorkStatus.COMPLETED,
+        spec_kind=QuestionRunKind.MODEL_ASSISTED.value,
+        execution_spec={
+            "integrated_question": question.original_question,
+            "provider": None,
+            "model_key": "test:model",
+            "context_run_id": None,
+            "conversation_context": {},
+            "runtime_context": {},
+            "max_budget_usd": None,
+            "max_thinking_tokens": None,
+        },
+        read_context_ref=conversation.read_context_ref,
     )
     step = RunStep.objects.create(
         step_id="run_clarification_result_data.grounding",
@@ -804,7 +1009,7 @@ def test_fervis_worker_processes_queued_run_to_terminal(
     conversation = _create_conversation(api_client)
     response = _post_message(api_client, conversation["conversationId"])
     question = response.json()
-    run_id = question["currentRunId"]
+    run_id = question["latestRunId"]
 
     cycle = process_run_batch(
         worker_id="test-worker",
@@ -837,7 +1042,7 @@ def test_same_conversation_rejects_second_active_run(
         first.status_code,
         second.status_code,
         second.json()["error"]["context"]["activeRunId"],
-    ) == (202, 409, first.json()["currentRunId"])
+    ) == (202, 409, first.json()["latestRunId"])
 
 
 @pytest.mark.django_db
@@ -851,7 +1056,7 @@ def test_created_run_response_exposes_worker_snapshot(
 
     question = response.json()
     detail = api_client.get(
-        question_run_detail_url(question["questionId"], question["currentRunId"]),
+        question_run_detail_url(question["questionId"], question["latestRunId"]),
         HTTP_X_REQUESTER_SCOPES="fervis:read",
     )
 
@@ -873,10 +1078,8 @@ def test_idempotent_integrity_race_returns_existing_same_key(
         conversation_id="conversation-race",
         tenant_id="tenant-race",
         user_id="user-race",
-        provider="anthropic",
-        model_key="HAIKU",
-        question="already completed",
-        conversation_context={},
+        spec_kind=QuestionRunKind.MODEL_ASSISTED.value,
+        execution_spec=_model_execution_spec("already completed"),
         read_context_ref={
             "scheme": "django_principal",
             "key": "user-race",
@@ -884,7 +1087,6 @@ def test_idempotent_integrity_race_returns_existing_same_key(
         },
         idempotency_key="same-key",
         status=RunWorkStatus.COMPLETED,
-        max_budget_usd=0.5,
     )
     original_filter = RunWorkItem.objects.filter
     calls = {"idempotency": 0}
@@ -907,24 +1109,14 @@ def test_idempotent_integrity_race_returns_existing_same_key(
     )
 
     enqueued = enqueue_run_work_item(
-        run_id="new-race-run",
-        conversation_id="conversation-race",
-        tenant_id="tenant-race",
-        user_id="user-race",
-        question="same question",
-        provider="anthropic",
-        model_key="HAIKU",
-        execution_mode="queued",
-        conversation_context={},
-        runtime_context={},
-        read_context_ref={
-            "scheme": "django_principal",
-            "key": "user-race",
-            "tenant_key": None,
-        },
-        idempotency_key="same-key",
-        max_budget_usd=0.5,
-        max_thinking_tokens=64,
+        submission=_model_submission(
+            run_id="new-race-run",
+            conversation_id="conversation-race",
+            tenant_id="tenant-race",
+            user_id="user-race",
+            question="same question",
+            idempotency_key="same-key",
+        ),
     )
 
     assert (enqueued.item, enqueued.created, RunWorkItem.objects.count()) == (
@@ -943,34 +1135,21 @@ def test_enqueue_integrity_error_does_not_break_outer_transaction(
         conversation_id="other-conversation",
         tenant_id="tenant-race",
         user_id="user-race",
-        provider="anthropic",
-        model_key="HAIKU",
-        question="already created",
-        conversation_context={},
-        max_budget_usd=0.5,
+        spec_kind=QuestionRunKind.MODEL_ASSISTED.value,
+        execution_spec=_model_execution_spec("already created"),
+        read_context_ref=ReadContextRef(scheme="anonymous").to_storage_dict(),
     )
 
     with transaction.atomic():
         with pytest.raises(IntegrityError):
             enqueue_run_work_item(
-                run_id="duplicate-run",
-                conversation_id="conversation-race",
-                tenant_id="tenant-race",
-                user_id="user-race",
-                question="same run id",
-                provider="anthropic",
-                model_key="HAIKU",
-                execution_mode="queued",
-                conversation_context={},
-                runtime_context={},
-                read_context_ref={
-                    "scheme": "django_principal",
-                    "key": "user-race",
-                    "tenant_key": None,
-                },
-                idempotency_key=None,
-                max_budget_usd=0.5,
-                max_thinking_tokens=64,
+                submission=_model_submission(
+                    run_id="duplicate-run",
+                    conversation_id="conversation-race",
+                    tenant_id="tenant-race",
+                    user_id="user-race",
+                    question="same run id",
+                ),
             )
         assert RunWorkItem.objects.count() == 1
 
@@ -980,31 +1159,21 @@ def test_enqueue_run_work_item_persists_runtime_context(
     fervis_foundation_reset,
 ):
     enqueued = enqueue_run_work_item(
-        run_id="runtime-context-run",
-        conversation_id="conversation-runtime-context",
-        tenant_id="tenant-runtime-context",
-        user_id="user-runtime-context",
-        question="same question",
-        provider="anthropic",
-        model_key="HAIKU",
-        execution_mode="queued",
-        conversation_context={},
-        runtime_context={
-            "caseId": "case-1",
-            "goldsetRunId": "goldset-1",
-            "certificationRunId": "goldset-1",
-        },
-        read_context_ref={
-            "scheme": "django_principal",
-            "key": "user-runtime-context",
-            "tenant_key": None,
-        },
-        idempotency_key=None,
-        max_budget_usd=0.5,
-        max_thinking_tokens=64,
+        submission=_model_submission(
+            run_id="runtime-context-run",
+            conversation_id="conversation-runtime-context",
+            tenant_id="tenant-runtime-context",
+            user_id="user-runtime-context",
+            question="same question",
+            runtime_context={
+                "caseId": "case-1",
+                "goldsetRunId": "goldset-1",
+                "certificationRunId": "goldset-1",
+            },
+        ),
     )
 
-    assert enqueued.item.runtime_context == {
+    assert enqueued.item.execution_spec["runtime_context"] == {
         "caseId": "case-1",
         "goldsetRunId": "goldset-1",
         "certificationRunId": "goldset-1",
@@ -1018,10 +1187,10 @@ def test_terminal_lineage_reconciles_stale_active_work_item(
 ):
     conversation = _create_conversation(api_client)
     first = _post_message(api_client, conversation["conversationId"], "first").json()
-    work_item = RunWorkItem.objects.get(run_id=first["currentRunId"])
+    work_item = RunWorkItem.objects.get(run_id=first["latestRunId"])
     work_item.status = RunWorkStatus.RUNNING
     work_item.save(update_fields=["status", "updated_at"])
-    _record_terminal_run_result(first["currentRunId"])
+    _record_terminal_run_result(first["latestRunId"])
 
     second = _post_message(api_client, conversation["conversationId"], "second")
 
@@ -1039,7 +1208,7 @@ def test_expired_running_lease_is_claimed_by_next_worker(
 ):
     conversation = _create_conversation(api_client)
     run = _post_message(api_client, conversation["conversationId"], "first").json()
-    RunWorkItem.objects.filter(run_id=run["currentRunId"]).update(
+    RunWorkItem.objects.filter(run_id=run["latestRunId"]).update(
         status=RunWorkStatus.RUNNING,
         lease_owner="worker-a",
         lease_expires_at=timezone.now() - timezone.timedelta(minutes=1),
@@ -1051,13 +1220,13 @@ def test_expired_running_lease_is_claimed_by_next_worker(
         lease_seconds=300,
     )
 
-    work_item = RunWorkItem.objects.get(run_id=run["currentRunId"])
+    work_item = RunWorkItem.objects.get(run_id=run["latestRunId"])
     assert (
         [item.run_id for item in claimed],
         work_item.status,
         work_item.lease_owner,
         work_item.attempt_count,
-    ) == ([run["currentRunId"]], RunWorkStatus.RUNNING, "worker-b", 1)
+    ) == ([run["latestRunId"]], RunWorkStatus.RUNNING, "worker-b", 1)
 
 
 @pytest.mark.django_db
@@ -1073,7 +1242,7 @@ def test_stale_worker_cannot_execute_after_expired_lease_is_reclaimed(
         lease_seconds=300,
     )
     first_attempt = first_claim[0].active_attempt
-    RunWorkItem.objects.filter(run_id=run["currentRunId"]).update(
+    RunWorkItem.objects.filter(run_id=run["latestRunId"]).update(
         lease_expires_at=timezone.now() - timezone.timedelta(minutes=1),
     )
 
@@ -1085,12 +1254,12 @@ def test_stale_worker_cannot_execute_after_expired_lease_is_reclaimed(
 
     with pytest.raises(StaleRunLease):
         process_run_work(
-            run_id=run["currentRunId"],
+            run_id=run["latestRunId"],
             worker_id="worker-a",
             active_attempt=first_attempt,
         )
 
-    work_item = RunWorkItem.objects.get(run_id=run["currentRunId"])
+    work_item = RunWorkItem.objects.get(run_id=run["latestRunId"])
     assert (
         [item.run_id for item in first_claim],
         [item.run_id for item in second_claim],
@@ -1098,8 +1267,8 @@ def test_stale_worker_cannot_execute_after_expired_lease_is_reclaimed(
         work_item.lease_owner,
         work_item.active_attempt,
     ) == (
-        [run["currentRunId"]],
-        [run["currentRunId"]],
+        [run["latestRunId"]],
+        [run["latestRunId"]],
         RunWorkStatus.RUNNING,
         "worker-b",
         second_claim[0].active_attempt,
@@ -1119,8 +1288,8 @@ def test_stale_worker_failure_does_not_overwrite_terminal_work_item(
         lease_seconds=300,
     )
     first_attempt = first_claim[0].active_attempt
-    _record_terminal_run_result(run["currentRunId"])
-    RunWorkItem.objects.filter(run_id=run["currentRunId"]).update(
+    _record_terminal_run_result(run["latestRunId"])
+    RunWorkItem.objects.filter(run_id=run["latestRunId"]).update(
         status=RunWorkStatus.COMPLETED,
         completed_at=timezone.now(),
         lease_owner=None,
@@ -1130,13 +1299,13 @@ def test_stale_worker_failure_does_not_overwrite_terminal_work_item(
 
     with pytest.raises(StaleRunLease):
         runs_module.fail_run_work(
-            run_id=run["currentRunId"],
+            run_id=run["latestRunId"],
             worker_id="worker-a",
             active_attempt=first_attempt,
             error="stale worker failure",
         )
 
-    work_item = RunWorkItem.objects.get(run_id=run["currentRunId"])
+    work_item = RunWorkItem.objects.get(run_id=run["latestRunId"])
     assert work_item.last_error == ""
 
 
@@ -1152,16 +1321,16 @@ def test_current_worker_failure_reconciles_existing_terminal_lineage(
         batch_size=1,
         lease_seconds=300,
     )
-    _record_terminal_run_result(run["currentRunId"])
+    _record_terminal_run_result(run["latestRunId"])
 
     terminal = runs_module.fail_run_work(
-        run_id=run["currentRunId"],
+        run_id=run["latestRunId"],
         worker_id="worker-a",
         active_attempt=claimed[0].active_attempt,
         error="worker_crashed",
     )
 
-    work_item = RunWorkItem.objects.get(run_id=run["currentRunId"])
+    work_item = RunWorkItem.objects.get(run_id=run["latestRunId"])
     assert (
         terminal["status"],
         work_item.status,
@@ -1182,7 +1351,7 @@ def test_expired_running_lease_stops_at_max_attempts(
 ):
     conversation = _create_conversation(api_client)
     run = _post_message(api_client, conversation["conversationId"], "first").json()
-    RunWorkItem.objects.filter(run_id=run["currentRunId"]).update(
+    RunWorkItem.objects.filter(run_id=run["latestRunId"]).update(
         status=RunWorkStatus.RUNNING,
         lease_owner="worker-a",
         lease_expires_at=timezone.now() - timezone.timedelta(minutes=1),
@@ -1191,7 +1360,7 @@ def test_expired_running_lease_stops_at_max_attempts(
         max_attempts=2,
     )
     _record_lineage_model_usage(
-        run["currentRunId"],
+        run["latestRunId"],
         input_tokens=2,
         output_tokens=3,
         thinking_tokens=1,
@@ -1204,9 +1373,9 @@ def test_expired_running_lease_stops_at_max_attempts(
         lease_seconds=300,
     )
 
-    work_item = RunWorkItem.objects.get(run_id=run["currentRunId"])
-    terminal_run = get_run(run["currentRunId"])
-    failure = RuntimeErrorDetail.objects.get(run_id=run["currentRunId"])
+    work_item = RunWorkItem.objects.get(run_id=run["latestRunId"])
+    terminal_run = get_run(run["latestRunId"])
+    failure = RuntimeErrorDetail.objects.get(run_id=run["latestRunId"])
     assert {
         "claimed": claimed,
         "work_status": work_item.status,
@@ -1245,7 +1414,7 @@ def test_worker_failure_terminal_payload_preserves_recorded_usage(
         lease_seconds=300,
     )
     _record_lineage_model_usage(
-        run["currentRunId"],
+        run["latestRunId"],
         input_tokens=10,
         output_tokens=5,
         thinking_tokens=1,
@@ -1253,12 +1422,12 @@ def test_worker_failure_terminal_payload_preserves_recorded_usage(
     )
 
     failed = runs_module.fail_run_work(
-        run_id=run["currentRunId"],
+        run_id=run["latestRunId"],
         worker_id="worker-a",
         active_attempt=claimed[0].active_attempt,
         error="worker_crashed",
     )
-    derived_run_view = get_run_view(run["currentRunId"])
+    derived_run_view = get_run_view(run["latestRunId"])
 
     assert (
         [item.run_id for item in claimed],
@@ -1268,7 +1437,7 @@ def test_worker_failure_terminal_payload_preserves_recorded_usage(
         failed["usage"]["thinkingTokens"],
         failed["usage"]["costUsd"],
         "usage" in (derived_run_view or {}),
-    ) == ([run["currentRunId"]], "FAILED", 10, 5, 1, 0.025, False)
+    ) == ([run["latestRunId"]], "FAILED", 10, 5, 1, 0.025, True)
 
 
 @pytest.mark.django_db
@@ -1284,7 +1453,7 @@ def test_already_terminal_worker_return_preserves_recorded_usage(
         lease_seconds=300,
     )
     _record_lineage_model_usage(
-        run["currentRunId"],
+        run["latestRunId"],
         input_tokens=8,
         output_tokens=4,
         thinking_tokens=2,
@@ -1292,14 +1461,14 @@ def test_already_terminal_worker_return_preserves_recorded_usage(
     )
 
     runs_module.fail_run_work(
-        run_id=run["currentRunId"],
+        run_id=run["latestRunId"],
         worker_id="worker-a",
         active_attempt=claimed[0].active_attempt,
         error="worker_crashed",
     )
 
     terminal = process_run_work(
-        run_id=run["currentRunId"],
+        run_id=run["latestRunId"],
         worker_id="worker-a",
         active_attempt=claimed[0].active_attempt,
     )
@@ -1436,7 +1605,7 @@ def test_terminal_failed_work_item_does_not_starve_new_queued_runs(
 ):
     conversation = _create_conversation(api_client)
     failed = _post_message(api_client, conversation["conversationId"], "first").json()
-    RunWorkItem.objects.filter(run_id=failed["currentRunId"]).update(
+    RunWorkItem.objects.filter(run_id=failed["latestRunId"]).update(
         status=RunWorkStatus.FAILED,
         attempt_count=1,
         max_attempts=2,
@@ -1451,6 +1620,6 @@ def test_terminal_failed_work_item_does_not_starve_new_queued_runs(
 
     assert (
         cycle.claimed_count,
-        RunWorkItem.objects.get(run_id=second["currentRunId"]).status
+        RunWorkItem.objects.get(run_id=second["latestRunId"]).status
         in {RunWorkStatus.COMPLETED, RunWorkStatus.FAILED},
     ) == (1, True)

@@ -1,0 +1,97 @@
+id: compatibility_manifest_is_total
+kind: algorithm
+algorithm: answer_program.instantiate
+description: Compatibility is an exact graph-derived manifest, so missing, extra, or duplicate claims have no effects.
+input:
+  schema_revision: 1
+  attempts:
+    - &attempt
+      id: missing_function
+      program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/invocation}
+      catalog: {$ref: ../../../fixtures/answer_program_v1.yaml#/catalogs/sales}
+      environment: {$ref: ../../../fixtures/answer_program_v1.yaml#/environments/invocation}
+      bindings: &bindings
+        - parameter_id: question.store_ids
+          value: {kind: identity_set, identity_type: store, identity_field: store_id, values: [store_1]}
+          provenance: {kind: question_input}
+        - parameter_id: semantic.sale_states
+          value: {kind: string_set, values: [COMPLETED]}
+          provenance: {kind: semantic_choice}
+      compatibility: &missing_function
+        schema_revision: 1
+        compiler_version: fervis.answer_program.compiler@1
+        function_semantics:
+          - {function_key: answer.materialize, version: '1'}
+          - {function_key: fact.materialize, version: '1'}
+          - {function_key: proof.construct, version: '1'}
+          - {function_key: relation.project, version: '1'}
+          - {function_key: source.instantiate_read, version: '1'}
+          - {function_key: source.read_relation, version: '1'}
+        source_contracts: &sources
+          - {kind: catalog_read, source_id: sales, fingerprint: 082b9e5bca783c107e75b0896681261e78736c4218fd394648403251ad226336}
+    - <<: *attempt
+      id: missing_source
+      compatibility:
+        <<: *missing_function
+        function_semantics: &functions
+          - {function_key: answer.classify, version: '1'}
+          - {function_key: answer.materialize, version: '1'}
+          - {function_key: fact.materialize, version: '1'}
+          - {function_key: proof.construct, version: '1'}
+          - {function_key: relation.project, version: '1'}
+          - {function_key: source.instantiate_read, version: '1'}
+          - {function_key: source.read_relation, version: '1'}
+        source_contracts: []
+    - <<: *attempt
+      id: extra_function
+      compatibility:
+        <<: *missing_function
+        function_semantics:
+          - {function_key: answer.classify, version: '1'}
+          - {function_key: answer.materialize, version: '1'}
+          - {function_key: fact.materialize, version: '1'}
+          - {function_key: proof.construct, version: '1'}
+          - {function_key: relation.aggregate, version: '1'}
+          - {function_key: relation.project, version: '1'}
+          - {function_key: source.instantiate_read, version: '1'}
+          - {function_key: source.read_relation, version: '1'}
+        source_contracts: *sources
+    - <<: *attempt
+      id: duplicate_function
+      compatibility:
+        <<: *missing_function
+        function_semantics:
+          - {function_key: answer.classify, version: '1'}
+          - {function_key: answer.classify, version: '1'}
+          - {function_key: answer.materialize, version: '1'}
+          - {function_key: fact.materialize, version: '1'}
+          - {function_key: proof.construct, version: '1'}
+          - {function_key: relation.project, version: '1'}
+          - {function_key: source.instantiate_read, version: '1'}
+          - {function_key: source.read_relation, version: '1'}
+        source_contracts: *sources
+    - <<: *attempt
+      id: duplicate_source
+      compatibility:
+        <<: *missing_function
+        function_semantics: *functions
+        source_contracts:
+          - {kind: catalog_read, source_id: sales, fingerprint: 082b9e5bca783c107e75b0896681261e78736c4218fd394648403251ad226336}
+          - {kind: catalog_read, source_id: sales, fingerprint: 082b9e5bca783c107e75b0896681261e78736c4218fd394648403251ad226336}
+    - <<: *attempt
+      id: extra_source_kind
+      compatibility:
+        <<: *missing_function
+        function_semantics: *functions
+        source_contracts:
+          - {kind: catalog_read, source_id: sales, fingerprint: 082b9e5bca783c107e75b0896681261e78736c4218fd394648403251ad226336}
+          - {kind: generated_source, source_id: sales, fingerprint: 082b9e5bca783c107e75b0896681261e78736c4218fd394648403251ad226336}
+expect:
+  result_equals:
+    attempts:
+      - {id: missing_function, status: rejected, code: incomplete_compatibility_manifest, reads: 0}
+      - {id: missing_source, status: rejected, code: incomplete_compatibility_manifest, reads: 0}
+      - {id: extra_function, status: rejected, code: incomplete_compatibility_manifest, reads: 0}
+      - {id: duplicate_function, status: rejected, code: incomplete_compatibility_manifest, reads: 0}
+      - {id: duplicate_source, status: rejected, code: incomplete_compatibility_manifest, reads: 0}
+      - {id: extra_source_kind, status: rejected, code: incomplete_compatibility_manifest, reads: 0}

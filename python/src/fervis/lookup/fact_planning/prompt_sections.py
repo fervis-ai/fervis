@@ -134,7 +134,7 @@ def fact_plan_instruction_sections(
                     "Use computed_scalar only with bound value sources.",
                     "scalar_inputs are the bound value sources used by computed_scalar.",
                     "Copy source_binding_id values verbatim from Bound sources where kind is value.",
-                    "expression is arithmetic using scalar_inputs input_id names.",
+                    "expression is reverse-Polish tokens: input_id operands followed by add, subtract, multiply, divide, or negate operators.",
                     "output.scalar_id is the ID for the computed scalar result.",
                     "output.label is an optional output name.",
                 ),

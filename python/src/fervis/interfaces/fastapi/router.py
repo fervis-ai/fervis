@@ -91,14 +91,14 @@ def fervis_fastapi_router(
         return JSONResponse(status_code=response.status_code, content=response.payload)
 
     @router.post("/questions/{question_id}/runs/")
-    def continue_question(
+    def create_question_run(
         question_id: str,
         payload: dict[str, Any],
         request: Request,
         dependency_principal=Depends(principal_dependency),
     ):
         try:
-            response = question_interface.continue_question(
+            response = question_interface.create_question_run(
                 question_id,
                 payload,
                 principal=request_principal(request, dependency_principal),

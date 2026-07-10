@@ -42,7 +42,10 @@ input:
           scalar_inputs:
             - {input_id: current, value_id: prior_totals.value.current}
             - {input_id: previous, value_id: prior_totals.value.previous}
-          expression: current - previous
+          expression:
+            - {input_id: current}
+            - {input_id: previous}
+            - {operator: subtract}
           output: {scalar_id: increase, label: increase}
   responses: {}
 expect:

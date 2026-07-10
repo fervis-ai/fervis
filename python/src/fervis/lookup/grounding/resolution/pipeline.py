@@ -14,7 +14,7 @@ from fervis.lookup.conversation_resolution.overlay import (
     LiteralQuestionInputOverlay,
     ResolvedCanonicalIdentityOverlay,
 )
-from fervis.lookup.fact_plan.values import FactValue
+from fervis.lookup.answer_program.values import FactValue
 from fervis.lookup.grounding.model import (
     CanonicalInputLedger,
     GroundedValueCertification,
@@ -302,6 +302,7 @@ def _overlay_identity_value(
 ) -> FactValue:
     return FactValue.identity(
         id=_grounded_value_id(known.id),
+        known_input_id=known.id,
         identity_type=canonical.identity_type,
         identity_field=canonical.identity_field,
         value=canonical.value,

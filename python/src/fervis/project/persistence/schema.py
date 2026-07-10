@@ -14,10 +14,10 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy.dialects import sqlite
 
-from .schema_snapshots.v0002 import metadata
+from .schema_snapshots.v0001 import metadata
 
 HEAD_SCHEMA_FINGERPRINT = (
-    "8ce3627a220b28017ab1a4b8414d7bcb5f5041ad6f494a14597912fc2d973a7f"
+    "cb35cc5585cc1f38488cbd66128a8310464cbcfa760eca36f9bd4c200fc30b76"
 )
 FERVIS_TABLES = tuple(metadata.tables)
 

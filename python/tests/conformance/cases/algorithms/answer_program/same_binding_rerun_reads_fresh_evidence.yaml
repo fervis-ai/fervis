@@ -1,0 +1,68 @@
+id: same_binding_rerun_reads_fresh_evidence
+kind: algorithm
+algorithm: answer_program.invoke
+description: Reinvoking unchanged bindings performs a fresh read and recomputes the answer.
+input:
+  schema_revision: 1
+  program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/invocation}
+  catalog: {$ref: ../../../fixtures/answer_program_v1.yaml#/catalogs/sales}
+  environment: {$ref: ../../../fixtures/answer_program_v1.yaml#/environments/invocation}
+  invocations:
+    - id: first
+      bindings: &bindings
+        - parameter_id: question.store_ids
+          value:
+            kind: identity_set
+            identity_type: store
+            identity_field: store_id
+            values: [store_1]
+          provenance: {kind: question_input}
+        - parameter_id: semantic.sale_states
+          value: {kind: string_set, values: [COMPLETED]}
+          provenance: {kind: semantic_choice}
+      evidence:
+        - request:
+            endpoint_name: list_sale_list
+            args: {sales.query.store_id: store_1}
+          response:
+            status: 200
+            body:
+              results:
+                - {sale_id: sale_1, store_id: store_1}
+    - id: rerun
+      bindings: *bindings
+      evidence:
+        - request:
+            endpoint_name: list_sale_list
+            args: {sales.query.store_id: store_1}
+          response:
+            status: 200
+            body:
+              results:
+                - {sale_id: sale_1, store_id: store_1}
+                - {sale_id: sale_2, store_id: store_1}
+expect:
+  result_contains:
+    invocations:
+      - id: first
+        status: completed
+        relations:
+          - {id: sales_rows}
+          - id: answer_rows
+            rows:
+              - {answer_sale_id: sale_1, store_id: store_1}
+        requests:
+          - endpoint_name: list_sale_list
+            args: {sales.query.store_id: store_1}
+      - id: rerun
+        status: completed
+        relations:
+          - {id: sales_rows}
+          - id: answer_rows
+            rows:
+              - {answer_sale_id: sale_1, store_id: store_1}
+              - {answer_sale_id: sale_2, store_id: store_1}
+        requests:
+          - endpoint_name: list_sale_list
+            args: {sales.query.store_id: store_1}
+

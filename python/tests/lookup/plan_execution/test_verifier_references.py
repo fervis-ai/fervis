@@ -1,5 +1,6 @@
 import hashlib
 import json
+from dataclasses import replace
 from uuid import UUID
 
 import pytest
@@ -26,15 +27,14 @@ from fervis.lookup.lineage.source_reads import SourceReadLineageScope
 from fervis.lookup.plan_execution.authorized_sources import (
     AuthorizedExecutionSources,
 )
-from fervis.lookup.plan_execution.compiled_execution import (
-    compile_fact_execution,
+from fervis.lookup.answer_program.instantiation import (
+    _materialize_execution,
 )
 from fervis.lookup.plan_execution.errors import (
     RelationEngineError,
     VerificationError,
 )
-from fervis.lookup.plan_execution.runner import execute_fact_plan
-from fervis.lookup.plan_execution.value_compiler import compile_value_uses
+from tests.lookup.plan_execution.invocation_helpers import compile_and_invoke
 from fervis.lookup.plan_execution.verification import (
     verify_fact_plan as verify_fact_plan_impl,
 )
@@ -42,16 +42,15 @@ from fervis.lineage.enums import ProofNodeKind, SourceReadStatus
 from fervis.lineage.recorder import CatalogEndpointWrite, SourceReadWrite
 from fervis.lookup.grounding.model import GroundedInputUse
 from fervis.lookup.memory.projection import LookupMemory
-from fervis.lookup.fact_plan.fact_plan import (
-    AnswerPlan,
-    FactFulfillment,
-    FactPlan,
-)
-from fervis.lookup.fact_plan.operations import (
+from fervis.lookup.answer_program.model import AnswerProgram, FactFulfillment
+from fervis.lookup.fact_plan.fact_plan import FactPlan
+from fervis.lookup.answer_program.operations import (
     AggregateSpec,
     AggregationFunction,
     AggregationSpec,
     AntiJoinSpec,
+    ComputeBinary,
+    ComputeBinaryOperator,
     ComputeSpec,
     CrossJoinSpec,
     FilterSpec,
@@ -72,9 +71,9 @@ from fervis.lookup.fact_plan.operations import (
     SortKey,
     TiePolicy,
 )
-from fervis.lookup.fact_plan.relations import (
-    EndpointParamBinding,
+from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
+    EndpointParamBinding,
     Relation,
     RelationField,
     RelationSource,
@@ -86,20 +85,18 @@ from fervis.lookup.fact_plan.row_sources import (
     api_row_source_id,
     build_row_source_catalog,
 )
-from fervis.lookup.fact_plan.values import (
+from fervis.lookup.answer_program.values import (
+    ConstantRef,
     FactValue,
-    RankLimitUse,
-    RowFilterUse,
-    ScalarInputUse,
+    NodeOutputRef,
+    ParameterRef,
     TimeComponent,
     ValueComponent,
-    ValueFilterOperator,
-    ValueKind,
-    ValueUse,
 )
-from fervis.lookup.fact_plan.values import LiteralType
+from fervis.lookup.answer_program import BindingSet, compiler_input_context
+from fervis.lookup.answer_program import AnswerProgramContractError
+from fervis.lookup.answer_program.values import LiteralType
 from fervis.lookup.question_contract import (
-    KnownInputKind,
     KnownInputSource,
     LiteralInputRole,
     QuestionContract,
@@ -108,21 +105,21 @@ from fervis.lookup.question_contract import (
     RequestedFactKnownInput,
     RequestedFactLiteralInput,
 )
-from fervis.lookup.fact_plan.render_spec import (
+from fervis.lookup.answer_program.render_spec import (
     RenderRelationOutput,
     RenderScalarOutput,
     RenderSpec,
 )
 
 
-def _answer_plan(**kwargs) -> AnswerPlan:
+def _answer_plan(**kwargs) -> AnswerProgram:
     render_spec = kwargs.get("render_spec")
     operations = tuple(kwargs.get("operations", ()))
     fulfillment = _default_fulfillment(render_spec, operations)
     kwargs.pop("requested_facts", None)
     if "fulfillment" not in kwargs:
         kwargs["fulfillment"] = fulfillment
-    return AnswerPlan(
+    return AnswerProgram(
         **kwargs,
     )
 
@@ -175,7 +172,7 @@ def _known_time(input_id: str, text: str) -> RequestedFactKnownInput:
 
 
 def _known_result_limit(
-    input_id: str, text: str, value: int
+    input_id: str, text: str, value: int | str
 ) -> RequestedFactKnownInput:
     return RequestedFactLiteralInput(
         id=input_id,
@@ -186,7 +183,28 @@ def _known_result_limit(
     )
 
 
+def _rank_limit_constant(value: int) -> ConstantRef:
+    return ConstantRef(
+        constant_id=f"rank-limit.{value}",
+        version_ref="rank@1",
+        value=FactValue.literal(
+            id=f"rank-limit.{value}",
+            literal_type=LiteralType.NUMBER,
+            value=str(value),
+        ),
+    )
+
+
+def _constant_expression(value: FactValue, *, ref_id: str) -> ConstantRef:
+    return ConstantRef(
+        constant_id=f"test.{ref_id}",
+        version_ref="test@1",
+        value=value,
+    )
+
+
 def verify_fact_plan(plan: FactPlan, **kwargs):
+    original_plan = plan
     catalog = kwargs.pop("catalog", _catalog())
     question_contract = kwargs.pop(
         "question_contract",
@@ -196,16 +214,62 @@ def verify_fact_plan(plan: FactPlan, **kwargs):
         ),
     )
     explicit_values = tuple(kwargs.pop("available_values", ()))
-    return verify_fact_plan_impl(
-        plan,
-        question_contract=question_contract,
-        catalog=catalog,
-        available_values=(
+    kwargs.pop("available_value_uses", ())
+    input_context = compiler_input_context(
+        values=(
             *_available_values_for_contract(question_contract),
             *explicit_values,
         ),
-        **kwargs,
+        question_contract=question_contract,
     )
+    if isinstance(plan.outcome, AnswerProgram):
+        plan = replace(
+            plan,
+            outcome=replace(
+                plan.outcome,
+                parameters=input_context.program_inputs.parameters,
+            ),
+            bindings=input_context.program_inputs.bindings,
+        )
+        from fervis.lookup.answer_program.compilation import compile_answer_program
+        from fervis.lookup.answer_program.instantiation import (
+            ExecutionEnvironment,
+            instantiate_answer_program,
+        )
+
+        memory_relations = tuple(kwargs.pop("memory_relations", ()))
+        authorized_sources = kwargs.pop("authorized_sources", None)
+        catalog_selection = kwargs.pop("catalog_selection", None)
+        execution_catalog = (
+            authorized_sources.relation_catalog
+            if authorized_sources is not None
+            else catalog
+        )
+        program, bindings = compile_answer_program(
+            plan.outcome,
+            question_contract=question_contract,
+            catalog=execution_catalog,
+            bindings=plan.bindings,
+            memory_relations=memory_relations,
+        )
+        instantiate_answer_program(
+            program,
+            bindings,
+            ExecutionEnvironment(
+                catalog=execution_catalog,
+                authorized_sources=authorized_sources,
+                catalog_selection=catalog_selection,
+                memory_relations=memory_relations,
+            ),
+        )
+    else:
+        verify_fact_plan_impl(
+            plan,
+            question_contract=question_contract,
+            catalog=catalog,
+            **kwargs,
+        )
+    return original_plan
 
 
 def _grounded_input_use(
@@ -236,6 +300,7 @@ def _grounded_time_value(
         expression=value_id,
         resolved_start=start,
         resolved_end=end,
+        granularity="day",
     )
 
 
@@ -256,6 +321,7 @@ def _available_values_for_contract(
             values.append(
                 FactValue.literal(
                     id=known.id,
+                    known_input_id=known.id,
                     literal_type=LiteralType.NUMBER,
                     value=known.resolved_value_text,
                     proof_refs=(f"known_input:{known.id}",),
@@ -266,9 +332,11 @@ def _available_values_for_contract(
             values.append(
                 FactValue.time(
                     id=known.id,
+                    known_input_id=known.id,
                     expression=known.text,
                     resolved_start="2026-04-08",
                     resolved_end="2026-04-08",
+                    granularity="day",
                     proof_refs=(f"known_input:{known.id}",),
                 )
             )
@@ -276,6 +344,7 @@ def _available_values_for_contract(
         values.append(
             FactValue.named(
                 id=known.id,
+                known_input_id=known.id,
                 text=known.text,
                 proof_refs=(f"known_input:{known.id}",),
             )
@@ -308,13 +377,13 @@ def _render_output_ids(plan: FactPlan) -> tuple[str, ...]:
     return binding_target_ids or ("answer",)
 
 
-def _source_description(answer: AnswerPlan, relation_id: str, field_id: str) -> str:
+def _source_description(answer: AnswerProgram, relation_id: str, field_id: str) -> str:
     seen: set[tuple[str, str]] = set()
     return _source_description_inner(answer, relation_id, field_id, seen=seen)
 
 
 def _source_description_inner(
-    answer: AnswerPlan,
+    answer: AnswerProgram,
     relation_id: str,
     field_id: str,
     *,
@@ -572,6 +641,27 @@ def _rows_relation() -> Relation:
     )
 
 
+def _rows_relation_with_filter(
+    expression,
+    *,
+    field_id: str = "name",
+) -> Relation:
+    relation = _rows_relation()
+    return replace(
+        relation,
+        source=replace(
+            relation.source,
+            row_filters=(
+                RelationSourceRowFilter(
+                    field_id=field_id,
+                    operator="equals",
+                    value_expr=expression,
+                ),
+            ),
+        ),
+    )
+
+
 def _rows_relation_filtered_by_known_input(known_input_id: str) -> Relation:
     return Relation(
         id="rows",
@@ -582,7 +672,14 @@ def _rows_relation_filtered_by_known_input(known_input_id: str) -> Relation:
                 RelationSourceRowFilter(
                     field_id="name",
                     operator="equals",
-                    values=("yesterday",),
+                    value_expr=_constant_expression(
+                        FactValue.named(
+                            id=f"filter_{known_input_id}",
+                            text="yesterday",
+                            proof_refs=(f"known_input:{known_input_id}",),
+                        ),
+                        ref_id=f"filter_{known_input_id}",
+                    ),
                     proof_refs=(f"known_input:{known_input_id}",),
                 ),
             ),
@@ -596,21 +693,10 @@ def _rows_relation_filtered_by_known_input(known_input_id: str) -> Relation:
     )
 
 
-def test_value_use_references_existing_value():
+def test_row_filter_references_existing_value():
     plan = FactPlan(
         outcome=_answer_plan(
-            value_uses=(
-                ValueUse(
-                    id="use_missing",
-                    value_id="missing",
-                    target=RowFilterUse(
-                        relation_id="rows",
-                        field_id="name",
-                        operator=ValueFilterOperator.EQUALS,
-                    ),
-                ),
-            ),
-            relations=(_rows_relation(),),
+            relations=(_rows_relation_with_filter(ParameterRef("missing")),),
             operations=(_project_operation(input_relation="rows"),),
             render_spec=RenderSpec(
                 relation_outputs=(
@@ -624,25 +710,16 @@ def test_value_use_references_existing_value():
         )
     )
 
-    with pytest.raises(VerificationError, match="unknown value"):
+    with pytest.raises(AnswerProgramContractError, match="unknown parameter"):
         verify_fact_plan(plan)
 
 
-def test_value_use_can_reference_known_question_input():
+def test_row_filter_can_reference_known_question_input():
     plan = FactPlan(
         outcome=_answer_plan(
-            value_uses=(
-                ValueUse(
-                    id="use_known_person",
-                    value_id="person_name",
-                    target=RowFilterUse(
-                        relation_id="rows",
-                        field_id="name",
-                        operator=ValueFilterOperator.EQUALS,
-                    ),
-                ),
+            relations=(
+                _rows_relation_with_filter(ParameterRef("question.person_name")),
             ),
-            relations=(_rows_relation(),),
             operations=(_project_operation(input_relation="rows"),),
             render_spec=RenderSpec(
                 relation_outputs=(
@@ -697,28 +774,10 @@ def test_known_inputs_are_inventory_not_automatic_obligations():
     )
 
 
-def test_plan_authored_literal_cannot_supply_row_filter_value():
+def test_unclassified_literal_cannot_supply_row_filter_value():
     plan = FactPlan(
         outcome=_answer_plan(
-            values=(
-                FactValue.literal(
-                    id="invented_name",
-                    literal_type=LiteralType.STRING,
-                    value="Alice",
-                ),
-            ),
-            value_uses=(
-                ValueUse(
-                    id="use_invented_name",
-                    value_id="invented_name",
-                    target=RowFilterUse(
-                        relation_id="rows",
-                        field_id="name",
-                        operator=ValueFilterOperator.EQUALS,
-                    ),
-                ),
-            ),
-            relations=(_rows_relation(),),
+            relations=(_rows_relation_with_filter({"literal": "Alice"}),),
             operations=(_project_operation(input_relation="rows"),),
             render_spec=RenderSpec(
                 relation_outputs=(
@@ -733,50 +792,8 @@ def test_plan_authored_literal_cannot_supply_row_filter_value():
     )
 
     with pytest.raises(
-        VerificationError,
-        match="fact plan values are not model-authored",
-    ):
-        verify_fact_plan(plan)
-
-
-def test_plan_authored_literal_cannot_supply_endpoint_param_value():
-    plan = FactPlan(
-        outcome=_answer_plan(
-            values=(
-                FactValue.literal(
-                    id="invented_date",
-                    literal_type=LiteralType.STRING,
-                    value="2026-05-08",
-                ),
-            ),
-            value_uses=(
-                ValueUse(
-                    id="use_invented_date",
-                    value_id="invented_date",
-                    target=RowFilterUse(
-                        relation_id="rows",
-                        field_id="name",
-                        operator=ValueFilterOperator.EQUALS,
-                    ),
-                ),
-            ),
-            relations=(_rows_relation(),),
-            operations=(_project_operation(input_relation="rows"),),
-            render_spec=RenderSpec(
-                relation_outputs=(
-                    RenderRelationOutput(
-                        id="answer",
-                        relation_id="result",
-                        field_id="name",
-                    ),
-                )
-            ),
-        )
-    )
-
-    with pytest.raises(
-        VerificationError,
-        match="fact plan values are not model-authored",
+        AnswerProgramContractError,
+        match="declared value origin",
     ):
         verify_fact_plan(plan)
 
@@ -815,10 +832,32 @@ def test_unused_known_time_input_does_not_require_runtime_anchors():
 
 
 def test_endpoint_time_param_can_reference_grounded_time_input():
+    runtime_date = _grounded_time_value(
+        "runtime_date",
+        start="2026-04-08",
+        end="2026-04-08",
+    )
+    relation = _rows_relation_filtered_by_known_input("period")
+    relation = replace(
+        relation,
+        source=replace(
+            relation.source,
+            param_bindings=(
+                EndpointParamBinding(
+                    param_id="start_date",
+                    value_expr=ConstantRef(
+                        constant_id="context.runtime_date",
+                        version_ref="context-value@1",
+                        value=runtime_date,
+                        component=TimeComponent.START.value,
+                    ),
+                ),
+            ),
+        ),
+    )
     plan = FactPlan(
         outcome=_answer_plan(
-            value_uses=(),
-            relations=(_rows_relation_filtered_by_known_input("period"),),
+            relations=(relation,),
             operations=(_project_operation(input_relation="rows"),),
             render_spec=RenderSpec(
                 relation_outputs=(
@@ -834,20 +873,6 @@ def test_endpoint_time_param_can_reference_grounded_time_input():
 
     verify_fact_plan(
         plan,
-        available_values=(
-            _grounded_time_value(
-                "runtime_date",
-                start="2026-04-08",
-                end="2026-04-08",
-            ),
-        ),
-        available_value_uses=(
-            _grounded_input_use(
-                value_id="runtime_date",
-                param_id="start_date",
-                value_component=TimeComponent.START,
-            ),
-        ),
     )
 
 
@@ -877,7 +902,6 @@ def test_endpoint_time_param_requires_grounded_time_value():
     )
     plan = FactPlan(
         outcome=_answer_plan(
-            value_uses=(),
             relations=(_rows_relation(),),
             operations=(_project_operation(input_relation="rows"),),
             render_spec=RenderSpec(
@@ -929,16 +953,27 @@ def test_endpoint_requirement_uses_selected_time_component():
             ),
         )
     )
-    row_source_id = next(
-        source.id
-        for source in build_row_source_catalog(catalog).sources
-        if source.read_id == "records"
+    month = _grounded_time_value(
+        "month",
+        start="2026-04-01",
+        end="2026-04-30",
     )
     relation = Relation(
         id="rows",
         source=RelationSource(
             kind=SourceKind.API_READ,
             read_id="records",
+            param_bindings=(
+                EndpointParamBinding(
+                    param_id="end_date",
+                    value_expr=ConstantRef(
+                        constant_id="context.month",
+                        version_ref="context-value@1",
+                        value=month,
+                        component=TimeComponent.END.value,
+                    ),
+                ),
+            ),
         ),
         fields=(
             RelationField(
@@ -949,7 +984,6 @@ def test_endpoint_requirement_uses_selected_time_component():
     )
     plan = FactPlan(
         outcome=_answer_plan(
-            value_uses=(),
             relations=(relation,),
             operations=(_project_operation(input_relation="rows"),),
             render_spec=RenderSpec(
@@ -967,21 +1001,6 @@ def test_endpoint_requirement_uses_selected_time_component():
     verify_fact_plan(
         plan,
         catalog=catalog,
-        available_values=(
-            _grounded_time_value(
-                "month",
-                start="2026-04-01",
-                end="2026-04-30",
-            ),
-        ),
-        available_value_uses=(
-            _grounded_input_use(
-                value_id="month",
-                row_source_id=row_source_id,
-                param_id="end_date",
-                value_component=TimeComponent.END,
-            ),
-        ),
     )
 
 
@@ -1045,97 +1064,6 @@ def test_empty_operation_id_is_rejected():
 
     with pytest.raises(VerificationError, match="operation requires id"):
         verify_fact_plan(plan)
-
-
-def test_empty_value_use_id_is_rejected():
-    plan = FactPlan(
-        outcome=_answer_plan(
-            value_uses=(
-                ValueUse(
-                    id="",
-                    value_id="runtime_date",
-                    target=RowFilterUse(
-                        relation_id="rows",
-                        field_id="name",
-                        operator=ValueFilterOperator.EQUALS,
-                    ),
-                ),
-            ),
-            relations=(_rows_relation(),),
-            operations=(_project_operation(input_relation="rows"),),
-            render_spec=RenderSpec(
-                relation_outputs=(
-                    RenderRelationOutput(
-                        id="answer",
-                        relation_id="result",
-                        field_id="name",
-                    ),
-                )
-            ),
-        )
-    )
-
-    with pytest.raises(VerificationError, match="value use requires id"):
-        verify_fact_plan(
-            plan,
-            available_values=(
-                _grounded_time_value(
-                    "runtime_date",
-                    start="2026-04-08",
-                    end="2026-04-08",
-                ),
-            ),
-        )
-
-
-def test_duplicate_value_use_ids_are_rejected():
-    plan = FactPlan(
-        outcome=_answer_plan(
-            value_uses=(
-                ValueUse(
-                    id="use_value",
-                    value_id="runtime_date",
-                    target=RowFilterUse(
-                        relation_id="rows",
-                        field_id="name",
-                        operator=ValueFilterOperator.EQUALS,
-                    ),
-                ),
-                ValueUse(
-                    id="use_value",
-                    value_id="runtime_date",
-                    target=RowFilterUse(
-                        relation_id="rows",
-                        field_id="name",
-                        operator=ValueFilterOperator.EQUALS,
-                    ),
-                ),
-            ),
-            relations=(_rows_relation(),),
-            operations=(_project_operation(input_relation="rows"),),
-            render_spec=RenderSpec(
-                relation_outputs=(
-                    RenderRelationOutput(
-                        id="answer",
-                        relation_id="result",
-                        field_id="name",
-                    ),
-                )
-            ),
-        )
-    )
-
-    with pytest.raises(VerificationError, match="duplicate value use"):
-        verify_fact_plan(
-            plan,
-            available_values=(
-                _grounded_time_value(
-                    "runtime_date",
-                    start="2026-04-08",
-                    end="2026-04-08",
-                ),
-            ),
-        )
 
 
 def test_fact_local_known_inputs_are_canonicalized_to_shared_question_inputs():
@@ -1227,13 +1155,6 @@ def test_shared_question_input_refs_are_valid_across_answer_requests():
 def test_known_limit_input_must_match_rank_limit():
     plan = FactPlan(
         outcome=_answer_plan(
-            value_uses=(
-                ValueUse(
-                    id="use_result_limit",
-                    value_id="result_limit",
-                    target=RankLimitUse(operation_id="top_rows"),
-                ),
-            ),
             relations=(_rows_relation(),),
             operations=(
                 Operation(
@@ -1245,7 +1166,7 @@ def test_known_limit_input_must_match_rank_limit():
                         tie_breakers=(
                             SortKey(field="name", direction=SortDirection.ASC),
                         ),
-                        limit=5,
+                        limit=ParameterRef("question.result_limit"),
                     ),
                     output_relation="result",
                 ),
@@ -1284,7 +1205,7 @@ def test_rank_limit_allows_literal_limit_without_bound_known_input():
                         tie_breakers=(
                             SortKey(field="name", direction=SortDirection.ASC),
                         ),
-                        limit=5,
+                        limit=_rank_limit_constant(5),
                     ),
                     output_relation="result",
                 ),
@@ -1304,18 +1225,11 @@ def test_rank_limit_allows_literal_limit_without_bound_known_input():
     verify_fact_plan(plan)
 
 
-def test_known_limit_input_requires_positive_integer_value():
+def test_rank_limit_expression_requires_positive_integer_value():
     for value in ("0", "-1", "5.5"):
-        with pytest.raises(VerificationError, match="rank limit does not match value"):
+        with pytest.raises(VerificationError, match="positive integer"):
             plan = FactPlan(
                 outcome=_answer_plan(
-                    value_uses=(
-                        ValueUse(
-                            id="use_result_limit",
-                            value_id="result_limit",
-                            target=RankLimitUse(operation_id="top_rows"),
-                        ),
-                    ),
                     relations=(_rows_relation(),),
                     operations=(
                         Operation(
@@ -1335,7 +1249,14 @@ def test_known_limit_input_requires_positive_integer_value():
                                         direction=SortDirection.ASC,
                                     ),
                                 ),
-                                limit=5,
+                                limit=_constant_expression(
+                                    FactValue.literal(
+                                        id=f"rank_limit_{value}",
+                                        literal_type=LiteralType.NUMBER,
+                                        value=value,
+                                    ),
+                                    ref_id=f"rank_limit_{value}",
+                                ),
                             ),
                             output_relation="result",
                         ),
@@ -1343,29 +1264,12 @@ def test_known_limit_input_requires_positive_integer_value():
                     render_spec=RenderSpec(relation_outputs=()),
                 )
             )
-            verify_fact_plan(
-                plan,
-                available_values=(
-                    FactValue.literal(
-                        id="result_limit",
-                        literal_type=LiteralType.NUMBER,
-                        value=value,
-                        proof_refs=("known_input:result_limit",),
-                    ),
-                ),
-            )
+            verify_fact_plan(plan)
 
 
-def test_rank_limit_rejects_number_value_that_does_not_match_plan_limit():
+def test_rank_limit_rejects_non_numeric_expression():
     plan = FactPlan(
         outcome=_answer_plan(
-            value_uses=(
-                ValueUse(
-                    id="use_result_limit",
-                    value_id="result_limit",
-                    target=RankLimitUse(operation_id="top_rows"),
-                ),
-            ),
             relations=(_rows_relation(),),
             operations=(
                 Operation(
@@ -1377,7 +1281,14 @@ def test_rank_limit_rejects_number_value_that_does_not_match_plan_limit():
                         tie_breakers=(
                             SortKey(field="name", direction=SortDirection.ASC),
                         ),
-                        limit=5,
+                        limit=_constant_expression(
+                            FactValue.literal(
+                                id="rank_limit_four",
+                                literal_type=LiteralType.STRING,
+                                value="four",
+                            ),
+                            ref_id="rank_limit_four",
+                        ),
                     ),
                     output_relation="result",
                 ),
@@ -1394,60 +1305,8 @@ def test_rank_limit_rejects_number_value_that_does_not_match_plan_limit():
         )
     )
 
-    with pytest.raises(VerificationError, match="rank limit does not match value"):
-        verify_fact_plan(
-            plan,
-            question_contract=_question_contract(
-                known_inputs=(_known_result_limit("result_limit", "top 4", 4),)
-            ),
-        )
-
-
-def test_known_limit_input_rejects_rank_limit_mismatch():
-    plan = FactPlan(
-        outcome=_answer_plan(
-            value_uses=(
-                ValueUse(
-                    id="use_result_limit",
-                    value_id="result_limit",
-                    target=RankLimitUse(operation_id="top_rows"),
-                ),
-            ),
-            relations=(_rows_relation(),),
-            operations=(
-                Operation(
-                    id="top_rows",
-                    spec=RankSpec(
-                        input_relation="rows",
-                        order_by=(SortKey(field="name", direction=SortDirection.DESC),),
-                        tie_policy=TiePolicy.FIELD,
-                        tie_breakers=(
-                            SortKey(field="name", direction=SortDirection.ASC),
-                        ),
-                        limit=10,
-                    ),
-                    output_relation="result",
-                ),
-            ),
-            render_spec=RenderSpec(
-                relation_outputs=(
-                    RenderRelationOutput(
-                        id="answer",
-                        relation_id="result",
-                        field_id="name",
-                    ),
-                )
-            ),
-        )
-    )
-
-    with pytest.raises(VerificationError, match="rank limit does not match value"):
-        verify_fact_plan(
-            plan,
-            question_contract=_question_contract(
-                known_inputs=(_known_result_limit("result_limit", "top 5", 5),)
-            ),
-        )
+    with pytest.raises(VerificationError, match="numeric"):
+        verify_fact_plan(plan)
 
 
 def test_fulfillment_uses_visible_requested_fact_id_and_rendered_output():
@@ -1569,6 +1428,18 @@ def test_field_binding_id_must_exist_on_row_source():
 
 
 def test_proof_backed_scalar_output_can_satisfy_requested_derived_fact():
+    current_sales = FactValue.literal(
+        id="current_sales",
+        literal_type=LiteralType.NUMBER,
+        value="35",
+        proof_refs=("prior.sales_total",),
+    )
+    target_value = FactValue.literal(
+        id="target_value",
+        literal_type=LiteralType.NUMBER,
+        value="100",
+        proof_refs=("question.target",),
+    )
     plan = FactPlan(
         outcome=_answer_plan(
             fulfillment=(
@@ -1591,27 +1462,18 @@ def test_proof_backed_scalar_output_can_satisfy_requested_derived_fact():
                 Operation(
                     id="compute",
                     spec=ComputeSpec(
-                        expression="target - current",
-                        scalar_inputs=("target", "current"),
+                        expression=ComputeBinary(
+                            operator=ComputeBinaryOperator.SUBTRACT,
+                            left=_constant_expression(
+                                target_value,
+                                ref_id="target_value",
+                            ),
+                            right=_constant_expression(
+                                current_sales,
+                                ref_id="current_sales",
+                            ),
+                        ),
                         output_scalar="remaining",
-                    ),
-                ),
-            ),
-            value_uses=(
-                ValueUse(
-                    id="target_use",
-                    value_id="target_value",
-                    target=ScalarInputUse(
-                        operation_id="compute",
-                        input_id="target",
-                    ),
-                ),
-                ValueUse(
-                    id="current_use",
-                    value_id="current_sales",
-                    target=ScalarInputUse(
-                        operation_id="compute",
-                        input_id="current",
                     ),
                 ),
             ),
@@ -1630,6 +1492,31 @@ def test_proof_backed_scalar_output_can_satisfy_requested_derived_fact():
             ),
         )
     )
+    question_contract = _question_contract("remaining")
+    assert (
+        verify_fact_plan(
+            plan,
+            question_contract=question_contract,
+            catalog=_catalog(),
+        )
+        is plan
+    )
+    program = plan.outcome
+    bindings = BindingSet()
+    compiled = _materialize_execution(
+        answer=program,
+        bindings=bindings,
+        catalog=_catalog(),
+        row_sources=build_row_source_catalog(_catalog()),
+    )
+
+    assert any(
+        node.kind is ProofNodeKind.SCALAR and node.id == "scalar:remaining"
+        for node in compiled.proof_graph.nodes
+    )
+
+
+def test_chained_compute_scalar_output_preserves_evidence_proof():
     current_sales = FactValue.literal(
         id="current_sales",
         literal_type=LiteralType.NUMBER,
@@ -1642,31 +1529,6 @@ def test_proof_backed_scalar_output_can_satisfy_requested_derived_fact():
         value="100",
         proof_refs=("question.target",),
     )
-
-    question_contract = _question_contract("remaining")
-    assert (
-        verify_fact_plan(
-            plan,
-            question_contract=question_contract,
-            available_values=(current_sales, target_value),
-            catalog=_catalog(),
-        )
-        is plan
-    )
-    compiled = compile_fact_execution(
-        answer=plan.outcome,
-        catalog=_catalog(),
-        row_sources=build_row_source_catalog(_catalog()),
-        available_values=(current_sales, target_value),
-    )
-
-    assert any(
-        node.kind is ProofNodeKind.SCALAR and node.id == "scalar:remaining"
-        for node in compiled.proof_graph.nodes
-    )
-
-
-def test_chained_compute_scalar_output_preserves_evidence_proof():
     plan = FactPlan(
         outcome=_answer_plan(
             fulfillment=(
@@ -1689,35 +1551,28 @@ def test_chained_compute_scalar_output_preserves_evidence_proof():
                 Operation(
                     id="subtotal",
                     spec=ComputeSpec(
-                        expression="target - current",
-                        scalar_inputs=("target", "current"),
+                        expression=ComputeBinary(
+                            operator=ComputeBinaryOperator.SUBTRACT,
+                            left=_constant_expression(
+                                target_value,
+                                ref_id="target_value",
+                            ),
+                            right=_constant_expression(
+                                current_sales,
+                                ref_id="current_sales",
+                            ),
+                        ),
                         output_scalar="subtotal",
                     ),
                 ),
                 Operation(
                     id="final",
                     spec=ComputeSpec(
-                        expression="subtotal",
-                        scalar_inputs=("subtotal",),
+                        expression=NodeOutputRef(
+                            node_id="subtotal",
+                            output_id="subtotal",
+                        ),
                         output_scalar="final_total",
-                    ),
-                ),
-            ),
-            value_uses=(
-                ValueUse(
-                    id="target_use",
-                    value_id="target_value",
-                    target=ScalarInputUse(
-                        operation_id="subtotal",
-                        input_id="target",
-                    ),
-                ),
-                ValueUse(
-                    id="current_use",
-                    value_id="current_sales",
-                    target=ScalarInputUse(
-                        operation_id="subtotal",
-                        input_id="current",
                     ),
                 ),
             ),
@@ -1738,24 +1593,10 @@ def test_chained_compute_scalar_output_preserves_evidence_proof():
             ),
         )
     )
-    current_sales = FactValue.literal(
-        id="current_sales",
-        literal_type=LiteralType.NUMBER,
-        value="35",
-        proof_refs=("prior.sales_total",),
-    )
-    target_value = FactValue.literal(
-        id="target_value",
-        literal_type=LiteralType.NUMBER,
-        value="100",
-        proof_refs=("question.target",),
-    )
-
     assert (
         verify_fact_plan(
             plan,
             question_contract=_question_contract("remaining"),
-            available_values=(current_sales, target_value),
             catalog=_catalog(),
         )
         is plan
@@ -2112,7 +1953,7 @@ def test_execution_uses_same_authorized_catalog_as_verification():
         }
     )
 
-    result = execute_fact_plan(
+    result = compile_and_invoke(
         plan=plan,
         question_contract=QuestionContract(
             requested_facts=(
@@ -2173,7 +2014,7 @@ def test_api_execution_records_source_read_lineage():
     )
     recorder = _SourceReadRecorder()
 
-    result = execute_fact_plan(
+    result = compile_and_invoke(
         plan=plan,
         question_contract=_question_contract(),
         catalog=_catalog(),
@@ -2293,7 +2134,7 @@ def test_api_execution_records_one_source_read_for_one_backend_request():
     )
     recorder = _SourceReadRecorder()
 
-    result = execute_fact_plan(
+    result = compile_and_invoke(
         plan=plan,
         question_contract=_question_contract(
             binding_target_ids=("summary_answer", "row_answer")
@@ -2358,7 +2199,7 @@ def test_api_execution_records_failed_source_read_when_response_shape_is_invalid
     recorder = _SourceReadRecorder()
 
     with pytest.raises(RelationEngineError) as exc_info:
-        execute_fact_plan(
+        compile_and_invoke(
             plan=plan,
             question_contract=_question_contract(),
             catalog=_catalog(),
@@ -2422,7 +2263,7 @@ def test_api_execution_records_failed_source_read_when_response_status_is_invali
     recorder = _SourceReadRecorder()
 
     with pytest.raises(RelationEngineError):
-        execute_fact_plan(
+        compile_and_invoke(
             plan=plan,
             question_contract=_question_contract(),
             catalog=_catalog(),
@@ -2549,7 +2390,7 @@ def _execute_location_id_plan_with_observed_label():
         }
     )
 
-    return execute_fact_plan(
+    return compile_and_invoke(
         plan=plan,
         question_contract=QuestionContract(
             requested_facts=(
@@ -2567,6 +2408,17 @@ def _execute_location_id_plan_with_observed_label():
 
 
 def test_relation_source_applied_filter_constrains_rows_before_operation():
+    area_expression = _constant_expression(
+        FactValue.identity(
+            id="nairobi_area",
+            identity_type="area",
+            identity_field="area_id",
+            value="area_nairobi",
+            display_value="Nairobi",
+            proof_refs=("known_input:input_1",),
+        ),
+        ref_id="nairobi_area",
+    )
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(
@@ -2578,9 +2430,7 @@ def test_relation_source_applied_filter_constrains_rows_before_operation():
                         applied_filters=(
                             RelationSourceAppliedFilter(
                                 predicate_field_ids=("area_id",),
-                                known_input_id="input_1",
-                                value_kind=ValueKind.IDENTITY.value,
-                                identity_type="area",
+                                value_expr=area_expression,
                             ),
                         ),
                     ),
@@ -2692,22 +2542,12 @@ def test_relation_source_applied_filter_constrains_rows_before_operation():
         }
     )
 
-    result = execute_fact_plan(
+    result = compile_and_invoke(
         plan=plan,
         question_contract=_question_contract("metric total"),
         catalog=catalog,
         data_access_port=data_access,
         memory=LookupMemory(),
-        available_values=(
-            FactValue.identity(
-                id="nairobi_area",
-                identity_type="area",
-                identity_field="area_id",
-                value="area_nairobi",
-                display_value="London",
-                proof_refs=("known_input:input_1",),
-            ),
-        ),
     )
 
     assert result.relations[0].rows == (
@@ -2747,19 +2587,15 @@ def test_fulfillment_rejects_rendered_scalar_without_evidence_proof():
                 Operation(
                     id="compute",
                     spec=ComputeSpec(
-                        expression="current",
-                        scalar_inputs=("current",),
+                        expression=_constant_expression(
+                            FactValue.literal(
+                                id="current_value",
+                                literal_type=LiteralType.NUMBER,
+                                value="100",
+                            ),
+                            ref_id="current_value",
+                        ),
                         output_scalar="current_total",
-                    ),
-                ),
-            ),
-            value_uses=(
-                ValueUse(
-                    id="current_use",
-                    value_id="current_value",
-                    target=ScalarInputUse(
-                        operation_id="compute",
-                        input_id="current",
                     ),
                 ),
             ),
@@ -2787,52 +2623,18 @@ def test_fulfillment_rejects_rendered_scalar_without_evidence_proof():
             question_contract=_question_contract(
                 "answer", binding_target_ids=("name", "answer")
             ),
-            available_values=(
-                FactValue.literal(
-                    id="current_value",
-                    literal_type=LiteralType.NUMBER,
-                    value="100",
-                ),
-            ),
         )
 
 
-def test_plan_authored_values_are_rejected_before_payload_validation():
+def test_row_filter_targets_are_verified_against_catalog_and_relations():
     plan = FactPlan(
         outcome=_answer_plan(
-            values=(FactValue(id="literal_value", kind=ValueKind.LITERAL),),
-            operations=(_project_operation(input_relation="rows"),),
-            render_spec=RenderSpec(
-                relation_outputs=(
-                    RenderRelationOutput(
-                        id="answer", relation_id="result", field_id="name"
-                    ),
-                )
-            ),
-        )
-    )
-
-    with pytest.raises(
-        VerificationError, match="fact plan values are not model-authored"
-    ):
-        verify_fact_plan(plan)
-
-
-def test_value_use_targets_are_verified_against_catalog_and_relations():
-    plan = FactPlan(
-        outcome=_answer_plan(
-            value_uses=(
-                ValueUse(
-                    id="use_known",
-                    value_id="known",
-                    target=RowFilterUse(
-                        relation_id="rows",
-                        field_id="field.missing",
-                        operator=ValueFilterOperator.EQUALS,
-                    ),
+            relations=(
+                _rows_relation_with_filter(
+                    ParameterRef("question.known"),
+                    field_id="field.missing",
                 ),
             ),
-            relations=(_rows_relation(),),
             operations=(_project_operation(input_relation="rows"),),
             render_spec=RenderSpec(
                 relation_outputs=(
@@ -2880,7 +2682,14 @@ def test_fulfillment_rejects_known_input_proof_from_unrelated_join_branch():
                             RelationSourceRowFilter(
                                 field_id="entity_id",
                                 operator="equals",
-                                values=("entity_1",),
+                                value_expr=_constant_expression(
+                                    FactValue.named(
+                                        id="filter_entity_1",
+                                        text="entity_1",
+                                        proof_refs=("known_input:input_1",),
+                                    ),
+                                    ref_id="filter_entity_1",
+                                ),
                                 proof_refs=("known_input:input_1",),
                             ),
                         ),
@@ -3073,64 +2882,6 @@ def test_role_expand_generated_role_field_carries_evidence_proof():
     )
 
     verify_fact_plan(plan, catalog=_catalog())
-
-
-def test_duplicate_endpoint_args_merge_proof_refs():
-    catalog = _catalog()
-    row_sources = build_row_source_catalog(catalog)
-    row_source_id = next(
-        source.id for source in row_sources.sources if source.read_id == "records"
-    )
-    relation = Relation(
-        id="rows",
-        source=RelationSource(
-            kind=SourceKind.API_READ,
-            read_id="records",
-            param_bindings=(
-                EndpointParamBinding(
-                    param_id="start_date",
-                    value="2026-04-08",
-                    proof_refs=("known_input:bound_period",),
-                ),
-            ),
-        ),
-        fields=(
-            RelationField(
-                field_id="name",
-                roles=(FieldBindingRole.OUTPUT,),
-            ),
-        ),
-    )
-
-    compiled = compile_value_uses(
-        values=(
-            FactValue.time(
-                id="grounded_period",
-                expression="today",
-                resolved_start="2026-04-08",
-                resolved_end="2026-04-08",
-                proof_refs=("known_input:grounded_period",),
-            ),
-        ),
-        value_uses=(),
-        catalog=catalog,
-        relations=(relation,),
-        row_sources=row_sources,
-        grounded_input_uses=(
-            _grounded_input_use(
-                value_id="grounded_period",
-                param_id="start_date",
-                value_component=TimeComponent.START,
-            ),
-        ),
-    )
-
-    assert len(compiled.endpoint_args) == 1
-    assert compiled.endpoint_args[0].proof_refs == (
-        "known_input:grounded_period",
-        "known_input:bound_period",
-        f"row_source:{row_source_id}:param:start_date",
-    )
 
 
 def test_api_identity_binding_can_use_catalog_display_field_as_relation_grain():
@@ -3583,57 +3334,17 @@ def test_api_relation_field_requirements_are_satisfied_by_row_source_default():
     )
 
 
-def test_scalar_input_targets_existing_scalar_input():
-    plan = FactPlan(
-        outcome=_answer_plan(
-            value_uses=(
-                ValueUse(
-                    id="use_number",
-                    value_id="number",
-                    target=ScalarInputUse(
-                        operation_id="compute",
-                        input_id="missing_input",
-                    ),
-                ),
-            ),
-            operations=(
-                Operation(
-                    id="compute",
-                    spec=ComputeSpec(
-                        expression="known_input",
-                        scalar_inputs=("known_input",),
-                        output_scalar="result",
-                    ),
-                ),
-            ),
-            render_spec=RenderSpec(relation_outputs=()),
-        )
-    )
-
-    with pytest.raises(VerificationError, match="unknown scalar input"):
-        verify_fact_plan(
-            plan,
-            catalog=_catalog(),
-            available_values=(
-                FactValue.literal(
-                    id="number",
-                    literal_type=LiteralType.NUMBER,
-                    value="5",
-                    proof_refs=("known_input:number",),
-                ),
-            ),
-        )
-
-
-def test_compute_scalar_inputs_require_bound_value_or_prior_scalar_output():
+def test_compute_node_output_requires_matching_prior_operation():
     plan = FactPlan(
         outcome=_answer_plan(
             operations=(
                 Operation(
                     id="compute",
                     spec=ComputeSpec(
-                        expression="target",
-                        scalar_inputs=("target",),
+                        expression=NodeOutputRef(
+                            node_id="missing",
+                            output_id="target",
+                        ),
                         output_scalar="result",
                     ),
                 ),
@@ -3646,7 +3357,7 @@ def test_compute_scalar_inputs_require_bound_value_or_prior_scalar_output():
         verify_fact_plan(plan, catalog=_catalog())
 
 
-def test_predicate_scalar_rhs_requires_bound_value_use():
+def test_predicate_scalar_rhs_requires_prior_scalar_output():
     relation = Relation(
         id="rows",
         source=_source(),
@@ -3685,38 +3396,6 @@ def test_predicate_scalar_rhs_requires_bound_value_use():
 
     with pytest.raises(VerificationError, match="unbound scalar input"):
         verify_fact_plan(plan)
-
-    bound = FactPlan(
-        outcome=_answer_plan(
-            value_uses=(
-                ValueUse(
-                    id="bind_max_amount",
-                    value_id="max_amount",
-                    target=ScalarInputUse(
-                        operation_id="filter",
-                        input_id="max_amount",
-                    ),
-                ),
-            ),
-            relations=(relation,),
-            operations=(operation,),
-            render_spec=plan.outcome.render_spec,
-        )
-    )
-    verify_fact_plan(
-        bound,
-        question_contract=_question_contract(
-            binding_target_ids=("name",),
-        ),
-        available_values=(
-            FactValue.literal(
-                id="max_amount",
-                literal_type=LiteralType.NUMBER,
-                value="5",
-                proof_refs=("known_input:max_amount",),
-            ),
-        ),
-    )
 
 
 def test_operation_input_references_existing_relation_or_prior_operation():
@@ -3850,7 +3529,7 @@ def test_operation_field_references_must_exist_on_input_relation_contracts():
                 order_by=(SortKey(field="missing", direction=SortDirection.ASC),),
                 tie_policy=TiePolicy.FIELD,
                 tie_breakers=(SortKey(field="name", direction=SortDirection.ASC),),
-                limit=5,
+                limit=_rank_limit_constant(5),
             ),
             output_relation="ranked",
         ),
@@ -3874,17 +3553,6 @@ def test_operation_field_references_must_exist_on_input_relation_contracts():
     for operation in cases:
         final_relation = operation.output_relation
         final_field = "total" if operation.id == "aggregate" else "name"
-        value_uses = (
-            (
-                ValueUse(
-                    id="use_result_limit",
-                    value_id="result_limit",
-                    target=RankLimitUse(operation_id="rank"),
-                ),
-            )
-            if operation.id == "rank"
-            else ()
-        )
         question_contract = (
             _question_contract(
                 known_inputs=(_known_result_limit("result_limit", "top 5", 5),)
@@ -3894,7 +3562,6 @@ def test_operation_field_references_must_exist_on_input_relation_contracts():
         )
         plan = FactPlan(
             outcome=_answer_plan(
-                value_uses=value_uses,
                 relations=(
                     _rows_relation(),
                     Relation(
@@ -3925,23 +3592,29 @@ def test_operation_field_references_must_exist_on_input_relation_contracts():
             verify_fact_plan(plan, question_contract=question_contract)
 
 
-def test_compute_scalar_outputs_are_unique_and_do_not_shadow_inputs():
+def test_compute_scalar_outputs_are_unique():
+    expression = _constant_expression(
+        FactValue.literal(
+            id="target",
+            literal_type=LiteralType.NUMBER,
+            value="5",
+        ),
+        ref_id="target",
+    )
     duplicate_scalars = FactPlan(
         outcome=_answer_plan(
             operations=(
                 Operation(
                     id="compute_a",
                     spec=ComputeSpec(
-                        expression="target",
-                        scalar_inputs=("target",),
+                        expression=expression,
                         output_scalar="result",
                     ),
                 ),
                 Operation(
                     id="compute_b",
                     spec=ComputeSpec(
-                        expression="target",
-                        scalar_inputs=("target",),
+                        expression=expression,
                         output_scalar="result",
                     ),
                 ),
@@ -3952,25 +3625,6 @@ def test_compute_scalar_outputs_are_unique_and_do_not_shadow_inputs():
 
     with pytest.raises(VerificationError, match="duplicate scalar"):
         verify_fact_plan(duplicate_scalars)
-
-    scalar_shadow = FactPlan(
-        outcome=_answer_plan(
-            operations=(
-                Operation(
-                    id="compute",
-                    spec=ComputeSpec(
-                        expression="target",
-                        scalar_inputs=("target",),
-                        output_scalar="target",
-                    ),
-                ),
-            ),
-            render_spec=RenderSpec(relation_outputs=()),
-        )
-    )
-
-    with pytest.raises(VerificationError, match="duplicate scalar"):
-        verify_fact_plan(scalar_shadow)
 
 
 def test_compute_scalar_outputs_do_not_shadow_aggregate_fields():
@@ -4006,8 +3660,14 @@ def test_compute_scalar_outputs_do_not_shadow_aggregate_fields():
                 Operation(
                     id="compute",
                     spec=ComputeSpec(
-                        expression="target",
-                        scalar_inputs=("target",),
+                        expression=_constant_expression(
+                            FactValue.literal(
+                                id="target",
+                                literal_type=LiteralType.NUMBER,
+                                value="5",
+                            ),
+                            ref_id="target",
+                        ),
                         output_scalar="total",
                     ),
                 ),

@@ -18,7 +18,7 @@ from fervis.lookup.grounding.model import (
     KnownInputBindingTask,
 )
 from fervis.lookup.grounding.prompt import GroundingTurnPrompt
-from fervis.lookup.fact_plan.relations import (
+from fervis.lookup.answer_program.relations import (
     RelationSource,
     SourceKind,
 )
@@ -66,7 +66,7 @@ from fervis.memory.artifacts import (
 
 
 _APPROVED_CHARS = {
-    "question contract": (364, 15018, 22509),
+    "question contract": (364, 15395, 22889),
     "query enrichment": (364, 6026, 8255),
     "grounding": (364, 5008, 6825),
     "source binding": (364, 14408, 18143),

@@ -16,17 +16,28 @@ from fervis.lookup.relation_catalog.selection import (
     select_resolver_relation_catalog,
 )
 from fervis.lookup.conversation_resolution import (
+    ConversationResolution,
     ConversationResolutionGenerationError,
     ConversationResolutionKind,
+    ConversationResolutionOverlay,
     ConversationResolutionRequest,
+    ConversationResolutionTurnResult,
+    ConversationInputProvenanceSet,
+    conversation_input_provenance_from,
     conversation_resolution_overlay_from,
     generate_conversation_resolution,
 )
+from fervis.lookup.conversation_resolution.model import UnresolvedResolution
+from fervis.lookup.continuations import ContinuationPlan, derive_continuation_plan
 from fervis.lookup.plan_execution.authorized_sources import (
     AuthorizedExecutionSources,
 )
 from fervis.lookup.plan_execution.errors import VerificationError
-from fervis.lookup.plan_execution.runner import execute_fact_plan
+from fervis.lookup.answer_program.model import AnswerProgram
+from fervis.lookup.answer_program.instantiation import ExecutionEnvironment
+from fervis.lookup.answer_program.persistence import (
+    ProgramInvocationBinding,
+)
 from fervis.lookup.grounding.resolution import (
     ground_question_inputs,
     GroundingSourceReadError,
@@ -57,7 +68,7 @@ from fervis.lookup.fact_plan.fact_plan import (
     PlanClarification,
     PlanImpossible,
 )
-from fervis.lookup.fact_plan.values import FactValue
+from fervis.lookup.answer_program.values import FactValue
 from fervis.lookup.fact_planning.request import FactPlanRequest
 from fervis.lookup.fact_planning.turn import (
     FactPlanGenerationError,
@@ -92,6 +103,7 @@ from fervis.lookup.source_binding import (
     SourceBindingGenerationError,
     SourceBindingPlan,
     SourceBindingRequest,
+    SourceBindingTurnResult,
     SourceCandidateDiscoveryRequest,
     generate_source_binding,
     source_candidate_discovery_payload,
@@ -109,23 +121,24 @@ from fervis.lookup.memory.projection import (
     ConversationMemoryProjectionOverflow,
     project_conversation_memory_cards,
 )
-from fervis.memory.conversation_context import expand_activated_memory_cards
+from fervis.memory.conversation_context import (
+    ConversationMemoryCardProjection,
+    ExpandedActivatedMemory,
+    expand_activated_memory_cards,
+)
 from fervis.memory.projection import fact_artifacts_from_context
-from fervis.lookup.lineage.source_reads import SourceReadLineageScope
+from fervis.lookup.lineage.source_read_buffer import (
+    BufferedSourceReadLineage,
+    buffered_source_read_lineage,
+)
 from fervis.lineage.recorder import (
-    CatalogEndpointWrite,
     RunStepWrite,
-    SourceReadWrite,
 )
 from .model_turn_events import _model_turn_event_payload
 from fervis.lookup.lineage.steps import (
-    compile_step_id,
-    execution_step_id,
     lineage_error_json,
     lineage_model_turn_output_summary,
     model_turn_step_id,
-    record_compile_step,
-    record_execution_step,
     record_model_turn_audit,
     record_model_turn_step,
     record_step_source_context,
@@ -138,13 +151,12 @@ from fervis.lookup.lineage.results import (
 )
 from fervis.lookup.lineage.step_summaries import add_grounding_result_semantics
 from .result_synthesis import _synthesize_result
+from .program_execution import ProgramExecutionPorts, run_answer_program_execution
 from .terminal_results import (
-    _execution_failure_payload,
     _grounding_issue_fact_result,
     _plan_clarification_fact_result,
     _plan_validation_failed_result,
     _question_contract_clarification_fact_result,
-    _status_for_fact_result,
 )
 from .limits import _limit_before_next_model_turn, _merge_usage
 
@@ -156,11 +168,15 @@ class _LookupPipelineState:
     memory: Any
     provider: str
     model_key: str
-    memory_card_projection: Any = None
-    activated_memory: Any = None
-    conversation_turn: Any = None
-    conversation_resolution: Any = None
-    conversation_resolution_overlay: Any = None
+    memory_card_projection: ConversationMemoryCardProjection
+    activated_memory: ExpandedActivatedMemory | None = None
+    conversation_turn: ConversationResolutionTurnResult | None = None
+    conversation_resolution: ConversationResolution | None = None
+    conversation_resolution_overlay: ConversationResolutionOverlay | None = None
+    continuation_plan: ContinuationPlan | None = None
+    conversation_input_provenance: ConversationInputProvenanceSet = field(
+        default_factory=ConversationInputProvenanceSet
+    )
     question_turn: Any = None
     question_contract: Any = None
     full_catalog: Any = None
@@ -177,47 +193,12 @@ class _LookupPipelineState:
     grounding: Any = None
     grounding_usage: dict[str, Any] | None = None
     source_binding_turn_number: int = 3
-    source_binding_turn: Any = None
+    source_binding_turn: SourceBindingTurnResult | None = None
     source_binding_outcome: Any = None
     fact_plan_request: FactPlanRequest | None = None
     bound_plan_selection: Any = None
     pattern_plan_turn_number: int = 5
     plan_turn: Any = None
-
-
-@dataclass
-class _SourceReadLineageBuffer:
-    catalog_endpoints: list[CatalogEndpointWrite] = field(default_factory=list)
-    source_reads: list[SourceReadWrite] = field(default_factory=list)
-
-    def record_catalog_endpoint(
-        self,
-        catalog_endpoint: CatalogEndpointWrite,
-    ) -> CatalogEndpointWrite:
-        self.catalog_endpoints.append(catalog_endpoint)
-        return catalog_endpoint
-
-    def record_source_read(self, source_read: SourceReadWrite) -> SourceReadWrite:
-        self.source_reads.append(source_read)
-        return source_read
-
-
-@dataclass
-class _SourceReadLineage:
-    source_read_lineage: SourceReadLineageScope | None = None
-    source_read_buffer: _SourceReadLineageBuffer | None = None
-
-    @property
-    def source_reads(self) -> tuple[SourceReadWrite, ...]:
-        if self.source_read_buffer is None:
-            return ()
-        return tuple(self.source_read_buffer.source_reads)
-
-    @property
-    def catalog_endpoints(self) -> tuple[CatalogEndpointWrite, ...]:
-        if self.source_read_buffer is None:
-            return ()
-        return _dedupe_catalog_endpoints(self.source_read_buffer.catalog_endpoints)
 
 
 def run_lookup_question(
@@ -331,12 +312,8 @@ def _emit_progress(
 def _run_conversation_resolution_phase(
     state: _LookupPipelineState,
 ) -> LookupResult | None:
-    context_sources = tuple(
-        getattr(state.memory_card_projection, "context_sources", ()) or ()
-    )
-    context_frames = tuple(
-        getattr(state.memory_card_projection, "context_frames", ()) or ()
-    )
+    context_sources = state.memory_card_projection.context_sources
+    context_frames = state.memory_card_projection.context_frames
     if (
         not context_sources
         and active_clarification_context(
@@ -386,6 +363,14 @@ def _run_conversation_resolution_phase(
     state.conversation_resolution_overlay = conversation_resolution_overlay_from(
         state.conversation_resolution,
         memory_projection=state.memory_card_projection,
+    )
+    state.continuation_plan = derive_continuation_plan(
+        resolution=state.conversation_resolution,
+        memory_projection=state.memory_card_projection,
+    )
+    state.conversation_input_provenance = conversation_input_provenance_from(
+        overlay=state.conversation_resolution_overlay,
+        continuation_plan=state.continuation_plan,
     )
     if (
         state.conversation_resolution.resolution
@@ -444,6 +429,7 @@ def _run_question_contract_phase(state: _LookupPipelineState) -> LookupResult | 
                 current_question=state.request.question,
                 conversation_context=state.request.conversation_context,
                 conversation_resolution_overlay=state.conversation_resolution_overlay,
+                conversation_input_provenance=state.conversation_input_provenance,
                 host=state.request.host,
             ),
             model_port=state.ports.planner_model_port,
@@ -568,7 +554,7 @@ def _run_grounding_phase(state: _LookupPipelineState) -> LookupResult | None:
             ),
             active_memory_ids=_active_memory_ids(state),
             conversation_resolution_overlay=state.conversation_resolution_overlay,
-            source_read_lineage=grounding_lineage.source_read_lineage,
+            source_read_lineage=grounding_lineage.scope,
             host=state.request.host,
         )
     except GroundingGenerationError as exc:
@@ -784,6 +770,7 @@ def _set_fact_plan_request_from_source_binding(state: _LookupPipelineState) -> N
         bound_sources=state.source_binding_outcome.bound_sources,
         same_scope_relation_catalog=state.full_catalog,
         memory_inputs=_active_memory_prompt_context(state),
+        memory_relations=state.memory.relations,
         catalog_selection=state.catalog_selection,
         available_values=_available_values_for_state(state),
         available_value_uses=state.grounding.ledger.uses,
@@ -983,116 +970,42 @@ def _bound_plan_selection_from_plan_selection(
 
 def _run_execution_phase(state: _LookupPipelineState) -> LookupResult:
     execution_sources = _authorized_execution_sources(state)
-    execution_lineage = _execution_lineage(state)
     _emit_progress(
         state,
         stage="execution",
         message="reading source",
     )
-    try:
-        execution = execute_fact_plan(
-            plan=state.plan_turn.plan,
-            question_contract=state.question_contract,
-            catalog=execution_sources.relation_catalog,
-            catalog_selection=state.catalog_selection,
+    program = state.plan_turn.plan.outcome
+    if not isinstance(program, AnswerProgram):
+        raise VerificationError("execution requires an answer program")
+    return run_answer_program_execution(
+        request=state.request,
+        ports=ProgramExecutionPorts(
             data_access_port=state.ports.data_access_port,
             memory=state.memory,
-            available_values=_available_values_for_state(state),
-            available_value_uses=state.grounding.ledger.uses,
+            lineage_step_sink=state.ports.lineage_step_sink,
+            lineage_required=state.ports.lineage_required,
+        ),
+        program=program,
+        bindings=state.plan_turn.plan.bindings,
+        environment=ExecutionEnvironment(
+            catalog=execution_sources.relation_catalog,
             authorized_sources=execution_sources,
-            source_read_lineage=execution_lineage.source_read_lineage,
-        )
-    except VerificationError as exc:
-        payload = _execution_failure_payload(
-            request=state.request,
-            error_code=ErrorCode.PLAN_VALIDATION_FAILED,
-            exc=exc,
-        )
-        failed_step = _record_execution_failure_step(
-            state,
-            payload,
-            execution_lineage,
-        )
-        record_runtime_error_lineage(
-            request=state.request,
-            ports=state.ports,
-            failed_step_id=failed_step.step_id if failed_step is not None else None,
-            error_code=ErrorCode.PLAN_VALIDATION_FAILED,
-            message=str(exc),
-        )
-        return LookupResult(
-            status=RunStatus.FAILED,
-            error=ErrorCode.PLAN_VALIDATION_FAILED,
-            usage=_pattern_plan_usage(state),
-        )
-    except Exception as exc:
-        payload = _execution_failure_payload(
-            request=state.request,
-            error_code=ErrorCode.FACT_PLAN_EXECUTION_FAILED,
-            exc=exc,
-        )
-        failed_step = _record_execution_failure_step(
-            state,
-            payload,
-            execution_lineage,
-        )
-        record_runtime_error_lineage(
-            request=state.request,
-            ports=state.ports,
-            failed_step_id=failed_step.step_id if failed_step is not None else None,
-            error_code=ErrorCode.FACT_PLAN_EXECUTION_FAILED,
-            message=str(exc),
-        )
-        return LookupResult(
-            status=RunStatus.FAILED,
-            error=ErrorCode.FACT_PLAN_EXECUTION_FAILED,
-            usage=_pattern_plan_usage(state),
-        )
-    _record_execution_lineage_step(state, execution, execution_lineage)
-    if execution.issue is not None or execution.fact_result is None:
-        error_code = (
-            execution.issue.kind.value
-            if execution.issue is not None
-            else ErrorCode.FACT_PLAN_EXECUTION_FAILED
-        )
-        record_runtime_error_lineage(
-            request=state.request,
-            ports=state.ports,
-            failed_step_id=execution_step_id(state.ports),
-            error_code=error_code,
-            message=(
-                execution.issue.message
-                if execution.issue is not None
-                else ErrorCode.FACT_PLAN_EXECUTION_FAILED
-            ),
-        )
-        return LookupResult(
-            status=RunStatus.FAILED,
-            error=error_code,
-            usage=_pattern_plan_usage(state),
-        )
-    return _synthesize_result(
-        request=state.request,
-        ports=state.ports,
-        fact_result=execution.fact_result,
-        status=_status_for_fact_result(execution.fact_result),
-        usage=_pattern_plan_usage(state),
-        question_contract=state.question_contract,
-        grounded_values=state.grounding.ledger.values,
-        extra_fact_addresses=fact_value_memory_addresses(state.grounding.ledger.values),
-        known_input_step_id=_known_input_step_id(state),
+            catalog_selection=state.catalog_selection,
+            memory_relations=state.memory.relations,
+            authority_ref=state.request.authority_ref,
+        ),
+        invocation_binding=_program_invocation_binding(state),
         question_contract_step_id=model_turn_step_id(
             state.ports,
             purpose=ModelTurnPurpose.QUESTION_CONTRACT,
             turn=_question_turn_number(state),
-        ),
-        compile_step_id=compile_step_id(state.ports),
-        execute_step_id=execution_step_id(state.ports),
-        proof_graph=execution.proof_graph,
-        answer_plan=execution.answer_plan,
-        proof_node_refs_by_render_output_id=(
-            execution.proof_node_refs_by_render_output_id
-        ),
+        )
+        or "",
+        usage=_pattern_plan_usage(state),
+        grounded_values=state.grounding.ledger.values,
+        extra_fact_addresses=fact_value_memory_addresses(state.grounding.ledger.values),
+        known_input_step_id=_known_input_step_id(state),
         conversation_resolution_activation=_conversation_resolution_activation(state),
     )
 
@@ -1338,29 +1251,35 @@ def _active_memory_ids(state: _LookupPipelineState) -> frozenset[str]:
     activated_memory = state.activated_memory
     if activated_memory is None:
         return frozenset()
-    return frozenset(getattr(activated_memory, "by_memory_id", {}) or {})
+    return frozenset(activated_memory.by_memory_id)
 
 
 def _conversation_resolution_activation(
     state: _LookupPipelineState,
 ) -> dict[str, Any]:
     resolution = state.conversation_resolution
-    if resolution is None:
-        return {}
-    return dict(resolution.activation_payload())
+    payload = dict(resolution.activation_payload()) if resolution is not None else {}
+    continuation_plan = state.continuation_plan
+    if continuation_plan is not None and continuation_plan.has_continuation:
+        payload["continuation"] = continuation_plan.to_inspection_payload()
+    provenance = state.conversation_input_provenance
+    if provenance.has_inputs:
+        payload["conversation_input_provenance"] = provenance.to_inspection_payload()
+    return payload
 
 
 def _activate_selected_memory(state: _LookupPipelineState) -> LookupResult | None:
-    used_memory_ids = tuple(
-        getattr(state.conversation_resolution, "used_memory_ids", ()) or ()
-    )
+    resolution = state.conversation_resolution
+    if resolution is None:
+        return None
+    used_memory_ids = resolution.used_memory_ids
     if not used_memory_ids:
         state.activated_memory = None
         return None
     try:
         state.activated_memory = expand_activated_memory_cards(
             artifacts=fact_artifacts_from_context(state.request.conversation_context),
-            memory_cards=dict(state.memory_card_projection.private_cards or {}),
+            memory_projection=state.memory_card_projection,
             used_memory_ids=used_memory_ids,
         )
     except ValueError:
@@ -1374,20 +1293,20 @@ def _activate_selected_memory(state: _LookupPipelineState) -> LookupResult | Non
 
 
 def _conversation_resolution_ambiguity_fact_result(
-    unresolved: Any,
+    unresolved: UnresolvedResolution,
 ) -> FactResult:
     clarifications = _conversation_resolution_clarifications(unresolved)
     return FactResult(outcome=NeedsClarification(clarifications=clarifications))
 
 
 def _conversation_resolution_clarifications(
-    unresolved: Any,
+    unresolved: UnresolvedResolution,
 ) -> tuple[Clarification, ...]:
-    if getattr(unresolved, "unresolved_kind", "") == "multiple_meanings":
+    if unresolved.unresolved_kind == "multiple_meanings":
         option_labels = tuple(
-            str(getattr(item, "integrated_question", "") or "")
-            for item in getattr(unresolved, "candidate_interpretations", ()) or ()
-            if str(getattr(item, "integrated_question", "") or "")
+            item.integrated_question
+            for item in unresolved.candidate_interpretations
+            if item.integrated_question
         )
         return (
             clarify(
@@ -1421,8 +1340,8 @@ def _conversation_resolution_clarifications(
     )
 
 
-def _unresolved_text(item: Any) -> str:
-    return str(getattr(item, "why_unresolved", item) or "")
+def _unresolved_text(item: UnresolvedResolution) -> str:
+    return item.why_unresolved
 
 
 def _active_memory_prompt_context(state: _LookupPipelineState) -> dict[str, Any]:
@@ -1685,56 +1604,18 @@ def _model_turn_error_message(
     return f"{error_code}: {json.dumps(error_context, sort_keys=True)}"
 
 
-def _record_execution_lineage_step(
+def _program_invocation_binding(
     state: _LookupPipelineState,
-    execution: Any,
-    execution_lineage: _SourceReadLineage,
-) -> None:
-    execution_payload = {
-        EventPayloadKey.RUN_ID: state.request.run_id,
-        EventPayloadKey.RELATION_COUNT: len(execution.relations),
-    }
-    if execution.issue is not None:
-        execution_payload.update(
-            {
-                EventPayloadKey.ERROR_CODE: execution.issue.kind.value,
-                EventPayloadKey.ERROR_CLASS: execution.issue.__class__.__name__,
-                EventPayloadKey.ERROR_CONTEXT: execution.issue.message,
-            }
+) -> ProgramInvocationBinding | None:
+    binding = state.ports.program_invocation_binding
+    if binding is None and state.ports.lineage_required:
+        raise LineagePersistenceUnavailable(
+            "answer program invocation persistence is unavailable"
         )
-    record_compile_step(
-        state.ports,
-        proof_node_count=len(execution.proof_graph.nodes),
-        proof_edge_count=len(execution.proof_graph.edges),
-    )
-    record_execution_step(
-        state.ports,
-        relation_count=len(execution.relations),
-        proof_refs=tuple(str(item) for item in execution.proof_refs),
-        error_json=lineage_error_json(execution_payload),
-        catalog_endpoints=execution_lineage.catalog_endpoints,
-        source_reads=execution_lineage.source_reads,
-    )
+    return binding
 
 
-def _record_execution_failure_step(
-    state: _LookupPipelineState,
-    payload: dict[str, Any],
-    execution_lineage: _SourceReadLineage,
-) -> RunStepWrite | None:
-    return record_execution_step(
-        state.ports,
-        error_json=lineage_error_json(payload),
-        catalog_endpoints=execution_lineage.catalog_endpoints,
-        source_reads=execution_lineage.source_reads,
-    )
-
-
-def _execution_lineage(state: _LookupPipelineState) -> _SourceReadLineage:
-    return _source_read_lineage_for_step(state, step_id=execution_step_id(state.ports))
-
-
-def _grounding_source_lineage(state: _LookupPipelineState) -> _SourceReadLineage:
+def _grounding_source_lineage(state: _LookupPipelineState) -> BufferedSourceReadLineage:
     return _source_read_lineage_for_step(
         state,
         step_id=model_turn_step_id(
@@ -1749,17 +1630,10 @@ def _source_read_lineage_for_step(
     state: _LookupPipelineState,
     *,
     step_id: str | None,
-) -> _SourceReadLineage:
-    if step_id is None:
-        return _SourceReadLineage()
-    source_read_buffer = _SourceReadLineageBuffer()
-    return _SourceReadLineage(
-        source_read_buffer=source_read_buffer,
-        source_read_lineage=SourceReadLineageScope(
-            run_id=state.request.run_id,
-            step_id=step_id,
-            recorder=source_read_buffer,
-        ),
+) -> BufferedSourceReadLineage:
+    return buffered_source_read_lineage(
+        run_id=state.request.run_id,
+        step_id=step_id,
     )
 
 
@@ -1772,30 +1646,10 @@ def _source_binding_usage(state: _LookupPipelineState) -> dict[str, Any]:
     )
 
 
-def _dedupe_catalog_endpoints(
-    catalog_endpoints: list[CatalogEndpointWrite],
-) -> tuple[CatalogEndpointWrite, ...]:
-    by_run_key: dict[tuple[str, str], CatalogEndpointWrite] = {}
-    for catalog_endpoint in catalog_endpoints:
-        key = (catalog_endpoint.run_id, catalog_endpoint.catalog_endpoint_key)
-        existing = by_run_key.get(key)
-        if existing is None:
-            by_run_key[key] = catalog_endpoint
-            continue
-        if existing != catalog_endpoint:
-            raise ValueError(
-                "conflicting catalog endpoint lineage for "
-                f"{catalog_endpoint.catalog_endpoint_key!r} in run "
-                f"{catalog_endpoint.run_id!r}"
-            )
-    return tuple(by_run_key.values())
-
-
 def _source_binding_model_turn_count(state: _LookupPipelineState) -> int:
     if state.source_binding_turn is None:
         return 0
-    subturns = getattr(state.source_binding_turn, "subturns", ()) or ()
-    return len(subturns) or 1
+    return len(state.source_binding_turn.subturns) or 1
 
 
 def _phase_usage(

@@ -16,6 +16,7 @@ from fervis.lookup.memory.outcomes import (
     fact_result_outcome_address,
 )
 from fervis.lookup.outcomes.model import FactResult
+from fervis.lookup.question_contract import QuestionContract
 from fervis.memory.artifacts import FactOutcome, build_fact_artifact
 from fervis.memory.lineage import (
     MEMORY_ARTIFACT_SCHEMA,
@@ -30,7 +31,7 @@ def answered_memory_artifacts(
     fact_result: FactResult,
     requested_facts: tuple[RequestedFactWrite, ...],
     fact_results: tuple[FactResultWrite, ...],
-    question_contract: Any,
+    question_contract: QuestionContract,
     answer_plan: Any,
     grounded_values: tuple[Any, ...],
     extra_fact_addresses: tuple[Any, ...],
@@ -116,7 +117,7 @@ def terminal_memory_artifacts(
     fact_result: FactResult,
     requested_facts: tuple[RequestedFactWrite, ...],
     fact_results: tuple[FactResultWrite, ...],
-    question_contract: Any,
+    question_contract: QuestionContract,
     produced_by_step_id: str | None,
     outcome: FactOutcome,
     source_question: str,
@@ -277,7 +278,7 @@ def _requested_fact_memory_artifacts(
     *,
     run_id: str,
     requested_facts: tuple[RequestedFactWrite, ...],
-    question_contract: Any,
+    question_contract: QuestionContract,
     outcome: FactOutcome,
     source_question: str,
     source_answer: str = "",
@@ -341,7 +342,7 @@ def _memory_artifact_write(
 def _memory_provenance(
     *,
     run_id: str,
-    question_contract: Any,
+    question_contract: QuestionContract | None,
     requested_fact_id: str,
     requested_fact_key: str,
     conversation_resolution_activation: dict[str, Any] | None,
@@ -365,17 +366,25 @@ def _memory_provenance(
 
 
 def _question_contract_memory_payload(
-    question_contract: Any,
+    question_contract: QuestionContract,
     *,
     requested_fact_key: str,
 ) -> dict[str, Any]:
-    payload = dict(question_contract.to_model_dict())
-    payload["answer_requests"] = [
-        item
-        for item in payload.get("answer_requests") or ()
-        if isinstance(item, dict) and item.get("id") == requested_fact_key
-    ]
-    return payload
+    requested_fact = next(
+        (
+            fact
+            for fact in question_contract.requested_facts
+            if fact.id == requested_fact_key
+        ),
+        None,
+    )
+    if requested_fact is None:
+        raise ValueError("memory artifact references unknown requested fact")
+    scoped_contract = QuestionContract(
+        question_inputs=question_contract.inputs_for_fact(requested_fact_key),
+        requested_facts=(requested_fact,),
+    )
+    return dict(scoped_contract.to_model_dict())
 
 
 def _answer_output_ids_by_requested_fact(

@@ -1,6 +1,6 @@
 from dataclasses import replace
 import re
-from typing import Iterable
+from typing import cast, Iterable
 
 from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 
@@ -1809,12 +1809,13 @@ def _plan_payload(
 ) -> dict[str, Any]:
     from dataclasses import asdict
 
-    if isinstance(plan.outcome, AnswerPlan):
+    if isinstance(plan.outcome, AnswerProgram):
         return _canonicalized_plan_payload(
             _pattern_payload_from_answer_plan(plan.outcome),
             question_contract=question_contract,
         )
     payload = _without_none(asdict(plan))
+    payload.pop("bindings", None)
     outcome = payload.get("outcome")
     if isinstance(outcome, dict):
         outcome.pop("values", None)
@@ -1823,7 +1824,7 @@ def _plan_payload(
     return _canonicalized_plan_payload(payload, question_contract=question_contract)
 
 
-def _pattern_payload_from_answer_plan(plan: AnswerPlan) -> dict[str, Any]:
+def _pattern_payload_from_answer_plan(plan: AnswerProgram) -> dict[str, Any]:
     return {
         "outcome": {
             "kind": "fact_plan",
@@ -1832,7 +1833,7 @@ def _pattern_payload_from_answer_plan(plan: AnswerPlan) -> dict[str, Any]:
     }
 
 
-def _pattern_answer_from_answer_plan(plan: AnswerPlan) -> dict[str, Any]:
+def _pattern_answer_from_answer_plan(plan: AnswerProgram) -> dict[str, Any]:
     relation_by_id = {relation.id: relation for relation in plan.relations}
     if len(plan.operations) == 1 and isinstance(plan.operations[0].spec, AggregateSpec):
         aggregate = plan.operations[0]
@@ -1884,14 +1885,20 @@ def _pattern_answer_from_answer_plan(plan: AnswerPlan) -> dict[str, Any]:
     raise AssertionError("test plan shape is not expressible as a model fact pattern")
 
 
-def _pattern_answer_base(plan: AnswerPlan, relation: Relation) -> dict[str, Any]:
+def _pattern_answer_base(plan: AnswerProgram, relation: Relation) -> dict[str, Any]:
     read_id = relation.source.read_id
     if not read_id:
         raise AssertionError("model fact pattern requires an API read")
     source: dict[str, Any] = {"kind": "read", "read_id": read_id}
     if relation.source.param_bindings:
         source["param_bindings"] = [
-            {"param_id": item.param_id, "value": item.value}
+            {
+                "param_id": item.param_id,
+                "value": cast(
+                    ConstantRef,
+                    item.value_expr,
+                ).value.payload.canonical_value(),
+            }
             for item in relation.source.param_bindings
         ]
     return {

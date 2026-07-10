@@ -72,7 +72,11 @@ def _read(payload: dict[str, Any]) -> EndpointRead:
         row_paths=tuple(_row_path(item) for item in payload.get("row_paths") or ()),
         fields=tuple(_field(item) for item in payload.get("fields") or ()),
         facts=tuple(_fact(item) for item in payload.get("facts") or ()),
-        source_metadata=dict(payload.get("source_metadata") or {}),
+        source_metadata=(
+            dict(payload["source_metadata"])
+            if payload.get("source_metadata") is not None
+            else None
+        ),
     )
 
 
@@ -110,7 +114,11 @@ def _field(payload: dict[str, Any]) -> CatalogField:
         requirements=tuple(
             _field_requirement(item) for item in payload.get("requirements") or ()
         ),
-        metadata=dict(payload.get("metadata") or {}),
+        metadata=(
+            dict(payload["metadata"])
+            if payload.get("metadata") is not None
+            else None
+        ),
     )
 
 

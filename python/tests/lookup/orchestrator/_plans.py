@@ -2,16 +2,16 @@ from tests.lookup.orchestrator._catalogs import *  # noqa: F403
 
 
 def _join_key(left: str, right: str):
-    from fervis.lookup.fact_plan.operations import JoinKey
+    from fervis.lookup.answer_program.operations import JoinKey
 
     return JoinKey(left=left, right=right)
 
 
-def _answer_plan(**kwargs) -> AnswerPlan:
+def _answer_plan(**kwargs) -> AnswerProgram:
     render_spec = kwargs.get("render_spec")
     operations = tuple(kwargs.get("operations", ()))
     kwargs.pop("requested_facts", None)
-    return AnswerPlan(
+    return AnswerProgram(
         fulfillment=kwargs.pop(
             "fulfillment",
             _default_fulfillment(render_spec, operations),
@@ -259,7 +259,7 @@ def _answer_expression_family_for_plan(
     plan: FactPlan,
 ) -> RequestedFactAnswerExpressionFamily:
     outcome = plan.outcome
-    if not isinstance(outcome, AnswerPlan):
+    if not isinstance(outcome, AnswerProgram):
         return RequestedFactAnswerExpressionFamily.SCALAR_AGGREGATE
     operation_specs = tuple(operation.spec for operation in outcome.operations)
     if any(isinstance(spec, AntiJoinSpec) for spec in operation_specs):
@@ -286,7 +286,7 @@ def _answer_expression_family_for_plan(
 
 def _render_output_ids(plan: FactPlan) -> tuple[str, ...]:
     outcome = plan.outcome
-    if not isinstance(outcome, AnswerPlan) or outcome.render_spec is None:
+    if not isinstance(outcome, AnswerProgram) or outcome.render_spec is None:
         return ()
     return tuple(
         slot.id
@@ -299,7 +299,7 @@ def _render_output_ids(plan: FactPlan) -> tuple[str, ...]:
 
 def _default_description(plan: FactPlan) -> str:
     outcome = plan.outcome
-    if not isinstance(outcome, AnswerPlan) or outcome.render_spec is None:
+    if not isinstance(outcome, AnswerProgram) or outcome.render_spec is None:
         return "field.name"
     render_spec = outcome.render_spec
     if render_spec.scalar_outputs:
@@ -313,12 +313,12 @@ def _default_description(plan: FactPlan) -> str:
     return "field.name"
 
 
-def _source_description(answer: AnswerPlan, relation_id: str, field_id: str) -> str:
+def _source_description(answer: AnswerProgram, relation_id: str, field_id: str) -> str:
     return _source_description_inner(answer, relation_id, field_id, seen=set())
 
 
 def _source_description_inner(
-    answer: AnswerPlan,
+    answer: AnswerProgram,
     relation_id: str,
     field_id: str,
     *,

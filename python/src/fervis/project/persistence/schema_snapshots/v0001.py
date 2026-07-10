@@ -11,6 +11,7 @@ fervis_conversation = sa.Table(
     metadata,
     sa.Column("conversation_id", sa.String(128), primary_key=True, nullable=False),
     sa.Column("tenant_id", sa.String(128), nullable=False),
+    sa.Column("read_context_ref", sa.JSON(), nullable=False),
     sa.Column("origin_kind", sa.String(32), nullable=False),
     sa.Column(
         "parent_conversation_id",
@@ -110,26 +111,17 @@ fervis_question_run = sa.Table(
         nullable=False,
     ),
     sa.Column("run_number", sa.Integer(), nullable=False),
+    sa.Column("kind", sa.String(32), nullable=False),
     sa.Column("trigger_kind", sa.String(32), nullable=False),
     sa.Column(
-        "previous_run_id",
+        "base_run_id",
         sa.String(128),
         sa.ForeignKey(
-            "fervis_question_run.run_id", name="fervis_question_run_previous_run_id_fk"
-        ),
-        nullable=True,
-    ),
-    sa.Column(
-        "trigger_clarification_response_run_id",
-        sa.String(128),
-        sa.ForeignKey(
-            "fervis_question_run.run_id",
-            name="fervis_question_run_trigger_clarification_response_run_id_fk",
+            "fervis_question_run.run_id", name="fervis_question_run_base_run_id_fk"
         ),
         nullable=True,
     ),
     sa.Column("trigger_clarification_response_id", sa.String(128), nullable=False),
-    sa.Column("integrated_question", sa.Text(), nullable=False),
     sa.Column("adapter_ref", sa.String(128), nullable=False),
     sa.Column("runtime_version", sa.String(128), nullable=False),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
@@ -144,18 +136,101 @@ sa.Index(
     fervis_question_run.c.question_id,
     fervis_question_run.c.run_number,
 )
-sa.Index("fervis_run_previous_idx", fervis_question_run.c.previous_run_id)
-sa.Index(
-    "fervis_run_clarify_idx",
-    fervis_question_run.c.trigger_clarification_response_run_id,
-)
+sa.Index("fervis_run_base_idx", fervis_question_run.c.base_run_id)
 sa.Index("fervis_question_run_question_id_idx", fervis_question_run.c.question_id)
 sa.Index(
-    "fervis_question_run_previous_run_id_idx", fervis_question_run.c.previous_run_id
+    "fervis_question_run_base_run_id_idx", fervis_question_run.c.base_run_id
+)
+
+fervis_answer_program = sa.Table(
+    "fervis_answer_program",
+    metadata,
+    sa.Column("program_id", sa.String(80), primary_key=True, nullable=False),
+    sa.Column("schema_revision", sa.Integer(), nullable=False),
+    sa.Column("canonical_json", sa.Text(), nullable=False),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+)
+
+fervis_program_revision = sa.Table(
+    "fervis_program_revision",
+    metadata,
+    sa.Column("revision_id", sa.String(80), primary_key=True, nullable=False),
+    sa.Column(
+        "base_program_id",
+        sa.String(80),
+        sa.ForeignKey(
+            "fervis_answer_program.program_id",
+            name="fervis_program_revision_base_program_id_fk",
+        ),
+        nullable=False,
+    ),
+    sa.Column(
+        "revised_program_id",
+        sa.String(80),
+        sa.ForeignKey(
+            "fervis_answer_program.program_id",
+            name="fervis_program_revision_revised_program_id_fk",
+        ),
+        nullable=False,
+    ),
+    sa.Column("capability_id", sa.String(128), nullable=False),
+    sa.Column("application_json", sa.Text(), nullable=False),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
 )
 sa.Index(
-    "fervis_question_run_trigger_clarification_response_run_id_idx",
-    fervis_question_run.c.trigger_clarification_response_run_id,
+    "fervis_program_rev_base_idx",
+    fervis_program_revision.c.base_program_id,
+)
+sa.Index(
+    "fervis_program_rev_revised_idx",
+    fervis_program_revision.c.revised_program_id,
+)
+
+fervis_program_invocation = sa.Table(
+    "fervis_program_invocation",
+    metadata,
+    sa.Column("invocation_id", sa.String(80), primary_key=True, nullable=False),
+    sa.Column(
+        "run_id",
+        sa.String(128),
+        sa.ForeignKey(
+            "fervis_question_run.run_id",
+            name="fervis_program_invocation_run_id_fk",
+        ),
+        nullable=False,
+        unique=True,
+    ),
+    sa.Column(
+        "program_id",
+        sa.String(80),
+        sa.ForeignKey(
+            "fervis_answer_program.program_id",
+            name="fervis_program_invocation_program_id_fk",
+        ),
+        nullable=False,
+    ),
+    sa.Column("bindings_json", sa.Text(), nullable=False),
+    sa.Column("patch_id", sa.String(80), nullable=True),
+    sa.Column("binding_patch_json", sa.Text(), nullable=True),
+    sa.Column(
+        "revision_id",
+        sa.String(80),
+        sa.ForeignKey(
+            "fervis_program_revision.revision_id",
+            name="fervis_program_invocation_revision_id_fk",
+        ),
+        nullable=True,
+    ),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    sa.CheckConstraint(
+        "(patch_id IS NULL AND binding_patch_json IS NULL) OR "
+        "(patch_id IS NOT NULL AND binding_patch_json IS NOT NULL)",
+        name="fervis_program_invocation_patch_pair_ck",
+    ),
+)
+sa.Index(
+    "fervis_program_invocation_program_id_idx",
+    fervis_program_invocation.c.program_id,
 )
 
 fervis_run_step = sa.Table(
@@ -1158,18 +1233,10 @@ fervis_run_work_item = sa.Table(
     sa.Column("conversation_id", sa.String(128), nullable=False),
     sa.Column("tenant_id", sa.String(128), nullable=False),
     sa.Column("user_id", sa.String(128), nullable=False),
+    sa.Column("read_context_ref", sa.JSON(), nullable=False),
     sa.Column("status", sa.String(32), nullable=False),
-    sa.Column("provider", sa.String(64), nullable=True),
-    sa.Column("model_key", sa.String(64), nullable=False),
-    sa.Column("question", sa.Text(), nullable=False),
-    sa.Column("session_mode", sa.String(32), nullable=False),
-    sa.Column("session_id", sa.String(128), nullable=True),
-    sa.Column("approval_mode", sa.String(32), nullable=False),
-    sa.Column("approval_decision", sa.String(128), nullable=True),
-    sa.Column("max_budget_usd", sa.Numeric(8, 4), nullable=False),
-    sa.Column("max_thinking_tokens", sa.Integer(), nullable=False),
-    sa.Column("conversation_context", sa.JSON(), nullable=False),
-    sa.Column("runtime_context", sa.JSON(), nullable=False),
+    sa.Column("spec_kind", sa.String(32), nullable=False),
+    sa.Column("execution_spec", sa.JSON(), nullable=False),
     sa.Column("idempotency_key", sa.String(255), nullable=True),
     sa.Column("attempt_count", sa.Integer(), nullable=False),
     sa.Column("active_attempt", sa.Integer(), nullable=False),
@@ -1183,10 +1250,6 @@ fervis_run_work_item = sa.Table(
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
     sa.CheckConstraint(
-        "max_thinking_tokens" + " >= 0",
-        name="fervis_run_work_item_max_thinking_tokens_nonnegative_ck",
-    ),
-    sa.CheckConstraint(
         "attempt_count" + " >= 0",
         name="fervis_run_work_item_attempt_count_nonnegative_ck",
     ),
@@ -1199,12 +1262,8 @@ fervis_run_work_item = sa.Table(
         name="fervis_run_work_item_max_attempts_nonnegative_ck",
     ),
     sa.CheckConstraint(
-        "JSON_VALID(conversation_context)",
-        name="fervis_run_work_item_conversation_context_json_valid_ck",
-    ),
-    sa.CheckConstraint(
-        "JSON_VALID(runtime_context)",
-        name="fervis_run_work_item_runtime_context_json_valid_ck",
+        "JSON_VALID(execution_spec)",
+        name="fervis_run_work_item_execution_spec_json_valid_ck",
     ),
 )
 sa.Index(

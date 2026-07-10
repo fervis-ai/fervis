@@ -3,11 +3,9 @@ description: Memory artifact reads fail closed when row id and payload artifactI
 kind: algorithm
 algorithm: memory.lineage_memory_artifacts
 input:
-  conversation_id: conversation_1
-  limit: 5
+  selected_run_ids: [run_1]
   memory_artifacts:
     - memory_artifact_id: mem_row_id
-      conversation_id: conversation_1
       run_id: run_1
       produced_by_step_id: step_execute
       source_kind: fact_result

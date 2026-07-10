@@ -23,11 +23,13 @@ input:
       - run_id: run_1
         question_id: question_1
         run_number: 1
+        kind: model_assisted
         trigger_kind: initial
         integrated_question: How many stores are open?
       - run_id: run_2
         question_id: question_2
         run_number: 1
+        kind: model_assisted
         trigger_kind: initial
         integrated_question: What about this month?
     steps:

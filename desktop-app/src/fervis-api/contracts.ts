@@ -5,11 +5,21 @@ export type RunStatus =
   | "NEEDS_CLARIFICATION"
   | "FAILED";
 
+export type RunKind = "model_assisted" | "deterministic";
+
+export type RunTriggerKind =
+  | "initial"
+  | "clarification_response"
+  | "retry"
+  | "rerun";
+
 export interface ConversationSummary {
   readonly conversationId: string;
   readonly firstQuestion: string;
   readonly latestQuestionId: string;
-  readonly currentRunId: string | null;
+  readonly primaryRunId: string | null;
+  readonly latestRunId: string | null;
+  readonly activeRunId: string | null;
   readonly status: RunStatus;
   readonly runCount: number;
   readonly updatedAt: string;
@@ -35,7 +45,9 @@ export interface QuestionStatePayload {
   readonly questionId: string;
   readonly conversationId: string;
   readonly question: string;
-  readonly currentRunId: string;
+  readonly primaryRunId: string | null;
+  readonly latestRunId: string | null;
+  readonly activeRunId: string | null;
   readonly status: RunStatus;
   readonly answer: string | null;
   readonly resultData: ResultData;
@@ -50,22 +62,73 @@ export interface QuestionRunListPayload {
 export interface AskQuestionRequest {
   readonly question: string;
   readonly conversationId: string | null;
+  readonly contextRunId?: string;
 }
 
 export interface ClarificationResponseRequest {
   readonly question: string;
   readonly triggerKind: "clarification_response";
-  readonly triggerRunId: string;
+  readonly baseRunId: string;
   readonly clarificationId: string;
   readonly selectedOptionId?: string;
 }
 
-export interface RunPayload {
+export interface RerunQuestionRequest {
+  readonly triggerKind: "rerun";
+  readonly baseRunId: string;
+  readonly patch?: BindingPatchRequest;
+  readonly capabilityApplication?: CapabilityApplicationRequest;
+}
+
+export interface CapabilityApplicationRequest {
+  readonly capabilityId: string;
+  readonly binding: {
+    readonly parameterId: string;
+    readonly value: BindingPatchValueRequest;
+  };
+}
+
+export interface BindingPatchRequest {
+  readonly operations: readonly BindingPatchOperationRequest[];
+}
+
+export type BindingPatchOperationRequest =
+  | {
+      readonly kind: "set";
+      readonly parameterId: string;
+      readonly value: BindingPatchValueRequest;
+    }
+  | {
+      readonly kind: "unset";
+      readonly parameterId: string;
+    };
+
+export type BindingPatchValueRequest =
+  | { readonly kind: "string_set"; readonly values: readonly string[] }
+  | { readonly kind: "string"; readonly value: string }
+  | { readonly kind: "number"; readonly value: number }
+  | { readonly kind: "boolean"; readonly value: boolean }
+  | {
+      readonly kind: "named";
+      readonly text: string;
+      readonly referenceText?: string;
+    }
+  | {
+      readonly kind: "time";
+      readonly expression: string;
+      readonly intent?: Readonly<Record<string, unknown>>;
+      readonly resolvedStart: string;
+      readonly resolvedEnd: string;
+      readonly granularity: string;
+    };
+
+interface RunPayloadBase {
   readonly runId: string;
   readonly questionId: string;
   readonly conversationId: string;
   readonly runNumber: number;
-  readonly triggerKind: "initial" | "clarification_response";
+  readonly patchId: string | null;
+  readonly revisionId: string | null;
   readonly status: RunStatus;
   readonly answer: string | null;
   readonly resultData: ResultData;
@@ -76,6 +139,31 @@ export interface RunPayload {
   readonly usage: UsageSnapshot | null;
   readonly nextActions: readonly NextAction[];
 }
+
+export type RunIdentity =
+  | {
+      readonly kind: "model_assisted";
+      readonly triggerKind: "initial";
+      readonly baseRunId: null;
+      readonly programId: string | null;
+      readonly invocationId: string | null;
+    }
+  | {
+      readonly kind: "model_assisted";
+      readonly triggerKind: "clarification_response" | "retry";
+      readonly baseRunId: string;
+      readonly programId: string | null;
+      readonly invocationId: string | null;
+    }
+  | {
+      readonly kind: "deterministic";
+      readonly triggerKind: "rerun";
+      readonly baseRunId: string;
+      readonly programId: string;
+      readonly invocationId: string;
+    };
+
+export type RunPayload = RunPayloadBase & RunIdentity;
 
 export type ResultData = AnswerResultData | ClarificationResultData | null;
 

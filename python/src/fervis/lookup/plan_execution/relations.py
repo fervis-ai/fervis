@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
+import hashlib
 from typing import Mapping
+
+from fervis.lookup.canonical_data import canonical_runtime_json
 
 from fervis.lookup.relation_catalog.model import (
     CompletenessPolicy,
@@ -56,6 +59,15 @@ class CompletenessProof:
 
 
 @dataclass(frozen=True)
+class RelationEvidence:
+    source_refs: tuple[str, ...] = ()
+    read_refs: tuple[str, ...] = ()
+    authority_refs: tuple[str, ...] = ()
+    snapshot_hash: str = ""
+    proof_refs: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class RelationRows:
     id: str
     rows: tuple[Row, ...] = ()
@@ -64,6 +76,7 @@ class RelationRows:
     field_answer_output_ids: Mapping[str, tuple[str, ...]] | None = None
     completeness: CompletenessProof = CompletenessProof()
     identity_type: str = ""
+    evidence: RelationEvidence = RelationEvidence()
 
     def __post_init__(self) -> None:
         if self.completeness.row_count is None:
@@ -72,6 +85,67 @@ class RelationRows:
                 "completeness",
                 replace(self.completeness, row_count=len(self.rows)),
             )
+    def with_filtered_rows(
+        self,
+        rows: tuple[Row, ...],
+        *,
+        proof_refs: tuple[str, ...],
+        scope_fingerprint: str,
+    ) -> RelationRows:
+        combined_proof_refs = tuple(
+            dict.fromkeys(
+                (
+                    *self.evidence.proof_refs,
+                    *self.completeness.proof_refs,
+                    *proof_refs,
+                )
+            )
+        )
+        return replace(
+            self,
+            rows=rows,
+            evidence=replace(
+                self.evidence,
+                snapshot_hash=relation_snapshot_hash(rows),
+                proof_refs=combined_proof_refs,
+            ),
+            completeness=replace(
+                self.completeness,
+                row_count=len(rows),
+                proof_refs=combined_proof_refs,
+                scope_fingerprint=scope_fingerprint,
+            ),
+        )
+
+    def with_scope(
+        self,
+        *,
+        proof_refs: tuple[str, ...],
+        scope_fingerprint: str,
+    ) -> RelationRows:
+        combined_proof_refs = tuple(
+            dict.fromkeys(
+                (
+                    *self.evidence.proof_refs,
+                    *self.completeness.proof_refs,
+                    *proof_refs,
+                )
+            )
+        )
+        return replace(
+            self,
+            evidence=replace(self.evidence, proof_refs=combined_proof_refs),
+            completeness=replace(
+                self.completeness,
+                proof_refs=combined_proof_refs,
+                scope_fingerprint=scope_fingerprint,
+            ),
+        )
+
+
+def relation_snapshot_hash(rows: tuple[Row, ...]) -> str:
+    payload = canonical_runtime_json([dict(row) for row in rows])
+    return "sha256:" + hashlib.sha256(payload.encode()).hexdigest()
 
 
 @dataclass(frozen=True)

@@ -716,6 +716,25 @@ def _memory_context_with_prior_staff_sales_request() -> dict[str, object]:
         source_answer="Alice Smith sold 100 today.",
         provenance={
             "question_contract": {
+                "question_inputs": [
+                    {
+                        "id": "fact_1_entity_1",
+                        "kind": "literal_text",
+                        "source": "question_context",
+                        "text": "Alice Smith",
+                        "role": "reference_value",
+                        "resolved_value_text": "Alice Smith",
+                        "value_meaning_hint": "staff member",
+                    },
+                    {
+                        "id": "fact_1_time_1",
+                        "kind": "literal_text",
+                        "source": "question_context",
+                        "text": "today",
+                        "role": "time_value",
+                        "resolved_value_text": "today",
+                    },
+                ],
                 "answer_requests": [
                     {
                         "id": "fact_1",
@@ -723,28 +742,13 @@ def _memory_context_with_prior_staff_sales_request() -> dict[str, object]:
                         "answer_subject": _answer_subject_payload("Alice Smith"),
                         "answer_outputs": [
                             {
+                                "id": "answer_1",
                                 "description": "total sales amount",
-                                "requested_value_frame": "total sales amount",
                             }
                         ],
-                        "known_inputs": [
-                            {
-                                "id": "fact_1_entity_1",
-                                "kind": "literal_text",
-                                "source": "question_context",
-                                "text": "Alice Smith",
-                                "role": "reference_value",
-                                "resolved_value_text": "Alice Smith",
-                                "value_meaning_hint": "staff member",
-                            },
-                            {
-                                "id": "fact_1_time_1",
-                                "kind": "literal_text",
-                                "source": "question_context",
-                                "text": "today",
-                                "role": "time_value",
-                                "resolved_value_text": "today",
-                            },
+                        "used_question_inputs": [
+                            "fact_1_entity_1",
+                            "fact_1_time_1",
                         ],
                     }
                 ]
@@ -782,6 +786,24 @@ def _memory_context_with_prior_numeric_slots() -> dict[str, object]:
         source_answer="Alice Smith was in the top 5.",
         provenance={
             "question_contract": {
+                "question_inputs": [
+                    {
+                        "id": "fact_1_limit_1",
+                        "kind": "literal_text",
+                        "source": "question_context",
+                        "text": "top 5",
+                        "role": "result_limit",
+                        "resolved_value_text": "5",
+                    },
+                    {
+                        "id": "fact_1_time_1",
+                        "kind": "literal_text",
+                        "source": "question_context",
+                        "text": "today",
+                        "role": "time_value",
+                        "resolved_value_text": "today",
+                    },
+                ],
                 "answer_requests": [
                     {
                         "id": "fact_1",
@@ -789,27 +811,13 @@ def _memory_context_with_prior_numeric_slots() -> dict[str, object]:
                         "answer_subject": _answer_subject_payload("staff"),
                         "answer_outputs": [
                             {
+                                "id": "answer_1",
                                 "description": "staff sales ranking",
-                                "requested_value_frame": "staff sales ranking",
                             }
                         ],
-                        "known_inputs": [
-                            {
-                                "id": "fact_1_limit_1",
-                                "kind": "literal_text",
-                                "source": "question_context",
-                                "text": "top 5",
-                                "role": "result_limit",
-                                "resolved_value_text": "5",
-                            },
-                            {
-                                "id": "fact_1_time_1",
-                                "kind": "literal_text",
-                                "source": "question_context",
-                                "text": "today",
-                                "role": "time_value",
-                                "resolved_value_text": "today",
-                            },
+                        "used_question_inputs": [
+                            "fact_1_limit_1",
+                            "fact_1_time_1",
                         ],
                     }
                 ]
@@ -818,7 +826,7 @@ def _memory_context_with_prior_numeric_slots() -> dict[str, object]:
         addresses=(
             FactAddress.value(
                 address="value.limit_top_5",
-                value={"type": "integer", "value": "5"},
+                value={"type": "integer", "value": 5},
                 display="top 5",
                 evidence=EvidenceRef(step_ids=("known_input:fact_1_limit_1",)),
             ),
@@ -1332,7 +1340,7 @@ def _computed_scalar_from_bound_value_payload(
                             "source_binding_id": source_binding_id,
                         }
                     ],
-                    "expression": "value",
+                    "expression": [{"input_id": "value"}],
                     "output": {"scalar_id": "answer", "label": "answer"},
                 }
             ],
@@ -1474,7 +1482,7 @@ def test_pipeline_passes_raw_question_and_overlay_to_question_contract():
     question_contract_prompt = planner.prompts[1]
     assert "Current question:\nHow about the day before?" in question_contract_prompt
     assert "Conversation resolution annotations:" in question_contract_prompt
-    assert '"resolved_question_inputs"' in question_contract_prompt
+    assert "Conversation input provenance:" in question_contract_prompt
     assert '"value_frames"' in question_contract_prompt
     assert '"resolved_frame_text"' in question_contract_prompt
     assert "Integrated question:" not in question_contract_prompt
@@ -1878,7 +1886,7 @@ def test_source_binding_prompt_excludes_unactivated_memory_context():
     assert "turn_unselected_sales" not in source_binding_prompt
     assert "relation.secret_sales" not in source_binding_prompt
     plan_prompt = planner.prompts[planner.tool_names.index("submit_pattern_fact_plan")]
-    assert "10.00" in plan_prompt
+    assert '"value": "10"' in plan_prompt
     assert "999.00" not in plan_prompt
 
 
@@ -2246,7 +2254,7 @@ def test_clause_resolution_prior_answer_frame_reaches_question_contract():
         in question_contract_prompt
     )
     assert "Conversation resolution annotations:" in question_contract_prompt
-    assert '"resolved_question_inputs"' in question_contract_prompt
+    assert "Conversation input provenance:" in question_contract_prompt
     assert '"value_frames"' in question_contract_prompt
     assert '"resolved_frame_text"' in question_contract_prompt
     assert "total sales amount" in question_contract_prompt

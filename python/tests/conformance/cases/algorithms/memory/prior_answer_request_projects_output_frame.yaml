@@ -11,13 +11,16 @@ input:
         outcome: answered
         provenance:
           question_contract:
+            kind: question_contract
+            answer_requests_count: 1
+            question_inputs: []
             answer_requests:
               - id: fact_1
                 answer_fact: total sales for Staff One
                 answer_outputs:
                   - id: answer_1
                     description: sales total
-                    requested_value_frame: total sales amount
+                used_question_inputs: []
         addresses:
           - address: value.answer_1
             kind: value
@@ -32,5 +35,4 @@ expect:
         output_frames:
           - output_id: answer_1
             description: sales total
-            requested_value_frame: total sales amount
-
+            requested_value_frame: sales total

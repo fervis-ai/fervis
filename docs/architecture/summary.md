@@ -30,16 +30,23 @@ terminal outcome, or fail visibly.
 ## Hard Rules
 
 1. Fail closed. Do not answer from unverified facts.
-2. Keep model authority bounded. A model may choose only IDs and choices shown in
-   the current prompt surface.
+2. Keep model authority bounded. Models may author bounded text inside strict,
+   parsed contracts. When a model refers to backend-owned entities, evidence,
+   or legal alternatives, it may use only IDs and choices shown in the current
+   prompt surface.
 3. Execute deterministically. Backend code performs API reads, relation
    operations, time resolution, proof projection, and canonical rendering.
-4. Keep one truth. Interface payloads, CLI output, observability, and UI views
-   project lineage; they do not rebuild history.
+4. Keep one audit truth. Lineage is canonical for facts, source reads, proof,
+   answers, clarification, and history. Operational lifecycle responses and
+   events may project question/run-work state; audit, explanation, and historical
+   views project lineage and do not rebuild it.
 5. Do not become a semantic oracle. Runtime code must not infer domain meaning
    from endpoint names, field names, fixture names, or host-product assumptions.
-6. Use domain-neutral language. Runtime code should say source, endpoint, fact,
-   answer, value, context, relation, and proof.
+6. Use domain-neutral language for internal mechanics. Runtime contracts and
+   package names should say source, endpoint, fact, answer, value, context,
+   relation, and proof. Model-facing language may remain concretely business-
+   oriented where experiments show that abstraction changes meaning; it must
+   still avoid host-product assumptions and backend-invented semantics.
 7. Prefer small closed contracts. When a prompt grows, remove duplicated context
    before adding new instructions.
 8. Parse, do not merely validate. At each boundary, convert less-structured
@@ -101,15 +108,22 @@ Only run `fervis runtime ask` after doctor passes.
 - `ReadContextRef` is the persisted non-secret host-owned handle used to
   reauthorize reads during queued work.
 - `ReadAuthority` is the durable Fervis authority for state reads and host reads:
-  tenant id plus the submitted read context.
+  tenant id plus the submitted read context and, when configured, an encrypted
+  delegated read credential.
 - `ReadInvocation` is the selected safe read: endpoint name plus path, query,
-  and page params.
+  and page policy.
 - `HostApiAdapter` describes configured sources, captures read context, and
   executes selected reads through that context.
 
 The visible catalog is the configured source allowlist. Fervis does not derive
 endpoint visibility from roles or scopes. The host API enforces row and endpoint
 visibility when `execute_read(authority, invocation)` runs.
+
+Some hosts require the original request credential to pass through their normal
+authorization middleware. Fervis may capture only explicitly configured headers,
+encrypt the short-lived delegated credential, and replay it through the same
+compiled read-request path. The host still reauthorizes the read; Fervis does not
+turn delegated credentials into its own role or permission system.
 
 `in_process` and `http` transports return the same read result contract. Their
 authentication and transport details are implementation details behind the host
@@ -134,16 +148,33 @@ GET route is either read-eligible with a deterministic contract or doctor blocks
 
 ## Question Runtime
 
-External interfaces call the question lifecycle ports. The lookup runtime then
-executes this flow:
+External interfaces call one framework-neutral lifecycle:
+
+```text
+interface request
+-> question admission, authority, and idempotency
+-> Question + immutable QuestionRun
+-> queued RunWork
+-> LookupService
+-> terminalization
+-> interface projection
+```
+
+`questions/` owns question and run lifecycle. `run_work/` owns queued execution,
+worker attempts, and terminalization. `lookup/` owns factual interpretation,
+planning, execution, and outcomes. Interfaces translate transport; they do not
+create a second lifecycle or lookup path.
+
+Within `LookupService`, the factual runtime executes this flow:
 
 ```text
 question + conversation context
 -> conversation resolution
 -> question contract
 -> query enrichment
--> relation catalog selection
+-> resolver catalog selection
 -> grounding
+-> answer-read catalog selection
 -> read eligibility
 -> plan selection
 -> source binding
@@ -153,24 +184,29 @@ question + conversation context
 -> source reads and relation operations
 -> factual outcome classification
 -> canonical answer outputs
--> lineage recording
 ```
 
 Model turns stop at interpretation and bounded selection. Verification,
 compilation, execution, classification, proof construction, and canonical
 rendering are deterministic backend work.
 
+Lineage recording is interleaved throughout the run, not appended after the
+answer. Model turns, endpoint snapshots, source reads, compile steps, execution,
+facts, clarification, and terminal results record their canonical artifacts as
+they occur. Required lineage is fail-closed: a successful factual answer cannot
+outlive failure to persist its audit truth.
+
 ## Model Turn Boundaries
 
 | Turn | Model chooses | Backend owns |
 | --- | --- | --- |
-| Conversation resolution | Whether prior context changes the current utterance. | Memory validation and context-frame projection. |
-| Question contract | Requested facts, known inputs, answer requests, time intents. | Stable IDs, runtime anchors, contract parsing. |
-| Query enrichment | Search terms for facts and inputs. | Catalog and resolver recall. |
-| Grounding | Which resolver can identify a named input. | Resolver execution and ambiguity detection. |
-| Read eligibility | Which reads are relevant. | Read-card construction and retained-read caps. |
+| Conversation resolution | Clause-level dependencies, context-frame choices, and the contextual meaning needed to interpret the current utterance. | Memory validation, visible context-frame projection, and activation boundaries. |
+| Question contract | Requested facts, answer shapes, outputs, populations, and literal or row-set question inputs. | Stable IDs, catalog blindness, contract parsing, and preservation of uncompiled time text. |
+| Query enrichment | Resource and entity search terms grounded in the current question contract. | Catalog and resolver recall. |
+| Grounding | A shown resolver route or candidate when semantic selection is required. | Exact-literal verification, deterministic time resolution, resolver execution, canonical values, and ambiguity detection. |
+| Read eligibility | Candidate-local retain/drop decisions plus relevant row paths and field evidence hints. | Read-card construction, candidate identity, structural filtering, and retained-read caps. |
 | Plan selection | Which source strategy to evaluate. | Strategy construction from retained reads. |
-| Source binding | Source invocations, params, finite-choice membership, evidence. | ID validation, param validation, executable consistency. |
+| Source binding | Source invocations, answer population, params and omission, finite-choice effects, fulfillment evidence, metric fit, and role-qualified targets. | Review-scope construction, ID and param validation, target compatibility, deterministic bindings, and executable consistency. |
 | Fact planning | A typed operation plan. | Parsing, verification, compilation, execution. |
 
 `requested_facts` are immutable inside a run. Downstream turns satisfy,
@@ -212,8 +248,11 @@ Conversation
       -> RuntimeErrorDetail
 ```
 
-`QuestionRun` is immutable once written. Clarification, retry, rerun, replay,
-and future review/correction flows create a new run.
+`QuestionRun` identity and authored intent are immutable once written.
+Clarification continuation, user-visible rerun or replay, and future
+review/correction flows create a new run. Retriable worker or provider execution
+attempts may remain within the same run and are distinguished by attempt metadata;
+they do not rewrite the run's question or lineage identity.
 
 `ExecutionProofGraph` is the proof truth. Views may project it by answer output,
 step, source read, or input contribution, but they do not store another proof
@@ -244,12 +283,14 @@ Interfaces are adapters, not audit stores.
 - `interfaces/common/` owns shared projections.
 - `run_work/` owns package-level queued worker behavior.
 
-Interface read views return answers, compact explanation, verbose explanation,
-usage when available, clarification requests, and runtime failure details. They
-must read typed lineage views rather than reconstructing history from events.
-When a run needs clarification, interface views return the structured
-clarification details recorded in lineage so clients can render questions,
-choices, and evidence consistently.
+Operational interface payloads such as accepted, queued, running, and active-run
+conflict project question lifecycle and run-work state. Historical and factual
+read views return answers, compact explanation, verbose explanation, usage when
+available, clarification requests, and runtime failure details from typed lineage
+views rather than reconstructing history from events. When a run needs
+clarification, interface views return the structured clarification details
+recorded in lineage so clients can render questions, choices, and evidence
+consistently.
 
 ## Model IO And Usage
 

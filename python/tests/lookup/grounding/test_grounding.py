@@ -40,7 +40,7 @@ from fervis.lookup.fact_plan.row_sources import (
     CALENDAR_END_PARAM_ID,
     CALENDAR_START_PARAM_ID,
 )
-from fervis.lookup.fact_plan.values import IdentityValuePayload
+from fervis.lookup.answer_program.values import IdentityValuePayload
 from fervis.lookup.turn_prompts import build_turn_prompt_context
 from fervis.lookup.question_contract import (
     AnswerPopulationMembershipTestKind,

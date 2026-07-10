@@ -161,6 +161,7 @@ def test_omit_param_decision_compiles_to_no_endpoint_binding():
             intent_text="all stores",
             match_basis_explanation="Use the full store population.",
         ),
+        parameter_namespace="fixture.source_1",
     )
 
     assert parsed.binding_sets == ((),)

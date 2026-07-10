@@ -2,7 +2,7 @@
 
 from ._shared import (
     Any,
-    EndpointParamBinding,
+    DraftEndpointParamBinding,
     RelationCatalog,
     RowSource,
     build_row_source_catalog,
@@ -12,13 +12,16 @@ from ._shared import (
     row_sources_for_read_id,
 )
 from .evidence import _read_field_payloads
+from fervis.lookup.relation_catalog.parameter_values import (
+    parse_catalog_parameter_value,
+)
 
 
 @dataclass(frozen=True)
 class _SameScopeReadScope:
     memory_relation_id: str
     read_id: str
-    param_bindings: tuple[EndpointParamBinding, ...]
+    param_bindings: tuple[DraftEndpointParamBinding, ...]
 
 
 def _same_scope_api_candidate_payloads(
@@ -103,11 +106,11 @@ def _same_scope_api_candidate_payloads(
 
 
 def _prior_scope_bound_param_payload(
-    binding: EndpointParamBinding,
+    binding: DraftEndpointParamBinding,
 ) -> dict[str, Any]:
     output = {
         "param_id": binding.param_id,
-        "value": binding.value,
+        "value": binding.compiler_value,
         "source": "prior_scope",
     }
     if binding.proof_refs:
@@ -121,7 +124,7 @@ def _row_source_scope_compatible(
     scope: _SameScopeReadScope,
 ) -> bool:
     bindings_by_param_id = {
-        binding.param_id: binding.value for binding in scope.param_bindings
+        binding.param_id: binding.compiler_value for binding in scope.param_bindings
     }
     for param in source.params:
         if param.default is None:
@@ -222,12 +225,12 @@ def _scope_param_bindings(
     endpoint_args: dict[str, Any],
     endpoint_arg_proof_refs: dict[str, Any],
     row_sources: Any,
-) -> tuple[EndpointParamBinding, ...]:
+) -> tuple[DraftEndpointParamBinding, ...]:
     params_by_ref: dict[str, Any] = {}
     for source in row_sources_for_read_id(read_id, row_sources=row_sources):
         for param in source.params:
             params_by_ref.setdefault(param.param_ref, param)
-    output: list[EndpointParamBinding] = []
+    output: list[DraftEndpointParamBinding] = []
     seen: set[str] = set()
     for param_ref, value in endpoint_args.items():
         param = params_by_ref.get(str(param_ref))
@@ -235,9 +238,13 @@ def _scope_param_bindings(
             continue
         seen.add(param.id)
         output.append(
-            EndpointParamBinding(
+            DraftEndpointParamBinding(
                 param_id=param.id,
-                value=canonical_param_value(value),
+                value=parse_catalog_parameter_value(
+                    value,
+                    type_name=param.type.value,
+                    choices=param.choices,
+                ),
                 proof_refs=_endpoint_arg_proof_refs(
                     endpoint_arg_proof_refs.get(str(param_ref))
                 ),

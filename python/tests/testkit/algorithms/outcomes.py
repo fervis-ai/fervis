@@ -20,15 +20,14 @@ from fervis.lookup.outcomes.classification import (
     classify_binding_candidates,
     classify_empty_relation,
 )
+from fervis.lookup.answer_program.model import AnswerProgram, FactFulfillment
 from fervis.lookup.fact_plan.fact_plan import (
-    AnswerPlan,
     BlockedFact,
     BlockedFactBasis,
     BlockedFactField,
-    FactFulfillment,
     PlanImpossible,
 )
-from fervis.lookup.fact_plan.render_spec import (
+from fervis.lookup.answer_program.render_spec import (
     RenderRelationOutput,
     RenderSpec,
 )
@@ -129,7 +128,7 @@ def _classify_answer(payload: dict[str, Any]) -> Any:
     )
 
 
-def _answer_plan(payload: dict[str, Any]) -> AnswerPlan:
+def _answer_plan(payload: dict[str, Any]) -> AnswerProgram:
     render_outputs = tuple(
         RenderRelationOutput(
             id=str(item["id"]),
@@ -139,7 +138,7 @@ def _answer_plan(payload: dict[str, Any]) -> AnswerPlan:
         )
         for item in payload.get("render_outputs") or ()
     )
-    return AnswerPlan(
+    return AnswerProgram(
         fulfillment=tuple(
             FactFulfillment(
                 requested_fact_id=str(item.get("requested_fact_id") or "rf_answer"),

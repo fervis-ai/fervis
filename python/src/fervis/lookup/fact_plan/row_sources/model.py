@@ -11,7 +11,8 @@ from fervis.lookup.relation_catalog.model import (
     ParamSource,
     RowCardinality,
 )
-from fervis.lookup.fact_plan.relations import FieldBindingRole
+from fervis.lookup.relation_catalog.parameter_values import CatalogParameterValue
+from fervis.lookup.answer_program.relations import FieldBindingRole
 
 
 class RowSourceKind(StrEnum):
@@ -91,7 +92,7 @@ class RowSourceParam:
     required: bool = False
     choices: tuple[str, ...] = ()
     choice_labels: dict[str, str] | None = None
-    default: object = None
+    default: CatalogParameterValue = None
     default_source: str = ""
     identity: IdentityMetadata | None = None
     semantics: RowSourceParamSemantics = RowSourceParamSemantics.OPAQUE_QUERY_PARAM

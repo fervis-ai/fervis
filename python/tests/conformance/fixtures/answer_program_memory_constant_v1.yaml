@@ -1,0 +1,76 @@
+schema_revision: 1
+program:
+  $type: AnswerProgram
+  fields:
+    fact_template: {$tuple: []}
+    fulfillment: {$tuple: []}
+    parameters: {$tuple: []}
+    capabilities: {$tuple: []}
+    relations:
+      $tuple:
+        - $type: Relation
+          fields:
+            id: sales
+            source:
+              $type: RelationSource
+              fields:
+                kind: {$enum: SourceKind, value: api_read}
+                read_id: sales
+                row_source_id: ""
+                calendar_id: ""
+                memory_relation_id: ""
+                param_bindings: {$tuple: []}
+                applied_filters: {$tuple: []}
+                row_filters:
+                  $tuple:
+                    - $type: RelationSourceRowFilter
+                      fields:
+                        field_id: amount
+                        operator: equals
+                        value_expr:
+                          $type: ConstantRef
+                          fields:
+                            constant_id: prior_total
+                            version_ref: memory-value@1
+                            value:
+                              $type: FactValue
+                              fields:
+                                id: prior_total
+                                payload:
+                                  $type: LiteralValuePayload
+                                  fields:
+                                    literal_type:
+                                      $enum: LiteralType
+                                      value: number
+                                    value: "42"
+                                known_input_id: ""
+                                label: ""
+                                proof_refs: {$tuple: []}
+                                source_refs: {$tuple: []}
+                                dependencies:
+                                  $tuple:
+                                    - $type: ValueDependency
+                                      fields:
+                                        kind:
+                                          $enum: ValueDependencyKind
+                                          value: conversation_memory
+                                        ref: prior.value.total
+                                applies_to_requested_fact_ids: {$tuple: []}
+                            component: value
+                            item_index: null
+                            origin:
+                              $enum: ValueExpressionOrigin
+                              value: constant
+                        proof_refs: {$tuple: []}
+                population_choices: {$tuple: []}
+                proof_refs: {$tuple: []}
+            fields: {$tuple: []}
+    operations: {$tuple: []}
+    render_spec: null
+    compatibility:
+      $type: ProgramCompatibility
+      fields:
+        schema_revision: 1
+        compiler_version: ""
+        function_semantics: {$tuple: []}
+        source_contracts: {$tuple: []}

@@ -3,11 +3,9 @@ description: Persisted memory artifacts preserve relation and row addresses exac
 kind: algorithm
 algorithm: memory.lineage_memory_artifacts
 input:
-  conversation_id: conversation_1
-  limit: 5
+  selected_run_ids: [run_1]
   memory_artifacts:
     - memory_artifact_id: mem_run_1_fact_result_1
-      conversation_id: conversation_1
       run_id: run_1
       source_kind: fact_result
       payload_schema: fervis.memory_artifact

@@ -6,6 +6,7 @@ from fervis.lineage.enums import (
     ArtifactKind,
     ConversationOriginKind,
     MemoryArtifactSourceKind,
+    QuestionRunKind,
     RunTriggerKind,
     SourceReadStatus,
 )
@@ -23,15 +24,15 @@ def test_recorder_contract_accepts_clarification_trigger_shape() -> None:
         run_id="run_2",
         question_id="q_1",
         run_number=2,
+        kind=QuestionRunKind.MODEL_ASSISTED,
         trigger_kind=RunTriggerKind.CLARIFICATION_RESPONSE,
-        trigger_clarification_response_run_id="run_1",
+        base_run_id="run_1",
         trigger_clarification_response_id="response_1",
-        integrated_question="Question with clarification.",
         adapter_ref="django_drf:test",
         runtime_version="test-runtime",
     )
 
-    assert run.trigger_clarification_response_run_id == "run_1"
+    assert run.base_run_id == "run_1"
 
 
 def test_recorder_contract_accepts_complete_conversation_fork_shape() -> None:
@@ -69,16 +70,14 @@ def test_recorder_contract_rejects_incomplete_conversation_fork_shape() -> None:
 
 
 def test_recorder_contract_rejects_conflicting_run_trigger_shape() -> None:
-    with pytest.raises(ValueError, match="previous_run_id must be absent"):
+    with pytest.raises(ValueError, match="base_run_id is required"):
         QuestionRunWrite(
             run_id="run_2",
             question_id="q_1",
             run_number=2,
+            kind=QuestionRunKind.MODEL_ASSISTED,
             trigger_kind=RunTriggerKind.CLARIFICATION_RESPONSE,
-            previous_run_id="run_1",
-            trigger_clarification_response_run_id="run_1",
             trigger_clarification_response_id="response_1",
-            integrated_question="Question with clarification.",
             adapter_ref="django_drf:test",
             runtime_version="test-runtime",
         )

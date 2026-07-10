@@ -1,7 +1,7 @@
 import pytest
 
 from .helpers import (
-    current_run_detail,
+    primary_run_detail,
     post_fervis_question,
     question_detail_url,
     question_run_detail_url,
@@ -25,12 +25,12 @@ def test_question_detail_reads_current_run_from_lineage(
     assert (
         response.status_code,
         response.json()["questionId"],
-        response.json()["currentRunId"],
+        response.json()["latestRunId"],
         response.json()["conversationId"],
     ) == (
         200,
         question["questionId"],
-        question["currentRunId"],
+        question["latestRunId"],
         question["conversationId"],
     )
 
@@ -46,9 +46,10 @@ def test_question_run_detail_includes_structured_answer_explanation(
     )
     question = run_worker_until_terminal(api_client, response).json()
 
-    response = current_run_detail(api_client, question)
+    response = primary_run_detail(api_client, question)
 
     explanation = response.json()["explanation"]
+    duration_ms = response.json()["durationMs"]
     assert (
         response.status_code,
         response.json()["questionId"],
@@ -56,13 +57,15 @@ def test_question_run_detail_includes_structured_answer_explanation(
         set(explanation["lineage"]),
         explanation["inputs"]["rootKind"],
         explanation["lineage"]["verbose"]["rootId"],
+        isinstance(duration_ms, int),
     ) == (
         200,
         question["questionId"],
         {"inputs", "lineage"},
         {"compact", "verbose"},
         "run",
-        question["currentRunId"],
+        question["latestRunId"],
+        True,
     )
 
 
@@ -81,7 +84,7 @@ def test_question_runs_lists_attempts_for_question(
     assert response.status_code == 200
     assert response.json()["questionId"] == question["questionId"]
     assert [run["runId"] for run in response.json()["runs"]] == [
-        question["currentRunId"]
+        question["latestRunId"]
     ]
 
 
@@ -98,7 +101,7 @@ def test_question_run_detail_is_tenant_scoped(
 
     monkeypatch.setattr(principal, "tenant_from_request", lambda request: "tenant-b")
     response = api_client.get(
-        question_run_detail_url(question["questionId"], question["currentRunId"]),
+        question_run_detail_url(question["questionId"], question["latestRunId"]),
         HTTP_X_REQUESTER_SCOPES="fervis:read",
     )
 
@@ -120,5 +123,5 @@ def test_question_create_rejects_second_active_run_for_same_tenant_conversation(
 
     assert (second.status_code, second.json()["error"]["context"]["activeRunId"]) == (
         409,
-        first["currentRunId"],
+        first["latestRunId"],
     )

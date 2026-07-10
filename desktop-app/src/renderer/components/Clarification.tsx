@@ -126,7 +126,7 @@ function ChoiceClarification({
               question: clarificationOptionAnswer(selectedOption),
               selectedOptionId: selectedOption.id,
               triggerKind: "clarification_response",
-              triggerRunId: run.runId
+              baseRunId: run.runId
             })
             .then(onClarificationState)
             .catch(onActionError)
@@ -182,7 +182,7 @@ function TextClarification({
               clarificationId: clarification.id,
               question: answer.trim(),
               triggerKind: "clarification_response",
-              triggerRunId: run.runId
+              baseRunId: run.runId
             })
             .then(onClarificationState)
             .catch(onActionError)

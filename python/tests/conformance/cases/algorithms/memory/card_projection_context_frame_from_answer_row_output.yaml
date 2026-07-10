@@ -14,14 +14,14 @@ input:
         sourceAnswer: "2468.00"
         provenance:
           question_contract:
+            question_inputs: []
             answer_requests:
               - id: fact_1
                 answer_fact: total sales for the referenced products
                 answer_outputs:
                   - id: answer_output_1
                     description: total sales amount
-                    requested_value_frame: total sales amount
-            question_inputs: []
+                used_question_inputs: []
         addresses:
           - address: relation.answer_rows
             kind: relation
@@ -41,4 +41,3 @@ expect:
     context_frames:
       - requested_frame: total sales amount
         prior_answer_fact: total sales for the referenced products
-

@@ -1,0 +1,80 @@
+id: decoder_rejects_contract_hidden_in_json_field
+kind: algorithm
+algorithm: answer_program.decode
+description: Open JSON fields cannot carry self-describing contract objects.
+input:
+  schema_revision: 1
+  program:
+    schema_revision: 1
+    program:
+      $type: AnswerProgram
+      fields:
+        fact_template: {$tuple: []}
+        fulfillment: {$tuple: []}
+        parameters: {$tuple: []}
+        capabilities: {$tuple: []}
+        relations: {$tuple: []}
+        operations:
+          $tuple:
+            - $type: Operation
+              fields:
+                id: rank_1
+                spec:
+                  $type: RankSpec
+                  fields:
+                    input_relation: r
+                    order_by: {$tuple: []}
+                    tie_policy: {$enum: TiePolicy, value: field}
+                    limit:
+                      $type: ConstantRef
+                      fields:
+                        constant_id: time_1
+                        version_ref: "1"
+                        value:
+                          $type: FactValue
+                          fields:
+                            id: time_1
+                            payload:
+                              $type: TimeValuePayload
+                              fields:
+                                expression: today
+                                intent:
+                                  $map:
+                                    - - hidden_contract
+                                      - $type: ProgramCompatibility
+                                        fields:
+                                          schema_revision: 1
+                                          compiler_version: ""
+                                          function_semantics: {$tuple: []}
+                                          source_contracts: {$tuple: []}
+                                anchor_date_ref: ANCHOR_DATE
+                                timezone_ref: ANCHOR_TIMEZONE
+                                resolved_start: "2026-07-10"
+                                resolved_end: "2026-07-10"
+                                granularity: day
+                            known_input_id: ""
+                            label: today
+                            proof_refs: {$tuple: []}
+                            source_refs: {$tuple: []}
+                            dependencies: {$tuple: []}
+                            applies_to_requested_fact_ids: {$tuple: []}
+                        component: value
+                        item_index: null
+                        origin:
+                          $enum: ValueExpressionOrigin
+                          value: constant
+                    tie_breakers: {$tuple: []}
+                    kind: {$enum: OperationKind, value: rank}
+                output_relation: ranked
+        render_spec: null
+        compatibility:
+          $type: ProgramCompatibility
+          fields:
+            schema_revision: 1
+            compiler_version: ""
+            function_semantics: {$tuple: []}
+            source_contracts: {$tuple: []}
+expect:
+  result_equals:
+    status: rejected
+    code: invalid_answer_program

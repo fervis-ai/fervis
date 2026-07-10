@@ -14,6 +14,10 @@ from fervis.lookup.question_contract import (
     parse_question_contract,
 )
 from fervis.lookup.conversation_resolution import (
+    ConversationInputProvenance,
+    ConversationInputProvenanceSet,
+    ConversationInputProvenanceSource,
+    ConversationInputProvenanceSourceKind,
     ConversationDependencyOverlay,
     ConversationResolutionOverlay,
     ConversationValueFrameOverlay,
@@ -38,6 +42,11 @@ def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
     model_payload = dict(
         input_payload.get("payload") or _model_payload_from_case_input(input_payload)
     )
+    input_provenance = _optional_conversation_input_provenance(
+        input_payload.get("conversation_input_provenance")
+    )
+    question_context_texts = list(input_payload.get("question_context_texts") or ())
+    question_context_texts.extend(input_provenance.context_texts())
     tool_name = str(input_payload.get("tool_name") or "")
     if not tool_name:
         tool_name = (
@@ -50,12 +59,8 @@ def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
             tool_name=tool_name,
             payload=model_payload,
             question_context=str(input_payload["question_context"]),
-            question_context_texts=tuple(
-                input_payload.get("question_context_texts") or ()
-            ),
-            conversation_resolution_overlay=_optional_conversation_overlay(
-                input_payload.get("conversation_resolution_overlay")
-            ),
+            question_context_texts=tuple(question_context_texts),
+            conversation_input_provenance=input_provenance,
         )
     except ValueError as exc:
         if expects_rejection(payload["expect"]):
@@ -403,6 +408,9 @@ def run_question_contract_prompt_case(payload: dict[str, Any]) -> list[str]:
     request = QuestionContractRequest(
         current_question=str(payload["input"]["current_question"]),
         conversation_context=dict(payload["input"].get("conversation_context") or {}),
+        conversation_input_provenance=_optional_conversation_input_provenance(
+            payload["input"].get("conversation_input_provenance")
+        ),
     )
     conversation_resolution_overlay = payload["input"].get(
         "conversation_resolution_overlay"
@@ -438,6 +446,56 @@ def run_question_contract_prompt_case(payload: dict[str, Any]) -> list[str]:
     if expected_subset:
         errors.extend(subset_mismatches(actual=actual, expected_subset=expected_subset))
     return errors
+
+
+def _optional_conversation_input_provenance(
+    raw: object,
+) -> ConversationInputProvenanceSet:
+    if raw is None:
+        return ConversationInputProvenanceSet()
+    if not isinstance(raw, dict):
+        raise ValueError("conversation_input_provenance must be an object")
+    return ConversationInputProvenanceSet(
+        resolved_request_text=str(raw.get("resolved_request_text") or ""),
+        question_context_kind=str(raw.get("question_context_kind") or ""),
+        inputs=tuple(
+            _conversation_input_provenance(item)
+            for item in raw.get("inputs") or ()
+            if isinstance(item, dict)
+        ),
+    )
+
+
+def _conversation_input_provenance(
+    item: dict[str, Any],
+) -> ConversationInputProvenance:
+    raw_role = str(item.get("role") or "")
+    return ConversationInputProvenance(
+        input_ref=str(item["input_ref"]),
+        kind=KnownInputKind(str(item["kind"])),
+        value_source_text=str(item["value_source_text"]),
+        resolved_value_text=str(item.get("resolved_value_text") or ""),
+        role=LiteralInputRole(raw_role) if raw_role else None,
+        field_label_text=str(item.get("field_label_text") or ""),
+        value_meaning_hint=str(item.get("value_meaning_hint") or ""),
+        sources=tuple(
+            _conversation_input_provenance_source(source)
+            for source in item.get("sources") or ()
+            if isinstance(source, dict)
+        ),
+    )
+
+
+def _conversation_input_provenance_source(
+    item: dict[str, Any],
+) -> ConversationInputProvenanceSource:
+    return ConversationInputProvenanceSource(
+        kind=ConversationInputProvenanceSourceKind(str(item["kind"])),
+        current_text=str(item.get("current_text") or ""),
+        prior_text=str(item.get("prior_text") or ""),
+        part_id=str(item.get("part_id") or ""),
+        resolved_input_ref=str(item.get("resolved_input_ref") or ""),
+    )
 
 
 def _conversation_overlay(payload: dict[str, Any]) -> ConversationResolutionOverlay:

@@ -20,24 +20,23 @@ from fervis.lookup.plan_execution.verification import (
     verify_fact_plan as verify_fact_plan_impl,
 )
 from fervis.lookup.grounding.model import GroundedInputUse
+from fervis.lookup.answer_program.model import AnswerProgram, FactFulfillment
 from fervis.lookup.fact_plan.fact_plan import (
-    AnswerPlan,
     BlockedFact,
     BlockedFactBasis,
     BlockedFactField,
-    FactFulfillment,
     FactPlan,
     MissingCatalogChoiceInput,
     MissingCatalogRequiredInput,
     PlanClarification,
     PlanImpossible,
 )
-from fervis.lookup.fact_plan.operations import (
+from fervis.lookup.answer_program.operations import (
     Operation,
     ProjectField,
     ProjectSpec,
 )
-from fervis.lookup.fact_plan.relations import (
+from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
     Relation,
     RelationField,
@@ -49,19 +48,17 @@ from fervis.lookup.fact_plan.row_sources import (
     read_evidence_ref,
     read_field_evidence_ref,
 )
-from fervis.lookup.fact_plan.values import FactValue
+from fervis.lookup.answer_program.values import FactValue
 from fervis.lookup.fact_planning.required_inputs import required_input_id
 from fervis.lookup.question_contract import (
-    KnownInputKind,
     KnownInputSource,
     LiteralInputRole,
     QuestionContract,
     RequestedFact,
     RequestedFactAnswerOutput,
-    RequestedFactKnownInput,
     RequestedFactLiteralInput,
 )
-from fervis.lookup.fact_plan.render_spec import (
+from fervis.lookup.answer_program.render_spec import (
     RenderRelationOutput,
     RenderSpec,
 )
@@ -89,7 +86,7 @@ def _operation() -> Operation:
 def test_fact_plan_accepts_only_one_terminal_shape():
     question_contract = _question_contract()
     plan = FactPlan(
-        outcome=AnswerPlan(
+        outcome=AnswerProgram(
             fulfillment=(
                 FactFulfillment(
                     requested_fact_id="rf_name",
@@ -128,13 +125,13 @@ def test_answer_plan_requires_operations_and_render_spec():
         ),
     )
     missing_operations = FactPlan(
-        outcome=AnswerPlan(
+        outcome=AnswerProgram(
             fulfillment=fulfillment,
             render_spec=_render_spec(),
         )
     )
     missing_render = FactPlan(
-        outcome=AnswerPlan(
+        outcome=AnswerProgram(
             fulfillment=fulfillment,
             operations=(_operation(),),
         )
@@ -785,12 +782,33 @@ def _required_choice_catalog() -> RelationCatalog:
 
 
 def verify_fact_plan(plan: FactPlan, **kwargs):
-    return verify_fact_plan_impl(
-        plan,
-        question_contract=kwargs.pop("question_contract", _question_contract()),
-        catalog=kwargs.pop("catalog", _answer_catalog()),
-        **kwargs,
+    question_contract = kwargs.pop("question_contract", _question_contract())
+    catalog = kwargs.pop("catalog", _answer_catalog())
+    if not isinstance(plan.outcome, AnswerProgram):
+        return verify_fact_plan_impl(
+            plan,
+            question_contract=question_contract,
+            catalog=catalog,
+            **kwargs,
+        )
+    from fervis.lookup.answer_program.compilation import compile_answer_program
+    from fervis.lookup.answer_program.instantiation import (
+        ExecutionEnvironment,
+        instantiate_answer_program,
     )
+
+    program, bindings = compile_answer_program(
+        plan.outcome,
+        question_contract=question_contract,
+        catalog=catalog,
+        bindings=plan.bindings,
+    )
+    instantiate_answer_program(
+        program,
+        bindings,
+        ExecutionEnvironment(catalog=catalog),
+    )
+    return plan
 
 
 def _answer_catalog() -> RelationCatalog:

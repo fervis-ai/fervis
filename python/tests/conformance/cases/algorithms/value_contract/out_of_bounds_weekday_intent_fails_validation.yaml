@@ -9,6 +9,9 @@ input:
     - id: time_value
       kind: time
       expression: time
+      resolved_start: "2026-01-01"
+      resolved_end: "2026-01-01"
+      granularity: day
       intent:
         kind: point
         precision: day

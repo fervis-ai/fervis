@@ -14,6 +14,7 @@ input:
         sourceAnswer: "Sale 1: Product One\nSale 2: Product Two"
         provenance:
           question_contract:
+            question_inputs: []
             answer_requests:
               - id: fact_1
                 answer_fact: products sold by Alice today, grouped by sale
@@ -22,7 +23,7 @@ input:
                     description: the products included in each sale
                   - id: answer_output_2
                     description: the sale grouping for each product
-            question_inputs: []
+                used_question_inputs: []
         addresses:
           - address: relation.answer_rows
             kind: relation
@@ -51,4 +52,3 @@ expect:
   result_contains:
     card_kinds: [prior_answer_request, row_set]
     context_frames: []
-

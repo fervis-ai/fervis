@@ -30,17 +30,16 @@ from fervis.lookup.relation_catalog import (
     RowCardinality,
     RowPath,
 )
+from fervis.lookup.answer_program.model import AnswerProgram, FactFulfillment
 from fervis.lookup.fact_plan.fact_plan import (
-    AnswerPlan,
     BlockedFact,
     BlockedFactBasis,
-    FactFulfillment,
     FactPlan,
     MissingCatalogRequiredInput,
     PlanClarification,
     PlanImpossible,
 )
-from fervis.lookup.fact_plan.operations import (
+from fervis.lookup.answer_program.operations import (
     AggregateSpec,
     AggregationFunction,
     AggregationSpec,
@@ -54,7 +53,7 @@ from fervis.lookup.fact_plan.operations import (
     RelationRole,
     RelationRoleRef,
 )
-from fervis.lookup.fact_plan.relations import (
+from fervis.lookup.answer_program.relations import (
     EndpointParamBinding,
     FieldBindingRole,
     Relation,
@@ -62,7 +61,7 @@ from fervis.lookup.fact_plan.relations import (
     RelationSource,
     SourceKind,
 )
-from fervis.lookup.fact_plan.render_spec import (
+from fervis.lookup.answer_program.render_spec import (
     RenderRelationOutput,
     RenderScalarOutput,
     RenderSpec,
@@ -74,11 +73,10 @@ from fervis.lookup.fact_plan.row_sources import (
     read_field_evidence_ref,
     required_input_evidence_ref,
 )
-from fervis.lookup.fact_plan.values import (
-    RowFilterUse,
-    ScalarInputUse,
-    ValueFilterOperator,
-    ValueUse,
+from fervis.lookup.answer_program.values import (
+    ConstantRef,
+    FactValue,
+    LiteralType,
 )
 from fervis.lookup.fact_planning.request import RuntimeValueContext
 from fervis.lookup.question_contract import (

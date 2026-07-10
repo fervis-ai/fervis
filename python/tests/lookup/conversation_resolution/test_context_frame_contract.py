@@ -3,12 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 
+import pytest
+
 from fervis.memory.conversation_context import (
     ConversationContextFrame,
     ConversationMemoryCard,
     ConversationMemoryCardProjection,
     ConversationContextSource,
     ConversationMeaningAnchor,
+    ConversationReplaceablePart,
 )
 from fervis.lookup.conversation_resolution import (
     CONVERSATION_RESOLUTION_TOOL_NAME,
@@ -1498,6 +1501,7 @@ def test_conversation_resolution_prompt_exposes_available_context_frames():
     invocation = prompt.to_model_invocation()
 
     assert "Available context frames:" in invocation.prompt_text
+    assert '"prior_answer_fact": "total sales for prior rows"' in invocation.prompt_text
     assert "requested_value_frame.context_frame_choices" in invocation.prompt_text
     assert "status=standalone" not in invocation.prompt_text
     assert "status=resolved" not in invocation.prompt_text
@@ -1520,6 +1524,115 @@ def test_conversation_resolution_prompt_exposes_available_context_frames():
     assert "maxContains" not in choices
 
 
+def _sales_count_time_context_source() -> ConversationContextSource:
+    return ConversationContextSource(
+        source_id="prior_1",
+        kind="prior_user_question",
+        text="How many sales did we make on July 9th?",
+    )
+
+
+def _sales_count_time_context_frame() -> ConversationContextFrame:
+    return ConversationContextFrame(
+        frame_id="context_frame_1",
+        source_ids=("prior_1",),
+        requested_frame="count",
+        prior_answer_fact="sales count on July 9th",
+        replaceable_parts=(
+            ConversationReplaceablePart(
+                part_id="q_time",
+                kind="time_scope",
+                text="July 9th",
+            ),
+        ),
+    )
+
+
+def _sales_count_time_continuation_payload(
+    *,
+    part_id: str = "q_time",
+    current_text: str = "July 8th",
+    replacement_text: str = "July 8th",
+) -> dict[str, object]:
+    return {
+        "kind": "conversation_resolution",
+        "current_question_text": "sorry, meant July 8th",
+        "clause_resolutions": [
+            {
+                "current_clause_text": "sorry, meant July 8th",
+                "occurrence": 1,
+                "requested_value_frame": {
+                    "current_value_surface": {
+                        "text": current_text,
+                        "kind": "broad_current_value",
+                    },
+                    "context_frame_choices": [
+                        {
+                            "frame_id": "context_frame_1",
+                            "choice": "use_frame",
+                            "current_conflict_quotes": [],
+                        }
+                    ],
+                },
+                "continuation": {
+                    "kind": "continue_prior_question",
+                    "frame_id": "context_frame_1",
+                    "replacements": [
+                        {
+                            "part_id": part_id,
+                            "current_text": replacement_text,
+                        }
+                    ],
+                },
+                "dependencies": [],
+                "resolved_clause_text": "How many sales did we make on July 8th?",
+            }
+        ],
+        "unresolved": {
+            "unresolved_kind": "none",
+            "why_unresolved": "",
+            "candidate_interpretations": [],
+        },
+    }
+
+
+def _parse_sales_count_time_continuation(
+    payload: dict[str, object] | None = None,
+):
+    return parse_conversation_resolution(
+        tool_name=CONVERSATION_RESOLUTION_TOOL_NAME,
+        payload=payload or _sales_count_time_continuation_payload(),
+        current_question="sorry, meant July 8th",
+        context_frames=(_sales_count_time_context_frame(),),
+        context_sources=(_sales_count_time_context_source(),),
+    )
+
+
+def test_schema_exposes_continuation_with_bounded_replaceable_part_ids():
+    prompt = ConversationResolutionTurnPrompt(
+        question="sorry, meant July 8th",
+        conversation_context={},
+        context_sources=(_sales_count_time_context_source(),),
+        context_frames=(_sales_count_time_context_frame(),),
+    )
+
+    schema = prompt.response_contract().provider_schema[
+        CONVERSATION_RESOLUTION_TOOL_NAME
+    ]
+    clause_schema = schema["properties"]["clause_resolutions"]["items"]
+    continuation_schema = clause_schema["properties"]["continuation"]
+    replacement_schema = continuation_schema["properties"]["replacements"]["items"]
+
+    assert "continuation" not in clause_schema["required"]
+    assert continuation_schema["properties"]["kind"]["enum"] == [
+        "continue_prior_question"
+    ]
+    assert continuation_schema["properties"]["frame_id"]["enum"] == [
+        "context_frame_1"
+    ]
+    assert replacement_schema["properties"]["part_id"]["enum"] == ["q_time"]
+
+
 def test_prior_answer_outputs_project_to_context_frames_without_backend_semantics():
     artifact = build_fact_artifact(
         artifact_id="turn_sales_total",
@@ -1536,9 +1649,9 @@ def test_prior_answer_outputs_project_to_context_frames_without_backend_semantic
                             {
                                 "id": "answer_output_1",
                                 "description": "total sales amount",
-                                "requested_value_frame": "total sales amount",
                             }
                         ],
+                        "used_question_inputs": [],
                     }
                 ],
                 "question_inputs": [],
@@ -1562,6 +1675,99 @@ def test_prior_answer_outputs_project_to_context_frames_without_backend_semantic
     assert frame.requested_frame == "total sales amount"
     assert frame.prior_answer_fact == "total sales for products sold by Alice"
     assert frame.source_ids
+
+
+def test_prior_answer_request_context_frame_exposes_replaceable_parts_from_contract():
+    artifact = build_fact_artifact(
+        artifact_id="turn_sales_count",
+        outcome=FactOutcome.ANSWERED,
+        source_question="How many sales did we make on July 9th?",
+        source_answer="8",
+        provenance={
+            "question_contract": {
+                "question_inputs": [
+                    {
+                        "id": "q_time",
+                        "kind": "literal_text",
+                        "role": "time_value",
+                        "text": "July 9th",
+                        "resolved_value_text": "July 9th",
+                    }
+                ],
+                "answer_requests": [
+                    {
+                        "id": "fact_1",
+                        "answer_fact": "sales count on July 9th",
+                        "answer_subject": {
+                            "subject_text": "sales",
+                        },
+                        "answer_outputs": [
+                            {
+                                "id": "answer_1",
+                                "description": "sales count",
+                            }
+                        ],
+                        "used_question_inputs": ["q_time"],
+                    }
+                ],
+            }
+        },
+        addresses=(
+            FactAddress.value(
+                address="value.answer_1",
+                value={"type": "integer", "value": 8},
+            ),
+        ),
+    )
+
+    projection = project_conversation_memory_cards(
+        {"factArtifacts": [artifact.to_dict()]},
+        current_question="sorry, meant July 8th",
+    )
+
+    frame = projection.context_frames[0]
+    assert [part.to_model_dict() for part in frame.replaceable_parts] == [
+        {
+            "part_id": "answer_subject",
+            "kind": "answer_subject",
+            "text": "sales",
+        },
+        {
+            "part_id": "q_time",
+            "kind": "time_scope",
+            "text": "July 9th",
+        },
+    ]
+
+
+def test_parser_accepts_prior_question_continuation_replacement():
+    result = _parse_sales_count_time_continuation()
+
+    continuation = result.outcome.clause_resolutions[0].continuation
+    assert continuation is not None
+    assert continuation.frame_id == "context_frame_1"
+    assert [
+        replacement.to_model_dict() for replacement in continuation.replacements
+    ] == [
+        {
+            "part_id": "q_time",
+            "current_text": "July 8th",
+        }
+    ]
+
+
+def test_parser_rejects_unknown_continuation_replacement_part():
+    with pytest.raises(ValueError, match="part_id is not replaceable on frame"):
+        _parse_sales_count_time_continuation(
+            _sales_count_time_continuation_payload(part_id="q_missing")
+        )
+
+
+def test_parser_rejects_continuation_text_not_copied_from_clause():
+    with pytest.raises(ValueError, match="current_text does not appear"):
+        _parse_sales_count_time_continuation(
+            _sales_count_time_continuation_payload(replacement_text="July 10th")
+        )
 
 
 def test_prior_answer_outputs_project_unique_context_frames_for_same_prior_frame():
@@ -1602,9 +1808,9 @@ def _sale_ids_artifact(artifact_id: str):
                             {
                                 "id": "answer_1",
                                 "description": "sale IDs",
-                                "requested_value_frame": "sale IDs",
                             }
                         ],
+                        "used_question_inputs": [],
                     }
                 ],
                 "question_inputs": [],

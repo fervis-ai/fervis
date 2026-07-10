@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from fervis.lookup.fact_plan.values import (
+from fervis.lookup.answer_program.values import (
     IdentitySetValuePayload,
     ValueKind,
     known_input_id_for_value,

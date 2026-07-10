@@ -11,7 +11,7 @@ from fervis.lookup.conversation_resolution.overlay import (
 )
 from fervis.lookup.relation_catalog import IdentityMetadata
 from fervis.lookup.turn_prompts.context import HostPromptContext
-from fervis.lookup.fact_plan.values import (
+from fervis.lookup.answer_program.values import (
     FactValue,
     TimeComponent,
     ValueComponent,

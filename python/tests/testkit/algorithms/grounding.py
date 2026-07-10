@@ -7,7 +7,7 @@ from fervis.lookup.conversation_resolution import (
     LiteralQuestionInputOverlay,
     ResolvedCanonicalIdentityOverlay,
 )
-from fervis.lookup.fact_plan.values import FactValue, IdentityValuePayload
+from fervis.lookup.answer_program.values import FactValue, IdentityValuePayload
 from fervis.lookup.fact_planning.request import RuntimeValueContext
 from fervis.lookup.grounding.resolution import ground_question_inputs
 from fervis.lookup.question_contract import (

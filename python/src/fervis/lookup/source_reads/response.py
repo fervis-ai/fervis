@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from fervis.lookup.canonical_data import canonical_runtime_json
 from fervis.lookup.relation_catalog import RowCardinality
 from fervis.lookup.fact_plan.row_sources.model import RowSource
 
@@ -75,12 +75,7 @@ def response_body_hash(result: dict[str, Any]) -> str:
     return (
         "sha256:"
         + hashlib.sha256(
-            json.dumps(
-                result.get("responseBody"),
-                sort_keys=True,
-                default=str,
-                separators=(",", ":"),
-            ).encode("utf-8")
+            canonical_runtime_json(result.get("responseBody")).encode("utf-8")
         ).hexdigest()
     )
 

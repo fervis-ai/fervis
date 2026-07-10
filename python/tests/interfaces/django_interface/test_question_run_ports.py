@@ -10,25 +10,43 @@ from django.utils import timezone
 from fervis.host_api.contracts.authority import ReadAuthority, ReadContextRef
 from fervis.interfaces.django import question_run_ports
 from fervis.run_work.queue.django.models import RunWorkItem
-from fervis.run_work.queue.django.queue import claim_run_work_items
+from fervis.run_work.queue.django.queue import (
+    claim_run_work_items,
+    mark_work_item_terminal,
+)
 from fervis.interfaces.django.composition import RUN_CONTEXT_KEY
-from fervis.lineage.enums import RunStepKind, RunTriggerKind
+from fervis.lineage.enums import (
+    QuestionRunKind,
+    RunResultKind,
+    RunStepKind,
+    RunTriggerKind,
+)
+from fervis.lineage.django.recorder import DjangoLineageRecorder
+from fervis.lineage.recorder import RunResultWrite
 from fervis.lineage.models import (
     ClarificationRequest,
     ClarificationResponse,
     Conversation,
+    ProgramInvocation,
+    ProgramRevision,
     Question,
     QuestionRun,
     RunStep,
     RuntimeErrorDetail,
 )
 from fervis.lookup.clarification import ClarificationNeed, ClarificationReason
-from fervis.questions.contracts import ExecutionMode, QuestionPrincipal
+from fervis.questions.contracts import (
+    AskRequest,
+    ExecutionMode,
+    QuestionPrincipal,
+    RerunQuestionRequest,
+)
 from fervis.questions.ports import (
     QuestionRunRecord,
     QuestionRunStart,
     QuestionRunSubmissionKind,
     LookupExecutionRequest,
+    ModelAssistedRunSpec,
     QuestionStart,
     RunSubmission,
 )
@@ -37,7 +55,24 @@ from fervis.interfaces.django.question_run_ports import (
     DjangoQuestionLookupPort,
     DjangoQuestionLifecyclePort,
     DjangoQuestionStateReaderPort,
+    django_question_service,
 )
+from fervis.lookup.answer_program import (
+    BindingPatch,
+    BindingProvenance,
+    BindingProvenanceKind,
+    CapabilityApplication,
+    ParameterBinding,
+    SetParameter,
+    answer_program_id,
+)
+from fervis.lookup.answer_program.revisions import apply_capability
+from fervis.lookup.answer_program.persistence import (
+    program_invocation,
+    program_invocation_bundle,
+    program_revision_bundle,
+)
+from fervis.lookup.answer_program.values import FactValue
 
 SEEDED_USER_ID = "1"
 
@@ -65,17 +100,184 @@ def test_django_question_run_port_submits_initial_run_atomically(
     assert result.run.status == "QUEUED"
     assert {
         "work_item_user_id": work_item.user_id,
-        "work_item_model_key": work_item.model_key,
-        "work_item_budget": str(work_item.max_budget_usd),
+        "work_item_spec_kind": work_item.spec_kind,
+        "work_item_model_key": work_item.execution_spec["model_key"],
+        "work_item_budget": work_item.execution_spec["max_budget_usd"],
         "run_trigger": run.trigger_kind,
         "question_sequence": question.conversation_sequence,
     } == {
         "work_item_user_id": str(user.pk),
+        "work_item_spec_kind": QuestionRunKind.MODEL_ASSISTED.value,
         "work_item_model_key": "HAIKU",
-        "work_item_budget": "0.2500",
+        "work_item_budget": "0.25",
         "run_trigger": RunTriggerKind.INITIAL.value,
         "question_sequence": 1,
     }
+
+
+@pytest.mark.django_db
+def test_django_rerun_persists_child_invocation_and_queue_atomically(
+    api_client,
+    fervis_foundation_reset,
+):
+    service, principal, base = _django_answered_program_base()
+
+    rerun = service.rerun_question(_django_rerun_request(base, principal=principal))
+
+    run = QuestionRun.objects.get(run_id=rerun.run_id)
+    invocation = ProgramInvocation.objects.get(run_id=rerun.run_id)
+    work_item = RunWorkItem.objects.get(run_id=rerun.run_id)
+    assert rerun.status == "QUEUED"
+    assert (
+        run.kind,
+        run.trigger_kind,
+        run.base_run_id,
+        work_item.spec_kind,
+    ) == (
+        QuestionRunKind.DETERMINISTIC.value,
+        RunTriggerKind.RERUN.value,
+        base.run_id,
+        QuestionRunKind.DETERMINISTIC.value,
+    )
+    assert invocation.patch_id.startswith("bp_")
+
+
+@pytest.mark.django_db
+def test_django_rerun_submission_rolls_back_every_child_record_on_failure(
+    api_client,
+    fervis_foundation_reset,
+    monkeypatch,
+):
+    service, principal, base = _django_answered_program_base(
+        program_name="capability",
+        binding_set_name="capability",
+        catalog_name="sales_channel",
+    )
+    before = (
+        QuestionRun.objects.count(),
+        RunWorkItem.objects.count(),
+        ProgramInvocation.objects.count(),
+        ProgramRevision.objects.count(),
+    )
+
+    def fail_on_child_invocation(_self, _bundle):
+        raise RuntimeError("injected rerun invocation persistence failure")
+
+    monkeypatch.setattr(
+        DjangoLineageRecorder,
+        "record_program_invocation",
+        fail_on_child_invocation,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="injected rerun invocation persistence failure",
+    ):
+        service.rerun_question(
+            _django_capability_rerun_request(base, principal=principal)
+        )
+
+    assert (
+        QuestionRun.objects.count(),
+        RunWorkItem.objects.count(),
+        ProgramInvocation.objects.count(),
+        ProgramRevision.objects.count(),
+    ) == before
+
+
+@pytest.mark.django_db
+def test_django_capability_rerun_persists_one_revision_and_child_invocation(
+    api_client,
+    fervis_foundation_reset,
+):
+    service, principal, base = _django_answered_program_base(
+        program_name="capability",
+        binding_set_name="capability",
+        catalog_name="sales_channel",
+    )
+
+    rerun = service.rerun_question(
+        _django_capability_rerun_request(base, principal=principal)
+    )
+
+    invocation = ProgramInvocation.objects.get(run_id=rerun.run_id)
+    revision = ProgramRevision.objects.get(revision_id=invocation.revision_id)
+    assert rerun.status == "QUEUED"
+    assert invocation.patch_id is None
+    assert invocation.program_id == revision.revised_program_id
+    assert revision.base_program_id != revision.revised_program_id
+    assert revision.capability_id == "filter_by_sale_channel"
+
+
+@pytest.mark.django_db
+def test_django_persists_declared_program_revision(
+    api_client,
+    fervis_foundation_reset,
+):
+    from tests.testkit.answer_program_fixtures import load_answer_program_fixture
+
+    user = _seeded_user()
+    principal = QuestionPrincipal(
+        principal_id=str(user.pk),
+        tenant_id="tenant_1",
+        raw=user,
+        read_context_ref=ReadContextRef(
+            scheme="django_principal",
+            key=str(user.pk),
+        ),
+    )
+    base = django_question_service().ask(
+        AskRequest(
+            question="How many sales did we make today?",
+            principal=principal,
+        )
+    )
+    fixture = load_answer_program_fixture(
+        program="capability",
+        binding_set="capability",
+        catalog="sales_channel",
+    )
+    program, bindings = fixture.program, fixture.bindings
+    recorder = DjangoLineageRecorder()
+    recorder.record_program_invocation(
+        program_invocation_bundle(
+            program=program,
+            invocation=program_invocation(
+                run_id=base.run_id,
+                program_id=answer_program_id(program),
+                bindings=bindings,
+            ),
+        )
+    )
+    revision = apply_capability(
+        program=program,
+        bindings=bindings,
+        application=CapabilityApplication(
+            capability_id="filter_by_sale_channel",
+            binding=ParameterBinding(
+                parameter_id="semantic.sale_channels",
+                value=FactValue.string_set(
+                    id="capability.sale_channels",
+                    values=("STORE",),
+                ),
+                provenance=BindingProvenance(
+                    kind=BindingProvenanceKind.SEMANTIC_CHOICE,
+                    refs=("governance:sales.channel",),
+                ),
+            ),
+        ),
+    )
+
+    recorder.record_program_revision(
+        program_revision_bundle(
+            revision=revision,
+        )
+    )
+
+    stored = ProgramRevision.objects.get(revision_id=revision.revision_id)
+    assert stored.base_program_id == revision.base_program_id
+    assert stored.revised_program_id == revision.revised_program_id
+    assert stored.capability_id == "filter_by_sale_channel"
 
 
 @pytest.mark.django_db
@@ -186,6 +388,7 @@ def test_django_question_state_reader_lists_authorized_conversations(
     port.submit_question_run_atomically(
         submission=_submission(
             user=user,
+            read_context_ref=other,
             conversation_id="conversation_other",
             question_id="question_other",
             run_id="run_other",
@@ -261,8 +464,10 @@ def test_django_question_state_reader_lists_authorized_conversations(
             "conversationId": "conversation_newer",
             "firstQuestion": "How many stores are open this month?",
             "latestQuestionId": "question_newer_latest",
-            "currentRunId": "run_newer_latest",
-            "status": "RUNNING",
+            "primaryRunId": "run_newer_latest",
+            "latestRunId": "run_newer_latest",
+            "activeRunId": "run_newer_latest",
+            "status": "QUEUED",
             "runCount": 1,
             "updatedAt": "2026-06-27T10:15:00+00:00",
         },
@@ -270,8 +475,10 @@ def test_django_question_state_reader_lists_authorized_conversations(
             "conversationId": "conversation_older",
             "firstQuestion": "How many stores were open yesterday?",
             "latestQuestionId": "question_older",
-            "currentRunId": "run_older",
-            "status": "RUNNING",
+            "primaryRunId": "run_older",
+            "latestRunId": "run_older",
+            "activeRunId": "run_older",
+            "status": "QUEUED",
             "runCount": 1,
             "updatedAt": "2026-06-26T09:00:00+00:00",
         },
@@ -302,7 +509,41 @@ def test_django_question_run_port_creates_missing_conversation(
 
 
 @pytest.mark.django_db
-def test_django_question_run_port_replays_idempotent_submission_without_lineage_duplication(
+def test_django_question_projection_rejects_missing_work_state(
+    api_client,
+    fervis_foundation_reset,
+):
+    user = _seeded_user()
+    owner = ReadContextRef(scheme="django_principal", key=str(user.pk))
+    lifecycle = DjangoQuestionLifecyclePort()
+    lifecycle.submit_question_run_atomically(
+        submission=_submission(
+            user=user,
+            question_id="question_missing_work",
+            run_id="run_missing_work",
+        ),
+        record=_question_run_record(
+            question_id="question_missing_work",
+            run_id="run_missing_work",
+            read_context_ref=owner,
+        ),
+    )
+    RunWorkItem.objects.filter(run_id="run_missing_work").delete()
+    access = lifecycle.get_question(
+        question_id="question_missing_work",
+        authority=ReadAuthority(tenant_id="tenant_1", read_context_ref=owner),
+    )
+    assert access is not None
+
+    with pytest.raises(
+        RuntimeError,
+        match="question run is missing its persisted work state",
+    ):
+        DjangoQuestionStateReaderPort().get_question_state(access=access)
+
+
+@pytest.mark.django_db
+def test_django_question_run_port_returns_idempotent_submission_without_lineage_duplication(
     api_client,
     fervis_foundation_reset,
 ):
@@ -393,12 +634,11 @@ def test_django_question_run_port_persists_clarification_response_continuation(
             run=QuestionRunStart(
                 question_id="question_1",
                 run_id="run_2",
+                kind=QuestionRunKind.MODEL_ASSISTED,
                 trigger_kind=RunTriggerKind.CLARIFICATION_RESPONSE,
-                integrated_question="ABC Mall",
                 adapter_ref="django_drf",
                 runtime_version="test-runtime",
-                previous_run_id=None,
-                trigger_clarification_response_run_id="run_1",
+                base_run_id="run_1",
                 trigger_clarification_response_id="clar_response_1",
             )
         ),
@@ -407,8 +647,7 @@ def test_django_question_run_port_persists_clarification_response_continuation(
     continued = QuestionRun.objects.get(run_id="run_2")
     assert result.kind is QuestionRunSubmissionKind.CREATED
     assert continued.question_id == run.question_id
-    assert continued.previous_run_id is None
-    assert continued.trigger_clarification_response_run_id == "run_1"
+    assert continued.base_run_id == "run_1"
     assert continued.trigger_clarification_response_id == "clar_response_1"
 
 
@@ -424,7 +663,7 @@ def test_django_question_run_port_finds_idempotent_run_without_memory_hydration(
         record=_question_run_record(),
     )
 
-    replay = port.find_idempotent_run(
+    existing = port.find_idempotent_run(
         authority=ReadAuthority(
             tenant_id="tenant_1",
             read_context_ref=ReadContextRef(
@@ -436,12 +675,12 @@ def test_django_question_run_port_finds_idempotent_run_without_memory_hydration(
         idempotency_key="same-key",
     )
 
-    assert replay is not None
-    assert replay.submission.run_id == "run_1"
+    assert existing is not None
+    assert existing.submission.run_id == "run_1"
 
 
 @pytest.mark.django_db
-def test_django_question_run_port_replays_same_run_id_idempotently(
+def test_django_question_run_port_returns_same_run_id_idempotently(
     api_client,
     fervis_foundation_reset,
 ):
@@ -761,15 +1000,15 @@ def test_queued_django_lookup_uses_submitting_subject_not_worker_identity(
             run_id=queued.submission.run_id,
             conversation_id=queued.submission.conversation_id,
             tenant_id=queued.submission.tenant_id,
-            question=queued.submission.question,
+            question=queued.submission.spec.integrated_question,
             read_context_ref=queued.submission.principal.read_context_ref,
             principal=queued.submission.principal.principal_id,
-            provider=queued.submission.provider,
-            model_key=queued.submission.model_key,
-            conversation_context=queued.submission.conversation_context,
-            runtime_context=queued.submission.runtime_context,
-            max_budget_usd=queued.submission.max_budget_usd,
-            max_thinking_tokens=queued.submission.max_thinking_tokens,
+            provider=queued.submission.spec.provider,
+            model_key=queued.submission.spec.model_key,
+            conversation_context=queued.submission.spec.conversation_context,
+            runtime_context=queued.submission.spec.runtime_context,
+            max_budget_usd=queued.submission.spec.max_budget_usd,
+            max_thinking_tokens=queued.submission.spec.max_thinking_tokens,
             active_attempt=work_item.active_attempt,
         )
     )
@@ -781,6 +1020,109 @@ def test_queued_django_lookup_uses_submitting_subject_not_worker_identity(
     assert runtime.calls[0]["read_context_ref"].key != worker_id
 
 
+def _django_answered_program_base(
+    *,
+    program_name: str = "invocation",
+    binding_set_name: str = "invocation",
+    catalog_name: str = "sales",
+):
+    from tests.testkit.answer_program_fixtures import load_answer_program_fixture
+
+    user = _seeded_user()
+    principal = QuestionPrincipal(
+        principal_id=str(user.pk),
+        tenant_id="tenant_1",
+        raw=user,
+        read_context_ref=ReadContextRef(
+            scheme="django_principal",
+            key=str(user.pk),
+        ),
+    )
+    service = django_question_service()
+    base = service.ask(
+        AskRequest(
+            question="How many sales did we make today?",
+            principal=principal,
+            execution_mode=ExecutionMode.QUEUED,
+        )
+    )
+    fixture = load_answer_program_fixture(
+        program=program_name,
+        binding_set=binding_set_name,
+        catalog=catalog_name,
+    )
+    program, bindings = fixture.program, fixture.bindings
+    recorder = DjangoLineageRecorder()
+    recorder.record_program_invocation(
+        program_invocation_bundle(
+            program=program,
+            invocation=program_invocation(
+                run_id=base.run_id,
+                program_id=answer_program_id(program),
+                bindings=bindings,
+            ),
+        )
+    )
+    recorder.record_run_result(
+        RunResultWrite(
+            run_result_id="base_answered",
+            run_id=base.run_id,
+            result_kind=RunResultKind.ANSWERED,
+        )
+    )
+    mark_work_item_terminal(run_id=base.run_id, status="COMPLETED")
+    return service, principal, base
+
+
+def _django_rerun_request(
+    base,
+    *,
+    principal: QuestionPrincipal,
+) -> RerunQuestionRequest:
+    return RerunQuestionRequest(
+        question_id=base.question_id,
+        base_run_id=base.run_id,
+        patch=BindingPatch(
+            operations=(
+                SetParameter(
+                    parameter_id="semantic.sale_states",
+                    value=FactValue.string_set(
+                        id="patch.sale_states",
+                        values=("COMPLETED", "PLACED"),
+                    ),
+                ),
+            )
+        ),
+        principal=principal,
+    )
+
+
+def _django_capability_rerun_request(
+    base,
+    *,
+    principal: QuestionPrincipal,
+) -> RerunQuestionRequest:
+    return RerunQuestionRequest(
+        question_id=base.question_id,
+        base_run_id=base.run_id,
+        capability_application=CapabilityApplication(
+            capability_id="filter_by_sale_channel",
+            binding=ParameterBinding(
+                parameter_id="semantic.sale_channels",
+                value=FactValue.string_set(
+                    id="capability.sale_channels",
+                    values=("STORE",),
+                ),
+                provenance=BindingProvenance(
+                    kind=BindingProvenanceKind.SEMANTIC_CHOICE,
+                    refs=("governance:sales.channel",),
+                ),
+            ),
+        ),
+        principal=principal,
+    )
+
+
 def _submission(
     *,
     user=None,
@@ -790,6 +1132,7 @@ def _submission(
     question: str = "How many stores are open?",
     idempotency_key: str | None = None,
     execution_mode: ExecutionMode = ExecutionMode.QUEUED,
+    read_context_ref: ReadContextRef | None = None,
 ) -> RunSubmission:
     user = user or _seeded_user()
     return RunSubmission(
@@ -797,23 +1140,25 @@ def _submission(
         tenant_id="tenant_1",
         question_id=question_id,
         run_id=run_id,
-        question=question,
         principal=QuestionPrincipal(
             principal_id=str(user.pk),
             tenant_id="tenant_1",
             raw=user,
             read_context_ref=ReadContextRef(
                 scheme="django_principal", key=str(user.pk)
-            ),
+            ) if read_context_ref is None else read_context_ref,
         ),
-        provider="anthropic",
-        model_key="HAIKU",
+        spec=ModelAssistedRunSpec(
+            integrated_question=question,
+            provider="anthropic",
+            model_key="HAIKU",
+            conversation_context={"factArtifacts": []},
+            runtime_context={"request_id": "request_1"},
+            max_budget_usd="0.25",
+            max_thinking_tokens=128,
+        ),
         execution_mode=execution_mode,
-        conversation_context={"factArtifacts": []},
-        runtime_context={"request_id": "request_1"},
         idempotency_key=idempotency_key,
-        max_budget_usd="0.25",
-        max_thinking_tokens=128,
     )
 
 
@@ -838,8 +1183,8 @@ def _question_run_record(
         run=QuestionRunStart(
             question_id=question_id,
             run_id=run_id,
+            kind=QuestionRunKind.MODEL_ASSISTED,
             trigger_kind=RunTriggerKind.INITIAL,
-            integrated_question=question,
             adapter_ref="django_drf",
             runtime_version="test-runtime",
         ),

@@ -13,6 +13,7 @@ from fervis.lineage.enums import (
     RunStepKey,
     RunStepKind,
     RunTriggerKind,
+    QuestionRunKind,
 )
 from fervis.lineage.recorder import (
     ConversationWrite,
@@ -176,8 +177,8 @@ def _record_prompt_capture_lineage() -> None:
             run_id="run_prompt",
             question_id="question_1",
             run_number=1,
+            kind=QuestionRunKind.MODEL_ASSISTED,
             trigger_kind=RunTriggerKind.INITIAL,
-            integrated_question="How many stores are open?",
             adapter_ref="django_drf:test",
             runtime_version="test-runtime",
         )

@@ -10,6 +10,9 @@ from typing import Any, TypeAlias
 from fervis.lookup.conversation_resolution.overlay import (
     ConversationResolutionOverlay,
 )
+from fervis.lookup.conversation_resolution.input_provenance import (
+    ConversationInputProvenanceSet,
+)
 from fervis.lookup.question_contract.answer_output_support import (
     ANSWER_OUTPUT_SUPPORT_ROLE_VALUES,
 )
@@ -671,6 +674,40 @@ def default_answer_population(
 
 
 @dataclass(frozen=True)
+class RequestedFactPopulationConstraint:
+    id: str
+    included_values: tuple[str, ...]
+    excluded_values: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.id:
+            raise ValueError("requested fact population constraint requires identity")
+        if not self.included_values:
+            raise ValueError(
+                "requested fact population constraint requires included values"
+            )
+        if len(set(self.included_values)) != len(self.included_values):
+            raise ValueError(
+                "requested fact population constraint included values must be unique"
+            )
+        if len(set(self.excluded_values)) != len(self.excluded_values):
+            raise ValueError(
+                "requested fact population constraint excluded values must be unique"
+            )
+        if set(self.included_values) & set(self.excluded_values):
+            raise ValueError(
+                "requested fact population constraint values cannot overlap"
+            )
+
+    def to_model_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "included_values": list(self.included_values),
+            "excluded_values": list(self.excluded_values),
+        }
+
+
+@dataclass(frozen=True)
 class RequestedFact:
     id: str
     description: str
@@ -681,6 +718,7 @@ class RequestedFact:
     known_inputs: tuple[RequestedFactKnownInput, ...] = ()
     input_refs: tuple[str, ...] = ()
     required_for: str = ""
+    population_constraints: tuple[RequestedFactPopulationConstraint, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.id or not self.description:
@@ -749,6 +787,9 @@ class RequestedFact:
         for output in self.answer_outputs:
             if output.role == "GROUP_KEY":
                 raise ValueError("GROUP_KEY belongs to answer_expression.group_key")
+        constraint_ids = tuple(item.id for item in self.population_constraints)
+        if len(set(constraint_ids)) != len(constraint_ids):
+            raise ValueError("duplicate requested fact population constraint")
 
     @property
     def support_answer_outputs(self) -> tuple[RequestedFactAnswerOutput, ...]:
@@ -785,6 +826,11 @@ class RequestedFact:
         payload["answer_outputs"] = [
             output.to_answer_request_dict() for output in self.answer_outputs
         ]
+        if self.population_constraints:
+            payload["population_constraints"] = [
+                constraint.to_model_dict()
+                for constraint in self.population_constraints
+            ]
         return payload
 
 
@@ -959,6 +1005,9 @@ class QuestionContractRequest:
     current_question: str
     conversation_context: dict[str, Any]
     conversation_resolution_overlay: ConversationResolutionOverlay | None = None
+    conversation_input_provenance: ConversationInputProvenanceSet = field(
+        default_factory=ConversationInputProvenanceSet
+    )
     host: HostPromptContext = field(default_factory=HostPromptContext)
 
 
@@ -967,13 +1016,17 @@ def _answer_request_contract_dict(
     *,
     question_input_ids: tuple[str, ...],
 ) -> dict[str, object]:
-    return {
+    payload = {
         "id": fact.id,
         **fact.answer_request_model_dict(),
         "used_question_inputs": [
             input_id for input_id in question_input_ids if input_id in fact.input_refs
         ],
     }
+    payload["answer_outputs"] = [
+        output.to_model_dict() for output in fact.answer_outputs
+    ]
+    return payload
 
 
 def requested_fact_evidence_ref(requested_fact_id: str) -> str:

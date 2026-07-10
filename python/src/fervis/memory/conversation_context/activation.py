@@ -5,9 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from fervis.memory.conversation_context.model import ConversationMemoryCard
+from fervis.memory.conversation_context.model import (
+    ConversationMemoryActivation,
+    ConversationMemoryActivationKind,
+    ConversationMemoryCardProjection,
+)
 from fervis.memory.addresses import FactAddress
 from fervis.memory.artifacts import FactArtifact
+from fervis.memory.prior_requests import PriorRequestMemory
 
 
 @dataclass(frozen=True)
@@ -21,128 +26,118 @@ class ExpandedActivatedMemory:
 def expand_activated_memory_cards(
     *,
     artifacts: tuple[FactArtifact, ...],
-    memory_cards: dict[str, dict[str, Any]],
+    memory_projection: ConversationMemoryCardProjection,
     used_memory_ids: tuple[str, ...],
 ) -> ExpandedActivatedMemory:
     context = _ActivationContext(
         artifacts_by_id={artifact.artifact_id: artifact for artifact in artifacts},
-        memory_cards=memory_cards,
     )
     output: dict[str, dict[str, Any]] = {}
-    for card in _selected_memory_cards(
-        memory_cards=memory_cards,
+    for activation in _selected_memory_activations(
+        memory_projection=memory_projection,
         memory_ids=used_memory_ids,
     ):
-        if card.memory_id in output:
+        if activation.memory_id in output:
             raise ValueError("duplicate used memory id")
-        output[card.memory_id] = _expanded_memory_card_payload(
-            selected_card=card,
+        output[activation.memory_id] = _expanded_memory_card_payload(
+            activation=activation,
             context=context,
         )
     return ExpandedActivatedMemory(by_memory_id=output)
 
 
-def _selected_memory_cards(
+def _selected_memory_activations(
     *,
-    memory_cards: dict[str, dict[str, Any]],
+    memory_projection: ConversationMemoryCardProjection,
     memory_ids: tuple[str, ...],
-) -> tuple[ConversationMemoryCard, ...]:
-    output: list[ConversationMemoryCard] = []
+) -> tuple[ConversationMemoryActivation, ...]:
+    activations_by_memory_id = {
+        activation.memory_id: activation
+        for activation in memory_projection.activations
+    }
+    if len(activations_by_memory_id) != len(memory_projection.activations):
+        raise ValueError("memory projection contains duplicate memory ids")
+    output: list[ConversationMemoryActivation] = []
     for memory_id in memory_ids:
-        payload = memory_cards.get(memory_id)
-        if not isinstance(payload, dict):
+        activation = activations_by_memory_id.get(memory_id)
+        if activation is None:
             raise ValueError(f"unknown memory id: {memory_id}")
-        output.append(
-            ConversationMemoryCard(
-                card_id=str(payload.get("card_id") or memory_id),
-                memory_id=memory_id,
-                kind=str(payload.get("kind") or ""),
-                display=str(payload.get("display") or memory_id),
-                details=dict(payload.get("details") or {}),
-            )
-        )
+        output.append(activation)
     return tuple(output)
 
 
 @dataclass(frozen=True)
 class _ActivationContext:
     artifacts_by_id: dict[str, FactArtifact]
-    memory_cards: dict[str, dict[str, Any]]
 
 
 def _expanded_memory_card_payload(
     *,
-    selected_card: ConversationMemoryCard,
+    activation: ConversationMemoryActivation,
     context: _ActivationContext,
 ) -> dict[str, Any]:
-    card = dict(context.memory_cards.get(selected_card.memory_id) or {})
-    if not card:
-        raise ValueError(f"unknown memory id: {selected_card.memory_id}")
-    artifact = _artifact_for_card(selected_card.memory_id, card=card, context=context)
-    _validate_memory_card(selected_card=selected_card, card=card)
-    if card.get("kind") == "prior_answer_request":
+    if activation.kind is ConversationMemoryActivationKind.PRIOR_REQUEST:
+        prior_request = activation.prior_request
+        assert prior_request is not None
+        artifact = _artifact_for_id(
+            activation.memory_id,
+            artifact_id=activation.artifact_id,
+            context=context,
+        )
         return _expanded_prior_request_payload(
             artifact=artifact,
-            card=card,
+            prior_request=prior_request,
         )
-    address = _address_for_card(selected_card.memory_id, card=card, artifact=artifact)
+    artifact = _artifact_for_id(
+        activation.memory_id,
+        artifact_id=activation.artifact_id,
+        context=context,
+    )
+    address = _address_for_id(
+        activation.memory_id,
+        address_id=activation.address_id,
+        artifact=artifact,
+    )
     return _expanded_card_payload(
         artifact=artifact,
         address=address,
-        card=card,
+        kind=activation.kind,
     )
 
 
-def _artifact_for_card(
+def _artifact_for_id(
     memory_id: str,
     *,
-    card: dict[str, Any],
+    artifact_id: str,
     context: _ActivationContext,
 ) -> FactArtifact:
-    artifact_id = str(card.get("artifact_id") or "").strip()
     artifact = context.artifacts_by_id.get(artifact_id)
     if artifact is None:
         raise ValueError(f"memory {memory_id} references unknown artifact")
     return artifact
 
 
-def _address_for_card(
+def _address_for_id(
     memory_id: str,
     *,
-    card: dict[str, Any],
+    address_id: str,
     artifact: FactArtifact,
 ) -> FactAddress:
-    address_id = str(card.get("address") or "").strip()
     address = artifact.address(address_id)
     if address is None:
         raise ValueError(f"memory {memory_id} references unknown address")
     return address
 
 
-def _validate_memory_card(
-    *,
-    selected_card: ConversationMemoryCard,
-    card: dict[str, Any],
-) -> None:
-    kind = str(card.get("kind") or "").strip()
-    if kind != selected_card.kind:
-        raise ValueError("memory card kind does not match backing card")
-
-
 def _expanded_prior_request_payload(
     *,
     artifact: FactArtifact,
-    card: dict[str, Any],
+    prior_request: PriorRequestMemory,
 ) -> dict[str, Any]:
-    request_shape = dict(card.get("request_shape") or {})
-    slots = _request_slots(request_shape)
     return {
         "kind": "prior_answer_request",
         "source_question": artifact.source_question,
-        "request_shape": {
-            **request_shape,
-            "slots": slots,
-        },
+        "request_shape": prior_request.request_shape_payload(),
     }
 
 
@@ -150,16 +145,14 @@ def _expanded_card_payload(
     *,
     artifact: FactArtifact,
     address: FactAddress,
-    card: dict[str, Any],
+    kind: ConversationMemoryActivationKind,
 ) -> dict[str, Any]:
-    kind = str(card.get("kind") or "").strip()
     builder = _CARD_PAYLOAD_BUILDERS.get(kind)
     if builder is None:
         raise ValueError(f"unsupported memory card kind: {kind}")
     return builder(
         artifact=artifact,
         address=address,
-        card=card,
     )
 
 
@@ -192,8 +185,10 @@ def _row_set_payload(
 
 def _entity_identity_payload(
     *,
+    artifact: FactArtifact,
     address: FactAddress,
 ) -> dict[str, Any]:
+    del artifact
     canonical_values = {
         str(field).strip(): str(value).strip()
         for field, value in address.identity.items()
@@ -219,8 +214,10 @@ def _entity_identity_payload(
 
 def _scalar_value_payload(
     *,
+    artifact: FactArtifact,
     address: FactAddress,
 ) -> dict[str, Any]:
+    del artifact
     return {
         "kind": "scalar_value",
         "value": address.scalar_value.get("value"),
@@ -231,24 +228,12 @@ def _scalar_value_payload(
     }
 
 
-def _comparison_payload(
-    *,
-    address: FactAddress,
-) -> dict[str, Any]:
-    return {
-        "kind": "comparison",
-        "value": address.scalar_value.get("value"),
-        "value_kind": str(address.scalar_value.get("type") or ""),
-        "unit": address.scalar_value.get("unit"),
-        "value_fact_refs": (address.address,),
-        "proof_refs": _proof_refs(address),
-    }
-
-
 def _time_scope_payload(
     *,
+    artifact: FactArtifact,
     address: FactAddress,
 ) -> dict[str, Any]:
+    del artifact
     return {
         "kind": "time_scope",
         "expression": address.scalar_value.get("expression")
@@ -265,28 +250,14 @@ def _clarification_answer_payload(
     *,
     artifact: FactArtifact,
     address: FactAddress,
-    card: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "kind": "clarification_answer",
         "clarification_chain_id": artifact.artifact_id,
-        "clarification_question": card.get("clarification_question")
-        or " ".join(address.clarification_questions),
-        "pending_integrated_question": card.get("pending_integrated_question")
-        or artifact.source_question,
+        "clarification_question": " ".join(address.clarification_questions),
+        "pending_integrated_question": artifact.source_question,
         "activation_fact_refs": (address.address,),
     }
-
-
-def _request_slots(request_shape: dict[str, Any]) -> tuple[dict[str, Any], ...]:
-    raw_slots = request_shape.get("slots") or ()
-    if not isinstance(raw_slots, (list, tuple)):
-        return ()
-    slots: list[dict[str, Any]] = []
-    for item in raw_slots:
-        if isinstance(item, dict):
-            slots.append(dict(item))
-    return tuple(slots)
 
 
 def _source_lineage(address: FactAddress) -> tuple[Any, ...]:
@@ -305,61 +276,12 @@ def _proof_refs(address: FactAddress) -> tuple[Any, ...]:
     return tuple(address.evidence.step_ids if address.evidence else ())
 
 
-def _row_set_payload_from_card(
-    *,
-    artifact: FactArtifact,
-    address: FactAddress,
-    card: dict[str, Any],
-) -> dict[str, Any]:
-    del card
-    return _row_set_payload(artifact=artifact, address=address)
-
-
-def _entity_identity_payload_from_card(
-    *,
-    artifact: FactArtifact,
-    address: FactAddress,
-    card: dict[str, Any],
-) -> dict[str, Any]:
-    del artifact, card
-    return _entity_identity_payload(address=address)
-
-
-def _scalar_value_payload_from_card(
-    *,
-    artifact: FactArtifact,
-    address: FactAddress,
-    card: dict[str, Any],
-) -> dict[str, Any]:
-    del artifact, card
-    return _scalar_value_payload(address=address)
-
-
-def _comparison_payload_from_card(
-    *,
-    artifact: FactArtifact,
-    address: FactAddress,
-    card: dict[str, Any],
-) -> dict[str, Any]:
-    del artifact, card
-    return _comparison_payload(address=address)
-
-
-def _time_scope_payload_from_card(
-    *,
-    artifact: FactArtifact,
-    address: FactAddress,
-    card: dict[str, Any],
-) -> dict[str, Any]:
-    del artifact, card
-    return _time_scope_payload(address=address)
-
-
 _CARD_PAYLOAD_BUILDERS = {
-    "row_set": _row_set_payload_from_card,
-    "entity_identity": _entity_identity_payload_from_card,
-    "scalar_value": _scalar_value_payload_from_card,
-    "comparison": _comparison_payload_from_card,
-    "time_scope": _time_scope_payload_from_card,
-    "clarification_answer": _clarification_answer_payload,
+    ConversationMemoryActivationKind.ROW_SET: _row_set_payload,
+    ConversationMemoryActivationKind.ENTITY_IDENTITY: _entity_identity_payload,
+    ConversationMemoryActivationKind.SCALAR_VALUE: _scalar_value_payload,
+    ConversationMemoryActivationKind.TIME_SCOPE: _time_scope_payload,
+    ConversationMemoryActivationKind.CLARIFICATION_ANSWER: (
+        _clarification_answer_payload
+    ),
 }

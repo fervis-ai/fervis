@@ -27,6 +27,7 @@ input:
         value: {year: 2030, month: 1, day: 1}
       resolved_start: "2030-01-01"
       resolved_end: "2030-01-01"
+      granularity: day
   grounded_input_uses:
     - id: grounded_use_jan_1_start_date_value
       value_id: jan_1

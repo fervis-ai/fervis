@@ -1,0 +1,22 @@
+id: incompatible_source_contract_has_no_effects
+kind: algorithm
+algorithm: answer_program.instantiate
+description: A current source-contract mismatch rejects before source reads.
+input:
+  schema_revision: 1
+  attempts:
+    - id: source
+      program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/invocation}
+      catalog: {$ref: ../../../fixtures/answer_program_v1.yaml#/catalogs/sales_changed_endpoint}
+      environment: {$ref: ../../../fixtures/answer_program_v1.yaml#/environments/invocation}
+      bindings:
+        - parameter_id: question.store_ids
+          value: {kind: identity_set, identity_type: store, identity_field: store_id, values: [store_1]}
+          provenance: {kind: question_input}
+        - parameter_id: semantic.sale_states
+          value: {kind: string_set, values: [COMPLETED]}
+          provenance: {kind: semantic_choice}
+expect:
+  result_equals:
+    attempts:
+      - {id: source, status: rejected, code: incompatible_source_contract, reads: 0}

@@ -24,7 +24,7 @@ from fervis.lookup.fact_plan.fact_plan import (
     PlanImpossible,
 )
 from fervis.lookup.fact_plan.row_sources import api_row_source_id
-from fervis.lookup.fact_plan.values import (
+from fervis.lookup.answer_program.values import (
     FactValue,
     TimeComponent,
 )
@@ -1106,6 +1106,7 @@ def _request_with_optional_params(
                 expression="today",
                 resolved_start="2026-05-22",
                 resolved_end="2026-05-22",
+                granularity="day",
                 proof_refs=("known_input:time_1",),
                 applies_to_requested_fact_ids=("fact_1",),
             ),

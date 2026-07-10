@@ -12,30 +12,43 @@ from fervis.lookup.relation_catalog import (
     RowCardinality,
     RowPath,
 )
-from fervis.lookup.plan_execution.runner import execute_fact_plan
-from fervis.lookup.memory.projection import LookupMemory
-from fervis.lookup.fact_plan.fact_plan import (
-    AnswerPlan,
-    FactFulfillment,
-    FactPlan,
+from fervis.lookup.answer_program import (
+    AnswerProgram,
 )
-from fervis.lookup.fact_plan.operations import (
+from fervis.lookup.answer_program.compilation import compile_answer_program
+from fervis.lookup.answer_program.instantiation import ExecutionEnvironment
+from fervis.lookup.answer_program.invocation import RuntimePorts, invoke_answer_program
+from fervis.lookup.memory.projection import LookupMemory
+from fervis.lookup.answer_program.model import FactFulfillment
+from fervis.lookup.fact_plan.fact_plan import FactPlan
+from fervis.lookup.answer_program.operations import (
     Operation,
     ProjectField,
     ProjectSpec,
 )
-from fervis.lookup.fact_plan.relations import (
+from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
     Relation,
     RelationField,
     RelationSource,
     SourceKind,
 )
-from fervis.lookup.fact_plan.render_spec import (
+from fervis.lookup.answer_program.render_spec import (
     RenderRelationOutput,
     RenderSpec,
 )
-from fervis.lookup.fact_plan.relations import EndpointParamBinding
+from fervis.lookup.answer_program.relations import EndpointParamBinding
+from fervis.lookup.answer_program import (
+    BindingProvenance,
+    BindingProvenanceKind,
+    BindingSet,
+    ParameterBinding,
+    ParameterDeclaration,
+    ParameterRef,
+    ParameterRole,
+    ParameterValueType,
+)
+from fervis.lookup.answer_program.values import FactValue
 
 from tests.testkit.assertions import subset_mismatches
 from tests.testkit.question_contract import question_contract_from_payload
@@ -45,22 +58,37 @@ from tests.testkit.serialization import portable_value
 def run_identity_set_binding_case(payload: dict[str, Any]) -> list[str]:
     input_payload = payload["input"]
     data_access = _DataAccess(responses=tuple(input_payload["responses"]))
-    result = execute_fact_plan(
-        plan=_plan(param_value=tuple(input_payload["identity_values"])),
-        question_contract=question_contract_from_payload(
-            {
-                "requested_facts": [
-                    {
-                        "id": "fact_1",
-                        "description": "sales for prior stores",
-                        "answer_outputs": [{"id": "answer_1"}],
-                    }
-                ]
-            }
+    question_contract = question_contract_from_payload(
+        {
+            "requested_facts": [
+                {
+                    "id": "fact_1",
+                    "description": "sales for prior stores",
+                    "answer_outputs": [{"id": "answer_1"}],
+                }
+            ]
+        }
+    )
+    catalog = _catalog(param_type=str(input_payload.get("param_type") or "uuid"))
+    draft = _plan(param_value=tuple(input_payload["identity_values"]))
+    if not isinstance(draft.outcome, AnswerProgram):
+        raise ValueError("identity-set fixture requires answer program")
+    program, bindings = compile_answer_program(
+        draft.outcome,
+        question_contract=question_contract,
+        catalog=catalog,
+        bindings=draft.bindings,
+    )
+    result = invoke_answer_program(
+        program=program,
+        bindings=bindings,
+        environment=ExecutionEnvironment(
+            catalog=catalog,
         ),
-        catalog=_catalog(param_type=str(input_payload.get("param_type") or "uuid")),
-        data_access_port=data_access,
-        memory=LookupMemory(),
+        ports=RuntimePorts(
+            data_access_port=data_access,
+            memory=LookupMemory(),
+        ),
     )
     actual = {
         "request_param_values": [
@@ -130,8 +158,34 @@ def _catalog(*, param_type: str) -> RelationCatalog:
 
 
 def _plan(*, param_value: object) -> FactPlan:
+    identity_values = tuple(str(value) for value in param_value)
+    parameter_id = "question.store_ids"
+    binding_value = FactValue.identity_set(
+        id="store_ids",
+        identity_type="store",
+        identity_field="store_id",
+        values=identity_values,
+    )
     return FactPlan(
-        outcome=AnswerPlan(
+        bindings=BindingSet.from_bindings(
+            (
+                ParameterBinding(
+                    parameter_id=parameter_id,
+                    value=binding_value,
+                    provenance=BindingProvenance(
+                        kind=BindingProvenanceKind.QUESTION_INPUT,
+                    ),
+                ),
+            )
+        ),
+        outcome=AnswerProgram(
+            parameters=(
+                ParameterDeclaration(
+                    id=parameter_id,
+                    role=ParameterRole.QUESTION_INPUT,
+                    value_type=ParameterValueType.IDENTITY_SET,
+                ),
+            ),
             fulfillment=(
                 FactFulfillment(
                     requested_fact_id="fact_1",
@@ -148,7 +202,7 @@ def _plan(*, param_value: object) -> FactPlan:
                         param_bindings=(
                             EndpointParamBinding(
                                 param_id="store_id",
-                                value=param_value,
+                                value_expr=ParameterRef(parameter_id=parameter_id),
                             ),
                         ),
                     ),

@@ -8,6 +8,7 @@ from fervis.lookup.conversation_resolution import (
     ConversationResolutionOverlay,
     ConversationValueFrameOverlay,
     LiteralQuestionInputOverlay,
+    conversation_input_provenance_from,
     conversation_resolution_question_contract_prompt_payload,
 )
 from fervis.lookup.question_contract import QuestionContractRequest
@@ -67,6 +68,10 @@ def test_question_contract_prompt_uses_raw_question_with_conversation_overlay():
             "And how much did she make yesterday? and where did she work?"
         ),
         conversation_resolution_overlay=overlay,
+        conversation_input_provenance=conversation_input_provenance_from(
+            overlay=overlay,
+            continuation_plan=None,
+        ),
         conversation_context={},
     )
 
@@ -87,10 +92,11 @@ def test_question_contract_prompt_uses_raw_question_with_conversation_overlay():
     assert "Current question:" in prompt
     assert "And how much did she make yesterday? and where did she work?" in prompt
     assert "Conversation resolution annotations:" in prompt
-    assert "resolved_question_inputs" in prompt
+    assert "Conversation input provenance:" in prompt
     assert "literal_text" in prompt
     assert "Alice Smith" in prompt
     assert "question_context" in prompt
+    assert "conversation_resolution" in prompt
     assert '"value_frames"' in prompt
     assert '"resolved_frame_text"' in prompt
     assert '"must_preserve_terms"' in prompt
@@ -105,6 +111,7 @@ def test_question_contract_prompt_uses_raw_question_with_conversation_overlay():
     assert "memory.entity.alice" not in prompt
     assert '"references"' not in prompt
     assert '"scopes"' not in prompt
+    assert "resolved_question_inputs" not in prompt
 
 
 def test_question_contract_turn_does_not_recompose_resolved_active_clarification():

@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from fervis.lookup.fact_plan.values import FactValue
+from fervis.lookup.answer_program.values import FactValue
 
 
 def fact_value_from_payload(payload: dict[str, Any]) -> FactValue:
     if payload.get("kind") == "identity":
         return FactValue.identity(
             id=str(payload["id"]),
+            known_input_id=str(payload.get("known_input_id") or ""),
             identity_type=str(payload["identity_type"]),
             identity_field=str(payload["identity_field"]),
             value=str(payload["value"]),

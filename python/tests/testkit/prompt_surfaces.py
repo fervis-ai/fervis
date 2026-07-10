@@ -18,6 +18,7 @@ PROMPT_SURFACE_CONTRACTS = {
         "instruction_headings": (
             "Task",
             "Clause Resolution",
+            "Prior Question Continuation",
             "Other Dependencies",
             "Resolved Clauses",
             "Needs Clarification",

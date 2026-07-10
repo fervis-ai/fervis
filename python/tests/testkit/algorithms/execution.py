@@ -3,10 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from fervis.lookup.relation_catalog import RelationCatalog
-from fervis.lookup.plan_execution.compiled_execution import compile_fact_execution
-from fervis.lookup.fact_plan.fact_plan import AnswerPlan, FactFulfillment
-from fervis.lookup.fact_plan.operations import Operation, ProjectField, ProjectSpec
-from fervis.lookup.fact_plan.relations import (
+from fervis.lookup.answer_program.instantiation import _materialize_execution
+from fervis.lookup.answer_program.model import AnswerProgram, FactFulfillment
+from fervis.lookup.answer_program.operations import Operation, ProjectField, ProjectSpec
+from fervis.lookup.answer_program.relations import (
+    FieldBindingRole,
     PopulationChoiceControllerKind,
     Relation,
     RelationField,
@@ -16,19 +17,32 @@ from fervis.lookup.fact_plan.relations import (
     ReviewScopeDecisionKind,
     SourceKind,
 )
-from fervis.lookup.fact_plan.render_spec import RenderRelationOutput, RenderSpec
+from fervis.lookup.answer_program.render_spec import RenderRelationOutput, RenderSpec
 from fervis.lookup.fact_plan.row_sources import (
     RowSource,
     RowSourceCatalog,
     RowSourceKind,
 )
+from fervis.lookup.answer_program.values import (
+    BindingProvenance,
+    BindingProvenanceKind,
+    BindingSet,
+    FactValue,
+    ParameterBinding,
+    ParameterDeclaration,
+    ParameterRef,
+    ParameterRole,
+    ParameterValueType,
+)
+from fervis.lookup.question_contract import RequestedFact, RequestedFactAnswerOutput
 
 from tests.testkit.assertions import subset_mismatches
 
 
 def run_execution_proof_graph_case(payload: dict[str, Any]) -> list[str]:
-    compiled = compile_fact_execution(
+    compiled = _materialize_execution(
         answer=_answer_plan(payload["input"]),
+        bindings=_population_bindings(payload["input"]),
         catalog=RelationCatalog(),
         row_sources=_row_source_catalog(payload["input"]),
     )
@@ -41,7 +55,10 @@ def run_execution_proof_graph_case(payload: dict[str, Any]) -> list[str]:
                     "label": node.label,
                     "value": node.value,
                 }
-                for node in compiled.proof_graph.nodes
+                for node in sorted(
+                    compiled.proof_graph.nodes,
+                    key=lambda item: item.kind.value != "population_choice",
+                )
             ],
             "edges": [
                 {
@@ -49,7 +66,12 @@ def run_execution_proof_graph_case(payload: dict[str, Any]) -> list[str]:
                     "target": edge.target,
                     "role": edge.role.value,
                 }
-                for edge in compiled.proof_graph.edges
+                for edge in sorted(
+                    compiled.proof_graph.edges,
+                    key=lambda item: not item.source.startswith(
+                        "population_choice:"
+                    ),
+                )
             ],
             "contributions": [
                 {
@@ -57,7 +79,12 @@ def run_execution_proof_graph_case(payload: dict[str, Any]) -> list[str]:
                     "label": item.label,
                     "node_refs": list(item.node_refs),
                 }
-                for item in compiled.proof_graph.contributions
+                for item in sorted(
+                    compiled.proof_graph.contributions,
+                    key=lambda contribution: not contribution.node_refs[0].startswith(
+                        "population_choice:"
+                    ),
+                )
             ],
             "node_kinds": sorted({node.kind.value for node in compiled.proof_graph.nodes}),
             "edge_roles": sorted({edge.role.value for edge in compiled.proof_graph.edges}),
@@ -66,14 +93,25 @@ def run_execution_proof_graph_case(payload: dict[str, Any]) -> list[str]:
     )
 
 
-def _answer_plan(input_payload: dict[str, Any]) -> AnswerPlan:
-    return AnswerPlan(
+def _answer_plan(input_payload: dict[str, Any]) -> AnswerProgram:
+    return AnswerProgram(
+        fact_template=(
+            RequestedFact(
+                id="fact_1",
+                description="requested fact",
+                answer_outputs=(RequestedFactAnswerOutput(id="answer_1"),),
+            ),
+        ),
         fulfillment=(
             FactFulfillment(
                 requested_fact_id="fact_1",
                 answer_output_id="answer_1",
                 render_output_id="answer_1",
             ),
+        ),
+        parameters=tuple(
+            _population_parameter(item)
+            for item in input_payload.get("population_choices") or ()
         ),
         relations=(_relation(input_payload),),
         operations=(
@@ -110,23 +148,82 @@ def _relation(input_payload: dict[str, Any]) -> Relation:
                 for item in input_payload.get("population_choices") or ()
             ),
         ),
-        fields=(RelationField(field_id="id", roles=()),),
+        fields=(
+            RelationField(field_id="id", roles=()),
+            *tuple(
+                RelationField(
+                    field_id=field_id,
+                    roles=(FieldBindingRole.PREDICATE,),
+                )
+                for field_id in dict.fromkeys(
+                    str(item["field_id"])
+                    for item in input_payload.get("population_choices") or ()
+                )
+                if field_id != "id"
+            ),
+        ),
     )
 
 
 def _population_choice(item: dict[str, Any]) -> RelationSourcePopulationChoice:
+    included_values = tuple(str(value) for value in item["included_values"])
+    excluded_values = tuple(str(value) for value in item.get("excluded_values") or ())
+    proof_refs = tuple(str(ref) for ref in item.get("proof_refs") or ())
     return RelationSourcePopulationChoice(
         controller_kind=PopulationChoiceControllerKind(str(item["controller_kind"])),
         controller_id=str(item["controller_id"]),
         field_id=str(item["field_id"]),
-        included_values=tuple(str(value) for value in item["included_values"]),
-        excluded_values=tuple(str(value) for value in item.get("excluded_values") or ()),
-        proof_refs=tuple(str(ref) for ref in item.get("proof_refs") or ()),
+        requested_fact_ids=tuple(
+            str(fact_id)
+            for fact_id in item.get("requested_fact_ids") or ("fact_1",)
+        ),
+        selection_expr=ParameterRef(
+            parameter_id=_population_parameter_id(item),
+        ),
+        allowed_values=(*included_values, *excluded_values),
+        proof_refs=proof_refs,
         review_scope_decisions=tuple(
             _review_scope_decision(decision)
             for decision in item.get("review_scope_decisions") or ()
         ),
     )
+
+
+def _population_parameter(item: dict[str, Any]) -> ParameterDeclaration:
+    included_values = tuple(str(value) for value in item["included_values"])
+    excluded_values = tuple(str(value) for value in item.get("excluded_values") or ())
+    return ParameterDeclaration(
+        id=_population_parameter_id(item),
+        role=ParameterRole.SEMANTIC_CONTROL,
+        value_type=ParameterValueType.STRING_SET,
+        allowed_values=(*included_values, *excluded_values),
+        semantic_control_ref=str(item["controller_id"]),
+    )
+
+
+def _population_bindings(input_payload: dict[str, Any]) -> BindingSet:
+    return BindingSet.from_bindings(
+        tuple(
+            ParameterBinding(
+                parameter_id=_population_parameter_id(item),
+                value=FactValue.string_set(
+                    id=f"fixture.population.{item['controller_id']}",
+                    values=tuple(str(value) for value in item["included_values"]),
+                    proof_refs=tuple(
+                        str(ref) for ref in item.get("proof_refs") or ()
+                    ),
+                ),
+                provenance=BindingProvenance(
+                    kind=BindingProvenanceKind.SEMANTIC_CHOICE,
+                ),
+            )
+            for item in input_payload.get("population_choices") or ()
+        )
+    )
+
+
+def _population_parameter_id(item: dict[str, Any]) -> str:
+    return f"semantic.{item['controller_id']}"
 
 
 def _review_scope_decision(item: dict[str, Any]) -> RelationSourceReviewScopeDecision:

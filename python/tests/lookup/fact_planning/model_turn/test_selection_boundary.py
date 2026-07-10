@@ -27,13 +27,32 @@ def test_pattern_fact_plan_uses_selected_candidate_member_fields():
                 ),
             )
         ),
-        relation_catalog=RelationCatalog(reads=()),
+        relation_catalog=RelationCatalog(
+            reads=(
+                EndpointRead(
+                    id="get_staff_sales",
+                    endpoint_name="get_staff_sales",
+                    fields=(
+                        CatalogField(
+                            ref="get_staff_sales.field.amount",
+                            path="amount",
+                            type="decimal",
+                        ),
+                        CatalogField(
+                            ref="get_staff_sales.field.location_name",
+                            path="location_name",
+                            type="string",
+                        ),
+                    ),
+                ),
+            )
+        ),
         bound_sources=(
             BoundSource(
                 id="sb_1",
                 requested_fact_id="fact_1",
                 answer_population=_answer_population(),
-                source=RelationSource(
+                source=DraftRelationSource(
                     kind=SourceKind.API_READ,
                     read_id="get_staff_sales",
                 ),
@@ -218,7 +237,7 @@ def test_fact_plan_prompt_uses_bound_source_lineage_not_rehydrated_candidate_fie
                     id="sb_1",
                     requested_fact_id="rf_answer",
                     answer_population=_answer_population(),
-                    source=RelationSource(
+                    source=DraftRelationSource(
                         kind=SourceKind.API_READ,
                         read_id="sales",
                         row_source_id=api_row_source_id("sales", "data"),
@@ -501,7 +520,7 @@ def test_pattern_schema_uses_shape_compatible_bound_source_fields():
                     requested_fact_id="rf_answer",
                     answer_population=_answer_population(),
                     source_candidate_id="source_1",
-                    source=RelationSource(
+                    source=DraftRelationSource(
                         kind=SourceKind.API_READ,
                         read_id="nested_amounts",
                     ),

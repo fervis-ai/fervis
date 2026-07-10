@@ -11,7 +11,9 @@ export type QuestionRefreshPayload = Pick<
   | "questionId"
   | "conversationId"
   | "question"
-  | "currentRunId"
+  | "primaryRunId"
+  | "latestRunId"
+  | "activeRunId"
   | "status"
 >;
 
