@@ -9,10 +9,10 @@ from fervis.lookup.relation_catalog import RelationCatalog
 from fervis.lookup.relation_catalog.selection import (
     EntityTargetResolverSelection,
 )
-from fervis.lookup.conversation_resolution.overlay import (
-    ConversationResolutionOverlay,
-    LiteralQuestionInputOverlay,
-    ResolvedCanonicalIdentityOverlay,
+from fervis.lookup.conversation_resolution.compilation import (
+    CompiledConversationResolution,
+    ResolvedCanonicalIdentity,
+    ResolvedIdentityInput,
 )
 from fervis.lookup.answer_program.values import FactValue
 from fervis.lookup.grounding.model import (
@@ -65,13 +65,13 @@ class GroundingSourceReadError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class _OverlayIdentityImports:
+class _ResolvedIdentityImports:
     ledger: CanonicalInputLedger = CanonicalInputLedger()
     known_input_ids: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
-class _OverlayIdentityImport:
+class _ResolvedIdentityImport:
     known_input_id: str
     value: FactValue
     certification: GroundedValueCertification
@@ -92,9 +92,10 @@ def ground_question_inputs(
     resolver_selections: tuple[EntityTargetResolverSelection, ...] = (),
     conversation_context: dict[str, Any] | None = None,
     active_memory_ids: frozenset[str] | None = None,
-    conversation_resolution_overlay: ConversationResolutionOverlay | None = None,
+    conversation_resolution: CompiledConversationResolution | None = None,
     source_read_lineage: SourceReadLineageScope | None = None,
     host: HostPromptContext = HostPromptContext(),
+    selected_input_ids: frozenset[str] | None = None,
 ) -> GroundingOutput:
     values = []
     uses = []
@@ -114,26 +115,52 @@ def ground_question_inputs(
         runtime_values=runtime_values,
         active_time_anchor_periods=active_time_anchor_periods,
     )
-    values.extend(deterministic.values)
-    issues.extend(deterministic.issues)
-    certifications.extend(deterministic.certifications)
-    time_tasks = time_resolution_tasks(question_contract)
+    values.extend(
+        value
+        for value in deterministic.values
+        if _selected(value.known_input_id, selected_input_ids=selected_input_ids)
+    )
+    issues.extend(
+        issue
+        for issue in deterministic.issues
+        if _selected(issue.known_input_id, selected_input_ids=selected_input_ids)
+    )
+    certifications.extend(
+        certification
+        for certification in deterministic.certifications
+        if any(value.id == certification.value_id for value in values)
+    )
+    time_tasks = tuple(
+        task
+        for task in time_resolution_tasks(question_contract)
+        if _selected(task.known_input_id, selected_input_ids=selected_input_ids)
+    )
 
     reference_tasks = _reference_binding_tasks(
         question_contract,
         resolver_row_sources=resolver_row_sources,
     )
-    overlay_imports = _overlay_canonical_identity_imports(
-        question_contract=question_contract,
-        conversation_resolution_overlay=conversation_resolution_overlay,
+    reference_tasks = tuple(
+        task
+        for task in reference_tasks
+        if _selected(task.known_input_id, selected_input_ids=selected_input_ids)
     )
-    values.extend(overlay_imports.ledger.values)
-    certifications.extend(overlay_imports.ledger.certifications)
-    if overlay_imports.known_input_ids:
+    identity_imports = _resolved_canonical_identity_imports(
+        question_contract=question_contract,
+        conversation_resolution=conversation_resolution,
+    )
+    if selected_input_ids is not None:
+        identity_imports = _selected_identity_imports(
+            identity_imports,
+            selected_input_ids=selected_input_ids,
+        )
+    values.extend(identity_imports.ledger.values)
+    certifications.extend(identity_imports.ledger.certifications)
+    if identity_imports.known_input_ids:
         reference_tasks = tuple(
             task
             for task in reference_tasks
-            if task.known_input_id not in overlay_imports.known_input_ids
+            if task.known_input_id not in identity_imports.known_input_ids
         )
     try:
         resolved_references = _resolve_reference_tasks(
@@ -161,7 +188,6 @@ def ground_question_inputs(
                 tasks=model_tasks,
                 time_tasks=time_tasks,
                 conversation_context=dict(conversation_context or {}),
-                conversation_resolution_overlay=conversation_resolution_overlay,
                 host=host,
             ),
             model_port=model_port,
@@ -211,93 +237,114 @@ def ground_question_inputs(
     )
 
 
-def _overlay_canonical_identity_imports(
+def _selected(
+    known_input_id: str,
+    *,
+    selected_input_ids: frozenset[str] | None,
+) -> bool:
+    return selected_input_ids is None or known_input_id in selected_input_ids
+
+
+def _selected_identity_imports(
+    imports: _ResolvedIdentityImports,
+    *,
+    selected_input_ids: frozenset[str],
+) -> _ResolvedIdentityImports:
+    selected_value_ids = {
+        value.id
+        for value in imports.ledger.values
+        if value.known_input_id in selected_input_ids
+    }
+    return _ResolvedIdentityImports(
+        ledger=CanonicalInputLedger(
+            values=tuple(
+                value
+                for value in imports.ledger.values
+                if value.id in selected_value_ids
+            ),
+            certifications=tuple(
+                item
+                for item in imports.ledger.certifications
+                if item.value_id in selected_value_ids
+            ),
+        ),
+        known_input_ids=imports.known_input_ids & selected_input_ids,
+    )
+
+
+def _resolved_canonical_identity_imports(
     *,
     question_contract: QuestionContract,
-    conversation_resolution_overlay: ConversationResolutionOverlay | None,
-) -> _OverlayIdentityImports:
-    if conversation_resolution_overlay is None:
-        return _OverlayIdentityImports()
+    conversation_resolution: CompiledConversationResolution | None,
+) -> _ResolvedIdentityImports:
+    if conversation_resolution is None:
+        return _ResolvedIdentityImports()
 
-    overlay_by_ref = _literal_identity_overlays_by_ref(conversation_resolution_overlay)
-    imports: list[_OverlayIdentityImport] = []
+    identities_by_ref = {
+        item.input_ref: item for item in conversation_resolution.identity_inputs()
+    }
+    imports: list[_ResolvedIdentityImport] = []
     for known, requested_fact_ids in _reference_known_input_bindings(question_contract):
-        imported = _overlay_identity_import(
+        imported = _resolved_identity_import(
             known=known,
             requested_fact_ids=requested_fact_ids,
-            overlay_by_ref=overlay_by_ref,
+            identities_by_ref=identities_by_ref,
         )
         if imported is not None:
             imports.append(imported)
 
-    return _overlay_identity_imports_ledger(tuple(imports))
+    return _resolved_identity_imports_ledger(tuple(imports))
 
 
-def _literal_identity_overlays_by_ref(
-    overlay: ConversationResolutionOverlay,
-) -> dict[str, LiteralQuestionInputOverlay]:
-    output: dict[str, LiteralQuestionInputOverlay] = {}
-    for item in overlay.resolved_question_inputs:
-        if (
-            item.kind == KnownInputKind.LITERAL
-            and item.resolved_input_ref
-            and item.resolved_canonical_identity is not None
-        ):
-            output[item.resolved_input_ref] = item
-    return output
-
-
-def _overlay_identity_import(
+def _resolved_identity_import(
     *,
     known: RequestedFactKnownInput,
     requested_fact_ids: tuple[str, ...],
-    overlay_by_ref: dict[str, LiteralQuestionInputOverlay],
-) -> _OverlayIdentityImport | None:
-    if not _can_import_overlay_identity(known):
+    identities_by_ref: dict[str, ResolvedIdentityInput],
+) -> _ResolvedIdentityImport | None:
+    if not _can_import_resolved_identity(known):
         return None
-    overlay = overlay_by_ref.get(known.resolved_input_ref)
-    if overlay is None or not _overlay_identity_matches_known(known, overlay):
+    resolved = identities_by_ref.get(known.resolved_input_ref)
+    if resolved is None or not _resolved_identity_matches_known(known, resolved):
         return None
-    canonical = overlay.resolved_canonical_identity
-    if canonical is None:
-        return None
-    value = _overlay_identity_value(
+    canonical = resolved.canonical_identity
+    value = _resolved_identity_value(
         known=known,
-        overlay=overlay,
+        resolved=resolved,
         canonical=canonical,
         requested_fact_ids=requested_fact_ids,
     )
-    return _OverlayIdentityImport(
+    return _ResolvedIdentityImport(
         known_input_id=known.id,
         value=value,
-        certification=_overlay_identity_certification(
+        certification=_resolved_identity_certification(
             known=known,
-            overlay=overlay,
+            resolved=resolved,
             canonical=canonical,
             value=value,
         ),
     )
 
 
-def _overlay_identity_matches_known(
+def _resolved_identity_matches_known(
     known: RequestedFactKnownInput,
-    overlay: LiteralQuestionInputOverlay,
+    resolved: ResolvedIdentityInput,
 ) -> bool:
     return (
-        known.text == overlay.source_text
-        and known.occurrence == overlay.occurrence
-        and known.resolved_value_text == overlay.resolved_value_text
-        and known.field_label_text == overlay.field_label_text
-        and known.value_meaning_hint == overlay.value_meaning_hint
-        and known.role == overlay.role
+        known.text == resolved.value_source_text
+        and known.occurrence == resolved.occurrence
+        and known.resolved_value_text == resolved.resolved_value_text
+        and known.field_label_text == resolved.field_label_text
+        and known.value_meaning_hint == resolved.value_meaning_hint
+        and known.role == resolved.role
     )
 
 
-def _overlay_identity_value(
+def _resolved_identity_value(
     *,
     known: RequestedFactKnownInput,
-    overlay: LiteralQuestionInputOverlay,
-    canonical: ResolvedCanonicalIdentityOverlay,
+    resolved: ResolvedIdentityInput,
+    canonical: ResolvedCanonicalIdentity,
     requested_fact_ids: tuple[str, ...],
 ) -> FactValue:
     return FactValue.identity(
@@ -309,18 +356,18 @@ def _overlay_identity_value(
         display_value=known.resolved_value_text,
         proof_refs=(
             f"known_input:{known.id}",
-            f"resolved_question_input:{overlay.resolved_input_ref}",
+            f"resolved_question_input:{resolved.input_ref}",
             *canonical.authority_refs,
         ),
         applies_to_requested_fact_ids=requested_fact_ids,
     )
 
 
-def _overlay_identity_certification(
+def _resolved_identity_certification(
     *,
     known: RequestedFactKnownInput,
-    overlay: LiteralQuestionInputOverlay,
-    canonical: ResolvedCanonicalIdentityOverlay,
+    resolved: ResolvedIdentityInput,
+    canonical: ResolvedCanonicalIdentity,
     value: FactValue,
 ) -> GroundedValueCertification:
     return GroundedValueCertification(
@@ -329,16 +376,16 @@ def _overlay_identity_certification(
         authority_refs=canonical.authority_refs,
         lineage_refs=(
             f"known_input:{known.id}",
-            f"resolved_question_input:{overlay.resolved_input_ref}",
+            f"resolved_question_input:{resolved.input_ref}",
             *canonical.lineage_refs,
         ),
     )
 
 
-def _overlay_identity_imports_ledger(
-    imports: tuple[_OverlayIdentityImport, ...],
-) -> _OverlayIdentityImports:
-    return _OverlayIdentityImports(
+def _resolved_identity_imports_ledger(
+    imports: tuple[_ResolvedIdentityImport, ...],
+) -> _ResolvedIdentityImports:
+    return _ResolvedIdentityImports(
         ledger=CanonicalInputLedger(
             values=tuple(item.value for item in imports),
             certifications=tuple(item.certification for item in imports),
@@ -347,7 +394,7 @@ def _overlay_identity_imports_ledger(
     )
 
 
-def _can_import_overlay_identity(known: RequestedFactKnownInput) -> bool:
+def _can_import_resolved_identity(known: RequestedFactKnownInput) -> bool:
     return (
         known.kind == KnownInputKind.LITERAL
         and known.source == KnownInputSource.CONVERSATION_RESOLUTION

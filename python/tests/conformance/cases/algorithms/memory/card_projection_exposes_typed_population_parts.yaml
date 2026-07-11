@@ -1,0 +1,63 @@
+id: card_projection_exposes_typed_population_parts
+description: Prior-request frames expose typed time and population constraints for continuation.
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: Same period, but include cancelled orders.
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_completed_orders
+        outcome: answered
+        sourceQuestion: How many completed orders did we receive this month?
+        sourceAnswer: "42"
+        provenance:
+          question_contract:
+            question_inputs:
+              - id: q_time
+                kind: literal_text
+                role: time_value
+                text: this month
+                resolved_value_text: this month
+            answer_requests:
+              - id: fact_1
+                answer_fact: completed order count this month
+                answer_expression: {family: scalar_aggregate}
+                answer_subject: {subject_text: orders}
+                answer_population:
+                  population_label: completed orders this month
+                  counted_unit: order
+                  membership_tests:
+                    - test_id: subject_identity
+                      kind: SUBJECT_IDENTITY
+                      polarity: MUST_PASS
+                      test_question: Is this an order?
+                      owned_question_input_refs: []
+                    - test_id: completed_status
+                      kind: EXPLICIT_USER_CONSTRAINT
+                      polarity: MUST_PASS
+                      test_question: Is this order completed?
+                      owned_question_input_refs: []
+                answer_outputs:
+                  - id: answer_1
+                    description: completed order count
+                used_question_inputs: [q_time]
+        addresses:
+          - address: value.answer_1
+            kind: value
+            value: {type: integer, value: 42, answer_output_ids: [answer_1]}
+expect:
+  result_contains:
+    context_frames:
+      - answer_shape:
+          expression_family: scalar_aggregate
+        parts:
+          - {part_id: subject, kind: answer_subject, text: orders}
+          - {part_id: "output:1", kind: answer_output, text: completed order count}
+          - {part_id: "input:time_scope:1", kind: time_scope, text: this month}
+          - {part_id: "population:explicit_user_constraint:1", kind: population_constraint, text: "Is this order completed?"}
+    cards_by_memory_id:
+      turn_completed_orders.prior_request.fact_1:
+        details:
+          request_shape:
+            semantic_parts:
+              - {part_kind: population_constraint, role: explicit_user_constraint, text: "Is this order completed?"}

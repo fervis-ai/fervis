@@ -8,12 +8,12 @@ input:
   - kind=literal_text with role=reference_value
   - kind=literal_text with role=time_value
   - kind=literal_text with role=result_limit
-  - Use source=conversation_resolution only for conversation input provenance items marked question_input_source=conversation_resolution.
+  - Use source=conversation_resolution only for declared resolved question inputs.
 expect:
   result_contains:
     contains:
       kind=literal_text with role=reference_value: true
       kind=literal_text with role=time_value: true
       kind=literal_text with role=result_limit: true
-      ? Use source=conversation_resolution only for conversation input provenance items marked question_input_source=conversation_resolution.
+      ? Use source=conversation_resolution only for declared resolved question inputs.
       : true

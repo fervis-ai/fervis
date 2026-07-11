@@ -9,6 +9,7 @@ from fervis.host_api.context import HostApiContext
 from fervis.host_api.contracts.authority import ReadAuthority, ReadContextRef
 from fervis.host_api.contracts.credentials import DelegatedReadCredential
 from fervis.lineage.ports import LineageRecorderPort
+from fervis.lineage.enums import ProgramInvocationKind
 from fervis.lookup.answer_program.instantiation import ExecutionEnvironment
 from fervis.lookup.answer_program.persistence import (
     StoredProgramInvocation,
@@ -117,4 +118,6 @@ class AnswerProgramService:
             grounded_values=bound_values,
             extra_fact_addresses=fact_value_memory_addresses(bound_values),
             known_input_step_id=contract_step.step_id,
+            invocation_kind=ProgramInvocationKind.RERUN_PROGRAM,
+            base_invocation_id=request.invocation.invocation.base_invocation_id,
         )

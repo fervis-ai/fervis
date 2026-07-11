@@ -255,7 +255,7 @@ def _clarification_answer_payload(
         "kind": "clarification_answer",
         "clarification_chain_id": artifact.artifact_id,
         "clarification_question": " ".join(address.clarification_questions),
-        "pending_integrated_question": artifact.source_question,
+        "question_being_clarified": artifact.source_question,
         "activation_fact_refs": (address.address,),
     }
 

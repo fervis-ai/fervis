@@ -40,7 +40,15 @@ def test_anthropic_conversation_resolution_uses_canonical_single_tool():
     tools = anthropic_loop._message_kwargs(payload)["tools"]
 
     assert [tool["name"] for tool in tools] == [CONVERSATION_RESOLUTION_TOOL_NAME]
-    assert "clause_resolutions" in tools[0]["input_schema"]["properties"]
+    schema = tools[0]["input_schema"]
+    assert schema["type"] == "object"
+    outcome_variants = schema["properties"]["outcome"]["anyOf"]
+    assert "clauses" in outcome_variants[0]["properties"]
+    assert "frame_call" in outcome_variants[0]["properties"]
+    assert [
+        variant["properties"]["kind"]["enum"][0]
+        for variant in outcome_variants
+    ] == ["resolved", "multiple_meanings", "missing_input"]
 
 
 def _anthropic_test_config() -> ChatProviderConfig:

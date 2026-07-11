@@ -5,10 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any
 
-from fervis.lookup.conversation_resolution import (
-    conversation_resolution_question_contract_context_texts,
-    conversation_resolution_question_contract_prompt_payload,
-)
 from fervis.model_io.turn_artifacts import (
     ModelTurnArtifact,
 )
@@ -55,8 +51,7 @@ def generate_question_contract(
     prompt_request = QuestionContractRequest(
         current_question=request.current_question,
         conversation_context=request.conversation_context,
-        conversation_resolution_overlay=request.conversation_resolution_overlay,
-        conversation_input_provenance=request.conversation_input_provenance,
+        conversation_resolution=request.conversation_resolution,
         host=request.host,
     )
     invocation = QuestionContractTurnPrompt(prompt_request).to_model_invocation(
@@ -64,9 +59,6 @@ def generate_question_contract(
             current_question=request.current_question,
             conversation_context=request.conversation_context,
             host=request.host,
-            conversation_resolution_overlay=conversation_resolution_question_contract_prompt_payload(
-                request.conversation_resolution_overlay
-            ),
         )
     )
     try:
@@ -89,7 +81,7 @@ def generate_question_contract(
             current_question_context_texts=(
                 _question_contract_active_clarification_texts(request)
             ),
-            conversation_input_provenance=request.conversation_input_provenance,
+            conversation_resolution=request.conversation_resolution,
         )
         if isinstance(result.outcome, QuestionContract):
             validate_question_contract_against_question(
@@ -120,11 +112,10 @@ def _question_contract_context_texts(
     request: QuestionContractRequest,
 ) -> tuple[str, ...]:
     output = list(
-        conversation_resolution_question_contract_context_texts(
-            request.conversation_resolution_overlay
-        )
+        request.conversation_resolution.context_texts()
+        if request.conversation_resolution is not None
+        else ()
     )
-    output.extend(request.conversation_input_provenance.context_texts())
     active = active_clarification_context(
         request.conversation_context,
         current_question=request.current_question,

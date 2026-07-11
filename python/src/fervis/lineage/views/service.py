@@ -245,6 +245,8 @@ def _program_derivation_view(
         )
     return ProgramDerivationView(
         invocation_id=invocation.invocation_id,
+        kind=invocation.kind,
+        base_invocation_id=invocation.base_invocation_id,
         program=AnswerProgramRefView(
             program_id=program.program_id,
             schema_revision=program.schema_revision,

@@ -21,7 +21,6 @@ input:
         run_number: 1
         kind: model_assisted
         trigger_kind: initial
-        integrated_question: How many stores are open there?
       - run_id: run_2
         question_id: question_1
         run_number: 2
@@ -29,7 +28,6 @@ input:
         trigger_kind: clarification_response
         base_run_id: run_1
         trigger_clarification_response_id: response_1
-        integrated_question: How many stores are open in London?
     steps:
       - step_id: step_contract_1
         run_id: run_1

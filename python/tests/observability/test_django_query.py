@@ -11,6 +11,7 @@ from fervis.lineage.enums import (
     ModelCallStatus,
     ModelUsageKind,
     ModelUsageUnit,
+    ProgramInvocationKind,
     QuestionRunKind,
     RunResultKind,
     RunStepKey,
@@ -539,6 +540,7 @@ def _record_program_invocation(
                 run_id=run_id,
                 program_id=f"{run_id}:program",
                 bindings_json="{}",
+                kind=ProgramInvocationKind.COMPILED_QUESTION,
             ),
         )
     )

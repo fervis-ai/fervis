@@ -19,7 +19,7 @@ from tests.testkit.algorithms.catalog_selection import (
 )
 from tests.testkit.algorithms.capabilities import run_capabilities_case
 from tests.testkit.algorithms.conversation_resolution import (
-    run_conversation_resolution_overlay_case,
+    run_conversation_resolution_compile_case,
     run_conversation_resolution_parse_case,
     run_conversation_resolution_schema_case,
 )
@@ -73,6 +73,7 @@ from tests.testkit.algorithms.value_uses import (
 from tests.testkit.algorithms.memory import (
     run_conversation_memory_card_projection_case,
     run_conversation_memory_expand_activated_case,
+    run_conversation_memory_frame_equivalence_case,
     run_memory_activate_case,
     run_memory_answer_addresses_case,
     run_memory_available_values_case,
@@ -149,10 +150,13 @@ _RUNNERS: dict[tuple[str, str], CaseRunner] = {
     ("algorithm", "conversation_memory.expand_activated"): (
         run_conversation_memory_expand_activated_case
     ),
+    ("algorithm", "conversation_memory.frame_equivalence"): (
+        run_conversation_memory_frame_equivalence_case
+    ),
     (
         "algorithm",
-        "conversation_resolution.overlay",
-    ): run_conversation_resolution_overlay_case,
+        "conversation_resolution.compile",
+    ): run_conversation_resolution_compile_case,
     (
         "algorithm",
         "conversation_resolution.parse",

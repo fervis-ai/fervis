@@ -16,6 +16,7 @@ from fervis.run_work.queue.django.queue import (
 )
 from fervis.interfaces.django.composition import RUN_CONTEXT_KEY
 from fervis.lineage.enums import (
+    ProgramInvocationKind,
     QuestionRunKind,
     RunResultKind,
     RunStepKind,
@@ -46,7 +47,8 @@ from fervis.questions.ports import (
     QuestionRunStart,
     QuestionRunSubmissionKind,
     LookupExecutionRequest,
-    ModelAssistedRunSpec,
+    ResolveQuestionRunSpec,
+    RunExecutionSpecKind,
     QuestionStart,
     RunSubmission,
 )
@@ -107,7 +109,7 @@ def test_django_question_run_port_submits_initial_run_atomically(
         "question_sequence": question.conversation_sequence,
     } == {
         "work_item_user_id": str(user.pk),
-        "work_item_spec_kind": QuestionRunKind.MODEL_ASSISTED.value,
+        "work_item_spec_kind": RunExecutionSpecKind.RESOLVE_QUESTION.value,
         "work_item_model_key": "HAIKU",
         "work_item_budget": "0.25",
         "run_trigger": RunTriggerKind.INITIAL.value,
@@ -137,9 +139,12 @@ def test_django_rerun_persists_child_invocation_and_queue_atomically(
         QuestionRunKind.DETERMINISTIC.value,
         RunTriggerKind.RERUN.value,
         base.run_id,
-        QuestionRunKind.DETERMINISTIC.value,
+        RunExecutionSpecKind.RERUN_PROGRAM.value,
     )
     assert invocation.patch_id.startswith("bp_")
+    base_invocation = ProgramInvocation.objects.get(run_id=base.run_id)
+    assert invocation.kind == ProgramInvocationKind.RERUN_PROGRAM.value
+    assert invocation.base_invocation_id == base_invocation.invocation_id
 
 
 @pytest.mark.django_db
@@ -246,6 +251,7 @@ def test_django_persists_declared_program_revision(
                 run_id=base.run_id,
                 program_id=answer_program_id(program),
                 bindings=bindings,
+                kind=ProgramInvocationKind.COMPILED_QUESTION,
             ),
         )
     )
@@ -1000,7 +1006,7 @@ def test_queued_django_lookup_uses_submitting_subject_not_worker_identity(
             run_id=queued.submission.run_id,
             conversation_id=queued.submission.conversation_id,
             tenant_id=queued.submission.tenant_id,
-            question=queued.submission.spec.integrated_question,
+            question=queued.submission.spec.question,
             read_context_ref=queued.submission.principal.read_context_ref,
             principal=queued.submission.principal.principal_id,
             provider=queued.submission.spec.provider,
@@ -1060,6 +1066,7 @@ def _django_answered_program_base(
                 run_id=base.run_id,
                 program_id=answer_program_id(program),
                 bindings=bindings,
+                kind=ProgramInvocationKind.COMPILED_QUESTION,
             ),
         )
     )
@@ -1148,8 +1155,8 @@ def _submission(
                 scheme="django_principal", key=str(user.pk)
             ) if read_context_ref is None else read_context_ref,
         ),
-        spec=ModelAssistedRunSpec(
-            integrated_question=question,
+        spec=ResolveQuestionRunSpec(
+            question=question,
             provider="anthropic",
             model_key="HAIKU",
             conversation_context={"factArtifacts": []},

@@ -18,9 +18,12 @@ input:
             answer_requests:
               - id: fact_1
                 answer_fact: total sales for the referenced products
+                answer_expression: {family: scalar_aggregate}
+                answer_subject: {subject_text: sales}
                 answer_outputs:
                   - id: answer_output_1
                     description: total sales amount
+                    role: MEASURED_VALUE
                 used_question_inputs: []
         addresses:
           - address: relation.answer_rows
@@ -39,5 +42,10 @@ input:
 expect:
   result_contains:
     context_frames:
-      - requested_frame: total sales amount
-        prior_answer_fact: total sales for the referenced products
+      - frame_id: "request:1"
+        answer_shape:
+          expression_family: scalar_aggregate
+          output_roles: [MEASURED_VALUE]
+        parts:
+          - {part_id: subject, kind: answer_subject, text: sales}
+          - {part_id: "output:1", kind: answer_output, text: total sales amount}

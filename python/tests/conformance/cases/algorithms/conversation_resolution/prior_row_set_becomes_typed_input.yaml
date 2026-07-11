@@ -1,0 +1,41 @@
+id: prior_row_set_becomes_typed_input
+description: A prior result-set reference compiles to a typed row-set input rather than rewritten prose.
+kind: algorithm
+algorithm: conversation_resolution.compile
+input:
+  current_question: Which of those were completed?
+  context_sources:
+    - source_id: prior_answer
+      kind: prior_fervis_answer
+      text: The previous answer listed five sales.
+      source_card_ids: [rows_card]
+      source_memory_ids: [sales_rows]
+      meaning_anchors:
+        - {memory_id: sales_rows, text: five sales, occurrence: 1, kind: row_set, label: prior sales}
+  memories:
+    - {memory_id: sales_rows, kind: row_set}
+  payload:
+    kind: conversation_resolution
+    current_question_text: Which of those were completed?
+    outcome:
+      kind: resolved
+      resolution_basis: Current meaning and retained prior meaning form the resolved question.
+      contextualized_question: Which of the five prior sales were completed?
+      clauses:
+        - current_clause_text: Which of those were completed?
+          occurrence: 1
+          resolved_text: Which of the five prior sales were completed?
+          retained_frame_parts: []
+          values:
+            - value_id: prior_sales
+              resolved_text: five sales
+              sources:
+                - {kind: current_span, text: those, occurrence: 1}
+                - {kind: context_anchor, source_id: prior_answer, memory_id: sales_rows, source_text: five sales}
+      frame_call: {kind: none}
+expect:
+  result_contains:
+    question_contract_context:
+      resolved_question_inputs:
+        - {kind: row_set_reference, input_ref: conversation.prior_sales, reference_text: five sales, occurrence: 1}
+    uses_prior_context: true

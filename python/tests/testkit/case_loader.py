@@ -103,6 +103,7 @@ def _lint_case(payload: dict[str, Any], *, path: Path) -> None:
 
 
 _TURN_CONTRACT_ALGORITHMS = {
+    "conversation_resolution.compile",
     "conversation_resolution.parse",
     "conversation_resolution.schema",
     "question_contract.parse",

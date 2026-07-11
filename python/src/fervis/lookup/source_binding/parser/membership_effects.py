@@ -370,14 +370,14 @@ def choice_is_included(
     test_ids: tuple[str, ...],
     choice_inclusion: str | None,
 ) -> bool:
+    if choice_inclusion == "EXCLUDE":
+        return False
     tests_decide = _population_tests_decide(
         test_effects=test_effects,
         test_ids=test_ids,
     )
     if not tests_decide:
-        if choice_inclusion is None:
-            return True
-        return choice_inclusion == "INCLUDE"
+        return True
     return population_tests_allow_choice(
         test_effects=test_effects,
         tests_by_id=tests_by_id,

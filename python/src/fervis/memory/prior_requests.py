@@ -19,18 +19,34 @@ from fervis.memory.artifacts import FactArtifact, FactOutcome
 class PriorRequestOutput:
     output_id: str
     description: str
-    requested_value_frame: str
+    role: str
     source_lineage: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if not self.output_id or not self.description or not self.requested_value_frame:
+        if not self.output_id or not self.description or not self.role:
             raise ValueError("prior request output requires identity and meaning")
 
     def to_request_shape(self) -> dict[str, str]:
         return {
             "output_id": self.output_id,
             "description": self.description,
-            "requested_value_frame": self.requested_value_frame,
+            "role": self.role,
+        }
+
+
+@dataclass(frozen=True)
+class PriorRequestAnswerShape:
+    expression_family: str
+    output_roles: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.expression_family or not self.output_roles:
+            raise ValueError("prior request requires typed answer shape")
+
+    def to_request_shape(self) -> dict[str, object]:
+        return {
+            "expression_family": self.expression_family,
+            "output_roles": self.output_roles,
         }
 
 
@@ -38,6 +54,29 @@ class PriorRequestSlotKind(StrEnum):
     ENTITY_IDENTITY = "entity_identity"
     TIME_SCOPE = "time_scope"
     LIMIT = "limit"
+
+
+class PriorRequestSemanticPartKind(StrEnum):
+    POPULATION_CONSTRAINT = "population_constraint"
+    GROUPING = "grouping"
+
+
+@dataclass(frozen=True)
+class PriorRequestSemanticPart:
+    kind: PriorRequestSemanticPartKind
+    role: str
+    text: str
+
+    def __post_init__(self) -> None:
+        if not self.role or not self.text:
+            raise ValueError("prior request semantic part requires role and text")
+
+    def to_request_shape(self) -> dict[str, str]:
+        return {
+            "part_kind": self.kind.value,
+            "role": self.role,
+            "text": self.text,
+        }
 
 
 @dataclass(frozen=True)
@@ -176,9 +215,13 @@ class PriorRequestMemory:
     artifact_id: str
     request_id: str
     answer_fact: str
+    answer_shape: PriorRequestAnswerShape | None
     output_frames: tuple[PriorRequestOutput, ...]
+    run_id: str = ""
+    program_request_ids: tuple[str, ...] = ()
     answer_subject_text: str = ""
     slots: tuple[PriorRequestSlot, ...] = ()
+    semantic_parts: tuple[PriorRequestSemanticPart, ...] = ()
     bound_slots: tuple[PriorRequestBoundSlot, ...] = ()
 
     def __post_init__(self) -> None:
@@ -193,6 +236,10 @@ class PriorRequestMemory:
             raise ValueError("prior request memory requires stable identity")
         if not self.output_frames:
             raise ValueError("prior request memory requires answer outputs")
+        if len(set(self.program_request_ids)) != len(self.program_request_ids):
+            raise ValueError("prior request memory contains duplicate program requests")
+        if self.program_request_ids and self.request_id not in self.program_request_ids:
+            raise ValueError("prior request is not part of its declared program")
         slots_by_id = {slot.slot_id: slot for slot in self.slots}
         if len(slots_by_id) != len(self.slots):
             raise ValueError("prior request memory contains duplicate slots")
@@ -224,9 +271,14 @@ class PriorRequestMemory:
                 frame.to_request_shape() for frame in self.output_frames
             ),
             "slots": tuple(slot.to_request_shape() for slot in self.slots),
+            "semantic_parts": tuple(
+                part.to_request_shape() for part in self.semantic_parts
+            ),
         }
         if self.answer_subject_text:
             payload["answer_subject"] = self.answer_subject_text
+        if self.answer_shape is not None:
+            payload["answer_shape"] = self.answer_shape.to_request_shape()
         return payload
 
     def slot_bindings_payload(self) -> dict[str, dict[str, object]]:
@@ -291,6 +343,13 @@ def prior_requests_from_artifact(
                 artifact_id=artifact.artifact_id,
                 request_id=request_id,
                 answer_fact=_text_field(request, "answer_fact", path=path),
+                answer_shape=_request_answer_shape(request, path=path),
+                run_id=str(artifact.provenance.get("runId") or "").strip(),
+                program_request_ids=tuple(
+                    str(item).strip()
+                    for item in artifact.provenance.get("programRequestedFactIds") or ()
+                    if str(item).strip()
+                ),
                 answer_subject_text=_answer_subject_text(request, path=path),
                 output_frames=_request_outputs(
                     request,
@@ -298,6 +357,7 @@ def prior_requests_from_artifact(
                     path=path,
                 ),
                 slots=slots,
+                semantic_parts=_request_semantic_parts(request, path=path),
                 bound_slots=_prior_slot_bindings(
                     artifact,
                     slots_by_id={slot.slot_id: slot for slot in slots},
@@ -388,7 +448,8 @@ def _request_outputs(
             PriorRequestOutput(
                 output_id=output_id,
                 description=description,
-                requested_value_frame=description,
+                role=_optional_text_field(item, "role", path=output_path)
+                or "ANSWER_VALUE",
                 source_lineage=lineage_by_output_id.get(output_id, ()),
             )
         )
@@ -401,6 +462,111 @@ def _answer_subject_text(request: dict[str, object], *, path: str) -> str:
         return ""
     subject = _mapping(raw_subject, path=f"{path}.answer_subject")
     return _text_field(subject, "subject_text", path=f"{path}.answer_subject")
+
+
+def _request_answer_shape(
+    request: dict[str, object],
+    *,
+    path: str,
+) -> PriorRequestAnswerShape | None:
+    raw_expression = request.get("answer_expression")
+    if raw_expression is None:
+        return None
+    expression = _mapping(raw_expression, path=f"{path}.answer_expression")
+    outputs = _list_field(request, "answer_outputs", path=path)
+    return PriorRequestAnswerShape(
+        expression_family=_text_field(
+            expression,
+            "family",
+            path=f"{path}.answer_expression",
+        ),
+        output_roles=tuple(
+            _optional_text_field(
+                _mapping(output, path=f"{path}.answer_outputs[{index}]"),
+                "role",
+                path=f"{path}.answer_outputs[{index}]",
+            )
+            or "ANSWER_VALUE"
+            for index, output in enumerate(outputs)
+        ),
+    )
+
+
+def _request_semantic_parts(
+    request: dict[str, object],
+    *,
+    path: str,
+) -> tuple[PriorRequestSemanticPart, ...]:
+    return (
+        *_population_constraint_parts(request, path=path),
+        *_grouping_parts(request, path=path),
+    )
+
+
+def _population_constraint_parts(
+    request: dict[str, object],
+    *,
+    path: str,
+) -> tuple[PriorRequestSemanticPart, ...]:
+    raw_population = request.get("answer_population")
+    if raw_population is None:
+        return ()
+    population = _mapping(raw_population, path=f"{path}.answer_population")
+    tests = _list_field(
+        population,
+        "membership_tests",
+        path=f"{path}.answer_population",
+    )
+    parts: list[PriorRequestSemanticPart] = []
+    for index, raw_test in enumerate(tests):
+        test_path = f"{path}.answer_population.membership_tests[{index}]"
+        test = _mapping(raw_test, path=test_path)
+        test_kind = _text_field(test, "kind", path=test_path)
+        owned_input_refs = _list_field(
+            test,
+            "owned_question_input_refs",
+            path=test_path,
+        )
+        if test_kind == "SUBJECT_IDENTITY" or owned_input_refs:
+            continue
+        parts.append(
+            PriorRequestSemanticPart(
+                kind=PriorRequestSemanticPartKind.POPULATION_CONSTRAINT,
+                role=test_kind.casefold(),
+                text=_text_field(test, "test_question", path=test_path),
+            )
+        )
+    return tuple(parts)
+
+
+def _grouping_parts(
+    request: dict[str, object],
+    *,
+    path: str,
+) -> tuple[PriorRequestSemanticPart, ...]:
+    raw_expression = request.get("answer_expression")
+    if raw_expression is None:
+        return ()
+    expression = _mapping(raw_expression, path=f"{path}.answer_expression")
+    raw_group_key = expression.get("group_key")
+    if raw_group_key is None:
+        return ()
+    group_key = _mapping(raw_group_key, path=f"{path}.answer_expression.group_key")
+    return (
+        PriorRequestSemanticPart(
+            kind=PriorRequestSemanticPartKind.GROUPING,
+            role=_text_field(
+                group_key,
+                "domain",
+                path=f"{path}.answer_expression.group_key",
+            ).casefold(),
+            text=_text_field(
+                group_key,
+                "description",
+                path=f"{path}.answer_expression.group_key",
+            ),
+        ),
+    )
 
 
 def _output_source_lineage_by_id(

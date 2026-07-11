@@ -15,6 +15,7 @@ input:
         principal: &principal {principal_id: user_1, tenant_id: tenant_1}
     program_invocations:
       - run_id: run_base
+        kind: compiled_question
         program_id: ap_d261575e1831f8d36c1424830364b3f6dda4c4b6e86b1d1bd7e31aea5c415e7c
         program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/capability}
         bindings:
@@ -45,7 +46,7 @@ expect:
     question_count: 1
     run_count: 2
     run:
-      kind: deterministic
+      kind: rerun_program
       trigger_kind: rerun
       base_run_id: run_base
       patch_id_present: false

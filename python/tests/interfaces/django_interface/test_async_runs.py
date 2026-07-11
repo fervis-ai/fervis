@@ -41,7 +41,11 @@ from fervis.lineage.enums import (
     RunTriggerKind,
 )
 from fervis.questions.contracts import ExecutionMode, QuestionPrincipal
-from fervis.questions.ports import ModelAssistedRunSpec, RunSubmission
+from fervis.questions.ports import (
+    ResolveQuestionRunSpec,
+    RunExecutionSpecKind,
+    RunSubmission,
+)
 from fervis.lookup.clarification import ClarificationNeed, ClarificationReason
 from fervis.lineage.django.recorder import DjangoLineageRecorder
 from fervis.lineage.models import (
@@ -297,8 +301,16 @@ def _answered_lineage_variant(
         conversation_id=str(question.conversation_id),
         tenant_id=str(question.conversation.tenant_id),
         user_id="user-memory",
-        spec_kind=kind.value,
-        execution_spec=_model_execution_spec(question.original_question),
+        spec_kind=(
+            RunExecutionSpecKind.RESOLVE_QUESTION.value
+            if kind is QuestionRunKind.MODEL_ASSISTED
+            else RunExecutionSpecKind.RERUN_PROGRAM.value
+        ),
+        execution_spec=(
+            _model_execution_spec(question.original_question)
+            if kind is QuestionRunKind.MODEL_ASSISTED
+            else {"invocation_id": "seeded", "runtime_context": {}}
+        ),
         read_context_ref=question.conversation.read_context_ref,
         status=RunWorkStatus.COMPLETED,
     )
@@ -381,7 +393,7 @@ def _model_execution_spec(
     runtime_context: dict[str, object] | None = None,
 ) -> dict[str, object]:
     return {
-        "integrated_question": question,
+        "question": question,
         "provider": "anthropic",
         "model_key": "HAIKU",
         "conversation_context": {},
@@ -414,8 +426,8 @@ def _model_submission(
                 key=user_id,
             ),
         ),
-        spec=ModelAssistedRunSpec(
-            integrated_question=question,
+        spec=ResolveQuestionRunSpec(
+            question=question,
             provider="anthropic",
             model_key="HAIKU",
             runtime_context=dict(runtime_context or {}),
@@ -901,9 +913,9 @@ def test_run_view_projects_needs_clarification_result_data_in_canonical_shape(
         tenant_id=conversation.tenant_id,
         user_id="user-1",
         status=RunWorkStatus.COMPLETED,
-        spec_kind=QuestionRunKind.MODEL_ASSISTED.value,
+        spec_kind=RunExecutionSpecKind.RESOLVE_QUESTION.value,
         execution_spec={
-            "integrated_question": question.original_question,
+            "question": question.original_question,
             "provider": None,
             "model_key": "test:model",
             "context_run_id": None,
@@ -1078,7 +1090,7 @@ def test_idempotent_integrity_race_returns_existing_same_key(
         conversation_id="conversation-race",
         tenant_id="tenant-race",
         user_id="user-race",
-        spec_kind=QuestionRunKind.MODEL_ASSISTED.value,
+        spec_kind=RunExecutionSpecKind.RESOLVE_QUESTION.value,
         execution_spec=_model_execution_spec("already completed"),
         read_context_ref={
             "scheme": "django_principal",
@@ -1135,7 +1147,7 @@ def test_enqueue_integrity_error_does_not_break_outer_transaction(
         conversation_id="other-conversation",
         tenant_id="tenant-race",
         user_id="user-race",
-        spec_kind=QuestionRunKind.MODEL_ASSISTED.value,
+        spec_kind=RunExecutionSpecKind.RESOLVE_QUESTION.value,
         execution_spec=_model_execution_spec("already created"),
         read_context_ref=ReadContextRef(scheme="anonymous").to_storage_dict(),
     )

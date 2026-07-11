@@ -1,0 +1,24 @@
+id: finite_choice_excluded_value_stays_out_when_membership_tests_allow_it
+description: A choice excluded from the answer population stays out even when its membership-test effects do not reject it.
+kind: algorithm
+algorithm: source_binding.finite_choice_parse
+input:
+  choices:
+    OPEN:
+      subject_identity: SATISFIES_TEST
+      normal_instance_guard: SATISFIES_TEST
+      choice_inclusion: INCLUDE
+    CLOSED:
+      subject_identity: SATISFIES_TEST
+      normal_instance_guard: DOES_NOT_DECIDE_TEST
+      choice_inclusion: EXCLUDE
+expect:
+  result_contains:
+    source_invocation_param_values:
+      - status: OPEN
+    population_choices:
+      - controller_kind: query_param
+        controller_id: status
+        field_id: status
+        included_values: [OPEN]
+        excluded_values: [CLOSED]

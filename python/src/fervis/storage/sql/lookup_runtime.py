@@ -21,6 +21,7 @@ from fervis.questions.ports import QuestionLookupPort, QuestionProgramPort
 from .lineage_store import SQLLineageRecorderStore
 from .observability_query import SQLObservabilityQuery
 from .terminal import run_has_terminal_result
+from .question_run_ports import SQLQuestionLifecyclePort
 
 
 def sql_configured_lookup_port(
@@ -40,6 +41,7 @@ def sql_configured_lookup_port(
         ),
         observability_query=SQLObservabilityQuery(engine),
         lineage_recorder=LineageRecorder(SQLLineageRecorderStore(engine)),
+        prior_program_invocations=SQLQuestionLifecyclePort(engine=engine),
     )
     return LookupServiceQuestionLookupPort(
         lookup_service=lookup_service,

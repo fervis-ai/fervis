@@ -40,7 +40,7 @@ input:
     memory_id: turn_alice.entity.staff.alice
     anchor_text: she
     resolved_text: Alice Smith
-    integrated_question: How much did Alice Smith sell yesterday?
+    contextualized_question: How much did Alice Smith sell yesterday?
   question_contract:
     fact_description: staff sales yesterday
     subject_text: she
@@ -57,9 +57,9 @@ input:
         term: staff
     known_inputs:
     - kind: literal_text
-      text: she
+      text: Alice Smith
       source: conversation_resolution
-      resolved_input_ref: cr_input_1
+      resolved_input_ref: conversation.selected_memory_value
       resolved_value_text: Alice Smith
       value_meaning_hint: staff identity
       role: reference_value

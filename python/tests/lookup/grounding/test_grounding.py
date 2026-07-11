@@ -13,11 +13,12 @@ from fervis.lookup.relation_catalog import (
     RowCardinality,
     RowPath,
 )
-from fervis.lookup.conversation_resolution.overlay import (
-    ConversationResolutionOverlay,
-    LiteralQuestionInputOverlay,
-    ResolvedCanonicalIdentityOverlay,
+from fervis.lookup.conversation_resolution import (
+    CompiledConversationResolution,
+    ResolvedCanonicalIdentity,
+    ResolvedLiteralQuestionInput,
 )
+from fervis.lookup.conversation_resolution.compilation import CompiledResolvedClause
 from fervis.memory.addresses import FactAddress
 from fervis.memory.artifacts import (
     build_fact_artifact,
@@ -45,7 +46,6 @@ from fervis.lookup.turn_prompts import build_turn_prompt_context
 from fervis.lookup.question_contract import (
     AnswerPopulationMembershipTestKind,
     AnswerPopulationMembershipTestPolarity,
-    KnownInputKind,
     KnownInputSource,
     LiteralInputRole,
     QuestionContract,
@@ -56,6 +56,43 @@ from fervis.lookup.question_contract import (
     RequestedFactKnownInput,
     RequestedFactLiteralInput,
 )
+
+
+def _compiled_resolution_input(
+    *,
+    question: str,
+    input_ref: str,
+    source_text: str,
+    resolved_text: str,
+    role: LiteralInputRole,
+    value_meaning_hint: str,
+    canonical_identity: ResolvedCanonicalIdentity | None = None,
+) -> CompiledConversationResolution:
+    return CompiledConversationResolution(
+        current_question_text=question,
+        contextualized_question=question,
+        clauses=(
+            CompiledResolvedClause(
+                current_clause_text=question,
+                resolved_text=question,
+                retained_frame_parts=(),
+                values=(),
+            ),
+        ),
+        inputs=(
+            ResolvedLiteralQuestionInput(
+                input_ref=input_ref,
+                value_source_text=source_text,
+                resolved_value_text=resolved_text,
+                role=role,
+                value_meaning_hint=value_meaning_hint,
+                canonical_identity=canonical_identity,
+            ),
+        ),
+        frame_call=None,
+        used_source_card_ids=(),
+        used_memory_ids=(),
+    )
 
 
 class _DataAccess:
@@ -562,75 +599,7 @@ def test_grounding_time_schema_rejects_relative_word_as_yearless_point_date():
         validate(instance=payload, schema=schema)
 
 
-def test_grounding_task_payload_places_raw_question_and_cr_annotations_next_to_value_meaning_hint():
-    request = GroundingRequest(
-        question="How many stores are in London?",
-        conversation_resolution_overlay=ConversationResolutionOverlay(
-            current_question="How many stores are in London?",
-            value_frames=(),
-            references=(),
-            scopes=(),
-            activated_memory_ids=(),
-            used_source_card_ids=(),
-            resolved_question_inputs=(
-                LiteralQuestionInputOverlay(
-                    source_text="London",
-                    occurrence=1,
-                    resolved_value_text="London",
-                    value_meaning_hint="city",
-                    role=LiteralInputRole.REFERENCE_VALUE,
-                    resolved_input_ref="input_1",
-                ),
-            ),
-        ),
-        tasks=(
-            KnownInputBindingTask(
-                known_input_id="input_1",
-                known_input_text="London",
-                known_input_kind=KnownInputKind.LITERAL.value,
-                requested_fact_id="fact_1",
-                known_input_description="city/location",
-                lookup_text="London",
-                options=(
-                    InputBindingOption(
-                        id="bind_input_1_1",
-                        known_input_id="input_1",
-                        path="Area name -> area identity",
-                    ),
-                ),
-            ),
-        ),
-    )
-
-    known_inputs = GroundingTurnPrompt(request).known_inputs_payload()
-
-    task = known_inputs["known_input_binding_tasks"][0]
-    assert task["value_meaning_hint"] == "city/location"
-    assert task["question_context"] == {
-        "raw_question": "How many stores are in London?",
-        "conversation_resolution_annotations": {
-            "current_question": "How many stores are in London?",
-            "value_frames": [],
-            "references": [],
-            "scopes": [],
-            "activated_memory_ids": [],
-            "used_source_card_ids": [],
-            "resolved_question_inputs": [
-                {
-                    "kind": "literal_text",
-                    "source_text": "London",
-                    "occurrence": 1,
-                    "resolved_value_text": "London",
-                    "value_meaning_hint": "city",
-                    "role": "reference_value",
-                    "resolved_input_ref": "input_1",
-                }
-            ],
-        },
-    }
-
-
-def test_grounding_imports_overlay_canonical_identity_without_resolver():
+def test_grounding_imports_resolved_canonical_identity_without_resolver():
     known = RequestedFactLiteralInput(
         id="input_staff",
         source=KnownInputSource.CONVERSATION_RESOLUTION,
@@ -663,30 +632,19 @@ def test_grounding_imports_overlay_canonical_identity_without_resolver():
         provider="test",
         model_key="test",
         max_thinking_tokens=0,
-        conversation_resolution_overlay=ConversationResolutionOverlay(
-            current_question="What were her sales?",
-            value_frames=(),
-            references=(),
-            scopes=(),
-            activated_memory_ids=("turn_1.entity.staff.alice",),
-            used_source_card_ids=("card_staff_alice",),
-            resolved_question_inputs=(
-                LiteralQuestionInputOverlay(
-                    source_text="her",
-                    occurrence=1,
-                    resolved_input_ref="cr_input_1",
-                    resolved_value_text="Alice Smith",
-                    value_meaning_hint="staff member",
-                    role=LiteralInputRole.REFERENCE_VALUE,
-                    evidence_refs=("turn_1.entity.staff.alice",),
-                    resolved_canonical_identity=ResolvedCanonicalIdentityOverlay(
-                        identity_type="staff",
-                        identity_field="staff_id",
-                        value="51515151-0000-0000-0002-000000000001",
-                        authority_refs=("prior_source_read:staff:list:row_1",),
-                        lineage_refs=("memory:turn_1.entity.staff.alice",),
-                    ),
-                ),
+        conversation_resolution=_compiled_resolution_input(
+            question="What were her sales?",
+            input_ref="cr_input_1",
+            source_text="her",
+            resolved_text="Alice Smith",
+            role=LiteralInputRole.REFERENCE_VALUE,
+            value_meaning_hint="staff member",
+            canonical_identity=ResolvedCanonicalIdentity(
+                identity_type="staff",
+                identity_field="staff_id",
+                value="51515151-0000-0000-0002-000000000001",
+                authority_refs=("prior_source_read:staff:list:row_1",),
+                lineage_refs=("memory:turn_1.entity.staff.alice",),
             ),
         ),
     )
@@ -712,28 +670,6 @@ def test_grounding_imports_overlay_canonical_identity_without_resolver():
         "resolved_question_input:cr_input_1",
         "memory:turn_1.entity.staff.alice",
     )
-
-
-def test_resolved_canonical_identity_requires_authority_refs():
-    with pytest.raises(ValueError, match="authority"):
-        ResolvedCanonicalIdentityOverlay(
-            identity_type="staff",
-            identity_field="staff_id",
-            value="51515151-0000-0000-0002-000000000001",
-            authority_refs=(),
-            lineage_refs=("memory:turn_1.entity.staff.alice",),
-        )
-
-
-def test_resolved_canonical_identity_rejects_known_input_as_authority():
-    with pytest.raises(ValueError, match="authority"):
-        ResolvedCanonicalIdentityOverlay(
-            identity_type="staff",
-            identity_field="staff_id",
-            value="51515151-0000-0000-0002-000000000001",
-            authority_refs=("known_input:prior_staff",),
-            lineage_refs=("memory:turn_1.entity.staff.alice",),
-        )
 
 
 def test_grounding_imports_canonical_handoff_without_active_memory_check():
@@ -769,29 +705,19 @@ def test_grounding_imports_canonical_handoff_without_active_memory_check():
         provider="test",
         model_key="test",
         max_thinking_tokens=0,
-        conversation_resolution_overlay=ConversationResolutionOverlay(
-            current_question="What were her sales?",
-            value_frames=(),
-            references=(),
-            scopes=(),
-            activated_memory_ids=(),
-            used_source_card_ids=("card_staff_alice",),
-            resolved_question_inputs=(
-                LiteralQuestionInputOverlay(
-                    source_text="her",
-                    occurrence=1,
-                    resolved_input_ref="cr_input_1",
-                    resolved_value_text="Alice Smith",
-                    value_meaning_hint="staff member",
-                    role=LiteralInputRole.REFERENCE_VALUE,
-                    resolved_canonical_identity=ResolvedCanonicalIdentityOverlay(
-                        identity_type="staff",
-                        identity_field="staff_id",
-                        value="51515151-0000-0000-0002-000000000001",
-                        authority_refs=("prior_source_read:staff:list:row_1",),
-                        lineage_refs=("memory:turn_1.entity.staff.alice",),
-                    ),
-                ),
+        conversation_resolution=_compiled_resolution_input(
+            question="What were her sales?",
+            input_ref="cr_input_1",
+            source_text="her",
+            resolved_text="Alice Smith",
+            role=LiteralInputRole.REFERENCE_VALUE,
+            value_meaning_hint="staff member",
+            canonical_identity=ResolvedCanonicalIdentity(
+                identity_type="staff",
+                identity_field="staff_id",
+                value="51515151-0000-0000-0002-000000000001",
+                authority_refs=("prior_source_read:staff:list:row_1",),
+                lineage_refs=("memory:turn_1.entity.staff.alice",),
             ),
         ),
     )
@@ -864,29 +790,19 @@ def test_grounding_certifies_separate_current_input_when_prior_lineage_mentions_
         provider="test",
         model_key="test",
         max_thinking_tokens=0,
-        conversation_resolution_overlay=ConversationResolutionOverlay(
-            current_question="Compare her sales with Jane Doe.",
-            value_frames=(),
-            references=(),
-            scopes=(),
-            activated_memory_ids=(),
-            used_source_card_ids=("card_staff_alice",),
-            resolved_question_inputs=(
-                LiteralQuestionInputOverlay(
-                    source_text="her",
-                    occurrence=1,
-                    resolved_input_ref="cr_input_1",
-                    resolved_value_text="Alice Smith",
-                    value_meaning_hint="staff member",
-                    role=LiteralInputRole.REFERENCE_VALUE,
-                    resolved_canonical_identity=ResolvedCanonicalIdentityOverlay(
-                        identity_type="staff",
-                        identity_field="staff_id",
-                        value="staff_alice",
-                        authority_refs=("prior_source_read:staff:list:row_1",),
-                        lineage_refs=("known_input:old_id",),
-                    ),
-                ),
+        conversation_resolution=_compiled_resolution_input(
+            question="Compare her sales with Jane Doe.",
+            input_ref="cr_input_1",
+            source_text="her",
+            resolved_text="Alice Smith",
+            role=LiteralInputRole.REFERENCE_VALUE,
+            value_meaning_hint="staff member",
+            canonical_identity=ResolvedCanonicalIdentity(
+                identity_type="staff",
+                identity_field="staff_id",
+                value="staff_alice",
+                authority_refs=("prior_source_read:staff:list:row_1",),
+                lineage_refs=("known_input:old_id",),
             ),
         ),
     )
@@ -2594,24 +2510,13 @@ def test_time_grounding_uses_conversation_resolved_value_text():
         provider="test",
         model_key="test",
         max_thinking_tokens=0,
-        conversation_resolution_overlay=ConversationResolutionOverlay(
-            current_question="What about that same period?",
-            value_frames=(),
-            references=(),
-            scopes=(),
-            activated_memory_ids=("turn_1.time_scope.yesterday",),
-            used_source_card_ids=("card_time_yesterday",),
-            resolved_question_inputs=(
-                LiteralQuestionInputOverlay(
-                    source_text="that same period",
-                    occurrence=1,
-                    resolved_input_ref="cr_input_time_1",
-                    resolved_value_text="yesterday",
-                    value_meaning_hint="time scope",
-                    role=LiteralInputRole.TIME_VALUE,
-                    evidence_refs=("turn_1.time_scope.yesterday",),
-                ),
-            ),
+        conversation_resolution=_compiled_resolution_input(
+            question="What about that same period?",
+            input_ref="cr_input_time_1",
+            source_text="that same period",
+            resolved_text="yesterday",
+            role=LiteralInputRole.TIME_VALUE,
+            value_meaning_hint="time scope",
         ),
     )
 

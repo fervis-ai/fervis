@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from typing import Any
+from fervis.lineage.enums import ProgramInvocationKind
 
 from fervis.questions import (
     AskRequest,
@@ -170,6 +171,12 @@ def _portable_rerun_state(
             run_id=str(base["run_id"]),
             program_id=str(base["program_id"]),
             bindings=bindings,
+            kind=ProgramInvocationKind(str(base["kind"])),
+            base_invocation_id=(
+                str(base["base_invocation_id"])
+                if base.get("base_invocation_id") is not None
+                else None
+            ),
         )
         runs.stored_invocations[str(base["run_id"])] = StoredProgramInvocation(
             invocation=invocation,
@@ -554,6 +561,8 @@ class _InMemoryRuns:
                     program_id=bundle.invocation.program_id,
                     canonical_json=bundle.program.canonical_json,
                     bindings_json=bundle.invocation.bindings_json,
+                    kind=bundle.invocation.kind.value,
+                    base_invocation_id=bundle.invocation.base_invocation_id,
                     patch_id=bundle.invocation.patch_id,
                     binding_patch_json=bundle.invocation.binding_patch_json,
                     revision_id=bundle.invocation.revision_id,

@@ -297,6 +297,8 @@ def _program_invocation_row(
         invocation_id=item.invocation_id,
         run_id=item.run_id,
         program_id=item.program_id,
+        kind=item.kind,
+        base_invocation_id=item.base_invocation_id,
         bindings_json=item.bindings_json,
         patch=patch,
         revision_id=item.revision_id,

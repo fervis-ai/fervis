@@ -3,12 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from fervis.lookup.relation_catalog import EndpointRead, RelationCatalog
-from fervis.lookup.conversation_resolution import (
-    ConversationDependencyOverlay,
-    ConversationResolutionOverlay,
-    ConversationValueFrameOverlay,
-    conversation_resolution_query_enrichment_prompt_payload,
-)
 from fervis.lookup.turn_prompts import build_turn_prompt_context
 from fervis.lookup.query_enrichment import (
     QueryEnrichmentRequest,
@@ -115,9 +109,6 @@ def run_query_enrichment_prompt_case(payload: dict[str, Any]) -> list[str]:
         build_turn_prompt_context(
             current_question=request.question,
             conversation_context=request.conversation_context,
-            conversation_resolution_overlay=conversation_resolution_query_enrichment_prompt_payload(
-                request.conversation_resolution_overlay
-            ),
         )
     ).prompt_text
     prompt_object = QueryEnrichmentTurnPrompt(request)
@@ -173,40 +164,4 @@ def _request(payload: dict[str, Any]) -> QueryEnrichmentRequest:
                 for item in payload["reads"]
             )
         ),
-        conversation_resolution_overlay=(
-            _conversation_overlay(payload["conversation_resolution_overlay"])
-            if isinstance(payload.get("conversation_resolution_overlay"), dict)
-            else None
-        ),
-    )
-
-
-def _conversation_overlay(payload: dict[str, Any]) -> ConversationResolutionOverlay:
-    return ConversationResolutionOverlay(
-        current_question=str(payload["current_question"]),
-        value_frames=tuple(
-            ConversationValueFrameOverlay(
-                current_clause_text=str(item["current_clause_text"]),
-                current_value_text=str(item["current_value_text"]),
-                current_value_kind=str(item["current_value_kind"]),
-                resolved_frame_text=str(item["resolved_frame_text"]),
-                must_preserve_terms=tuple(item.get("must_preserve_terms") or ()),
-                used_context_frame_ids=tuple(item.get("used_context_frame_ids") or ()),
-            )
-            for item in payload.get("value_frames") or ()
-        ),
-        references=tuple(
-            ConversationDependencyOverlay(
-                current_clause_text=str(item["current_clause_text"]),
-                anchor_text=str(item["anchor_text"]),
-                occurrence=int(item.get("occurrence") or 1),
-                resolved_text=str(item["resolved_text"]),
-                must_preserve_terms=tuple(item.get("must_preserve_terms") or ()),
-                source_ids=tuple(item.get("source_ids") or ()),
-            )
-            for item in payload.get("references") or ()
-        ),
-        scopes=(),
-        activated_memory_ids=(),
-        used_source_card_ids=(),
     )

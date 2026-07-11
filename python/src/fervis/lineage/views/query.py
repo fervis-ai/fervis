@@ -67,6 +67,8 @@ class ProgramInvocationRow:
     invocation_id: str
     run_id: str
     program_id: str
+    kind: str
+    base_invocation_id: str | None = None
     bindings_json: str = ""
     patch: BindingPatchRow | None = None
     revision_id: str | None = None

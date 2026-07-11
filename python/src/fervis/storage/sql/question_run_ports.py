@@ -207,47 +207,34 @@ class SQLQuestionLifecyclePort:
         access: AuthorizedQuestionAccess,
     ) -> StoredProgramInvocation | None:
         access.require_valid()
-        invocation = metadata.tables["fervis_program_invocation"]
-        program = metadata.tables["fervis_answer_program"]
-        run = metadata.tables["fervis_question_run"]
         question = metadata.tables["fervis_question"]
-        conversation = metadata.tables["fervis_conversation"]
-        result = metadata.tables["fervis_run_result"]
         with sql_connection(self.engine) as connection:
             row = connection.execute(
-                sa.select(
-                    invocation.c.invocation_id,
-                    invocation.c.run_id,
-                    invocation.c.program_id,
-                    invocation.c.bindings_json,
-                    invocation.c.patch_id,
-                    invocation.c.binding_patch_json,
-                    invocation.c.revision_id,
-                    program.c.canonical_json,
-                )
-                .select_from(
-                    invocation.join(
-                        program,
-                        invocation.c.program_id == program.c.program_id,
-                    )
-                    .join(run, invocation.c.run_id == run.c.run_id)
-                    .join(question, run.c.question_id == question.c.question_id)
-                    .join(
-                        conversation,
-                        question.c.conversation_id == conversation.c.conversation_id,
-                    )
-                    .join(result, result.c.run_id == run.c.run_id)
-                )
-                .where(
-                    invocation.c.run_id == run_id,
-                    run.c.question_id == access.question_id,
-                    conversation.c.tenant_id == access.tenant_id,
-                    result.c.result_kind == RunResultKind.ANSWERED.value,
-                )
+                _answered_program_invocation_statement(
+                    run_id=run_id,
+                    tenant_id=access.tenant_id,
+                ).where(question.c.question_id == access.question_id)
             ).first()
         if row is None:
             return None
         return _stored_program_invocation(row)
+
+    def load_prior_answered_invocation(
+        self,
+        *,
+        run_id: str,
+        conversation_id: str,
+        tenant_id: str,
+    ) -> StoredProgramInvocation | None:
+        question = metadata.tables["fervis_question"]
+        with sql_connection(self.engine) as connection:
+            row = connection.execute(
+                _answered_program_invocation_statement(
+                    run_id=run_id,
+                    tenant_id=tenant_id,
+                ).where(question.c.conversation_id == conversation_id)
+            ).first()
+        return _stored_program_invocation(row) if row is not None else None
 
     def load_program_invocation_for_execution(
         self,
@@ -272,6 +259,8 @@ class SQLQuestionLifecyclePort:
                     invocation.c.run_id,
                     invocation.c.program_id,
                     invocation.c.bindings_json,
+                    invocation.c.kind,
+                    invocation.c.base_invocation_id,
                     invocation.c.patch_id,
                     invocation.c.binding_patch_json,
                     invocation.c.revision_id,
@@ -897,6 +886,51 @@ def _spine_clarification_response(response):
     )
 
 
+def _answered_program_invocation_statement(
+    *,
+    run_id: str,
+    tenant_id: str,
+):
+    invocation = metadata.tables["fervis_program_invocation"]
+    program = metadata.tables["fervis_answer_program"]
+    run = metadata.tables["fervis_question_run"]
+    question = metadata.tables["fervis_question"]
+    conversation = metadata.tables["fervis_conversation"]
+    result = metadata.tables["fervis_run_result"]
+    return (
+        sa.select(
+            invocation.c.invocation_id,
+            invocation.c.run_id,
+            invocation.c.program_id,
+            invocation.c.bindings_json,
+            invocation.c.kind,
+            invocation.c.base_invocation_id,
+            invocation.c.patch_id,
+            invocation.c.binding_patch_json,
+            invocation.c.revision_id,
+            program.c.canonical_json,
+        )
+        .select_from(
+            invocation.join(
+                program,
+                invocation.c.program_id == program.c.program_id,
+            )
+            .join(run, invocation.c.run_id == run.c.run_id)
+            .join(question, run.c.question_id == question.c.question_id)
+            .join(
+                conversation,
+                question.c.conversation_id == conversation.c.conversation_id,
+            )
+            .join(result, result.c.run_id == run.c.run_id)
+        )
+        .where(
+            invocation.c.run_id == run_id,
+            conversation.c.tenant_id == tenant_id,
+            result.c.result_kind == RunResultKind.ANSWERED.value,
+        )
+    )
+
+
 def _stored_program_invocation(row: Any) -> StoredProgramInvocation:
     return parse_stored_program_invocation(
         invocation_id=str(row.invocation_id),
@@ -904,6 +938,12 @@ def _stored_program_invocation(row: Any) -> StoredProgramInvocation:
         program_id=str(row.program_id),
         canonical_json=str(row.canonical_json),
         bindings_json=str(row.bindings_json),
+        kind=str(row.kind),
+        base_invocation_id=(
+            str(row.base_invocation_id)
+            if row.base_invocation_id is not None
+            else None
+        ),
         patch_id=str(row.patch_id) if row.patch_id is not None else None,
         binding_patch_json=(
             str(row.binding_patch_json)

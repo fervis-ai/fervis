@@ -22,7 +22,6 @@ input:
         run_number: 1
         kind: model_assisted
         trigger_kind: initial
-        integrated_question: How many stores are open in London?
     steps:
       - step_id: step_execute
         run_id: run_1

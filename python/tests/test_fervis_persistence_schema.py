@@ -80,9 +80,11 @@ def test_fresh_schema_matches_program_and_run_contract() -> None:
         "fervis_program_invocation": {
             "invocation_id",
             "run_id",
-            "program_id",
-            "bindings_json",
-            "patch_id",
+                "program_id",
+                "bindings_json",
+                "kind",
+                "base_invocation_id",
+                "patch_id",
             "binding_patch_json",
             "revision_id",
             "created_at",
@@ -129,7 +131,7 @@ def test_fresh_schema_matches_program_and_run_contract() -> None:
 def test_initial_revision_fingerprint_matches_current_metadata() -> None:
     assert (
         schema.metadata_fingerprint()
-        == "cb35cc5585cc1f38488cbd66128a8310464cbcfa760eca36f9bd4c200fc30b76"
+        == "0f709421843a2bd09b9e40cbdce435ed781a0ec637fdeea01e91833786e462a5"
     )
     schema.assert_head_schema_fingerprint_is_current()
 

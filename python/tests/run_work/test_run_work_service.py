@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from fervis.host_api.contracts.authority import ReadContextRef
+from fervis.lineage.enums import ProgramInvocationKind
 from fervis.lookup.answer_program import AnswerProgram, BindingSet, answer_program_id
 from fervis.lookup.answer_program.persistence import (
     StoredProgramInvocation,
@@ -11,7 +12,7 @@ from fervis.lookup.answer_program.persistence import (
 from fervis.questions import ExecutionMode, QuestionPrincipal
 from fervis.questions.ports import (
     AuthorizedQuestionAccess,
-    DeterministicRunSpec,
+    RerunProgramSpec,
     LookupExecutionResult,
     QueuedRun,
     RunSubmission,
@@ -27,6 +28,8 @@ def test_queued_deterministic_run_uses_program_invoker() -> None:
         run_id="run_rerun",
         program_id=answer_program_id(program),
         bindings=bindings,
+        kind=ProgramInvocationKind.RERUN_PROGRAM,
+        base_invocation_id="pi_base",
     )
     stored = StoredProgramInvocation(
         invocation=invocation,
@@ -47,7 +50,7 @@ def test_queued_deterministic_run_uses_program_invoker() -> None:
                 tenant_id="tenant_1",
                 read_context_ref=current_read_context,
             ),
-            spec=DeterministicRunSpec(invocation_id=invocation.invocation_id),
+            spec=RerunProgramSpec(invocation_id=invocation.invocation_id),
             execution_mode=ExecutionMode.QUEUED,
         ),
         status="QUEUED",
@@ -83,6 +86,8 @@ def test_queued_deterministic_run_rechecks_current_question_authority() -> None:
         run_id="run_rerun",
         program_id=answer_program_id(program),
         bindings=bindings,
+        kind=ProgramInvocationKind.RERUN_PROGRAM,
+        base_invocation_id="pi_base",
     )
     queued = QueuedRun(
         submission=RunSubmission(
@@ -98,7 +103,7 @@ def test_queued_deterministic_run_rechecks_current_question_authority() -> None:
                     key="current-user",
                 ),
             ),
-            spec=DeterministicRunSpec(invocation_id=invocation.invocation_id),
+            spec=RerunProgramSpec(invocation_id=invocation.invocation_id),
             execution_mode=ExecutionMode.QUEUED,
         ),
         status="QUEUED",

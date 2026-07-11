@@ -7,11 +7,8 @@ from enum import StrEnum
 import re
 from typing import Any, TypeAlias
 
-from fervis.lookup.conversation_resolution.overlay import (
-    ConversationResolutionOverlay,
-)
-from fervis.lookup.conversation_resolution.input_provenance import (
-    ConversationInputProvenanceSet,
+from fervis.lookup.conversation_resolution.compilation import (
+    CompiledConversationResolution,
 )
 from fervis.lookup.question_contract.answer_output_support import (
     ANSWER_OUTPUT_SUPPORT_ROLE_VALUES,
@@ -1004,10 +1001,7 @@ class QuestionContractResult:
 class QuestionContractRequest:
     current_question: str
     conversation_context: dict[str, Any]
-    conversation_resolution_overlay: ConversationResolutionOverlay | None = None
-    conversation_input_provenance: ConversationInputProvenanceSet = field(
-        default_factory=ConversationInputProvenanceSet
-    )
+    conversation_resolution: CompiledConversationResolution | None = None
     host: HostPromptContext = field(default_factory=HostPromptContext)
 
 

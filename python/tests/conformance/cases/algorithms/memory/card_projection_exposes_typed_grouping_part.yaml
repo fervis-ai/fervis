@@ -1,0 +1,47 @@
+id: card_projection_exposes_typed_grouping_part
+description: Prior-request frames expose the typed grouping choice independently of concrete inputs.
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: Same sales, grouped by channel instead.
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_sales_by_region
+        outcome: answered
+        sourceQuestion: How many sales did we make by region this month?
+        sourceAnswer: Nairobi 8, Mombasa 4
+        provenance:
+          question_contract:
+            question_inputs:
+              - id: q_time
+                kind: literal_text
+                role: time_value
+                text: this month
+                resolved_value_text: this month
+            answer_requests:
+              - id: fact_1
+                answer_fact: sales count by region this month
+                answer_expression:
+                  family: grouped_aggregate
+                  group_key:
+                    description: region
+                    domain: SOURCE_RESULT_VALUES
+                answer_subject: {subject_text: sales}
+                answer_outputs:
+                  - id: answer_1
+                    description: sales counts by region
+                used_question_inputs: [q_time]
+        addresses:
+          - address: value.answer_1
+            kind: value
+            value: {type: integer, value: 12, answer_output_ids: [answer_1]}
+expect:
+  result_contains:
+    context_frames:
+      - answer_shape:
+          expression_family: grouped_aggregate
+        parts:
+          - {part_id: subject, kind: answer_subject, text: sales}
+          - {part_id: "output:1", kind: answer_output, text: sales counts by region}
+          - {part_id: "input:time_scope:1", kind: time_scope, text: this month}
+          - {part_id: "grouping:1", kind: grouping, text: region}

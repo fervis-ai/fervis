@@ -3,10 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from fervis.lookup.conversation_resolution import (
-    ConversationResolutionOverlay,
-    LiteralQuestionInputOverlay,
-    ResolvedCanonicalIdentityOverlay,
+    CompiledConversationResolution,
+    ResolvedCanonicalIdentity,
+    ResolvedLiteralQuestionInput,
 )
+from fervis.lookup.conversation_resolution.compilation import CompiledResolvedClause
 from fervis.lookup.answer_program.values import FactValue, IdentityValuePayload
 from fervis.lookup.fact_planning.request import RuntimeValueContext
 from fervis.lookup.grounding.resolution import ground_question_inputs
@@ -51,7 +52,7 @@ def _run_grounding_runtime_case(payload: dict[str, Any]) -> list[str]:
         provider="test",
         model_key="test",
         max_thinking_tokens=0,
-        conversation_resolution_overlay=_conversation_overlay_from_input(input_payload),
+        conversation_resolution=_compiled_resolution_from_input(input_payload),
     )
     actual = {
         "values": [_value_payload(value) for value in output.ledger.values],
@@ -103,32 +104,40 @@ def _known_input(payload: dict[str, Any]) -> RequestedFactLiteralInput:
     )
 
 
-def _conversation_overlay_from_input(
+def _compiled_resolution_from_input(
     payload: dict[str, Any],
-) -> ConversationResolutionOverlay:
-    return ConversationResolutionOverlay(
-        current_question=str(payload["question"]),
-        value_frames=(),
-        references=(),
-        scopes=(),
-        activated_memory_ids=(),
-        used_source_card_ids=(),
-        resolved_question_inputs=(
+) -> CompiledConversationResolution:
+    question = str(payload["question"])
+    return CompiledConversationResolution(
+        current_question_text=question,
+        contextualized_question=question,
+        clauses=(
+            CompiledResolvedClause(
+                current_clause_text=question,
+                resolved_text=question,
+                retained_frame_parts=(),
+                values=(),
+            ),
+        ),
+        inputs=(
             _resolved_question_input(payload["resolved_question_input"]),
         ),
+        frame_call=None,
+        used_source_card_ids=(),
+        used_memory_ids=(),
     )
 
 
-def _resolved_question_input(payload: dict[str, Any]) -> LiteralQuestionInputOverlay:
-    return LiteralQuestionInputOverlay(
-        source_text=str(payload["source_text"]),
+def _resolved_question_input(payload: dict[str, Any]) -> ResolvedLiteralQuestionInput:
+    return ResolvedLiteralQuestionInput(
+        input_ref=str(payload["resolved_input_ref"]),
+        value_source_text=str(payload["source_text"]),
         occurrence=int(payload.get("occurrence") or 1),
-        resolved_input_ref=str(payload["resolved_input_ref"]),
         resolved_value_text=str(payload["resolved_value_text"]),
         value_meaning_hint=str(payload.get("value_meaning_hint") or ""),
         field_label_text=str(payload.get("field_label_text") or ""),
         role=LiteralInputRole(str(payload["role"])),
-        resolved_canonical_identity=_resolved_canonical_identity(
+        canonical_identity=_resolved_canonical_identity(
             payload["resolved_canonical_identity"]
         ),
     )
@@ -136,8 +145,8 @@ def _resolved_question_input(payload: dict[str, Any]) -> LiteralQuestionInputOve
 
 def _resolved_canonical_identity(
     payload: dict[str, Any],
-) -> ResolvedCanonicalIdentityOverlay:
-    return ResolvedCanonicalIdentityOverlay(
+) -> ResolvedCanonicalIdentity:
+    return ResolvedCanonicalIdentity(
         identity_type=str(payload["identity_type"]),
         identity_field=str(payload["identity_field"]),
         value=str(payload["value"]),

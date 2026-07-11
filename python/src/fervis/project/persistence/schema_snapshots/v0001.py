@@ -210,6 +210,8 @@ fervis_program_invocation = sa.Table(
         nullable=False,
     ),
     sa.Column("bindings_json", sa.Text(), nullable=False),
+    sa.Column("kind", sa.String(32), nullable=False),
+    sa.Column("base_invocation_id", sa.String(80), nullable=True),
     sa.Column("patch_id", sa.String(80), nullable=True),
     sa.Column("binding_patch_json", sa.Text(), nullable=True),
     sa.Column(

@@ -7,8 +7,8 @@ from typing import Any
 
 from fervis.lookup.relation_catalog import IdentityMetadata, RelationCatalog
 from fervis.lookup.relation_catalog.selection import CatalogSelectionResult
-from fervis.lookup.conversation_resolution.overlay import (
-    ConversationResolutionOverlay,
+from fervis.lookup.conversation_resolution.compilation import (
+    CompiledConversationResolution,
 )
 from fervis.lookup.fact_plan.fact_plan import PlanClarification, PlanImpossible
 from fervis.lookup.source_binding.compiler_ir import DraftRelationSource
@@ -34,7 +34,7 @@ class SourceCandidateDiscoveryRequest:
     available_value_uses: tuple[GroundedInputUse, ...] = ()
     read_eligibility: ReadEligibilityResult | None = None
     conversation_context: dict[str, Any] = field(default_factory=dict)
-    conversation_resolution_overlay: ConversationResolutionOverlay | None = None
+    conversation_resolution: CompiledConversationResolution | None = None
     host: HostPromptContext = field(default_factory=HostPromptContext)
 
 
@@ -53,7 +53,7 @@ class SourceBindingRequest:
     available_value_uses: tuple[GroundedInputUse, ...] = ()
     read_eligibility: ReadEligibilityResult | None = None
     conversation_context: dict[str, Any] = field(default_factory=dict)
-    conversation_resolution_overlay: ConversationResolutionOverlay | None = None
+    conversation_resolution: CompiledConversationResolution | None = None
     host: HostPromptContext = field(default_factory=HostPromptContext)
 
 

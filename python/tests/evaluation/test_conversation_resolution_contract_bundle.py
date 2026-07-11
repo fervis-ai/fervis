@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import json
+
 from fervis.memory.conversation_context import (
     ConversationContextSource,
     ConversationMeaningAnchor,
 )
 from fervis.lookup.conversation_resolution import (
-    CONVERSATION_RESOLUTION_TOOL_NAME,
     ConversationResolutionRequest,
-    ConversationResolutionTurnPrompt,
     generate_conversation_resolution,
 )
 from fervis.lookup.conversation_resolution.schema import (
@@ -32,50 +32,6 @@ def _context_source() -> ConversationContextSource:
             ),
         ),
     )
-
-
-def test_conversation_resolution_contract_bundle_exposes_clause_resolution_contract():
-    prompt = ConversationResolutionTurnPrompt(
-        question="And how much did she make yesterday?",
-        context_sources=(_context_source(),),
-        conversation_context={},
-    )
-    invocation = prompt.to_model_invocation()
-    schema_text = repr(invocation.provider_schema)
-
-    assert {
-        "prompt_terms_present": all(
-            term in invocation.prompt_text
-            for term in (
-                "context_sources",
-                "Available context frames:",
-                "clause_resolutions",
-                "requested_value_frame.context_frame_choices",
-                "Return a conversation resolution result for the current user utterance",
-                "context_frame_choices must include one choice item",
-                "resolved_clause_text rewrites current_clause_text as a standalone clause",
-                "current_clause_text is exact text copied from the current user question",
-            )
-        ),
-        "retired_terms_absent": all(
-            term not in invocation.prompt_text
-            for term in ("context-light", "abstract conversation frame")
-        ),
-        "tool_names": set(invocation.provider_schema),
-        "schema_terms_present": all(
-            term in schema_text for term in ("clause_resolutions", "unresolved")
-        ),
-        "retired_integrated_question_absent": "integrated_question"
-        not in invocation.provider_schema[CONVERSATION_RESOLUTION_TOOL_NAME][
-            "properties"
-        ],
-    } == {
-        "prompt_terms_present": True,
-        "retired_terms_absent": True,
-        "tool_names": {CONVERSATION_RESOLUTION_TOOL_NAME},
-        "schema_terms_present": True,
-        "retired_integrated_question_absent": True,
-    }
 
 
 def test_conversation_resolution_schemas_are_provider_compatible_root_objects():
@@ -147,43 +103,56 @@ class _ConversationResolutionModelPort:
             tool_specs,
         )
         return {
-            "answer": (
-                '{"tool": "submit_conversation_resolution", '
-                '"arguments": {'
-                '"kind": "conversation_resolution", '
-                '"current_question_text": "What quantities were those?", '
-                '"clause_resolutions": [{'
-                '"current_clause_text": "What quantities were those", '
-                '"occurrence": 1, '
-                '"requested_value_frame": {'
-                '"current_value_surface": {'
-                '"text": "quantities", '
-                '"kind": "self_sufficient_current_value"'
-                "}, "
-                '"context_frame_choices": []'
-                "}, "
-                '"dependencies": [{'
-                '"anchor_text": "those", '
-                '"occurrence": 1, '
-                '"kind": "reference", '
-                '"meaning_components": [{'
-                '"kind": "other", '
-                '"source_id": "prior_1", '
-                '"source_text": "prior rows", '
-                '"memory_id": "mem_1", '
-                '"resolved_text": "prior rows"'
-                "}], "
-                '"resolved_text": "prior rows", '
-                '"must_preserve_terms": ["prior rows"]'
-                "}], "
-                '"resolved_clause_text": "What quantities were in the prior rows?"'
-                "}], "
-                '"unresolved": {'
-                '"unresolved_kind": "none", '
-                '"why_unresolved": "", '
-                '"candidate_interpretations": []'
-                "}"
-                "}}"
+            "answer": json.dumps(
+                {
+                    "tool": "submit_conversation_resolution",
+                    "arguments": {
+                        "kind": "conversation_resolution",
+                        "current_question_text": "What quantities were those?",
+                        "outcome": {
+                            "kind": "resolved",
+                            "resolution_basis": (
+                                "The prior rows supply the referent omitted by the "
+                                "current question."
+                            ),
+                            "contextualized_question": (
+                                "What quantities were in the prior rows?"
+                            ),
+                            "clauses": [
+                                {
+                                    "current_clause_text": (
+                                        "What quantities were those?"
+                                    ),
+                                    "occurrence": 1,
+                                    "resolved_text": (
+                                        "What quantities were in the prior rows?"
+                                    ),
+                                    "retained_frame_parts": [],
+                                    "values": [
+                                        {
+                                            "value_id": "prior_rows",
+                                            "resolved_text": "prior rows",
+                                            "sources": [
+                                                {
+                                                    "kind": "current_span",
+                                                    "text": "those",
+                                                    "occurrence": 1,
+                                                },
+                                                {
+                                                    "kind": "context_anchor",
+                                                    "source_id": "prior_1",
+                                                    "memory_id": "mem_1",
+                                                    "source_text": "prior rows",
+                                                },
+                                            ],
+                                        }
+                                    ],
+                                }
+                            ],
+                            "frame_call": {"kind": "none"},
+                        },
+                    },
+                }
             ),
             "usage": {"inputTokens": 1, "outputTokens": 1, "thinkingTokens": 0},
         }

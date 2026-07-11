@@ -43,7 +43,6 @@ class TurnPromptContext:
     host: HostPromptContext = field(default_factory=HostPromptContext)
     active_clarification: ActiveClarificationPromptContext | None = None
     memory: MemoryPromptContext | None = None
-    conversation_resolution_overlay: Mapping[str, object] | None = None
     conversation_context: Mapping[str, object] = field(default_factory=dict)
 
 
@@ -53,7 +52,6 @@ def build_turn_prompt_context(
     conversation_context: Mapping[str, object],
     host: HostPromptContext | None = None,
     memory_payload: Mapping[str, object] | None = None,
-    conversation_resolution_overlay: Mapping[str, object] | None = None,
 ) -> TurnPromptContext:
     return TurnPromptContext(
         current_question=current_question,
@@ -65,7 +63,6 @@ def build_turn_prompt_context(
         memory=(
             MemoryPromptContext(payload=memory_payload) if memory_payload else None
         ),
-        conversation_resolution_overlay=conversation_resolution_overlay,
         conversation_context=conversation_context,
     )
 

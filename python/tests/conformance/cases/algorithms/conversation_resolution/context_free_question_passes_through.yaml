@@ -1,0 +1,26 @@
+id: context_free_question_passes_through
+description: A context-free question preserves the user's wording exactly.
+kind: algorithm
+algorithm: conversation_resolution.parse
+input:
+  current_question: How many stores do we have?
+  payload:
+    kind: conversation_resolution
+    current_question_text: How many stores do we have?
+    outcome:
+      kind: resolved
+      resolution_basis: Current meaning and retained prior meaning form the resolved question.
+      contextualized_question: How many stores do we have?
+      clauses:
+        - current_clause_text: How many stores do we have?
+          occurrence: 1
+          resolved_text: How many stores do we have?
+          retained_frame_parts: []
+          values: []
+      frame_call: {kind: none}
+expect:
+  result_contains:
+    current_question_text: How many stores do we have?
+    contextualized_question: How many stores do we have?
+    frame_call: {kind: none}
+    used_memory_ids: []

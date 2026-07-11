@@ -350,6 +350,11 @@ def _memory_provenance(
     provenance: dict[str, Any] = {
         "runId": run_id,
         "requestedFactId": requested_fact_id,
+        "programRequestedFactIds": [
+            fact.id for fact in question_contract.requested_facts
+        ]
+        if question_contract is not None
+        else [],
     }
     if requested_fact_key:
         provenance["requestedFactKey"] = requested_fact_key

@@ -17,6 +17,7 @@ from fervis.lineage.enums import (
     ModelUsageKind,
     ModelUsageUnit,
     PresentationKind,
+    ProgramInvocationKind,
     QuestionRunKind,
     RunResultKind,
     RunStepKey,
@@ -1717,6 +1718,7 @@ def _record_program_invocation(recorder: LineageRecorderPort) -> None:
                 run_id="run_1",
                 program_id="ap_test",
                 bindings_json="{}",
+                kind=ProgramInvocationKind.COMPILED_QUESTION,
             ),
         )
     )
@@ -1740,6 +1742,7 @@ def test_content_addressed_program_is_shared_by_independent_run_invocations() ->
                     run_id=run_id,
                     program_id=program.program_id,
                     bindings_json="{}",
+                    kind=ProgramInvocationKind.COMPILED_QUESTION,
                 ),
             )
         )

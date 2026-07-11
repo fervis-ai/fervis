@@ -199,11 +199,7 @@ def run_conversation_memory_card_projection_case(
                 for source in projection.context_sources
             ],
             "context_frames": [
-                {
-                    **frame.to_model_dict(),
-                    "prior_answer_fact": frame.prior_answer_fact,
-                }
-                for frame in projection.context_frames
+                frame.to_model_dict() for frame in projection.context_frames
             ],
             "private_cards": projection.private_cards or {},
             "private_backing_ids": _private_backing_ids(projection.private_cards or {}),
@@ -227,6 +223,25 @@ def run_conversation_memory_card_projection_case(
             )
         )
     return errors
+
+
+def run_conversation_memory_frame_equivalence_case(
+    payload: dict[str, Any],
+) -> list[str]:
+    control_frames = [
+        [frame.control_payload() for frame in projection.context_frames]
+        for conversation_context in payload["input"]["conversation_contexts"]
+        for projection in (
+            project_conversation_memory_cards(
+                dict(conversation_context),
+                current_question=str(payload["input"]["current_question"]),
+            ),
+        )
+    ]
+    return exact_mismatches(
+        actual={"control_frames": control_frames},
+        expected=payload["expect"]["result_equals"],
+    )
 
 
 def run_memory_lineage_memory_artifacts_case(payload: dict[str, Any]) -> list[str]:

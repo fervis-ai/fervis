@@ -21,7 +21,6 @@ input:
         run_number: 1
         kind: model_assisted
         trigger_kind: initial
-        integrated_question: Which staff earned the most this month?
     steps:
       - step_id: step_contract
         run_id: run_1

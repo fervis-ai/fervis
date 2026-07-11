@@ -19,6 +19,7 @@ from fervis.lookup.answer_program.persistence import (
     ProgramInvocation,
     ProgramInvocationBinding,
 )
+from fervis.lineage.enums import ProgramInvocationKind
 from fervis.lookup.errors import ErrorCode
 from fervis.lookup.lineage.source_read_buffer import buffered_source_read_lineage
 from fervis.lookup.memory.projection import LookupMemory
@@ -53,8 +54,18 @@ class _RecordCompileInvocationBinding:
     binding: ProgramInvocationBinding
     ports: ProgramExecutionPorts
 
-    def bind(self, execution: VerifiedExecution) -> ProgramInvocation:
-        invocation = self.binding.bind(execution)
+    def bind(
+        self,
+        execution: VerifiedExecution,
+        *,
+        kind: ProgramInvocationKind,
+        base_invocation_id: str | None,
+    ) -> ProgramInvocation:
+        invocation = self.binding.bind(
+            execution,
+            kind=kind,
+            base_invocation_id=base_invocation_id,
+        )
         record_compile_step(
             self.ports,
             program_id=invocation.program_id,
@@ -79,6 +90,8 @@ def run_answer_program_execution(
     extra_fact_addresses: tuple[Any, ...] = (),
     known_input_step_id: str | None = None,
     conversation_resolution_activation: dict[str, Any] | None = None,
+    invocation_kind: ProgramInvocationKind = ProgramInvocationKind.COMPILED_QUESTION,
+    base_invocation_id: str | None = None,
 ) -> LookupResult:
     execution_lineage = buffered_source_read_lineage(
         run_id=request.run_id,
@@ -101,6 +114,8 @@ def run_answer_program_execution(
                     if invocation_binding is not None
                     else None
                 ),
+                invocation_kind=invocation_kind,
+                base_invocation_id=base_invocation_id,
             ),
         )
     except VerificationError as exc:

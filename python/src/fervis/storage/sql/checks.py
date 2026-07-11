@@ -28,7 +28,7 @@ from fervis.questions.ports import (
     ProgramExecutionRequest,
     QuestionLookupPort,
     QuestionProgramPort,
-    ModelAssistedRunSpec,
+    ResolveQuestionRunSpec,
     RunSubmission,
 )
 
@@ -147,8 +147,8 @@ def _dry_run_queue(engine) -> None:
                 principal_id=f"doctor-queue-principal-{suffix}",
                 tenant_id=f"doctor-queue-tenant-{suffix}",
             ),
-            spec=ModelAssistedRunSpec(
-                integrated_question="doctor queue dry run",
+            spec=ResolveQuestionRunSpec(
+                question="doctor queue dry run",
                 provider=None,
                 model_key="DOCTOR",
             ),

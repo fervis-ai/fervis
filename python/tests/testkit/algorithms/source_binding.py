@@ -3876,7 +3876,8 @@ def _finite_choice_option_review(
         "choice_option_id": str(value),
         "choice_domain_meaning": f"{str(value).lower()} sales",
         "choice_inclusion_basis": f"{value} is reviewed for inclusion.",
-        "choice_inclusion": (
+        "choice_inclusion": effect_spec.get("choice_inclusion")
+        or (
             "EXCLUDE"
             if any(v == "CONFLICTS_WITH_TEST" for v in effects.values())
             else "INCLUDE"
@@ -4032,6 +4033,7 @@ def _effect_membership_test_ids(effect: object) -> tuple[str, ...]:
         "omit_tests",
         "include_normal_guard_result",
         "normal_instance_match",
+        "choice_inclusion",
     }
     return tuple(str(key) for key in effect_spec if str(key) not in special_keys)
 

@@ -20,16 +20,15 @@ input:
   conversation_resolution:
     kind: conversation_resolution
     current_question_text: How much was that?
-    clause_resolutions: []
-    unresolved:
-      unresolved_kind: multiple_meanings
+    outcome:
+      kind: multiple_meanings
       why_unresolved: More than one complete interpretation is plausible.
       candidate_interpretations:
-        - integrated_question: How much was that? (1)
+        - contextualized_question: How much was that? (1)
           supporting_evidence:
             - source_id: current_question
               exact_source_texts: ["How much was that?"]
-        - integrated_question: How much was that? (2)
+        - contextualized_question: How much was that? (2)
           supporting_evidence:
             - source_id: current_question
               exact_source_texts: ["How much was that?"]

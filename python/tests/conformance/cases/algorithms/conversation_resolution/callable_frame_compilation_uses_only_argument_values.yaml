@@ -1,0 +1,71 @@
+id: callable_frame_compilation_uses_only_argument_values
+description: A callable frame compiles from its declared argument values without treating other resolution work as invocation input.
+kind: algorithm
+algorithm: conversation_resolution.compile
+input:
+  current_question: What about Pivot Mall?
+  context_sources:
+    - source_id: prior_question
+      kind: prior_user_question
+      text: How many sales did we make at Acacia Mall today?
+      source_card_ids: [prior_card]
+      source_memory_ids: [prior_request]
+  context_frames:
+    - frame_id: request:1
+      source_ids: [prior_question]
+      answer_shape: {expression_family: scalar_aggregate, output_roles: [ROW_POPULATION]}
+      parts:
+        - {part_id: subject, kind: answer_subject, text: sales}
+        - {part_id: output:1, kind: answer_output, text: number of sales}
+        - {part_id: input:entity_identity:1, kind: entity_identity, text: Acacia Mall}
+        - {part_id: input:time_scope:1, kind: time_scope, text: today}
+      callable:
+        base_run_id: run_base
+        requested_fact_id: fact_1
+        parameters:
+          - parameter_id: question.location
+            part_id: input:entity_identity:1
+            kind: entity_identity
+            current_text: Acacia Mall
+            resolved_text: Acacia Mall
+          - parameter_id: question.time
+            part_id: input:time_scope:1
+            kind: time_scope
+            current_text: today
+            resolved_text: today
+  payload:
+    kind: conversation_resolution
+    current_question_text: What about Pivot Mall?
+    outcome:
+      kind: resolved
+      resolution_basis: Current meaning and retained prior meaning form the resolved question.
+      contextualized_question: How many sales did we make at Pivot Mall today?
+      clauses:
+        - current_clause_text: What about Pivot Mall?
+          occurrence: 1
+          resolved_text: How many sales did we make at Pivot Mall today?
+          retained_frame_parts: []
+          values:
+            - value_id: pivot_mall
+              resolved_text: Pivot Mall
+              sources:
+                - {kind: current_span, text: Pivot Mall, occurrence: 1}
+            - value_id: complete_question_meaning
+              resolved_text: How many sales did we make at Pivot Mall today?
+              sources:
+                - {kind: frame_part, frame_id: request:1, part_id: input:entity_identity:1}
+                - {kind: frame_part, frame_id: request:1, part_id: input:time_scope:1}
+      frame_call:
+        kind: call
+        frame_id: request:1
+        arguments:
+          - {kind: resolved_value, parameter_id: question.location, value_id: pivot_mall}
+          - {kind: carry, parameter_id: question.time}
+expect:
+  result_contains:
+    current_question_text: What about Pivot Mall?
+    recorded_contextualized_question: How many sales did we make at Pivot Mall today?
+    frame_call:
+      kind: call
+      frame_id: request:1
+    uses_prior_context: true

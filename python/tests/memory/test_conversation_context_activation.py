@@ -32,11 +32,12 @@ def test_prior_request_activation_uses_the_typed_projection() -> None:
         artifact_id=artifact.artifact_id,
         request_id="fact_1",
         answer_fact="sales count",
+        answer_shape=None,
         output_frames=(
             PriorRequestOutput(
                 output_id="answer_1",
                 description="sales count",
-                requested_value_frame="sales count",
+                role="ROW_POPULATION",
             ),
         ),
     )
@@ -75,9 +76,10 @@ def test_prior_request_activation_uses_the_typed_projection() -> None:
                 {
                     "output_id": "answer_1",
                     "description": "sales count",
-                    "requested_value_frame": "sales count",
+                    "role": "ROW_POPULATION",
                 },
             ),
             "slots": (),
+            "semantic_parts": (),
         },
     }
