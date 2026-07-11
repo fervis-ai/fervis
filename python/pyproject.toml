@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fervis"
-version = "0.1.4"
+version = "0.1.5"
 description = "Deterministic, auditable LLM answers over REST APIs."
 readme = "README.md"
 requires-python = ">=3.11"
