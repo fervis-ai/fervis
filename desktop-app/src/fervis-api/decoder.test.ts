@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  completedContinuedRunFixture,
   completedRunFixture,
   conversationListFixture,
   failedRunFixture,
   freeTextClarificationRunFixture,
   questionStateFixture,
+  runningContinuedRunFixture,
   runListFixture
 } from "./__fixtures__/payloads";
 import {
@@ -399,6 +401,29 @@ describe("Fervis API boundary decoder", () => {
     expect(decoded.value.worker).toBeNull();
     expect(decoded.value.usage).toBeNull();
   });
+
+  it.each([
+    ["RUNNING", runningContinuedRunFixture],
+    ["COMPLETED", completedContinuedRunFixture]
+  ] as const)(
+    "decodes a %s callable prior-request invocation",
+    (_status, payload) => {
+      const decoded = decodeRun(payload);
+
+      if (!decoded.ok) {
+        throw new Error(decoded.error.message);
+      }
+      expect(decoded.value).toMatchObject({
+        kind: "model_assisted",
+        triggerKind: "initial",
+        baseRunId: null,
+        programId: "ap_sales",
+        invocationId: "pi_store_followup",
+        executionKind: "continue_prior_request",
+        baseInvocationId: "pi_sales"
+      });
+    }
+  );
 
   it("decodes deterministic rerun identity and lineage", () => {
     const decoded = decodeRun({
