@@ -82,13 +82,10 @@ def _resolved_clause_schema(
             "current_clause_text": {"type": "string", "minLength": 1},
             "occurrence": {"type": "integer", "minimum": 1},
             "resolved_text": {"type": "string", "minLength": 1},
-            "retained_frame_parts": {
-                "type": "array",
-                "items": _frame_part_reference_schema(
-                    context_frames,
-                    allowed_kinds=_FIXED_SHAPE_PART_KINDS,
-                ),
-            },
+            "retained_frame_parts": _frame_part_references_schema(
+                context_frames,
+                allowed_kinds=_FIXED_SHAPE_PART_KINDS,
+            ),
             "values": {
                 "type": "array",
                 "items": output.ResolvedValueOutput.schema(
@@ -176,7 +173,7 @@ def _frame_part_source_schema(
     )
 
 
-def _frame_part_reference_schema(
+def _frame_part_references_schema(
     frames: tuple[ConversationContextFrame, ...],
     *,
     allowed_kinds: frozenset[ConversationFramePartKind],
@@ -187,10 +184,23 @@ def _frame_part_reference_schema(
         if any(part.kind in allowed_kinds for part in frame.parts)
     ]
     if not branches:
-        return {"type": "object", "not": {}}
+        return {
+            "type": "array",
+            "maxItems": 0,
+            "items": output.FramePartSourceOutput.schema(
+                {
+                    "kind": {"type": "string", "enum": ["frame_part"]},
+                    "frame_id": {"type": "string", "minLength": 1},
+                    "part_id": {"type": "string", "minLength": 1},
+                }
+            ),
+        }
     return {
-        "type": "object",
-        "oneOf": branches,
+        "type": "array",
+        "items": {
+            "type": "object",
+            "oneOf": branches,
+        },
     }
 
 
