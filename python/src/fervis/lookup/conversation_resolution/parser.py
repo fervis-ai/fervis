@@ -276,7 +276,9 @@ def _resolved_clause(
             current_clause_text=current_clause_text,
             context=context,
         )
-        for index, value in enumerate(_required_dicts(item.values, path=f"{path}.values"))
+        for index, value in enumerate(
+            _required_dicts(item.values, path=f"{path}.values")
+        )
     )
     return ResolvedConversationClause(
         current_clause_text=current_clause_text,
@@ -439,9 +441,7 @@ def _frame_argument(
     values_by_id: dict[str, ResolvedConversationValue],
 ) -> FrameArgument:
     item = _required_dict(raw, path=path)
-    kind = FrameArgumentKind(
-        _required_string(item.get("kind"), path=f"{path}.kind")
-    )
+    kind = FrameArgumentKind(_required_string(item.get("kind"), path=f"{path}.kind"))
     if kind is FrameArgumentKind.CARRY:
         value = output.CarriedFrameArgumentOutput.parse(item)
         return CarriedFrameArgument(
@@ -472,7 +472,7 @@ def _unresolved_outcome(
     context: _ParseContext,
 ) -> UnresolvedResolution:
     item = output.UnresolvedOutcomeOutput.parse(raw)
-    return UnresolvedResolution(
+    resolution = UnresolvedResolution(
         unresolved_kind=kind.value,
         why_unresolved=_required_string(
             item.why_unresolved,
@@ -492,6 +492,9 @@ def _unresolved_outcome(
             )
         ),
     )
+    if kind is _OutcomeKind.MULTIPLE_MEANINGS:
+        _require_distinct_context_evidence(resolution.candidate_interpretations)
+    return resolution
 
 
 def _candidate_interpretation(
@@ -501,25 +504,42 @@ def _candidate_interpretation(
     context: _ParseContext,
 ) -> CandidateInterpretation:
     item = output.CandidateInterpretationOutput.parse(raw)
+    context_evidence = tuple(
+        _source_evidence(
+            evidence,
+            path=f"{path}.context_evidence[{index}]",
+            context=context,
+        )
+        for index, evidence in enumerate(
+            _required_dicts(
+                item.context_evidence,
+                path=f"{path}.context_evidence",
+            )
+        )
+    )
+    if any(evidence.source_id == "current_question" for evidence in context_evidence):
+        raise ValueError(f"{path}.context_evidence must cite prior context")
     return CandidateInterpretation(
         contextualized_question=_required_string(
             item.contextualized_question,
             path=f"{path}.contextualized_question",
         ),
-        supporting_evidence=tuple(
-            _source_evidence(
-                evidence,
-                path=f"{path}.supporting_evidence[{index}]",
-                context=context,
-            )
-            for index, evidence in enumerate(
-                _required_dicts(
-                    item.supporting_evidence,
-                    path=f"{path}.supporting_evidence",
-                )
-            )
-        ),
+        context_evidence=context_evidence,
     )
+
+
+def _require_distinct_context_evidence(
+    candidates: tuple[CandidateInterpretation, ...],
+) -> None:
+    signatures = tuple(
+        frozenset(
+            (evidence.source_id, evidence.exact_source_texts)
+            for evidence in candidate.context_evidence
+        )
+        for candidate in candidates
+    )
+    if len(signatures) != len(set(signatures)):
+        raise ValueError("multiple meanings require distinct context evidence")
 
 
 def _source_evidence(
@@ -570,7 +590,7 @@ def _used_sources(
         for source_id in context.frames[frame_call.frame_id].source_ids:
             _append_unique(source_ids, source_id)
     for interpretation in unresolved.candidate_interpretations:
-        for evidence in interpretation.supporting_evidence:
+        for evidence in interpretation.context_evidence:
             _append_unique(source_ids, evidence.source_id)
     return tuple(
         context.sources[source_id]
@@ -581,7 +601,9 @@ def _used_sources(
 
 def _source_card_ids(sources: tuple[_SourceText, ...]) -> tuple[str, ...]:
     return tuple(
-        dict.fromkeys(card_id for source in sources for card_id in source.source_card_ids)
+        dict.fromkeys(
+            card_id for source in sources for card_id in source.source_card_ids
+        )
     )
 
 
@@ -663,8 +685,7 @@ def _required_dicts(raw: object, *, path: str) -> tuple[dict[str, Any], ...]:
     if not isinstance(raw, list):
         raise ValueError(f"{path} must be an array")
     return tuple(
-        _required_dict(item, path=f"{path}[{index}]")
-        for index, item in enumerate(raw)
+        _required_dict(item, path=f"{path}[{index}]") for index, item in enumerate(raw)
     )
 
 

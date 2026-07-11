@@ -66,11 +66,20 @@ from fervis.lookup.source_binding import (
 from fervis.lookup.source_binding.candidates import SourceCandidate
 from fervis.lookup.source_binding.parser.fulfillment import parse_source_fulfillments
 from fervis.lookup.source_binding.schema import build_source_binding_schema
-from fervis.lookup.source_binding.plan_targets import SourceBindingTargetCompatibility
+from fervis.lookup.plan_selection.family_specs import SourceMemberConstraint
+from fervis.lookup.source_binding.plan_targets import (
+    SourceBindingPlanFamily,
+    SourceBindingTarget,
+    SourceBindingTargetCompatibility,
+    source_binding_fact_field_id,
+    source_binding_target_index_for_plan_selection,
+)
 from fervis.lookup.source_binding.role_selection import value_only_source_binding_plan
 from fervis.lookup.source_binding.parser import parse_source_binding
 from fervis.lookup.source_binding.model import SourceBindingPlan
-from fervis.lookup.orchestration.pipeline import _bound_plan_selection_from_plan_selection
+from fervis.lookup.orchestration.pipeline import (
+    _bound_plan_selection_from_plan_selection,
+)
 from fervis.lookup.operation_families.source_binding_registry import (
     source_binding_metric_evidence_ids_by_requested_fact,
 )
@@ -98,11 +107,47 @@ def test_source_binding_schema_uses_compact_role_target_handles():
     candidate_target_schema = invocation_schemas[
         "target.fact_1.set_difference.source_1.candidate_set"
     ]
-    fulfillment_schema = candidate_target_schema["properties"][
-        "fulfillment_decisions"
-    ]
+    fulfillment_schema = candidate_target_schema["properties"]["fulfillment_decisions"]
     assert "answer_1" in fulfillment_schema["properties"]
     assert "anyOf" not in fulfillment_schema
+
+
+def test_source_binding_projects_fact_shape_role_plan_families():
+    prompt = SourceBindingTurnPrompt(_set_difference_request())
+
+    payload = prompt.binding_plan_families_payload()
+
+    fact = payload["bindings_by_requested_fact"]["fact_1"]
+    shape = fact["plan_shapes"]["set_difference"]
+    assert shape["member_constraint"] == "DISTINCT_SOURCE_CANDIDATES"
+    assert set(shape["role_targets"]) == {"candidate_set", "observed_set"}
+    assert all(
+        target["requirement_id"] == role_id
+        for role_id, targets in shape["role_targets"].items()
+        for target in targets
+    )
+
+
+def test_source_binding_schema_is_fact_shape_role_keyed():
+    schema = (
+        SourceBindingTurnPrompt(_set_difference_request())
+        .response_contract()
+        .provider_schema
+    )
+
+    outcome = next(
+        variant
+        for variant in schema["properties"]["outcome"]["oneOf"]
+        if variant["properties"]["kind"].get("enum") == ["source_bindings"]
+    )
+    fact = outcome["properties"]["bindings_for_fact_1"]
+
+    assert "source_invocations" not in outcome["properties"]
+    assert fact["properties"]["plan_shape"]["enum"] == ["set_difference"]
+    assert set(fact["properties"]) - {"plan_shape"} == {
+        "candidate_set",
+        "observed_set",
+    }
 
 
 def test_source_binding_schema_scopes_param_surfaces_to_binding_target():
@@ -157,6 +202,7 @@ def test_source_binding_schema_scopes_param_surfaces_to_binding_target():
             "target.source_1": ("pop.source_1.candidate_population",),
             "target.source_2": ("pop.source_2.candidate_population",),
         },
+        plan_families=_test_plan_families("target.source_1", "target.source_2"),
     )
 
     variants = _source_invocation_variants_by_target(schema)
@@ -166,16 +212,16 @@ def test_source_binding_schema_scopes_param_surfaces_to_binding_target():
     assert set(source_1["properties"]["param_decisions"]["properties"]) == {
         "start_date"
     }
-    assert set(
-        source_1["properties"]["finite_choice_param_reviews"]["properties"]
-    ) == {"status"}
+    assert set(source_1["properties"]["finite_choice_param_reviews"]["properties"]) == {
+        "status"
+    }
     assert set(source_2["properties"]["param_decisions"]["properties"]) == {
         "group_by",
         "status",
     }
-    assert set(
-        source_2["properties"]["finite_choice_param_reviews"]["properties"]
-    ) == {"sale_type"}
+    assert set(source_2["properties"]["finite_choice_param_reviews"]["properties"]) == {
+        "sale_type"
+    }
 
 
 def test_source_binding_schema_requires_only_selectable_fulfillment_outputs():
@@ -202,6 +248,7 @@ def test_source_binding_schema_requires_only_selectable_fulfillment_outputs():
         target_population_binding_ids={
             "target.source_1": ("pop.source_1.candidate_population",),
         },
+        plan_families=_test_plan_families("target.source_1"),
     )
     invocation_schema = _source_invocation_variants_by_target(schema)["target.source_1"]
     fulfillment_schema = invocation_schema["properties"]["fulfillment_decisions"]
@@ -227,22 +274,23 @@ def test_source_binding_schema_requires_only_selectable_fulfillment_outputs():
                         }
                     }
                 },
-                "source_invocations": [
-                    {
-                        **_minimal_source_invocation(
-                            "target.source_1",
-                            "pop.source_1.candidate_population",
-                        ),
-                        "fulfillment_decisions": {
-                            "answer_group": {
-                                "fulfillment_choice_id": (
-                                    "support.source_1.answer_group"
+                "bindings_for_fact_1": {
+                    "plan_shape": "test_shape",
+                    "primary": {
+                                **_minimal_source_invocation(
+                                    "target.source_1",
+                                    "pop.source_1.candidate_population",
                                 ),
-                                "match_basis_explanation": "The selected group key.",
-                            },
-                        },
+                                "fulfillment_decisions": {
+                                    "answer_group": {
+                                        "fulfillment_choice_id": (
+                                            "support.source_1.answer_group"
+                                        ),
+                                        "match_basis_explanation": "The selected group key.",
+                                    },
+                                },
                     }
-                ],
+                },
             },
         },
         schema=schema,
@@ -273,6 +321,7 @@ def test_source_binding_schema_requires_exposed_row_predicate_reviews():
         target_population_binding_ids={
             "target.source_1": ("pop.source_1.candidate_population",),
         },
+        plan_families=_test_plan_families("target.source_1"),
     )
     invocation_schema = _source_invocation_variants_by_target(schema)["target.source_1"]
     row_reviews_schema = invocation_schema["properties"]["row_predicate_reviews"]
@@ -285,12 +334,15 @@ def test_source_binding_schema_requires_exposed_row_predicate_reviews():
                     "kind": "source_bindings",
                     "metric_fit_bases": {},
                     "fit_basis_interpretations": {},
-                    "source_invocations": [
-                        _minimal_source_invocation(
+                    **_test_fact_binding(
+                        requested_fact_id="fact_1",
+                        plan_shape="test_shape",
+                        requirement_id="primary",
+                        invocation=_minimal_source_invocation(
                             "target.source_1",
                             "pop.source_1.candidate_population",
-                        )
-                    ],
+                        ),
+                    ),
                 },
             },
             schema=schema,
@@ -344,6 +396,7 @@ def test_source_binding_schema_accepts_known_target_arrays_without_enumeration()
             "target.source_1": ("pop.source_1",),
             "target.source_2": ("pop.source_2",),
         },
+        plan_families=_test_plan_families("target.source_1", "target.source_2"),
     )
     source_1 = _minimal_source_invocation("target.source_1", "pop.source_1")
     source_2 = _minimal_source_invocation("target.source_2", "pop.source_2")
@@ -352,13 +405,10 @@ def test_source_binding_schema_accepts_known_target_arrays_without_enumeration()
         instance=_source_binding_plan_payload(source_1),
         schema=schema,
     )
-    validate(
-        instance=_source_binding_plan_payload(source_1, source_2),
-        schema=schema,
-    )
+    validate(instance=_source_binding_plan_payload(source_2), schema=schema)
 
 
-def test_source_binding_schema_caps_alternative_invocations_without_enumeration():
+def test_source_binding_schema_exposes_alternatives_as_one_role_choice():
     schema = build_source_binding_schema(
         target_param_decision_ids_by_param={
             "target.source_1": {},
@@ -405,29 +455,25 @@ def test_source_binding_schema_caps_alternative_invocations_without_enumeration(
             "target.source_1": ("pop.source_1",),
             "target.source_2": ("pop.source_2",),
         },
-        source_invocations_max_items=1,
+        plan_families=_test_plan_families("target.source_1", "target.source_2"),
     )
     source_1 = _minimal_source_invocation("target.source_1", "pop.source_1")
     source_2 = _minimal_source_invocation("target.source_2", "pop.source_2")
 
-    validate(
-        instance=_source_binding_plan_payload(source_1),
-        schema=schema,
+    validate(instance=_source_binding_plan_payload(source_1), schema=schema)
+    validate(instance=_source_binding_plan_payload(source_2), schema=schema)
+
+
+def test_source_binding_prompt_requires_each_shape_role_once():
+    schema = (
+        SourceBindingTurnPrompt(_set_difference_request())
+        .response_contract()
+        .provider_schema
     )
-    with pytest.raises(ValidationError):
-        validate(
-            instance=_source_binding_plan_payload(source_1, source_2),
-            schema=schema,
-        )
+    outcome = _source_binding_outcome_schema(schema)
+    fact = outcome["properties"]["bindings_for_fact_1"]
 
-
-def test_source_binding_prompt_caps_invocations_by_compatible_plan_size():
-    prompt = SourceBindingTurnPrompt(_set_difference_request())
-    source_invocations_schema = _source_invocations_schema(
-        prompt.response_contract().provider_schema
-    )
-
-    assert source_invocations_schema["maxItems"] == 2
+    assert fact["required"] == ["plan_shape", "candidate_set", "observed_set"]
 
 
 def test_source_binding_prompt_scopes_plan_selection_basis_to_api_read():
@@ -475,7 +521,7 @@ def test_closed_key_grouped_identity_param_is_backend_owned_without_grounding_us
         available_value_uses=(),
     )
     prompt = SourceBindingTurnPrompt(request)
-    target = prompt.binding_targets_payload()["binding_targets"][0]
+    target = _only_binding_target(prompt)
     invocation_schema = _source_invocation_variants_by_target(
         prompt.response_contract().provider_schema
     )[target["binding_target_id"]]
@@ -513,7 +559,7 @@ def test_closed_key_grouped_identity_param_can_use_group_key_field_id():
         ),
     )
     prompt = SourceBindingTurnPrompt(request)
-    target = prompt.binding_targets_payload()["binding_targets"][0]
+    target = _only_binding_target(prompt)
     invocation_schema = _source_invocation_variants_by_target(
         prompt.response_contract().provider_schema
     )[target["binding_target_id"]]
@@ -538,9 +584,9 @@ def test_closed_key_grouped_identity_param_scopes_group_key_fulfillment_choices(
         target["source_candidate_id"]
     ]
 
-    choice_ids = invocation_schema["properties"]["fulfillment_decisions"][
-        "properties"
-    ]["answer_staff"]["properties"]["fulfillment_choice_id"]["enum"]
+    choice_ids = invocation_schema["properties"]["fulfillment_decisions"]["properties"][
+        "answer_staff"
+    ]["properties"]["fulfillment_choice_id"]["enum"]
     staff_id_choice = source_fulfills_fields_for_candidate(
         candidate,
         field_ids_by_answer_output={"answer_staff": ("staff_id",)},
@@ -581,7 +627,9 @@ def test_parse_source_binding_rejects_closed_key_param_with_mismatched_group_key
         target["source_candidate_id"]
     ]
 
-    with pytest.raises(ValueError, match="source fulfillment references unknown choice"):
+    with pytest.raises(
+        ValueError, match="source fulfillment references unknown choice"
+    ):
         parse_source_binding(
             {
                 "outcome": {
@@ -603,8 +651,11 @@ def test_parse_source_binding_rejects_closed_key_param_with_mismatched_group_key
                             }
                         }
                     },
-                    "source_invocations": [
-                        {
+                    **_test_fact_binding(
+                        requested_fact_id=target["requested_fact_id"],
+                        plan_shape=target["plan_shape"],
+                        requirement_id=target["requirement_id"],
+                        invocation={
                             "binding_target_id": target["binding_target_id"],
                             "answer_population": {
                                 "population_binding_id": _population_binding_id(
@@ -631,8 +682,8 @@ def test_parse_source_binding_rejects_closed_key_param_with_mismatched_group_key
                             "param_decisions": {},
                             "row_predicate_reviews": {},
                             "finite_choice_param_reviews": {},
-                        }
-                    ],
+                        },
+                    ),
                 },
             },
             request=request,
@@ -667,8 +718,11 @@ def test_parse_source_binding_expands_backend_owned_closed_key_param_bindings():
                         }
                     }
                 },
-                "source_invocations": [
-                    {
+                **_test_fact_binding(
+                    requested_fact_id=target["requested_fact_id"],
+                    plan_shape=target["plan_shape"],
+                    requirement_id=target["requirement_id"],
+                    invocation={
                         "binding_target_id": target["binding_target_id"],
                         "answer_population": {
                             "population_binding_id": _population_binding_id(candidate),
@@ -693,8 +747,8 @@ def test_parse_source_binding_expands_backend_owned_closed_key_param_bindings():
                         "param_decisions": {},
                         "row_predicate_reviews": {},
                         "finite_choice_param_reviews": {},
-                    }
-                ],
+                    },
+                ),
             },
         },
         request=request,
@@ -882,8 +936,8 @@ def test_source_binding_prompt_distinguishes_role_targets_from_fulfillment_outpu
     )
 
     assert observed_target["answer_output_ids"] == []
-    assert "Bind every operation-required role target" in prompt_text
-    assert "including targets with no answer outputs" in prompt_text
+    assert "bind every role shown for that shape exactly once" in prompt_text
+    assert "including roles with no answer outputs" in prompt_text
 
 
 def test_parse_source_binding_binds_observed_target_without_answer_fulfillment():
@@ -1077,13 +1131,15 @@ def test_parse_source_binding_rejects_compact_equivalent_plans_with_different_fi
 
 
 def test_source_binding_target_compatibility_does_not_carry_evidence_selection():
-    compatibility_fields = {field.name for field in fields(SourceBindingTargetCompatibility)}
+    compatibility_fields = {
+        field.name for field in fields(SourceBindingTargetCompatibility)
+    }
 
     assert "fulfillment_support_set_ids" not in compatibility_fields
     assert "answer_output_ids" not in compatibility_fields
 
 
-def test_value_only_bypass_selects_one_role_bound_plan_instead_of_private_union():
+def test_value_only_bypass_does_not_choose_non_equivalent_plan_by_tuple_order():
     question_contract = QuestionContract(
         requested_facts=(
             RequestedFact(
@@ -1113,23 +1169,19 @@ def test_value_only_bypass_selects_one_role_bound_plan_instead_of_private_union(
             ),
         )
     )
-    source_binding = value_only_source_binding_plan(
+    forward = value_only_source_binding_plan(
         plan_selection,
         requested_facts=question_contract.requested_facts,
     )
-
-    bound = _bound_plan_selection_from_plan_selection(
-        SimpleNamespace(
-            plan_selection_outcome=plan_selection,
-            source_binding_outcome=source_binding,
-            question_contract=question_contract,
-        )
+    reversed_order = value_only_source_binding_plan(
+        PlanSelectionSet(
+            plan_selections=tuple(reversed(plan_selection.plan_selections))
+        ),
+        requested_facts=question_contract.requested_facts,
     )
 
-    assert bound is not None
-    assert tuple(plan.plan_selection_id for plan in bound.plan_selections) == (
-        "plan.fact_1.values.a",
-    )
+    assert forward is None
+    assert reversed_order is None
 
 
 def test_source_binding_target_construction_dedupes_duplicate_private_targets():
@@ -1147,12 +1199,13 @@ def test_source_binding_target_construction_dedupes_duplicate_private_targets():
         ),
     )
 
-    targets = SourceBindingTurnPrompt(
-        duplicated_member_request
-    ).transport_context_payload()["binding_targets"]
+    targets = source_binding_target_index_for_plan_selection(
+        duplicated_member_request.plan_selection,
+        requested_facts=duplicated_member_request.requested_facts,
+    ).targets
 
     assert len(targets) == 1
-    assert targets[0]["binding_target_id"] == (
+    assert targets[0].binding_target_id == (
         "target.fact_1.set_difference.source_1.candidate_set"
     )
 
@@ -1173,20 +1226,27 @@ def test_source_binding_fixture_selector_returns_compact_role_target():
             ),
         ),
     )
-    prompt_text = SourceBindingTurnPrompt(ambiguous_request).to_model_invocation(
-        build_turn_prompt_context(
-            current_question=ambiguous_request.question,
-            conversation_context={},
+    prompt_text = (
+        SourceBindingTurnPrompt(ambiguous_request)
+        .to_model_invocation(
+            build_turn_prompt_context(
+                current_question=ambiguous_request.question,
+                conversation_context={},
+            )
         )
-    ).prompt_text
+        .prompt_text
+    )
 
-    assert source_binding_target_id_for_candidate(
-        prompt_text,
-        requested_fact_id="fact_1",
-        source_candidate_id=plan.source_members[0].source_candidate_id,
-        source_role="candidate",
-        plan_shape="set_difference",
-    ) == "target.fact_1.set_difference.source_1.candidate_set"
+    assert (
+        source_binding_target_id_for_candidate(
+            prompt_text,
+            requested_fact_id="fact_1",
+            source_candidate_id=plan.source_members[0].source_candidate_id,
+            source_role="candidate",
+            plan_shape="set_difference",
+        )
+        == "target.fact_1.set_difference.source_1.candidate_set"
+    )
 
 
 def _set_difference_request() -> SourceBindingRequest:
@@ -1606,8 +1666,11 @@ def _closed_key_model_output_with_single_staff_param(
                     }
                 }
             },
-            "source_invocations": [
-                {
+            **_test_fact_binding(
+                requested_fact_id="fact_1",
+                plan_shape="aggregate_by_group",
+                requirement_id="operation",
+                invocation={
                     "binding_target_id": binding_target_id,
                     "answer_population": {
                         "population_binding_id": _population_binding_id(candidate),
@@ -1640,8 +1703,8 @@ def _closed_key_model_output_with_single_staff_param(
                     },
                     "row_predicate_reviews": {},
                     "finite_choice_param_reviews": {},
-                }
-            ],
+                },
+            ),
         },
     }
 
@@ -1653,7 +1716,9 @@ def _single_param_decision(
     value: str,
     value_component: str = "",
 ) -> dict[str, str]:
-    param = next(param for param in candidate["params"] if param["param_id"] == param_id)
+    param = next(
+        param for param in candidate["params"] if param["param_id"] == param_id
+    )
     option = next(
         option
         for option in param["decision_options"]
@@ -1869,7 +1934,14 @@ def _sales_read() -> EndpointRead:
 
 
 def _binding_targets(prompt: SourceBindingTurnPrompt) -> tuple[dict[str, Any], ...]:
-    return tuple(prompt.transport_context_payload()["binding_targets"])
+    families = prompt.transport_context_payload()["binding_plan_families"]
+    return tuple(
+        target
+        for fact in families["bindings_by_requested_fact"].values()
+        for shape in fact["plan_shapes"].values()
+        for targets in shape["role_targets"].values()
+        for target in targets
+    )
 
 
 def _only_binding_target(prompt: SourceBindingTurnPrompt) -> dict[str, Any]:
@@ -1897,7 +1969,9 @@ def _target_for(
         and target["requirement_id"] == requirement_id
     ]
     if len(matches) != 1:
-        raise AssertionError(f"target not found: {source_candidate_id}/{requirement_id}")
+        raise AssertionError(
+            f"target not found: {source_candidate_id}/{requirement_id}"
+        )
     return matches[0]
 
 
@@ -1931,23 +2005,80 @@ def _source_binding_outcome(
                 "finite_choice_param_reviews": {},
             }
         )
+    fact_bindings: dict[str, dict[str, Any]] = {}
+    for target, invocation in zip(targets, invocations, strict=True):
+        fact_id = str(target["requested_fact_id"])
+        plan_shape = str(target["plan_shape"])
+        field_id = source_binding_fact_field_id(fact_id)
+        fact_binding = fact_bindings.setdefault(
+            field_id,
+            {"plan_shape": plan_shape},
+        )
+        if fact_binding["plan_shape"] != plan_shape:
+            raise AssertionError("test outcome mixes source-binding plan shapes")
+        fact_binding[str(target["requirement_id"])] = invocation
     return {
         "kind": "source_bindings",
         "metric_fit_bases": {},
         "fit_basis_interpretations": {},
-        "source_invocations": invocations,
+        **fact_bindings,
     }
 
 
 def _source_binding_plan_payload(*invocations: dict[str, Any]) -> dict[str, Any]:
+    assert len(invocations) == 1
     return {
         "outcome": {
             "kind": "source_bindings",
             "metric_fit_bases": {},
             "fit_basis_interpretations": {},
-            "source_invocations": list(invocations),
+            "bindings_for_fact_1": {
+                "plan_shape": "test_shape",
+                "primary": invocations[0],
+            },
         }
     }
+
+
+def _test_fact_binding(
+    *,
+    requested_fact_id: str,
+    plan_shape: str,
+    requirement_id: str,
+    invocation: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        source_binding_fact_field_id(requested_fact_id): {
+            "plan_shape": plan_shape,
+            requirement_id: invocation,
+        }
+    }
+
+
+def _test_plan_families(*target_ids: str) -> tuple[SourceBindingPlanFamily, ...]:
+    return (
+        SourceBindingPlanFamily(
+            requested_fact_id="fact_1",
+            plan_shape="test_shape",
+            member_constraint=SourceMemberConstraint.ANY,
+            required_answer_output_ids=(),
+            role_targets=(
+                (
+                    "primary",
+                    tuple(
+                        SourceBindingTarget(
+                            binding_target_id=target_id,
+                            requested_fact_id="fact_1",
+                            plan_shape="test_shape",
+                            source_candidate_id=target_id.removeprefix("target."),
+                            requirement_id="primary",
+                        )
+                        for target_id in target_ids
+                    ),
+                ),
+            ),
+        ),
+    )
 
 
 def _minimal_source_invocation(
@@ -1989,66 +2120,39 @@ def _population_binding_id(candidate: dict[str, Any]) -> str:
     return str(bindings[0]["population_binding_id"])
 
 
-def _source_invocation_items_schema(
-    schema: dict[str, Any],
-) -> dict[str, Any]:
-    return _source_invocations_schema(schema)["items"]
-
-
-def _source_invocations_schema(
-    schema: dict[str, Any],
-) -> dict[str, Any]:
-    if isinstance(schema, dict):
-        properties = schema.get("properties")
-        if isinstance(properties, dict):
-            source_invocations = properties.get("source_invocations")
-            if isinstance(source_invocations, dict):
-                variants = source_invocations.get("oneOf")
-                if isinstance(variants, list):
-                    item_variants = tuple(
-                        variant["items"]
-                        for variant in variants
-                        if isinstance(variant, dict) and variant.get("items")
-                    )
-                    if len(item_variants) == 1:
-                        return {**source_invocations, "items": item_variants[0]}
-                    if item_variants:
-                        return {
-                            **source_invocations,
-                            "items": {"oneOf": list(item_variants)},
-                        }
-                return source_invocations
-        for value in schema.values():
-            if isinstance(value, dict):
-                try:
-                    found = _source_invocations_schema(value)
-                    return found
-                except AssertionError:
-                    pass
-            if isinstance(value, list):
-                for item in value:
-                    if isinstance(item, dict):
-                        try:
-                            found = _source_invocations_schema(item)
-                            return found
-                        except AssertionError:
-                            pass
-    raise AssertionError("source invocations schema not found")
-
-
 def _source_invocation_variants_by_target(
     schema: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
-    item_schema = _source_invocation_items_schema(schema)
-    variants = _flatten_source_invocation_item_variants(item_schema)
-    if not variants:
-        variants = (item_schema,)
-    output = {}
-    for variant in variants:
-        target_ids = variant["properties"]["binding_target_id"]["enum"]
-        assert len(target_ids) == 1
-        output[target_ids[0]] = variant
+    output: dict[str, dict[str, Any]] = {}
+    for node in _schema_nodes(schema):
+        properties = node.get("properties")
+        if not isinstance(properties, dict):
+            continue
+        target_schema = properties.get("binding_target_id")
+        if not isinstance(target_schema, dict):
+            continue
+        target_ids = target_schema.get("enum")
+        if isinstance(target_ids, list) and len(target_ids) == 1:
+            output[str(target_ids[0])] = node
     return output
+
+
+def _schema_nodes(value: object):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from _schema_nodes(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _schema_nodes(child)
+
+
+def _source_binding_outcome_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    return next(
+        variant
+        for variant in schema["properties"]["outcome"]["oneOf"]
+        if variant["properties"]["kind"].get("enum") == ["source_bindings"]
+    )
 
 
 def _flatten_source_invocation_item_variants(

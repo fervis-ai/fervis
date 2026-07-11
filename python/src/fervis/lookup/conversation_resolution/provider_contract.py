@@ -68,7 +68,7 @@ UnresolvedOutcomeOutput = provider_output_type(
 )
 CandidateInterpretationOutput = provider_output_type(
     "CandidateInterpretationOutput",
-    ("contextualized_question", "supporting_evidence"),
+    ("contextualized_question", "context_evidence"),
 )
 SourceEvidenceOutput = provider_output_type(
     "SourceEvidenceOutput",

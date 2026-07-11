@@ -113,33 +113,34 @@ def test_source_binding_model_turn_summary_projects_decision_basis() -> None:
                     "kind": "source_bindings",
                     "metric_fit_bases": {},
                     "fit_basis_interpretations": {},
-                        "source_invocations": [
-                            {
-                                "binding_target_id": "target.source_5",
-                                "answer_population": {
-                                    "match_basis_explanation": (
-                                        "Payroll summary rows match the requested "
-                                    "staff population."
-                                )
-                            },
-                            "fulfillment_decisions": {
-                                "answer_1": {
-                                    "fulfillment_choice_id": "choice_staff_name",
-                                    "match_basis_explanation": (
-                                        "staff_name identifies the returned staff."
-                                    ),
-                                }
-                            },
-                            "param_decisions": {
-                                "month": {
-                                    "param_decision_id": "param_month",
-                                    "match_basis_explanation": (
-                                        "The requested month must bind the month param."
-                                    ),
-                                }
-                            },
+                    "bindings_for_fact_1": {
+                        "plan_shape": "aggregate_scalar",
+                        "metric": {
+                                    "binding_target_id": "target.source_5",
+                                    "answer_population": {
+                                        "match_basis_explanation": (
+                                            "Payroll summary rows match the requested "
+                                            "staff population."
+                                        )
+                                    },
+                                    "fulfillment_decisions": {
+                                        "answer_1": {
+                                            "fulfillment_choice_id": "choice_staff_name",
+                                            "match_basis_explanation": (
+                                                "staff_name identifies the returned staff."
+                                            ),
+                                        }
+                                    },
+                                    "param_decisions": {
+                                        "month": {
+                                            "param_decision_id": "param_month",
+                                            "match_basis_explanation": (
+                                                "The requested month must bind the month param."
+                                            ),
+                                        }
+                                    },
                         }
-                    ],
+                    },
                 },
             },
         }
@@ -531,7 +532,5 @@ def test_fact_planning_model_turn_summary_projects_selected_binding() -> None:
     )
 
     assert summary == step_summary_json(
-        StepSummaryItem(
-            text="Binding: metric=calculated_pay function=sum"
-        )
+        StepSummaryItem(text="Binding: metric=calculated_pay function=sum")
     )

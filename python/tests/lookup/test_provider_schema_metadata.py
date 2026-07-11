@@ -36,6 +36,7 @@ def test_lookup_provider_schemas_do_not_emit_internal_model_schemas_metadata():
             metric_evidence_ids_by_requested_fact={},
             target_fulfillment_support_set_ids_by_answer_output={},
             target_required_fulfillment_answer_output_ids={},
+            plan_families=(),
         ),
     ):
         assert not _contains_key(schema, "modelSchemas")

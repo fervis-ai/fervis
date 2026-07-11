@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from fervis.lookup.source_binding.plan_targets import (
+    source_binding_fact_id_from_field,
+)
+
 from fervis.lineage.step_summary import (
     StepSummaryDetail,
     StepSummaryItem,
@@ -75,7 +79,11 @@ def _metric_review_items_for_fact(
 def _decision_basis_items(payload: dict[str, Any]) -> tuple[StepSummaryItem, ...]:
     return tuple(
         item
-        for invocation in _list_of_dicts(payload.get("source_invocations"))
+        for field_id, raw_fact_binding in payload.items()
+        if source_binding_fact_id_from_field(field_id) is not None
+        for role_id, invocation in _dict_or_empty(raw_fact_binding).items()
+        if role_id != "plan_shape"
+        if isinstance(invocation, dict)
         for item in _invocation_decision_items(invocation)
     )
 

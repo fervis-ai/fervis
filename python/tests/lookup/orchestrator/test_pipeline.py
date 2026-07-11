@@ -538,38 +538,38 @@ def test_lookup_derives_finite_choice_membership_from_answer_population_tests():
         "answer_requests": [
             {
                 "answer_fact": "count of in-person sales",
-                    "answer_expression": {"family": "list_rows"},
+                "answer_expression": {"family": "list_rows"},
                 "answer_subject": _answer_subject_payload("sales"),
                 "answer_population": {
                     "population_label": "in-person sales",
                     "counted_unit": "sale",
                     "membership_tests": [
-                            {
-                                "test_id": "pop_test_1",
-                                "kind": "SUBJECT_IDENTITY",
-                                "polarity": "MUST_PASS",
-                                "test_question": "Does the row/value represent a sale?",
-                                "owned_question_input_refs": [],
-                            },
-                            {
-                                "test_id": "pop_test_2",
-                                "kind": "EXPLICIT_USER_CONSTRAINT",
-                                "polarity": "MUST_PASS",
-                                "test_question": "Is the sale in-person?",
-                                "owned_question_input_refs": [],
-                            },
-                            {
-                                "test_id": "pop_test_3",
-                                "kind": "NORMAL_INSTANCE_GUARD",
-                                "polarity": "MUST_PASS",
+                        {
+                            "test_id": "pop_test_1",
+                            "kind": "SUBJECT_IDENTITY",
+                            "polarity": "MUST_PASS",
+                            "test_question": "Does the row/value represent a sale?",
+                            "owned_question_input_refs": [],
+                        },
+                        {
+                            "test_id": "pop_test_2",
+                            "kind": "EXPLICIT_USER_CONSTRAINT",
+                            "polarity": "MUST_PASS",
+                            "test_question": "Is the sale in-person?",
+                            "owned_question_input_refs": [],
+                        },
+                        {
+                            "test_id": "pop_test_3",
+                            "kind": "NORMAL_INSTANCE_GUARD",
+                            "polarity": "MUST_PASS",
                             "test_question": (
                                 "Is this an actual business sale instance rather "
-                                    "than a draft, canceled, voided, failed, or raw "
-                                    "storage representation unless the user explicitly "
-                                    "requested that state?"
-                                ),
-                                "owned_question_input_refs": [],
-                            },
+                                "than a draft, canceled, voided, failed, or raw "
+                                "storage representation unless the user explicitly "
+                                "requested that state?"
+                            ),
+                            "owned_question_input_refs": [],
+                        },
                     ],
                 },
                 "answer_outputs": [{"description": "count"}],
@@ -1468,42 +1468,44 @@ class _OmitOptionalDefaultChoicePlannerPort(_ReadEligibilityPlannerPort):
         self.system_prompts.append(system_prompt)
         self.prompts.append(prompt)
         self.source_binding_selection_prompt = prompt
+        binding_target_id = source_binding_target_id_for_candidate(
+            prompt,
+            requested_fact_id="fact_1",
+            source_candidate_id="source_1",
+            plan_shape="list_rows",
+        )
         arguments = source_binding_payload_for_one_call(
             {
                 "outcome": {
                     "kind": "source_bindings",
-                    "source_invocations": [
-                        {
-                            "binding_target_id": source_binding_target_id_for_candidate(
-                                prompt,
-                                requested_fact_id="fact_1",
-                                source_candidate_id="source_1",
-                                plan_shape="list_rows",
-                            ),
-                            "answer_population": {
-                                "population_binding_id": (
-                                    "pop.source_1.candidate_population"
-                                ),
-                                "intent_text": "What was total sales revenue?",
-                                "match_basis_explanation": (
-                                    "The selected source provides the requested revenue."
-                                ),
-                            },
-                            "fulfillment_decisions": {
-                                "answer_1": {
-                                    "match_basis_explanation": (
-                                        "answer_1 is fulfilled by the total_revenue field."
-                                    ),
-                                    "fulfillment_choice_id": (
-                                        "source_1.data.total_revenue"
-                                    ),
-                                }
-                            },
-                            "param_decisions": {},
-                            "row_predicate_reviews": {},
-                            "finite_choice_param_reviews": {},
+                    "bindings_for_fact_1": {
+                        "plan_shape": "list_rows",
+                        "primary": {
+                                    "binding_target_id": binding_target_id,
+                                    "answer_population": {
+                                        "population_binding_id": (
+                                            "pop.source_1.candidate_population"
+                                        ),
+                                        "intent_text": "What was total sales revenue?",
+                                        "match_basis_explanation": (
+                                            "The selected source provides the requested revenue."
+                                        ),
+                                    },
+                                    "fulfillment_decisions": {
+                                        "answer_1": {
+                                            "match_basis_explanation": (
+                                                "answer_1 is fulfilled by the total_revenue field."
+                                            ),
+                                            "fulfillment_choice_id": (
+                                                "source_1.data.total_revenue"
+                                            ),
+                                        }
+                                    },
+                                    "param_decisions": {},
+                                    "row_predicate_reviews": {},
+                                    "finite_choice_param_reviews": {},
                         }
-                    ],
+                    },
                 }
             },
             prompt=prompt,
@@ -1623,7 +1625,9 @@ def test_lookup_unresolved_named_entity_returns_resource_specific_clarification(
     )
 
     assert result.status == "NEEDS_CLARIFICATION", result
-    assert result.answer == 'I could not find store "Nextgen". Which store should I use?'
+    assert (
+        result.answer == 'I could not find store "Nextgen". Which store should I use?'
+    )
     assert planner.tool_names == [
         "submit_answer_request_contract",
         "submit_query_enrichment",
@@ -1649,30 +1653,32 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
                     prompt,
                     required=("staff_id",),
                 )
+                binding_target_id = source_binding_target_id_for_candidate(
+                    prompt,
+                    requested_fact_id="fact_1",
+                    source_candidate_id=str(candidate["source_candidate_id"]),
+                    plan_shape="list_rows",
+                )
                 arguments = {
                     "outcome": {
                         "kind": "source_bindings",
-                        "source_invocations": [
-                            {
-                                "binding_target_id": source_binding_target_id_for_candidate(
-                                    prompt,
-                                    requested_fact_id="fact_1",
-                                    source_candidate_id=str(
-                                        candidate["source_candidate_id"]
-                                    ),
-                                    plan_shape="list_rows",
-                                ),
-                                "answer_population": source_candidate_answer_population(
-                                    prompt,
-                                    source_candidate_id=candidate["source_candidate_id"],
-                                ),
-                                "fulfillment_decisions": source_fulfills_for_candidate(
-                                    candidate,
-                                    field_ids=("staff_id",),
-                                ),
-                                "param_decisions": {},
+                        "bindings_for_fact_1": {
+                            "plan_shape": "list_rows",
+                            "primary": {
+                                        "binding_target_id": binding_target_id,
+                                        "answer_population": source_candidate_answer_population(
+                                            prompt,
+                                            source_candidate_id=candidate[
+                                                "source_candidate_id"
+                                            ],
+                                        ),
+                                        "fulfillment_decisions": source_fulfills_for_candidate(
+                                            candidate,
+                                            field_ids=("staff_id",),
+                                        ),
+                                        "param_decisions": {},
                             }
-                        ],
+                        },
                     }
                 }
                 arguments = source_binding_payload_for_one_call(
@@ -1700,11 +1706,11 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
 
     planner = _NoisyResolverPlannerPort(
         responses={
-                "submit_answer_request_contract": _question_contract_response(
-                    subject="Jane Doe staff ID",
-                    answer_subject="staff ID",
-                    answer_expression_family="list_rows",
-                    parts=("staff ID",),
+            "submit_answer_request_contract": _question_contract_response(
+                subject="Jane Doe staff ID",
+                answer_subject="staff ID",
+                answer_expression_family="list_rows",
+                parts=("staff ID",),
                 question_inputs=(
                     {
                         "kind": KnownInputKind.LITERAL.value,
@@ -2003,11 +2009,11 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
             ),
         ),
         responses={
-                "submit_answer_request_contract": _question_contract_response(
-                    subject="Jane Doe staff ID",
-                    answer_subject="staff ID",
-                    answer_expression_family="list_rows",
-                    parts=("staff ID",),
+            "submit_answer_request_contract": _question_contract_response(
+                subject="Jane Doe staff ID",
+                answer_subject="staff ID",
+                answer_expression_family="list_rows",
+                parts=("staff ID",),
                 question_inputs=(
                     {
                         "kind": KnownInputKind.LITERAL.value,
@@ -2466,36 +2472,38 @@ def test_lookup_cutover_runs_combined_source_and_split_planning_turns():
 
     def source_binding_payload(*, prompt, tool_specs):
         del tool_specs
+        binding_target_id = source_binding_target_id_for_candidate(
+            prompt,
+            requested_fact_id="fact_1",
+            source_candidate_id="source_1",
+            plan_shape="list_rows",
+        )
         return source_binding_payload_for_one_call(
             {
                 "outcome": {
                     "kind": "source_bindings",
-                    "source_invocations": [
-                        {
-                            "binding_target_id": source_binding_target_id_for_candidate(
-                                prompt,
-                                requested_fact_id="fact_1",
-                                source_candidate_id="source_1",
-                                plan_shape="list_rows",
-                            ),
-                            "answer_population": {
-                                "population_binding_id": "pop.source_1.candidate_population",
-                                "intent_text": "sales",
-                                "match_basis_explanation": "sales defines the source population",
-                            },
-                            "fulfillment_decisions": {
-                                "answer_1": {
-                                    "match_basis_explanation": (
-                                        "answer_1 is fulfilled by source_1.data.amount "
-                                        "because that source evidence provides the "
-                                        "requested output."
-                                    ),
-                                    "fulfillment_choice_id": "source_1.data.amount",
-                                }
-                            },
-                            "param_decisions": {},
+                    "bindings_for_fact_1": {
+                        "plan_shape": "list_rows",
+                        "primary": {
+                                    "binding_target_id": binding_target_id,
+                                    "answer_population": {
+                                        "population_binding_id": "pop.source_1.candidate_population",
+                                        "intent_text": "sales",
+                                        "match_basis_explanation": "sales defines the source population",
+                                    },
+                                    "fulfillment_decisions": {
+                                        "answer_1": {
+                                            "match_basis_explanation": (
+                                                "answer_1 is fulfilled by source_1.data.amount "
+                                                "because that source evidence provides the "
+                                                "requested output."
+                                            ),
+                                            "fulfillment_choice_id": "source_1.data.amount",
+                                        }
+                                    },
+                                    "param_decisions": {},
                         }
-                    ],
+                    },
                 }
             },
             prompt=prompt,
@@ -2510,10 +2518,10 @@ def test_lookup_cutover_runs_combined_source_and_split_planning_turns():
             ),
         ),
         responses={
-                "submit_answer_request_contract": _question_contract_response(
-                    subject="sales",
-                    answer_expression_family="list_rows",
-                    parts=("sales",),
+            "submit_answer_request_contract": _question_contract_response(
+                subject="sales",
+                answer_expression_family="list_rows",
+                parts=("sales",),
             ),
             "submit_source_binding": source_binding_payload,
             "submit_source_alignment_reviews": {
@@ -2664,36 +2672,38 @@ def test_lookup_source_binding_uses_first_class_fulfillment_usage():
 
     def source_binding_payload(*, prompt, tool_specs):
         del tool_specs
+        binding_target_id = source_binding_target_id_for_candidate(
+            prompt,
+            requested_fact_id="fact_1",
+            source_candidate_id="source_1",
+            plan_shape="list_rows",
+        )
         return source_binding_payload_for_one_call(
             {
                 "outcome": {
                     "kind": "source_bindings",
-                    "source_invocations": [
-                        {
-                            "binding_target_id": source_binding_target_id_for_candidate(
-                                prompt,
-                                requested_fact_id="fact_1",
-                                source_candidate_id="source_1",
-                                plan_shape="list_rows",
-                            ),
-                            "answer_population": {
-                                "population_binding_id": "pop.source_1.candidate_population",
-                                "intent_text": "staff and sales amount",
-                                "match_basis_explanation": "staff and sales amount defines the source population",
-                            },
-                            "fulfillment_decisions": {
-                                "answer_1": {
-                                    "match_basis_explanation": "answer_1 is fulfilled by source_1.data.staff_name because that evidence provides the requested staff value.",
-                                    "fulfillment_choice_id": "source_1.data.staff_name",
-                                },
-                                "answer_2": {
-                                    "match_basis_explanation": "answer_2 is fulfilled by source_1.data.amount because that evidence provides the requested sales amount value.",
-                                    "fulfillment_choice_id": "source_1.data.amount",
-                                },
-                            },
-                            "param_decisions": {},
+                    "bindings_for_fact_1": {
+                        "plan_shape": "list_rows",
+                        "primary": {
+                                    "binding_target_id": binding_target_id,
+                                    "answer_population": {
+                                        "population_binding_id": "pop.source_1.candidate_population",
+                                        "intent_text": "staff and sales amount",
+                                        "match_basis_explanation": "staff and sales amount defines the source population",
+                                    },
+                                    "fulfillment_decisions": {
+                                        "answer_1": {
+                                            "match_basis_explanation": "answer_1 is fulfilled by source_1.data.staff_name because that evidence provides the requested staff value.",
+                                            "fulfillment_choice_id": "source_1.data.staff_name",
+                                        },
+                                        "answer_2": {
+                                            "match_basis_explanation": "answer_2 is fulfilled by source_1.data.amount because that evidence provides the requested sales amount value.",
+                                            "fulfillment_choice_id": "source_1.data.amount",
+                                        },
+                                    },
+                                    "param_decisions": {},
                         }
-                    ],
+                    },
                 }
             },
             prompt=prompt,
@@ -2713,12 +2723,12 @@ def test_lookup_source_binding_uses_first_class_fulfillment_usage():
             ),
         ),
         responses={
-                "submit_answer_request_contract": _question_contract_response(
-                    subject="staff and sales amount",
-                    answer_subject="staff",
-                    parts=("staff", "sales amount"),
-                    answer_expression_family="list_rows",
-                ),
+            "submit_answer_request_contract": _question_contract_response(
+                subject="staff and sales amount",
+                answer_subject="staff",
+                parts=("staff", "sales amount"),
+                answer_expression_family="list_rows",
+            ),
             "submit_source_binding": source_binding_payload,
             "submit_pattern_fact_plan": {
                 "outcome": {
@@ -3020,31 +3030,33 @@ def test_lookup_plan_selection_uses_backend_projected_candidates():
                     answer_value_fields=("total_sales",),
                 )
             elif tool_name == "submit_source_binding":
+                binding_target_id = source_binding_target_id_for_candidate(
+                    prompt,
+                    requested_fact_id="fact_1",
+                    source_candidate_id="source_1",
+                    plan_shape="direct_field_value",
+                )
                 source_binding_arguments = {
                     "outcome": {
                         "kind": "source_bindings",
-                        "source_invocations": [
-                            {
-                                "binding_target_id": source_binding_target_id_for_candidate(
-                                    prompt,
-                                    requested_fact_id="fact_1",
-                                    source_candidate_id="source_1",
-                                    plan_shape="direct_field_value",
-                                ),
-                                "answer_population": {
-                                    "population_binding_id": "pop.source_1.candidate_population",
-                                    "intent_text": "total sales",
-                                    "match_basis_explanation": "total sales defines the source population",
-                                },
-                                "fulfillment_decisions": {
-                                    "answer_1": {
-                                        "match_basis_explanation": "answer_1 is fulfilled by source_1.root.total_sales because that evidence is the requested scalar value.",
-                                        "fulfillment_choice_id": "source_1.root.total_sales",
-                                    }
-                                },
-                                "param_decisions": {},
+                        "bindings_for_fact_1": {
+                            "plan_shape": "direct_field_value",
+                            "primary": {
+                                        "binding_target_id": binding_target_id,
+                                        "answer_population": {
+                                            "population_binding_id": "pop.source_1.candidate_population",
+                                            "intent_text": "total sales",
+                                            "match_basis_explanation": "total sales defines the source population",
+                                        },
+                                        "fulfillment_decisions": {
+                                            "answer_1": {
+                                                "match_basis_explanation": "answer_1 is fulfilled by source_1.root.total_sales because that evidence is the requested scalar value.",
+                                                "fulfillment_choice_id": "source_1.root.total_sales",
+                                            }
+                                        },
+                                        "param_decisions": {},
                             }
-                        ],
+                        },
                     }
                 }
                 arguments = source_binding_payload_for_one_call(

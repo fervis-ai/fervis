@@ -58,6 +58,7 @@ def bound_relation_source(
     population_binding: dict[str, Any],
     param_binding_sets: tuple[tuple[DraftEndpointParamBinding, ...], ...],
     population_choices: tuple[DraftRelationSourcePopulationChoice, ...],
+    row_source_id: str = "",
 ) -> tuple[Any, tuple[Any, ...]]:
     if (
         str(population_binding.get("kind") or "") == "exact_row_set"
@@ -83,6 +84,7 @@ def bound_relation_source(
         source_invocations = tuple(
             replace(
                 source,
+                row_source_id=row_source_id or source.row_source_id,
                 param_bindings=param_bindings,
                 population_choices=population_choices,
             )

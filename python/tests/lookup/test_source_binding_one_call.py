@@ -253,7 +253,9 @@ def test_source_binding_targets_are_compact_role_targets_not_private_plan_varian
                     source_strategy_id="source_strategy.fact_1.direct_field_value.1",
                     plan_shape="direct_field_value",
                     required_answer_output_ids=("answer_1",),
-                    source_members=(SourceStrategyMember(source_candidate_id="source_1"),),
+                    source_members=(
+                        SourceStrategyMember(source_candidate_id="source_1"),
+                    ),
                     basis="First private strategy.",
                 ),
                 SelectedSourceStrategy(
@@ -262,16 +264,16 @@ def test_source_binding_targets_are_compact_role_targets_not_private_plan_varian
                     source_strategy_id="source_strategy.fact_1.direct_field_value.2",
                     plan_shape="direct_field_value",
                     required_answer_output_ids=("answer_1",),
-                    source_members=(SourceStrategyMember(source_candidate_id="source_1"),),
+                    source_members=(
+                        SourceStrategyMember(source_candidate_id="source_1"),
+                    ),
                     basis="Equivalent private strategy.",
                 ),
             )
         ),
     )
 
-    targets = SourceBindingTurnPrompt(request).binding_targets_payload()[
-        "binding_targets"
-    ]
+    targets = _binding_targets(SourceBindingTurnPrompt(request))
 
     assert targets == [
         {
@@ -297,7 +299,9 @@ def test_source_binding_schema_uses_one_compact_invocation_shape():
                     source_strategy_id="source_strategy.fact_1.direct_field_value.1",
                     plan_shape="direct_field_value",
                     required_answer_output_ids=("answer_1",),
-                    source_members=(SourceStrategyMember(source_candidate_id="source_1"),),
+                    source_members=(
+                        SourceStrategyMember(source_candidate_id="source_1"),
+                    ),
                     basis="First private strategy.",
                 ),
                 SelectedSourceStrategy(
@@ -306,16 +310,18 @@ def test_source_binding_schema_uses_one_compact_invocation_shape():
                     source_strategy_id="source_strategy.fact_1.direct_field_value.2",
                     plan_shape="direct_field_value",
                     required_answer_output_ids=("answer_1",),
-                    source_members=(SourceStrategyMember(source_candidate_id="source_1"),),
+                    source_members=(
+                        SourceStrategyMember(source_candidate_id="source_1"),
+                    ),
                     basis="Equivalent private strategy.",
                 ),
             )
         ),
     )
-    tool_schema = SourceBindingTurnPrompt(request).tool_contract().tool_specs[
-        0
-    ].input_schema
-    invocation_items = _source_invocation_items_schema(tool_schema)
+    tool_schema = (
+        SourceBindingTurnPrompt(request).tool_contract().tool_specs[0].input_schema
+    )
+    invocation_items = _source_invocation_schema(tool_schema)
 
     assert "oneOf" not in invocation_items
     assert invocation_items["properties"]["binding_target_id"] == {
@@ -465,7 +471,19 @@ def test_ranked_aggregate_source_binding_keeps_selected_group_key_lineage():
         base,
         question_contract=QuestionContract(requested_facts=(fact,)),
         requested_facts=(fact,),
-        plan_selection=_selected_plan(plan_shape="ranked_aggregate"),
+        plan_selection=PlanSelectionSet(
+            plan_selections=(
+                replace(
+                    _selected_plan(plan_shape="ranked_aggregate").plan_selections[0],
+                    source_members=(
+                        SourceStrategyMember(
+                            source_candidate_id="source_1",
+                            requirement_ids=("operation",),
+                        ),
+                    ),
+                ),
+            )
+        ),
     )
     prompt = SourceBindingTurnPrompt(request)
     candidate = _only_source_candidate(prompt.source_invocation_candidate_payload())
@@ -484,9 +502,9 @@ def test_ranked_aggregate_source_binding_keeps_selected_group_key_lineage():
         },
         field_ids=("unrelated",),
     )
-    metric_evidence_ids = source_binding_metric_evidence_ids_by_requested_fact(
-        request
-    )["fact_1"]
+    metric_evidence_ids = source_binding_metric_evidence_ids_by_requested_fact(request)[
+        "fact_1"
+    ]
     outcome["metric_fit_bases"] = {
         "fact_1": {
             evidence_id: {
@@ -669,9 +687,7 @@ def test_row_population_metric_fit_ids_do_not_collapse_across_candidates():
         id="returns",
         endpoint_name="list_return_list",
         resource_names=("return",),
-        row_paths=(
-            RowPath(id="data", path="data", cardinality=RowCardinality.MANY),
-        ),
+        row_paths=(RowPath(id="data", path="data", cardinality=RowCardinality.MANY),),
         fields=(
             CatalogField(
                 ref="returns.field.return_id",
@@ -2021,25 +2037,26 @@ def _source_binding_outcome(
     return {
         "kind": "source_bindings",
         **metric_fit_contract,
-        "source_invocations": [
-            {
-                "binding_target_id": binding_target_id,
-                "answer_population": {
-                    "population_binding_id": _binding_surface(candidate)[
-                        "population_bindings"
-                    ][0]["population_binding_id"],
-                    "intent_text": "sales that happened today",
-                    "match_basis_explanation": "The requested fact asks for today's sales.",
-                },
-                "fulfillment_decisions": fulfillment_decisions,
-                "param_decisions": {
-                    param_id: _param_decision(param_id, decision)
-                    for param_id, decision in param_decisions.items()
-                },
-                "row_predicate_reviews": dict(row_predicate_reviews or {}),
-                "finite_choice_param_reviews": finite_choice_param_reviews,
+        "bindings_for_fact_1": {
+            "plan_shape": binding_target_id.split(".")[2],
+            binding_target_id.rsplit(".", 1)[-1]: {
+                        "binding_target_id": binding_target_id,
+                        "answer_population": {
+                            "population_binding_id": _binding_surface(candidate)[
+                                "population_bindings"
+                            ][0]["population_binding_id"],
+                            "intent_text": "sales that happened today",
+                            "match_basis_explanation": "The requested fact asks for today's sales.",
+                        },
+                        "fulfillment_decisions": fulfillment_decisions,
+                        "param_decisions": {
+                            param_id: _param_decision(param_id, decision)
+                            for param_id, decision in param_decisions.items()
+                        },
+                        "row_predicate_reviews": dict(row_predicate_reviews or {}),
+                        "finite_choice_param_reviews": finite_choice_param_reviews,
             }
-        ],
+        },
     }
 
 
@@ -2375,10 +2392,24 @@ def _source_invocation_for_metric_candidate(
 
 
 def _only_binding_target_id(prompt: SourceBindingTurnPrompt) -> str:
-    targets = prompt.transport_context_payload()["binding_targets"]
-    assert isinstance(targets, list)
+    targets = _binding_targets(prompt)
     assert len(targets) == 1
     return str(targets[0]["binding_target_id"])
+
+
+def _binding_targets(prompt: SourceBindingTurnPrompt) -> list[dict[str, object]]:
+    facts = prompt.binding_plan_families_payload()["bindings_by_requested_fact"]
+    assert isinstance(facts, dict)
+    return [
+        target
+        for fact in facts.values()
+        if isinstance(fact, dict)
+        for shape in (fact.get("plan_shapes") or {}).values()
+        if isinstance(shape, dict)
+        for targets in (shape.get("role_targets") or {}).values()
+        for target in targets
+        if isinstance(target, dict)
+    ]
 
 
 def _source_options(payload: dict[str, object]) -> list[dict[str, object]]:
@@ -2475,29 +2506,27 @@ def _retained_read_assessment(
     )
 
 
-def _source_invocation_items_schema(schema: dict[str, object]) -> dict[str, object]:
+def _source_invocation_schema(schema: dict[str, object]) -> dict[str, object]:
     if isinstance(schema, dict):
         properties = schema.get("properties")
         if isinstance(properties, dict):
-            source_invocations = properties.get("source_invocations")
-            if isinstance(source_invocations, dict):
-                items = source_invocations.get("items")
-                if isinstance(items, dict):
-                    return items
+            target_id = properties.get("binding_target_id")
+            if isinstance(target_id, dict):
+                return schema
         for value in schema.values():
             if isinstance(value, dict):
                 try:
-                    return _source_invocation_items_schema(value)
+                    return _source_invocation_schema(value)
                 except AssertionError:
                     pass
             if isinstance(value, list):
                 for item in value:
                     if isinstance(item, dict):
                         try:
-                            return _source_invocation_items_schema(item)
+                            return _source_invocation_schema(item)
                         except AssertionError:
                             pass
-    raise AssertionError("missing source_invocations items schema")
+    raise AssertionError("missing source-binding invocation schema")
 
 
 def _first_fulfillment_decisions_schema(schema: dict[str, object]) -> dict[str, object]:

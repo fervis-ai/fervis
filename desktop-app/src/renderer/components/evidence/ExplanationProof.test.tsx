@@ -270,9 +270,8 @@ describe("ExplanationProof", () => {
               conversationClauses: [
                 {
                   currentClauseText: "what about last month?",
-                  currentValueText: "what about last month?",
-                  resolvedFrameText: "count of completed in-person sales",
-                  resolvedClauseText: "how many completed in-person sales last month?"
+                  resolvedText: "how many completed in-person sales last month?",
+                  resolvedValues: ["last month"]
                 }
               ]
             })

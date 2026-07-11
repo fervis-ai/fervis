@@ -67,39 +67,47 @@ def run_conversation_resolution_schema_case(payload: dict[str, Any]) -> list[str
     input_payload = payload.get("input") or {}
     schema = build_conversation_resolution_tool_schemas(
         context_sources=tuple(
-            _context_source(item)
-            for item in input_payload.get("context_sources") or ()
+            _context_source(item) for item in input_payload.get("context_sources") or ()
         ),
         context_frames=tuple(
-            _context_frame(item)
-            for item in input_payload.get("context_frames") or ()
+            _context_frame(item) for item in input_payload.get("context_frames") or ()
         ),
     )[CONVERSATION_RESOLUTION_TOOL_NAME]
     properties = schema["properties"]
     outcome_branches = properties["outcome"]["oneOf"]
     resolved = outcome_branches[0]
     clause = resolved["properties"]["clauses"]["items"]
-    source_branches = clause["properties"]["values"]["items"]["properties"][
-        "sources"
-    ]["items"]["oneOf"]
+    source_branches = clause["properties"]["values"]["items"]["properties"]["sources"][
+        "items"
+    ]["oneOf"]
     call_branches = resolved["properties"]["frame_call"]["oneOf"]
+    ambiguity = outcome_branches[1]
+    ambiguity_candidate = ambiguity["properties"]["candidate_interpretations"]["items"]
+    ambiguity_candidate_fields = ambiguity_candidate["properties"]
+    evidence_field = next(
+        field_id
+        for field_id in ambiguity_candidate_fields
+        if field_id != "contextualized_question"
+    )
+    evidence_source_ids = ambiguity_candidate_fields[evidence_field]["items"][
+        "properties"
+    ]["source_id"]["enum"]
     actual = {
         "top_level_fields": sorted(properties),
         "top_level_required": sorted(schema["required"]),
         "outcome_kinds": [
-            branch["properties"]["kind"]["enum"][0]
-            for branch in outcome_branches
+            branch["properties"]["kind"]["enum"][0] for branch in outcome_branches
         ],
         "resolved_fields": sorted(resolved["properties"]),
         "resolved_required": sorted(resolved["required"]),
         "source_kinds": [
-            branch["properties"]["kind"]["enum"][0]
-            for branch in source_branches
+            branch["properties"]["kind"]["enum"][0] for branch in source_branches
         ],
         "frame_call_kinds": [
-            branch["properties"]["kind"]["enum"][0]
-            for branch in call_branches
+            branch["properties"]["kind"]["enum"][0] for branch in call_branches
         ],
+        "ambiguity_candidate_fields": sorted(ambiguity_candidate_fields),
+        "ambiguity_evidence_source_ids": evidence_source_ids,
     }
     return _mismatches(actual, payload["expect"])
 
@@ -137,7 +145,9 @@ def _context_source(payload: dict[str, Any]) -> ConversationContextSource:
         source_id=str(payload["source_id"]),
         kind=str(payload["kind"]),
         text=str(payload["text"]),
-        source_card_ids=tuple(str(item) for item in payload.get("source_card_ids") or ()),
+        source_card_ids=tuple(
+            str(item) for item in payload.get("source_card_ids") or ()
+        ),
         source_memory_ids=tuple(
             str(item) for item in payload.get("source_memory_ids") or ()
         ),
@@ -229,12 +239,9 @@ def compiled_conversation_resolution_from_payload(
                     for value in item.get("values") or ()
                 ),
             )
-            for item in payload.get("clauses")
-            or ({"current_clause_text": question},)
+            for item in payload.get("clauses") or ({"current_clause_text": question},)
         ),
-        inputs=tuple(
-            _compiled_input(item) for item in payload.get("inputs") or ()
-        ),
+        inputs=tuple(_compiled_input(item) for item in payload.get("inputs") or ()),
         frame_call=None,
         used_source_card_ids=(),
         used_memory_ids=(),

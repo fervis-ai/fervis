@@ -1,0 +1,14 @@
+id: selected_fulfillment_pins_parent_row_grain
+description: Selecting answer evidence from a parent row population pins that population even when the endpoint also exposes nested rows.
+kind: algorithm
+algorithm: source_binding.parse
+input:
+  request:
+    mode: nested_population_roles
+  selected_field_id: order_id
+  choices:
+    OPEN: SATISFIES_TEST
+    CLOSED: SATISFIES_TEST
+expect:
+  result_contains:
+    source_row_source_id: rs_b4e0645e10dd58d0

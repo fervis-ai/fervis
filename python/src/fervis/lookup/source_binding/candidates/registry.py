@@ -55,7 +55,7 @@ def source_candidate_discovery_payload(
     return _source_candidate_payload(
         request,
         field_scope=SourceBindingFieldScope.from_read_eligibility(
-            getattr(request, "read_eligibility", None)
+            request.read_eligibility
         ),
     )
 
@@ -114,7 +114,17 @@ def source_candidate_registry(request: SourceBindingRequest) -> SourceCandidateR
     field_scope = SourceBindingFieldScope.from_read_eligibility(
         request.read_eligibility
     )
-    candidate_payload = _source_candidate_payload(request, field_scope=field_scope)
+    selected_value_ids = frozenset(
+        member.value_id
+        for plan in request.plan_selection.plan_selections
+        for member in plan.source_members
+        if member.value_id
+    )
+    candidate_payload = _source_candidate_payload(
+        request,
+        field_scope=field_scope,
+        selected_value_ids=selected_value_ids,
+    )
     selected_candidate_payload = filter_prompt_payload_by_plan_selection(
         candidate_payload,
         request,
@@ -148,8 +158,12 @@ def _source_candidate_payload(
     request: SourceCandidateDiscoveryRequest | SourceBindingRequest,
     *,
     field_scope: SourceBindingFieldScope,
+    selected_value_ids: frozenset[str] = frozenset(),
 ) -> dict[str, object]:
-    payload = _raw_source_binding_candidate_payload(request)
+    payload = _raw_source_binding_candidate_payload(
+        request,
+        selected_value_ids=selected_value_ids,
+    )
     candidate_payload = _with_stable_source_candidate_handles(
         payload,
         requested_facts=request.requested_facts,

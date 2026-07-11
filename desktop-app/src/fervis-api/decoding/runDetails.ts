@@ -104,14 +104,10 @@ export function decodeStepSemantic(raw: unknown): StepSemantic {
           clause.currentClauseText,
           "currentClauseText"
         ),
-        currentValueText: expectString(clause.currentValueText, "currentValueText"),
-        resolvedFrameText: expectString(
-          clause.resolvedFrameText,
-          "resolvedFrameText"
-        ),
-        resolvedClauseText: expectString(
-          clause.resolvedClauseText,
-          "resolvedClauseText"
+        resolvedText: expectString(clause.resolvedText, "resolvedText"),
+        resolvedValues: expectStringArray(
+          clause.resolvedValues,
+          "resolvedValues"
         )
       };
     })

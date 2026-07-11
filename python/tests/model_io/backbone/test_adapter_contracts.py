@@ -1559,12 +1559,11 @@ def test_openai_adapter_keeps_canonical_source_binding_grammar():
         "parameters"
     ]
     source_bindings_variant = schema["properties"]["outcome"]["anyOf"][0]
-    invocation_item = source_bindings_variant["properties"]["source_invocations"][
-        "items"
-    ]
+    fact_binding = source_bindings_variant["properties"]["bindings_for_fact_1"]
+    invocation_item = fact_binding["properties"]["metric"]
     canonical_invocation_item = spec.input_schema["properties"]["outcome"]["oneOf"][0][
         "properties"
-    ]["source_invocations"]["items"]
+    ]["bindings_for_fact_1"]["properties"]["metric"]
     invocation_variants = _schema_variants_by_binding_target(
         invocation_item,
         variant_key="anyOf",
@@ -1637,6 +1636,40 @@ def test_openai_adapter_keeps_canonical_source_binding_grammar():
         "has_finite_choice_reviews": True,
         "forbidden_terms_present": [],
     }
+
+
+def test_openai_accepts_source_binding_schema_nesting_depth():
+    spec = source_binding_tool_spec()
+    projected_schema = openai_compatible_loop._openai_strict_schema(
+        spec.input_schema
+    )
+
+    assert _maximum_container_nesting(projected_schema) <= 10
+
+
+def _maximum_container_nesting(schema: object, *, depth: int = 0) -> int:
+    if not isinstance(schema, dict):
+        return depth
+    current_depth = depth + (schema.get("type") in {"object", "array"})
+    child_depths = [current_depth]
+    properties = schema.get("properties", {})
+    if isinstance(properties, dict):
+        child_depths.extend(
+            _maximum_container_nesting(child, depth=current_depth)
+            for child in properties.values()
+        )
+    for variant_key in ("anyOf", "oneOf"):
+        variants = schema.get(variant_key, ())
+        if isinstance(variants, list):
+            child_depths.extend(
+                _maximum_container_nesting(child, depth=current_depth)
+                for child in variants
+            )
+    if "items" in schema:
+        child_depths.append(
+            _maximum_container_nesting(schema["items"], depth=current_depth)
+        )
+    return max(child_depths)
 
 
 def _schema_variants_by_binding_target(

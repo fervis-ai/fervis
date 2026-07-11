@@ -1,0 +1,20 @@
+id: source_binding_plan_families_project_fact_shape_roles
+kind: algorithm
+algorithm: source_binding.plan_families
+input: {}
+expect:
+  result_equals:
+    fact_1:
+      list_rows:
+        member_constraint: ANY
+        required_answer_output_ids: [answer_1]
+        roles: [primary]
+        role_target_counts:
+          primary: 1
+      grouped_rows:
+        member_constraint: SAME_SOURCE_CANDIDATE
+        required_answer_output_ids: [answer_1]
+        roles: [primary, group_identity]
+        role_target_counts:
+          primary: 1
+          group_identity: 1
