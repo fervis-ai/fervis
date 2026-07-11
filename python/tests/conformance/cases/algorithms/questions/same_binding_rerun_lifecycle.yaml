@@ -1,0 +1,54 @@
+id: same_binding_rerun_lifecycle
+kind: algorithm
+algorithm: questions.lifecycle
+description: A rerun without a patch executes with unchanged bindings and no patch artifact.
+input:
+  schema_revision: 1
+  operation: rerun
+  state:
+    question_count: 1
+    run_count: 1
+    questions:
+      - question_id: question_1
+        conversation_id: conversation_1
+        original_question: How many sales did we make today?
+        principal: &principal {principal_id: user_1, tenant_id: tenant_1}
+    program_invocations:
+      - run_id: run_base
+        kind: compiled_question
+        program_id: ap_3f931704e91234d2aa71355037bbf1b487e2034e8a04e91a2a7a1c58192f09a7
+        program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/invocation}
+        bindings:
+          - parameter_id: question.store_ids
+            value: {kind: identity_set, identity_type: store, identity_field: store_id, values: [store_1]}
+            provenance: {kind: question_input}
+          - parameter_id: semantic.sale_states
+            value: {kind: string_set, values: [COMPLETED]}
+            provenance: {kind: semantic_choice}
+    program_result:
+      status: COMPLETED
+      answer: '1'
+      result_data: {count: 1}
+      terminal_lineage_recorded: true
+  command:
+    question_id: question_1
+    base_run_id: run_base
+    principal: *principal
+  after_enqueue: {process: true}
+expect:
+  result_contains:
+    result: {status: QUEUED, run_id: run_1}
+    execution_result: {status: COMPLETED, answer: '1'}
+    question_count: 1
+    run_count: 2
+    run:
+      kind: rerun_program
+      lineage_kind: deterministic
+      trigger_kind: rerun
+      base_run_id: run_base
+      patch_id_present: false
+      binding_ids: [question.store_ids, semantic.sale_states]
+    memory_call_count: 0
+    model_call_count: 0
+    program_call_count: 1
+    base_run_unchanged: true

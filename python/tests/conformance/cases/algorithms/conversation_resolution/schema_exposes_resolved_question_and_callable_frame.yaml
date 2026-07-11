@@ -1,0 +1,35 @@
+id: schema_exposes_resolved_question_and_callable_frame
+description: The language-neutral schema has one resolved-value contract and one optional callable-frame contract.
+kind: algorithm
+algorithm: conversation_resolution.schema
+input:
+  context_sources:
+    - source_id: prior_question
+      kind: prior_user_question
+      text: How many sales did we make at Acacia Mall today?
+      source_card_ids: [prior_card]
+      source_memory_ids: [prior_request]
+      meaning_anchors:
+        - {memory_id: prior_time, text: today, occurrence: 1, kind: time_scope, label: prior time}
+  context_frames:
+    - frame_id: request:1
+      source_ids: [prior_question]
+      answer_shape: {expression_family: scalar_aggregate, output_roles: [ROW_POPULATION]}
+      parts:
+        - {part_id: location, kind: entity_identity, text: Acacia Mall, source_ref: location}
+        - {part_id: time, kind: time_scope, text: today, source_ref: time}
+      callable:
+        base_run_id: run_1
+        requested_fact_id: sales_count
+        parameters:
+          - {parameter_id: question.location, part_id: location, kind: entity_identity, current_text: Acacia Mall, resolved_text: Acacia Mall}
+          - {parameter_id: question.time, part_id: time, kind: time_scope, current_text: today, resolved_text: today}
+expect:
+  result_contains:
+    top_level_fields: [current_question_text, kind, outcome]
+    top_level_required: [current_question_text, kind, outcome]
+    outcome_kinds: [resolved, multiple_meanings, missing_input]
+    resolved_fields: [clauses, contextualized_question, frame_call, kind, resolution_basis]
+    resolved_required: [clauses, contextualized_question, frame_call, kind, resolution_basis]
+    source_kinds: [current_span, context_anchor, frame_part]
+    frame_call_kinds: [none, call]

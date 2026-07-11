@@ -1,0 +1,2141 @@
+schema_revision: 1
+programs:
+  canonical_a:
+    schema_revision: 1
+    program:
+      $type: AnswerProgram
+      fields:
+        fact_template:
+          $tuple: []
+        fulfillment:
+          $tuple: []
+        parameters:
+          $tuple:
+          - $type: ParameterDeclaration
+            fields:
+              id: plan.limit
+              role:
+                $enum: ParameterRole
+                value: plan_control
+              value_type:
+                $enum: ParameterValueType
+                value: number
+              required: true
+              allowed_values:
+                $tuple: []
+              semantic_control_ref: ''
+          - $type: ParameterDeclaration
+            fields:
+              id: question.place
+              role:
+                $enum: ParameterRole
+                value: question_input
+              value_type:
+                $enum: ParameterValueType
+                value: string
+              required: true
+              allowed_values:
+                $tuple:
+                - Kampala
+                - London
+              semantic_control_ref: ''
+        capabilities:
+          $tuple: []
+        relations:
+          $tuple: []
+        operations:
+          $tuple: []
+        render_spec: null
+        compatibility:
+          $type: ProgramCompatibility
+          fields:
+            schema_revision: 1
+            compiler_version: ''
+            function_semantics:
+              $tuple: []
+            source_contracts:
+              $tuple: []
+  canonical_b:
+    schema_revision: 1
+    program:
+      $type: AnswerProgram
+      fields:
+        fact_template:
+          $tuple: []
+        fulfillment:
+          $tuple: []
+        parameters:
+          $tuple:
+          - $type: ParameterDeclaration
+            fields:
+              id: plan.limit
+              role:
+                $enum: ParameterRole
+                value: plan_control
+              value_type:
+                $enum: ParameterValueType
+                value: number
+              required: true
+              allowed_values:
+                $tuple: []
+              semantic_control_ref: ''
+          - $type: ParameterDeclaration
+            fields:
+              id: question.place
+              role:
+                $enum: ParameterRole
+                value: question_input
+              value_type:
+                $enum: ParameterValueType
+                value: string
+              required: true
+              allowed_values:
+                $tuple:
+                - London
+                - Kampala
+              semantic_control_ref: ''
+        capabilities:
+          $tuple: []
+        relations:
+          $tuple: []
+        operations:
+          $tuple: []
+        render_spec: null
+        compatibility:
+          $type: ProgramCompatibility
+          fields:
+            schema_revision: 1
+            compiler_version: ''
+            function_semantics:
+              $tuple: []
+            source_contracts:
+              $tuple: []
+  compile_catalog_default:
+    schema_revision: 1
+    program:
+      $type: AnswerProgram
+      fields:
+        fact_template:
+          $tuple: []
+        fulfillment:
+          $tuple:
+          - $type: FactFulfillment
+            fields:
+              requested_fact_id: fact_1
+              answer_output_id: answer_1
+              render_output_id: answer_1
+        parameters:
+          $tuple:
+          - $type: ParameterDeclaration
+            fields:
+              id: question.store_ids
+              role:
+                $enum: ParameterRole
+                value: question_input
+              value_type:
+                $enum: ParameterValueType
+                value: identity_set
+              required: true
+              allowed_values:
+                $tuple: []
+              semantic_control_ref: ''
+        capabilities:
+          $tuple: []
+        relations:
+          $tuple:
+          - $type: Relation
+            fields:
+              id: sales_rows
+              source:
+                $type: RelationSource
+                fields:
+                  kind:
+                    $enum: SourceKind
+                    value: api_read
+                  read_id: sales
+                  row_source_id: ''
+                  calendar_id: ''
+                  memory_relation_id: ''
+                  param_bindings:
+                    $tuple:
+                    - $type: EndpointParamBinding
+                      fields:
+                        param_id: store_id
+                        value_expr:
+                          $type: ParameterRef
+                          fields:
+                            parameter_id: question.store_ids
+                            component: value
+                            item_index: null
+                            origin:
+                              $enum: ValueExpressionOrigin
+                              value: parameter
+                        proof_refs:
+                          $tuple: []
+                  applied_filters:
+                    $tuple: []
+                  row_filters:
+                    $tuple: []
+                  population_choices:
+                    $tuple: []
+                  proof_refs:
+                    $tuple: []
+              fields:
+                $tuple:
+                - $type: RelationField
+                  fields:
+                    field_id: sale_id
+                    roles:
+                      $tuple:
+                      - $enum: FieldBindingRole
+                        value: identity
+                - $type: RelationField
+                  fields:
+                    field_id: store_id
+                    roles:
+                      $tuple:
+                      - $enum: FieldBindingRole
+                        value: output
+        operations:
+          $tuple:
+          - $type: Operation
+            fields:
+              id: project_sales
+              spec:
+                $type: ProjectSpec
+                fields:
+                  input_relation: sales_rows
+                  fields:
+                    $tuple:
+                    - $type: ProjectField
+                      fields:
+                        source: sale_id
+                        output: answer_sale_id
+                    - $type: ProjectField
+                      fields:
+                        source: store_id
+                        output: ''
+                  kind:
+                    $enum: OperationKind
+                    value: project
+              output_relation: answer_rows
+        render_spec:
+          $type: RenderSpec
+          fields:
+            relation_outputs:
+              $tuple:
+              - $type: RenderRelationOutput
+                fields:
+                  id: answer_1
+                  relation_id: answer_rows
+                  field_id: store_id
+                  label: ''
+                  role: answer_value
+            scalar_outputs:
+              $tuple: []
+        compatibility:
+          $type: ProgramCompatibility
+          fields:
+            schema_revision: 1
+            compiler_version: ''
+            function_semantics:
+              $tuple: []
+            source_contracts:
+              $tuple: []
+  compile_hidden_value:
+    schema_revision: 1
+    program:
+      $type: AnswerProgram
+      fields:
+        fact_template:
+          $tuple: []
+        fulfillment:
+          $tuple:
+          - $type: FactFulfillment
+            fields:
+              requested_fact_id: fact_1
+              answer_output_id: answer_1
+              render_output_id: answer_1
+        parameters:
+          $tuple:
+          - $type: ParameterDeclaration
+            fields:
+              id: question.store_ids
+              role:
+                $enum: ParameterRole
+                value: question_input
+              value_type:
+                $enum: ParameterValueType
+                value: identity_set
+              required: true
+              allowed_values:
+                $tuple: []
+              semantic_control_ref: ''
+        capabilities:
+          $tuple: []
+        relations:
+          $tuple:
+          - $type: Relation
+            fields:
+              id: sales_rows
+              source:
+                $type: RelationSource
+                fields:
+                  kind:
+                    $enum: SourceKind
+                    value: api_read
+                  read_id: sales
+                  row_source_id: ''
+                  calendar_id: ''
+                  memory_relation_id: ''
+                  param_bindings:
+                    $tuple:
+                    - $type: EndpointParamBinding
+                      fields:
+                        param_id: store_id
+                        value:
+                          $tuple:
+                          - store_1
+                        value_expr: null
+                        origin_kind:
+                          $enum: RelationInputOrigin
+                          value: context_constant
+                        value_id: ''
+                        value_component: value
+                        value_item_index: null
+                        parameter_id: ''
+                        proof_refs:
+                          $tuple: []
+                  applied_filters:
+                    $tuple: []
+                  row_filters:
+                    $tuple: []
+                  population_choices:
+                    $tuple: []
+                  proof_refs:
+                    $tuple: []
+              fields:
+                $tuple:
+                - $type: RelationField
+                  fields:
+                    field_id: sale_id
+                    roles:
+                      $tuple:
+                      - $enum: FieldBindingRole
+                        value: identity
+                - $type: RelationField
+                  fields:
+                    field_id: store_id
+                    roles:
+                      $tuple:
+                      - $enum: FieldBindingRole
+                        value: output
+        operations:
+          $tuple:
+          - $type: Operation
+            fields:
+              id: project_sales
+              spec:
+                $type: ProjectSpec
+                fields:
+                  input_relation: sales_rows
+                  fields:
+                    $tuple:
+                    - $type: ProjectField
+                      fields:
+                        source: sale_id
+                        output: answer_sale_id
+                    - $type: ProjectField
+                      fields:
+                        source: store_id
+                        output: ''
+                  kind:
+                    $enum: OperationKind
+                    value: project
+              output_relation: answer_rows
+        render_spec:
+          $type: RenderSpec
+          fields:
+            relation_outputs:
+              $tuple:
+              - $type: RenderRelationOutput
+                fields:
+                  id: answer_1
+                  relation_id: answer_rows
+                  field_id: store_id
+                  label: ''
+                  role: answer_value
+            scalar_outputs:
+              $tuple: []
+        compatibility:
+          $type: ProgramCompatibility
+          fields:
+            schema_revision: 1
+            compiler_version: ''
+            function_semantics:
+              $tuple: []
+            source_contracts:
+              $tuple: []
+  invocation:
+    schema_revision: 1
+    program:
+      $type: AnswerProgram
+      fields:
+        fact_template:
+          $tuple:
+          - $type: RequestedFact
+            fields:
+              id: fact_1
+              description: sales for a store
+              answer_expression: null
+              answer_subject: null
+              answer_population: null
+              answer_outputs:
+                $tuple:
+                - $type: RequestedFactAnswerOutput
+                  fields:
+                    id: answer_1
+                    description: answer_1
+                    role: ''
+              known_inputs:
+                $tuple:
+                - $type: RequestedFactLiteralInput
+                  fields:
+                    id: store_ids
+                    source: {$enum: KnownInputSource, value: question_context}
+                    role: {$enum: LiteralInputRole, value: reference_value}
+                    text: Acacia Mall
+                    resolved_value_text: Acacia Mall
+                    field_label_text: mall
+                    value_meaning_hint: mall identity
+                    resolved_input_ref: ''
+                    occurrence: 1
+              input_refs:
+                $tuple: [store_ids]
+              required_for: ''
+              population_constraints:
+                $tuple: []
+        fulfillment:
+          $tuple:
+          - $type: FactFulfillment
+            fields:
+              requested_fact_id: fact_1
+              answer_output_id: answer_1
+              render_output_id: answer_1
+        parameters:
+          $tuple:
+          - $type: ParameterDeclaration
+            fields:
+              id: question.store_ids
+              role:
+                $enum: ParameterRole
+                value: question_input
+              value_type:
+                $enum: ParameterValueType
+                value: identity_set
+              required: true
+              allowed_values:
+                $tuple: []
+              semantic_control_ref: ''
+          - $type: ParameterDeclaration
+            fields:
+              id: semantic.sale_states
+              role:
+                $enum: ParameterRole
+                value: semantic_control
+              value_type:
+                $enum: ParameterValueType
+                value: string_set
+              required: true
+              allowed_values:
+                $tuple:
+                - COMPLETED
+                - PLACED
+              semantic_control_ref: sales.state_population
+        capabilities:
+          $tuple: []
+        relations:
+          $tuple:
+          - $type: Relation
+            fields:
+              id: sales_rows
+              source:
+                $type: RelationSource
+                fields:
+                  kind:
+                    $enum: SourceKind
+                    value: api_read
+                  read_id: sales
+                  row_source_id: ''
+                  calendar_id: ''
+                  memory_relation_id: ''
+                  param_bindings:
+                    $tuple:
+                    - $type: EndpointParamBinding
+                      fields:
+                        param_id: store_id
+                        value_expr:
+                          $type: ParameterRef
+                          fields:
+                            parameter_id: question.store_ids
+                            component: value
+                            item_index: null
+                            origin:
+                              $enum: ValueExpressionOrigin
+                              value: parameter
+                        proof_refs:
+                          $tuple: [known_input:store_ids]
+                  applied_filters:
+                    $tuple: []
+                  row_filters:
+                    $tuple: []
+                  population_choices:
+                    $tuple: []
+                  proof_refs:
+                    $tuple: []
+              fields:
+                $tuple:
+                - $type: RelationField
+                  fields:
+                    field_id: sale_id
+                    roles:
+                      $tuple:
+                      - $enum: FieldBindingRole
+                        value: identity
+                - $type: RelationField
+                  fields:
+                    field_id: store_id
+                    roles:
+                      $tuple:
+                      - $enum: FieldBindingRole
+                        value: output
+        operations:
+          $tuple:
+          - $type: Operation
+            fields:
+              id: project_sales
+              spec:
+                $type: ProjectSpec
+                fields:
+                  input_relation: sales_rows
+                  fields:
+                    $tuple:
+                    - $type: ProjectField
+                      fields:
+                        source: sale_id
+                        output: answer_sale_id
+                    - $type: ProjectField
+                      fields:
+                        source: store_id
+                        output: ''
+                  kind:
+                    $enum: OperationKind
+                    value: project
+              output_relation: answer_rows
+        render_spec:
+          $type: RenderSpec
+          fields:
+            relation_outputs:
+              $tuple:
+              - $type: RenderRelationOutput
+                fields:
+                  id: answer_1
+                  relation_id: answer_rows
+                  field_id: store_id
+                  label: ''
+                  role: answer_value
+            scalar_outputs:
+              $tuple: []
+        compatibility:
+          $type: ProgramCompatibility
+          fields:
+            schema_revision: 1
+            compiler_version: fervis.answer_program.compiler@1
+            function_semantics:
+              $tuple:
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: answer.classify
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: answer.materialize
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: fact.materialize
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: proof.construct
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: relation.project
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: source.instantiate_read
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: source.read_relation
+                  version: '1'
+            source_contracts:
+              $tuple:
+              - $type: SourceContractPin
+                fields:
+                  kind:
+                    $enum: SourceContractKind
+                    value: catalog_read
+                  source_id: sales
+                  fingerprint: 2d9a5f0e9bb0e0c7e1787d62d2f3c9f00446b2b57a4acd9ed2ac414a4e59f575
+  memory_backed:
+    schema_revision: 1
+    program:
+      $type: AnswerProgram
+      fields:
+        fact_template: {$tuple: []}
+        fulfillment: {$tuple: []}
+        parameters: {$tuple: []}
+        capabilities: {$tuple: []}
+        relations:
+          $tuple:
+          - $type: Relation
+            fields:
+              id: prior_sales
+              source:
+                $type: RelationSource
+                fields:
+                  kind: {$enum: SourceKind, value: memory_read}
+                  read_id: ''
+                  row_source_id: ''
+                  calendar_id: ''
+                  memory_relation_id: prior_sales
+                  param_bindings: {$tuple: []}
+                  applied_filters: {$tuple: []}
+                  row_filters: {$tuple: []}
+                  population_choices: {$tuple: []}
+                  proof_refs: {$tuple: [memory:prior_sales]}
+              fields:
+                $tuple:
+                - $type: RelationField
+                  fields:
+                    field_id: sale_id
+                    roles:
+                      $tuple:
+                      - {$enum: FieldBindingRole, value: identity}
+        operations: {$tuple: []}
+        render_spec: null
+        compatibility:
+          $type: ProgramCompatibility
+          fields:
+            schema_revision: 1
+            compiler_version: fervis.answer_program.compiler@1
+            function_semantics:
+              $tuple:
+              - $type: FunctionSemanticVersion
+                fields: {function_key: answer.classify, version: '1'}
+              - $type: FunctionSemanticVersion
+                fields: {function_key: answer.materialize, version: '1'}
+              - $type: FunctionSemanticVersion
+                fields: {function_key: fact.materialize, version: '1'}
+              - $type: FunctionSemanticVersion
+                fields: {function_key: proof.construct, version: '1'}
+            source_contracts:
+              $tuple:
+              - $type: SourceContractPin
+                fields:
+                  kind: {$enum: SourceContractKind, value: memory_relation}
+                  source_id: mem_fe7f674c7ac59e4a
+                  fingerprint: 8a2f05f7e1f6c2aee3b39cb8f1d4572306d28bfbd81a671f099af87d915638f2
+  population_required:
+    schema_revision: 1
+    program:
+      $type: AnswerProgram
+      fields:
+        fact_template: &population_fact_template
+          $tuple:
+          - $type: RequestedFact
+            fields:
+              id: fact_1
+              description: sales for selected stores
+              answer_expression: null
+              answer_subject: null
+              answer_population: null
+              answer_outputs:
+                $tuple:
+                - $type: RequestedFactAnswerOutput
+                  fields:
+                    id: answer_1
+                    description: answer_1
+                    role: ''
+              known_inputs:
+                $tuple: []
+              input_refs:
+                $tuple: []
+              required_for: ''
+              population_constraints:
+                $tuple: []
+        fulfillment: &population_fulfillment
+          $tuple:
+          - $type: FactFulfillment
+            fields:
+              requested_fact_id: fact_1
+              answer_output_id: answer_1
+              render_output_id: answer_1
+        parameters:
+          $tuple:
+          - &population_question_parameter
+            $type: ParameterDeclaration
+            fields:
+              id: question.store_ids
+              role:
+                $enum: ParameterRole
+                value: question_input
+              value_type:
+                $enum: ParameterValueType
+                value: identity_set
+              required: true
+              allowed_values:
+                $tuple: []
+              semantic_control_ref: ''
+          - $type: ParameterDeclaration
+            fields:
+              id: semantic.store_population
+              role:
+                $enum: ParameterRole
+                value: semantic_control
+              value_type:
+                $enum: ParameterValueType
+                value: string_set
+              required: true
+              allowed_values:
+                $tuple:
+                - store_1
+                - store_2
+              semantic_control_ref: stores.population
+        capabilities: &population_capabilities
+          $tuple: []
+        relations: &population_relations
+          $tuple:
+          - $type: Relation
+            fields:
+              id: sales_rows
+              source:
+                $type: RelationSource
+                fields:
+                  kind:
+                    $enum: SourceKind
+                    value: api_read
+                  read_id: sales
+                  row_source_id: ''
+                  calendar_id: ''
+                  memory_relation_id: ''
+                  param_bindings:
+                    $tuple:
+                    - $type: EndpointParamBinding
+                      fields:
+                        param_id: store_id
+                        value_expr:
+                          $type: ParameterRef
+                          fields:
+                            parameter_id: question.store_ids
+                            component: value
+                            item_index: null
+                            origin:
+                              $enum: ValueExpressionOrigin
+                              value: parameter
+                        proof_refs:
+                          $tuple: []
+                  applied_filters:
+                    $tuple: []
+                  row_filters:
+                    $tuple: []
+                  population_choices:
+                    $tuple:
+                    - $type: RelationSourcePopulationChoice
+                      fields:
+                        controller_kind:
+                          $enum: PopulationChoiceControllerKind
+                          value: row_predicate
+                        controller_id: stores.population
+                        field_id: store_id
+                        requested_fact_ids:
+                          $tuple:
+                          - fact_1
+                        selection_expr:
+                          $type: ParameterRef
+                          fields:
+                            parameter_id: semantic.store_population
+                            component: value
+                            item_index: null
+                            origin:
+                              $enum: ValueExpressionOrigin
+                              value: parameter
+                        allowed_values:
+                          $tuple:
+                          - store_1
+                          - store_2
+                        proof_refs:
+                          $tuple: []
+                        review_scope_decisions:
+                          $tuple: []
+                  proof_refs:
+                    $tuple: []
+              fields:
+                $tuple:
+                - $type: RelationField
+                  fields:
+                    field_id: sale_id
+                    roles:
+                      $tuple:
+                      - $enum: FieldBindingRole
+                        value: identity
+                - $type: RelationField
+                  fields:
+                    field_id: store_id
+                    roles:
+                      $tuple:
+                      - $enum: FieldBindingRole
+                        value: output
+        operations: &population_operations
+          $tuple:
+          - $type: Operation
+            fields:
+              id: project_sales
+              spec:
+                $type: ProjectSpec
+                fields:
+                  input_relation: sales_rows
+                  fields:
+                    $tuple:
+                    - $type: ProjectField
+                      fields:
+                        source: sale_id
+                        output: answer_sale_id
+                    - $type: ProjectField
+                      fields:
+                        source: store_id
+                        output: ''
+                  kind:
+                    $enum: OperationKind
+                    value: project
+              output_relation: answer_rows
+        render_spec: &population_render_spec
+          $type: RenderSpec
+          fields:
+            relation_outputs:
+              $tuple:
+              - $type: RenderRelationOutput
+                fields:
+                  id: answer_1
+                  relation_id: answer_rows
+                  field_id: store_id
+                  label: ''
+                  role: answer_value
+            scalar_outputs:
+              $tuple: []
+        compatibility: &population_compatibility
+          $type: ProgramCompatibility
+          fields:
+            schema_revision: 1
+            compiler_version: fervis.answer_program.compiler@1
+            function_semantics:
+              $tuple:
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: answer.classify
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: answer.materialize
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: fact.materialize
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: proof.construct
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: relation.project
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: relation.row_filter
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: source.instantiate_read
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: source.read_relation
+                  version: '1'
+            source_contracts:
+              $tuple:
+              - $type: SourceContractPin
+                fields:
+                  kind:
+                    $enum: SourceContractKind
+                    value: catalog_read
+                  source_id: sales
+                  fingerprint: 2d9a5f0e9bb0e0c7e1787d62d2f3c9f00446b2b57a4acd9ed2ac414a4e59f575
+  population_scalar_invalid:
+    schema_revision: 1
+    program:
+      $type: AnswerProgram
+      fields:
+        fact_template: *population_fact_template
+        fulfillment: *population_fulfillment
+        parameters:
+          $tuple:
+          - *population_question_parameter
+          - $type: ParameterDeclaration
+            fields:
+              id: semantic.store_population
+              role: {$enum: ParameterRole, value: semantic_control}
+              value_type: {$enum: ParameterValueType, value: string}
+              required: true
+              allowed_values: {$tuple: [store_1, store_2]}
+              semantic_control_ref: stores.population
+        capabilities: *population_capabilities
+        relations: *population_relations
+        operations: *population_operations
+        render_spec: *population_render_spec
+        compatibility: *population_compatibility
+  population_plan_control_invalid:
+    schema_revision: 1
+    program:
+      $type: AnswerProgram
+      fields:
+        fact_template: *population_fact_template
+        fulfillment: *population_fulfillment
+        parameters:
+          $tuple:
+          - *population_question_parameter
+          - $type: ParameterDeclaration
+            fields:
+              id: semantic.store_population
+              role: {$enum: ParameterRole, value: plan_control}
+              value_type: {$enum: ParameterValueType, value: string_set}
+              required: true
+              allowed_values: {$tuple: [store_1, store_2]}
+              semantic_control_ref: stores.population
+        capabilities: *population_capabilities
+        relations: *population_relations
+        operations: *population_operations
+        render_spec: *population_render_spec
+        compatibility: *population_compatibility
+  population_optional:
+    schema_revision: 1
+    program:
+      $type: AnswerProgram
+      fields:
+        fact_template:
+          $tuple:
+          - $type: RequestedFact
+            fields:
+              id: fact_1
+              description: sales for selected stores
+              answer_expression: null
+              answer_subject: null
+              answer_population: null
+              answer_outputs:
+                $tuple:
+                - $type: RequestedFactAnswerOutput
+                  fields:
+                    id: answer_1
+                    description: answer_1
+                    role: ''
+              known_inputs:
+                $tuple: []
+              input_refs:
+                $tuple: []
+              required_for: ''
+              population_constraints:
+                $tuple: []
+        fulfillment:
+          $tuple:
+          - $type: FactFulfillment
+            fields:
+              requested_fact_id: fact_1
+              answer_output_id: answer_1
+              render_output_id: answer_1
+        parameters:
+          $tuple:
+          - $type: ParameterDeclaration
+            fields:
+              id: question.store_ids
+              role:
+                $enum: ParameterRole
+                value: question_input
+              value_type:
+                $enum: ParameterValueType
+                value: identity_set
+              required: true
+              allowed_values:
+                $tuple: []
+              semantic_control_ref: ''
+          - $type: ParameterDeclaration
+            fields:
+              id: semantic.store_population
+              role:
+                $enum: ParameterRole
+                value: semantic_control
+              value_type:
+                $enum: ParameterValueType
+                value: string_set
+              required: false
+              allowed_values:
+                $tuple:
+                - store_1
+                - store_2
+              semantic_control_ref: stores.population
+        capabilities:
+          $tuple: []
+        relations:
+          $tuple:
+          - $type: Relation
+            fields:
+              id: sales_rows
+              source:
+                $type: RelationSource
+                fields:
+                  kind:
+                    $enum: SourceKind
+                    value: api_read
+                  read_id: sales
+                  row_source_id: ''
+                  calendar_id: ''
+                  memory_relation_id: ''
+                  param_bindings:
+                    $tuple:
+                    - $type: EndpointParamBinding
+                      fields:
+                        param_id: store_id
+                        value_expr:
+                          $type: ParameterRef
+                          fields:
+                            parameter_id: question.store_ids
+                            component: value
+                            item_index: null
+                            origin:
+                              $enum: ValueExpressionOrigin
+                              value: parameter
+                        proof_refs:
+                          $tuple: []
+                  applied_filters:
+                    $tuple: []
+                  row_filters:
+                    $tuple: []
+                  population_choices:
+                    $tuple:
+                    - $type: RelationSourcePopulationChoice
+                      fields:
+                        controller_kind:
+                          $enum: PopulationChoiceControllerKind
+                          value: row_predicate
+                        controller_id: stores.population
+                        field_id: store_id
+                        requested_fact_ids:
+                          $tuple:
+                          - fact_1
+                        selection_expr:
+                          $type: ParameterRef
+                          fields:
+                            parameter_id: semantic.store_population
+                            component: value
+                            item_index: null
+                            origin:
+                              $enum: ValueExpressionOrigin
+                              value: parameter
+                        allowed_values:
+                          $tuple:
+                          - store_1
+                          - store_2
+                        proof_refs:
+                          $tuple: []
+                        review_scope_decisions:
+                          $tuple: []
+                  proof_refs:
+                    $tuple: []
+              fields:
+                $tuple:
+                - $type: RelationField
+                  fields:
+                    field_id: sale_id
+                    roles:
+                      $tuple:
+                      - $enum: FieldBindingRole
+                        value: identity
+                - $type: RelationField
+                  fields:
+                    field_id: store_id
+                    roles:
+                      $tuple:
+                      - $enum: FieldBindingRole
+                        value: output
+        operations:
+          $tuple:
+          - $type: Operation
+            fields:
+              id: project_sales
+              spec:
+                $type: ProjectSpec
+                fields:
+                  input_relation: sales_rows
+                  fields:
+                    $tuple:
+                    - $type: ProjectField
+                      fields:
+                        source: sale_id
+                        output: answer_sale_id
+                    - $type: ProjectField
+                      fields:
+                        source: store_id
+                        output: ''
+                  kind:
+                    $enum: OperationKind
+                    value: project
+              output_relation: answer_rows
+        render_spec:
+          $type: RenderSpec
+          fields:
+            relation_outputs:
+              $tuple:
+              - $type: RenderRelationOutput
+                fields:
+                  id: answer_1
+                  relation_id: answer_rows
+                  field_id: store_id
+                  label: ''
+                  role: answer_value
+            scalar_outputs:
+              $tuple: []
+        compatibility:
+          $type: ProgramCompatibility
+          fields:
+            schema_revision: 1
+            compiler_version: fervis.answer_program.compiler@1
+            function_semantics:
+              $tuple:
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: answer.classify
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: answer.materialize
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: fact.materialize
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: proof.construct
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: relation.project
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: relation.row_filter
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: source.instantiate_read
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: source.read_relation
+                  version: '1'
+            source_contracts:
+              $tuple:
+              - $type: SourceContractPin
+                fields:
+                  kind:
+                    $enum: SourceContractKind
+                    value: catalog_read
+                  source_id: sales
+                  fingerprint: 2d9a5f0e9bb0e0c7e1787d62d2f3c9f00446b2b57a4acd9ed2ac414a4e59f575
+  capability:
+    schema_revision: 1
+    program:
+      $type: AnswerProgram
+      fields:
+        fact_template:
+          $tuple:
+          - $type: RequestedFact
+            fields:
+              id: fact_1
+              description: sales for selected channels
+              answer_expression: null
+              answer_subject: null
+              answer_population: null
+              answer_outputs:
+                $tuple:
+                - $type: RequestedFactAnswerOutput
+                  fields:
+                    id: answer_1
+                    description: answer_1
+                    role: ''
+              known_inputs:
+                $tuple: []
+              input_refs:
+                $tuple: []
+              required_for: ''
+              population_constraints:
+                $tuple: []
+        fulfillment:
+          $tuple:
+          - $type: FactFulfillment
+            fields:
+              requested_fact_id: fact_1
+              answer_output_id: answer_1
+              render_output_id: answer_1
+        parameters:
+          $tuple:
+          - $type: ParameterDeclaration
+            fields:
+              id: question.store_ids
+              role:
+                $enum: ParameterRole
+                value: question_input
+              value_type:
+                $enum: ParameterValueType
+                value: identity_set
+              required: true
+              allowed_values:
+                $tuple: []
+              semantic_control_ref: ''
+        capabilities:
+          $tuple:
+          - $type: NarrowPopulationCapability
+            fields:
+              id: filter_by_sale_channel
+              parameter:
+                $type: ParameterDeclaration
+                fields:
+                  id: semantic.sale_channels
+                  role:
+                    $enum: ParameterRole
+                    value: semantic_control
+                  value_type:
+                    $enum: ParameterValueType
+                    value: string_set
+                  required: true
+                  allowed_values:
+                    $tuple:
+                    - STORE
+                    - ONLINE
+                  semantic_control_ref: sales.channel_population
+              relation_id: sales_rows
+              field_id: channel
+              operator:
+                $enum: ValueFilterOperator
+                value: in
+              requested_fact_ids:
+                $tuple:
+                - fact_1
+              proof_refs:
+                $tuple:
+                - capability:sales.channel
+              function_semantics_version: '1'
+              kind:
+                $enum: CapabilityKind
+                value: narrow_population
+        relations:
+          $tuple:
+          - $type: Relation
+            fields:
+              id: sales_rows
+              source:
+                $type: RelationSource
+                fields:
+                  kind:
+                    $enum: SourceKind
+                    value: api_read
+                  read_id: sales
+                  row_source_id: ''
+                  calendar_id: ''
+                  memory_relation_id: ''
+                  param_bindings:
+                    $tuple:
+                    - $type: EndpointParamBinding
+                      fields:
+                        param_id: store_id
+                        value_expr:
+                          $type: ParameterRef
+                          fields:
+                            parameter_id: question.store_ids
+                            component: value
+                            item_index: null
+                            origin:
+                              $enum: ValueExpressionOrigin
+                              value: parameter
+                        proof_refs:
+                          $tuple: []
+                  applied_filters:
+                    $tuple: []
+                  row_filters:
+                    $tuple: []
+                  population_choices:
+                    $tuple: []
+                  proof_refs:
+                    $tuple: []
+              fields:
+                $tuple:
+                - $type: RelationField
+                  fields:
+                    field_id: sale_id
+                    roles:
+                      $tuple:
+                      - $enum: FieldBindingRole
+                        value: identity
+                - $type: RelationField
+                  fields:
+                    field_id: store_id
+                    roles:
+                      $tuple:
+                      - $enum: FieldBindingRole
+                        value: output
+                - $type: RelationField
+                  fields:
+                    field_id: channel
+                    roles:
+                      $tuple:
+                      - $enum: FieldBindingRole
+                        value: predicate
+        operations:
+          $tuple:
+          - $type: Operation
+            fields:
+              id: project_sales
+              spec:
+                $type: ProjectSpec
+                fields:
+                  input_relation: sales_rows
+                  fields:
+                    $tuple:
+                    - $type: ProjectField
+                      fields:
+                        source: sale_id
+                        output: answer_sale_id
+                    - $type: ProjectField
+                      fields:
+                        source: store_id
+                        output: ''
+                  kind:
+                    $enum: OperationKind
+                    value: project
+              output_relation: answer_rows
+        render_spec:
+          $type: RenderSpec
+          fields:
+            relation_outputs:
+              $tuple:
+              - $type: RenderRelationOutput
+                fields:
+                  id: answer_1
+                  relation_id: answer_rows
+                  field_id: store_id
+                  label: ''
+                  role: answer_value
+            scalar_outputs:
+              $tuple: []
+        compatibility:
+          $type: ProgramCompatibility
+          fields:
+            schema_revision: 1
+            compiler_version: fervis.answer_program.compiler@1
+            function_semantics:
+              $tuple:
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: answer.classify
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: answer.materialize
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: fact.materialize
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: program.capability.narrow_population
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: proof.construct
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: relation.project
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: relation.row_filter
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: source.instantiate_read
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: source.read_relation
+                  version: '1'
+            source_contracts:
+              $tuple:
+              - $type: SourceContractPin
+                fields:
+                  kind:
+                    $enum: SourceContractKind
+                    value: catalog_read
+                  source_id: sales
+                  fingerprint: e7351d0771a04bb0704b7babf7f953eb634c0b1f8a0e9d88dffbf3ed981ab612
+  incompatible_compiler:
+    schema_revision: 1
+    program:
+      $type: AnswerProgram
+      fields:
+        fact_template:
+          $tuple:
+          - $type: RequestedFact
+            fields:
+              id: fact_1
+              description: sales for a store
+              answer_expression: null
+              answer_subject: null
+              answer_population: null
+              answer_outputs:
+                $tuple:
+                - $type: RequestedFactAnswerOutput
+                  fields:
+                    id: answer_1
+                    description: answer_1
+                    role: ''
+              known_inputs:
+                $tuple: []
+              input_refs:
+                $tuple: []
+              required_for: ''
+              population_constraints:
+                $tuple: []
+        fulfillment:
+          $tuple:
+          - $type: FactFulfillment
+            fields:
+              requested_fact_id: fact_1
+              answer_output_id: answer_1
+              render_output_id: answer_1
+        parameters:
+          $tuple:
+          - $type: ParameterDeclaration
+            fields:
+              id: question.store_ids
+              role:
+                $enum: ParameterRole
+                value: question_input
+              value_type:
+                $enum: ParameterValueType
+                value: identity_set
+              required: true
+              allowed_values:
+                $tuple: []
+              semantic_control_ref: ''
+          - $type: ParameterDeclaration
+            fields:
+              id: semantic.sale_states
+              role:
+                $enum: ParameterRole
+                value: semantic_control
+              value_type:
+                $enum: ParameterValueType
+                value: string_set
+              required: true
+              allowed_values:
+                $tuple:
+                - COMPLETED
+                - PLACED
+              semantic_control_ref: sales.state_population
+        capabilities:
+          $tuple: []
+        relations:
+          $tuple:
+          - $type: Relation
+            fields:
+              id: sales_rows
+              source:
+                $type: RelationSource
+                fields:
+                  kind:
+                    $enum: SourceKind
+                    value: api_read
+                  read_id: sales
+                  row_source_id: ''
+                  calendar_id: ''
+                  memory_relation_id: ''
+                  param_bindings:
+                    $tuple:
+                    - $type: EndpointParamBinding
+                      fields:
+                        param_id: store_id
+                        value_expr:
+                          $type: ParameterRef
+                          fields:
+                            parameter_id: question.store_ids
+                            component: value
+                            item_index: null
+                            origin:
+                              $enum: ValueExpressionOrigin
+                              value: parameter
+                        proof_refs:
+                          $tuple: []
+                  applied_filters:
+                    $tuple: []
+                  row_filters:
+                    $tuple: []
+                  population_choices:
+                    $tuple: []
+                  proof_refs:
+                    $tuple: []
+              fields:
+                $tuple:
+                - $type: RelationField
+                  fields:
+                    field_id: sale_id
+                    roles:
+                      $tuple:
+                      - $enum: FieldBindingRole
+                        value: identity
+                - $type: RelationField
+                  fields:
+                    field_id: store_id
+                    roles:
+                      $tuple:
+                      - $enum: FieldBindingRole
+                        value: output
+        operations:
+          $tuple:
+          - $type: Operation
+            fields:
+              id: project_sales
+              spec:
+                $type: ProjectSpec
+                fields:
+                  input_relation: sales_rows
+                  fields:
+                    $tuple:
+                    - $type: ProjectField
+                      fields:
+                        source: sale_id
+                        output: answer_sale_id
+                    - $type: ProjectField
+                      fields:
+                        source: store_id
+                        output: ''
+                  kind:
+                    $enum: OperationKind
+                    value: project
+              output_relation: answer_rows
+        render_spec:
+          $type: RenderSpec
+          fields:
+            relation_outputs:
+              $tuple:
+              - $type: RenderRelationOutput
+                fields:
+                  id: answer_1
+                  relation_id: answer_rows
+                  field_id: store_id
+                  label: ''
+                  role: answer_value
+            scalar_outputs:
+              $tuple: []
+        compatibility:
+          $type: ProgramCompatibility
+          fields:
+            schema_revision: 1
+            compiler_version: incompatible.compiler@1
+            function_semantics:
+              $tuple:
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: answer.classify
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: answer.materialize
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: fact.materialize
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: proof.construct
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: relation.project
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: source.instantiate_read
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: source.read_relation
+                  version: '1'
+            source_contracts:
+              $tuple:
+              - $type: SourceContractPin
+                fields:
+                  kind:
+                    $enum: SourceContractKind
+                    value: catalog_read
+                  source_id: sales
+                  fingerprint: 2d9a5f0e9bb0e0c7e1787d62d2f3c9f00446b2b57a4acd9ed2ac414a4e59f575
+  incompatible_function:
+    schema_revision: 1
+    program:
+      $type: AnswerProgram
+      fields:
+        fact_template:
+          $tuple:
+          - $type: RequestedFact
+            fields:
+              id: fact_1
+              description: sales for a store
+              answer_expression: null
+              answer_subject: null
+              answer_population: null
+              answer_outputs:
+                $tuple:
+                - $type: RequestedFactAnswerOutput
+                  fields:
+                    id: answer_1
+                    description: answer_1
+                    role: ''
+              known_inputs:
+                $tuple: []
+              input_refs:
+                $tuple: []
+              required_for: ''
+              population_constraints:
+                $tuple: []
+        fulfillment:
+          $tuple:
+          - $type: FactFulfillment
+            fields:
+              requested_fact_id: fact_1
+              answer_output_id: answer_1
+              render_output_id: answer_1
+        parameters:
+          $tuple:
+          - $type: ParameterDeclaration
+            fields:
+              id: question.store_ids
+              role:
+                $enum: ParameterRole
+                value: question_input
+              value_type:
+                $enum: ParameterValueType
+                value: identity_set
+              required: true
+              allowed_values:
+                $tuple: []
+              semantic_control_ref: ''
+          - $type: ParameterDeclaration
+            fields:
+              id: semantic.sale_states
+              role:
+                $enum: ParameterRole
+                value: semantic_control
+              value_type:
+                $enum: ParameterValueType
+                value: string_set
+              required: true
+              allowed_values:
+                $tuple:
+                - COMPLETED
+                - PLACED
+              semantic_control_ref: sales.state_population
+        capabilities:
+          $tuple: []
+        relations:
+          $tuple:
+          - $type: Relation
+            fields:
+              id: sales_rows
+              source:
+                $type: RelationSource
+                fields:
+                  kind:
+                    $enum: SourceKind
+                    value: api_read
+                  read_id: sales
+                  row_source_id: ''
+                  calendar_id: ''
+                  memory_relation_id: ''
+                  param_bindings:
+                    $tuple:
+                    - $type: EndpointParamBinding
+                      fields:
+                        param_id: store_id
+                        value_expr:
+                          $type: ParameterRef
+                          fields:
+                            parameter_id: question.store_ids
+                            component: value
+                            item_index: null
+                            origin:
+                              $enum: ValueExpressionOrigin
+                              value: parameter
+                        proof_refs:
+                          $tuple: []
+                  applied_filters:
+                    $tuple: []
+                  row_filters:
+                    $tuple: []
+                  population_choices:
+                    $tuple: []
+                  proof_refs:
+                    $tuple: []
+              fields:
+                $tuple:
+                - $type: RelationField
+                  fields:
+                    field_id: sale_id
+                    roles:
+                      $tuple:
+                      - $enum: FieldBindingRole
+                        value: identity
+                - $type: RelationField
+                  fields:
+                    field_id: store_id
+                    roles:
+                      $tuple:
+                      - $enum: FieldBindingRole
+                        value: output
+        operations:
+          $tuple:
+          - $type: Operation
+            fields:
+              id: project_sales
+              spec:
+                $type: ProjectSpec
+                fields:
+                  input_relation: sales_rows
+                  fields:
+                    $tuple:
+                    - $type: ProjectField
+                      fields:
+                        source: sale_id
+                        output: answer_sale_id
+                    - $type: ProjectField
+                      fields:
+                        source: store_id
+                        output: ''
+                  kind:
+                    $enum: OperationKind
+                    value: project
+              output_relation: answer_rows
+        render_spec:
+          $type: RenderSpec
+          fields:
+            relation_outputs:
+              $tuple:
+              - $type: RenderRelationOutput
+                fields:
+                  id: answer_1
+                  relation_id: answer_rows
+                  field_id: store_id
+                  label: ''
+                  role: answer_value
+            scalar_outputs:
+              $tuple: []
+        compatibility:
+          $type: ProgramCompatibility
+          fields:
+            schema_revision: 1
+            compiler_version: fervis.answer_program.compiler@1
+            function_semantics:
+              $tuple:
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: answer.classify
+                  version: incompatible
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: answer.materialize
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: fact.materialize
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: proof.construct
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: relation.project
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: source.instantiate_read
+                  version: '1'
+              - $type: FunctionSemanticVersion
+                fields:
+                  function_key: source.read_relation
+                  version: '1'
+            source_contracts:
+              $tuple:
+              - $type: SourceContractPin
+                fields:
+                  kind:
+                    $enum: SourceContractKind
+                    value: catalog_read
+                  source_id: sales
+                  fingerprint: 2d9a5f0e9bb0e0c7e1787d62d2f3c9f00446b2b57a4acd9ed2ac414a4e59f575
+  compute_versioned_constant:
+    schema_revision: 1
+    program:
+      $type: AnswerProgram
+      fields:
+        fact_template:
+          $tuple:
+          - $type: RequestedFact
+            fields:
+              id: fact_1
+              description: scaled amount
+              answer_expression: null
+              answer_subject: null
+              answer_population: null
+              answer_outputs:
+                $tuple:
+                - $type: RequestedFactAnswerOutput
+                  fields: {id: answer_1, description: answer_1, role: ''}
+              known_inputs: {$tuple: []}
+              input_refs: {$tuple: []}
+              required_for: ''
+              population_constraints: {$tuple: []}
+        fulfillment:
+          $tuple:
+          - $type: FactFulfillment
+            fields:
+              requested_fact_id: fact_1
+              answer_output_id: answer_1
+              render_output_id: answer_1
+        parameters: {$tuple: []}
+        capabilities: {$tuple: []}
+        relations: {$tuple: []}
+        operations:
+          $tuple:
+          - $type: Operation
+            fields:
+              id: scale
+              spec:
+                $type: ComputeSpec
+                fields:
+                  expression:
+                    $type: ComputeBinary
+                    fields:
+                      operator:
+                        $enum: ComputeBinaryOperator
+                        value: multiply
+                      left:
+                        $type: ConstantRef
+                        fields:
+                          constant_id: amount
+                          version_ref: calculation@1
+                          value:
+                            $type: FactValue
+                            fields:
+                              id: amount
+                              known_input_id: ''
+                              label: ''
+                              payload:
+                                $type: LiteralValuePayload
+                                fields:
+                                  literal_type: {$enum: LiteralType, value: number}
+                                  value: '1'
+                              proof_refs: {$tuple: [known_input:amount]}
+                              source_refs: {$tuple: []}
+                              dependencies: {$tuple: []}
+                              applies_to_requested_fact_ids: {$tuple: []}
+                          component: value
+                          item_index: null
+                          origin: {$enum: ValueExpressionOrigin, value: constant}
+                      right:
+                        $type: ConstantRef
+                        fields:
+                          constant_id: rate
+                          version_ref: calculation@1
+                          value:
+                            $type: FactValue
+                            fields:
+                              id: rate
+                              known_input_id: ''
+                              label: ''
+                              payload:
+                                $type: LiteralValuePayload
+                                fields:
+                                  literal_type: {$enum: LiteralType, value: number}
+                                  value: '0.1234567890123456789012345'
+                              proof_refs: {$tuple: [semantic:rate]}
+                              source_refs: {$tuple: []}
+                              dependencies: {$tuple: []}
+                              applies_to_requested_fact_ids: {$tuple: []}
+                          component: value
+                          item_index: null
+                          origin: {$enum: ValueExpressionOrigin, value: constant}
+                  output_scalar: scaled
+                  kind: {$enum: OperationKind, value: compute}
+              output_relation: ''
+        render_spec:
+          $type: RenderSpec
+          fields:
+            relation_outputs: {$tuple: []}
+            scalar_outputs:
+              $tuple:
+              - $type: RenderScalarOutput
+                fields:
+                  id: answer_1
+                  scalar_id: scaled
+                  label: ''
+                  role: ''
+        compatibility:
+          $type: ProgramCompatibility
+          fields:
+            schema_revision: 1
+            compiler_version: fervis.answer_program.compiler@1
+            function_semantics:
+              $tuple:
+              - $type: FunctionSemanticVersion
+                fields: {function_key: answer.classify, version: '1'}
+              - $type: FunctionSemanticVersion
+                fields: {function_key: answer.materialize, version: '1'}
+              - $type: FunctionSemanticVersion
+                fields: {function_key: fact.materialize, version: '1'}
+              - $type: FunctionSemanticVersion
+                fields: {function_key: proof.construct, version: '1'}
+              - $type: FunctionSemanticVersion
+                fields: {function_key: relation.compute, version: '1'}
+            source_contracts: {$tuple: []}
+binding_sets:
+  invocation:
+  - parameter_id: question.store_ids
+    value:
+      kind: identity_set
+      identity_type: store
+      identity_field: store_id
+      values: [store_1]
+      known_input_id: store_ids
+      applies_to_requested_fact_ids: [fact_1]
+    provenance: {kind: question_input}
+  - parameter_id: semantic.sale_states
+    value: {kind: string_set, values: [COMPLETED]}
+    provenance: {kind: semantic_choice}
+  population_required:
+  - parameter_id: question.store_ids
+    value:
+      kind: identity_set
+      identity_type: store
+      identity_field: store_id
+      values: [store_1, store_2]
+    provenance: {kind: question_input}
+  - parameter_id: semantic.store_population
+    value: {kind: string_set, values: [store_1]}
+    provenance: {kind: semantic_choice}
+  population_optional:
+  - parameter_id: question.store_ids
+    value:
+      kind: identity_set
+      identity_type: store
+      identity_field: store_id
+      values: [store_1, store_2]
+    provenance: {kind: question_input}
+  capability:
+  - parameter_id: question.store_ids
+    value:
+      kind: identity_set
+      identity_type: store
+      identity_field: store_id
+      values: [store_1, store_2]
+    provenance: {kind: question_input}
+catalogs:
+  sales:
+    reads:
+    - id: sales
+      endpoint_name: list_sale_list
+      resource_names: [sale]
+      params:
+      - ref: sales.query.store_id
+        name: store_id
+        source: query
+        type: uuid
+        identity:
+          entity_ref: store
+          identity_field: store_id
+          primary_key: true
+      row_paths:
+      - id: results
+        path: results
+        cardinality: many
+      fields:
+      - ref: sales.field.sale_id
+        path: results.sale_id
+        type: uuid
+        identity:
+          entity_ref: sale
+          identity_field: sale_id
+          primary_key: true
+      - ref: sales.field.store_id
+        path: results.store_id
+        type: uuid
+        identity:
+          entity_ref: store
+          identity_field: store_id
+          primary_key: true
+  sales_grouped:
+    reads:
+    - id: sales
+      endpoint_name: list_sale_list
+      resource_names: [sale]
+      params:
+      - ref: sales.query.store_id
+        name: store_id
+        source: query
+        type: uuid
+        identity:
+          entity_ref: store
+          identity_field: store_id
+          primary_key: true
+      - ref: sales.query.group_by
+        name: group_by
+        source: query
+        type: choice
+        choices:
+        - location
+      row_paths:
+      - id: results
+        path: results
+        cardinality: many
+      fields:
+      - ref: sales.field.sale_id
+        path: results.sale_id
+        type: uuid
+        identity:
+          entity_ref: sale
+          identity_field: sale_id
+          primary_key: true
+      - ref: sales.field.store_id
+        path: results.store_id
+        type: uuid
+        identity:
+          entity_ref: store
+          identity_field: store_id
+          primary_key: true
+        requirements:
+        - param_ref: sales.query.group_by
+          value: location
+  sales_channel:
+    reads:
+    - id: sales
+      endpoint_name: list_sale_list
+      resource_names: [sale]
+      params:
+      - ref: sales.query.store_id
+        name: store_id
+        source: query
+        type: uuid
+        identity:
+          entity_ref: store
+          identity_field: store_id
+          primary_key: true
+      row_paths:
+      - id: results
+        path: results
+        cardinality: many
+      fields:
+      - ref: sales.field.sale_id
+        path: results.sale_id
+        type: uuid
+        identity:
+          entity_ref: sale
+          identity_field: sale_id
+          primary_key: true
+      - ref: sales.field.store_id
+        path: results.store_id
+        type: uuid
+        identity:
+          entity_ref: store
+          identity_field: store_id
+          primary_key: true
+      - ref: sales.field.channel
+        path: results.channel
+        type: string
+  sales_changed_endpoint:
+    reads:
+    - id: sales
+      endpoint_name: changed_endpoint
+      params:
+      - ref: sales.query.store_id
+        name: store_id
+        source: query
+        type: uuid
+        identity:
+          entity_ref: store
+          identity_field: store_id
+          primary_key: true
+      row_paths:
+      - id: results
+        path: results
+        cardinality: many
+      fields:
+      - ref: sales.field.sale_id
+        path: results.sale_id
+        type: uuid
+        identity:
+          entity_ref: sale
+          identity_field: sale_id
+          primary_key: true
+      - ref: sales.field.store_id
+        path: results.store_id
+        type: uuid
+        identity:
+          entity_ref: store
+          identity_field: store_id
+          primary_key: true
+question_contracts:
+  computed_scalar:
+    requested_facts:
+    - id: fact_1
+      description: scaled amount
+      answer_outputs:
+      - id: answer_1
+  sales_for_store:
+    requested_facts:
+    - id: fact_1
+      description: sales for a store
+      answer_outputs:
+      - id: answer_1
+environments:
+  invocation:
+    authority_ref: authority:current
+  population_required:
+    authority_ref: authority:current
+  population_optional:
+    authority_ref: authority:current
+  capability:
+    authority_ref: authority:current

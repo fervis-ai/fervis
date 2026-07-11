@@ -1,0 +1,54 @@
+id: compilation_produces_closed_program
+kind: algorithm
+algorithm: answer_program.compile
+description: Program compilation closes every answer-affecting input over a declared typed origin.
+input:
+  schema_revision: 1
+  program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/compile_catalog_default}
+  question_contract: {$ref: ../../../fixtures/answer_program_v1.yaml#/question_contracts/sales_for_store}
+  catalog: {$ref: ../../../fixtures/answer_program_v1.yaml#/catalogs/sales_grouped}
+  bindings:
+    - parameter_id: question.store_ids
+      value:
+        kind: identity_set
+        identity_type: store
+        identity_field: store_id
+        values: [store_1]
+      provenance: {kind: question_input}
+expect:
+  result_contains:
+    status: compiled
+    program_id: ap_96075a44a602faa2c38e409e85f7c9d9f048d294d2b85b0c9e2f395ec08e7997
+    bindings:
+      question.store_ids: [store_1]
+    compatibility:
+      function_keys:
+        - answer.classify
+        - answer.materialize
+        - fact.materialize
+        - proof.construct
+        - relation.project
+        - source.instantiate_read
+        - source.read_relation
+      source_keys: [{kind: catalog_read, source_id: sales}]
+    program:
+      schema_revision: 1
+      program:
+        fields:
+          relations:
+            $tuple:
+              - fields:
+                  source:
+                    fields:
+                      param_bindings:
+                        $tuple:
+                          - fields:
+                              param_id: store_id
+                              value_expr:
+                                $type: ParameterRef
+                          - fields:
+                              param_id: group_by
+                              value_expr:
+                                $type: EnvironmentRef
+                                fields:
+                                  key: catalog_param_default

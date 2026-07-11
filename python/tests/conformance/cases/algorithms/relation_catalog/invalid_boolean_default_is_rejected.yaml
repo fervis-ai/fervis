@@ -1,0 +1,19 @@
+id: invalid_boolean_default_is_rejected
+description: A catalog boolean default is parsed before it can become an endpoint argument.
+kind: algorithm
+algorithm: relation_catalog.row_source_projection
+input:
+  catalog:
+    reads:
+      - id: records
+        endpoint_name: list_records
+        resource_names: [record]
+        params:
+          - ref: records.query.enabled
+            name: enabled
+            source: query
+            type: boolean
+            default: not-a-boolean
+expect:
+  result_contains:
+    status: rejected

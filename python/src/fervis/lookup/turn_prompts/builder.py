@@ -60,9 +60,6 @@ class TurnPromptBuilder:
                 active_clarification_section = self.active_clarification_section()
                 if active_clarification_section is not None:
                     sections.append(active_clarification_section)
-            overlay_section = self.conversation_resolution_overlay_section()
-            if overlay_section is not None:
-                sections.append(overlay_section)
         sections.append(self.turn_description_section(turn))
         sections.extend(turn.prompt_sections(self))
         prompt_text = "\n\n".join(section.render(self.renderer) for section in sections)
@@ -80,17 +77,6 @@ class TurnPromptBuilder:
             title="Current question:",
             content=self.context.current_question.strip(),
             kind=PromptSectionKind.TEXT,
-        )
-
-    def conversation_resolution_overlay_section(self) -> PromptSection | None:
-        payload = self.context.conversation_resolution_overlay
-        if not payload:
-            return None
-        return PromptSection(
-            title="Conversation resolution annotations:",
-            content=payload,
-            kind=PromptSectionKind.JSON,
-            json_indent=2,
         )
 
     def active_clarification_section(self) -> PromptSection | None:

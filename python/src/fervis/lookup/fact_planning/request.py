@@ -33,7 +33,7 @@ from fervis.lookup.fact_planning.grouped_ranked_choices import (
 from fervis.lookup.fact_planning.prompt_sections import (
     fact_plan_instruction_sections,
 )
-from fervis.lookup.fact_plan.values import (
+from fervis.lookup.answer_program.values import (
     FactValue,
     LiteralType,
     LiteralValuePayload,
@@ -52,6 +52,7 @@ from fervis.lookup.question_contract import (
     requested_fact_evidence_ref,
 )
 from fervis.lookup.plan_selection import BoundPlanSelectionSet
+from fervis.lookup.plan_execution.relations import RelationRows
 from fervis.lookup.source_binding import (
     BoundSource,
     bound_sources_prompt_payload,
@@ -79,6 +80,7 @@ class FactPlanRequest:
     bound_sources: tuple[BoundSource, ...] = ()
     same_scope_relation_catalog: RelationCatalog | None = None
     memory_inputs: dict[str, Any] = field(default_factory=dict)
+    memory_relations: tuple[RelationRows, ...] = ()
     catalog_selection: CatalogSelectionResult | None = None
     available_values: tuple[FactValue, ...] = ()
     available_value_uses: tuple[Any, ...] = ()

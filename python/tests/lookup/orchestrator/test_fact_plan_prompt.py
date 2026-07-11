@@ -67,7 +67,7 @@ def test_lookup_cutover_renders_scalar_memory_values_in_fact_plan_prompt():
         conversation_resolution=lambda prompt: (
             _conversation_resolution_payload_using_memory(
                 prompt,
-                integrated_question="What percentage increase is there from the prior sales total?",
+                contextualized_question="What percentage increase is there from the prior sales total?",
                 actual_text="that",
             )
         ),
@@ -89,7 +89,7 @@ def test_lookup_cutover_renders_scalar_memory_values_in_fact_plan_prompt():
     assert result.status == "FAILED"
     assert result.error == "planning_failed"
     fact_plan_prompt = _fact_plan_prompt(planner)
-    assert "125.00" in fact_plan_prompt
+    assert '"value": "125"' in fact_plan_prompt
 
 
 def test_lookup_cutover_projects_terminal_outcome_memory_into_resolution_prompt():
@@ -120,7 +120,7 @@ def test_lookup_cutover_projects_terminal_outcome_memory_into_resolution_prompt(
         conversation_resolution=lambda prompt: (
             _conversation_resolution_payload_using_memory(
                 prompt,
-                integrated_question="What is the metric total for ABC?",
+                contextualized_question="What is the metric total for ABC?",
                 actual_text="ABC",
             )
         ),
@@ -186,7 +186,7 @@ def test_lookup_cutover_renders_memory_relation_fields_in_fact_plan_prompt():
         conversation_resolution=lambda prompt: (
             _conversation_resolution_payload_using_memory(
                 prompt,
-                integrated_question="What quantities were in the prior items?",
+                contextualized_question="What quantities were in the prior items?",
                 actual_text="those",
             )
         ),

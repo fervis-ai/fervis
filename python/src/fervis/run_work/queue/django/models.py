@@ -11,14 +11,6 @@ class RunWorkStatus(models.TextChoices):
     FAILED = "FAILED", "Failed"
 
 
-def default_read_context_ref() -> dict[str, str | None]:
-    return {
-        "scheme": "unmigrated",
-        "key": None,
-        "tenant_key": None,
-    }
-
-
 class RunWorkItem(models.Model):
     run_id = models.CharField(max_length=128, unique=True, db_index=True)
     conversation_id = models.CharField(max_length=128, db_index=True)
@@ -30,18 +22,9 @@ class RunWorkItem(models.Model):
         default=RunWorkStatus.QUEUED,
         db_index=True,
     )
-    provider = models.CharField(max_length=64, null=True, blank=True)
-    model_key = models.CharField(max_length=64, default="HAIKU")
-    question = models.TextField()
-    session_mode = models.CharField(max_length=32, default="continue")
-    session_id = models.CharField(max_length=128, null=True, blank=True)
-    approval_mode = models.CharField(max_length=32, default="auto_allow")
-    approval_decision = models.CharField(max_length=128, null=True, blank=True)
-    max_budget_usd = models.DecimalField(max_digits=8, decimal_places=4, default=0)
-    max_thinking_tokens = models.PositiveIntegerField(default=64)
-    conversation_context = models.JSONField(default=dict)
-    runtime_context = models.JSONField(default=dict)
-    read_context_ref = models.JSONField(default=default_read_context_ref)
+    spec_kind = models.CharField(max_length=32)
+    execution_spec = models.JSONField()
+    read_context_ref = models.JSONField()
     idempotency_key = models.CharField(max_length=255, null=True, blank=True)
     attempt_count = models.PositiveIntegerField(default=0)
     active_attempt = models.PositiveIntegerField(default=0)

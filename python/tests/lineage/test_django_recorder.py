@@ -3,7 +3,10 @@ from __future__ import annotations
 import pytest
 
 from fervis.lineage.django.recorder import DjangoLineageRecorder
-from fervis.lineage.django.store import lineage_model_by_record_key
+from fervis.lineage.django.store import (
+    DjangoLineageRecorderStore,
+    lineage_model_by_record_key,
+)
 from fervis.lineage.views.django import DjangoLineageQuery
 from fervis.lineage.enums import (
     AnswerValueKind,
@@ -14,6 +17,8 @@ from fervis.lineage.enums import (
     ModelUsageKind,
     ModelUsageUnit,
     PresentationKind,
+    ProgramInvocationKind,
+    QuestionRunKind,
     RunResultKind,
     RunStepKey,
     RunStepKind,
@@ -24,6 +29,7 @@ from fervis.lineage.enums import (
 from fervis.lookup.clarification import ClarificationNeed, ClarificationReason
 from fervis.lineage.models import (
     Answer,
+    AnswerProgram,
     AnswerOutput,
     AnswerPresentation,
     ClarificationRequest,
@@ -34,6 +40,7 @@ from fervis.lineage.models import (
     MemoryArtifact,
     ModelCall,
     ModelCallUsage,
+    ProgramInvocation,
     RequestedFact,
     RunArtifact,
     RunResult,
@@ -47,6 +54,7 @@ from fervis.lineage.recorder import (
     AnswerPresentationWrite,
     AnswerWrite,
     AnsweredRunResultWrite,
+    AnswerProgramWrite,
     CatalogEndpointWrite,
     ClarificationRequestWrite,
     ClarificationResponseWrite,
@@ -59,6 +67,8 @@ from fervis.lineage.recorder import (
     ModelCallAuditWrite,
     ModelCallUsageWrite,
     ModelCallWrite,
+    ProgramInvocationBundleWrite,
+    ProgramInvocationWrite,
     QuestionRunWrite,
     QuestionWrite,
     RequestedFactWrite,
@@ -70,6 +80,7 @@ from fervis.lineage.recorder import (
     SourceReadWrite,
 )
 from fervis.lineage.records import RECORD_SPECS_BY_KEY
+from fervis.lineage.recorder_core import LineageRecorder
 
 pytestmark = pytest.mark.django_db
 
@@ -104,6 +115,27 @@ def test_django_lineage_recorder_ensure_conversation_is_idempotent() -> None:
     recorder.ensure_conversation(conversation)
 
     assert Conversation.objects.filter(conversation_id="cv_1").count() == 1
+
+
+def test_django_program_and_invocation_persistence_is_atomic(monkeypatch) -> None:
+    spine_recorder: LineageRecorderPort = DjangoLineageRecorder()
+    _record_run_spine(spine_recorder)
+    store = DjangoLineageRecorderStore()
+    recorder = LineageRecorder(store)
+    persist = store.get_or_insert_row
+
+    def fail_on_invocation(row):
+        if row.key == "program_invocation":
+            raise RuntimeError("injected invocation persistence failure")
+        return persist(row)
+
+    monkeypatch.setattr(store, "get_or_insert_row", fail_on_invocation)
+
+    with pytest.raises(RuntimeError, match="injected invocation persistence failure"):
+        _record_program_invocation(recorder)
+
+    assert AnswerProgram.objects.count() == 0
+    assert ProgramInvocation.objects.count() == 0
 
 
 def test_django_lineage_recorder_persists_model_call_usage_and_artifact() -> None:
@@ -704,6 +736,7 @@ def test_django_lineage_recorder_persists_answer_lineage_primitives_idempotently
 def test_django_lineage_recorder_records_answered_result_atomically() -> None:
     recorder: LineageRecorderPort = DjangoLineageRecorder()
     _record_run_spine(recorder)
+    _record_program_invocation(recorder)
     for step in (
         RunStepWrite(
             step_id="step_contract",
@@ -1054,8 +1087,8 @@ def test_django_lineage_recorder_rejects_cross_run_lineage_references() -> None:
             run_id="run_2",
             question_id="q_2",
             run_number=1,
+            kind=QuestionRunKind.MODEL_ASSISTED,
             trigger_kind=RunTriggerKind.INITIAL,
-            integrated_question="How many sales are open?",
             adapter_ref="django_drf:test",
             runtime_version="test-runtime",
         )
@@ -1101,8 +1134,8 @@ def test_django_lineage_recorder_rejects_cross_run_memory_artifact_refs() -> Non
             run_id="run_2",
             question_id="q_2",
             run_number=1,
+            kind=QuestionRunKind.MODEL_ASSISTED,
             trigger_kind=RunTriggerKind.INITIAL,
-            integrated_question="How many sales are open?",
             adapter_ref="django_drf:test",
             runtime_version="test-runtime",
         )
@@ -1202,7 +1235,7 @@ def test_django_lineage_query_maps_memory_artifact_rows() -> None:
     assert memory_artifact.payload_json["artifactId"] == "memory_artifact_1"
 
 
-def test_django_lineage_query_limits_memory_by_artifact_bearing_runs() -> None:
+def test_django_lineage_query_loads_memory_for_selected_runs() -> None:
     recorder: LineageRecorderPort = DjangoLineageRecorder()
     _record_answered_lineage_prerequisites(recorder)
     recorder.record_memory_artifact(
@@ -1231,9 +1264,8 @@ def test_django_lineage_query_limits_memory_by_artifact_bearing_runs() -> None:
     _record_empty_run(recorder, question_id="q_2", run_id="run_2", sequence=2)
     _record_empty_run(recorder, question_id="q_3", run_id="run_3", sequence=3)
 
-    rows = DjangoLineageQuery().memory_artifact_rows_for_conversation(
-        "cv_1",
-        limit=1,
+    rows = DjangoLineageQuery().memory_artifact_rows_for_run_ids(
+        ("run_1",),
     )
 
     assert [row.memory_artifact_id for row in rows] == ["memory_artifact_1"]
@@ -1254,10 +1286,10 @@ def test_django_lineage_recorder_rejects_missing_clarification_trigger_response(
                 run_id="run_2",
                 question_id="q_1",
                 run_number=2,
+                kind=QuestionRunKind.MODEL_ASSISTED,
                 trigger_kind=RunTriggerKind.CLARIFICATION_RESPONSE,
-                trigger_clarification_response_run_id="run_1",
+                base_run_id="run_1",
                 trigger_clarification_response_id="response_missing",
-                integrated_question="How many stores are open in London?",
                 adapter_ref="django_drf:test",
                 runtime_version="test-runtime",
             )
@@ -1561,8 +1593,8 @@ def _record_run_spine(recorder: LineageRecorderPort) -> None:
             run_id="run_1",
             question_id="q_1",
             run_number=1,
+            kind=QuestionRunKind.MODEL_ASSISTED,
             trigger_kind=RunTriggerKind.INITIAL,
-            integrated_question="How many stores are open?",
             adapter_ref="django_drf:test",
             runtime_version="test-runtime",
         )
@@ -1589,8 +1621,8 @@ def _record_empty_run(
             run_id=run_id,
             question_id=question_id,
             run_number=1,
+            kind=QuestionRunKind.MODEL_ASSISTED,
             trigger_kind=RunTriggerKind.INITIAL,
-            integrated_question="Follow-up?",
             adapter_ref="django_drf:test",
             runtime_version="test-runtime",
         )
@@ -1645,6 +1677,7 @@ def _record_answered_lineage_prerequisite_steps(
     recorder: LineageRecorderPort,
 ) -> None:
     _record_run_spine(recorder)
+    _record_program_invocation(recorder)
     for step in (
         RunStepWrite(
             step_id="step_contract",
@@ -1670,6 +1703,52 @@ def _record_answered_lineage_prerequisite_steps(
     ):
         recorder.record_step(step)
     _record_answered_source_read(recorder)
+
+
+def _record_program_invocation(recorder: LineageRecorderPort) -> None:
+    recorder.record_program_invocation(
+        ProgramInvocationBundleWrite(
+            program=AnswerProgramWrite(
+                program_id="ap_test",
+                schema_revision=1,
+                canonical_json="{}",
+            ),
+            invocation=ProgramInvocationWrite(
+                invocation_id="pi_test",
+                run_id="run_1",
+                program_id="ap_test",
+                bindings_json="{}",
+                kind=ProgramInvocationKind.COMPILED_QUESTION,
+            ),
+        )
+    )
+
+
+def test_content_addressed_program_is_shared_by_independent_run_invocations() -> None:
+    recorder: LineageRecorderPort = DjangoLineageRecorder()
+    _record_run_spine(recorder)
+    _record_empty_run(recorder, question_id="q_2", run_id="run_2", sequence=2)
+    program = AnswerProgramWrite(
+        program_id="ap_shared",
+        schema_revision=1,
+        canonical_json='{"program":"shared"}',
+    )
+    for run_id in ("run_1", "run_2"):
+        recorder.record_program_invocation(
+            ProgramInvocationBundleWrite(
+                program=program,
+                invocation=ProgramInvocationWrite(
+                    invocation_id=f"pi_{run_id}",
+                    run_id=run_id,
+                    program_id=program.program_id,
+                    bindings_json="{}",
+                    kind=ProgramInvocationKind.COMPILED_QUESTION,
+                ),
+            )
+        )
+
+    assert AnswerProgram.objects.filter(program_id="ap_shared").count() == 1
+    assert ProgramInvocation.objects.filter(program_id="ap_shared").count() == 2
 
 
 def _record_answered_source_read(recorder: LineageRecorderPort) -> None:

@@ -41,6 +41,11 @@ def goldset_result(
         model_key=args.model_key,
         wait_seconds=args.wait_seconds,
         ledger_file=Path(args.ledger_file) if args.ledger_file else None,
+        determinism_runs=args.determinism_runs,
+        enforce_structured_determinism=args.enforce_structured_determinism,
+        attempts=args.attempts,
+        retry_provider_failures=args.retry_provider_failures,
+        retry_sleep_seconds=args.retry_sleep_seconds,
     )
     return command_envelope_result(
         kind=FervisCommandKind.GOLDSET,

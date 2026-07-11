@@ -40,11 +40,10 @@ from fervis.lookup.question_contract import (
     RequestedFactLiteralInput,
 )
 from fervis.lookup.fact_plan.row_sources import api_row_source_id
-from fervis.lookup.fact_plan.fact_plan import FactPlan
-from fervis.lookup.fact_plan.values import FactValue, TimeComponent
-from fervis.lookup.fact_planning.pattern_plan import compile_pattern_answer_plan
+from fervis.lookup.answer_program.values import FactValue, TimeComponent
+from fervis.lookup.fact_planning.pattern_plan import compile_pattern_answer_program
+from fervis.lookup.answer_program import compiler_input_context
 from fervis.lookup.grounding.model import GroundedInputUse
-from fervis.lookup.plan_execution.verification import verify_fact_plan
 from fervis.lookup.question_inputs import LiteralInputRole
 from fervis.lookup.read_eligibility import (
     ReadAssessment,
@@ -814,7 +813,7 @@ def test_closed_key_source_binding_retains_input_proofs_through_grouped_count_pl
         for applied_filter in bound_source.applied_filters
     } == {"today"}
 
-    answer_plan = compile_pattern_answer_plan(
+    answer_plan, answer_bindings = compile_pattern_answer_program(
         {
             "answers": [
                 {
@@ -839,15 +838,31 @@ def test_closed_key_source_binding_retains_input_proofs_through_grouped_count_pl
         source_binding_ids_by_requirement_by_requested_fact_id={
             "fact_1": {"operation": (bound_source.id,)}
         },
+        input_context=compiler_input_context(
+            values=request.available_values,
+            question_contract=request.question_contract,
+        ),
     )
 
-    verify_fact_plan(
-        FactPlan(outcome=answer_plan),
+    from fervis.lookup.answer_program.compilation import compile_answer_program
+    from fervis.lookup.answer_program.instantiation import (
+        ExecutionEnvironment,
+        instantiate_answer_program,
+    )
+
+    program, bindings = compile_answer_program(
+        answer_plan,
         question_contract=request.question_contract,
         catalog=request.relation_catalog,
-        catalog_selection=request.catalog_selection,
-        available_values=request.available_values,
-        available_value_uses=request.available_value_uses,
+        bindings=answer_bindings,
+    )
+    instantiate_answer_program(
+        program,
+        bindings,
+        ExecutionEnvironment(
+            catalog=request.relation_catalog,
+            catalog_selection=request.catalog_selection,
+        ),
     )
 
 
@@ -1335,6 +1350,7 @@ def _closed_key_grouped_staff_sales_request() -> SourceBindingRequest:
     available_values = (
         FactValue.identity(
             id="staff_identity_1",
+            known_input_id="staff_id_1",
             identity_type="staff",
             identity_field="staff_id",
             value="51515151-0000-0000-0002-000000000001",
@@ -1344,6 +1360,7 @@ def _closed_key_grouped_staff_sales_request() -> SourceBindingRequest:
         ),
         FactValue.identity(
             id="staff_identity_2",
+            known_input_id="staff_id_2",
             identity_type="staff",
             identity_field="staff_id",
             value="51515151-0000-0000-0002-000000000002",
@@ -1460,6 +1477,7 @@ def _closed_key_grouped_staff_sales_today_request() -> SourceBindingRequest:
     question_contract = QuestionContract(requested_facts=(fact,))
     today_value = FactValue.time(
         id="today_value",
+        known_input_id="today",
         expression="today",
         resolved_start="2026-07-06",
         resolved_end="2026-07-06",

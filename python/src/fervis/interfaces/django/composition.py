@@ -98,6 +98,7 @@ def _new_lookup_service(
     *, provider_backbone: ProviderBackbone | None = None
 ) -> LookupService:
     from fervis.lookup.orchestration.service import LookupService
+    from fervis.interfaces.django.question_run_ports import DjangoQuestionLifecyclePort
 
     return LookupService(
         provider_backbone=provider_backbone,
@@ -105,6 +106,7 @@ def _new_lookup_service(
         host_api_context=get_host_api_context(),
         observability_query=DjangoObservabilityQuery(),
         lineage_recorder=DjangoLineageRecorder(),
+        prior_program_invocations=DjangoQuestionLifecyclePort(),
     )
 
 

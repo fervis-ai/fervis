@@ -9,6 +9,7 @@ from fervis.lineage.enums import (
     PresentationClientKey,
     PresentationKind,
     RunResultKind,
+    QuestionRunKind,
     RunStepKey,
     RunStepKind,
     RunTriggerKind,
@@ -17,6 +18,7 @@ from fervis.lineage.enums import (
 )
 from fervis.lineage.memory_artifacts import MemoryArtifactRow
 from fervis.lineage.views.query import (
+    AnswerProgramRow,
     AnswerOutputRow,
     AnswerPresentationRow,
     AnswerRow,
@@ -24,10 +26,13 @@ from fervis.lineage.views.query import (
     ClarificationRequestRow,
     ClarificationResponseRow,
     ConversationRow,
+    BindingPatchRow,
     FactResultRow,
     LineageQueryPort,
     LineageRows,
     ProofGraphRow,
+    ProgramInvocationRow,
+    ProgramRevisionRow,
     QuestionRow,
     RequestedFactRow,
     RunResultRow,
@@ -48,12 +53,25 @@ from fervis.lineage.views.service import (
     QuestionLineageService,
 )
 from fervis.lineage.views.timeline import lineage_timeline_view
+from fervis.lookup.answer_program import (
+    canonical_binding_patch_json,
+    canonical_binding_set_json,
+)
+from fervis.lookup.answer_program.revisions import (
+    canonical_capability_application_json,
+)
+from tests.testkit.answer_program_contracts import (
+    binding_patch_from_payload,
+    binding_set_from_payload,
+    capability_application_from_payload,
+)
 from tests.testkit.assertions import subset_mismatches
 
 
 def run_lineage_explain_case(payload: dict) -> list[str]:
     input_payload = payload["input"]
-    query = _FixtureLineageQuery(_rows(input_payload["dataset"]))
+    dataset = input_payload["dataset"]
+    query = _FixtureLineageQuery(_rows(dataset))
     view = _lineage_root(query, input_payload["root"])
     rendered = render_lineage(lineage_timeline_view(view))
     errors = _compare_rendered(rendered, payload["expect"], line_key="lines")
@@ -79,7 +97,8 @@ def run_lineage_explain_case(payload: dict) -> list[str]:
 
 def run_lineage_input_lineage_case(payload: dict) -> list[str]:
     input_payload = payload["input"]
-    query = _FixtureLineageQuery(_rows(input_payload["dataset"]))
+    dataset = input_payload["dataset"]
+    query = _FixtureLineageQuery(_rows(dataset))
     rendered = render_input_lineage(
         input_lineage_view(
             _lineage_root(query, input_payload["root"]),
@@ -153,6 +172,34 @@ def _portable_run_view(run) -> dict:
     return {
         "result_kind": run.result_kind,
         "activated_memory_ids": list(run.activated_memory_ids),
+        "program_derivation": _program_derivation_payload(run.program_derivation),
+    }
+
+
+def _program_derivation_payload(derivation) -> dict | None:
+    if derivation is None:
+        return None
+    return {
+        "invocation_id": derivation.invocation_id,
+        "program": {
+            "program_id": derivation.program.program_id,
+            "schema_revision": derivation.program.schema_revision,
+        },
+        "patch": (
+            {"patch_id": derivation.patch.patch_id}
+            if derivation.patch is not None
+            else None
+        ),
+        "revision": (
+            {
+                "revision_id": derivation.revision.revision_id,
+                "base_program_id": derivation.revision.base_program_id,
+                "revised_program_id": derivation.revision.revised_program_id,
+                "capability_id": derivation.revision.capability_id,
+            }
+            if derivation.revision is not None
+            else None
+        ),
     }
 
 
@@ -206,6 +253,26 @@ class _FixtureLineageQuery(LineageQueryPort):
         catalog_endpoint_ids = {
             source_read.catalog_endpoint_id for source_read in source_reads
         }
+        program_invocations = tuple(
+            item
+            for item in self.rows.program_invocations
+            if item.run_id in run_id_set
+        )
+        revision_ids = {
+            item.revision_id
+            for item in program_invocations
+            if item.revision_id is not None
+        }
+        program_revisions = tuple(
+            item
+            for item in self.rows.program_revisions
+            if item.revision_id in revision_ids
+        )
+        program_ids = {
+            *(item.program_id for item in program_invocations),
+            *(item.base_program_id for item in program_revisions),
+            *(item.revised_program_id for item in program_revisions),
+        }
         return LineageRows(
             conversations=tuple(
                 item
@@ -214,6 +281,13 @@ class _FixtureLineageQuery(LineageQueryPort):
             ),
             questions=questions,
             runs=run_rows,
+            answer_programs=tuple(
+                item
+                for item in self.rows.answer_programs
+                if item.program_id in program_ids
+            ),
+            program_invocations=program_invocations,
+            program_revisions=program_revisions,
             steps=tuple(item for item in self.rows.steps if item.run_id in run_id_set),
             run_results=tuple(
                 item for item in self.rows.run_results if item.run_id in run_id_set
@@ -288,17 +362,29 @@ def _rows(payload: dict) -> LineageRows:
                 run_id=str(item["run_id"]),
                 question_id=str(item["question_id"]),
                 run_number=int(item["run_number"]),
+                kind=QuestionRunKind(str(item["kind"])),
                 trigger_kind=RunTriggerKind(str(item["trigger_kind"])),
-                integrated_question=str(item["integrated_question"]),
-                previous_run_id=item.get("previous_run_id"),
-                trigger_clarification_response_run_id=item.get(
-                    "trigger_clarification_response_run_id"
-                ),
+                base_run_id=item.get("base_run_id"),
                 trigger_clarification_response_id=item.get(
                     "trigger_clarification_response_id"
                 ),
             )
             for item in payload.get("runs", ())
+        ),
+        answer_programs=tuple(
+            AnswerProgramRow(
+                program_id=str(item["program_id"]),
+                schema_revision=int(item["schema_revision"]),
+            )
+            for item in payload.get("answer_programs", ())
+        ),
+        program_invocations=tuple(
+            _program_invocation_row(item)
+            for item in payload.get("program_invocations", ())
+        ),
+        program_revisions=tuple(
+            _program_revision_row(item)
+            for item in payload.get("program_revisions", ())
         ),
         steps=tuple(_step(item) for item in payload.get("steps", ())),
         run_results=tuple(
@@ -477,6 +563,49 @@ def _rows(payload: dict) -> LineageRows:
             )
             for item in payload.get("proof_graphs", ())
         ),
+    )
+
+
+def _program_invocation_row(item: dict) -> ProgramInvocationRow:
+    patch_payload = item.get("patch")
+    patch = None
+    if patch_payload is not None:
+        parsed_patch = binding_patch_from_payload(patch_payload)
+        patch = BindingPatchRow(
+            patch_id=str(patch_payload["patch_id"]),
+            canonical_json=canonical_binding_patch_json(parsed_patch),
+        )
+    return ProgramInvocationRow(
+        invocation_id=str(item["invocation_id"]),
+        run_id=str(item["run_id"]),
+        program_id=str(item["program_id"]),
+        kind=str(item["kind"]),
+        base_invocation_id=(
+            str(item["base_invocation_id"])
+            if item.get("base_invocation_id") is not None
+            else None
+        ),
+        bindings_json=canonical_binding_set_json(binding_set_from_payload(item)),
+        patch=patch,
+        revision_id=(
+            str(item["revision_id"]) if item.get("revision_id") is not None else None
+        ),
+    )
+
+
+def _program_revision_row(item: dict) -> ProgramRevisionRow:
+    application = capability_application_from_payload(
+        {
+            "capability_id": item["capability_id"],
+            **dict(item["application"]),
+        }
+    )
+    return ProgramRevisionRow(
+        revision_id=str(item["revision_id"]),
+        base_program_id=str(item["base_program_id"]),
+        revised_program_id=str(item["revised_program_id"]),
+        capability_id=str(item["capability_id"]),
+        application_json=canonical_capability_application_json(application),
     )
 
 

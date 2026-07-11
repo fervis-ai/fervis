@@ -3,7 +3,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from fervis.model_io.turns import ModelTurnPurpose
-from fervis.lookup.orchestration.pipeline import _known_input_step_id
+from fervis.lookup.orchestration.pipeline import (
+    _known_input_step_id,
+)
 
 
 def test_known_input_step_id_uses_question_contract_when_grounding_turn_did_not_run() -> None:

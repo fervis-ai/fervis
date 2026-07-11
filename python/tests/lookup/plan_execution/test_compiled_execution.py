@@ -10,7 +10,7 @@ from fervis.lookup.relation_catalog import (
     RowCardinality,
     RowPath,
 )
-from fervis.lookup.fact_plan.relations import (
+from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
     Relation,
     RelationField,
@@ -19,12 +19,12 @@ from fervis.lookup.fact_plan.relations import (
     RelationSourceRowFilter,
     SourceKind,
 )
-from fervis.lookup.plan_execution.compiled_execution import (
+from fervis.lookup.answer_program.instantiation import (
     ExecutionProofContribution,
     ExecutionProofEdge,
     ExecutionProofGraph,
     ExecutionProofNode,
-    compile_fact_execution,
+    _materialize_execution,
 )
 from fervis.lookup.plan_execution.errors import VerificationError
 from fervis.lookup.plan_execution.relations import (
@@ -35,15 +35,28 @@ from fervis.lookup.plan_execution.relations import (
 )
 from fervis.lookup.memory.available_values import active_memory_operation_values
 from fervis.lookup.memory.projection import LookupMemory, MemoryValue
-from fervis.lookup.fact_plan.fact_plan import AnswerPlan
-from fervis.lookup.fact_plan.operations import ComputeSpec, Operation
-from fervis.lookup.fact_plan.values import (
-    FactValue,
-    ScalarInputUse,
-    ValueFilterOperator,
-    ValueKind,
-    ValueUse,
+from fervis.lookup.answer_program.model import AnswerProgram
+from fervis.lookup.answer_program.operations import (
+    ComputeBinary,
+    ComputeBinaryOperator,
+    ComputeSpec,
+    Operation,
 )
+from fervis.lookup.answer_program.values import (
+    BindingSet,
+    ConstantRef,
+    FactValue,
+    LiteralType,
+    ValueFilterOperator,
+)
+
+
+def _constant_ref(value: FactValue, *, constant_id: str) -> ConstantRef:
+    return ConstantRef(
+        constant_id=constant_id,
+        version_ref="test@1",
+        value=value,
+    )
 
 
 def test_active_memory_scalar_input_keeps_memory_and_prior_proof_refs() -> None:
@@ -59,34 +72,27 @@ def test_active_memory_scalar_input_keeps_memory_and_prior_proof_refs() -> None:
         ),
     )
 
-    compiled = compile_fact_execution(
-        answer=AnswerPlan(
-            value_uses=(
-                ValueUse(
-                    id="use_total",
-                    value_id=memory_value_id,
-                    target=ScalarInputUse(
-                        operation_id="compare",
-                        input_id="total",
-                    ),
-                ),
-            ),
+    memory_value = active_memory_operation_values(
+        memory=memory,
+        active_memory_ids=frozenset({memory_value_id}),
+    )[0]
+    compiled = _materialize_execution(
+        answer=AnswerProgram(
             operations=(
                 Operation(
                     id="compare",
                     spec=ComputeSpec(
-                        expression="total",
-                        scalar_inputs=("total",),
+                        expression=_constant_ref(
+                            memory_value,
+                            constant_id=f"context.{memory_value_id}",
+                        ),
                     ),
                 ),
             ),
         ),
+        bindings=BindingSet(),
         catalog=None,
         row_sources=(),
-        available_values=active_memory_operation_values(
-            memory=memory,
-            active_memory_ids=frozenset({memory_value_id}),
-        ),
     )
 
     contribution = next(
@@ -98,6 +104,43 @@ def test_active_memory_scalar_input_keeps_memory_and_prior_proof_refs() -> None:
         "memory:memory_artifact_1.value.total",
         "prior_step:answer_output",
     )
+
+
+def test_repeated_compute_origin_has_one_operation_input_node() -> None:
+    value = FactValue.literal(
+        id="amount",
+        literal_type=LiteralType.NUMBER,
+        value="10",
+        proof_refs=("known_input:amount",),
+    )
+    expression = _constant_ref(value, constant_id="question.amount")
+
+    compiled = _materialize_execution(
+        answer=AnswerProgram(
+            operations=(
+                Operation(
+                    id="double",
+                    spec=ComputeSpec(
+                        expression=ComputeBinary(
+                            operator=ComputeBinaryOperator.ADD,
+                            left=expression,
+                            right=expression,
+                        ),
+                        output_scalar="total",
+                    ),
+                ),
+            ),
+        ),
+        bindings=BindingSet(),
+        catalog=None,
+        row_sources=(),
+    )
+
+    assert tuple(
+        node.id
+        for node in compiled.proof_graph.nodes
+        if node.kind is ProofNodeKind.OPERATION_INPUT
+    ) == ("operation_input:double:constant:question.amount@test@1",)
 
 
 def test_executed_memory_relation_adds_current_run_contribution() -> None:
@@ -149,8 +192,15 @@ def test_executed_memory_relation_adds_current_run_contribution() -> None:
 
 def test_compile_merges_equivalent_applied_and_concrete_row_filters() -> None:
     catalog = _sales_catalog()
-    compiled = compile_fact_execution(
-        answer=AnswerPlan(
+    staff_value = FactValue.identity(
+        id="value_staff",
+        identity_type="staff",
+        identity_field="staff_id",
+        value="staff_1",
+        proof_refs=("known_input:qi_staff",),
+    )
+    compiled = _materialize_execution(
+        answer=AnswerProgram(
             relations=(
                 Relation(
                     id="sales",
@@ -160,16 +210,24 @@ def test_compile_merges_equivalent_applied_and_concrete_row_filters() -> None:
                         applied_filters=(
                             RelationSourceAppliedFilter(
                                 predicate_field_ids=("staff_id",),
-                                known_input_id="qi_staff",
-                                value_kind=ValueKind.IDENTITY.value,
-                                identity_type="staff",
+                                value_expr=_constant_ref(
+                                    staff_value,
+                                    constant_id="question.qi_staff",
+                                ),
                             ),
                         ),
                         row_filters=(
                             RelationSourceRowFilter(
                                 field_id="staff_id",
                                 operator=ValueFilterOperator.EQUALS.value,
-                                values=("staff_1",),
+                                value_expr=_constant_ref(
+                                    FactValue.string_set(
+                                        id="closed_key_staff",
+                                        values=("staff_1",),
+                                        proof_refs=("backend:closed_key",),
+                                    ),
+                                    constant_id="closed-key.staff",
+                                ),
                                 proof_refs=("backend:closed_key",),
                             ),
                         ),
@@ -183,17 +241,9 @@ def test_compile_merges_equivalent_applied_and_concrete_row_filters() -> None:
                 ),
             ),
         ),
+        bindings=BindingSet(),
         catalog=catalog,
         row_sources=(),
-        available_values=(
-            FactValue.identity(
-                id="value_staff",
-                identity_type="staff",
-                identity_field="staff_id",
-                value="staff_1",
-                proof_refs=("known_input:qi_staff",),
-            ),
-        ),
     )
 
     row_filter_nodes = tuple(
@@ -217,8 +267,8 @@ def test_compile_merges_equivalent_applied_and_concrete_row_filters() -> None:
 def test_compile_rejects_conflicting_same_field_row_filters() -> None:
     catalog = _sales_catalog()
     with pytest.raises(VerificationError, match="conflicting row filters"):
-        compile_fact_execution(
-            answer=AnswerPlan(
+        _materialize_execution(
+            answer=AnswerProgram(
                 relations=(
                     Relation(
                         id="sales",
@@ -229,13 +279,25 @@ def test_compile_rejects_conflicting_same_field_row_filters() -> None:
                                 RelationSourceRowFilter(
                                     field_id="staff_id",
                                     operator=ValueFilterOperator.EQUALS.value,
-                                    values=("staff_1",),
+                                    value_expr=_constant_ref(
+                                        FactValue.string_set(
+                                            id="staff_1",
+                                            values=("staff_1",),
+                                        ),
+                                        constant_id="staff.1",
+                                    ),
                                     proof_refs=("known_input:qi_staff_1",),
                                 ),
                                 RelationSourceRowFilter(
                                     field_id="staff_id",
                                     operator=ValueFilterOperator.EQUALS.value,
-                                    values=("staff_2",),
+                                    value_expr=_constant_ref(
+                                        FactValue.string_set(
+                                            id="staff_2",
+                                            values=("staff_2",),
+                                        ),
+                                        constant_id="staff.2",
+                                    ),
                                     proof_refs=("known_input:qi_staff_2",),
                                 ),
                             ),
@@ -249,6 +311,7 @@ def test_compile_rejects_conflicting_same_field_row_filters() -> None:
                     ),
                 ),
             ),
+            bindings=BindingSet(),
             catalog=catalog,
             row_sources=(),
         )

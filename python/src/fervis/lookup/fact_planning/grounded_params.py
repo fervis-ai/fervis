@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from fervis.lookup.fact_planning.value_components import value_component
-from fervis.lookup.fact_plan.values import FactValue
+from fervis.lookup.answer_program.values import FactValue
+from fervis.lookup.grounding.model import GroundedInputUse
 
 
 @dataclass(frozen=True)
@@ -22,20 +23,20 @@ class GroundedParamValue:
 def unique_grounded_param_values(
     *,
     values: tuple[FactValue, ...],
-    grounded_input_uses: tuple[object, ...],
+    grounded_input_uses: tuple[GroundedInputUse, ...],
 ) -> dict[tuple[str, str], GroundedParamValue]:
     values_by_id = {item.id: item for item in values}
     grouped: dict[tuple[str, str], dict[object, GroundedParamValue]] = {}
     for use in grounded_input_uses:
-        row_source_id = str(getattr(use, "row_source_id", "") or "")
-        param_id = str(getattr(use, "param_id", "") or "")
-        field_id = str(getattr(use, "field_id", "") or "")
+        row_source_id = use.row_source_id
+        param_id = use.param_id
+        field_id = use.field_id
         if not row_source_id or not param_id:
             continue
-        value = values_by_id.get(str(getattr(use, "value_id", "") or ""))
+        value = values_by_id.get(use.value_id)
         if value is None:
             continue
-        concrete_value = value_component(value, getattr(use, "value_component"))
+        concrete_value = value_component(value, use.value_component)
         value_key = _value_key(concrete_value)
         group = grouped.setdefault((row_source_id, param_id), {})
         existing = group.get(value_key)
@@ -65,7 +66,7 @@ def unique_grounded_param_values(
 def unique_grounded_param_ids_by_row_source(
     *,
     values: tuple[FactValue, ...],
-    grounded_input_uses: tuple[object, ...],
+    grounded_input_uses: tuple[GroundedInputUse, ...],
 ) -> dict[str, frozenset[str]]:
     output: dict[str, set[str]] = {}
     for row_source_id, param_id in unique_grounded_param_values(

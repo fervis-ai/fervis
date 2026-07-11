@@ -14,6 +14,7 @@ from fervis.lineage.enums import (
     RunStepKey,
     RunStepKind,
     RunTriggerKind,
+    QuestionRunKind,
     RuntimeErrorKind,
     SourceReadStatus,
 )
@@ -42,11 +43,44 @@ class RunRow:
     run_id: str
     question_id: str
     run_number: int
+    kind: QuestionRunKind
     trigger_kind: RunTriggerKind
-    integrated_question: str
-    previous_run_id: str | None = None
-    trigger_clarification_response_run_id: str | None = None
+    base_run_id: str | None = None
     trigger_clarification_response_id: str | None = None
+
+
+@dataclass(frozen=True)
+class AnswerProgramRow:
+    program_id: str
+    schema_revision: int
+    canonical_json: str = ""
+
+
+@dataclass(frozen=True)
+class BindingPatchRow:
+    patch_id: str
+    canonical_json: str = ""
+
+
+@dataclass(frozen=True)
+class ProgramInvocationRow:
+    invocation_id: str
+    run_id: str
+    program_id: str
+    kind: str
+    base_invocation_id: str | None = None
+    bindings_json: str = ""
+    patch: BindingPatchRow | None = None
+    revision_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ProgramRevisionRow:
+    revision_id: str
+    base_program_id: str
+    revised_program_id: str
+    capability_id: str
+    application_json: str = ""
 
 
 @dataclass(frozen=True)
@@ -208,6 +242,9 @@ class LineageRows:
     conversations: tuple[ConversationRow, ...] = ()
     questions: tuple[QuestionRow, ...] = ()
     runs: tuple[RunRow, ...] = ()
+    answer_programs: tuple[AnswerProgramRow, ...] = ()
+    program_invocations: tuple[ProgramInvocationRow, ...] = ()
+    program_revisions: tuple[ProgramRevisionRow, ...] = ()
     steps: tuple[StepRow, ...] = ()
     run_results: tuple[RunResultRow, ...] = ()
     runtime_errors: tuple[RuntimeErrorRow, ...] = ()

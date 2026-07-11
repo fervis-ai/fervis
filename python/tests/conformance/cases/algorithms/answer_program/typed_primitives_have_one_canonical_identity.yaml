@@ -1,0 +1,22 @@
+id: typed_primitives_have_one_canonical_identity
+kind: algorithm
+algorithm: answer_program.canonicalize
+description: Equivalent typed primitive spellings produce one binding and invocation identity.
+input:
+  schema_revision: 1
+  programs:
+    - {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/canonical_a}
+  binding_sets:
+    - bindings:
+        - parameter_id: semantic.sale_states
+          value: {kind: number, value: 1}
+          provenance: {kind: semantic_choice}
+    - bindings:
+        - parameter_id: semantic.sale_states
+          value: {kind: number, value: 1.0}
+          provenance: {kind: semantic_choice}
+  run_id: run_same_primitive
+expect:
+  result_contains:
+    same_binding_json: true
+    same_invocation_id: true

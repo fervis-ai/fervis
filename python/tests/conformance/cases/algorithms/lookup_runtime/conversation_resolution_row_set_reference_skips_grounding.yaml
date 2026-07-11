@@ -37,7 +37,7 @@ input:
     mode: select_visible_memory
     memory_id: turn_sales.relation.sales
     resolved_text: those sales
-    integrated_question: Show the amount for the prior sales.
+    contextualized_question: Show the amount for the prior sales.
   question_contract:
     fact_description: amount for the prior sales
     subject_text: sales

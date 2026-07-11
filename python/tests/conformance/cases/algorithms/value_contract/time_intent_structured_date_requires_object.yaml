@@ -9,6 +9,9 @@ input:
     - id: since_jan_13
       kind: time
       expression: since Jan 13th
+      resolved_start: "2026-01-13"
+      resolved_end: "2026-07-10"
+      granularity: day
       intent:
         kind: open_range
         start: "2026-01-13"

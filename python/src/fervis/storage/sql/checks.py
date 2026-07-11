@@ -10,7 +10,7 @@ from fervis.project.configuration import LoadedFervisConfig
 from fervis.project.discovery import ProjectInspection
 from fervis.project.persistence.contracts import PersistenceCheck
 from fervis.lineage.recorder_core import LineageRecorder
-from fervis.lineage.enums import RunTriggerKind
+from fervis.lineage.enums import QuestionRunKind, RunTriggerKind
 from fervis.lineage.run_spine import (
     QuestionRunStart,
     QuestionRunStartRequest,
@@ -25,7 +25,10 @@ from fervis.questions import (
 from fervis.questions.ports import (
     LookupExecutionRequest,
     LookupExecutionResult,
+    ProgramExecutionRequest,
     QuestionLookupPort,
+    QuestionProgramPort,
+    ResolveQuestionRunSpec,
     RunSubmission,
 )
 
@@ -86,6 +89,7 @@ def _dry_run_question_lifecycle(engine) -> None:
     service = sql_question_service(
         engine=engine,
         lookup=_DoctorLookup(),
+        program=_DoctorProgram(),
         adapter_ref="fervis_doctor",
     )
     suffix = uuid.uuid4().hex
@@ -120,8 +124,8 @@ def _dry_run_lineage(engine) -> None:
             run=QuestionRunStart(
                 question_id=f"doctor-lineage-question-{suffix}",
                 run_id=f"doctor-lineage-run-{suffix}",
+                kind=QuestionRunKind.MODEL_ASSISTED,
                 trigger_kind=RunTriggerKind.INITIAL,
-                integrated_question="doctor lineage dry run",
                 adapter_ref="fervis_doctor",
                 runtime_version="doctor",
             ),
@@ -139,13 +143,15 @@ def _dry_run_queue(engine) -> None:
             tenant_id=f"doctor-queue-tenant-{suffix}",
             question_id=f"doctor-queue-question-{suffix}",
             run_id=f"doctor-queue-run-{suffix}",
-            question="doctor queue dry run",
             principal=QuestionPrincipal(
                 principal_id=f"doctor-queue-principal-{suffix}",
                 tenant_id=f"doctor-queue-tenant-{suffix}",
             ),
-            provider=None,
-            model_key="DOCTOR",
+            spec=ResolveQuestionRunSpec(
+                question="doctor queue dry run",
+                provider=None,
+                model_key="DOCTOR",
+            ),
             execution_mode=ExecutionMode.QUEUED,
         )
     )
@@ -160,3 +166,14 @@ class _DoctorLookup(QuestionLookupPort):
     ) -> LookupExecutionResult:
         del request, progress_sink
         raise RuntimeError("doctor dry run must not execute lookup")
+
+
+class _DoctorProgram(QuestionProgramPort):
+    def run_program(
+        self,
+        request: ProgramExecutionRequest,
+        *,
+        progress_sink=None,
+    ) -> LookupExecutionResult:
+        del request, progress_sink
+        raise RuntimeError("doctor dry run must not execute a program")

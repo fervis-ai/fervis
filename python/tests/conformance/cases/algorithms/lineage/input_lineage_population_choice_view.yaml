@@ -20,8 +20,8 @@ input:
       - run_id: run_1
         question_id: question_1
         run_number: 1
+        kind: model_assisted
         trigger_kind: initial
-        integrated_question: How many current transfers exist?
     steps:
       - step_id: step_execute
         run_id: run_1

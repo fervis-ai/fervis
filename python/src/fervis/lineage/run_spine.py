@@ -7,7 +7,7 @@ from contextlib import AbstractContextManager
 from typing import Protocol
 
 from fervis.host_api.contracts.authority import ReadContextRef
-from fervis.lineage.enums import ConversationOriginKind, RunTriggerKind
+from fervis.lineage.enums import ConversationOriginKind, QuestionRunKind, RunTriggerKind
 from fervis.lineage.ports import LineageRecorderPort
 from fervis.lineage.recorder import (
     ClarificationResponseWrite,
@@ -31,12 +31,11 @@ class QuestionStart:
 class QuestionRunStart:
     question_id: str
     run_id: str
+    kind: QuestionRunKind
     trigger_kind: RunTriggerKind
-    integrated_question: str
     adapter_ref: str
     runtime_version: str
-    previous_run_id: str | None = None
-    trigger_clarification_response_run_id: str | None = None
+    base_run_id: str | None = None
     trigger_clarification_response_id: str | None = None
 
 
@@ -112,14 +111,11 @@ def record_question_run_start(
                 run_number=sequence_store.next_question_run_number(
                     request.run.question_id
                 ),
+                kind=request.run.kind,
                 trigger_kind=request.run.trigger_kind,
-                integrated_question=request.run.integrated_question,
                 adapter_ref=request.run.adapter_ref,
                 runtime_version=request.run.runtime_version,
-                previous_run_id=request.run.previous_run_id,
-                trigger_clarification_response_run_id=(
-                    request.run.trigger_clarification_response_run_id
-                ),
+                base_run_id=request.run.base_run_id,
                 trigger_clarification_response_id=(
                     request.run.trigger_clarification_response_id
                 ),

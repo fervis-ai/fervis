@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
-
 from fervis.lookup.fact_planning.grounded_params import (
     unique_grounded_param_ids_by_row_source,
 )
-from fervis.lookup.fact_plan.values import FactValue
+from fervis.lookup.answer_program.values import FactValue
+from fervis.lookup.fact_plan.row_sources.model import RowSourceCatalog
+from fervis.lookup.grounding.model import GroundedInputUse
 
 
 @dataclass(frozen=True)
@@ -28,12 +28,12 @@ def required_input_id(*, row_source_id: str, param_id: str) -> str:
     return f"{row_source_id}.{param_id}"
 
 
-def required_inputs(row_sources: Any) -> tuple[RequiredInput, ...]:
+def required_inputs(row_sources: RowSourceCatalog) -> tuple[RequiredInput, ...]:
     return tuple(
         RequiredInput(
             id=required_input_id(row_source_id=source.id, param_id=param.id),
             row_source_id=source.id,
-            row_source_kind=str(getattr(source.kind, "value", source.kind)),
+            row_source_kind=source.kind.value,
             param_id=param.id,
             param_ref=param.param_ref,
             param_label=param.name,
@@ -47,7 +47,9 @@ def required_inputs(row_sources: Any) -> tuple[RequiredInput, ...]:
     )
 
 
-def clarifiable_required_inputs(row_sources: Any) -> tuple[RequiredInput, ...]:
+def clarifiable_required_inputs(
+    row_sources: RowSourceCatalog,
+) -> tuple[RequiredInput, ...]:
     return tuple(
         item
         for item in required_inputs(row_sources)
@@ -56,10 +58,10 @@ def clarifiable_required_inputs(row_sources: Any) -> tuple[RequiredInput, ...]:
 
 
 def grounded_required_input_ids(
-    row_sources: Any,
+    row_sources: RowSourceCatalog,
     *,
     values: tuple[FactValue, ...],
-    grounded_input_uses: tuple[object, ...],
+    grounded_input_uses: tuple[GroundedInputUse, ...],
 ) -> frozenset[str]:
     grounded_params = unique_grounded_param_ids_by_row_source(
         values=values,

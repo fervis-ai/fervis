@@ -1,24 +1,5 @@
 """Planner row-source handles compiled from catalog and memory relations."""
 
-from .builder import (
-    api_row_source_id,
-    build_row_source_catalog,
-    memory_row_source_id,
-    row_source_ids_for_read_ids,
-    row_sources_for_read_id,
-)
-from .evidence import (
-    read_evidence_ref,
-    read_field_evidence_ref,
-    required_input_evidence_ref,
-    row_source_description_evidence_ref,
-    row_source_evidence_ref,
-    row_source_evidence_refs,
-    row_source_field_evidence_ref,
-    row_source_param_evidence_ref,
-)
-from .field_paths import executable_field_ids_for_row_path
-from .lookup import row_source_for_relation
 from .model import (
     CALENDAR_DATE_FIELD_ID,
     CALENDAR_END_PARAM_ID,
@@ -34,14 +15,56 @@ from .model import (
     RowSourceKind,
     RowSourceParam,
     RowSourceParamSemantics,
+    RowSourceValueType,
 )
 from fervis.lookup.relation_catalog.model import RowCardinality
-from .payload import (
-    memory_row_source_prompt_payload,
-    row_source_param_prompt_payload,
-    row_source_prompt_payload,
-)
-from .source_groups import api_read_source_groups, read_row_source_counts
+
+
+def __getattr__(name: str):
+    if name in {
+        "api_row_source_id",
+        "build_row_source_catalog",
+        "memory_row_source_id",
+        "row_source_ids_for_read_ids",
+        "row_sources_for_read_id",
+    }:
+        from . import builder
+
+        return getattr(builder, name)
+    if name in {
+        "read_evidence_ref",
+        "read_field_evidence_ref",
+        "required_input_evidence_ref",
+        "row_source_description_evidence_ref",
+        "row_source_evidence_ref",
+        "row_source_evidence_refs",
+        "row_source_field_evidence_ref",
+        "row_source_param_evidence_ref",
+    }:
+        from . import evidence
+
+        return getattr(evidence, name)
+    if name == "executable_field_ids_for_row_path":
+        from . import field_paths
+
+        return getattr(field_paths, name)
+    if name == "row_source_for_relation":
+        from . import lookup
+
+        return getattr(lookup, name)
+    if name in {
+        "memory_row_source_prompt_payload",
+        "row_source_param_prompt_payload",
+        "row_source_prompt_payload",
+    }:
+        from . import payload
+
+        return getattr(payload, name)
+    if name in {"api_read_source_groups", "read_row_source_counts"}:
+        from . import source_groups
+
+        return getattr(source_groups, name)
+    raise AttributeError(name)
 
 __all__ = (
     "CALENDAR_DATE_FIELD_ID",
@@ -58,6 +81,7 @@ __all__ = (
     "RowSourceKind",
     "RowSourceParam",
     "RowSourceParamSemantics",
+    "RowSourceValueType",
     "RowCardinality",
     "api_row_source_id",
     "api_read_source_groups",

@@ -134,9 +134,8 @@ class SemanticInterpretedInputView:
 @dataclass(frozen=True)
 class SemanticConversationClauseView:
     current_clause_text: str
-    current_value_text: str
-    resolved_frame_text: str
-    resolved_clause_text: str
+    resolved_text: str
+    resolved_values: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -305,6 +304,35 @@ class MemoryArtifactView:
 
 
 @dataclass(frozen=True)
+class AnswerProgramRefView:
+    program_id: str
+    schema_revision: int
+
+
+@dataclass(frozen=True)
+class BindingPatchRefView:
+    patch_id: str
+
+
+@dataclass(frozen=True)
+class ProgramRevisionView:
+    revision_id: str
+    base_program_id: str
+    revised_program_id: str
+    capability_id: str
+
+
+@dataclass(frozen=True)
+class ProgramDerivationView:
+    invocation_id: str
+    kind: str
+    base_invocation_id: str | None
+    program: AnswerProgramRefView
+    patch: BindingPatchRefView | None = None
+    revision: ProgramRevisionView | None = None
+
+
+@dataclass(frozen=True)
 class FactResultView:
     fact_result_id: str
     produced_by_step_id: str
@@ -330,6 +358,7 @@ class RequestedFactView:
 class RunView:
     run_id: str
     run_number: int
+    kind: str
     trigger_kind: str
     result_kind: str
     activated_memory_ids: tuple[str, ...]
@@ -339,7 +368,8 @@ class RunView:
     steps: tuple[StepView, ...]
     runtime_errors: tuple[RuntimeErrorView, ...] = ()
     memory_artifacts: tuple[MemoryArtifactView, ...] = ()
-    trigger_clarification_response_run_id: str | None = None
+    program_derivation: ProgramDerivationView | None = None
+    base_run_id: str | None = None
     trigger_clarification_response_id: str | None = None
     clarification_requests: tuple[ClarificationRequestView, ...] = ()
     clarification_responses: tuple[ClarificationResponseView, ...] = ()
@@ -393,12 +423,14 @@ class TimelineStepView:
 class TimelineRunView:
     run_id: str
     run_number: int
+    kind: str
     trigger_kind: str
     result_kind: str
     activated_memory_ids: tuple[str, ...]
     memory_artifacts: tuple[MemoryArtifactView, ...]
     steps: tuple[TimelineStepView, ...]
-    trigger_clarification_response_run_id: str | None = None
+    program_derivation: ProgramDerivationView | None = None
+    base_run_id: str | None = None
     trigger_clarification_response_id: str | None = None
     clarification_responses: tuple[ClarificationResponseView, ...] = ()
 

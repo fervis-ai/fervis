@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fervis.lookup.fact_planning.grounded_params import GroundedParamValue
-from fervis.lookup.fact_plan.values import (
+from fervis.lookup.answer_program.values import (
     FactValue,
     IdentitySetValuePayload,
     IdentityValuePayload,
@@ -243,6 +243,7 @@ def _row_set_filter_payload(
     if value is None:
         return payload
     payload["kind"] = value.kind.value
+    payload["value_id"] = value.id
     known_input_id = known_input_id_for_value(value)
     if known_input_id:
         payload["known_input_id"] = known_input_id

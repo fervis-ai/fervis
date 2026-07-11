@@ -184,16 +184,23 @@ def test_lookup_carries_answer_subject_instance_interpretation_to_source_binding
                 "answer_requests_count": 1,
                 "question_inputs": [],
                 "answer_requests": [
-                    {
-                        "answer_fact": "in-person sales this month",
-                        "answer_expression": {"family": "scalar_aggregate"},
-                        "answer_subject": {
-                            "subject_text": "sales",
-                            "instance_interpretation": {
-                                "kind": "NORMAL_BUSINESS_INSTANCE"
+                        {
+                            "answer_fact": "in-person sales this month",
+                            "answer_expression": {"family": "scalar_aggregate"},
+                            "answer_subject": {
+                                "subject_text": "sales",
+                                "instance_interpretation": {
+                                    "kind": "NORMAL_BUSINESS_INSTANCE"
+                                },
                             },
-                        },
-                        "answer_outputs": [{"description": "amount"}],
+                            "answer_population": default_answer_population(
+                                description="in-person sales this month",
+                                subject_text="sales",
+                                instance_interpretation=RequestedFactAnswerSubject(
+                                    subject_text="sales"
+                                ).instance_interpretation,
+                            ).to_question_contract_dict(),
+                            "answer_outputs": [{"description": "amount"}],
                         "used_question_inputs": [],
                     }
                 ],
@@ -204,9 +211,15 @@ def test_lookup_carries_answer_subject_instance_interpretation_to_source_binding
             "submit_pattern_fact_plan": _pattern_fact_plan_payload(
                 requested_fact_id="fact_1",
                 answer_output_ids=("answer_1",),
-                read_id="sales",
-                output_fields=({"field_id": "amount"},),
-            ),
+                    read_id="sales",
+                    pattern="aggregate_scalar",
+                    metric={
+                        "kind": "aggregate_field",
+                        "function": "sum",
+                        "field_id": "amount",
+                        "label": "total",
+                    },
+                ),
         }
     )
     result = run_lookup_question(
@@ -637,17 +650,9 @@ def test_lookup_active_clarification_accepts_known_inputs_from_prior_question():
         return _conversation_resolution_clause_payload(
             prompt=prompt,
             current_question="ABC Mall",
-            integrated_question="How much sales did we make at ABC Mall yesterday?",
+            contextualized_question="How much sales did we make at ABC Mall yesterday?",
             actual_text="ABC Mall",
             selected_sources=(source,),
-            dependencies=[],
-            requested_value_frame={
-                "current_value_surface": {
-                    "text": "ABC Mall",
-                    "kind": "no_value_request",
-                },
-                "context_frame_choices": [],
-            },
         )
 
     ports = _ports(
@@ -782,6 +787,28 @@ def test_lookup_follow_up_memory_stays_out_of_question_contract_prompt():
                 derivation={"source": "prior_result"},
             ),
         ),
+        provenance={
+            "question_contract": {
+                "kind": "question_contract",
+                "answer_requests_count": 1,
+                "question_inputs": [],
+                "answer_requests": [
+                    {
+                        "id": "rf_answer",
+                        "answer_fact": "total sales amount",
+                        "answer_expression": {"family": "scalar_aggregate"},
+                        "answer_subject": _answer_subject_payload("sales"),
+                        "answer_outputs": [
+                            {
+                                "id": "metric_total",
+                                "description": "total sales amount",
+                            }
+                        ],
+                        "used_question_inputs": [],
+                    }
+                ],
+            }
+        },
         source_question="How much sales did ABC Mall make yesterday?",
     )
     plan = FactPlan(
@@ -866,13 +893,13 @@ def test_lookup_follow_up_memory_stays_out_of_question_contract_prompt():
     assert "Available prior answer candidates:" not in resolution_prompt
     assert "prior_reference_candidates" not in resolution_prompt
     assert "proofRefs" not in resolution_prompt
-    assert "Conversation resolution annotations:" in question_prompt
-    assert '"value_frames":' in question_prompt
+    assert "Conversation resolution context:" in question_prompt
+    assert '"resolved_values":' in question_prompt
     assert '"memory_id": "run_prior_total.value.sales_total"' not in question_prompt
     assert "proofRefs" not in question_prompt
 
 
-def test_lookup_resolved_follow_up_reaches_query_enrichment_as_raw_question_with_overlay():
+def test_lookup_resolved_follow_up_reaches_query_enrichment_with_typed_resolution():
     prior_artifact = {
         "artifactId": "run_prior_total",
         "outcome": "answered",
@@ -892,7 +919,6 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_as_raw_question_with
                             {
                                 "id": "answer_1",
                                 "description": "total sales amount",
-                                "requested_value_frame": "total sales amount",
                             }
                         ],
                         "used_question_inputs": [],
@@ -931,7 +957,7 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_as_raw_question_with
             CONVERSATION_RESOLUTION_TOOL_NAME: (
                 lambda prompt: _conversation_resolution_payload_using_memory(
                     prompt,
-                    integrated_question="How much money did we make the day before yesterday?",
+                    contextualized_question="How much money did we make the day before yesterday?",
                     actual_text="the day before",
                 )
             ),

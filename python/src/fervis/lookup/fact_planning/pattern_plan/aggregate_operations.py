@@ -1,6 +1,6 @@
 """Executable operation builders for aggregate pattern compilers."""
 
-from fervis.lookup.fact_plan.operations import (
+from fervis.lookup.answer_program.operations import (
     AggregateSpec,
     AggregationSpec,
     FilterSpec,
@@ -13,7 +13,8 @@ from fervis.lookup.fact_plan.operations import (
     SortKey,
     TiePolicy,
 )
-from fervis.lookup.fact_plan.values import RankLimitUse, ValueUse
+from fervis.lookup.answer_program.values import ConstantRef, FactValue, LiteralType
+from fervis.lookup.answer_program.compiler_inputs import CompilerInputContext
 
 
 def _aggregate_operations(
@@ -55,6 +56,7 @@ def _ranked_aggregate_operations(
     carry_fields: tuple[dict[str, str], ...],
     metric: dict[str, str],
     rank: dict[str, object],
+    input_context: CompilerInputContext,
     required_group_fields: tuple[str, ...] = (),
 ) -> tuple[Operation, ...]:
     aggregate_output_id = metric["output_field_id"]
@@ -86,7 +88,7 @@ def _ranked_aggregate_operations(
                     ),
                 ),
                 tie_policy=TiePolicy.FIELD,
-                limit=rank["limit"],
+                limit=_rank_limit_expression(rank, input_context=input_context),
                 tie_breakers=tuple(
                     SortKey(field=item["field_id"], direction=SortDirection.ASC)
                     for item in group_fields
@@ -124,19 +126,21 @@ def _not_null_group_filters(
     return current_relation, tuple(operations)
 
 
-def _rank_value_uses(
-    *,
-    rank_operation_id: str,
+def _rank_limit_expression(
     rank: dict[str, object],
-) -> tuple[ValueUse, ...]:
+    *,
+    input_context: CompilerInputContext,
+):
     limit_value_id = str(rank["limit_value_id"])
-    if not limit_value_id:
-        return ()
-    return (
-        ValueUse(
-            id=f"{rank_operation_id}_limit",
-            value_id=limit_value_id,
-            target=RankLimitUse(operation_id=rank_operation_id),
+    if limit_value_id:
+        return input_context.expression_for_value(limit_value_id)
+    return ConstantRef(
+        constant_id=f"rank-limit.{rank['limit']}",
+        version_ref="rank@1",
+        value=FactValue.literal(
+            id=f"rank-limit.{rank['limit']}",
+            literal_type=LiteralType.NUMBER,
+            value=str(rank["limit"]),
         ),
     )
 

@@ -39,7 +39,9 @@ export function httpPayloadFor(url: string): object {
 export const followUpQuestionState = {
   answer: null,
   conversationId: "conv_sales",
-  currentRunId: "run_followup",
+  primaryRunId: "run_followup",
+  latestRunId: "run_followup",
+  activeRunId: "run_followup",
   nextActions: [],
   question: "What about yesterday?",
   questionId: "q_followup",
@@ -57,7 +59,9 @@ export const initialQuestionState = {
 export const completedAfterClarificationState = {
   answer: completedRunFixture.answer,
   conversationId: "conv_sales",
-  currentRunId: completedRunFixture.runId,
+  primaryRunId: completedRunFixture.runId,
+  latestRunId: completedRunFixture.runId,
+  activeRunId: null,
   nextActions: completedRunFixture.nextActions,
   question: "How many in-person sales happened this month?",
   questionId: "q_sales",
@@ -68,7 +72,9 @@ export const completedAfterClarificationState = {
 export const textClarificationAnswerState = {
   answer: "March 2026 sales were 14.",
   conversationId: "conv_clarification",
-  currentRunId: "run_text_answer",
+  primaryRunId: "run_text_answer",
+  latestRunId: "run_text_answer",
+  activeRunId: null,
   nextActions: completedRunFixture.nextActions,
   question: "March 2026",
   questionId: "q_clarification",
@@ -138,7 +144,9 @@ export function createInteractiveTextClarificationClient(
       conversations: [
         {
           conversationId: "conv_clarification",
-          currentRunId: "run_clarify_text",
+          primaryRunId: "run_clarify_text",
+          latestRunId: "run_clarify_text",
+          activeRunId: null,
           firstQuestion: "What were sales for BBS last month?",
           latestQuestionId: "q_clarification",
           runCount: 1,
@@ -167,7 +175,8 @@ export function createInteractiveTextClarificationClient(
                     questionId: "q_clarification",
                     runId: "run_text_answer",
                     runNumber: 2,
-                    triggerKind: "clarification_response"
+                    triggerKind: "clarification_response",
+                    baseRunId: "run_clarify_text"
                   } satisfies RunPayload
                 ]
               : [])
@@ -192,7 +201,9 @@ export function createPollingClient({
       conversations: [
         {
           conversationId: "conv_running",
-          currentRunId: "run_running",
+          primaryRunId: "run_running",
+          latestRunId: "run_running",
+          activeRunId: "run_running",
           firstQuestion: "Which store has the most inventory at risk today?",
           latestQuestionId: "q_running",
           runCount: 1,

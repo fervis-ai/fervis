@@ -1,0 +1,23 @@
+id: incompatible_compiler_has_no_effects
+kind: algorithm
+algorithm: answer_program.instantiate
+description: A compiler-version mismatch rejects before source reads.
+input:
+  schema_revision: 1
+  attempts:
+    - id: compiler
+      program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/incompatible_compiler}
+      catalog: {$ref: ../../../fixtures/answer_program_v1.yaml#/catalogs/sales}
+      environment: {$ref: ../../../fixtures/answer_program_v1.yaml#/environments/invocation}
+      bindings: &bindings
+        - parameter_id: question.store_ids
+          value: {kind: identity_set, identity_type: store, identity_field: store_id, values: [store_1]}
+          provenance: {kind: question_input}
+        - parameter_id: semantic.sale_states
+          value: {kind: string_set, values: [COMPLETED]}
+          provenance: {kind: semantic_choice}
+expect:
+  result_equals:
+    attempts:
+      - {id: compiler, status: rejected, code: incompatible_compiler_version, reads: 0}
+

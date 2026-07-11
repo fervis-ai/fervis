@@ -1,3 +1,5 @@
+# ruff: noqa: F401 -- imported names are the shared test module's public surface.
+
 import json
 from dataclasses import replace
 
@@ -23,9 +25,9 @@ from fervis.lookup.relation_catalog.selection import (
 )
 from fervis.lookup.grounding.model import GroundedInputUse
 from fervis.model_io.turn_artifacts import ModelTurnArtifact
-from fervis.lookup.fact_plan.relations import FieldBindingRole
+from fervis.lookup.answer_program.relations import FieldBindingRole
 from fervis.lookup.fact_plan.row_sources import api_row_source_id
-from fervis.lookup.fact_plan.values import (
+from fervis.lookup.answer_program.values import (
     FactValue,
     TimeComponent,
 )
@@ -45,13 +47,13 @@ from fervis.lookup.fact_planning.metric_options import (
     scalar_aggregate_choices_for_source,
 )
 from fervis.lookup.turn_prompts import build_turn_prompt_context
-from fervis.lookup.fact_plan.relations import (
-    EndpointParamBinding,
-    RelationSource,
-    SourceKind,
+from fervis.lookup.source_binding.compiler_ir import (
+    DraftEndpointParamBinding,
+    DraftRelationSource,
 )
+from fervis.lookup.answer_program.relations import SourceKind
 from fervis.lookup.fact_planning.pattern_plan import (
-    compile_pattern_answer_plan as _compile_pattern_answer_plan,
+    compile_pattern_answer_program as _compile_pattern_answer_program,
 )
 from fervis.lookup.question_contract import (
     QuestionContract,
@@ -299,7 +301,10 @@ def compile_pattern_answer_plan(
         )
     if source_binding_ids_by_requirement_by_requested_fact_id is None:
         source_binding_ids_by_requirement_by_requested_fact_id = {}
-    return _compile_pattern_answer_plan(
+    from fervis.lookup.answer_program import CompilerInputContext, ProgramInputs
+    from fervis.lookup.answer_program import BindingSet
+
+    program, _bindings = _compile_pattern_answer_program(
         payload,
         bound_sources=bound_sources,
         source_binding_ids_by_requested_fact_id=(
@@ -308,7 +313,12 @@ def compile_pattern_answer_plan(
         source_binding_ids_by_requirement_by_requested_fact_id=(
             source_binding_ids_by_requirement_by_requested_fact_id
         ),
+        input_context=CompilerInputContext(
+            program_inputs=ProgramInputs(parameters=(), bindings=BindingSet()),
+            expressions_by_value_id={},
+        ),
     )
+    return program
 
 def _selected_source_ids_by_fact(
     bound_sources: tuple[BoundSource, ...],
@@ -377,7 +387,7 @@ def _api_bound_source_for_memory_boundary_test() -> BoundSource:
         id="sb_1",
         requested_fact_id="rf_answer",
         answer_population=_answer_population(),
-        source=RelationSource(kind=SourceKind.API_READ, read_id="sales"),
+        source=DraftRelationSource(kind=SourceKind.API_READ, read_id="sales"),
         cardinality="many",
         available_field_ids=("value",),
         available_fields=(SourceField(field_id="value", type="string"),),
@@ -404,7 +414,7 @@ def _two_output_aggregate_bound_source() -> BoundSource:
             id="sb_1",
             requested_fact_id="rf_answer",
             answer_population=_answer_population(),
-            source=RelationSource(
+            source=DraftRelationSource(
                 kind=SourceKind.API_READ,
                 read_id="list_metric_by_location",
             ),
@@ -448,7 +458,7 @@ def _two_output_aggregate_bound_source_pair() -> tuple[BoundSource, BoundSource]
     second = replace(
         first,
         id="sb_2",
-        source=RelationSource(
+        source=DraftRelationSource(
             kind=SourceKind.API_READ,
             read_id="list_observed_metric_by_location",
         ),
@@ -461,7 +471,7 @@ def _ranked_group_key_with_display_bound_source() -> BoundSource:
             id="sb_1",
             requested_fact_id="rf_answer",
             answer_population=_answer_population(),
-            source=RelationSource(
+            source=DraftRelationSource(
                 kind=SourceKind.API_READ,
                 read_id="list_metric_by_location",
             ),
@@ -512,7 +522,7 @@ def _ranked_count_by_store_bound_source() -> BoundSource:
             id="sb_1",
             requested_fact_id="rf_answer",
             answer_population=_answer_population(),
-            source=RelationSource(
+            source=DraftRelationSource(
                 kind=SourceKind.API_READ,
                 read_id="list_order",
             ),
@@ -573,7 +583,7 @@ def _single_output_ranked_aggregate_bound_source() -> BoundSource:
             id="sb_1",
             requested_fact_id="rf_answer",
             answer_population=_answer_population(),
-            source=RelationSource(
+            source=DraftRelationSource(
                 kind=SourceKind.API_READ,
                 read_id="list_metric_by_location",
             ),
@@ -615,7 +625,7 @@ def _display_only_location_bound_source() -> BoundSource:
         id="sb_1",
         requested_fact_id="rf_answer",
         answer_population=_answer_population(),
-        source=RelationSource(
+        source=DraftRelationSource(
             kind=SourceKind.API_READ,
             read_id="list_location",
         ),

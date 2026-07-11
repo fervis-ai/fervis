@@ -73,9 +73,7 @@ class _PlannerPort:
             return {
                 "answer": json.dumps(
                     {
-                        "tool": _conversation_resolution_tool_name_for_payload(
-                            arguments
-                        ),
+                        "tool": CONVERSATION_RESOLUTION_TOOL_NAME,
                         "arguments": arguments,
                     },
                     default=str,
@@ -103,7 +101,6 @@ class _PlannerPort:
                         "tool": "submit_answer_request_contract",
                         "arguments": _question_contract_payload(
                             question_contract,
-                            prompt=prompt,
                         ),
                     },
                     default=str,

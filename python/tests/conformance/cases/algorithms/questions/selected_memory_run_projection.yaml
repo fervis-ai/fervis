@@ -1,0 +1,16 @@
+id: selected_memory_run_projection
+kind: algorithm
+algorithm: questions.memory_projection
+description: Default memory uses one primary run per recent question while an explicit answered variant replaces its question and remains selected outside the recent window.
+input:
+  questions:
+    - question_id: question_2
+      primary_run_id: run_2_model
+    - question_id: question_3
+      primary_run_id: run_3_model
+  selected:
+    question_id: question_1
+    run_id: run_1_variant
+expect:
+  result_equals:
+    run_ids: [run_1_variant, run_2_model, run_3_model]

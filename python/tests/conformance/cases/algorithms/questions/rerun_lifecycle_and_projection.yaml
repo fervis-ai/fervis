@@ -1,0 +1,26 @@
+id: rerun_lifecycle_and_projection
+kind: algorithm
+algorithm: questions.projection
+description: Deterministic variants remain visible without replacing the primary model-assisted answer.
+input:
+  runs:
+    - run_id: run_model
+      run_number: 1
+      kind: model_assisted
+      status: COMPLETED
+      answered: true
+    - run_id: run_variant_a
+      run_number: 2
+      kind: deterministic
+      status: COMPLETED
+      answered: true
+    - run_id: run_variant_b
+      run_number: 3
+      kind: deterministic
+      status: RUNNING
+      answered: false
+expect:
+  result_equals:
+    primary_run_id: run_model
+    latest_run_id: run_variant_b
+    active_run_id: run_variant_b

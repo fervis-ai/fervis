@@ -1,10 +1,11 @@
 id: activated_memory_expands_comparison
-description: Selected comparison memory cards expand to comparison value payloads.
+description: Selected scalar cards preserve comparison values and units.
 migrates:
   - api/tests/fervis/memory/test_activated_memory.py::test_activated_memory_expands_comparison_from_used_memory_id
 kind: algorithm
 algorithm: conversation_memory.expand_activated
 input:
+  current_question: What about that comparison?
   conversation_context:
     factArtifacts:
       - artifactId: turn_1
@@ -13,20 +14,14 @@ input:
           - address: value.comparison
             kind: value
             value: {type: comparison, value: "12.5", unit: percent}
-  memory_cards:
-    mem.comparison:
-      kind: comparison
-      artifact_id: turn_1
-      address: value.comparison
-  used_memory_ids: [mem.comparison]
+  used_memory_ids: [turn_1.value.comparison]
 expect:
   result_contains:
     activatedMemory:
-      mem.comparison:
-        kind: comparison
+      turn_1.value.comparison:
+        kind: scalar_value
         value: "12.5"
         value_kind: comparison
         unit: percent
         value_fact_refs: [value.comparison]
         proof_refs: []
-

@@ -5,9 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from fervis.lookup.memory.projection import LookupMemory, MemoryValue
-from fervis.lookup.fact_plan.values import (
+from fervis.lookup.answer_program.values import (
     FactValue,
     LiteralType,
+    ValueDependency,
+    ValueDependencyKind,
 )
 
 
@@ -63,6 +65,9 @@ def _active_identity_values(
             source_refs=_active_memory_source_refs(
                 _identity_value_memory_id(value.source)
             ),
+            dependencies=_active_memory_dependencies(
+                _identity_value_memory_id(value.source)
+            ),
         )
         for value in memory.identity_values
         if _identity_value_memory_id(value.source) in active_memory_ids
@@ -92,6 +97,7 @@ def _active_identity_sets(
             source_relation_id=value.source_relation_id,
             proof_refs=value.proof_refs,
             source_refs=_active_memory_source_refs(value.source_relation_id),
+            dependencies=_active_memory_dependencies(value.source_relation_id),
         )
         for value in memory.identity_sets
         if value.source_relation_id in active_memory_ids
@@ -130,6 +136,7 @@ def _literal_fact_value(value: MemoryValue) -> FactValue:
         label=value.id,
         proof_refs=value.proof_refs,
         source_refs=_active_memory_source_refs(value.id),
+        dependencies=_active_memory_dependencies(value.id),
     )
 
 
@@ -146,6 +153,17 @@ def _literal_type(value: MemoryValue) -> LiteralType:
 
 def _active_memory_source_refs(memory_id: str) -> tuple[str, ...]:
     return (f"memory:{memory_id}",) if memory_id else ()
+
+
+def _active_memory_dependencies(memory_id: str) -> tuple[ValueDependency, ...]:
+    if not memory_id:
+        return ()
+    return (
+        ValueDependency(
+            kind=ValueDependencyKind.CONVERSATION_MEMORY,
+            ref=memory_id,
+        ),
+    )
 
 
 def _dedupe_values(values: tuple[FactValue, ...]) -> tuple[FactValue, ...]:

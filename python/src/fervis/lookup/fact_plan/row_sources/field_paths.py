@@ -16,7 +16,7 @@ from fervis.lookup.relation_catalog.model import (
 )
 from fervis.lookup.relation_catalog import catalog_field_is_count_anchor
 from fervis.lookup.relation_catalog.row_paths import infer_field_row_path_id
-from fervis.lookup.fact_plan.relations import FieldBindingRole
+from fervis.lookup.answer_program.relations import FieldBindingRole
 
 
 def _field_row_path_id(

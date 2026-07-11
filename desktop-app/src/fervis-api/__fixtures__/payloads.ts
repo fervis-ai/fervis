@@ -4,7 +4,9 @@ export const conversationListFixture = {
       conversationId: "conv_new",
       firstQuestion: "How many orders came in today?",
       latestQuestionId: "q_new",
-      currentRunId: "run_new",
+      primaryRunId: "run_new",
+      latestRunId: "run_new",
+      activeRunId: "run_new",
       status: "RUNNING",
       runCount: 1,
       updatedAt: "2026-06-27T10:15:00+00:00"
@@ -13,7 +15,9 @@ export const conversationListFixture = {
       conversationId: "conv_old",
       firstQuestion: "How many orders came in yesterday?",
       latestQuestionId: "q_old",
-      currentRunId: "run_old",
+      primaryRunId: "run_old",
+      latestRunId: "run_old",
+      activeRunId: null,
       status: "COMPLETED",
       runCount: 2,
       updatedAt: "2026-06-26T09:00:00+00:00"
@@ -228,7 +232,15 @@ export const completedRunFixture = {
   questionId: "q_sales",
   conversationId: "conv_sales",
   runNumber: 1,
+  kind: "model_assisted",
   triggerKind: "initial",
+  baseRunId: null,
+  programId: "ap_sales",
+  invocationId: "pi_sales",
+  executionKind: "compiled_question",
+  baseInvocationId: null,
+  patchId: null,
+  revisionId: null,
   status: "COMPLETED",
   answer: "18 in-person sales happened this month.",
   resultData: {
@@ -376,7 +388,7 @@ export const clarificationRunFixture = {
       kind: "provide_clarification",
       description: "Continue the same question by answering the clarification.",
       command:
-        'fervis runtime ask "<answer>" --question-id q_sales --previous-run-id run_clarify --clarification-id clar_store',
+        'fervis runtime ask "<answer>" --question-id q_sales --base-run-id run_clarify --clarification-id clar_store',
       request: null
     }
   ]
@@ -444,7 +456,9 @@ export const questionStateFixture = {
   questionId: "q_sales",
   conversationId: "conv_sales",
   question: "How many in-person sales happened this month?",
-  currentRunId: "run_sales",
+  primaryRunId: "run_sales",
+  latestRunId: "run_sales",
+  activeRunId: null,
   status: "COMPLETED",
   answer: "18 in-person sales happened this month.",
   resultData: completedRunFixture.resultData,

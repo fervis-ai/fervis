@@ -14,7 +14,8 @@ from fervis.lookup.relation_catalog.model import (
     RowCardinality,
     RowPath,
 )
-from fervis.lookup.fact_plan.relations import (
+from fervis.lookup.relation_catalog.validation import parse_relation_catalog_values
+from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
     Relation,
 )
@@ -63,6 +64,7 @@ def build_row_source_catalog(
     *,
     memory_relations: tuple["RelationRows", ...] = (),
 ) -> RowSourceCatalog:
+    catalog = parse_relation_catalog_values(catalog)
     return RowSourceCatalog(
         sources=(
             _generated_calendar_row_source(),

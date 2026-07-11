@@ -66,7 +66,9 @@ export function App({ initialClient }: AppProps) {
       const runs = await apiClient.listQuestionRuns(question.questionId);
       const nextSummary = {
         conversationId: question.conversationId,
-        currentRunId: question.currentRunId,
+        primaryRunId: question.primaryRunId,
+        latestRunId: question.latestRunId,
+        activeRunId: question.activeRunId,
         firstQuestion: submittedQuestion,
         latestQuestionId: question.questionId,
         runCount: runs.runs.length,

@@ -17,7 +17,9 @@ describe("Ledger app actions", () => {
     const askQuestion = vi.fn(async () => ({
       answer: null,
       conversationId: "conv_sales",
-      currentRunId: "run_followup",
+      primaryRunId: "run_followup",
+      latestRunId: "run_followup",
+      activeRunId: "run_followup",
       nextActions: [],
       question: "What about yesterday?",
       questionId: "q_followup",
@@ -101,7 +103,7 @@ describe("Ledger app actions", () => {
       question: "BBS Outlet",
       selectedOptionId: "store:store_id:70707070-0000-0000-0001-000000000002",
       triggerKind: "clarification_response",
-      triggerRunId: "run_clarify"
+      baseRunId: "run_clarify"
     } satisfies ClarificationResponseRequest);
   });
 
@@ -151,7 +153,7 @@ describe("Ledger app actions", () => {
       clarificationId: "clar_period",
       question: "March 2026",
       triggerKind: "clarification_response",
-      triggerRunId: "run_clarify_text"
+      baseRunId: "run_clarify_text"
     } satisfies ClarificationResponseRequest);
   });
 

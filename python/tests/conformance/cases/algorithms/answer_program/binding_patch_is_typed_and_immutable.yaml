@@ -1,0 +1,35 @@
+id: binding_patch_is_typed_and_immutable
+kind: algorithm
+algorithm: answer_program.patch
+description: A valid semantic-control patch creates a new binding set and leaves its base unchanged.
+input:
+  schema_revision: 1
+  parameters:
+    - id: population.sale_states
+      role: semantic_control
+      value_type: string_set
+      required: true
+      allowed_values: [COMPLETED, PLACED]
+  bindings:
+    - parameter_id: population.sale_states
+      value:
+        kind: string_set
+        values: [COMPLETED]
+      provenance:
+        kind: semantic_choice
+        refs: [population_choice:sale_states]
+  patch:
+    operations:
+      - kind: set
+        parameter_id: population.sale_states
+        value:
+          kind: string_set
+          values: [COMPLETED, PLACED]
+expect:
+  result_equals:
+    status: patched
+    base:
+      population.sale_states: [COMPLETED]
+    revised:
+      population.sale_states: [COMPLETED, PLACED]
+    changed_parameter_ids: [population.sale_states]

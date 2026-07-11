@@ -1,0 +1,28 @@
+id: undeclared_capability_is_not_guessed
+kind: algorithm
+algorithm: answer_program.apply_capability
+description: An undeclared structural edit is rejected before effects and never falls through to a model.
+input:
+  schema_revision: 1
+  program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/capability}
+  bindings:
+    - parameter_id: question.store_ids
+      value:
+        kind: identity_set
+        identity_type: store
+        identity_field: store_id
+        values: [store_1, store_2]
+      provenance: {kind: question_input}
+  application:
+    capability_id: add_arbitrary_predicate
+    binding:
+      parameter_id: semantic.sale_channels
+      value: {kind: string_set, values: [STORE]}
+      provenance: {kind: semantic_choice}
+expect:
+  result_contains:
+    status: rejected
+    code: undeclared_capability
+    reads: 0
+    model_calls: 0
+

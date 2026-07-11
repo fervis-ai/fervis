@@ -13,12 +13,14 @@ input:
         sourceQuestion: Which stores are we talking about?
         provenance:
           question_contract:
+            question_inputs: []
             answer_requests:
               - id: fact_1
                 answer_fact: stores
                 answer_outputs:
-                  - description: store identity
-                    requested_value_frame: store identity
+                  - id: answer_1
+                    description: store identity
+                used_question_inputs: []
         addresses:
           - address: relation.stores
             kind: relation
@@ -42,4 +44,3 @@ expect:
         source_memory_ids:
           - turn_stores.prior_request.fact_1
           - turn_stores.relation.stores
-

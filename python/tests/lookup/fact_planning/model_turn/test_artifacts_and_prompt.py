@@ -146,12 +146,12 @@ def test_fact_plan_prompt_exposes_bound_params_without_available_param_choices()
                     id="sb_1",
                     requested_fact_id="fact_1",
                     answer_population=_answer_population(),
-                    source=RelationSource(
+                    source=DraftRelationSource(
                         kind=SourceKind.API_READ,
                         read_id="records",
                         param_bindings=(
-                            EndpointParamBinding("channel", "STORE"),
-                            EndpointParamBinding("status", "COMPLETED"),
+                            DraftEndpointParamBinding("channel", "STORE"),
+                            DraftEndpointParamBinding("status", "COMPLETED"),
                         ),
                     ),
                     fulfillments=(

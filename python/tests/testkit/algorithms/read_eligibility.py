@@ -19,7 +19,7 @@ from fervis.lookup.read_eligibility.recall import (
 from fervis.lookup.read_eligibility.surface import (
     read_eligibility_candidate_surface,
 )
-from fervis.lookup.fact_plan.values import FactValue
+from fervis.lookup.answer_program.values import FactValue
 
 from tests.testkit.assertions import (
     expects_rejection,
@@ -160,7 +160,6 @@ def run_read_eligibility_prepare_recall_case(payload: dict[str, Any]) -> list[st
             catalog_selection=prepared,
             conversation_context=request.conversation_context,
             available_values=request.available_values,
-            conversation_resolution_overlay=request.conversation_resolution_overlay,
         )
     )
     card_payload = surface.card_payload

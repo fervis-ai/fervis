@@ -10,20 +10,15 @@ from fervis.lookup.question_contract import (
     QuestionContractRequest,
     QuestionContractTurnPrompt,
     RequestedFactKnownInput,
+    build_answer_request_contract_schema,
     build_question_contract_decisions_schema,
     parse_question_contract,
 )
-from fervis.lookup.conversation_resolution import (
-    ConversationDependencyOverlay,
-    ConversationResolutionOverlay,
-    ConversationValueFrameOverlay,
-    LiteralQuestionInputOverlay,
-    ResolvedQuestionInputOverlay,
-    RowSetQuestionInputOverlay,
-    conversation_resolution_question_contract_prompt_payload,
-)
-from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
+from fervis.lookup.question_inputs import KnownInputKind
 from fervis.lookup.turn_prompts import build_turn_prompt_context
+from tests.testkit.algorithms.conversation_resolution import (
+    compiled_conversation_resolution_from_payload,
+)
 
 from tests.testkit.assertions import (
     exact_mismatches,
@@ -38,6 +33,12 @@ def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
     model_payload = dict(
         input_payload.get("payload") or _model_payload_from_case_input(input_payload)
     )
+    conversation_resolution = compiled_conversation_resolution_from_payload(
+        input_payload.get("conversation_resolution")
+    )
+    question_context_texts = list(input_payload.get("question_context_texts") or ())
+    if conversation_resolution is not None:
+        question_context_texts.extend(conversation_resolution.context_texts())
     tool_name = str(input_payload.get("tool_name") or "")
     if not tool_name:
         tool_name = (
@@ -50,12 +51,8 @@ def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
             tool_name=tool_name,
             payload=model_payload,
             question_context=str(input_payload["question_context"]),
-            question_context_texts=tuple(
-                input_payload.get("question_context_texts") or ()
-            ),
-            conversation_resolution_overlay=_optional_conversation_overlay(
-                input_payload.get("conversation_resolution_overlay")
-            ),
+            question_context_texts=tuple(question_context_texts),
+            conversation_resolution=conversation_resolution,
         )
     except ValueError as exc:
         if expects_rejection(payload["expect"]):
@@ -148,6 +145,8 @@ def _known_input_actual(item: RequestedFactKnownInput) -> dict[str, object]:
 
 
 def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
+    if payload.get("input", {}).get("projection") == "declared_conversation_inputs":
+        return _declared_conversation_input_schema_case(payload)
     schema = build_question_contract_decisions_schema()
     branches = {
         branch["properties"]["kind"]["enum"][0]: branch for branch in schema["oneOf"]
@@ -191,6 +190,7 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
             for role in variant["properties"]["role"]["enum"]
         }
     )
+    row_set_variant = variants.get(KnownInputKind.ROW_SET_REFERENCE.value)
     actual = {
         "has_root_one_of": "oneOf" in schema,
         "branch_kinds": sorted(branches),
@@ -258,10 +258,13 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
             )
         },
         "row_set_reference_properties": sorted(
-            variants[KnownInputKind.ROW_SET_REFERENCE.value]["properties"]
+            row_set_variant["properties"] if row_set_variant is not None else ()
         ),
         "row_set_reference_property_membership": {
-            name: name in variants[KnownInputKind.ROW_SET_REFERENCE.value]["properties"]
+            name: (
+                row_set_variant is not None
+                and name in row_set_variant["properties"]
+            )
             for name in (
                 "input_ref",
                 "source",
@@ -272,9 +275,9 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
                 "kind",
             )
         },
-        "row_set_reference_required": variants[
-            KnownInputKind.ROW_SET_REFERENCE.value
-        ]["required"],
+        "row_set_reference_required": (
+            row_set_variant["required"] if row_set_variant is not None else []
+        ),
         "schema_text": repr(schema),
     }
     if payload.get("input", {}).get("projection") == "question_input_contract":
@@ -306,6 +309,49 @@ def run_question_contract_schema_case(payload: dict[str, Any]) -> list[str]:
             )
         )
     return errors
+
+
+def _declared_conversation_input_schema_case(payload: dict[str, Any]) -> list[str]:
+    conversation_resolution = compiled_conversation_resolution_from_payload(
+        payload["input"].get("conversation_resolution")
+    )
+    schema = build_answer_request_contract_schema(
+        conversation_inputs=(
+            conversation_resolution.inputs
+            if conversation_resolution is not None
+            else ()
+        )
+    )
+    variants = schema["properties"]["question_inputs"]["items"]["oneOf"]
+    declared_variants = [
+        variant
+        for variant in variants
+        if variant["properties"]["source"]["enum"] == ["conversation_resolution"]
+    ]
+    actual = {
+        "declared_variants": [
+            {
+                "kind": variant["properties"]["kind"]["enum"],
+                "source": variant["properties"]["source"]["enum"],
+                "value_source_text": variant["properties"].get(
+                    "value_source_text",
+                    variant["properties"].get("reference_text"),
+                )["enum"],
+                "resolved_value_text": variant["properties"].get(
+                    "resolved_value_text", {}
+                ).get("enum", []),
+                "role": variant["properties"].get("role", {}).get("enum", []),
+                "resolved_input_ref": variant["properties"]["resolved_input_ref"][
+                    "enum"
+                ],
+            }
+            for variant in declared_variants
+        ]
+    }
+    return exact_mismatches(
+        actual=actual,
+        expected=payload["expect"]["result_equals"],
+    )
 
 
 def _answer_output_schema_kind(schema: dict[str, Any]) -> str:
@@ -403,21 +449,14 @@ def run_question_contract_prompt_case(payload: dict[str, Any]) -> list[str]:
     request = QuestionContractRequest(
         current_question=str(payload["input"]["current_question"]),
         conversation_context=dict(payload["input"].get("conversation_context") or {}),
-    )
-    conversation_resolution_overlay = payload["input"].get(
-        "conversation_resolution_overlay"
+        conversation_resolution=compiled_conversation_resolution_from_payload(
+            payload["input"].get("conversation_resolution")
+        ),
     )
     invocation = QuestionContractTurnPrompt(request).to_model_invocation(
         build_turn_prompt_context(
             current_question=request.current_question,
             conversation_context=request.conversation_context,
-            conversation_resolution_overlay=(
-                conversation_resolution_question_contract_prompt_payload(
-                    _conversation_overlay(conversation_resolution_overlay)
-                )
-                if isinstance(conversation_resolution_overlay, dict)
-                else None
-            ),
         )
     )
     actual = {
@@ -438,71 +477,6 @@ def run_question_contract_prompt_case(payload: dict[str, Any]) -> list[str]:
     if expected_subset:
         errors.extend(subset_mismatches(actual=actual, expected_subset=expected_subset))
     return errors
-
-
-def _conversation_overlay(payload: dict[str, Any]) -> ConversationResolutionOverlay:
-    return ConversationResolutionOverlay(
-        current_question=str(payload["current_question"]),
-        value_frames=tuple(
-            ConversationValueFrameOverlay(
-                current_clause_text=str(item["current_clause_text"]),
-                current_value_text=str(item["current_value_text"]),
-                current_value_kind=str(item["current_value_kind"]),
-                resolved_frame_text=str(item["resolved_frame_text"]),
-                must_preserve_terms=tuple(item.get("must_preserve_terms") or ()),
-                used_context_frame_ids=tuple(item.get("used_context_frame_ids") or ()),
-            )
-            for item in payload.get("value_frames") or ()
-        ),
-        references=tuple(
-            ConversationDependencyOverlay(
-                current_clause_text=str(item["current_clause_text"]),
-                anchor_text=str(item["anchor_text"]),
-                occurrence=int(item.get("occurrence") or 1),
-                resolved_text=str(item["resolved_text"]),
-                must_preserve_terms=tuple(item.get("must_preserve_terms") or ()),
-                source_ids=tuple(item.get("source_ids") or ()),
-            )
-            for item in payload.get("references") or ()
-        ),
-        scopes=(),
-        activated_memory_ids=(),
-        used_source_card_ids=(),
-        resolved_question_inputs=tuple(
-            _resolved_question_input_overlay(item)
-            for item in payload.get("resolved_question_inputs") or ()
-        ),
-    )
-
-
-def _optional_conversation_overlay(raw: object) -> ConversationResolutionOverlay | None:
-    if raw is None:
-        return None
-    return _conversation_overlay(raw)
-
-
-def _resolved_question_input_overlay(
-    item: dict[str, Any],
-) -> ResolvedQuestionInputOverlay:
-    kind = KnownInputKind(str(item["kind"]))
-    if kind == KnownInputKind.LITERAL:
-        return LiteralQuestionInputOverlay(
-            source_text=str(item["source_text"]),
-            occurrence=int(item.get("occurrence") or 1),
-            resolved_input_ref=str(item["resolved_input_ref"]),
-            resolved_value_text=str(item["resolved_value_text"]),
-            value_meaning_hint=str(item.get("value_meaning_hint") or ""),
-            field_label_text=str(item.get("field_label_text") or ""),
-            role=LiteralInputRole(str(item["role"])),
-        )
-    if kind == KnownInputKind.ROW_SET_REFERENCE:
-        return RowSetQuestionInputOverlay(
-            reference_text=str(item["reference_text"]),
-            occurrence=int(item.get("occurrence") or 1),
-            resolved_input_ref=str(item["resolved_input_ref"]),
-            memory_ids=tuple(str(ref) for ref in item.get("memory_ids") or ()),
-        )
-    raise ValueError(f"unsupported resolved question input kind: {kind}")
 
 
 def _model_payload_from_case_input(input_payload: dict[str, Any]) -> dict[str, object]:

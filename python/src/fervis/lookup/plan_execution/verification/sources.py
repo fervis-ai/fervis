@@ -1,124 +1,49 @@
-"""Source, relation, catalog, and value-use checks for fact-plan verification."""
+"""Source, relation, catalog, and expression checks for program verification."""
 
 from ._shared import (
-    AnswerPlan,
+    AnswerProgram,
     AuthorizedExecutionSources,
     CatalogField,
     CatalogSelectionResult,
-    FactValue,
     FieldBindingRole,
-    LiteralType,
-    LiteralValuePayload,
-    RankLimitUse,
-    RankSpec,
     Relation,
     RelationCatalog,
     RelationSource,
     RowSource,
     RowSourceCatalog,
     RowSourceKind,
-    ScalarInputUse,
     SourceKind,
     VerificationError,
-    build_row_source_catalog,
-    compile_value_uses,
+    instantiate_program_expressions,
     row_source_for_relation,
-    unique_grounded_param_ids_by_row_source,
 )
-from .scalars import _operation_scalar_inputs
+from fervis.lookup.answer_program.expression_instantiation import (
+    InstantiatedProgramInputs,
+)
 
 
-def _verify_value_use_targets(
-    answer: AnswerPlan,
+def _verify_program_expression_targets(
+    answer: AnswerProgram,
     *,
+    bindings,
     catalog: RelationCatalog | None,
     row_sources: RowSourceCatalog,
-    available_values: tuple[FactValue, ...],
-    available_value_uses: tuple[object, ...],
 ) -> None:
-    if not answer.value_uses:
-        return
-    catalog_value_uses = tuple(
-        value_use
-        for value_use in answer.value_uses
-        if not isinstance(value_use.target, (ScalarInputUse, RankLimitUse))
+    instantiate_program_expressions(
+        bindings=bindings,
+        catalog=catalog or RelationCatalog(),
+        relations=answer.relations,
+        parameters=answer.parameters,
+        row_sources=row_sources,
     )
-    if catalog_value_uses:
-        if catalog is None:
-            raise VerificationError("catalog is required to verify value-use targets")
-        compile_value_uses(
-            values=(*answer.values, *available_values),
-            value_uses=catalog_value_uses,
-            catalog=catalog,
-            relations=answer.relations,
-            row_sources=row_sources,
-            grounded_input_uses=available_value_uses,
-        )
-    operations_by_id = {item.id: item for item in answer.operations}
-    values_by_id = {item.id: item for item in (*answer.values, *available_values)}
-    for value_use in answer.value_uses:
-        if isinstance(value_use.target, ScalarInputUse):
-            operation = operations_by_id.get(value_use.target.operation_id)
-            if operation is None:
-                raise VerificationError(
-                    f"value use {value_use.id} references unknown operation"
-                )
-            if value_use.target.input_id not in _operation_scalar_inputs(operation):
-                raise VerificationError(
-                    f"value use {value_use.id} references unknown scalar input"
-                )
-            value = values_by_id.get(value_use.value_id)
-            if not _is_numeric_scalar_input_value(value):
-                raise VerificationError(
-                    f"value use {value_use.id} references non-numeric scalar input"
-                )
-        if isinstance(value_use.target, RankLimitUse):
-            operation = operations_by_id.get(value_use.target.operation_id)
-            if operation is None:
-                raise VerificationError(
-                    f"value use {value_use.id} references unknown operation"
-                )
-            if not isinstance(operation.spec, RankSpec):
-                raise VerificationError(
-                    f"value use {value_use.id} references non-rank operation"
-                )
-            value = values_by_id.get(value_use.value_id)
-            if value is None or not _rank_limit_matches(value, operation.spec.limit):
-                raise VerificationError(
-                    f"value use {value_use.id} rank limit does not match value"
-                )
-
-
-def _is_numeric_scalar_input_value(value: FactValue | None) -> bool:
-    if value is None or not isinstance(value.payload, LiteralValuePayload):
-        return False
-    return value.payload.literal_type == LiteralType.NUMBER
-
-
-def _rank_limit_matches(value: FactValue, limit: int) -> bool:
-    if not isinstance(value.payload, LiteralValuePayload):
-        return False
-    if value.payload.literal_type != LiteralType.NUMBER:
-        return False
-    try:
-        numeric_value = float(value.payload.value)
-    except ValueError:
-        return False
-    return numeric_value.is_integer() and int(numeric_value) == limit
 
 
 def _verify_required_source_params(
-    answer: AnswerPlan,
+    answer: AnswerProgram,
     *,
     row_sources: RowSourceCatalog,
-    available_values: tuple[FactValue, ...],
-    available_value_uses: tuple[object, ...],
 ) -> None:
     provided: set[tuple[str, str]] = set()
-    unique_params_by_row_source = unique_grounded_param_ids_by_row_source(
-        values=available_values,
-        grounded_input_uses=available_value_uses,
-    )
     for relation in answer.relations:
         if relation.source.kind not in {
             SourceKind.API_READ,
@@ -127,8 +52,6 @@ def _verify_required_source_params(
         }:
             continue
         row_source = _row_source_for_relation(relation, row_sources=row_sources)
-        for param_id in unique_params_by_row_source.get(row_source.id, frozenset()):
-            provided.add((relation.id, param_id))
         for binding in relation.source.param_bindings:
             provided.add((relation.id, binding.param_id))
     for relation in answer.relations:
@@ -155,7 +78,7 @@ def _verify_required_source_params(
 
 
 def _verify_sources(
-    answer: AnswerPlan,
+    answer: AnswerProgram,
     *,
     row_sources: RowSourceCatalog,
     allowed_read_ids: frozenset[str] | None = None,
@@ -265,19 +188,14 @@ def _verify_unique_relation_field_ids(relation: Relation) -> None:
 def _verify_api_relation_catalog_refs(
     relations: tuple[Relation, ...],
     catalog: RelationCatalog,
-    value_uses: tuple[object, ...] = (),
-    values: tuple[FactValue, ...] = (),
-    row_sources: RowSourceCatalog | None = None,
-    available_value_uses: tuple[object, ...] = (),
+    *,
+    row_sources: RowSourceCatalog,
+    instantiated_inputs: InstantiatedProgramInputs,
 ) -> None:
-    row_sources = row_sources or build_row_source_catalog(catalog)
     endpoint_arg_values = _endpoint_arg_values(
-        value_uses,
-        values=values,
         relations=relations,
-        available_value_uses=available_value_uses,
-        catalog=catalog,
         row_sources=row_sources,
+        instantiated_inputs=instantiated_inputs,
     )
     for relation in relations:
         if relation.source.kind != SourceKind.API_READ:
@@ -308,22 +226,11 @@ def _verify_api_relation_catalog_refs(
 
 
 def _endpoint_arg_values(
-    value_uses: tuple[object, ...],
     *,
-    values: tuple[FactValue, ...],
     relations: tuple[Relation, ...],
-    available_value_uses: tuple[object, ...],
-    catalog: RelationCatalog,
     row_sources: RowSourceCatalog,
+    instantiated_inputs: InstantiatedProgramInputs,
 ) -> dict[tuple[str, str], object]:
-    compiled = compile_value_uses(
-        values=values,
-        value_uses=value_uses,
-        catalog=catalog,
-        relations=relations,
-        row_sources=row_sources,
-        grounded_input_uses=available_value_uses,
-    )
     return {
         (
             item.relation_id,
@@ -334,7 +241,7 @@ def _endpoint_arg_values(
                 param_ref=item.param_ref,
             ),
         ): item.value
-        for item in compiled.endpoint_args
+        for item in instantiated_inputs.endpoint_args
     }
 
 

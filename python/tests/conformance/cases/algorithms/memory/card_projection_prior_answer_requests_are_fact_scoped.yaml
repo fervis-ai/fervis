@@ -14,31 +14,32 @@ input:
       sourceAnswer: Staff One sold 100. Westlands had stockouts.
       provenance:
         question_contract:
+          question_inputs:
+          - id: sales_staff
+            kind: literal_text
+            source: question_context
+            text: Staff One
+            resolved_value_text: Staff One
+            role: reference_value
+          - id: stockout_store
+            kind: literal_text
+            source: question_context
+            text: store
+            resolved_value_text: store
+            role: reference_value
           answer_requests:
           - id: fact_sales
             answer_fact: sales by Staff One
             answer_outputs:
-            - description: total sales amount
-              requested_value_frame: total sales amount
-            known_inputs:
-            - id: sales_staff
-              kind: literal_text
-              source: question_context
-              text: Staff One
-              resolved_value_text: Staff One
-              role: reference_value
+            - id: answer_1
+              description: total sales amount
+            used_question_inputs: [sales_staff]
           - id: fact_stockouts
             answer_fact: stockouts by store
             answer_outputs:
-            - description: store name
-              requested_value_frame: store name
-            known_inputs:
-            - id: stockout_store
-              kind: literal_text
-              source: question_context
-              text: store
-              resolved_value_text: store
-              role: reference_value
+            - id: answer_1
+              description: store name
+            used_question_inputs: [stockout_store]
       addresses:
       - address: value.answer
         kind: value

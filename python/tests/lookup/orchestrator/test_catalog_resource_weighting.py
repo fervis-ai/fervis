@@ -457,6 +457,7 @@ def test_lookup_cutover_source_candidate_can_fulfill_parent_and_child_evidence_f
             "submit_answer_request_contract": _question_contract_response(
                 subject="salespeople, products, and total sales",
                 parts=("salesperson name", "product name", "total sales"),
+                answer_expression_family="list_rows",
             ),
             "submit_query_enrichment": _query_enrichment_payload(("sale",)),
             "submit_pattern_fact_plan": {

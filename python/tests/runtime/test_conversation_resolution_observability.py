@@ -17,16 +17,18 @@ def test_question_contract_failure_includes_conversation_resolution_usage():
         source_answer="100",
         provenance={
             "question_contract": {
+                "question_inputs": [],
                 "answer_requests": [
                     {
                         "id": "fact_1",
                         "answer_fact": "money we made today",
                         "answer_outputs": [
                             {
+                                "id": "answer_1",
                                 "description": "total sales amount",
-                                "requested_value_frame": "total sales amount",
                             }
                         ],
+                        "used_question_inputs": [],
                     }
                 ]
             }
@@ -54,7 +56,6 @@ def test_question_contract_failure_includes_conversation_resolution_usage():
                         "answer_outputs": [
                             {
                                 "description": "total money",
-                                "requested_value_frame": "total money",
                             }
                         ],
                         "used_question_inputs": [],

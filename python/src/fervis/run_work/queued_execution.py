@@ -89,4 +89,5 @@ def _ask_result_from_queued_result(
         answer=executed.answer,
         result_data=executed.result_data,
         error=executed.error,
+        duration_ms=executed.duration_ms,
     )

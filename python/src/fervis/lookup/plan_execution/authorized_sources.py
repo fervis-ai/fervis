@@ -7,7 +7,8 @@ from typing import Iterable
 
 from fervis.lookup.relation_catalog import RelationCatalog
 from fervis.lookup.relation_catalog.selection import CatalogSelectionResult
-from fervis.lookup.fact_plan.relations import RelationSource, SourceKind
+from fervis.lookup.answer_program.model import AnswerProgram
+from fervis.lookup.answer_program.relations import RelationSource, SourceKind
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,23 @@ class AuthorizedExecutionSources:
                 *_api_read_ids_from_catalog_selection(catalog_selection),
                 *_api_read_ids_from_relation_sources(relation_sources),
             )
+        )
+        return cls(
+            relation_catalog=_project_catalog(full_catalog, api_read_ids),
+            api_read_ids=api_read_ids,
+        )
+
+    @classmethod
+    def from_program(
+        cls,
+        *,
+        full_catalog: RelationCatalog,
+        program: AnswerProgram,
+    ) -> "AuthorizedExecutionSources":
+        api_read_ids = _unique(
+            relation.source.read_id
+            for relation in program.relations
+            if relation.source.kind is SourceKind.API_READ
         )
         return cls(
             relation_catalog=_project_catalog(full_catalog, api_read_ids),

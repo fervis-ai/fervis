@@ -6,7 +6,7 @@ import operator
 
 from fervis.lookup.plan_execution.operation_runtime import RelationEngineError
 from fervis.lookup.plan_execution.relations import Row
-from fervis.lookup.fact_plan.operations import Predicate, PredicateOperator
+from fervis.lookup.answer_program.operations import Predicate, PredicateOperator
 
 from .shared import _field, _ordered_predicate_values
 

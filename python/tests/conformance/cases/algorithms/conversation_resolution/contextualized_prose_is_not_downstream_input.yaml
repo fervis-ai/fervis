@@ -1,0 +1,54 @@
+id: contextualized_prose_is_not_downstream_input
+description: Compilation records CR's coherence text but exposes only raw clauses and typed values downstream.
+kind: algorithm
+algorithm: conversation_resolution.compile
+input:
+  current_question: What about stores?
+  context_sources:
+    - source_id: prior_question
+      kind: prior_user_question
+      text: How many sales did we make today?
+      source_card_ids: [prior_card]
+      source_memory_ids: [prior_request]
+  context_frames:
+    - frame_id: request:1
+      source_ids: [prior_question]
+      answer_shape: {expression_family: scalar_aggregate, output_roles: [ROW_POPULATION]}
+      parts:
+        - {part_id: subject, kind: answer_subject, text: sales}
+        - {part_id: output, kind: answer_output, text: sales count}
+  payload:
+    kind: conversation_resolution
+    current_question_text: What about stores?
+    outcome:
+      kind: resolved
+      resolution_basis: Current meaning and retained prior meaning form the resolved question.
+      contextualized_question: How many stores do we have?
+      clauses:
+        - current_clause_text: What about stores?
+          occurrence: 1
+          resolved_text: How many stores do we have?
+          retained_frame_parts:
+            - {kind: frame_part, frame_id: request:1, part_id: output}
+          values:
+            - value_id: subject
+              resolved_text: stores
+              sources:
+                - {kind: current_span, text: stores, occurrence: 1}
+      frame_call: {kind: none}
+expect:
+  result_equals:
+    current_question_text: What about stores?
+    recorded_contextualized_question: How many stores do we have?
+    question_contract_context:
+      clauses:
+        - current_clause_text: What about stores?
+          resolved_values: []
+          retained_frame_parts:
+            - kind: answer_output
+              text: sales count
+              answer_shape:
+                expression_family: scalar_aggregate
+                output_roles: [ROW_POPULATION]
+    frame_call: {kind: none}
+    uses_prior_context: true

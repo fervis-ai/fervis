@@ -1,0 +1,22 @@
+id: schema_projects_only_declared_resolved_inputs
+description: The schema exposes the exact kind and identity of each compiled resolved input.
+kind: algorithm
+algorithm: question_contract.schema
+input:
+  projection: declared_conversation_inputs
+  conversation_resolution:
+    current_question_text: Which of those were completed?
+    inputs:
+      - kind: row_set_reference
+        input_ref: conversation.rows
+        reference_text: those
+        memory_ids: [prior_rows]
+expect:
+  result_equals:
+    declared_variants:
+      - kind: [row_set_reference]
+        source: [conversation_resolution]
+        value_source_text: [those]
+        resolved_value_text: []
+        role: []
+        resolved_input_ref: [conversation.rows]

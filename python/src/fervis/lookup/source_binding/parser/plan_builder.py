@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import Any
 
-from fervis.lookup.fact_plan.relations import (
-    RelationSourcePopulationChoice,
+from fervis.lookup.source_binding.compiler_ir import (
+    DraftRelationSourcePopulationChoice,
 )
 from fervis.lookup.source_binding import provider_contract as provider_output
 from fervis.lookup.source_binding.candidates import SourceCandidate
 from fervis.lookup.source_binding.closed_key_params import (
     closed_key_param_binding_index,
 )
+from fervis.lookup.source_binding.grounded_params import grounded_param_bindings
+from fervis.lookup.fact_plan.row_sources import build_row_source_catalog
 from fervis.lookup.source_binding.model import (
     BoundSource,
     SourceBindingPlan,
@@ -62,7 +63,7 @@ def build_source_binding_plan(
     candidates: dict[str, SourceCandidate],
     effective_param_ids_by_index: dict[int, tuple[str, ...]] | None = None,
     population_choices_by_index: (
-        dict[int, tuple[RelationSourcePopulationChoice, ...]] | None
+        dict[int, tuple[DraftRelationSourcePopulationChoice, ...]] | None
     ) = None,
 ) -> SourceBindingPlan:
     value_candidates_by_relation_id = _value_candidates_by_source_relation_id(
@@ -117,6 +118,9 @@ def build_source_binding_plan(
             candidate=candidate,
             available_values=request.available_values,
             answer_population=answer_population,
+            parameter_namespace=(
+                f"semantic.{requested_fact_id}.{target.binding_target_id}"
+            ),
             effective_param_ids=(effective_param_ids_by_index or {}).get(index),
         )
         row_predicates = parse_row_predicate_filters(
@@ -133,11 +137,29 @@ def build_source_binding_plan(
         backend_param_binding_sets = closed_key_bindings.backend_param_binding_sets(
             target.binding_target_id,
         )
+        row_sources = build_row_source_catalog(request.relation_catalog)
+        try:
+            candidate_row_source = row_sources.source(candidate.source.row_source_id)
+        except KeyError:
+            grounded_bindings = ()
+        else:
+            grounded_bindings = grounded_param_bindings(
+                available_values=request.available_values,
+                available_value_uses=request.available_value_uses,
+                row_source=candidate_row_source,
+                requested_fact_id=candidate.requested_fact_id,
+                excluded_param_ids=closed_key_bindings.owned_param_ids(
+                    target.binding_target_id
+                ),
+            )
         param_binding_sets = tuple(
             merged_param_bindings(
                 merged_param_bindings(
-                    base_param_bindings,
-                    backend_param_bindings,
+                    merged_param_bindings(
+                        base_param_bindings,
+                        backend_param_bindings,
+                    ),
+                    grounded_bindings,
                 ),
                 model_param_bindings,
             )
@@ -149,7 +171,6 @@ def build_source_binding_plan(
             *((population_choices_by_index or {}).get(index, ())),
             *row_predicates.population_choices,
         )
-        row_filters = row_predicates.filters
         fulfillments = parse_source_fulfillments(
             parsed_invocation.fulfillment_decisions,
             requested_fact_id=requested_fact_id,
@@ -174,18 +195,12 @@ def build_source_binding_plan(
             param_binding_sets=param_binding_sets,
             population_choices=population_choices,
         )
-        if row_filters and source is not None:
-            source = replace(source, row_filters=row_filters)
-            source_invocations = tuple(
-                replace(source_invocation, row_filters=row_filters)
-                for source_invocation in source_invocations
-            )
         evidence_items = candidate_source_evidence_items(candidate)
         available_fields = candidate_source_fields(
             candidate,
             evidence_items=evidence_items,
             fulfillments=fulfillments,
-            row_filters=row_filters,
+            row_filters=(),
         )
         bound = BoundSource(
             id=f"sb_{len(output) + 1}",

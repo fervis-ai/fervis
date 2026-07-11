@@ -1,0 +1,37 @@
+id: repeated_identity_preserves_both_sources
+description: An explicit repeated name may also reuse its prior verified identity.
+kind: algorithm
+algorithm: conversation_resolution.parse
+input:
+  current_question: Where did Nadia Wanjiku work on her first two shifts?
+  context_sources:
+    - source_id: prior_answer
+      kind: prior_fervis_answer
+      text: Nadia Wanjiku is employee emp_17.
+      source_card_ids: [identity_card]
+      source_memory_ids: [nadia_identity]
+      meaning_anchors:
+        - {memory_id: nadia_identity, text: Nadia Wanjiku, occurrence: 1, kind: entity_identity, label: verified employee}
+  payload:
+    kind: conversation_resolution
+    current_question_text: Where did Nadia Wanjiku work on her first two shifts?
+    outcome:
+      kind: resolved
+      resolution_basis: Current meaning and retained prior meaning form the resolved question.
+      contextualized_question: Where did Nadia Wanjiku work on her first two shifts?
+      clauses:
+        - current_clause_text: Where did Nadia Wanjiku work on her first two shifts?
+          occurrence: 1
+          resolved_text: Where did Nadia Wanjiku work on her first two shifts?
+          retained_frame_parts: []
+          values:
+            - value_id: employee
+              resolved_text: Nadia Wanjiku
+              sources:
+                - {kind: current_span, text: Nadia Wanjiku, occurrence: 1}
+                - {kind: context_anchor, source_id: prior_answer, memory_id: nadia_identity, source_text: Nadia Wanjiku}
+      frame_call: {kind: none}
+expect:
+  result_contains:
+    used_source_card_ids: [identity_card]
+    used_memory_ids: [nadia_identity]

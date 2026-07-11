@@ -17,12 +17,14 @@ from fervis.lineage.enums import (
     RunStepKey,
     RunStepKind,
     RunTriggerKind,
+    QuestionRunKind,
     RuntimeErrorKind,
     SourceReadStatus,
 )
 from fervis.lineage.memory_artifacts import MemoryArtifactRow
 from fervis.lookup.clarification import ClarificationNeed, ClarificationReason
 from fervis.lineage.views.query import (
+    AnswerProgramRow,
     AnswerOutputRow,
     AnswerPresentationRow,
     AnswerRow,
@@ -30,10 +32,13 @@ from fervis.lineage.views.query import (
     ClarificationRequestRow,
     ClarificationResponseRow,
     ConversationRow,
+    BindingPatchRow,
     FactResultRow,
     LineageQueryPort,
     LineageRows,
     ProofGraphRow,
+    ProgramInvocationRow,
+    ProgramRevisionRow,
     QuestionRow,
     RequestedFactRow,
     RunResultRow,
@@ -103,6 +108,30 @@ class SQLLineageQuery(LineageQueryPort):
         run_ids_set = frozenset(run_ids)
         rows = _LineageRowsForRuns(self.engine, run_ids_set)
         runs = rows.fetch("fervis_question_run", _run_row, "question_id", "run_number")
+        program_invocations = rows.fetch(
+            "fervis_program_invocation",
+            _program_invocation_row,
+            "run_id",
+        )
+        revision_ids = frozenset(
+            item.revision_id
+            for item in program_invocations
+            if item.revision_id is not None
+        )
+        program_revisions = rows.fetch_by_values(
+            "fervis_program_revision",
+            "revision_id",
+            revision_ids,
+            _program_revision_row,
+            "revision_id",
+        )
+        program_ids = frozenset(
+            {
+                *(item.program_id for item in program_invocations),
+                *(item.base_program_id for item in program_revisions),
+                *(item.revised_program_id for item in program_revisions),
+            }
+        )
         question_ids = frozenset(run.question_id for run in runs)
         questions = rows.fetch_questions(question_ids)
         conversation_ids = frozenset(question.conversation_id for question in questions)
@@ -110,6 +139,15 @@ class SQLLineageQuery(LineageQueryPort):
             conversations=rows.fetch_conversations(conversation_ids),
             questions=questions,
             runs=runs,
+            answer_programs=rows.fetch_by_values(
+                "fervis_answer_program",
+                "program_id",
+                program_ids,
+                _answer_program_row,
+                "program_id",
+            ),
+            program_invocations=program_invocations,
+            program_revisions=program_revisions,
             steps=rows.fetch("fervis_run_step", _step_row, "run_id", "sequence"),
             run_results=rows.fetch("fervis_run_result", _run_result_row, "run_id"),
             runtime_errors=rows.fetch(
@@ -175,19 +213,10 @@ class SQLLineageQuery(LineageQueryPort):
             ),
         )
 
-    def memory_artifact_rows_for_conversation(
+    def memory_artifact_rows_for_run_ids(
         self,
-        conversation_id: str,
-        *,
-        limit: int,
+        run_ids: tuple[str, ...],
     ) -> tuple[MemoryArtifactRow, ...]:
-        if limit <= 0:
-            return ()
-        run_ids = _recent_artifact_bearing_run_ids(
-            self.engine,
-            conversation_id=conversation_id,
-            limit=limit,
-        )
         if not run_ids:
             return ()
         memory = metadata.tables["fervis_memory_artifact"]
@@ -245,6 +274,25 @@ class _LineageRowsForRuns:
             ).all()
         return tuple(_question_row(row) for row in row_mappings(rows))
 
+    def fetch_by_values(
+        self,
+        table_name: str,
+        column_name: str,
+        values: frozenset[str],
+        mapper: Callable[[dict[str, Any]], Any],
+        *order_by: str,
+    ) -> tuple[Any, ...]:
+        if not values:
+            return ()
+        table = metadata.tables[table_name]
+        with sql_connection(self.engine) as connection:
+            rows = connection.execute(
+                sa.select(table)
+                .where(table.c[column_name].in_(values))
+                .order_by(*(table.c[name] for name in order_by))
+            ).all()
+        return tuple(mapper(row) for row in row_mappings(rows))
+
     def fetch_conversations(
         self, conversation_ids: frozenset[str]
     ) -> tuple[ConversationRow, ...]:
@@ -258,45 +306,6 @@ class _LineageRowsForRuns:
                 .order_by(conversation.c.created_at)
             ).all()
         return tuple(_conversation_row(row) for row in row_mappings(rows))
-
-
-def _recent_artifact_bearing_run_ids(
-    engine: Engine,
-    *,
-    conversation_id: str,
-    limit: int,
-) -> tuple[str, ...]:
-    memory = metadata.tables["fervis_memory_artifact"]
-    run = metadata.tables["fervis_question_run"]
-    question = metadata.tables["fervis_question"]
-    with sql_connection(engine) as connection:
-        rows = connection.execute(
-            sa.select(memory.c.run_id)
-            .select_from(
-                memory.join(run, memory.c.run_id == run.c.run_id).join(
-                    question,
-                    run.c.question_id == question.c.question_id,
-                )
-            )
-            .where(question.c.conversation_id == conversation_id)
-            .order_by(
-                question.c.conversation_sequence.desc(),
-                run.c.run_number.desc(),
-                memory.c.created_at.desc(),
-                memory.c.memory_artifact_id.desc(),
-            )
-        ).all()
-    run_ids: list[str] = []
-    seen: set[str] = set()
-    for row in rows:
-        run_id = str(row.run_id)
-        if run_id in seen:
-            continue
-        seen.add(run_id)
-        run_ids.append(run_id)
-        if len(run_ids) >= limit:
-            break
-    return tuple(run_ids)
 
 
 def _string_column(engine: Engine, statement) -> tuple[str, ...]:
@@ -335,14 +344,60 @@ def _run_row(row: dict[str, Any]) -> RunRow:
         run_id=str(row["run_id"]),
         question_id=str(row["question_id"]),
         run_number=int(row["run_number"]),
+        kind=QuestionRunKind(row["kind"]),
         trigger_kind=RunTriggerKind(row["trigger_kind"]),
-        integrated_question=str(row["integrated_question"]),
-        previous_run_id=row["previous_run_id"],
-        trigger_clarification_response_run_id=row[
-            "trigger_clarification_response_run_id"
-        ],
+        base_run_id=row["base_run_id"],
         trigger_clarification_response_id=row["trigger_clarification_response_id"]
         or None,
+    )
+
+
+def _answer_program_row(row: dict[str, Any]) -> AnswerProgramRow:
+    return AnswerProgramRow(
+        program_id=str(row["program_id"]),
+        schema_revision=int(row["schema_revision"]),
+        canonical_json=str(row["canonical_json"]),
+    )
+
+
+def _program_invocation_row(row: dict[str, Any]) -> ProgramInvocationRow:
+    patch_id = row["patch_id"]
+    patch_json = row["binding_patch_json"]
+    patch = None
+    if patch_id is not None:
+        if patch_json is None:
+            raise ValueError(
+                f"program invocation {row['invocation_id']} has no binding patch"
+            )
+        patch = BindingPatchRow(
+            patch_id=str(patch_id),
+            canonical_json=str(patch_json),
+        )
+    return ProgramInvocationRow(
+        invocation_id=str(row["invocation_id"]),
+        run_id=str(row["run_id"]),
+        program_id=str(row["program_id"]),
+        kind=str(row["kind"]),
+        base_invocation_id=(
+            str(row["base_invocation_id"])
+            if row["base_invocation_id"] is not None
+            else None
+        ),
+        bindings_json=str(row["bindings_json"]),
+        patch=patch,
+        revision_id=(
+            str(row["revision_id"]) if row["revision_id"] is not None else None
+        ),
+    )
+
+
+def _program_revision_row(row: dict[str, Any]) -> ProgramRevisionRow:
+    return ProgramRevisionRow(
+        revision_id=str(row["revision_id"]),
+        base_program_id=str(row["base_program_id"]),
+        revised_program_id=str(row["revised_program_id"]),
+        capability_id=str(row["capability_id"]),
+        application_json=str(row["application_json"]),
     )
 
 

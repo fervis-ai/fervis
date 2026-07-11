@@ -7,7 +7,7 @@ from fervis.host_api.context import (
 from fervis.host_api.contracts.authority import ReadAuthority, ReadContextRef
 from fervis.host_api.contracts.read import ReadInvocation
 from fervis.lookup.orchestration.service import LookupService
-from fervis.lookup.orchestration.service import _EndpointRelationDataAccess
+from fervis.lookup.orchestration.host_runtime import HostRelationDataAccess
 from fervis.lookup.orchestration.service import (
     _ConfiguredRelationCatalogProvider,
 )
@@ -63,7 +63,7 @@ def test_endpoint_relation_data_access_uses_all_pages_only_for_paginated_endpoin
         execute_read=execute_read,
     )
     read_context_ref = ReadContextRef(scheme="delegated_capability", key="user_1")
-    access = _EndpointRelationDataAccess(
+    access = HostRelationDataAccess(
         host_api_context=context,
         authority=ReadAuthority(
             tenant_id="tenant_1",
@@ -150,7 +150,7 @@ def test_endpoint_relation_data_access_routes_args_by_param_ref_source():
         contracts=(contract,),
         execute_read=execute_read,
     )
-    access = _EndpointRelationDataAccess(
+    access = HostRelationDataAccess(
         host_api_context=context,
         authority=ReadAuthority(
             tenant_id="tenant_1",

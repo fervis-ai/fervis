@@ -9,4 +9,4 @@ input:
 expect:
   result_contains:
     param_ids: [status, is_active]
-    finite_choice_review_param_ids: [status, is_active]
+    finite_choice_review_param_ids: [status]

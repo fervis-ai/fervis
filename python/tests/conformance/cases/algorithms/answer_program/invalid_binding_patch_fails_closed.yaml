@@ -1,0 +1,142 @@
+id: invalid_binding_patch_fails_closed
+kind: algorithm
+algorithm: answer_program.patch
+description: Invalid patch operations fail with stable outcomes and never change the base bindings.
+input:
+  schema_revision: 1
+  parameters:
+    - id: population.sale_states
+      role: semantic_control
+      value_type: string_set
+      required: true
+      allowed_values: [COMPLETED, PLACED]
+    - id: plan.limit
+      role: plan_control
+      value_type: number
+      required: true
+    - id: question.period
+      role: question_input
+      value_type: time
+      required: true
+  bindings:
+    - parameter_id: population.sale_states
+      value:
+        kind: string_set
+        values: [COMPLETED]
+      provenance:
+        kind: semantic_choice
+    - parameter_id: plan.limit
+      value:
+        kind: number
+        value: 10
+      provenance:
+        kind: question_input
+    - parameter_id: question.period
+      value:
+        kind: time
+        expression: today
+        resolved_start: '2026-07-10'
+        resolved_end: '2026-07-10'
+        granularity: day
+      provenance:
+        kind: question_input
+  attempts:
+    - id: unknown_parameter
+      operations:
+        - kind: set
+          parameter_id: population.unknown
+          value: {kind: string_set, values: [COMPLETED]}
+    - id: wrong_type
+      operations:
+        - kind: set
+          parameter_id: plan.limit
+          value: {kind: string, value: ten}
+    - id: disallowed_value
+      operations:
+        - kind: set
+          parameter_id: population.sale_states
+          value: {kind: string_set, values: [CANCELLED]}
+    - id: required_parameter_removal
+      operations:
+        - kind: unset
+          parameter_id: plan.limit
+    - id: missing_time_bound
+      operations:
+        - kind: set
+          parameter_id: question.period
+          value:
+            kind: time
+            expression: today
+            resolved_start: '2026-07-10'
+            resolved_end: ''
+            granularity: day
+    - id: malformed_time_bound
+      operations:
+        - kind: set
+          parameter_id: question.period
+          value:
+            kind: time
+            expression: today
+            resolved_start: '2026-99-10'
+            resolved_end: '2026-07-10'
+            granularity: day
+    - id: reversed_time_range
+      operations:
+        - kind: set
+          parameter_id: question.period
+          value:
+            kind: time
+            expression: this week
+            resolved_start: '2026-07-12'
+            resolved_end: '2026-07-06'
+            granularity: week
+    - id: inconsistent_time_granularity
+      operations:
+        - kind: set
+          parameter_id: question.period
+          value:
+            kind: time
+            expression: this hour
+            resolved_start: '2026-07-10'
+            resolved_end: '2026-07-10'
+            granularity: hour
+    - id: unresolved_relative_time
+      operations:
+        - kind: set
+          parameter_id: question.period
+          value:
+            kind: time
+            expression: today
+            resolved_start: ''
+            resolved_end: ''
+            granularity: day
+expect:
+  result_equals:
+    status: rejected
+    base:
+      plan.limit: 10
+      population.sale_states: [COMPLETED]
+      question.period:
+        expression: today
+        resolved_start: '2026-07-10'
+        resolved_end: '2026-07-10'
+        granularity: day
+    attempts:
+      - id: unknown_parameter
+        code: unknown_parameter
+      - id: wrong_type
+        code: binding_type_mismatch
+      - id: disallowed_value
+        code: disallowed_parameter_value
+      - id: required_parameter_removal
+        code: required_parameter_unset
+      - id: missing_time_bound
+        code: invalid_time_value
+      - id: malformed_time_bound
+        code: invalid_time_value
+      - id: reversed_time_range
+        code: invalid_time_value
+      - id: inconsistent_time_granularity
+        code: invalid_time_value
+      - id: unresolved_relative_time
+        code: invalid_time_value

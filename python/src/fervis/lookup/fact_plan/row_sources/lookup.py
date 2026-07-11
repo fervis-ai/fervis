@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fervis.lookup.fact_plan.relations import Relation, SourceKind
+from fervis.lookup.answer_program.relations import Relation, SourceKind
 
 from .builder import (
     _api_row_source_for_relation,

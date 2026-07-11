@@ -41,10 +41,12 @@ def _memory_attribution_response(
     question: str,
     conversation_context: dict[str, object],
     selected_memory_id: str,
-    integrated_question: str,
+    contextualized_question: str,
     source_containing: str = "",
     dependency_kind: str = "reference",
+    retained_part_ids: tuple[str, ...] = (),
 ) -> dict[str, object]:
+    del dependency_kind
     projection = project_conversation_memory_cards(
         conversation_context,
         current_question=question,
@@ -54,33 +56,67 @@ def _memory_attribution_response(
         memory_id=selected_memory_id,
         containing=source_containing,
     )
-    source_evidence = _source_evidence_for_context_source(selected)
-    value_frame = _value_frame_for_context_source(
-        projection=projection,
-        selected=selected,
-        integrated_question=integrated_question,
-        current_clause_text=question,
+    anchors = tuple(getattr(selected, "meaning_anchors", ()) or ())
+    selected_anchors = tuple(
+        anchor
+        for anchor in anchors
+        if str(getattr(anchor, "memory_id", "")) == selected_memory_id
     )
+    values: list[dict[str, object]] = [
+        {
+            "value_id": f"context_value_{index}",
+            "resolved_text": str(getattr(anchor, "text")),
+            "sources": [
+                {
+                    "kind": "context_anchor",
+                    "source_id": str(getattr(selected, "source_id")),
+                    "memory_id": str(getattr(anchor, "memory_id")),
+                    "source_text": str(getattr(anchor, "text")),
+                }
+            ],
+        }
+        for index, anchor in enumerate(selected_anchors, start=1)
+    ]
+    retained_frame_parts: list[dict[str, object]] = []
+    for part_id in retained_part_ids:
+        matches = [
+            (frame.frame_id, part.part_id)
+            for frame in projection.context_frames
+            if str(getattr(selected, "source_id")) in frame.source_ids
+            for part in frame.parts
+            if part.part_id == part_id
+        ]
+        if len(matches) != 1:
+            raise AssertionError(f"retained frame part is not unique: {part_id}")
+        frame_id, matched_part_id = matches[0]
+        retained_frame_parts.append(
+            {
+                "kind": "frame_part",
+                "frame_id": frame_id,
+                "part_id": matched_part_id,
+            }
+        )
     return {
         "kind": "conversation_resolution",
-        "status": "resolved",
         "current_question_text": question,
-        "clause_resolutions": [
-            {
-                "current_clause_text": question,
-                "occurrence": 1,
-                "requested_value_frame": value_frame,
-                "dependencies": _dependencies_from_source_evidence(
-                    current_text=question,
-                    source_evidence_items=(source_evidence,),
-                    integrated_question=integrated_question,
-                    excluded_phrases=_value_frame_excluded_phrases(value_frame),
-                    dependency_kind=dependency_kind,
-                ),
-                "resolved_clause_text": integrated_question,
-            }
-        ],
-        "unresolved": _resolved_unresolved(),
+        "outcome": {
+            "kind": "resolved",
+            "resolution_basis": (
+                "The selected visible memory supplies the context omitted by the "
+                "current clause."
+            ),
+            "contextualized_question": contextualized_question,
+            "clauses": [
+                {
+                    "current_clause_text": question,
+                    "occurrence": 1,
+                    "resolved_text": contextualized_question,
+                    "retained_frame_parts": retained_frame_parts,
+                    "values": values,
+                }
+            ],
+            "frame_call": {"kind": "none"},
+        },
     }
 
 
@@ -89,301 +125,92 @@ def _standalone_attribution_response(
     question: str,
     conversation_context: dict[str, object],
 ) -> dict[str, object]:
-    payload = {
+    return {
         "kind": "conversation_resolution",
-        "status": "standalone",
         "current_question_text": question,
-        "clause_resolutions": [],
-        "unresolved": _resolved_unresolved(),
+        "outcome": {
+            "kind": "resolved",
+            "resolution_basis": "The current question is context-free.",
+            "contextualized_question": question,
+            "clauses": [
+                {
+                    "current_clause_text": question,
+                    "occurrence": 1,
+                    "resolved_text": question,
+                    "retained_frame_parts": [],
+                    "values": [],
+                }
+            ],
+            "frame_call": {"kind": "none"},
+        },
     }
-    return payload
 
 
 def _clause_resolution_conversation_response(
     *,
     question: str,
     conversation_context: dict[str, object],
-    integrated_question: str,
+    contextualized_question: str,
     prior_request_memory_id: str,
     entity_memory_id: str,
 ) -> dict[str, object]:
+    payload = _memory_attribution_response(
+        question=question,
+        conversation_context=conversation_context,
+        selected_memory_id=prior_request_memory_id,
+        contextualized_question=contextualized_question,
+        source_containing="total sales amount",
+        retained_part_ids=("output:1",),
+    )
     projection = project_conversation_memory_cards(
         conversation_context,
         current_question=question,
-    )
-    selected = _selected_prior_source_for_memory_id(
-        projection=projection,
-        memory_id=prior_request_memory_id,
-        containing="total sales amount",
-    )
-    source_evidence = _source_evidence_for_context_source(selected)
-    value_frame = _value_frame_for_context_source(
-        projection=projection,
-        selected=selected,
-        integrated_question=integrated_question,
-        current_clause_text=question,
     )
     entity_selected = _selected_prior_source_for_memory_id(
         projection=projection,
         memory_id=entity_memory_id,
         containing="Alice Smith",
     )
-    entity_component = _meaning_component_for_source_evidence(
-        _source_evidence_for_context_source(entity_selected),
-        resolved_text="Alice Smith",
+    entity_anchor = next(
+        anchor
+        for anchor in entity_selected.meaning_anchors
+        if anchor.memory_id == entity_memory_id
     )
-    dependencies: list[dict[str, object]] = []
-    if entity_component:
-        dependencies.append(
-            {
-                "anchor_text": "Alice Smith",
-                "occurrence": 1,
-                "kind": "reference",
-                "meaning_components": [entity_component],
-                "resolved_text": "Alice Smith",
-                "must_preserve_terms": ["Alice Smith"],
-            }
-        )
-    return {
-        "kind": "conversation_resolution",
-        "status": "resolved",
-        "current_question_text": question,
-        "clause_resolutions": [
-            {
-                "current_clause_text": question,
-                "occurrence": 1,
-                "requested_value_frame": value_frame,
-                "dependencies": dependencies,
-                "resolved_clause_text": integrated_question,
-            }
-        ],
-        "unresolved": _resolved_unresolved(),
-    }
+    clauses = payload["outcome"]["clauses"]
+    assert isinstance(clauses, list)
+    values = clauses[0]["values"]
+    assert isinstance(values, list)
+    values.append(
+        {
+            "value_id": "entity_value",
+            "resolved_text": "Alice Smith",
+            "sources": [
+                {
+                    "kind": "context_anchor",
+                    "source_id": entity_selected.source_id,
+                    "memory_id": entity_anchor.memory_id,
+                    "source_text": entity_anchor.text,
+                }
+            ],
+        }
+    )
+    return payload
 
 
 def _clause_resolution_response(
     *,
     question: str,
     conversation_context: dict[str, object],
-    integrated_question: str,
+    contextualized_question: str,
     prior_request_memory_id: str,
 ) -> dict[str, object]:
-    projection = project_conversation_memory_cards(
-        conversation_context,
-        current_question=question,
+    return _clause_resolution_conversation_response(
+        question=question,
+        conversation_context=conversation_context,
+        contextualized_question=contextualized_question,
+        prior_request_memory_id=prior_request_memory_id,
+        entity_memory_id="turn_staff_sales.entity.grounded_fact_1_entity_1",
     )
-    selected = _selected_prior_source_for_memory_id(
-        projection=projection,
-        memory_id=prior_request_memory_id,
-        containing="total sales amount",
-    )
-    source_evidence = _source_evidence_for_context_source(selected)
-    value_frame = _value_frame_for_context_source(
-        projection=projection,
-        selected=selected,
-        integrated_question=integrated_question,
-        current_clause_text="how much did she make yesterday",
-    )
-    entity_component = _meaning_component_for_source_evidence(
-        source_evidence,
-        resolved_text="Alice Smith",
-    )
-    dependencies = []
-    if entity_component:
-        dependencies.append(
-            {
-                "anchor_text": "she",
-                "occurrence": 1,
-                "kind": "reference",
-                "meaning_components": [entity_component],
-                "resolved_text": "Alice Smith",
-                "must_preserve_terms": ["Alice Smith"],
-            }
-        )
-    return {
-        "kind": "conversation_resolution",
-        "status": "resolved",
-        "current_question_text": question,
-        "clause_resolutions": [
-            {
-                "current_clause_text": "how much did she make yesterday",
-                "occurrence": 1,
-                "requested_value_frame": value_frame,
-                "dependencies": dependencies,
-                "resolved_clause_text": integrated_question,
-            }
-        ],
-        "unresolved": _resolved_unresolved(),
-    }
-
-
-def _dependencies_from_source_evidence(
-    *,
-    current_text: str,
-    source_evidence_items: tuple[dict[str, object], ...],
-    integrated_question: str,
-    required_phrases: tuple[str, ...] = (),
-    excluded_phrases: tuple[str, ...] = (),
-    dependency_kind: str = "reference",
-) -> list[dict[str, object]]:
-    items: list[dict[str, object]] = []
-    for phrase in required_phrases:
-        if _contains_excluded_phrase(phrase, excluded_phrases):
-            continue
-        for evidence in source_evidence_items:
-            source_text = _source_evidence_text(evidence)
-            component = _meaning_component_for_source_evidence(
-                evidence,
-                resolved_text=phrase,
-            )
-            if component and phrase in source_text and phrase in integrated_question:
-                items.append(
-                    {
-                        "anchor_text": current_text,
-                        "occurrence": 1,
-                        "kind": dependency_kind,
-                        "meaning_components": [component],
-                        "resolved_text": phrase,
-                        "must_preserve_terms": [phrase],
-                    }
-                )
-                break
-    if items:
-        return items
-    for evidence in source_evidence_items:
-        phrase = _shared_phrase(
-            _source_evidence_text(evidence),
-            integrated_question=integrated_question,
-        )
-        component = _meaning_component_for_source_evidence(
-            evidence,
-            resolved_text=phrase,
-        )
-        if (
-            component
-            and phrase
-            and not _contains_excluded_phrase(phrase, excluded_phrases)
-        ):
-            return [
-                {
-                    "anchor_text": current_text,
-                    "occurrence": 1,
-                    "kind": dependency_kind,
-                    "meaning_components": [component],
-                    "resolved_text": phrase,
-                    "must_preserve_terms": [phrase],
-                }
-            ]
-    return []
-
-
-def _contains_excluded_phrase(
-    phrase: str,
-    excluded_phrases: tuple[str, ...],
-) -> bool:
-    return any(excluded and excluded in phrase for excluded in excluded_phrases)
-
-
-def _value_frame_for_context_source(
-    *,
-    projection: object,
-    selected: object,
-    integrated_question: str,
-    current_clause_text: str,
-) -> dict[str, object]:
-    context_frames = tuple(getattr(projection, "context_frames", ()) or ())
-    selected_source_id = str(getattr(selected, "source_id") or "")
-    for frame in context_frames:
-        requested_frame = str(getattr(frame, "requested_frame") or "")
-        if selected_source_id in tuple(getattr(frame, "source_ids", ()) or ()) and (
-            requested_frame in integrated_question
-        ):
-            return _contextual_value_frame(
-                context_frames=context_frames,
-                selected_frame_id=str(getattr(frame, "frame_id")),
-                current_clause_text=current_clause_text,
-            )
-    return _literal_value_frame(
-        current_clause_text=current_clause_text,
-        context_frames=context_frames,
-    )
-
-
-def _contextual_value_frame(
-    *,
-    context_frames: tuple[object, ...],
-    selected_frame_id: str,
-    current_clause_text: str,
-) -> dict[str, object]:
-    return {
-        "current_value_surface": {
-            "text": current_clause_text,
-            "kind": "broad_current_value",
-        },
-        "context_frame_choices": [
-            {
-                "frame_id": str(getattr(frame, "frame_id")),
-                "choice": (
-                    "use_frame"
-                    if str(getattr(frame, "frame_id")) == selected_frame_id
-                    else "not_for_this_clause"
-                ),
-                "current_conflict_quotes": [],
-            }
-            for frame in context_frames
-        ],
-    }
-
-
-def _value_frame_excluded_phrases(value_frame: dict[str, object]) -> tuple[str, ...]:
-    choices = value_frame.get("context_frame_choices") or ()
-    if not any(item.get("choice") == "use_frame" for item in choices):
-        return ()
-    return ("selected context frame",)
-
-
-def _literal_value_frame(
-    *,
-    current_clause_text: str,
-    context_frames: tuple[object, ...] = (),
-) -> dict[str, object]:
-    return {
-        "current_value_surface": {
-            "text": current_clause_text,
-            "kind": "self_sufficient_current_value",
-        },
-        "context_frame_choices": [
-            {
-                "frame_id": str(getattr(frame, "frame_id")),
-                "choice": "not_for_this_clause",
-                "current_conflict_quotes": [],
-            }
-            for frame in context_frames
-        ],
-    }
-
-
-def _resolved_unresolved() -> dict[str, object]:
-    return {
-        "unresolved_kind": "none",
-        "why_unresolved": "",
-        "candidate_interpretations": [],
-    }
-
-
-def _shared_phrase(
-    source_text: str,
-    *,
-    integrated_question: str,
-) -> str:
-    words = [word.strip(".,?!;:\"'()[]{}") for word in source_text.split()]
-    words = [word for word in words if word]
-    for length in range(len(words), 0, -1):
-        for start in range(0, len(words) - length + 1):
-            phrase = " ".join(words[start : start + length])
-            if phrase in source_text and phrase in integrated_question:
-                return phrase
-    return ""
 
 
 def _selected_prior_source_for_memory_id(
@@ -405,52 +232,6 @@ def _selected_prior_source_for_memory_id(
     if len(sources) == 1:
         return sources[0]
     raise AssertionError(f"selected memory source not found: {memory_id}")
-
-
-def _source_evidence_for_context_source(source: object) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "source_id": str(getattr(source, "source_id")),
-        "exact_source_texts": [str(getattr(source, "text"))],
-    }
-    anchors = tuple(getattr(source, "meaning_anchors", ()) or ())
-    if anchors:
-        anchor = anchors[0]
-        payload["meaning_component"] = {
-            "kind": _component_kind_for_anchor(str(getattr(anchor, "kind"))),
-            "source_id": str(getattr(source, "source_id")),
-            "source_text": str(getattr(anchor, "text")),
-            "memory_id": str(getattr(anchor, "memory_id")),
-        }
-    return payload
-
-
-def _component_kind_for_anchor(kind: str) -> str:
-    if kind == "entity_identity":
-        return "entity"
-    if kind == "time_scope":
-        return "scope"
-    if kind == "row_set":
-        return "row_set"
-    if kind == "scalar_value":
-        return "value"
-    return "other"
-
-
-def _source_evidence_text(source_evidence: dict[str, object]) -> str:
-    return " ".join(str(item) for item in source_evidence["exact_source_texts"])
-
-
-def _meaning_component_for_source_evidence(
-    evidence: dict[str, object],
-    *,
-    resolved_text: str,
-) -> dict[str, object] | None:
-    component = evidence.get("meaning_component")
-    if not isinstance(component, dict):
-        return None
-    return {**component, "resolved_text": resolved_text}
-
-
 def _memory_context() -> dict[str, object]:
     artifact = build_fact_artifact(
         artifact_id="turn_1",
@@ -720,35 +501,40 @@ def _memory_context_with_prior_staff_sales_request() -> dict[str, object]:
         source_answer="Alice Smith sold 100 today.",
         provenance={
             "question_contract": {
+                "question_inputs": [
+                    {
+                        "id": "fact_1_entity_1",
+                        "kind": "literal_text",
+                        "source": "question_context",
+                        "text": "Alice Smith",
+                        "role": "reference_value",
+                        "resolved_value_text": "Alice Smith",
+                        "value_meaning_hint": "staff member",
+                    },
+                    {
+                        "id": "fact_1_time_1",
+                        "kind": "literal_text",
+                        "source": "question_context",
+                        "text": "today",
+                        "role": "time_value",
+                        "resolved_value_text": "today",
+                    },
+                ],
                 "answer_requests": [
                     {
                         "id": "fact_1",
                         "answer_fact": "sales by Alice Smith today",
+                        "answer_expression": {"family": "scalar_aggregate"},
                         "answer_subject": _answer_subject_payload("Alice Smith"),
                         "answer_outputs": [
                             {
+                                "id": "answer_1",
                                 "description": "total sales amount",
-                                "requested_value_frame": "total sales amount",
                             }
                         ],
-                        "known_inputs": [
-                            {
-                                "id": "fact_1_entity_1",
-                                "kind": "literal_text",
-                                "source": "question_context",
-                                "text": "Alice Smith",
-                                "role": "reference_value",
-                                "resolved_value_text": "Alice Smith",
-                                "value_meaning_hint": "staff member",
-                            },
-                            {
-                                "id": "fact_1_time_1",
-                                "kind": "literal_text",
-                                "source": "question_context",
-                                "text": "today",
-                                "role": "time_value",
-                                "resolved_value_text": "today",
-                            },
+                        "used_question_inputs": [
+                            "fact_1_entity_1",
+                            "fact_1_time_1",
                         ],
                     }
                 ]
@@ -786,6 +572,24 @@ def _memory_context_with_prior_numeric_slots() -> dict[str, object]:
         source_answer="Alice Smith was in the top 5.",
         provenance={
             "question_contract": {
+                "question_inputs": [
+                    {
+                        "id": "fact_1_limit_1",
+                        "kind": "literal_text",
+                        "source": "question_context",
+                        "text": "top 5",
+                        "role": "result_limit",
+                        "resolved_value_text": "5",
+                    },
+                    {
+                        "id": "fact_1_time_1",
+                        "kind": "literal_text",
+                        "source": "question_context",
+                        "text": "today",
+                        "role": "time_value",
+                        "resolved_value_text": "today",
+                    },
+                ],
                 "answer_requests": [
                     {
                         "id": "fact_1",
@@ -793,27 +597,13 @@ def _memory_context_with_prior_numeric_slots() -> dict[str, object]:
                         "answer_subject": _answer_subject_payload("staff"),
                         "answer_outputs": [
                             {
+                                "id": "answer_1",
                                 "description": "staff sales ranking",
-                                "requested_value_frame": "staff sales ranking",
                             }
                         ],
-                        "known_inputs": [
-                            {
-                                "id": "fact_1_limit_1",
-                                "kind": "literal_text",
-                                "source": "question_context",
-                                "text": "top 5",
-                                "role": "result_limit",
-                                "resolved_value_text": "5",
-                            },
-                            {
-                                "id": "fact_1_time_1",
-                                "kind": "literal_text",
-                                "source": "question_context",
-                                "text": "today",
-                                "role": "time_value",
-                                "resolved_value_text": "today",
-                            },
+                        "used_question_inputs": [
+                            "fact_1_limit_1",
+                            "fact_1_time_1",
                         ],
                     }
                 ]
@@ -822,7 +612,7 @@ def _memory_context_with_prior_numeric_slots() -> dict[str, object]:
         addresses=(
             FactAddress.value(
                 address="value.limit_top_5",
-                value={"type": "integer", "value": "5"},
+                value={"type": "integer", "value": 5},
                 display="top 5",
                 evidence=EvidenceRef(step_ids=("known_input:fact_1_limit_1",)),
             ),
@@ -1336,7 +1126,7 @@ def _computed_scalar_from_bound_value_payload(
                             "source_binding_id": source_binding_id,
                         }
                     ],
-                    "expression": "value",
+                    "expression": [{"input_id": "value"}],
                     "output": {"scalar_id": "answer", "label": "answer"},
                 }
             ],
@@ -1436,14 +1226,14 @@ def _slot_evidence_ids(slot: dict[str, Any]) -> tuple[str, ...]:
     )
 
 
-def test_pipeline_passes_raw_question_and_overlay_to_question_contract():
+def test_pipeline_passes_raw_question_and_typed_resolution_to_question_contract():
     planner = _ToolNamePlannerPort(
         responses={
             CONVERSATION_RESOLUTION_TOOL_NAME: _memory_attribution_response(
                 question="How about the day before?",
                 conversation_context=_memory_context(),
                 selected_memory_id="turn_1.relation.sales_rows",
-                integrated_question="How much money did we make the day before yesterday?",
+                contextualized_question="How much money did we make the day before yesterday?",
             ),
             "submit_answer_request_contract": _question_contract_response(
                 subject="money made the day before yesterday",
@@ -1462,7 +1252,7 @@ def test_pipeline_passes_raw_question_and_overlay_to_question_contract():
     run_lookup_question(
         LookupRequest(
             question="How about the day before?",
-            run_id="run_integrated_question",
+            run_id="run_contextualized_question",
             conversation_context=_memory_context(),
             provider_preferences=_PROVIDER_PREFS,
         ),
@@ -1477,11 +1267,12 @@ def test_pipeline_passes_raw_question_and_overlay_to_question_contract():
 
     question_contract_prompt = planner.prompts[1]
     assert "Current question:\nHow about the day before?" in question_contract_prompt
-    assert "Conversation resolution annotations:" in question_contract_prompt
-    assert '"resolved_question_inputs"' in question_contract_prompt
-    assert '"value_frames"' in question_contract_prompt
-    assert '"resolved_frame_text"' in question_contract_prompt
-    assert "Integrated question:" not in question_contract_prompt
+    assert "Conversation resolution context:" in question_contract_prompt
+    assert '"resolved_values"' in question_contract_prompt
+    assert (
+        "How much money did we make the day before yesterday?"
+        not in question_contract_prompt
+    )
 
 
 def test_pipeline_does_not_pass_memory_cards_to_question_contract_prompt():
@@ -1491,7 +1282,7 @@ def test_pipeline_does_not_pass_memory_cards_to_question_contract_prompt():
                 question="How much did those sales make?",
                 conversation_context=_memory_context(),
                 selected_memory_id="turn_1.relation.sales_rows",
-                integrated_question="How much money did the prior sales make?",
+                contextualized_question="How much money did the prior sales make?",
             ),
             "submit_answer_request_contract": _question_contract_response(
                 subject="money made by prior sales",
@@ -1538,6 +1329,7 @@ def test_standalone_resolution_is_backend_pass_through_without_model_rewrite():
             "submit_answer_request_contract": _question_contract_response(
                 subject="money made yesterday",
                 answer_subject="money",
+                answer_expression_family="list_rows",
                 parts=("total money",),
             ),
             "submit_query_enrichment": _query_enrichment_payload(("sales",)),
@@ -1674,11 +1466,12 @@ def test_active_clarification_requires_clause_resolution_not_standalone():
                 question="ABC Mall",
                 conversation_context=_memory_context_with_active_clarification(),
                 selected_memory_id="prior_clarification.outcome.needs_clarification",
-                integrated_question="How much sales did we make at ABC Mall yesterday?",
+                contextualized_question="How much sales did we make at ABC Mall yesterday?",
             ),
             "submit_answer_request_contract": _question_contract_response(
                 subject="sales at ABC Mall yesterday",
                 answer_subject="sales",
+                answer_expression_family="list_rows",
                 parts=("sales amount",),
             ),
             "submit_query_enrichment": _query_enrichment_payload(("sales",)),
@@ -1718,7 +1511,7 @@ def test_active_clarification_requires_clause_resolution_not_standalone():
         resolved_planner.tool_names.index("submit_answer_request_contract")
     ]
     assert "Current question:\nABC Mall" in question_contract_prompt
-    assert "Conversation resolution annotations:" in question_contract_prompt
+    assert "Conversation resolution context:" in question_contract_prompt
     assert "Prior question:" not in question_contract_prompt
     assert "Clarification answer:" not in question_contract_prompt
 
@@ -1738,7 +1531,7 @@ def test_active_clarification_memory_card_includes_clarification_question():
     )
     assert card.details == {
         "clarification_question": "Which store do you mean?",
-        "pending_integrated_question": "How much sales did we make yesterday?",
+        "question_being_clarified": "How much sales did we make yesterday?",
     }
 
 
@@ -1791,7 +1584,8 @@ def test_activated_memory_does_not_hide_current_question_source_candidates(monke
             "Current question:\nFor those sales, show the amount; also show current inventory."
             in prompt
         )
-        assert "Conversation resolution annotations:" in prompt
+        if tool_name == "submit_answer_request_contract":
+            assert "Conversation resolution context:" in prompt
         assert "For the prior sales, show sale amount." not in prompt
     for tool_name in ("submit_source_alignment_reviews", "submit_pattern_fact_plan"):
         prompt = planner.prompts[planner.tool_names.index(tool_name)]
@@ -1830,11 +1624,12 @@ def test_source_binding_prompt_excludes_unactivated_memory_context():
                 question="Show the amount for those sales.",
                 conversation_context=_memory_context_with_selected_and_unselected_memory(),
                 selected_memory_id="turn_selected_sales.relation.sales",
-                integrated_question="Show sale amount for the prior sales.",
+                contextualized_question="Show sale amount for the prior sales.",
             ),
             "submit_answer_request_contract": _question_contract_response(
                 subject="the prior sales",
                 answer_subject="sales",
+                answer_expression_family="list_rows",
                 parts=("sale amount",),
             ),
             "submit_query_enrichment": _query_enrichment_payload(("sales",)),
@@ -1882,7 +1677,7 @@ def test_source_binding_prompt_excludes_unactivated_memory_context():
     assert "turn_unselected_sales" not in source_binding_prompt
     assert "relation.secret_sales" not in source_binding_prompt
     plan_prompt = planner.prompts[planner.tool_names.index("submit_pattern_fact_plan")]
-    assert "10.00" in plan_prompt
+    assert '"value": "10"' in plan_prompt
     assert "999.00" not in plan_prompt
 
 
@@ -1900,7 +1695,7 @@ def test_source_binding_prompt_uses_only_current_run_grounded_values():
                 question="Show orders above that amount.",
                 conversation_context=_memory_context_with_selected_and_unselected_scalar_values(),
                 selected_memory_id="turn_selected_threshold.value.threshold",
-                integrated_question="Show orders above 50.",
+                contextualized_question="Show orders above 50.",
                 source_containing="50",
             ),
             "submit_answer_request_contract": _question_contract_response(
@@ -1981,7 +1776,7 @@ def test_runtime_expands_selected_memory_through_activation_chokepoint(monkeypat
                 question="Show the amount for those sales.",
                 conversation_context=_memory_context_with_selected_and_unselected_memory(),
                 selected_memory_id="turn_selected_sales.relation.sales",
-                integrated_question="Show sale amount for the prior sales.",
+                contextualized_question="Show sale amount for the prior sales.",
             ),
             "submit_answer_request_contract": _question_contract_response(
                 subject="the prior sales",
@@ -2031,48 +1826,37 @@ def test_selected_prior_request_outputs_reach_question_contract():
                 _clause_resolution_conversation_response(
                     question="How much did Alice Smith sell yesterday?",
                     conversation_context=context,
-                    integrated_question="What is the total sales amount for Alice Smith yesterday?",
+                    contextualized_question="What is the total sales amount for Alice Smith yesterday?",
                     prior_request_memory_id=prior_memory_id,
                     entity_memory_id=entity_memory_id,
                 )
             ),
-            "submit_answer_request_contract": {
-                "kind": "question_contract",
-                "answer_requests_count": 1,
-                "question_inputs": [
-                    {
-                        "input_ref": "input_staff",
-                        "kind": "literal_text",
-                        "source": "conversation_resolution",
-                        "value_source_text": "Alice Smith",
-                        "resolved_input_ref": "cr_input_1",
-                        "role": "reference_value",
-                        "value_meaning_hint": "staff identity",
-                        "resolved_value_text": "Alice Smith",
-                    },
-                    {
-                        "input_ref": "input_period",
-                        "kind": "literal_text",
-                        "source": "question_context",
-                        "value_source_text": "yesterday",
-                        "role": "time_value",
-                        "resolved_value_text": "yesterday",
-                    },
-                ],
-                "answer_requests": [
-                    {
-                        "answer_fact": "total sales amount for Alice Smith yesterday",
-                        "answer_subject": _answer_subject_payload("Alice Smith"),
-                        "answer_outputs": [
-                            {
-                                "description": "total sales amount",
-                                "requested_value_frame": "total sales amount",
-                            }
-                        ],
-                        "used_question_inputs": ["input_staff", "input_period"],
-                    }
-                ],
-            },
+                "submit_answer_request_contract": _question_contract_response(
+                    subject="total sales amount for Alice Smith yesterday",
+                    answer_subject="Alice Smith",
+                    answer_expression_family="computed_scalar",
+                    parts=("total sales amount",),
+                    question_inputs=(
+                        {
+                            "input_ref": "input_staff",
+                            "kind": "literal_text",
+                            "source": "conversation_resolution",
+                            "value_source_text": "Alice Smith",
+                            "resolved_input_ref": "conversation.entity_value",
+                            "role": "reference_value",
+                            "value_meaning_hint": "staff identity",
+                            "resolved_value_text": "Alice Smith",
+                        },
+                        {
+                            "input_ref": "input_period",
+                            "kind": "literal_text",
+                            "source": "question_context",
+                            "value_source_text": "yesterday",
+                            "role": "time_value",
+                            "resolved_value_text": "yesterday",
+                        },
+                    ),
+                ),
             "submit_query_enrichment": _query_enrichment_payload(
                 ("staff sales",),
                 entity_target_catalog_search_terms=[
@@ -2131,15 +1915,15 @@ def test_selected_prior_request_outputs_reach_question_contract():
         planner.tool_names.index("submit_answer_request_contract")
     ]
     assert prior_memory_id not in question_contract_prompt
-    assert '"value_frames"' in question_contract_prompt
-    assert '"resolved_frame_text"' in question_contract_prompt
+    assert '"resolved_values"' in question_contract_prompt
+    assert '"answer_output"' in question_contract_prompt
     assert "total sales amount" in question_contract_prompt
 
 
 def test_clause_resolution_prior_answer_frame_reaches_question_contract():
     context = _memory_context_with_prior_staff_sales_request()
     prior_memory_id = "turn_staff_sales.prior_request.fact_1"
-    integrated_question = (
+    contextualized_question = (
         "What is the total sales amount for products Alice Smith sold yesterday?"
     )
     planner = _ToolNamePlannerPort(
@@ -2147,48 +1931,37 @@ def test_clause_resolution_prior_answer_frame_reaches_question_contract():
             CONVERSATION_RESOLUTION_TOOL_NAME: _clause_resolution_response(
                 question="And how much did she make yesterday?",
                 conversation_context=context,
-                integrated_question=integrated_question,
+                contextualized_question=contextualized_question,
                 prior_request_memory_id=prior_memory_id,
             ),
-            "submit_answer_request_contract": {
-                "kind": "question_contract",
-                "answer_requests_count": 1,
-                "question_inputs": [
-                    {
-                        "input_ref": "input_staff",
-                        "kind": "literal_text",
-                        "source": "conversation_resolution",
-                        "value_source_text": "she",
-                        "resolved_input_ref": "cr_input_1",
-                        "role": "reference_value",
-                        "value_meaning_hint": "staff identity",
-                        "resolved_value_text": "Alice Smith",
-                    },
-                    {
-                        "input_ref": "input_period",
-                        "kind": "literal_text",
-                        "source": "question_context",
-                        "value_source_text": "yesterday",
-                        "role": "time_value",
-                        "resolved_value_text": "yesterday",
-                    },
-                ],
-                "answer_requests": [
-                    {
-                        "answer_fact": (
-                            "total sales amount for products Alice Smith sold yesterday"
-                        ),
-                        "answer_subject": _answer_subject_payload("she"),
-                        "answer_outputs": [
-                            {
-                                "description": "total sales amount",
-                                "requested_value_frame": "total sales amount",
-                            }
-                        ],
-                        "used_question_inputs": ["input_staff", "input_period"],
-                    }
-                ],
-            },
+                "submit_answer_request_contract": _question_contract_response(
+                    subject=(
+                        "total sales amount for products Alice Smith sold yesterday"
+                    ),
+                    answer_subject="she",
+                    answer_expression_family="computed_scalar",
+                    parts=("total sales amount",),
+                    question_inputs=(
+                        {
+                            "input_ref": "input_staff",
+                            "kind": "literal_text",
+                            "source": "conversation_resolution",
+                            "value_source_text": "Alice Smith",
+                            "resolved_input_ref": "conversation.entity_value",
+                            "role": "reference_value",
+                            "value_meaning_hint": "staff identity",
+                            "resolved_value_text": "Alice Smith",
+                        },
+                        {
+                            "input_ref": "input_period",
+                            "kind": "literal_text",
+                            "source": "question_context",
+                            "value_source_text": "yesterday",
+                            "role": "time_value",
+                            "resolved_value_text": "yesterday",
+                        },
+                    ),
+                ),
             "submit_query_enrichment": _query_enrichment_payload(
                 ("staff sales",),
                 entity_target_catalog_search_terms=[
@@ -2249,10 +2022,9 @@ def test_clause_resolution_prior_answer_frame_reaches_question_contract():
         "Current question:\nAnd how much did she make yesterday?"
         in question_contract_prompt
     )
-    assert "Conversation resolution annotations:" in question_contract_prompt
-    assert '"resolved_question_inputs"' in question_contract_prompt
-    assert '"value_frames"' in question_contract_prompt
-    assert '"resolved_frame_text"' in question_contract_prompt
+    assert "Conversation resolution context:" in question_contract_prompt
+    assert '"resolved_values"' in question_contract_prompt
+    assert '"answer_output"' in question_contract_prompt
     assert "total sales amount" in question_contract_prompt
     assert result.status == "COMPLETED", (result, planner.tool_names, planner.prompts)
 
@@ -2358,95 +2130,61 @@ class _TwoFactActiveMemoryPlannerPort:
         self.prompts.append(prompt)
         tool_name = _select_conversation_resolution_tool_name(
             tool_specs,
-            payload={"status": "resolved"},
         ) or (tool_specs[0].name if tool_specs else "")
         self.tool_names.append(tool_name)
         if tool_name in CONVERSATION_RESOLUTION_TOOL_NAMES:
-            projection = project_conversation_memory_cards(
-                _memory_context_with_prior_sales_and_location_identity(),
-                current_question=(
-                    "For those sales, show the amount; also show current inventory."
-                ),
-            )
-            selected = _selected_prior_source_for_memory_id(
-                projection=projection,
-                memory_id="turn_sales.relation.sales",
-                containing="sales",
-            )
             return _tool_response(
                 CONVERSATION_RESOLUTION_TOOL_NAME,
-                {
-                    "kind": "conversation_resolution",
-                    "status": "resolved",
-                    "current_question_text": (
+                _memory_attribution_response(
+                    question=(
                         "For those sales, show the amount; also show current inventory."
                     ),
-                    "clause_resolutions": [
-                        {
-                            "current_clause_text": "For those sales, show the amount",
-                            "occurrence": 1,
-                            "requested_value_frame": _literal_value_frame(
-                                current_clause_text=(
-                                    "For those sales, show the amount"
-                                ),
-                                context_frames=getattr(
-                                    projection, "context_frames", ()
-                                ),
-                            ),
-                            "dependencies": _dependencies_from_source_evidence(
-                                current_text="For those sales, show the amount",
-                                source_evidence_items=(
-                                    _source_evidence_for_context_source(selected),
-                                ),
-                                integrated_question=(
-                                    "For the prior sales, show sale amount. "
-                                    "Show current inventory."
-                                ),
-                                required_phrases=("sales",),
-                            ),
-                            "resolved_clause_text": (
-                                "For the prior sales, show sale amount."
-                            ),
-                        },
-                    ],
-                    "unresolved": _resolved_unresolved(),
-                },
+                    conversation_context=(
+                        _memory_context_with_prior_sales_and_location_identity()
+                    ),
+                    selected_memory_id="turn_sales.relation.sales",
+                    contextualized_question=(
+                        "For the prior sales, show sale amount. "
+                        "Show current inventory."
+                    ),
+                    source_containing="sales",
+                ),
             )
         if tool_name == "submit_answer_request_contract":
             return _tool_response(
                 tool_name,
-                _question_contract_arguments_for_current_contract(
-                    {
-                        "kind": "question_contract",
-                        "answer_requests_count": 2,
-                        "question_inputs": [],
-                        "answer_requests": [
-                            {
-                                "answer_fact": "the prior sales",
-                                "answer_expression": {"family": "list_rows"},
-                                "answer_subject": _answer_subject_payload("sales"),
-                                "answer_outputs": [
-                                    {
-                                        "description": "sale amount",
-                                    }
-                                ],
-                                "used_question_inputs": [],
-                            },
-                            {
-                                "answer_fact": "current inventory",
-                                "answer_expression": {"family": "list_rows"},
-                                "answer_subject": _answer_subject_payload("inventory"),
-                                "answer_outputs": [
-                                    {
-                                        "description": "inventory count",
-                                        "requested_value_frame": "inventory count",
-                                    }
-                                ],
-                                "used_question_inputs": [],
-                            },
-                        ],
-                    }
-                ),
+                {
+                    "kind": "question_contract",
+                    "answer_requests_count": 2,
+                    "question_inputs": [],
+                    "answer_requests": [
+                        {
+                            "answer_fact": "the prior sales",
+                            "answer_expression": {"family": "list_rows"},
+                            "answer_subject": _answer_subject_payload("sales"),
+                            "answer_population": _answer_population_payload_from_text(
+                                description="the prior sales",
+                                subject_text="sales",
+                            ),
+                            "answer_outputs": [{"description": "sale amount"}],
+                            "used_question_inputs": [],
+                        },
+                        {
+                            "answer_fact": "current inventory",
+                            "answer_expression": {"family": "list_rows"},
+                            "answer_subject": _answer_subject_payload("inventory"),
+                            "answer_population": _answer_population_payload_from_text(
+                                description="current inventory",
+                                subject_text="inventory",
+                            ),
+                            "answer_outputs": [{"description": "inventory count"}],
+                            "used_question_inputs": [],
+                        },
+                    ],
+                    "question_input_inventory_check": {
+                        "all_input_like_phrases_declared": True,
+                    },
+                },
             )
         if tool_name == "submit_query_enrichment":
             return _tool_response(
@@ -2645,99 +2383,60 @@ class _TwoSalesFactActiveMemoryPlannerPort:
         self.prompts.append(prompt)
         tool_name = _select_conversation_resolution_tool_name(
             tool_specs,
-            payload={"status": "resolved"},
         ) or (tool_specs[0].name if tool_specs else "")
         self.tool_names.append(tool_name)
         if tool_name in CONVERSATION_RESOLUTION_TOOL_NAMES:
-            projection = project_conversation_memory_cards(
-                _memory_context_with_prior_sales_and_location_identity(),
-                current_question=(
-                    "For those sales, show the amount; also show sale id."
-                ),
-            )
-            selected = _selected_prior_source_for_memory_id(
-                projection=projection,
-                memory_id="turn_sales.relation.sales",
-                containing="sales",
-            )
             return _tool_response(
                 CONVERSATION_RESOLUTION_TOOL_NAME,
-                {
-                    "kind": "conversation_resolution",
-                    "status": "resolved",
-                    "current_question_text": (
+                _memory_attribution_response(
+                    question=(
                         "For those sales, show the amount; also show sale id."
                     ),
-                    "clause_resolutions": [
-                        {
-                            "current_clause_text": (
-                                "For those sales, show the amount; also show sale id"
-                            ),
-                            "occurrence": 1,
-                            "requested_value_frame": _literal_value_frame(
-                                current_clause_text=(
-                                    "For those sales, show the amount; also show sale id"
-                                ),
-                                context_frames=getattr(
-                                    projection, "context_frames", ()
-                                ),
-                            ),
-                            "dependencies": _dependencies_from_source_evidence(
-                                current_text=(
-                                    "For those sales, show the amount; also show sale id"
-                                ),
-                                source_evidence_items=(
-                                    _source_evidence_for_context_source(selected),
-                                ),
-                                integrated_question=(
-                                    "For the prior sales, show sale amount; "
-                                    "also show sale id."
-                                ),
-                                required_phrases=("sales row",),
-                            ),
-                            "resolved_clause_text": (
-                                "For the prior sales, show sale amount and sale id."
-                            ),
-                        }
-                    ],
-                    "unresolved": _resolved_unresolved(),
-                },
+                    conversation_context=(
+                        _memory_context_with_prior_sales_and_location_identity()
+                    ),
+                    selected_memory_id="turn_sales.relation.sales",
+                    contextualized_question=(
+                        "For the prior sales, show sale amount and sale id."
+                    ),
+                    source_containing="sales",
+                ),
             )
         if tool_name == "submit_answer_request_contract":
             return _tool_response(
                 tool_name,
-                _question_contract_arguments_for_current_contract(
-                    {
-                        "kind": "question_contract",
-                        "answer_requests_count": 2,
-                        "question_inputs": [],
-                        "answer_requests": [
-                            {
-                                "answer_fact": "the prior sales",
-                                "answer_expression": {"family": "list_rows"},
-                                "answer_subject": _answer_subject_payload("sales"),
-                                "answer_outputs": [
-                                    {
-                                        "description": "sale amount",
-                                    }
-                                ],
-                                "used_question_inputs": [],
-                            },
-                            {
-                                "answer_fact": "sale id",
-                                "answer_expression": {"family": "list_rows"},
-                                "answer_subject": _answer_subject_payload("sale id"),
-                                "answer_outputs": [
-                                    {
-                                        "description": "sale id",
-                                        "requested_value_frame": "sale id",
-                                    }
-                                ],
-                                "used_question_inputs": [],
-                            },
-                        ],
-                    }
-                ),
+                {
+                    "kind": "question_contract",
+                    "answer_requests_count": 2,
+                    "question_inputs": [],
+                    "answer_requests": [
+                        {
+                            "answer_fact": "the prior sales",
+                            "answer_expression": {"family": "list_rows"},
+                            "answer_subject": _answer_subject_payload("sales"),
+                            "answer_population": _answer_population_payload_from_text(
+                                description="the prior sales",
+                                subject_text="sales",
+                            ),
+                            "answer_outputs": [{"description": "sale amount"}],
+                            "used_question_inputs": [],
+                        },
+                        {
+                            "answer_fact": "sale id",
+                            "answer_expression": {"family": "list_rows"},
+                            "answer_subject": _answer_subject_payload("sale id"),
+                            "answer_population": _answer_population_payload_from_text(
+                                description="sale id",
+                                subject_text="sale id",
+                            ),
+                            "answer_outputs": [{"description": "sale id"}],
+                            "used_question_inputs": [],
+                        },
+                    ],
+                    "question_input_inventory_check": {
+                        "all_input_like_phrases_declared": True,
+                    },
+                },
             )
         if tool_name == "submit_query_enrichment":
             return _tool_response(
@@ -2918,8 +2617,6 @@ class _TwoSalesFactActiveMemoryPlannerPort:
 
 
 def _tool_response(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    if tool_name == "submit_answer_request_contract":
-        arguments = _question_contract_arguments_for_current_contract(arguments)
     return {
         "answer": json.dumps(
             {"tool": tool_name, "arguments": arguments},
@@ -2932,70 +2629,6 @@ def _tool_response(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
             "costUsd": 0,
         },
     }
-
-
-def _question_contract_arguments_for_current_contract(
-    arguments: dict[str, Any],
-) -> dict[str, Any]:
-    output = dict(arguments)
-    output.setdefault(
-        "question_input_inventory_check",
-        {"all_input_like_phrases_declared": True},
-    )
-    question_inputs = output.get("question_inputs")
-    if isinstance(question_inputs, list):
-        for item in question_inputs:
-            if isinstance(item, dict):
-                item.setdefault(
-                    "inventory_check",
-                    {
-                        "why_this_is_an_input": (
-                            f"{item.get('reference_text') or 'input'} is a declared question input"
-                        )
-                    },
-                )
-    answer_requests = output.get("answer_requests")
-    if not isinstance(answer_requests, list):
-        return output
-    output["answer_requests"] = [
-        _question_contract_answer_request_for_current_contract(item)
-        for item in answer_requests
-    ]
-    return output
-
-
-def _question_contract_answer_request_for_current_contract(
-    item: Any,
-) -> Any:
-    if not isinstance(item, dict):
-        return item
-    output = dict(item)
-    output.setdefault("answer_expression", {"family": "scalar_aggregate"})
-    if "answer_population" not in output:
-        subject = output.get("answer_subject")
-        subject_text = (
-            str(subject.get("subject_text") or "")
-            if isinstance(subject, dict)
-            else str(output.get("answer_fact") or "")
-        )
-        output["answer_population"] = default_answer_population(
-            description=str(output.get("answer_fact") or subject_text),
-            subject_text=subject_text,
-            instance_interpretation=RequestedFactAnswerSubject(
-                subject_text=subject_text
-            ).instance_interpretation,
-        ).to_question_contract_dict()
-    answer_outputs = output.get("answer_outputs")
-    if isinstance(answer_outputs, list):
-        output["answer_outputs"] = [
-            (
-                {"description": answer_output.get("description")}
-                if isinstance(answer_output, dict) and "description" in answer_output
-                else answer_output
-            )
-            for answer_output in answer_outputs
-        ]
-    return output
 
 
 def _candidate_binding_surface(candidate: dict[str, Any]) -> dict[str, Any]:

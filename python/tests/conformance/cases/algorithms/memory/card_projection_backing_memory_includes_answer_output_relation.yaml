@@ -13,14 +13,14 @@ input:
         sourceQuestion: How much is that in total sales?
         provenance:
           question_contract:
+            question_inputs: []
             answer_requests:
               - id: fact_sales
                 answer_fact: total sales for referenced products
                 answer_outputs:
                   - id: answer_output_1
                     description: total sales amount
-                    requested_value_frame: total sales amount
-            question_inputs: []
+                used_question_inputs: []
         addresses:
           - address: relation.sales_rows
             kind: relation
@@ -38,4 +38,3 @@ expect:
     private_backing_ids:
       turn_sales_total.prior_request.fact_sales:
         - turn_sales_total.relation.sales_rows
-

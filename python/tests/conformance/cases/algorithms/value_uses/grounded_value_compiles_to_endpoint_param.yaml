@@ -47,4 +47,3 @@ expect:
         param_ref: records.query.selector
         value: Alpha
     row_filters: []
-    scalar_inputs: []

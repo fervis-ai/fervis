@@ -22,6 +22,13 @@ Options:
   --ledger-dir PATH       Output directory for per-case ledgers and command output.
   --python PATH           Python executable. Defaults to <project-root>/.venv/bin/python.
   --wait-seconds SECONDS  Per-case wait timeout. Defaults to 300.
+  --determinism-runs N    Independent full executions per case. Defaults to 1.
+  --enforce-structured-determinism
+                          Require identical structured results across repeats.
+  --attempts N            Attempts for retryable provider failures. Defaults to 1.
+  --retry-provider-failures
+                          Retry provider connection/runtime failures only.
+  --retry-sleep-seconds S Delay between provider retries. Defaults to 300.
   -h, --help              Show this help.
 EOF
 }
@@ -37,6 +44,11 @@ database_url="${FERVIS_LOCAL_DATABASE_URL:-}"
 ledger_dir=""
 python_bin=""
 wait_seconds="300"
+determinism_runs="1"
+enforce_structured_determinism="0"
+attempts="1"
+retry_provider_failures="0"
+retry_sleep_seconds="300"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -78,6 +90,26 @@ while [[ $# -gt 0 ]]; do
       ;;
     --wait-seconds)
       wait_seconds="${2:-}"
+      shift 2
+      ;;
+    --determinism-runs)
+      determinism_runs="${2:-}"
+      shift 2
+      ;;
+    --enforce-structured-determinism)
+      enforce_structured_determinism="1"
+      shift
+      ;;
+    --attempts)
+      attempts="${2:-}"
+      shift 2
+      ;;
+    --retry-provider-failures)
+      retry_provider_failures="1"
+      shift
+      ;;
+    --retry-sleep-seconds)
+      retry_sleep_seconds="${2:-}"
       shift 2
       ;;
     -h|--help)
@@ -222,24 +254,44 @@ PY
   set +e
   (
     cd "$project_root"
-    FERVIS_GOLDSET_CASE_IDS="$case_id" "$python_bin" -P - "$ledger_file" "$wait_seconds" <<'PY'
+    FERVIS_GOLDSET_CASE_IDS="$case_id" "$python_bin" -P - \
+      "$ledger_file" "$wait_seconds" "$determinism_runs" \
+      "$enforce_structured_determinism" "$attempts" \
+      "$retry_provider_failures" "$retry_sleep_seconds" <<'PY'
 from __future__ import annotations
 
 import sys
 from fervis.interfaces.cli.main import main
 
-ledger_file, wait_seconds = sys.argv[1:3]
+(
+    ledger_file,
+    wait_seconds,
+    determinism_runs,
+    enforce_structured_determinism,
+    attempts,
+    retry_provider_failures,
+    retry_sleep_seconds,
+) = sys.argv[1:8]
+args = [
+    "goldset",
+    "run",
+    "--ledger-file",
+    ledger_file,
+    "--wait-seconds",
+    wait_seconds,
+    "--determinism-runs",
+    determinism_runs,
+    "--attempts",
+    attempts,
+    "--retry-sleep-seconds",
+    retry_sleep_seconds,
+]
+if enforce_structured_determinism == "1":
+    args.append("--enforce-structured-determinism")
+if retry_provider_failures == "1":
+    args.append("--retry-provider-failures")
 raise SystemExit(
-    main(
-        (
-            "goldset",
-            "run",
-            "--ledger-file",
-            ledger_file,
-            "--wait-seconds",
-            wait_seconds,
-        )
-    )
+    main(tuple(args))
 )
 PY
   ) >"$stdout_file" 2>"$stderr_file"
@@ -261,7 +313,11 @@ try:
     result = payload["payload"]["cases"][0]
     answer = result.get("answer")
     if str(result.get("status")) == "passed" and str(exit_code) == "0":
-        print(f"PASS: {answer}")
+        duration = result.get("duration_ms")
+        suffix = ""
+        if duration is not None:
+            suffix = f" | Completed in {float(duration) / 1000:.2f} sec"
+        print(f"PASS: {answer}{suffix}")
     else:
         message = result.get("message") or answer or f"exit={exit_code}"
         print(f"FAIL: {message}")

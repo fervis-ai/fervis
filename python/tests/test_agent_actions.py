@@ -43,7 +43,7 @@ def test_agent_actions_are_self_describing() -> None:
         provide_clarification_action(
             "conversation-1",
             question_id="question-1",
-            previous_run_id="run-1",
+            base_run_id="run-1",
             clarification_id="clarification-1",
             tenant_id="tenant-1",
             principal_id="principal-1",
@@ -89,7 +89,7 @@ def test_provide_clarification_action_requires_real_clarification_id() -> None:
         provide_clarification_action(
             "conversation-1",
             question_id="question-1",
-            previous_run_id="run-1",
+            base_run_id="run-1",
             clarification_id="",
             tenant_id="tenant-1",
             principal_id="principal-1",
@@ -99,7 +99,7 @@ def test_provide_clarification_action_requires_real_clarification_id() -> None:
         provide_clarification_action(
             "conversation-1",
             question_id="question-1",
-            previous_run_id="run-1",
+            base_run_id="run-1",
             clarification_id=None,
             tenant_id="tenant-1",
             principal_id="principal-1",

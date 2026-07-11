@@ -1,5 +1,5 @@
-id: row_predicate_parse_true_value_becomes_row_filter
-description: A row predicate value classified as satisfying the population compiles into a row filter.
+id: row_predicate_parse_true_value_becomes_population_constraint
+description: A governed row-predicate decision compiles into one fact-scoped population constraint.
 migrates:
   - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_row_predicate_decision_becomes_bound_source_filter
 kind: algorithm
@@ -11,13 +11,10 @@ input:
       "false": CONFLICTS_WITH_TEST
 expect:
   result_contains:
-    row_filters:
-      - field_id: is_active
-        operator: in
-        values: ["true"]
     population_choices:
       - controller_kind: row_predicate
         controller_id: rp.source_1.row.root.is_active
         field_id: is_active
+        requested_fact_ids: [fact_1]
         included_values: ["true"]
         excluded_values: ["false"]

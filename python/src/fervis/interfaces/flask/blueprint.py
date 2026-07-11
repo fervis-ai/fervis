@@ -85,9 +85,9 @@ def fervis_flask_blueprint(
         return json_response(response.status_code, response.payload)
 
     @blueprint.route("/questions/<question_id>/runs/", methods=["POST"])
-    def continue_question(question_id: str):
+    def create_question_run(question_id: str):
         try:
-            response = questions().continue_question(
+            response = questions().create_question_run(
                 question_id,
                 _json_payload(request),
                 principal=request_principal(),

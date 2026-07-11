@@ -14,12 +14,14 @@ input:
         sourceQuestion: How much money did we make?
         provenance:
           question_contract:
+            question_inputs: []
             answer_requests:
               - id: fact_1
                 answer_fact: money we made
                 answer_outputs:
-                  - description: total sales amount
-                    requested_value_frame: total sales amount
+                  - id: answer_1
+                    description: total sales amount
+                used_question_inputs: []
         addresses:
           - address: value.answer
             kind: value
@@ -42,4 +44,3 @@ input:
 expect:
   result_contains:
     status: rejected
-

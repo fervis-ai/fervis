@@ -1,0 +1,62 @@
+id: declared_capability_revises_program
+kind: algorithm
+algorithm: answer_program.apply_capability
+description: A declared population capability creates one immutable program revision.
+input:
+  schema_revision: 1
+  program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/capability}
+  bindings:
+    - parameter_id: question.store_ids
+      value:
+        kind: identity_set
+        identity_type: store
+        identity_field: store_id
+        values: [store_1, store_2]
+      provenance: {kind: question_input}
+  application:
+    capability_id: filter_by_sale_channel
+    binding:
+      parameter_id: semantic.sale_channels
+      value: {kind: string_set, values: [STORE]}
+      provenance:
+        kind: semantic_choice
+        refs: [semantic-control:sales.channel]
+expect:
+  result_contains:
+    status: revised
+    application_round_trips: true
+    compatibility_unchanged: false
+    compatibility:
+      function_keys:
+        - answer.classify
+        - answer.materialize
+        - fact.materialize
+        - proof.construct
+        - relation.project
+        - relation.row_filter
+        - source.instantiate_read
+        - source.read_relation
+      source_keys: [{kind: catalog_read, source_id: sales}]
+    bindings:
+      question.store_ids: [store_1, store_2]
+      semantic.sale_channels: [STORE]
+    program:
+      program:
+        fields:
+          relations:
+            $tuple:
+              - fields:
+                  source:
+                    fields:
+                      population_choices:
+                        $tuple:
+                          - fields:
+                              controller_kind: {value: row_predicate}
+                              controller_id: sales.channel_population
+                              field_id: channel
+                              requested_fact_ids: {$tuple: [fact_1]}
+                              selection_expr:
+                                $type: ParameterRef
+                                fields: {parameter_id: semantic.sale_channels}
+    reads: 0
+    model_calls: 0

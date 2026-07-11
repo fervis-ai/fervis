@@ -38,7 +38,7 @@ def _computed_scalar_pattern_schema(
             "answer_output_ids": non_empty_string_array(),
             "pattern": {"enum": ["computed_scalar"]},
             "scalar_inputs": non_empty_array_items(_source_scalar_input_schema()),
-            "expression": {"type": "string", "minLength": 1},
+            "expression": non_empty_array_items(_compute_expression_token_schema()),
             "output": _scalar_output_schema(),
         },
         required=(
@@ -60,6 +60,31 @@ def _source_scalar_input_schema() -> dict[str, object]:
         },
         required=("input_id", "source_binding_id"),
     )
+
+
+def _compute_expression_token_schema() -> dict[str, object]:
+    return {
+        "oneOf": [
+            strict_object(
+                {"input_id": field_id_schema()},
+                required=("input_id",),
+            ),
+            strict_object(
+                {
+                    "operator": {
+                        "enum": [
+                            "add",
+                            "subtract",
+                            "multiply",
+                            "divide",
+                            "negate",
+                        ]
+                    }
+                },
+                required=("operator",),
+            ),
+        ]
+    }
 
 
 def _scalar_output_schema() -> dict[str, object]:

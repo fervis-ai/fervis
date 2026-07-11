@@ -14,12 +14,14 @@ input:
         sourceAnswer: Staff One answer.
         provenance:
           question_contract:
+            question_inputs: []
             answer_requests:
               - id: fact_1
                 answer_fact: Which products did Staff One sell today?
                 answer_outputs:
-                  - description: answer
-                    requested_value_frame: answer
+                  - id: answer_1
+                    description: answer
+                used_question_inputs: []
         addresses:
           - address: entity.staff_1
             kind: entity
@@ -43,12 +45,14 @@ input:
         sourceAnswer: Staff One answer.
         provenance:
           question_contract:
+            question_inputs: []
             answer_requests:
               - id: fact_1
                 answer_fact: How much is that in total sales?
                 answer_outputs:
-                  - description: answer
-                    requested_value_frame: answer
+                  - id: answer_1
+                    description: answer
+                used_question_inputs: []
         addresses:
           - address: entity.staff_1
             kind: entity
@@ -78,4 +82,3 @@ expect:
         kind: entity_identity
       turn_2.entity.staff_1:
         kind: entity_identity
-

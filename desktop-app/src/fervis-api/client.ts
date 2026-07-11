@@ -5,6 +5,7 @@ import type {
   DecodeResult,
   QuestionRunListPayload,
   QuestionStatePayload,
+  RerunQuestionRequest,
   RunPayload
 } from "./contracts";
 import {
@@ -30,6 +31,10 @@ export interface FervisApiClient {
   readonly answerClarification: (
     questionId: string,
     request: ClarificationResponseRequest
+  ) => Promise<QuestionStatePayload>;
+  readonly rerunQuestion: (
+    questionId: string,
+    request: RerunQuestionRequest
   ) => Promise<QuestionStatePayload>;
 }
 
@@ -83,13 +88,29 @@ export function createFervisHttpClient(
         await requestJson(connection, "/questions/", {
           body: JSON.stringify({
             question: request.question,
-            conversationId: request.conversationId
+            conversationId: request.conversationId,
+            ...(request.contextRunId === undefined
+              ? {}
+              : { contextRunId: request.contextRunId })
           }),
           method: "POST"
         }),
         decodeQuestionState
       ),
     answerClarification: async (questionId, request) =>
+      decodePayload(
+        "question state",
+        await requestJson(
+          connection,
+          `/questions/${encodeURIComponent(questionId)}/runs/`,
+          {
+            body: JSON.stringify(request),
+            method: "POST"
+          }
+        ),
+        decodeQuestionState
+      ),
+    rerunQuestion: async (questionId, request) =>
       decodePayload(
         "question state",
         await requestJson(

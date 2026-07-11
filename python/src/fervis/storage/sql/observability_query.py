@@ -45,8 +45,7 @@ class SQLObservabilityQuery(ObservabilityQueryPort):
             row = connection.execute(
                 sa.select(
                     run.c.run_id,
-                    run.c.previous_run_id,
-                    run.c.trigger_clarification_response_run_id,
+                    run.c.base_run_id,
                 ).where(run.c.run_id == run_id)
             ).first()
         if row is None:
@@ -54,10 +53,7 @@ class SQLObservabilityQuery(ObservabilityQueryPort):
         values = row_mapping(row)
         return ObservabilityRun(
             run_id=str(values["run_id"]),
-            previous_run_id=values["previous_run_id"],
-            trigger_clarification_response_run_id=values[
-                "trigger_clarification_response_run_id"
-            ],
+            base_run_id=values["base_run_id"],
         )
 
     def run_ids_for_run(self, run_id: str) -> tuple[str, ...]:

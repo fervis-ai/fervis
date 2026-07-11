@@ -5,7 +5,12 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from fervis.lookup.fact_plan.relations import EndpointParamBinding, RelationSource, RelationSourcePopulationChoice, SourceKind
+from fervis.lookup.source_binding.compiler_ir import (
+    DraftEndpointParamBinding,
+    DraftRelationSource,
+    DraftRelationSourcePopulationChoice,
+)
+from fervis.lookup.answer_program.relations import SourceKind
 from fervis.lookup.source_binding import provider_contract as provider_output
 from fervis.lookup.source_binding.model import AnswerPopulation, SourceBindingRequest
 from fervis.lookup.source_binding.parser_common import _dict, _required_strings, _text
@@ -51,8 +56,8 @@ def bound_relation_source(
     *,
     candidate: Any,
     population_binding: dict[str, Any],
-    param_binding_sets: tuple[tuple[EndpointParamBinding, ...], ...],
-    population_choices: tuple[RelationSourcePopulationChoice, ...],
+    param_binding_sets: tuple[tuple[DraftEndpointParamBinding, ...], ...],
+    population_choices: tuple[DraftRelationSourcePopulationChoice, ...],
 ) -> tuple[Any, tuple[Any, ...]]:
     if (
         str(population_binding.get("kind") or "") == "exact_row_set"
@@ -61,7 +66,7 @@ def bound_relation_source(
         basis = _dict(population_binding.get("basis"), "answer_population.basis")
         memory_relation_id = _text(basis.get("memory_relation_id"))
         return (
-            RelationSource(
+            DraftRelationSource(
                 kind=SourceKind.MEMORY_READ,
                 memory_relation_id=memory_relation_id,
                 population_choices=population_choices,
