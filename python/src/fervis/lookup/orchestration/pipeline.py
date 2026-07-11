@@ -1,10 +1,11 @@
 """Lookup runtime pipeline."""
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from fervis.model_io.turns import ModelTurnPurpose
+from fervis.lineage.enums import ProgramInvocationKind
 from fervis.lookup.errors import ErrorCode
 from fervis.observability.event_contracts import EventPayloadKey
 from fervis.lookup.relation_catalog import validate_relation_catalog
@@ -16,19 +17,18 @@ from fervis.lookup.relation_catalog.selection import (
     select_resolver_relation_catalog,
 )
 from fervis.lookup.conversation_resolution import (
+    CompiledConversationResolution,
     ConversationResolution,
     ConversationResolutionGenerationError,
-    ConversationResolutionKind,
-    ConversationResolutionOverlay,
     ConversationResolutionRequest,
     ConversationResolutionTurnResult,
-    ConversationInputProvenanceSet,
-    conversation_input_provenance_from,
-    conversation_resolution_overlay_from,
+    compile_conversation_resolution,
     generate_conversation_resolution,
 )
+from fervis.lookup.conversation_resolution.callable_frames import (
+    callable_frame_bindings,
+)
 from fervis.lookup.conversation_resolution.model import UnresolvedResolution
-from fervis.lookup.continuations import ContinuationPlan, derive_continuation_plan
 from fervis.lookup.plan_execution.authorized_sources import (
     AuthorizedExecutionSources,
 )
@@ -159,6 +159,12 @@ from .terminal_results import (
     _question_contract_clarification_fact_result,
 )
 from .limits import _limit_before_next_model_turn, _merge_usage
+from .question_execution import (
+    CompileQuestionExecution,
+    ContinuePriorRequestExecution,
+    fold_question_execution,
+    parse_question_execution,
+)
 
 
 @dataclass
@@ -172,11 +178,7 @@ class _LookupPipelineState:
     activated_memory: ExpandedActivatedMemory | None = None
     conversation_turn: ConversationResolutionTurnResult | None = None
     conversation_resolution: ConversationResolution | None = None
-    conversation_resolution_overlay: ConversationResolutionOverlay | None = None
-    continuation_plan: ContinuationPlan | None = None
-    conversation_input_provenance: ConversationInputProvenanceSet = field(
-        default_factory=ConversationInputProvenanceSet
-    )
+    compiled_conversation_resolution: CompiledConversationResolution | None = None
     question_turn: Any = None
     question_contract: Any = None
     full_catalog: Any = None
@@ -227,26 +229,83 @@ def run_lookup_question(
         model_key=str(request.provider_preferences.get("modelKey") or ""),
     )
     try:
-        for phase in (
-            _run_conversation_resolution_phase,
-            _run_question_contract_phase,
-            _run_query_enrichment_and_catalog_phase,
-            _run_grounding_phase,
-            _run_read_eligibility_phase,
-            _run_plan_selection_phase,
-            _run_source_binding_phase,
-            _run_planning_phase,
-        ):
-            result = phase(state)
-            if result is not None:
-                return result
-        return _run_execution_phase(state)
+        conversation_result = _run_conversation_resolution_phase(state)
+        if conversation_result is not None:
+            return conversation_result
+        try:
+            execution = parse_question_execution(
+                resolution=state.compiled_conversation_resolution,
+                memory_projection=state.memory_card_projection,
+                prior_program_invocations=state.ports.prior_program_invocations,
+                conversation_id=str(
+                    state.request.user_context.get("conversationId") or ""
+                ).strip(),
+                tenant_id=state.request.tenant_id,
+            )
+        except ValueError:
+            return _runtime_error_terminal(
+                state,
+                error_code=ErrorCode.PLAN_VALIDATION_FAILED,
+                message="question execution did not match its persisted contract",
+                usage=_phase_usage(state),
+            )
+        return fold_question_execution(
+            execution,
+            compile_question=lambda selected: _run_compile_question_execution(
+                state,
+                selected,
+            ),
+            continue_prior_request=lambda selected: (
+                _run_continue_prior_request_execution(state, selected)
+            ),
+        )
     except LineagePersistenceUnavailable:
         return RuntimeErrorTerminal(
             run_id=request.run_id,
             error_code=ErrorCode.LINEAGE_PERSISTENCE_FAILED,
             message=ErrorCode.LINEAGE_PERSISTENCE_FAILED,
         ).lookup_result()
+
+
+def _run_compile_question_execution(
+    state: _LookupPipelineState,
+    execution: CompileQuestionExecution,
+) -> LookupResult:
+    state.compiled_conversation_resolution = execution.resolution
+    for phase in (
+        _run_question_contract_phase,
+        _run_query_enrichment_and_catalog_phase,
+        _run_grounding_phase,
+        _run_read_eligibility_phase,
+        _run_plan_selection_phase,
+        _run_source_binding_phase,
+        _run_planning_phase,
+    ):
+        result = phase(state)
+        if result is not None:
+            return result
+    return _run_execution_phase(state)
+
+
+def _run_continue_prior_request_execution(
+    state: _LookupPipelineState,
+    execution: ContinuePriorRequestExecution,
+) -> LookupResult:
+    state.question_contract = execution.frame.question_contract
+    state.full_catalog = validate_relation_catalog(
+        state.ports.relation_catalog_port.build_relation_catalog()
+    )
+    enrichment_result = _run_query_enrichment_and_catalog_phase(state)
+    if enrichment_result is not None:
+        return enrichment_result
+    grounding_result = _run_grounding_phase(
+        state,
+        selected_input_ids=execution.frame.changed_input_ids,
+        prepare_answer_reads=False,
+    )
+    if grounding_result is not None:
+        return grounding_result
+    return _run_continue_prior_request_program(state, execution)
 
 
 def _runtime_error_terminal(
@@ -360,22 +419,7 @@ def _run_conversation_resolution_phase(
         model_turn=state.conversation_turn,
     )
     state.conversation_resolution = state.conversation_turn.result.outcome
-    state.conversation_resolution_overlay = conversation_resolution_overlay_from(
-        state.conversation_resolution,
-        memory_projection=state.memory_card_projection,
-    )
-    state.continuation_plan = derive_continuation_plan(
-        resolution=state.conversation_resolution,
-        memory_projection=state.memory_card_projection,
-    )
-    state.conversation_input_provenance = conversation_input_provenance_from(
-        overlay=state.conversation_resolution_overlay,
-        continuation_plan=state.continuation_plan,
-    )
-    if (
-        state.conversation_resolution.resolution
-        == ConversationResolutionKind.NEEDS_CLARIFICATION
-    ):
+    if state.conversation_resolution.needs_clarification:
         fact_result = _conversation_resolution_ambiguity_fact_result(
             state.conversation_resolution.unresolved
         )
@@ -394,18 +438,29 @@ def _run_conversation_resolution_phase(
             ),
         )
     if (
-        state.conversation_resolution.resolution
-        == ConversationResolutionKind.STANDALONE
-        and active_clarification_context(
+        active_clarification_context(
             state.request.conversation_context,
             current_question=state.request.question,
         )
         is not None
+        and not state.conversation_resolution.used_memory_ids
     ):
         return _runtime_error_terminal(
             state,
             error_code=ErrorCode.PLANNING_FAILED,
             message="clarification response was not connected to the active clarification",
+            usage=state.conversation_turn.usage,
+        )
+    try:
+        state.compiled_conversation_resolution = compile_conversation_resolution(
+            state.conversation_resolution,
+            memory_projection=state.memory_card_projection,
+        )
+    except ValueError:
+        return _runtime_error_terminal(
+            state,
+            error_code=ErrorCode.PLANNING_FAILED,
+            message="conversation resolution could not be compiled",
             usage=state.conversation_turn.usage,
         )
     activation_error = _activate_selected_memory(state)
@@ -428,8 +483,12 @@ def _run_question_contract_phase(state: _LookupPipelineState) -> LookupResult | 
             request=QuestionContractRequest(
                 current_question=state.request.question,
                 conversation_context=state.request.conversation_context,
-                conversation_resolution_overlay=state.conversation_resolution_overlay,
-                conversation_input_provenance=state.conversation_input_provenance,
+                conversation_resolution=(
+                    state.compiled_conversation_resolution
+                    if state.compiled_conversation_resolution is not None
+                    and state.compiled_conversation_resolution.uses_prior_context
+                    else None
+                ),
                 host=state.request.host,
             ),
             model_port=state.ports.planner_model_port,
@@ -492,7 +551,6 @@ def _run_query_enrichment_and_catalog_phase(
                 conversation_context=state.request.conversation_context,
                 requested_facts=state.question_contract.requested_facts,
                 relation_catalog=state.full_catalog,
-                conversation_resolution_overlay=state.conversation_resolution_overlay,
                 host=state.request.host,
             ),
             model_port=state.ports.planner_model_port,
@@ -526,7 +584,12 @@ def _run_query_enrichment_and_catalog_phase(
     return None
 
 
-def _run_grounding_phase(state: _LookupPipelineState) -> LookupResult | None:
+def _run_grounding_phase(
+    state: _LookupPipelineState,
+    *,
+    selected_input_ids: frozenset[str] | None = None,
+    prepare_answer_reads: bool = True,
+) -> LookupResult | None:
     limit_failure = _limit_before_next_model_turn(state.ports, state.request.run_id)
     if limit_failure is not None:
         return limit_failure
@@ -553,9 +616,10 @@ def _run_grounding_phase(state: _LookupPipelineState) -> LookupResult | None:
                 state.resolver_catalog_selection.entity_target_selections
             ),
             active_memory_ids=_active_memory_ids(state),
-            conversation_resolution_overlay=state.conversation_resolution_overlay,
+            conversation_resolution=state.compiled_conversation_resolution,
             source_read_lineage=grounding_lineage.scope,
             host=state.request.host,
+            selected_input_ids=selected_input_ids,
         )
     except GroundingGenerationError as exc:
         return _model_turn_failure_result(
@@ -603,7 +667,8 @@ def _run_grounding_phase(state: _LookupPipelineState) -> LookupResult | None:
             source_reads=grounding_lineage.source_reads,
         )
     state.grounding_usage = state.grounding.usage
-    _select_answer_reads_for_eligibility(state)
+    if prepare_answer_reads:
+        _select_answer_reads_for_eligibility(state)
     if state.grounding.ledger.issues:
         return _synthesize_result(
             request=state.request,
@@ -639,7 +704,6 @@ def _run_read_eligibility_phase(state: _LookupPipelineState) -> LookupResult | N
                 requested_facts=state.question_contract.requested_facts,
                 catalog_selection=state.catalog_selection,
                 conversation_context=state.request.conversation_context,
-                conversation_resolution_overlay=state.conversation_resolution_overlay,
                 available_values=_catalog_available_values_for_state(state),
                 host=state.request.host,
             ),
@@ -669,6 +733,64 @@ def _run_read_eligibility_phase(state: _LookupPipelineState) -> LookupResult | N
     )
     state.catalog = validate_relation_catalog(state.catalog_selection.relation_catalog)
     return None
+
+
+def _run_continue_prior_request_program(
+    state: _LookupPipelineState,
+    execution: ContinuePriorRequestExecution,
+) -> LookupResult:
+    prepared = execution.frame
+    try:
+        bindings = callable_frame_bindings(
+            prepared,
+            grounded_values=state.grounding.ledger.values,
+        )
+    except ValueError:
+        return _runtime_error_terminal(
+            state,
+            error_code=ErrorCode.PLAN_VALIDATION_FAILED,
+            message="callable prior frame arguments could not be bound",
+            usage=_phase_usage(state),
+        )
+    execution_sources = AuthorizedExecutionSources.from_program(
+        full_catalog=state.full_catalog,
+        program=prepared.program,
+    )
+    return run_answer_program_execution(
+        request=state.request,
+        ports=ProgramExecutionPorts(
+            data_access_port=state.ports.data_access_port,
+            memory=state.memory,
+            lineage_step_sink=state.ports.lineage_step_sink,
+            lineage_required=state.ports.lineage_required,
+        ),
+        program=prepared.program,
+        bindings=bindings,
+        environment=ExecutionEnvironment(
+            catalog=execution_sources.relation_catalog,
+            authorized_sources=execution_sources,
+            memory_relations=state.memory.relations,
+            authority_ref=state.request.authority_ref,
+        ),
+        invocation_binding=_program_invocation_binding(state),
+        question_contract_step_id=(
+            model_turn_step_id(
+                state.ports,
+                purpose=ModelTurnPurpose.CONVERSATION_RESOLUTION,
+                turn=1,
+            )
+            or ""
+        ),
+        usage=_phase_usage(state),
+        grounded_values=state.grounding.ledger.values,
+        extra_fact_addresses=fact_value_memory_addresses(
+            state.grounding.ledger.values
+        ),
+        known_input_step_id=_continue_prior_request_known_input_step_id(state),
+        conversation_resolution_activation=_conversation_resolution_activation(state),
+        invocation_kind=ProgramInvocationKind.CONTINUE_PRIOR_REQUEST,
+        base_invocation_id=prepared.base.invocation.invocation_id,
+    )
 
 
 def _select_answer_reads_for_eligibility(
@@ -806,7 +928,6 @@ def _run_plan_selection_phase(state: _LookupPipelineState) -> LookupResult | Non
                     _source_candidate_discovery_request_for_state(state)
                 ),
                 conversation_context=state.request.conversation_context,
-                conversation_resolution_overlay=state.conversation_resolution_overlay,
                 host=state.request.host,
             ),
             model_port=state.ports.planner_model_port,
@@ -873,7 +994,7 @@ def _source_binding_request_for_state(
         ),
         plan_selection=plan_selection,
         conversation_context=state.request.conversation_context,
-        conversation_resolution_overlay=state.conversation_resolution_overlay,
+        conversation_resolution=state.compiled_conversation_resolution,
         host=state.request.host,
     )
 
@@ -898,7 +1019,7 @@ def _source_candidate_discovery_request_for_state(
             else None
         ),
         conversation_context=state.request.conversation_context,
-        conversation_resolution_overlay=state.conversation_resolution_overlay,
+        conversation_resolution=state.compiled_conversation_resolution,
         host=state.request.host,
     )
 
@@ -1259,12 +1380,9 @@ def _conversation_resolution_activation(
 ) -> dict[str, Any]:
     resolution = state.conversation_resolution
     payload = dict(resolution.activation_payload()) if resolution is not None else {}
-    continuation_plan = state.continuation_plan
-    if continuation_plan is not None and continuation_plan.has_continuation:
-        payload["continuation"] = continuation_plan.to_inspection_payload()
-    provenance = state.conversation_input_provenance
-    if provenance.has_inputs:
-        payload["conversation_input_provenance"] = provenance.to_inspection_payload()
+    compiled = state.compiled_conversation_resolution
+    if compiled is not None:
+        payload["conversation_resolution_context"] = compiled.to_prompt_payload()
     return payload
 
 
@@ -1304,9 +1422,9 @@ def _conversation_resolution_clarifications(
 ) -> tuple[Clarification, ...]:
     if unresolved.unresolved_kind == "multiple_meanings":
         option_labels = tuple(
-            item.integrated_question
+            item.contextualized_question
             for item in unresolved.candidate_interpretations
-            if item.integrated_question
+            if item.contextualized_question
         )
         return (
             clarify(
@@ -1429,6 +1547,22 @@ def _known_input_step_id(state: _LookupPipelineState) -> str | None:
         state.ports,
         purpose=ModelTurnPurpose.QUESTION_CONTRACT,
         turn=_question_turn_number(state),
+    )
+
+
+def _continue_prior_request_known_input_step_id(
+    state: _LookupPipelineState,
+) -> str | None:
+    if state.grounding.turn is not None:
+        return model_turn_step_id(
+            state.ports,
+            purpose=ModelTurnPurpose.GROUNDING,
+            turn=_grounding_turn_number(state),
+        )
+    return model_turn_step_id(
+        state.ports,
+        purpose=ModelTurnPurpose.CONVERSATION_RESOLUTION,
+        turn=1,
     )
 
 

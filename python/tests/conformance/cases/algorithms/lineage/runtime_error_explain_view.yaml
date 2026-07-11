@@ -21,7 +21,6 @@ input:
         run_number: 1
         kind: model_assisted
         trigger_kind: initial
-        integrated_question: How many in-person sales happened this month?
     steps:
       - step_id: step_source_binding
         run_id: run_1

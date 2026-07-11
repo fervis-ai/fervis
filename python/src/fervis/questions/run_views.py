@@ -52,6 +52,8 @@ class ProjectedQuestionRun:
     base_run_id: str | None
     program_id: str | None
     invocation_id: str | None
+    execution_kind: str | None
+    base_invocation_id: str | None
     patch_id: str | None
     revision_id: str | None
     status: QuestionRunStatus
@@ -78,6 +80,8 @@ class ProjectedQuestionRun:
             "baseRunId": self.base_run_id,
             "programId": self.program_id,
             "invocationId": self.invocation_id,
+            "executionKind": self.execution_kind,
+            "baseInvocationId": self.base_invocation_id,
             "patchId": self.patch_id,
             "revisionId": self.revision_id,
             "status": self.status.value,
@@ -149,6 +153,10 @@ def project_question_run(
         base_run_id=run.base_run_id,
         program_id=derivation.program.program_id if derivation is not None else None,
         invocation_id=derivation.invocation_id if derivation is not None else None,
+        execution_kind=derivation.kind if derivation is not None else None,
+        base_invocation_id=(
+            derivation.base_invocation_id if derivation is not None else None
+        ),
         patch_id=(
             derivation.patch.patch_id
             if derivation is not None and derivation.patch is not None

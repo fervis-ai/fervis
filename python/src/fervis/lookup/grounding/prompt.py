@@ -103,7 +103,7 @@ class GroundingTurnPrompt(TurnPromptBase):
                 "Mark CAN_RESOLVE_LOOKUP_TEXT when the resolver can search or match the lookup text and return the shown canonical API identity.",
                 "Mark CANNOT_RESOLVE_LOOKUP_TEXT when the resolver cannot search or match the lookup text into the shown canonical API identity.",
                 "Do not reject a resolver because you are unsure how the final answer source will use the identity.",
-                "Use question_context.raw_question and question_context.conversation_resolution_annotations when interpreting value_meaning_hint.",
+                "Use question_context.question when interpreting value_meaning_hint.",
                 "Use question_context.requested_facts only as local context for what the lookup text refers to; do not decide final source use from it.",
                 "Use the known input's value_meaning_hint and each option's read_id, resource_names, returned_identity, lookup_surface, query_params, and selected_output_fields to decide whether the resolver can resolve the lookup text.",
                 "lookup_surface.param_ref means the resolver can search its own resource directly using the lookup text.",
@@ -194,7 +194,7 @@ class GroundingTurnPrompt(TurnPromptBase):
         task: KnownTimeResolutionTask,
     ) -> dict[str, object]:
         payload: dict[str, object] = {
-            "raw_question": self.request.question,
+            "question": self.request.question,
         }
         if task.requested_facts:
             payload["requested_facts"] = [
@@ -209,10 +209,6 @@ class GroundingTurnPrompt(TurnPromptBase):
                 }
                 for fact in task.requested_facts
             ]
-        if self.request.conversation_resolution_overlay is not None:
-            payload["conversation_resolution_annotations"] = (
-                self.request.conversation_resolution_overlay.to_prompt_payload()
-            )
         return payload
 
     def _question_context_payload(
@@ -220,7 +216,7 @@ class GroundingTurnPrompt(TurnPromptBase):
         task: KnownInputBindingTask,
     ) -> dict[str, object]:
         payload: dict[str, object] = {
-            "raw_question": self.request.question,
+            "question": self.request.question,
         }
         if task.requested_facts:
             payload["requested_facts"] = [
@@ -235,10 +231,6 @@ class GroundingTurnPrompt(TurnPromptBase):
                 }
                 for fact in task.requested_facts
             ]
-        if self.request.conversation_resolution_overlay is not None:
-            payload["conversation_resolution_annotations"] = (
-                self.request.conversation_resolution_overlay.to_prompt_payload()
-            )
         return payload
 
     def binding_options_payload(self) -> dict[str, object]:

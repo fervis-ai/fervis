@@ -160,7 +160,6 @@ def run_read_eligibility_prepare_recall_case(payload: dict[str, Any]) -> list[st
             catalog_selection=prepared,
             conversation_context=request.conversation_context,
             available_values=request.available_values,
-            conversation_resolution_overlay=request.conversation_resolution_overlay,
         )
     )
     card_payload = surface.card_payload

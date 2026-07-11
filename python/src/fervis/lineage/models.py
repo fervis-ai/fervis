@@ -14,6 +14,7 @@ from fervis.lineage.enums import (
     ModelUsageUnit,
     PresentationClientKey,
     PresentationKind,
+    ProgramInvocationKind,
     RunResultKind,
     RunStepKey,
     RunStepKind,
@@ -193,6 +194,11 @@ class ProgramInvocation(models.Model):
         related_name="invocations",
     )
     bindings_json = models.TextField()
+    kind = models.CharField(
+        max_length=32,
+        choices=choices(ProgramInvocationKind),
+    )
+    base_invocation_id = models.CharField(max_length=80, null=True, blank=True)
     patch_id = models.CharField(max_length=80, null=True, blank=True)
     binding_patch_json = models.TextField(null=True, blank=True)
     revision = models.ForeignKey(

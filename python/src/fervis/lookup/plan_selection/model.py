@@ -6,9 +6,6 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from fervis.lookup.conversation_resolution.overlay import (
-    ConversationResolutionOverlay,
-)
 from fervis.lookup.relation_catalog import RelationCatalog
 from fervis.lookup.fact_plan.fact_plan import PlanImpossible
 from fervis.lookup.fact_planning.plan_shapes import ALL_PLAN_SHAPES
@@ -30,7 +27,6 @@ class PlanSelectionRequest:
     relation_catalog: RelationCatalog
     source_candidate_payload: dict[str, Any]
     conversation_context: dict[str, Any]
-    conversation_resolution_overlay: ConversationResolutionOverlay | None = None
     host: HostPromptContext = field(default_factory=HostPromptContext)
 
 

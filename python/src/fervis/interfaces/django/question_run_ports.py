@@ -209,18 +209,30 @@ class DjangoQuestionLifecyclePort:
     ) -> StoredProgramInvocation | None:
         access.require_valid()
         record = (
-            ProgramInvocation.objects.select_related("program")
-            .filter(
+            _answered_program_invocations(
                 run_id=run_id,
-                run__question_id=access.question_id,
-                run__question__conversation__tenant_id=access.tenant_id,
-                run__run_result__result_kind=RunResultKind.ANSWERED.value,
+                tenant_id=access.tenant_id,
             )
+            .filter(run__question_id=access.question_id)
             .first()
         )
         if record is None:
             return None
         return _stored_program_invocation(record)
+
+    def load_prior_answered_invocation(
+        self,
+        *,
+        run_id: str,
+        conversation_id: str,
+        tenant_id: str,
+    ) -> StoredProgramInvocation | None:
+        record = (
+            _answered_program_invocations(run_id=run_id, tenant_id=tenant_id)
+            .filter(run__question__conversation_id=conversation_id)
+            .first()
+        )
+        return _stored_program_invocation(record) if record is not None else None
 
     def load_program_invocation_for_execution(
         self,
@@ -583,6 +595,14 @@ def _question(access: AuthorizedQuestionAccess) -> Question | None:
     return rows.first()
 
 
+def _answered_program_invocations(*, run_id: str, tenant_id: str):
+    return ProgramInvocation.objects.select_related("program").filter(
+        run_id=run_id,
+        run__question__conversation__tenant_id=tenant_id,
+        run__run_result__result_kind=RunResultKind.ANSWERED.value,
+    )
+
+
 def _stored_program_invocation(
     record: ProgramInvocation,
 ) -> StoredProgramInvocation:
@@ -592,6 +612,8 @@ def _stored_program_invocation(
         program_id=record.program_id,
         canonical_json=record.program.canonical_json,
         bindings_json=record.bindings_json,
+        kind=record.kind,
+        base_invocation_id=record.base_invocation_id,
         patch_id=record.patch_id,
         binding_patch_json=record.binding_patch_json,
         revision_id=record.revision_id,

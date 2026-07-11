@@ -24,5 +24,5 @@ expect:
         kind: clarification_answer
         clarification_chain_id: turn_1
         clarification_question: Which store do you mean?
-        pending_integrated_question: How much sales did we make yesterday?
+        question_being_clarified: How much sales did we make yesterday?
         activation_fact_refs: [outcome.needs_clarification]

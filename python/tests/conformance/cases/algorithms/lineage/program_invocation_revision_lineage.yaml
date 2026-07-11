@@ -50,12 +50,15 @@ input:
         schema_revision: 1
     program_invocations:
       - invocation_id: pi_base
+        kind: compiled_question
         run_id: run_base
         program_id: ap_sales
         bindings:
           - parameter_id: semantic.sale_states
             value: {kind: string_set, values: [COMPLETED]}
       - invocation_id: pi_patch
+        kind: rerun_program
+        base_invocation_id: pi_base
         run_id: run_patch
         program_id: ap_sales
         bindings:
@@ -68,6 +71,8 @@ input:
               parameter_id: semantic.sale_states
               value: {kind: string_set, values: [COMPLETED, PLACED]}
       - invocation_id: pi_revision
+        kind: rerun_program
+        base_invocation_id: pi_base
         run_id: run_revision
         program_id: ap_sales_by_channel
         bindings:

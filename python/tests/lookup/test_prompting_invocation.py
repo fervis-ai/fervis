@@ -66,9 +66,9 @@ from fervis.memory.artifacts import (
 
 
 _APPROVED_CHARS = {
-    "question contract": (364, 15395, 22889),
-    "query enrichment": (364, 6026, 8255),
-    "grounding": (364, 5008, 6825),
+    "question contract": (364, 15515, 23013),
+    "query enrichment": (364, 5156, 7379),
+    "grounding": (364, 4943, 6760),
     "source binding": (364, 14408, 18143),
     "pattern fact planning": (364, 3497, 5311),
 }
@@ -174,10 +174,6 @@ def test_active_clarification_context_is_question_contract_only():
     assert "Which store?" in question_prompt.prompt_text
     assert "Active clarification context:" not in query_prompt.prompt_text
     assert "Which store?" not in query_prompt.prompt_text
-
-
-def test_planning_request_does_not_accept_conversation_overlay():
-    assert "conversation_resolution_overlay" not in FactPlanRequest.__dataclass_fields__
 
 
 def _turn_invocations():

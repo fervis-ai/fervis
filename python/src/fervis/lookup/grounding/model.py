@@ -6,9 +6,6 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from fervis.lookup.conversation_resolution.overlay import (
-    ConversationResolutionOverlay,
-)
 from fervis.lookup.relation_catalog import IdentityMetadata
 from fervis.lookup.turn_prompts.context import HostPromptContext
 from fervis.lookup.answer_program.values import (
@@ -159,7 +156,6 @@ class GroundingRequest:
     tasks: tuple[KnownInputBindingTask, ...]
     time_tasks: tuple[KnownTimeResolutionTask, ...] = ()
     conversation_context: dict[str, Any] = field(default_factory=dict)
-    conversation_resolution_overlay: ConversationResolutionOverlay | None = None
     host: HostPromptContext = field(default_factory=HostPromptContext)
 
 

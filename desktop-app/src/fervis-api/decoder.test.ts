@@ -166,6 +166,8 @@ describe("Fervis API boundary decoder", () => {
           baseRunId: null,
           programId: null,
           invocationId: null,
+          executionKind: null,
+          baseInvocationId: null,
           patchId: null,
           revisionId: null,
           questionId: "q_clarify",
@@ -244,6 +246,8 @@ describe("Fervis API boundary decoder", () => {
       baseRunId: null,
       programId: null,
       invocationId: null,
+      executionKind: null,
+      baseInvocationId: null,
       patchId: null,
       revisionId: null,
       questionId: "q_failed",
@@ -405,6 +409,8 @@ describe("Fervis API boundary decoder", () => {
       baseRunId: "run_sales",
       programId: "ap_sales",
       invocationId: "pi_rerun",
+      executionKind: "rerun_program",
+      baseInvocationId: "pi_sales",
       patchId: "bp_rerun",
       revisionId: null
     });
@@ -418,6 +424,8 @@ describe("Fervis API boundary decoder", () => {
       baseRunId: "run_sales",
       programId: "ap_sales",
       invocationId: "pi_rerun",
+      executionKind: "rerun_program",
+      baseInvocationId: "pi_sales",
       patchId: "bp_rerun",
       revisionId: null
     });
@@ -451,6 +459,8 @@ describe("Fervis API boundary decoder", () => {
       baseRunId: "run_sales",
       programId: "ap_sales",
       invocationId: "pi_rerun",
+      executionKind: "rerun_program",
+      baseInvocationId: "pi_sales",
       ...missing
     });
 
@@ -481,6 +491,8 @@ describe("Fervis API boundary decoder", () => {
           baseRunId: null,
           programId: null,
           invocationId: null,
+          executionKind: null,
+          baseInvocationId: null,
           patchId: null,
           revisionId: null
         }

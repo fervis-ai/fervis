@@ -19,6 +19,8 @@ describe("ConversationLedger", () => {
       triggerKind: "rerun",
       baseRunId: completedRunFixture.runId,
       invocationId: "pi_variant",
+      executionKind: "rerun_program",
+      baseInvocationId: "pi_sales",
       patchId: "bp_variant",
       answer: "20 sales including placed orders."
     } satisfies RunPayload;

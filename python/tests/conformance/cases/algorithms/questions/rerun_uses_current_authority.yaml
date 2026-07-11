@@ -15,7 +15,8 @@ input:
         principal: &principal {principal_id: user_1, tenant_id: tenant_1}
     program_invocations:
       - run_id: run_base
-        program_id: ap_9e378ea04b6f0327b21dd9de0a49d1373d065783b427769ad24195afbf0f17b2
+        kind: compiled_question
+        program_id: ap_3f931704e91234d2aa71355037bbf1b487e2034e8a04e91a2a7a1c58192f09a7
         program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/invocation}
         bindings:
           - parameter_id: question.store_ids

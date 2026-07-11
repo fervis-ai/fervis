@@ -115,20 +115,41 @@ function decodeRunIdentity(
 ): RunIdentity {
   const kind = decodeRunKind(object.kind, "kind");
   const triggerKind = decodeTriggerKind(object.triggerKind, "triggerKind");
+  const invocationId = expectNullableString(object.invocationId, "invocationId");
+  const executionKind = decodeExecutionKind(object.executionKind);
+  const baseInvocationId = expectNullableString(
+    object.baseInvocationId,
+    "baseInvocationId"
+  );
   if (kind === "deterministic") {
     if (triggerKind !== "rerun") {
       throw new Error("deterministic run requires triggerKind rerun");
+    }
+    if (executionKind !== "rerun_program" || baseInvocationId === null) {
+      throw new Error("deterministic run requires a rerun program invocation");
     }
     return {
       kind,
       triggerKind,
       baseRunId: expectString(object.baseRunId, "baseRunId"),
       programId: expectString(object.programId, "programId"),
-      invocationId: expectString(object.invocationId, "invocationId")
+      invocationId: expectString(invocationId, "invocationId"),
+      executionKind,
+      baseInvocationId
     };
   }
   if (triggerKind === "rerun") {
     throw new Error("model-assisted run cannot use triggerKind rerun");
+  }
+  if (executionKind === "rerun_program") {
+    throw new Error("model-assisted run cannot execute a rerun program");
+  }
+  if (
+    (invocationId === null) !== (executionKind === null) ||
+    (executionKind === "compiled_question" && baseInvocationId !== null) ||
+    (executionKind === "continue_prior_request" && baseInvocationId === null)
+  ) {
+    throw new Error("model-assisted run has inconsistent invocation identity");
   }
   if (triggerKind === "initial") {
     if (object.baseRunId !== null) {
@@ -139,7 +160,9 @@ function decodeRunIdentity(
       triggerKind,
       baseRunId: null,
       programId: expectNullableString(object.programId, "programId"),
-      invocationId: expectNullableString(object.invocationId, "invocationId")
+      invocationId,
+      executionKind,
+      baseInvocationId
     };
   }
   return {
@@ -147,8 +170,26 @@ function decodeRunIdentity(
     triggerKind,
     baseRunId: expectString(object.baseRunId, "baseRunId"),
     programId: expectNullableString(object.programId, "programId"),
-    invocationId: expectNullableString(object.invocationId, "invocationId")
+    invocationId,
+    executionKind,
+    baseInvocationId
   };
+}
+
+function decodeExecutionKind(
+  raw: unknown
+): "compiled_question" | "continue_prior_request" | "rerun_program" | null {
+  if (raw === null) {
+    return null;
+  }
+  if (
+    raw === "compiled_question" ||
+    raw === "continue_prior_request" ||
+    raw === "rerun_program"
+  ) {
+    return raw;
+  }
+  throw new Error("executionKind must identify a supported execution path");
 }
 
 function decodeRunErrorPayload(raw: unknown): RunError | null {

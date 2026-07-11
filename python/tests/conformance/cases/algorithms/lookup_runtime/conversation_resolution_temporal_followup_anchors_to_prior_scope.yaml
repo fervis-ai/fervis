@@ -32,7 +32,7 @@ input:
     mode: select_visible_memory
     memory_id: turn_yesterday.value.grounded_fact_1_time_1
     resolved_text: yesterday
-    integrated_question: How much money did we make the day before?
+    contextualized_question: How much money did we make the day before?
   question_contract:
     fact_description: money made the day before
     subject_text: the day before

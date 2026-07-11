@@ -176,7 +176,6 @@ def _lineage_dataset() -> dict[str, object]:
                 "run_number": 1,
                 "kind": "model_assisted",
                 "trigger_kind": "initial",
-                "integrated_question": "Which staff earned the most this month?",
             },
             {
                 "run_id": "run_2",
@@ -185,7 +184,6 @@ def _lineage_dataset() -> dict[str, object]:
                 "kind": "model_assisted",
                 "trigger_kind": "retry",
                 "base_run_id": "run_1",
-                "integrated_question": "Which staff earned the most this month?",
             },
             {
                 "run_id": "run_3",
@@ -193,7 +191,6 @@ def _lineage_dataset() -> dict[str, object]:
                 "run_number": 1,
                 "kind": "model_assisted",
                 "trigger_kind": "initial",
-                "integrated_question": "How many stores are open?",
             },
         ],
         "steps": [

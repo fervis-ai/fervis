@@ -5,6 +5,13 @@ import json
 from typing import Any
 
 from fervis.lookup.orchestration.pipeline import run_lookup_question
+from fervis.lineage.enums import ProgramInvocationKind
+from fervis.lookup.answer_program.codec import answer_program_id, decode_answer_program
+from fervis.lookup.answer_program.persistence import (
+    ProgramInvocation,
+    StoredProgramInvocation,
+    program_invocation,
+)
 from fervis.lookup.orchestration.request import (
     LookupRequest,
     LookupRuntimePorts,
@@ -68,6 +75,7 @@ from tests.lookup.source_binding_helpers import (
 from fervis.lookup.clarification import clarification_payload
 from tests.testkit.assertions import subset_mismatches
 from tests.testkit.catalog import catalog_from_payload
+from tests.testkit.answer_program_contracts import binding_set_from_payload
 
 
 def run_lookup_runtime_case(payload: dict[str, Any]) -> list[str]:
@@ -76,6 +84,8 @@ def run_lookup_runtime_case(payload: dict[str, Any]) -> list[str]:
         return _run_grounded_identity_endpoint_variant(payload)
     if scenario == "scripted_pattern":
         return _run_scripted_pattern(payload)
+    if scenario == "callable_prior_frame":
+        return _run_callable_prior_frame(payload)
     return [f"unsupported lookup runtime scenario: {scenario}"]
 
 
@@ -149,6 +159,101 @@ def _run_scripted_pattern(payload: dict[str, Any]) -> list[str]:
         },
         expected_subset=payload["expect"]["result_contains"],
     )
+
+
+def _run_callable_prior_frame(payload: dict[str, Any]) -> list[str]:
+    input_payload = payload["input"]
+    program = decode_answer_program(input_payload["base_program"])
+    base_bindings = binding_set_from_payload(input_payload["base_invocation"])
+    base = StoredProgramInvocation(
+        invocation=program_invocation(
+            run_id=str(input_payload["base_run_id"]),
+            program_id=answer_program_id(program),
+            bindings=base_bindings,
+            kind=ProgramInvocationKind.COMPILED_QUESTION,
+        ),
+        program=program,
+    )
+    planner = _ScriptedPatternPlannerPort(
+        question_contract=input_payload["question_contract"],
+        fact_plan={},
+        conversation_resolution=input_payload["conversation_resolution"],
+        grounding=input_payload.get("grounding"),
+    )
+    data_access = _DataAccessPort(dict(input_payload["responses"]))
+    invocation_binding = _RecordingInvocationBinding(
+        run_id=str(input_payload.get("run_id") or "run_callable_frame")
+    )
+    conversation_id = str(input_payload.get("conversation_id") or "conversation_1")
+    tenant_id = str(input_payload.get("tenant_id") or "tenant_1")
+    result = run_lookup_question(
+        LookupRequest(
+            question=str(input_payload["question"]),
+            conversation_context=_conversation_context(input_payload),
+            provider_preferences={"provider": "fake", "modelKey": "FAKE"},
+            run_id=invocation_binding.run_id,
+            tenant_id=tenant_id,
+            user_context={"conversationId": conversation_id},
+        ),
+        LookupRuntimePorts(
+            relation_catalog_port=_CatalogPort(
+                catalog_from_payload(input_payload["catalog"])
+            ),
+            data_access_port=data_access,
+            planner_model_port=planner,
+            prior_program_invocations=_PriorInvocationReader(base),
+            program_invocation_binding=invocation_binding,
+        ),
+    )
+    invocation = invocation_binding.invocation
+    return subset_mismatches(
+        actual={
+            "status": result.status,
+            "error": result.error,
+            "answer": result.answer,
+            "endpoint_args": {
+                request["endpointName"]: request["args"]
+                for request in data_access.requests
+            },
+            "tool_names": planner.tool_names,
+            "invocation_kind": invocation.kind.value if invocation else "",
+            "base_invocation_id": (
+                invocation.base_invocation_id if invocation else None
+            ),
+        },
+        expected_subset=payload["expect"]["result_contains"],
+    )
+
+
+@dataclass(frozen=True)
+class _PriorInvocationReader:
+    stored: StoredProgramInvocation
+
+    def load_prior_answered_invocation(
+        self,
+        *,
+        run_id: str,
+        conversation_id: str,
+        tenant_id: str,
+    ) -> StoredProgramInvocation | None:
+        del conversation_id, tenant_id
+        return self.stored if run_id == self.stored.invocation.run_id else None
+
+
+@dataclass
+class _RecordingInvocationBinding:
+    run_id: str
+    invocation: ProgramInvocation | None = None
+
+    def bind(self, execution, *, kind, base_invocation_id):
+        self.invocation = program_invocation(
+            run_id=self.run_id,
+            program_id=answer_program_id(execution.answer),
+            bindings=execution.bindings,
+            kind=kind,
+            base_invocation_id=base_invocation_id,
+        )
+        return self.invocation
 
 
 def _run_grounded_identity_endpoint_variant(payload: dict[str, Any]) -> list[str]:
@@ -738,14 +843,14 @@ def _scripted_conversation_resolution_payload(
     if isinstance(payload, dict) and payload.get("mode") == "use_visible_memory":
         return _conversation_resolution_using_visible_memory(
             prompt,
-            integrated_question=str(payload.get("integrated_question") or ""),
+            contextualized_question=str(payload.get("contextualized_question") or ""),
         )
     if isinstance(payload, dict) and payload.get("mode") == "select_visible_memory":
         return _conversation_resolution_selecting_visible_memory(
             prompt,
             memory_id=str(payload.get("memory_id") or ""),
             anchor_text=str(payload.get("anchor_text") or ""),
-            integrated_question=str(payload.get("integrated_question") or ""),
+            contextualized_question=str(payload.get("contextualized_question") or ""),
             resolved_text=str(payload.get("resolved_text") or ""),
         )
     if payload:
@@ -754,11 +859,20 @@ def _scripted_conversation_resolution_payload(
     return {
         "kind": "conversation_resolution",
         "current_question_text": current_question,
-        "clause_resolutions": [],
-        "unresolved": {
-            "unresolved_kind": "none",
-            "why_unresolved": "",
-            "candidate_interpretations": [],
+        "outcome": {
+            "kind": "resolved",
+            "resolution_basis": "The current question is context-free.",
+            "contextualized_question": current_question,
+            "clauses": [
+                {
+                    "current_clause_text": current_question,
+                    "occurrence": 1,
+                    "resolved_text": current_question,
+                    "retained_frame_parts": [],
+                    "values": [],
+                }
+            ],
+            "frame_call": {"kind": "none"},
         },
     }
 
@@ -766,64 +880,46 @@ def _scripted_conversation_resolution_payload(
 def _conversation_resolution_using_visible_memory(
     prompt: str,
     *,
-    integrated_question: str,
+    contextualized_question: str,
 ) -> dict[str, Any]:
     current_question = _current_question_from_prompt(prompt)
     context_sources = (
         prompt_section_payload(prompt, "Context sources").get("context_sources") or []
     )
-    context_frames = (
-        prompt_section_payload(prompt, "Available context frames").get(
-            "available_context_frames"
-        )
-        or []
-    )
-    dependencies = [
-        {
-            "anchor_text": current_question,
-            "occurrence": 1,
-            "kind": "reference",
-            "meaning_components": _meaning_components_for_source(source),
-            "resolved_text": integrated_question or current_question,
-            "must_preserve_terms": [integrated_question or current_question],
-        }
+    components = [
+        component
         for source in context_sources
-        if isinstance(source, dict) and _meaning_components_for_source(source)
+        if isinstance(source, dict)
+        for component in _meaning_components_for_source(source)
     ]
+    resolved_question = contextualized_question or current_question
     return {
         "kind": "conversation_resolution",
         "current_question_text": current_question,
-        "clause_resolutions": (
-            [
+        "outcome": {
+            "kind": "resolved",
+            "resolution_basis": (
+                "Visible prior meaning supplies the context omitted by the current "
+                "question."
+            ),
+            "contextualized_question": resolved_question,
+            "clauses": [
                 {
                     "current_clause_text": current_question,
                     "occurrence": 1,
-                    "requested_value_frame": {
-                        "current_value_surface": {
-                            "text": current_question,
-                            "kind": "self_sufficient_current_value",
-                        },
-                        "context_frame_choices": [
-                            {
-                                "frame_id": str(frame["frame_id"]),
-                                "choice": "use_frame",
-                                "current_conflict_quotes": [],
-                            }
-                            for frame in context_frames
-                            if isinstance(frame, dict) and frame.get("frame_id")
-                        ],
-                    },
-                    "dependencies": dependencies,
-                    "resolved_clause_text": integrated_question or current_question,
+                    "resolved_text": resolved_question,
+                    "retained_frame_parts": [],
+                    "values": [
+                        {
+                            "value_id": f"memory_value_{index}",
+                            "resolved_text": component["resolved_text"],
+                            "sources": [_context_anchor_source(component)],
+                        }
+                        for index, component in enumerate(components, start=1)
+                    ],
                 }
-            ]
-            if dependencies
-            else []
-        ),
-        "unresolved": {
-            "unresolved_kind": "none",
-            "why_unresolved": "",
-            "candidate_interpretations": [],
+            ],
+            "frame_call": {"kind": "none"},
         },
     }
 
@@ -833,7 +929,7 @@ def _conversation_resolution_selecting_visible_memory(
     *,
     memory_id: str,
     anchor_text: str,
-    integrated_question: str,
+    contextualized_question: str,
     resolved_text: str,
 ) -> dict[str, Any]:
     current_question = _current_question_from_prompt(prompt)
@@ -846,37 +942,40 @@ def _conversation_resolution_selecting_visible_memory(
         resolved_text=resolved_text,
     )
     resolved = resolved_text or component["resolved_text"]
+    resolved_question = contextualized_question or current_question
     return {
         "kind": "conversation_resolution",
         "current_question_text": current_question,
-        "clause_resolutions": [
-            {
-                "current_clause_text": current_question,
-                "occurrence": 1,
-                "requested_value_frame": {
-                    "current_value_surface": {
-                        "text": current_question,
-                        "kind": "self_sufficient_current_value",
-                    },
-                    "context_frame_choices": [],
-                },
-                "dependencies": [
-                    {
-                        "anchor_text": anchor,
-                        "occurrence": 1,
-                        "kind": "reference",
-                        "meaning_components": [component],
-                        "resolved_text": resolved,
-                        "must_preserve_terms": [resolved],
-                    }
-                ],
-                "resolved_clause_text": integrated_question or current_question,
-            }
-        ],
-        "unresolved": {
-            "unresolved_kind": "none",
-            "why_unresolved": "",
-            "candidate_interpretations": [],
+        "outcome": {
+            "kind": "resolved",
+            "resolution_basis": (
+                "The selected visible memory supplies the referent omitted by the "
+                "current question."
+            ),
+            "contextualized_question": resolved_question,
+            "clauses": [
+                {
+                    "current_clause_text": current_question,
+                    "occurrence": 1,
+                    "resolved_text": resolved_question,
+                    "retained_frame_parts": [],
+                    "values": [
+                        {
+                            "value_id": "selected_memory_value",
+                            "resolved_text": resolved,
+                            "sources": [
+                                {
+                                    "kind": "current_span",
+                                    "text": anchor,
+                                    "occurrence": 1,
+                                },
+                                _context_anchor_source(component),
+                            ],
+                        }
+                    ],
+                }
+            ],
+            "frame_call": {"kind": "none"},
         },
     }
 
@@ -935,6 +1034,15 @@ def _meaning_component_kind(anchor_kind: str) -> str:
     return "other"
 
 
+def _context_anchor_source(component: dict[str, str]) -> dict[str, str]:
+    return {
+        "kind": "context_anchor",
+        "source_id": component["source_id"],
+        "memory_id": component["memory_id"],
+        "source_text": component["source_text"],
+    }
+
+
 def _current_question_from_prompt(prompt: str) -> str:
     marker = "Current question:\n"
     if marker not in prompt:
@@ -958,6 +1066,7 @@ def _fact_artifact(payload: dict[str, Any]) -> Any:
         outcome=FactOutcome(str(payload.get("outcome") or FactOutcome.ANSWERED)),
         source_question=str(payload.get("source_question") or ""),
         source_answer=str(payload.get("source_answer") or ""),
+        provenance=dict(payload.get("provenance") or {}),
         addresses=tuple(
             fact_address_from_payload(item) for item in payload.get("addresses") or ()
         ),

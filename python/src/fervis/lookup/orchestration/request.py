@@ -15,7 +15,10 @@ from fervis.lookup.relation_catalog.selection import (
 from fervis.lookup.turn_prompts.context import HostPromptContext
 
 if TYPE_CHECKING:
-    from fervis.lookup.answer_program.persistence import ProgramInvocationBinding
+    from fervis.lookup.answer_program.persistence import (
+        PriorProgramInvocationReader,
+        ProgramInvocationBinding,
+    )
     from fervis.lookup.fact_planning.request import RuntimeValueContext
 
 
@@ -45,6 +48,7 @@ class LookupRuntimePorts:
     data_access_port: RelationDataAccessPort
     planner_model_port: Any
     program_invocation_binding: ProgramInvocationBinding | None = None
+    prior_program_invocations: PriorProgramInvocationReader | None = None
     lineage_step_sink: Any = None
     progress_sink: LookupProgressSink | None = None
     lineage_required: bool = False

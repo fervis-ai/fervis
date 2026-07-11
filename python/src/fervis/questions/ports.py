@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, TypeVar, assert_never
 
@@ -71,8 +71,8 @@ class QuestionRunRecord:
 
 
 @dataclass(frozen=True)
-class ModelAssistedRunSpec:
-    integrated_question: str
+class ResolveQuestionRunSpec:
+    question: str
     provider: str | None
     model_key: str
     context_run_id: str | None = None
@@ -82,39 +82,48 @@ class ModelAssistedRunSpec:
     max_thinking_tokens: int | None = None
 
     def __post_init__(self) -> None:
-        if not self.integrated_question.strip():
-            raise ValueError("model-assisted run requires integrated_question")
+        if not self.question.strip():
+            raise ValueError("resolve-question run requires question")
         if self.context_run_id is not None and not self.context_run_id.strip():
-            raise ValueError("model-assisted context_run_id must be non-empty")
+            raise ValueError("resolve-question context_run_id must be non-empty")
 
 
 @dataclass(frozen=True)
-class DeterministicRunSpec:
+class RerunProgramSpec:
     invocation_id: str
     runtime_context: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.invocation_id.strip():
-            raise ValueError("deterministic run requires invocation_id")
+            raise ValueError("rerun-program spec requires invocation_id")
 
 
-RunExecutionSpec: TypeAlias = ModelAssistedRunSpec | DeterministicRunSpec
+RunExecutionSpec: TypeAlias = ResolveQuestionRunSpec | RerunProgramSpec
+
+
+class RunExecutionSpecKind(StrEnum):
+    RESOLVE_QUESTION = "resolve_question"
+    RERUN_PROGRAM = "rerun_program"
+
+
 _RunSpecResult = TypeVar("_RunSpecResult")
 
 
 def fold_run_execution_spec(
     spec: RunExecutionSpec,
     *,
-    model_assisted: Callable[[ModelAssistedRunSpec], _RunSpecResult],
-    deterministic: Callable[[DeterministicRunSpec], _RunSpecResult],
+    resolve_question: Callable[[ResolveQuestionRunSpec], _RunSpecResult],
+    rerun_program: Callable[[RerunProgramSpec], _RunSpecResult],
 ) -> _RunSpecResult:
     """Apply one exhaustive operation over the closed run-spec union."""
 
-    if isinstance(spec, ModelAssistedRunSpec):
-        return model_assisted(spec)
-    if isinstance(spec, DeterministicRunSpec):
-        return deterministic(spec)
-    assert_never(spec)
+    match spec:
+        case ResolveQuestionRunSpec():
+            return resolve_question(spec)
+        case RerunProgramSpec():
+            return rerun_program(spec)
+        case _:
+            assert_never(spec)
 
 
 @dataclass(frozen=True)
@@ -154,11 +163,11 @@ class ParsedQuestionRunSubmission:
                 raise ValueError("submission and question authority must match")
         fold_run_execution_spec(
             submission.spec,
-            model_assisted=lambda spec: _validate_model_assisted_record(
+            resolve_question=lambda spec: _validate_resolve_question_record(
                 spec,
                 record=record,
             ),
-            deterministic=lambda spec: _validate_deterministic_record(
+            rerun_program=lambda spec: _validate_rerun_program_record(
                 spec,
                 submission=submission,
                 record=record,
@@ -166,8 +175,8 @@ class ParsedQuestionRunSubmission:
         )
 
 
-def _validate_model_assisted_record(
-    spec: ModelAssistedRunSpec,
+def _validate_resolve_question_record(
+    spec: ResolveQuestionRunSpec,
     *,
     record: QuestionRunRecord,
 ) -> None:
@@ -180,8 +189,8 @@ def _validate_model_assisted_record(
         raise ValueError("model-assisted admission cannot include a revision")
 
 
-def _validate_deterministic_record(
-    spec: DeterministicRunSpec,
+def _validate_rerun_program_record(
+    spec: RerunProgramSpec,
     *,
     submission: RunSubmission,
     record: QuestionRunRecord,
@@ -356,6 +365,14 @@ class QuestionLifecyclePort(Protocol):
         *,
         run_id: str,
         access: AuthorizedQuestionAccess,
+    ) -> StoredProgramInvocation | None: ...
+
+    def load_prior_answered_invocation(
+        self,
+        *,
+        run_id: str,
+        conversation_id: str,
+        tenant_id: str,
     ) -> StoredProgramInvocation | None: ...
 
     def load_program_invocation_for_execution(

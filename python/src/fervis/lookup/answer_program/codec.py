@@ -22,6 +22,7 @@ from fervis.lookup.answer_program.model import AnswerProgram, ProgramCompatibili
 from fervis.lookup.answer_program.errors import AnswerProgramContractError
 from fervis.lookup.answer_program.values import BindingPatch, BindingSet
 from fervis.lookup.question_contract import model as question_contract_model
+from fervis.lookup import question_inputs
 
 
 ANSWER_PROGRAM_SCHEMA_REVISION = 1
@@ -642,6 +643,7 @@ _CONTRACT_TYPES = (
     question_contract_model.AnswerSubjectInstanceInterpretationKind,
     question_contract_model.GroupKeyDomainKind,
     question_contract_model.KnownInputSource,
+    question_inputs.LiteralInputRole,
     question_contract_model.MissingQuestionInput,
     question_contract_model.MissingQuestionInputType,
     question_contract_model.NormalInstanceExcludedStateRole,

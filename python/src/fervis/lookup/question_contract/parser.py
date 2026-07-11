@@ -5,7 +5,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from fervis.lookup.conversation_resolution import ConversationInputProvenanceSet
+from fervis.lookup.conversation_resolution.compilation import (
+    CompiledConversationResolution,
+)
 from fervis.lookup.question_contract._text_spans import copied_span
 from fervis.lookup.question_contract import provider_contract as provider_output
 from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
@@ -46,7 +48,7 @@ def parse_question_contract(
     question_context: str,
     question_context_texts: tuple[str, ...] = (),
     current_question_context_texts: tuple[str, ...] = (),
-    conversation_input_provenance: ConversationInputProvenanceSet | None = None,
+    conversation_resolution: CompiledConversationResolution | None = None,
 ) -> QuestionContractResult:
     question_text = _text(question_context)
     if not question_text:
@@ -81,7 +83,7 @@ def parse_question_contract(
     )
     _validate_conversation_resolution_question_inputs(
         question_inputs,
-        conversation_input_provenance=conversation_input_provenance,
+        conversation_resolution=conversation_resolution,
     )
     requested_facts = _requested_facts(
         parsed.answer_requests,
@@ -398,16 +400,18 @@ def _reject_unowned_question_inputs(
 def _validate_conversation_resolution_question_inputs(
     question_inputs: tuple[RequestedFactKnownInput, ...],
     *,
-    conversation_input_provenance: ConversationInputProvenanceSet | None,
+    conversation_resolution: CompiledConversationResolution | None,
 ) -> None:
-    provenance = conversation_input_provenance or ConversationInputProvenanceSet()
     for known in question_inputs:
         if known.source != KnownInputSource.CONVERSATION_RESOLUTION:
             continue
-        if provenance.accepts_question_input(known):
+        if (
+            conversation_resolution is not None
+            and conversation_resolution.accepts_question_input(known)
+        ):
             continue
         raise ValueError(
-            "conversation_resolution question input must match conversation input provenance"
+            "conversation_resolution question input must match a declared resolved input"
         )
 
 

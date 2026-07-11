@@ -9,7 +9,7 @@ input:
   question: What is the increase between the current and previous totals?
   conversation_resolution:
     mode: use_visible_memory
-    integrated_question: What is the increase between the prior current and previous totals?
+    contextualized_question: What is the increase between the prior current and previous totals?
   memory_artifacts:
     - artifact_id: prior_totals
       outcome: answered

@@ -1,0 +1,25 @@
+id: prompt_uses_raw_question_and_typed_resolution
+description: Question contract receives raw wording and typed values without CR's contextualized prose.
+kind: algorithm
+algorithm: question_contract.prompt
+input:
+  current_question: What about stores?
+  conversation_resolution:
+    current_question_text: What about stores?
+    contextualized_question: How many stores do we have?
+    clauses:
+      - current_clause_text: What about stores?
+        resolved_text: How many stores do we have?
+        values:
+          - {value_id: count_shape, resolved_text: count, source_kinds: [answer_output]}
+  contains: ["What about stores?", resolved_values, count]
+  excludes: ["How many stores do we have?"]
+expect:
+  result_contains:
+    current_question_present: true
+    contains:
+      "What about stores?": true
+      resolved_values: true
+      count: true
+    excludes:
+      "How many stores do we have?": true

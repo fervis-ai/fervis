@@ -147,6 +147,8 @@ export type RunIdentity =
       readonly baseRunId: null;
       readonly programId: string | null;
       readonly invocationId: string | null;
+      readonly executionKind: "compiled_question" | "continue_prior_request" | null;
+      readonly baseInvocationId: string | null;
     }
   | {
       readonly kind: "model_assisted";
@@ -154,6 +156,8 @@ export type RunIdentity =
       readonly baseRunId: string;
       readonly programId: string | null;
       readonly invocationId: string | null;
+      readonly executionKind: "compiled_question" | "continue_prior_request" | null;
+      readonly baseInvocationId: string | null;
     }
   | {
       readonly kind: "deterministic";
@@ -161,6 +165,8 @@ export type RunIdentity =
       readonly baseRunId: string;
       readonly programId: string;
       readonly invocationId: string;
+      readonly executionKind: "rerun_program";
+      readonly baseInvocationId: string;
     };
 
 export type RunPayload = RunPayloadBase & RunIdentity;

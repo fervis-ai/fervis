@@ -24,9 +24,11 @@ input:
             answer_requests:
               - id: fact_1
                 answer_fact: sales by Staff One yesterday
+                answer_expression: {family: scalar_aggregate}
                 answer_outputs:
                   - id: answer_1
                     description: total sales amount
+                    role: MEASURED_VALUE
                 used_question_inputs:
                   - input_period
         addresses:
@@ -51,7 +53,10 @@ expect:
             answer_outputs:
               - output_id: answer_1
                 description: total sales amount
-                requested_value_frame: total sales amount
+                role: MEASURED_VALUE
+            answer_shape:
+              expression_family: scalar_aggregate
+              output_roles: [MEASURED_VALUE]
             slots:
               - slot_id: input_period
                 slot_kind: time_scope

@@ -237,6 +237,8 @@ export const completedRunFixture = {
   baseRunId: null,
   programId: "ap_sales",
   invocationId: "pi_sales",
+  executionKind: "compiled_question",
+  baseInvocationId: null,
   patchId: null,
   revisionId: null,
   status: "COMPLETED",

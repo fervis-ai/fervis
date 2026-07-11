@@ -13,7 +13,7 @@ from .contracts import (
     RerunQuestionRequest,
     QuestionLifecycleError,
 )
-from fervis.lineage.enums import QuestionRunKind, RunTriggerKind
+from fervis.lineage.enums import ProgramInvocationKind, QuestionRunKind, RunTriggerKind
 from fervis.host_api.contracts.authority import ReadAuthority
 from fervis.run_work.contracts import QueuedRunRequest
 from fervis.run_work.events import (
@@ -42,8 +42,8 @@ from .ports import (
     QuestionRunStart,
     QuestionRunSubmissionKind,
     QueuedRun,
-    ModelAssistedRunSpec,
-    DeterministicRunSpec,
+    ResolveQuestionRunSpec,
+    RerunProgramSpec,
     RunSubmission,
     QuestionIdPort,
     QuestionStart,
@@ -132,8 +132,8 @@ class QuestionService:
             question_id=self.ids.new_question_id(),
             run_id=self.ids.new_run_id(),
             principal=request.principal,
-            spec=ModelAssistedRunSpec(
-                integrated_question=question,
+            spec=ResolveQuestionRunSpec(
+                question=question,
                 provider=request.provider,
                 model_key=request.model_key,
                 context_run_id=request.context_run_id,
@@ -200,8 +200,8 @@ class QuestionService:
             question_id=stored.question_id,
             run_id=self.ids.new_run_id(),
             principal=request.principal,
-            spec=ModelAssistedRunSpec(
-                integrated_question=question_text,
+            spec=ResolveQuestionRunSpec(
+                question=question_text,
                 provider=request.provider,
                 model_key=request.model_key,
                 conversation_context=self.lineage.conversation_memory_context(
@@ -325,6 +325,8 @@ class QuestionService:
             run_id=run_id,
             program_id=answer_program_id(program),
             bindings=bindings,
+            kind=ProgramInvocationKind.RERUN_PROGRAM,
+            base_invocation_id=base.invocation.invocation_id,
             patch=patch,
             revision_id=(revision.revision_id if revision is not None else None),
         )
@@ -334,7 +336,7 @@ class QuestionService:
             question_id=question.question_id,
             run_id=run_id,
             principal=request.principal,
-            spec=DeterministicRunSpec(
+            spec=RerunProgramSpec(
                 invocation_id=invocation.invocation_id,
                 runtime_context=dict(request.runtime_context),
             ),

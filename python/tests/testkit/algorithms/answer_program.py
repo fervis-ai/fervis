@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from typing import Any
+from fervis.lineage.enums import ProgramInvocationKind
 
 from fervis.lookup.answer_program import (
     AnswerProgram,
@@ -89,6 +90,7 @@ def run_answer_program_canonicalize_case(payload: dict[str, Any]) -> list[str]:
             run_id=run_id,
             program_id=program_ids[0],
             bindings=bindings,
+            kind=ProgramInvocationKind.COMPILED_QUESTION,
         ).invocation_id
         for bindings in binding_sets
     )

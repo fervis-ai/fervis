@@ -697,16 +697,10 @@ def _offered_conversation_resolution_tool_names(
     )
 
 
-def _conversation_resolution_tool_name_for_payload(payload: dict[str, Any]) -> str:
-    del payload
-    return CONVERSATION_RESOLUTION_TOOL_NAME
-
-
 def _select_conversation_resolution_tool_name(
     tool_specs: tuple[Any, ...],
     *,
     responses: dict[str, dict[str, Any]] | None = None,
-    payload: dict[str, Any] | None = None,
 ) -> str:
     offered = _offered_conversation_resolution_tool_names(tool_specs)
     if not offered:
@@ -714,8 +708,7 @@ def _select_conversation_resolution_tool_name(
     for name in offered:
         if responses and name in responses:
             return name
-    wanted = _conversation_resolution_tool_name_for_payload(payload or {})
-    return wanted if wanted in offered else offered[0]
+    return offered[0]
 
 
 @dataclass(frozen=True)
@@ -859,8 +852,6 @@ def _question_contract_with_answer_expression_from_fact_plan(
 
 def _question_contract_payload(
     contract: QuestionContract,
-    *,
-    prompt: str = "",
 ) -> dict[str, Any]:
     id_map = _question_contract_id_map(contract)
     payload = {
@@ -878,7 +869,7 @@ def _question_contract_payload(
             "all_input_like_phrases_declared": True,
         },
     }
-    return _question_contract_response_with_prompt_memory(payload, prompt=prompt)
+    return payload
 
 
 def _question_contract_answer_request_payload(
@@ -909,7 +900,7 @@ def _question_contract_answer_request_payload(
             subject_text=subject_text,
         ),
         "answer_outputs": [
-            _answer_output_for_current_contract(output.to_answer_request_dict())
+            output.to_answer_request_dict()
             for output in fact.answer_outputs
         ],
         "used_question_inputs": [
@@ -1127,120 +1118,12 @@ def _question_input_from_response_item(
     output["resolved_value_text"] = str(
         item.get("resolved_value_text") or item.get("value_text") or source_text
     )
+    if item.get("resolved_input_ref"):
+        output["resolved_input_ref"] = str(item["resolved_input_ref"])
     if item.get("field_label_text"):
         output["field_label_text"] = str(item["field_label_text"])
     if item.get("value_meaning_hint"):
         output["value_meaning_hint"] = str(item["value_meaning_hint"])
-    return output
-
-
-def _question_contract_response_with_prompt_memory(
-    response: dict[str, Any],
-    *,
-    prompt: str,
-    fact_plan: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    output = dict(response)
-    family_by_fact_id = _answer_expression_family_by_fact_id_from_fact_plan(
-        fact_plan or {}
-    )
-    output.setdefault(
-        "question_input_inventory_check",
-        {"all_input_like_phrases_declared": True},
-    )
-    question_inputs = output.get("question_inputs")
-    if isinstance(question_inputs, list):
-        for item in question_inputs:
-            if isinstance(item, dict):
-                item.setdefault(
-                    "inventory_check",
-                    {
-                        "why_this_is_an_input": (
-                            f"{item.get('reference_text') or 'input'} is a declared question input"
-                        )
-                    },
-                )
-    answer_requests = output.get("answer_requests")
-    if not isinstance(answer_requests, list):
-        return output
-    output.setdefault("answer_requests_count", len(answer_requests))
-    output["answer_requests"] = [
-        _question_contract_answer_request_for_current_contract(
-            item,
-            prompt=prompt,
-            answer_expression_family=(
-                family_by_fact_id.get(
-                    str(item.get("requested_fact_id") or f"fact_{index}")
-                )
-                if isinstance(item, dict)
-                else None
-            ),
-        )
-        for index, item in enumerate(answer_requests, start=1)
-    ]
-    return output
-
-
-def _question_contract_answer_request_for_current_contract(
-    item: Any,
-    *,
-    prompt: str,
-    answer_expression_family: str | None = None,
-) -> Any:
-    if not isinstance(item, dict):
-        return item
-    output = dict(item)
-    if answer_expression_family:
-        output["answer_expression"] = _question_contract_answer_expression_payload(
-            answer_expression_family
-        )
-    else:
-        output.setdefault("answer_expression", {"family": "scalar_aggregate"})
-    if "answer_subject" in output:
-        output["answer_subject"] = (
-            _question_contract_answer_subject_for_current_contract(
-                output.get("answer_subject"),
-            )
-        )
-    if "answer_population" not in output:
-        subject_text = str(
-            (output.get("answer_subject") or {}).get("subject_text")
-            if isinstance(output.get("answer_subject"), dict)
-            else output.get("answer_fact")
-        )
-        output["answer_population"] = _answer_population_payload_from_text(
-            description=str(output.get("answer_fact") or subject_text),
-            subject_text=subject_text,
-        )
-    answer_outputs = output.get("answer_outputs")
-    if isinstance(answer_outputs, list):
-        output["answer_outputs"] = [
-            _answer_output_for_current_contract(answer_output)
-            for answer_output in answer_outputs
-        ]
-    return output
-
-
-def _answer_output_for_current_contract(answer_output: object) -> object:
-    if not isinstance(answer_output, dict):
-        return answer_output
-    if "description" not in answer_output:
-        return answer_output
-    output: dict[str, object] = {
-        "description": answer_output.get("description"),
-    }
-    if answer_output.get("role"):
-        output["role"] = answer_output["role"]
-    return output
-
-
-def _question_contract_answer_expression_payload(family: str) -> dict[str, object]:
-    output: dict[str, object] = {"family": family}
-    if family == "grouped_aggregate":
-        output["group_key"] = {
-            "description": "group",
-            "domain": "SOURCE_RESULT_VALUES",
-        }
     return output
 
 
@@ -1278,24 +1161,6 @@ def _answer_expression_family_for_pattern(pattern: str) -> str:
     return "scalar_aggregate"
 
 
-def _question_contract_answer_subject_for_current_contract(
-    raw: Any,
-) -> Any:
-    if isinstance(raw, dict):
-        subject_text = str(raw.get("subject_text") or "").strip()
-        if subject_text:
-            instance = raw.get("instance_interpretation")
-            if isinstance(instance, dict) and str(instance.get("kind") or "").strip():
-                return {
-                    "subject_text": subject_text,
-                    "instance_interpretation": {
-                        "kind": str(instance.get("kind") or "").strip()
-                    },
-                }
-            return _answer_subject_payload(subject_text)
-    return raw
-
-
 def _current_question_from_prompt(prompt: str) -> str:
     marker = "Current question:\n"
     if marker not in prompt:
@@ -1308,20 +1173,34 @@ def _conversation_resolution_payload_from_prompt(prompt: str) -> dict[str, Any]:
     return {
         "kind": "conversation_resolution",
         "current_question_text": current_question,
-        "clause_resolutions": [],
-        "unresolved": _resolved_unresolved(),
+        "outcome": {
+            "kind": "resolved",
+            "resolution_basis": "The current question is context-free.",
+            "contextualized_question": current_question,
+            "clauses": [
+                {
+                    "current_clause_text": current_question,
+                    "occurrence": 1,
+                    "resolved_text": current_question,
+                    "retained_frame_parts": [],
+                    "values": [],
+                }
+            ],
+            "frame_call": {"kind": "none"},
+        },
     }
 
 
 def _conversation_resolution_payload_using_memory(
     prompt: str,
     *,
-    integrated_question: str | None = None,
+    contextualized_question: str | None = None,
     actual_text: str,
     source_kind: str = "",
+    retained_part_ids: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     current_question = _current_question_from_prompt(prompt)
-    resolved_question = integrated_question or current_question
+    resolved_question = contextualized_question or current_question
     source = (
         _context_source_by_kind(prompt, source_kind)
         if source_kind
@@ -1330,17 +1209,17 @@ def _conversation_resolution_payload_using_memory(
     return _conversation_resolution_clause_payload(
         prompt=prompt,
         current_question=current_question,
-        integrated_question=resolved_question,
+        contextualized_question=resolved_question,
         actual_text=actual_text,
         selected_sources=(source,),
-        force_selected_source=True,
+        retained_part_ids=retained_part_ids,
     )
 
 
 def _conversation_resolution_payload_using_memories(
     prompt: str,
     *,
-    integrated_question: str,
+    contextualized_question: str,
     memories: tuple[dict[str, str], ...],
 ) -> dict[str, Any]:
     current_question = _current_question_from_prompt(prompt)
@@ -1349,10 +1228,9 @@ def _conversation_resolution_payload_using_memories(
     return _conversation_resolution_clause_payload(
         prompt=prompt,
         current_question=current_question,
-        integrated_question=integrated_question,
+        contextualized_question=contextualized_question,
         actual_text=actual_text,
         selected_sources=selected_sources,
-        force_selected_source=bool(selected_sources),
     )
 
 
@@ -1435,12 +1313,10 @@ def _conversation_resolution_clause_payload(
     *,
     prompt: str,
     current_question: str,
-    integrated_question: str,
+    contextualized_question: str,
     actual_text: str,
     selected_sources: tuple[dict[str, Any], ...],
-    requested_value_frame: dict[str, Any] | None = None,
-    dependencies: list[dict[str, Any]] | None = None,
-    force_selected_source: bool = False,
+    retained_part_ids: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     current_text = actual_text if actual_text in current_question else current_question
     context_frames = tuple(
@@ -1450,231 +1326,103 @@ def _conversation_resolution_clause_payload(
             key="available_context_frames",
         )
     )
-    value_frame = requested_value_frame or _value_frame_for_prompt_context(
+    values = _resolved_values_for_sources(
+        selected_sources=selected_sources,
         context_frames=context_frames,
-        selected_sources=selected_sources,
-        current_value_text=current_text,
-        integrated_question=integrated_question,
-    )
-    dependencies = dependencies or _dependencies_for_resolution(
-        selected_sources=selected_sources,
-        current_question=current_question,
         current_text=current_text,
-        integrated_question=integrated_question,
-        excluded_phrases=_value_frame_excluded_phrases(value_frame),
     )
-    if force_selected_source and not dependencies and selected_sources:
-        source = selected_sources[0]
-        components = _meaning_components_for_source(source, resolved_text="")
-        source_text = _source_text_for_source(source)
-        if components:
-            dependencies = [
-                {
-                    "anchor_text": current_text,
-                    "occurrence": 1,
-                    "kind": "reference",
-                    "meaning_components": [
-                        {**component, "resolved_text": source_text}
-                        for component in components
-                    ],
-                    "resolved_text": "prior referenced context",
-                    "must_preserve_terms": [],
-                }
-            ]
+    retained_frame_parts = _retained_frame_part_refs(
+        context_frames=context_frames,
+        part_ids=retained_part_ids,
+    )
     return {
         "kind": "conversation_resolution",
         "current_question_text": current_question,
-        "clause_resolutions": [
-            {
-                "current_clause_text": current_text,
-                "occurrence": 1,
-                "requested_value_frame": value_frame,
-                "dependencies": dependencies,
-                "resolved_clause_text": integrated_question,
-            }
-        ],
-        "unresolved": _resolved_unresolved(),
+        "outcome": {
+            "kind": "resolved",
+            "resolution_basis": (
+                "The selected visible context supplies the meaning omitted by the "
+                "current clause."
+            ),
+            "contextualized_question": contextualized_question,
+            "clauses": [
+                {
+                    "current_clause_text": current_text,
+                    "occurrence": 1,
+                    "resolved_text": contextualized_question,
+                    "retained_frame_parts": retained_frame_parts,
+                    "values": values,
+                }
+            ],
+            "frame_call": {"kind": "none"},
+        },
     }
 
 
-def _dependencies_for_resolution(
+def _resolved_values_for_sources(
     *,
     selected_sources: tuple[dict[str, Any], ...],
-    current_question: str,
+    context_frames: tuple[dict[str, Any], ...],
     current_text: str,
-    integrated_question: str,
-    excluded_phrases: tuple[str, ...] = (),
 ) -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = []
-    for source in selected_sources:
-        source_text = _source_text_for_source(source)
-        phrase = _shared_phrase(
-            source_text,
-            integrated_question=integrated_question,
-        )
-        if phrase and phrase not in excluded_phrases:
-            components = _meaning_components_for_source(source, resolved_text=phrase)
-            if not components:
-                continue
-            items.append(
+    values = [
+        {
+            "value_id": f"context_value_{index}",
+            "resolved_text": str(anchor["text"]),
+            "sources": [
                 {
-                    "anchor_text": current_text,
-                    "occurrence": 1,
-                    "kind": "reference",
-                    "meaning_components": components,
-                    "resolved_text": phrase,
-                    "must_preserve_terms": [phrase],
+                    "kind": "context_anchor",
+                    "source_id": str(source["source_id"]),
+                    "memory_id": str(anchor["memory_id"]),
+                    "source_text": str(anchor["text"]),
                 }
-            )
-    if items:
-        return items
-    phrase = _shared_phrase(
-        current_text,
-        integrated_question=integrated_question,
-    )
-    source_text = current_text if phrase else current_question
-    phrase = phrase or _shared_phrase(
-        source_text,
-        integrated_question=integrated_question,
-    )
-    if not phrase:
-        return []
+            ],
+        }
+        for index, (source, anchor) in enumerate(
+            (
+                (source, anchor)
+                for source in selected_sources
+                for anchor in source.get("meaning_anchors") or ()
+                if isinstance(anchor, dict)
+                and anchor.get("memory_id")
+                and anchor.get("text")
+            ),
+            start=1,
+        )
+    ]
+    if values:
+        values[0]["sources"].insert(
+            0,
+            {"kind": "current_span", "text": current_text, "occurrence": 1},
+        )
+        return values
     return []
 
 
-def _meaning_components_for_source(
-    source: dict[str, Any],
-    *,
-    resolved_text: str,
-) -> list[dict[str, Any]]:
-    anchors = source.get("meaning_anchors") or ()
-    if not isinstance(anchors, list) or not anchors:
-        return []
-    output: list[dict[str, Any]] = []
-    for anchor in anchors:
-        if not isinstance(anchor, dict):
-            continue
-        output.append(
-            {
-                "kind": _meaning_component_kind(str(anchor.get("kind") or "")),
-                "source_id": str(source.get("source_id") or ""),
-                "source_text": str(anchor.get("text") or ""),
-                "memory_id": str(anchor.get("memory_id") or ""),
-                "resolved_text": resolved_text or str(anchor.get("text") or ""),
-            }
-        )
-    return output
-
-
-def _meaning_component_kind(anchor_kind: str) -> str:
-    if anchor_kind == "entity_identity":
-        return "entity"
-    if anchor_kind == "time_scope":
-        return "scope"
-    if anchor_kind == "row_set":
-        return "row_set"
-    if anchor_kind == "scalar_value":
-        return "value"
-    return "other"
-
-
-def _literal_requested_value_frame(
-    *,
-    current_value_text: str,
-    context_frames: tuple[dict[str, Any], ...] = (),
-) -> dict[str, Any]:
-    return {
-        "current_value_surface": {
-            "text": current_value_text,
-            "kind": "self_sufficient_current_value",
-        },
-        "context_frame_choices": [
-            {
-                "frame_id": str(frame.get("frame_id") or ""),
-                "choice": "not_for_this_clause",
-                "current_conflict_quotes": [],
-            }
-            for frame in context_frames
-            if str(frame.get("frame_id") or "").strip()
-        ],
-    }
-
-
-def _value_frame_for_prompt_context(
+def _retained_frame_part_refs(
     *,
     context_frames: tuple[dict[str, Any], ...],
-    selected_sources: tuple[dict[str, Any], ...],
-    current_value_text: str,
-    integrated_question: str,
-) -> dict[str, Any]:
-    selected_source_ids = {
-        str(source.get("source_id") or "") for source in selected_sources
-    }
-    for frame in context_frames:
-        requested_frame = str(frame.get("requested_frame") or "")
-        source_ids = {str(source_id) for source_id in frame.get("source_ids") or ()}
-        if requested_frame in integrated_question and selected_source_ids & source_ids:
-            selected_frame_id = str(frame.get("frame_id") or "")
-            return {
-                "current_value_surface": {
-                    "text": current_value_text,
-                    "kind": "broad_current_value",
-                },
-                "context_frame_choices": [
-                    {
-                        "frame_id": str(item.get("frame_id") or ""),
-                        "choice": (
-                            "use_frame"
-                            if str(item.get("frame_id") or "") == selected_frame_id
-                            else "not_for_this_clause"
-                        ),
-                        "current_conflict_quotes": [],
-                    }
-                    for item in context_frames
-                    if str(item.get("frame_id") or "").strip()
-                ],
+    part_ids: tuple[str, ...],
+) -> list[dict[str, str]]:
+    refs: list[dict[str, str]] = []
+    for part_id in part_ids:
+        matches = [
+            (str(frame["frame_id"]), str(part["part_id"]))
+            for frame in context_frames
+            for part in frame.get("parts") or ()
+            if str(part.get("part_id") or "") == part_id
+        ]
+        if len(matches) != 1:
+            raise AssertionError(f"retained frame part is not unique: {part_id}")
+        frame_id, matched_part_id = matches[0]
+        refs.append(
+            {
+                "kind": "frame_part",
+                "frame_id": frame_id,
+                "part_id": matched_part_id,
             }
-    return _literal_requested_value_frame(
-        current_value_text=current_value_text,
-        context_frames=context_frames,
-    )
-
-
-def _value_frame_excluded_phrases(value_frame: dict[str, Any]) -> tuple[str, ...]:
-    choices = value_frame.get("context_frame_choices") or ()
-    if not any(item.get("choice") == "use_frame" for item in choices):
-        return ()
-    return ("selected context frame",)
-
-
-def _resolved_unresolved() -> dict[str, Any]:
-    return {
-        "unresolved_kind": "none",
-        "why_unresolved": "",
-        "candidate_interpretations": [],
-    }
-
-
-def _shared_phrase(
-    source_text: str,
-    *,
-    integrated_question: str,
-) -> str:
-    words = re.findall(r"[A-Za-z0-9]+", source_text)
-    words = [word for word in words if word]
-    for length in range(len(words), 0, -1):
-        for start in range(0, len(words) - length + 1):
-            phrase = " ".join(words[start : start + length])
-            if phrase in source_text and phrase in integrated_question:
-                return phrase
-    return ""
-
-
-def _source_text_for_source(source: dict[str, Any]) -> str:
-    text = str(source.get("text") or "").strip()
-    if not text:
-        return ""
-    return text
+        )
+    return refs
 
 
 def _answer_output_support_role(answer_output: dict[str, Any]) -> str:

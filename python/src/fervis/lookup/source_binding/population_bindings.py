@@ -177,8 +177,8 @@ def _conversation_resolution_row_set_requirements(
     *,
     known_row_sets: dict[str, tuple[str, str]],
 ) -> tuple[RowSetPopulationRequirement, ...]:
-    overlay = request.conversation_resolution_overlay
-    if overlay is None or not known_row_sets:
+    resolution = request.conversation_resolution
+    if resolution is None or not known_row_sets:
         return ()
     active_ids = {str(item) for item in request.active_memory_ids if str(item)}
     known_by_resolved_ref = {
@@ -187,13 +187,11 @@ def _conversation_resolution_row_set_requirements(
         if resolved_input_ref
     }
     output: list[RowSetPopulationRequirement] = []
-    for item in overlay.resolved_question_inputs:
-        if item.kind != KnownInputKind.ROW_SET_REFERENCE:
-            continue
-        known = known_by_resolved_ref.get(item.resolved_input_ref)
+    for item in resolution.inputs:
+        known = known_by_resolved_ref.get(item.input_ref)
         if known is None:
             continue
-        memory_ids = tuple(str(value) for value in item.memory_ids if str(value))
+        memory_ids = item.row_set_memory_references()
         if len(memory_ids) != 1:
             continue
         memory_id = memory_ids[0]
@@ -203,9 +201,9 @@ def _conversation_resolution_row_set_requirements(
         output.append(
             RowSetPopulationRequirement(
                 input_ref=input_ref,
-                resolved_input_ref=item.resolved_input_ref,
+                resolved_input_ref=item.input_ref,
                 requested_fact_id=requested_fact_id,
-                value_id=item.resolved_input_ref,
+                value_id=item.input_ref,
                 memory_relation_id=memory_id,
             )
         )

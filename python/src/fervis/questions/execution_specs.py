@@ -5,35 +5,34 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any, Mapping
 
-from fervis.lineage.enums import QuestionRunKind
-
 from .ports import (
-    DeterministicRunSpec,
-    ModelAssistedRunSpec,
+    RerunProgramSpec,
+    ResolveQuestionRunSpec,
     RunExecutionSpec,
+    RunExecutionSpecKind,
     fold_run_execution_spec,
 )
 
 
-def execution_spec_kind(spec: RunExecutionSpec) -> QuestionRunKind:
+def execution_spec_kind(spec: RunExecutionSpec) -> RunExecutionSpecKind:
     return fold_run_execution_spec(
         spec,
-        model_assisted=lambda _spec: QuestionRunKind.MODEL_ASSISTED,
-        deterministic=lambda _spec: QuestionRunKind.DETERMINISTIC,
+        resolve_question=lambda _spec: RunExecutionSpecKind.RESOLVE_QUESTION,
+        rerun_program=lambda _spec: RunExecutionSpecKind.RERUN_PROGRAM,
     )
 
 
 def execution_spec_to_storage_dict(spec: RunExecutionSpec) -> dict[str, Any]:
     return fold_run_execution_spec(
         spec,
-        model_assisted=_model_assisted_storage_dict,
-        deterministic=_deterministic_storage_dict,
+        resolve_question=_resolve_question_storage_dict,
+        rerun_program=_rerun_program_storage_dict,
     )
 
 
-def _model_assisted_storage_dict(spec: ModelAssistedRunSpec) -> dict[str, Any]:
+def _resolve_question_storage_dict(spec: ResolveQuestionRunSpec) -> dict[str, Any]:
     return {
-        "integrated_question": spec.integrated_question,
+        "question": spec.question,
         "provider": spec.provider,
         "model_key": spec.model_key,
         "context_run_id": spec.context_run_id,
@@ -46,7 +45,7 @@ def _model_assisted_storage_dict(spec: ModelAssistedRunSpec) -> dict[str, Any]:
     }
 
 
-def _deterministic_storage_dict(spec: DeterministicRunSpec) -> dict[str, Any]:
+def _rerun_program_storage_dict(spec: RerunProgramSpec) -> dict[str, Any]:
     return {
         "invocation_id": spec.invocation_id,
         "runtime_context": dict(spec.runtime_context),
@@ -54,16 +53,18 @@ def _deterministic_storage_dict(spec: DeterministicRunSpec) -> dict[str, Any]:
 
 
 def execution_spec_from_storage(
-    kind: str | QuestionRunKind,
+    kind: str | RunExecutionSpecKind,
     payload: Mapping[str, object],
 ) -> RunExecutionSpec:
-    parsed_kind = kind if isinstance(kind, QuestionRunKind) else QuestionRunKind(kind)
+    parsed_kind = (
+        kind if isinstance(kind, RunExecutionSpecKind) else RunExecutionSpecKind(kind)
+    )
     values = dict(payload)
-    if parsed_kind is QuestionRunKind.MODEL_ASSISTED:
+    if parsed_kind is RunExecutionSpecKind.RESOLVE_QUESTION:
         _require_exact_fields(
             values,
             {
-                "integrated_question",
+                "question",
                 "provider",
                 "model_key",
                 "context_run_id",
@@ -77,9 +78,9 @@ def execution_spec_from_storage(
         context_run_id = values["context_run_id"]
         max_budget = values["max_budget_usd"]
         max_thinking = values["max_thinking_tokens"]
-        return ModelAssistedRunSpec(
-            integrated_question=_required_text(
-                values["integrated_question"], "integrated_question"
+        return ResolveQuestionRunSpec(
+            question=_required_text(
+                values["question"], "question"
             ),
             provider=None if provider is None else _text(provider, "provider"),
             model_key=_text(values["model_key"], "model_key"),
@@ -106,7 +107,7 @@ def execution_spec_from_storage(
             ),
         )
     _require_exact_fields(values, {"invocation_id", "runtime_context"})
-    return DeterministicRunSpec(
+    return RerunProgramSpec(
         invocation_id=_required_text(values["invocation_id"], "invocation_id"),
         runtime_context=_json_object(values["runtime_context"], "runtime_context"),
     )

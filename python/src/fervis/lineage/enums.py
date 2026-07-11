@@ -24,6 +24,12 @@ class QuestionRunKind(StrEnum):
     DETERMINISTIC = "deterministic"
 
 
+class ProgramInvocationKind(StrEnum):
+    COMPILED_QUESTION = "compiled_question"
+    CONTINUE_PRIOR_REQUEST = "continue_prior_request"
+    RERUN_PROGRAM = "rerun_program"
+
+
 class RunResultKind(StrEnum):
     ANSWERED = "answered"
     FACTUAL_TERMINAL = "factual_terminal"

@@ -82,6 +82,7 @@ from fervis.lookup.answer_program.values import (
 )
 from fervis.lookup.answer_program.codec import answer_program_id
 from fervis.lookup.answer_program.persistence import ProgramInvocationBinding
+from fervis.lineage.enums import ProgramInvocationKind
 from fervis.lookup.question_contract import RequestedFact
 
 if TYPE_CHECKING:
@@ -126,6 +127,8 @@ class RuntimePorts:
     memory: LookupMemory
     source_read_lineage: SourceReadLineageScope | None = None
     invocation_binding: ProgramInvocationBinding | None = None
+    invocation_kind: ProgramInvocationKind = ProgramInvocationKind.COMPILED_QUESTION
+    base_invocation_id: str | None = None
 
 
 def invoke_answer_program(
@@ -138,7 +141,11 @@ def invoke_answer_program(
     execution = instantiate_answer_program(program, bindings, environment)
     invocation_id = ""
     if ports.invocation_binding is not None:
-        invocation_id = ports.invocation_binding.bind(execution).invocation_id
+        invocation_id = ports.invocation_binding.bind(
+            execution,
+            kind=ports.invocation_kind,
+            base_invocation_id=ports.base_invocation_id,
+        ).invocation_id
     return replace(
         execute_verified_program(execution, ports),
         invocation_id=invocation_id,

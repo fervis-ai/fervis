@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from fervis.questions.ports import (
-    DeterministicRunSpec,
+    RerunProgramSpec,
     LookupExecutionRequest,
     LookupExecutionResult,
-    ModelAssistedRunSpec,
+    ResolveQuestionRunSpec,
     ProgramExecutionRequest,
     QueuedRun,
     RunSubmission,
@@ -156,7 +156,7 @@ class RunWorkService:
         self,
         submission: RunSubmission,
         *,
-        spec: ModelAssistedRunSpec,
+        spec: ResolveQuestionRunSpec,
         active_attempt: int | None,
         event_sink: QuestionRunEventSink | None = None,
     ) -> LookupExecutionResult:
@@ -165,7 +165,7 @@ class RunWorkService:
                 run_id=submission.run_id,
                 conversation_id=submission.conversation_id,
                 tenant_id=submission.tenant_id,
-                question=spec.integrated_question,
+                question=spec.question,
                 read_context_ref=submission.principal.read_context_ref,
                 delegated_credential=submission.principal.delegated_credential,
                 principal=(
@@ -193,13 +193,13 @@ class RunWorkService:
     ) -> LookupExecutionResult:
         return fold_run_execution_spec(
             submission.spec,
-            model_assisted=lambda spec: self._run_lookup(
+            resolve_question=lambda spec: self._run_lookup(
                 submission,
                 spec=spec,
                 active_attempt=active_attempt,
                 event_sink=event_sink,
             ),
-            deterministic=lambda spec: self._run_program(
+            rerun_program=lambda spec: self._run_program(
                 submission,
                 spec=spec,
                 active_attempt=active_attempt,
@@ -211,7 +211,7 @@ class RunWorkService:
         self,
         submission: RunSubmission,
         *,
-        spec: DeterministicRunSpec,
+        spec: RerunProgramSpec,
         active_attempt: int | None,
         event_sink: QuestionRunEventSink | None = None,
     ) -> LookupExecutionResult:
@@ -310,8 +310,8 @@ def _queued_result(queued: QueuedRun) -> QueuedRunResult:
 def _run_start_progress(spec: RunExecutionSpec) -> tuple[str, str]:
     return fold_run_execution_spec(
         spec,
-        model_assisted=lambda _spec: ("lookup", "starting lookup"),
-        deterministic=lambda _spec: (
+        resolve_question=lambda _spec: ("lookup", "starting lookup"),
+        rerun_program=lambda _spec: (
             "program",
             "starting deterministic program",
         ),

@@ -1,0 +1,42 @@
+id: mixed_context_resolves_without_edit_taxonomy
+description: One value may combine current wording and a prior semantic anchor without an edit classification.
+kind: algorithm
+algorithm: conversation_resolution.parse
+input:
+  current_question: What about Mombasa on that day?
+  context_sources:
+    - source_id: prior_question
+      kind: prior_user_question
+      text: How many sales did we make in Nairobi on Monday?
+      source_card_ids: [prior_card]
+      source_memory_ids: [prior_request, prior_monday]
+      meaning_anchors:
+        - {memory_id: prior_monday, text: Monday, occurrence: 1, kind: time_scope, label: prior day}
+  payload:
+    kind: conversation_resolution
+    current_question_text: What about Mombasa on that day?
+    outcome:
+      kind: resolved
+      resolution_basis: Current meaning and retained prior meaning form the resolved question.
+      contextualized_question: How many sales did we make in Mombasa on Monday?
+      clauses:
+        - current_clause_text: What about Mombasa on that day?
+          occurrence: 1
+          resolved_text: How many sales did we make in Mombasa on Monday?
+          retained_frame_parts: []
+          values:
+            - value_id: location
+              resolved_text: Mombasa
+              sources:
+                - {kind: current_span, text: Mombasa, occurrence: 1}
+            - value_id: day
+              resolved_text: Monday
+              sources:
+                - {kind: current_span, text: that day, occurrence: 1}
+                - {kind: context_anchor, source_id: prior_question, memory_id: prior_monday, source_text: Monday}
+      frame_call: {kind: none}
+expect:
+  result_contains:
+    contextualized_question: How many sales did we make in Mombasa on Monday?
+    used_memory_ids: [prior_monday]
+    frame_call: {kind: none}

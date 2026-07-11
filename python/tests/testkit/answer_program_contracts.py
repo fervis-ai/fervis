@@ -114,6 +114,11 @@ def fact_value_from_payload(
         "id": value_id,
         "proof_refs": tuple(str(item) for item in payload.get("proof_refs") or ()),
         "source_refs": tuple(str(item) for item in payload.get("source_refs") or ()),
+        "known_input_id": str(payload.get("known_input_id") or ""),
+        "applies_to_requested_fact_ids": tuple(
+            str(item)
+            for item in payload.get("applies_to_requested_fact_ids") or ()
+        ),
     }
     if kind == "identity":
         return FactValue.identity(

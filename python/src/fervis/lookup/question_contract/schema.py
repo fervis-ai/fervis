@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from fervis.lookup.question_contract.answer_output_support import (
     ANSWER_OUTPUT_SUPPORT_ROLE_VALUES,
 )
 from fervis.lookup.question_contract import provider_contract as provider_output
 from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
+
+if TYPE_CHECKING:
+    from fervis.lookup.conversation_resolution.compilation import (
+        ResolvedQuestionInput,
+    )
 
 
 def build_question_contract_decisions_schema() -> dict[str, object]:
@@ -20,7 +27,7 @@ def build_question_contract_decisions_schema() -> dict[str, object]:
 
 def build_answer_request_contract_schema(
     *,
-    include_conversation_resolution_inputs: bool = True,
+    conversation_inputs: tuple[ResolvedQuestionInput, ...] = (),
 ) -> dict[str, object]:
     return provider_output.QuestionContractOutput.schema(
         {
@@ -29,9 +36,7 @@ def build_answer_request_contract_schema(
             "question_inputs": {
                 "type": "array",
                 "items": _question_input_schema(
-                    include_conversation_resolution_inputs=(
-                        include_conversation_resolution_inputs
-                    ),
+                    conversation_inputs=conversation_inputs,
                 ),
             },
             "answer_requests": {
@@ -250,31 +255,83 @@ def _source_result_values_group_key_schema() -> dict[str, object]:
 
 def _question_input_schema(
     *,
-    include_conversation_resolution_inputs: bool,
+    conversation_inputs: tuple[ResolvedQuestionInput, ...],
 ) -> dict[str, object]:
     branches = [
         _literal_text_input_role_schema(
             role=LiteralInputRole.REFERENCE_VALUE,
-            include_conversation_resolution_inputs=(
-                include_conversation_resolution_inputs
-            ),
+            include_conversation_resolution_inputs=False,
         ),
         _literal_text_input_role_schema(
             role=LiteralInputRole.RESULT_LIMIT,
-            include_conversation_resolution_inputs=(
-                include_conversation_resolution_inputs
-            ),
+            include_conversation_resolution_inputs=False,
         ),
         _literal_text_input_role_schema(
             role=LiteralInputRole.TIME_VALUE,
-            include_conversation_resolution_inputs=(
-                include_conversation_resolution_inputs
-            ),
+            include_conversation_resolution_inputs=False,
         ),
     ]
-    if include_conversation_resolution_inputs:
-        branches.append(_row_set_reference_input_schema())
+    if conversation_inputs:
+        branches.extend(
+            _declared_conversation_input_schema(item)
+            for item in conversation_inputs
+        )
     return {"oneOf": branches}
+
+
+def _declared_conversation_input_schema(
+    item: ResolvedQuestionInput,
+) -> dict[str, object]:
+    if item.kind is KnownInputKind.LITERAL:
+        return _declared_literal_input_schema(item)
+    return _declared_row_set_input_schema(item)
+
+
+def _declared_literal_input_schema(
+    item: ResolvedQuestionInput,
+) -> dict[str, object]:
+    if item.role is None:
+        raise ValueError("literal conversation input requires role")
+    properties: dict[str, object] = {
+        "input_ref": {"type": "string", "minLength": 1},
+        "source": {"enum": ["conversation_resolution"]},
+        "value_source_text": {"enum": [item.value_source_text]},
+        "resolved_value_text": {"enum": [item.resolved_value_text]},
+        "role": {"enum": [item.role.value]},
+        "occurrence": {"type": "integer", "minimum": 1},
+        "resolved_input_ref": {"enum": [item.input_ref]},
+        "inventory_check": _question_input_inventory_check_schema(),
+        "kind": {"enum": [KnownInputKind.LITERAL.value]},
+    }
+    required_optional_fields = ["resolved_input_ref"]
+    if item.field_label_text:
+        properties["field_label_text"] = {"enum": [item.field_label_text]}
+        required_optional_fields.append("field_label_text")
+    if item.value_meaning_hint:
+        properties["value_meaning_hint"] = {"enum": [item.value_meaning_hint]}
+        required_optional_fields.append("value_meaning_hint")
+    schema = provider_output.LiteralTextInputOutput.schema(properties)
+    required = schema["required"]
+    if not isinstance(required, list):
+        raise ValueError("provider schema required fields must be an array")
+    schema["required"] = [*required, *required_optional_fields]
+    return schema
+
+
+def _declared_row_set_input_schema(
+    item: ResolvedQuestionInput,
+) -> dict[str, object]:
+    return provider_output.RowSetReferenceInputOutput.schema(
+        {
+            "input_ref": {"type": "string", "minLength": 1},
+            "source": {"enum": ["conversation_resolution"]},
+            "reference_text": {"enum": [item.reference_text]},
+            "occurrence": {"type": "integer", "minimum": 1},
+            "resolved_input_ref": {"enum": [item.input_ref]},
+            "inventory_check": _question_input_inventory_check_schema(),
+            "kind": {"enum": [KnownInputKind.ROW_SET_REFERENCE.value]},
+        }
+    )
 
 
 def _literal_text_input_role_schema(

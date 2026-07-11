@@ -2,12 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from fervis.lookup.conversation_resolution import (
-    ConversationResolutionOverlay,
-    LiteralQuestionInputOverlay,
-    RowSetQuestionInputOverlay,
-    conversation_input_provenance_from,
-)
 from fervis.lookup.question_contract import (
     KnownInputSource,
     LiteralInputRole,
@@ -112,7 +106,6 @@ def test_grouped_aggregate_requires_expression_group_key():
                 ),
             ),
         )
-
 
 def test_grouped_aggregate_provider_schema_requires_expression_group_key():
     schema = build_answer_request_contract_schema()
@@ -867,139 +860,4 @@ def test_question_contract_parser_rejects_answer_subject_literal_input():
             tool_name="submit_answer_request_contract",
             payload=payload,
             question_context=question,
-        )
-
-
-def test_question_contract_parser_rejects_unowned_row_set_reference_input():
-    overlay = ConversationResolutionOverlay(
-        current_question="What about those?",
-        value_frames=(),
-        references=(),
-        scopes=(),
-        activated_memory_ids=("turn_1.rows",),
-        used_source_card_ids=("card_rows",),
-        resolved_question_inputs=(
-            RowSetQuestionInputOverlay(
-                reference_text="those",
-                occurrence=1,
-                resolved_input_ref="cr_input_rows",
-                memory_ids=("turn_1.rows",),
-            ),
-        ),
-    )
-    payload = {
-        "kind": "question_contract",
-        "answer_requests_count": 1,
-        "question_inputs": [
-            {
-                "input_ref": "prior_rows",
-                "kind": "row_set_reference",
-                "source": "conversation_resolution",
-                "reference_text": "those",
-                "occurrence": 1,
-                "resolved_input_ref": "cr_input_rows",
-                "inventory_check": {
-                    "why_this_is_an_input": "those refers to prior rows"
-                },
-            }
-        ],
-        "question_input_inventory_check": {
-            "all_input_like_phrases_declared": True,
-        },
-        "answer_requests": [
-            {
-                "answer_fact": "sales total",
-                "answer_expression": {"family": "scalar_aggregate"},
-                "answer_subject": {
-                    "subject_text": "sales",
-                    "instance_interpretation": {
-                        "kind": "NORMAL_BUSINESS_INSTANCE",
-                    },
-                },
-                "answer_population": {
-                    "population_label": "sales",
-                    "counted_unit": "sale",
-                    "membership_tests": [
-                        {
-                            "test_id": "test_1",
-                            "kind": "SUBJECT_IDENTITY",
-                            "polarity": "MUST_PASS",
-                            "test_question": "Is this a sale?",
-                            "owned_question_input_refs": [],
-                        }
-                    ],
-                },
-                "answer_outputs": [{"description": "sales total"}],
-                "used_question_inputs": [],
-            }
-        ],
-    }
-
-    with pytest.raises(ValueError, match="question inputs must be owned"):
-        parse_question_contract(
-            tool_name="submit_answer_request_contract",
-            payload=payload,
-            question_context="What about those?",
-            question_context_texts=("those",),
-            conversation_input_provenance=conversation_input_provenance_from(
-                overlay=overlay,
-                continuation_plan=None,
-            ),
-        )
-
-
-@pytest.mark.parametrize(
-    "payload_update",
-    (
-        {"value_meaning_hint": "customer"},
-        {"field_label_text": "customer_id"},
-    ),
-)
-def test_question_contract_parser_requires_complete_cr_literal_handoff_match(
-    payload_update: dict[str, str],
-):
-    overlay = ConversationResolutionOverlay(
-        current_question="How much did she sell today?",
-        value_frames=(),
-        references=(),
-        scopes=(),
-        activated_memory_ids=("turn_1.entity.staff.alice",),
-        used_source_card_ids=("card_staff_alice",),
-        resolved_question_inputs=(
-            LiteralQuestionInputOverlay(
-                source_text="she",
-                occurrence=1,
-                resolved_input_ref="cr_input_1",
-                resolved_value_text="Alice Smith",
-                value_meaning_hint="staff member",
-                field_label_text="staff_id",
-                role=LiteralInputRole.REFERENCE_VALUE,
-                evidence_refs=("turn_1.entity.staff.alice",),
-            ),
-        ),
-    )
-    question_input = {
-        "input_ref": "input_staff",
-        "kind": "literal_text",
-        "source": "conversation_resolution",
-        "value_source_text": "she",
-        "resolved_input_ref": "cr_input_1",
-        "resolved_value_text": "Alice Smith",
-        "value_meaning_hint": "staff member",
-        "field_label_text": "staff_id",
-        "role": "reference_value",
-        "inventory_check": {"why_this_is_an_input": "she resolves to a staff member"},
-    }
-    question_input.update(payload_update)
-
-    with pytest.raises(ValueError, match="conversation_resolution"):
-        parse_question_contract(
-            tool_name="submit_answer_request_contract",
-            payload=_single_input_payload(question_input),
-            question_context="How much did she sell today?",
-            question_context_texts=("Alice Smith", "staff_id", "customer_id"),
-            conversation_input_provenance=conversation_input_provenance_from(
-                overlay=overlay,
-                continuation_plan=None,
-            ),
         )

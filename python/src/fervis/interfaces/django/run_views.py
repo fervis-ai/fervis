@@ -8,7 +8,7 @@ from fervis.lineage.views.django import DjangoLineageQuery
 from fervis.lineage.views.service import LineageRootNotFound
 from fervis.observability.django import DjangoObservabilityQuery
 from fervis.questions.execution_specs import execution_spec_from_storage
-from fervis.questions.ports import DeterministicRunSpec, ModelAssistedRunSpec
+from fervis.questions.ports import RerunProgramSpec, ResolveQuestionRunSpec
 from fervis.questions.projection import QuestionRunStatus
 from fervis.questions.run_views import (
     QuestionRunViewService,
@@ -66,12 +66,9 @@ class DjangoRunWorkQuery:
 def _display_fields(item: RunWorkItem) -> tuple[str | None, str]:
     spec = execution_spec_from_storage(item.spec_kind, item.execution_spec or {})
     match spec:
-        case ModelAssistedRunSpec(
-            integrated_question=integrated_question,
-            model_key=model_key,
-        ):
-            return integrated_question, model_key
-        case DeterministicRunSpec():
+        case ResolveQuestionRunSpec(question=question, model_key=model_key):
+            return question, model_key
+        case RerunProgramSpec():
             return None, ""
         case _ as unreachable:
             assert_never(unreachable)

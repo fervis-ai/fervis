@@ -7,6 +7,7 @@ from fervis.lineage.enums import (
     FactResultKind,
     PresentationClientKey,
     PresentationKind,
+    ProgramInvocationKind,
     RunResultKind,
     RunStepKey,
     RunStepKind,
@@ -51,6 +52,7 @@ def make_terminal_answer_writer(recorder: LineageRecorderPort) -> TerminalAnswer
                     run_id=run_id,
                     program_id=f"{run_id}:program",
                     bindings_json="{}",
+                    kind=ProgramInvocationKind.COMPILED_QUESTION,
                 ),
             )
         )

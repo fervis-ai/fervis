@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from fervis.lookup.plan_execution.relations import (
@@ -27,14 +27,18 @@ from fervis.memory.identities import (
 )
 from fervis.memory.projection import fact_artifacts_from_context
 from fervis.memory.conversation_context import (
+    ConversationAnswerShape,
+    ConversationCallableSignature,
     ConversationContextFrame,
     ConversationContextSource,
+    ConversationFrameParameter,
+    ConversationFramePart,
+    ConversationFramePartKind,
     ConversationMeaningAnchor,
     ConversationMemoryActivation,
     ConversationMemoryActivationKind,
     ConversationMemoryCard,
     ConversationMemoryCardProjection,
-    ConversationReplaceablePart,
 )
 
 _BACKING_MEMORY_CARDS = "backing_cards"
@@ -453,7 +457,7 @@ def _meaning_anchor_text_candidates(private: dict[str, Any]) -> tuple[str, ...]:
     values: list[str] = []
     for raw in (
         private.get("reference_text"),
-        private.get("pending_integrated_question"),
+        private.get("question_being_clarified"),
         private.get("clarification_question"),
         private.get("display"),
         private.get("expression"),
@@ -501,14 +505,12 @@ def _context_frames(
     prior_requests_by_memory_id: dict[str, PriorRequestMemory],
 ) -> tuple[ConversationContextFrame, ...]:
     output: list[ConversationContextFrame] = []
-    seen: set[tuple[frozenset[str], str, str]] = set()
+    seen: set[tuple[object, ...]] = set()
     for card in cards:
         prior_request = prior_requests_by_memory_id.get(card.memory_id)
         if prior_request is None:
             continue
-        output_frames = prior_request.output_frames
-        prior_answer_fact = prior_request.answer_fact
-        if not prior_answer_fact:
+        if prior_request.answer_shape is None:
             continue
         source_ids = _context_frame_source_ids(
             card=card,
@@ -516,50 +518,122 @@ def _context_frames(
         )
         if not source_ids:
             continue
-        if len(output_frames) != 1:
+        answer_shape = ConversationAnswerShape(
+            expression_family=prior_request.answer_shape.expression_family,
+            output_roles=prior_request.answer_shape.output_roles,
+        )
+        parts = _context_frame_parts(prior_request)
+        candidate = ConversationContextFrame(
+            frame_id="candidate",
+            source_ids=source_ids,
+            answer_shape=answer_shape,
+            parts=parts,
+            callable=_callable_signature(
+                prior_request,
+                parts=parts,
+            ),
+        )
+        key = (frozenset(source_ids), *candidate.control_key())
+        if key in seen:
             continue
-        for output_shape in output_frames:
-            requested_frame = output_shape.requested_value_frame
-            key = (frozenset(source_ids), requested_frame, prior_answer_fact)
-            if key in seen:
-                continue
-            seen.add(key)
-            output.append(
-                ConversationContextFrame(
-                    frame_id=f"context_frame_{len(output) + 1}",
-                    source_ids=source_ids,
-                    requested_frame=requested_frame,
-                    prior_answer_fact=prior_answer_fact,
-                    replaceable_parts=_context_frame_replaceable_parts(prior_request),
-                )
-            )
+        seen.add(key)
+        output.append(
+            replace(candidate, frame_id=f"request:{len(output) + 1}")
+        )
     return tuple(output)
 
 
-def _context_frame_replaceable_parts(
+def _context_frame_parts(
     prior_request: PriorRequestMemory,
-) -> tuple[ConversationReplaceablePart, ...]:
-    parts: list[ConversationReplaceablePart] = []
+) -> tuple[ConversationFramePart, ...]:
+    parts: list[ConversationFramePart] = []
     answer_subject = prior_request.answer_subject_text
     if answer_subject:
         parts.append(
-            ConversationReplaceablePart(
-                part_id="answer_subject",
-                kind="answer_subject",
+            ConversationFramePart(
+                part_id="subject",
+                kind=ConversationFramePartKind.ANSWER_SUBJECT,
                 text=answer_subject,
             )
         )
-    parts.extend(_replaceable_part_from_slot(slot) for slot in prior_request.slots)
+    parts.extend(
+        ConversationFramePart(
+            part_id=f"output:{index}",
+            kind=ConversationFramePartKind.ANSWER_OUTPUT,
+            text=output.description,
+            source_ref=output.output_id,
+        )
+        for index, output in enumerate(prior_request.output_frames, start=1)
+    )
+    parts.extend(_input_frame_parts(prior_request.slots))
+    role_counts: dict[tuple[str, str], int] = {}
+    for part in prior_request.semantic_parts:
+        count_key = (part.kind.value, part.role)
+        role_counts[count_key] = role_counts.get(count_key, 0) + 1
+        index = role_counts[count_key]
+        if part.kind.value == "grouping":
+            part_id = f"grouping:{index}"
+        else:
+            part_id = f"population:{part.role}:{index}"
+        parts.append(
+            ConversationFramePart(
+                part_id=part_id,
+                kind=ConversationFramePartKind(part.kind.value),
+                text=part.text,
+            )
+        )
     return tuple(parts)
 
 
-def _replaceable_part_from_slot(
-    slot: PriorRequestSlot,
-) -> ConversationReplaceablePart:
-    return ConversationReplaceablePart(
-        part_id=slot.slot_id,
-        kind=slot.kind.value,
-        text=slot.text,
+def _input_frame_parts(
+    slots: tuple[PriorRequestSlot, ...],
+) -> tuple[ConversationFramePart, ...]:
+    kind_counts: dict[str, int] = {}
+    parts: list[ConversationFramePart] = []
+    for slot in slots:
+        kind_counts[slot.kind.value] = kind_counts.get(slot.kind.value, 0) + 1
+        parts.append(
+            ConversationFramePart(
+                part_id=f"input:{slot.kind.value}:{kind_counts[slot.kind.value]}",
+                kind=ConversationFramePartKind(slot.kind.value),
+                text=slot.text,
+                source_ref=slot.slot_id,
+            )
+        )
+    return tuple(parts)
+
+
+def _callable_signature(
+    prior_request: PriorRequestMemory,
+    *,
+    parts: tuple[ConversationFramePart, ...],
+) -> ConversationCallableSignature | None:
+    if (
+        not prior_request.run_id
+        or prior_request.program_request_ids != (prior_request.request_id,)
+    ):
+        return None
+    parts_by_source_ref = {
+        part.source_ref: part
+        for part in parts
+        if part.source_ref
+    }
+    parameters = tuple(
+        ConversationFrameParameter(
+            parameter_id=f"question.{slot.slot_id}",
+            part_id=parts_by_source_ref[slot.slot_id].part_id,
+            kind=ConversationFramePartKind(slot.kind.value),
+            current_text=slot.text,
+            resolved_text=slot.resolved_value_text,
+            field_label_text=slot.field_label_text,
+            value_meaning_hint=slot.value_meaning_hint,
+        )
+        for slot in prior_request.slots
+    )
+    return ConversationCallableSignature(
+        base_run_id=prior_request.run_id,
+        requested_fact_id=prior_request.request_id,
+        parameters=parameters,
     )
 
 
@@ -1214,7 +1288,7 @@ def _clarification_card_details(*, artifact: Any, address: Any) -> dict[str, str
                 for raw in getattr(address, "clarification_questions", ()) or ()
                 if (question := str(raw or "").strip())
             ),
-            "pending_integrated_question": str(
+            "question_being_clarified": str(
                 getattr(artifact, "source_question", "") or ""
             ).strip(),
         }

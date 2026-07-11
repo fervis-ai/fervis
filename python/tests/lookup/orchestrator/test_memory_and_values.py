@@ -110,6 +110,7 @@ def test_lookup_cutover_list_rows_projected_identity_field_becomes_memory_identi
             "submit_answer_request_contract": _question_contract_response(
                 subject="sale ids",
                 answer_subject="sale IDs",
+                answer_expression_family="list_rows",
                 parts=("sale ids",),
             ),
             "submit_query_enrichment": _query_enrichment_payload(("sale",)),
@@ -179,6 +180,7 @@ def test_lookup_cutover_grounded_named_entity_is_stored_as_memory_identity():
         responses={
             "submit_answer_request_contract": _question_contract_response(
                 subject="sales at ABC Mall",
+                answer_expression_family="list_rows",
                 parts=("sales",),
                 question_inputs=(
                     {
@@ -335,6 +337,7 @@ def test_lookup_orchestrator_repeated_named_target_does_not_reuse_inactive_memor
             ),
             "submit_answer_request_contract": _question_contract_response(
                 subject="sales at ABC Mall",
+                answer_expression_family="list_rows",
                 parts=("sales",),
                 question_inputs=(
                     {
@@ -445,7 +448,6 @@ class _StandaloneIdentitySetPlannerPort:
         )
         tool_name = _select_conversation_resolution_tool_name(
             tool_specs,
-            payload=conversation_resolution_payload,
         ) or (tool_specs[0].name if tool_specs else "")
         if tool_name in CONVERSATION_RESOLUTION_TOOL_NAMES:
             self.calls += 1
@@ -502,13 +504,10 @@ class _StandaloneIdentitySetPlannerPort:
             "answer": json.dumps(
                 {
                     "tool": tool_name,
-                    "arguments": _question_contract_response_with_prompt_memory(
-                        _question_contract_response(
-                            subject="sales",
-                            parts=("sales",),
-                            demand_text="sales",
-                        ),
-                        prompt=prompt,
+                    "arguments": _question_contract_response(
+                        subject="sales",
+                        parts=("sales",),
+                        demand_text="sales",
                     ),
                 },
                 default=str,
@@ -732,7 +731,7 @@ def test_lookup_cutover_preserves_scalar_memory_proofs_for_undefined_compute():
                 conversation_resolution=lambda prompt: (
                     _conversation_resolution_payload_using_memories(
                         prompt,
-                        integrated_question=(
+                        contextualized_question=(
                             "What percentage increase is there from the prior current "
                             "and previous totals?"
                         ),
@@ -880,7 +879,7 @@ def test_lookup_cutover_computes_across_single_cell_prior_answer_relations():
                 conversation_resolution=lambda prompt: (
                     _conversation_resolution_payload_using_memories(
                         prompt,
-                        integrated_question="How much are the two prior daily revenue answers in total?",
+                        contextualized_question="How much are the two prior daily revenue answers in total?",
                         memories=(
                             {
                                 "actual_text": "that",
@@ -1026,7 +1025,7 @@ def test_lookup_cutover_computes_increase_across_multi_row_prior_answer_relation
                 conversation_resolution=lambda prompt: (
                     _conversation_resolution_payload_using_memory(
                         prompt,
-                        integrated_question="What is the increase across the prior daily revenue answers?",
+                        contextualized_question="What is the increase across the prior daily revenue answers?",
                         actual_text="that",
                         source_kind="row_set",
                     )
@@ -1123,7 +1122,7 @@ def test_lookup_cutover_executes_memory_relation_field_bindings():
                 conversation_resolution=lambda prompt: (
                     _conversation_resolution_payload_using_memories(
                         prompt,
-                        integrated_question="What quantities were the prior referenced items?",
+                        contextualized_question="What quantities were the prior referenced items?",
                         memories=(
                             {
                                 "actual_text": "those",
@@ -1236,7 +1235,6 @@ def test_lookup_cutover_can_fetch_same_prior_scope_for_additional_fields():
     assert result.status == "COMPLETED", (
         result,
         planner.prompts,
-        result.error[-1]["payload"].get("errorContext"),
     )
     assert result.answer == "Ruby"
     source_binding_prompt = next(
@@ -1607,11 +1605,11 @@ class _SameScopeReadPlannerPort:
         if is_conversation_resolution:
             arguments = _conversation_resolution_payload_using_memory(
                 prompt,
-                integrated_question="Show shade names for the prior referenced salespeople and products sold.",
+                contextualized_question="Show shade names for the prior referenced salespeople and products sold.",
                 actual_text="the shade names too",
                 source_kind="row_set",
             )
-            tool_name = _conversation_resolution_tool_name_for_payload(arguments)
+            tool_name = CONVERSATION_RESOLUTION_TOOL_NAME
             return {
                 "answer": json.dumps(
                     {"tool": tool_name, "arguments": arguments},
@@ -1627,14 +1625,11 @@ class _SameScopeReadPlannerPort:
         else:
             tool_name = tool_specs[0].name if tool_specs else ""
         if tool_name == "submit_answer_request_contract":
-            arguments = _question_contract_response_with_prompt_memory(
-                _question_contract_response(
-                    subject="shade names too",
-                    parts=("shade names",),
-                    demand_text="shade",
-                ),
-                prompt=prompt,
-                fact_plan=_list_rows_fact_plan(),
+            arguments = _question_contract_response(
+                subject="shade names too",
+                answer_expression_family="list_rows",
+                parts=("shade names",),
+                demand_text="shade",
             )
         elif tool_name == "submit_query_enrichment":
             arguments = _query_enrichment_payload(("sale",))
@@ -1721,26 +1716,20 @@ class _SameScopeReadOutputPlannerPort:
         self.system_prompts.append(system_prompt)
         tool_name = _select_conversation_resolution_tool_name(
             tool_specs,
-            payload={
-                "integrated_question": "Show shade names for the prior referenced salespeople and products sold."
-            },
         ) or (tool_specs[0].name if tool_specs else "")
         if tool_name in CONVERSATION_RESOLUTION_TOOL_NAMES:
             arguments = _conversation_resolution_payload_using_memory(
                 prompt,
-                integrated_question="Show shade names for the prior referenced salespeople and products sold.",
+                contextualized_question="Show shade names for the prior referenced salespeople and products sold.",
                 actual_text="the shade names too",
                 source_kind="row_set",
             )
         elif tool_name == "submit_answer_request_contract":
-            arguments = _question_contract_response_with_prompt_memory(
-                _question_contract_response(
-                    subject="shade names too",
-                    parts=("shade names",),
-                    demand_text="shade",
-                ),
-                prompt=prompt,
-                fact_plan=_list_rows_fact_plan(),
+            arguments = _question_contract_response(
+                subject="shade names too",
+                answer_expression_family="list_rows",
+                parts=("shade names",),
+                demand_text="shade",
             )
         elif tool_name == "submit_query_enrichment":
             arguments = _query_enrichment_payload(("shade",))
@@ -1850,11 +1839,11 @@ class _IdentitySetPlannerPort:
         if is_conversation_resolution:
             arguments = _conversation_resolution_payload_using_memory(
                 prompt,
-                integrated_question="Show sales for the prior referenced stores.",
+                contextualized_question="Show sales for the prior referenced stores.",
                 actual_text="those stores",
                 source_kind="row_set",
             )
-            tool_name = _conversation_resolution_tool_name_for_payload(arguments)
+            tool_name = CONVERSATION_RESOLUTION_TOOL_NAME
             return {
                 "answer": json.dumps(
                     {"tool": tool_name, "arguments": arguments},
@@ -1870,22 +1859,19 @@ class _IdentitySetPlannerPort:
         else:
             tool_name = tool_specs[0].name if tool_specs else ""
         if tool_name == "submit_answer_request_contract":
-            arguments = _question_contract_response_with_prompt_memory(
-                _question_contract_response(
-                    subject="sales for those stores",
-                    parts=("sales",),
-                    demand_text="sales",
-                    question_inputs=(
-                        {
-                            "kind": "row_set_reference",
-                            "reference_text": "those stores",
-                            "source": "conversation_resolution",
-                            "resolved_input_ref": "cr_input_1",
-                        },
-                    ),
+            arguments = _question_contract_response(
+                subject="sales for those stores",
+                answer_expression_family="list_rows",
+                parts=("sales",),
+                demand_text="sales",
+                question_inputs=(
+                    {
+                        "kind": "row_set_reference",
+                        "reference_text": "those stores",
+                        "source": "conversation_resolution",
+                        "resolved_input_ref": "cr_input_1",
+                    },
                 ),
-                prompt=prompt,
-                fact_plan=_list_rows_fact_plan(),
             )
         elif tool_name == "submit_query_enrichment":
             arguments = _query_enrichment_payload(("sale",))
@@ -2006,11 +1992,11 @@ class _SaleDetailIdentitySetPlannerPort:
         if is_conversation_resolution:
             arguments = _conversation_resolution_payload_using_memory(
                 prompt,
-                integrated_question="Show product names for the prior referenced sales.",
+                contextualized_question="Show product names for the prior referenced sales.",
                 actual_text="those sales",
                 source_kind="row_set",
             )
-            tool_name = _conversation_resolution_tool_name_for_payload(arguments)
+            tool_name = CONVERSATION_RESOLUTION_TOOL_NAME
             return {
                 "answer": json.dumps(
                     {"tool": tool_name, "arguments": arguments},
@@ -2026,22 +2012,19 @@ class _SaleDetailIdentitySetPlannerPort:
         else:
             tool_name = tool_specs[0].name if tool_specs else ""
         if tool_name == "submit_answer_request_contract":
-            arguments = _question_contract_response_with_prompt_memory(
-                _question_contract_response(
-                    subject="those sales",
-                    parts=("product names",),
-                    demand_text="product",
-                    question_inputs=(
-                        {
-                            "kind": "row_set_reference",
-                            "reference_text": "those sales",
-                            "source": "conversation_resolution",
-                            "resolved_input_ref": "cr_input_1",
-                        },
-                    ),
+            arguments = _question_contract_response(
+                subject="those sales",
+                answer_expression_family="list_rows",
+                parts=("product names",),
+                demand_text="product",
+                question_inputs=(
+                    {
+                        "kind": "row_set_reference",
+                        "reference_text": "those sales",
+                        "source": "conversation_resolution",
+                        "resolved_input_ref": "cr_input_1",
+                    },
                 ),
-                prompt=prompt,
-                fact_plan=_list_rows_fact_plan(),
             )
         elif tool_name == "submit_query_enrichment":
             arguments = _query_enrichment_payload(("sale",))
@@ -2166,26 +2149,20 @@ class _MissingFulfillmentPlannerPort:
         self.system_prompts.append(system_prompt)
         tool_name = _select_conversation_resolution_tool_name(
             tool_specs,
-            payload={
-                "integrated_question": "Show shade names for the prior referenced salespeople and products sold."
-            },
         ) or (tool_specs[0].name if tool_specs else "")
         if tool_name in CONVERSATION_RESOLUTION_TOOL_NAMES:
             arguments = _conversation_resolution_payload_using_memory(
                 prompt,
-                integrated_question="Show shade names for the prior referenced salespeople and products sold.",
+                contextualized_question="Show shade names for the prior referenced salespeople and products sold.",
                 actual_text="the shade names too",
                 source_kind="row_set",
             )
         elif tool_name == "submit_answer_request_contract":
-            arguments = _question_contract_response_with_prompt_memory(
-                _question_contract_response(
-                    subject="shade names too",
-                    parts=("shade names",),
-                    demand_text="shade",
-                ),
-                prompt=prompt,
-                fact_plan=_list_rows_fact_plan(),
+            arguments = _question_contract_response(
+                subject="shade names too",
+                answer_expression_family="list_rows",
+                parts=("shade names",),
+                demand_text="shade",
             )
         elif tool_name == "submit_query_enrichment":
             arguments = _query_enrichment_payload(("shade",))
@@ -2277,25 +2254,19 @@ class _UnavailableSourceFieldPlannerPort:
         self.system_prompts.append(system_prompt)
         tool_name = _select_conversation_resolution_tool_name(
             tool_specs,
-            payload={
-                "integrated_question": "Show shade names for the prior referenced salespeople and products sold."
-            },
         ) or (tool_specs[0].name if tool_specs else "")
         if tool_name in CONVERSATION_RESOLUTION_TOOL_NAMES:
             arguments = _conversation_resolution_payload_using_memory(
                 prompt,
-                integrated_question="Show shade names for the prior referenced salespeople and products sold.",
+                contextualized_question="Show shade names for the prior referenced salespeople and products sold.",
                 actual_text="the shade names too",
                 source_kind="row_set",
             )
         elif tool_name == "submit_answer_request_contract":
-            arguments = _question_contract_response_with_prompt_memory(
-                _question_contract_response(
-                    subject="shade names too",
-                    parts=("shade names",),
-                ),
-                prompt=prompt,
-                fact_plan=_list_rows_fact_plan(),
+            arguments = _question_contract_response(
+                subject="shade names too",
+                answer_expression_family="list_rows",
+                parts=("shade names",),
             )
         elif tool_name == "submit_query_enrichment":
             arguments = _query_enrichment_payload(("shade",))

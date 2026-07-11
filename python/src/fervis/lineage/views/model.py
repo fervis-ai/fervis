@@ -134,9 +134,8 @@ class SemanticInterpretedInputView:
 @dataclass(frozen=True)
 class SemanticConversationClauseView:
     current_clause_text: str
-    current_value_text: str
-    resolved_frame_text: str
-    resolved_clause_text: str
+    resolved_text: str
+    resolved_values: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -326,6 +325,8 @@ class ProgramRevisionView:
 @dataclass(frozen=True)
 class ProgramDerivationView:
     invocation_id: str
+    kind: str
+    base_invocation_id: str | None
     program: AnswerProgramRefView
     patch: BindingPatchRefView | None = None
     revision: ProgramRevisionView | None = None

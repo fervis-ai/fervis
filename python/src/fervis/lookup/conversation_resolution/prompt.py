@@ -87,177 +87,112 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Task",
                 (
-                    "Return a conversation resolution result for the current user utterance.",
-                    "If the current question can already be answered without prior turns, "
-                    "set clause_resolutions=[] and unresolved.unresolved_kind=none.",
-                    "If context is needed and sufficient, produce one "
-                    "clause_resolution for each answerable clause and set "
-                    "unresolved.unresolved_kind=none.",
-                    "When unresolved.unresolved_kind=none, set "
-                    'unresolved.why_unresolved="" and '
-                    "unresolved.candidate_interpretations=[].",
-                    "A standalone factual question can be answered without reading prior "
-                    "turns, memory cards, or transcript context.",
-                    "Use visible context sources only when the current question is not "
-                    "self-sufficient.",
-                    "An active_clarification context source is sufficient context when "
-                    "it contains the prior question plus the user's clarification answer.",
-                    "In that case, resolve the current utterance into the standalone "
-                    "question answered by applying the clarification to the prior question.",
-                ),
-            ),
-            builder.instruction_block(
-                "Clause Resolution",
-                (
-                    "current_clause_text is exact text copied from the current user "
-                    "question: one answerable part of the current question.",
-                    "Each answerable clause has a requested_value_frame: the measure, "
-                    "attribute, relation, or comparison whose value the clause asks for.",
-                    "Copy current_value_surface.text from the current clause. Do not "
-                    "paraphrase it.",
-                    "If the current clause contains exact words that name the "
-                    "requested value, current_value_surface.text must include "
-                    "those words.",
-                    "Question words alone are not enough when the current clause "
-                    "also names the requested value.",
-                    "Set current_value_surface.kind before choosing frames.",
-                    "Use self_sufficient_current_value when current text already "
-                    "identifies the requested value frame for this clause.",
-                    "Use broad_current_value when current text asks for a value but "
-                    "does not identify the value frame without context.",
-                    "Use no_value_request only when the clause does not ask for a "
-                    "value frame.",
-                    "requested_value_frame.context_frame_choices must include one "
-                    "choice item for each available_context_frames item.",
-                    "For one clause, at most one context_frame_choices item may "
-                    "have choice=use_frame.",
-                    "If exactly one prior frame supplies the requested value frame, "
-                    "mark that frame use_frame and mark every other frame "
-                    "not_for_this_clause or current_text_names_different_value.",
-                    "If multiple prior frames seem necessary for the requested "
-                    "value frame, the clause is not resolved; use unresolved "
-                    "with multiple_meanings and explain the competing frames.",
-                    "Use use_frame when the current clause continues that context "
-                    "frame as the requested value frame.",
-                    "Use current_text_names_different_value only when the current "
-                    "clause contains exact words that explicitly name a different "
-                    "requested value frame. Put those exact words in "
-                    "current_conflict_quotes.",
-                    "Use not_for_this_clause when the clause asks for a different "
-                    "kind of answer and the context frame is not a candidate for "
-                    "that clause.",
-                    "Use ambiguous when the frame could be the intended value frame "
-                    "but visible context is insufficient to choose it.",
-                    "Use dependencies only for context-dependent references or "
-                    "scopes that are not replacement of a visible prior part.",
-                    "Broad value wording is not conflict evidence. Broad value "
-                    "wording cannot be used in current_conflict_quotes.",
-                    "Do not create an unsupported domain-specific value frame from broad "
-                    "current wording.",
-                    "When current_value_surface.kind=broad_current_value, do not use "
-                    "current_text_names_different_value.",
-                    "For resolved clauses, do not use ambiguous. If a clause cannot "
-                    "choose one value frame from current text and available context, "
-                    "return unresolved with clause_resolutions=[].",
-                ),
-            ),
-            builder.instruction_block(
-                "Prior Question Continuation",
-                (
-                    "Use continuation only when the current clause is a follow-up to exactly one selected context frame, and the clause provides new text that replaces one or more visible replaceable_parts on that frame.",
-                    "List only changed parts. Each replacement must copy a visible replaceable_parts[].part_id and exact current_text from current_clause_text.",
-                    "Omitted replaceable_parts are carried by the backend.",
-                    "Replacement current_text is current-turn evidence, not a dependency or meaning_component.",
-                    "If the continued frame or replaced part is not clear, return unresolved.",
-                    "When continuation is present, resolved_clause_text must state the compact resolved factual request after applying replacements.",
-                ),
-            ),
-            builder.instruction_block(
-                "Other Dependencies",
-                (
-                    "A dependency is an exact word or phrase in current_clause_text "
-                    "whose standalone meaning comes from context and that "
-                    "is not the requested value frame itself.",
-                    "Dependencies include references and scopes.",
-                    "A reference names an entity, row, set, or value indirectly.",
-                    "A scope limits the question by time, place, grouping, row set, "
-                    "or other boundary.",
-                    "dependencies lists context-dependent references and scopes in "
-                    "that clause. Do not duplicate the requested value frame as a "
-                    "dependency. Use dependencies=[] when there are no such references "
-                    "or scopes.",
-                    "For each dependency, anchor_text is the exact current-question "
-                    "text being resolved.",
-                    "meaning_components lists the inherited pieces that make up "
-                    "the meaning of anchor_text.",
-                    "Each meaning component has source_text: exact text copied from "
-                    "the cited source, and resolved_text: what that source text means "
-                    "inside this dependency.",
-                    "When source_text comes from a context source meaning_anchors "
-                    "item, copy that item's memory_id exactly into the meaning "
-                    "component.",
-                    "Use one meaning component for each important inherited entity, "
-                    "scope, row set, value, or other meaning piece.",
-                    "Use kind=entity for a named person, place, organization, or "
-                    "item; kind=scope for time, place, filter, grouping, or other "
-                    "boundary; kind=row_set for prior returned rows; kind=value for "
-                    "one prior scalar value; use kind=other only when none of those "
-                    "fit.",
-                    "If a current anchor like that or those carries a prior time, "
-                    "put the time in meaning_components with kind=scope; do not create "
-                    "a separate dependency whose anchor_text is absent from the "
-                    "current clause.",
-                    "For each dependency, resolved_text is the standalone "
-                    "meaning that must be represented in "
-                    "resolved_clause_text.",
-                    "For each dependency, must_preserve_terms are exact words or "
-                    "phrases from resolved_text that must appear verbatim in "
-                    "resolved_clause_text when such terms are "
-                    "necessary to prevent meaning loss. Use an empty array only when no "
-                    "exact term is necessary.",
-                    "Do not simplify or generalize must_preserve_terms.",
+                    "Produce the complete standalone factual question the user means.",
+                    "Resolve every answerable clause completely. Do not describe how "
+                    "the wording changed.",
+                    "Treat meaning stated explicitly in the current question as "
+                    "authoritative. Prior context fills what the current wording leaves "
+                    "implicit; it does not overwrite explicit current meaning unless "
+                    "the current wording supports that interpretation.",
+                    "If the current wording needs no prior context, copy it exactly as "
+                    "the resolved question and copy each clause exactly as resolved_text.",
+                    "Use only the current question, visible context sources, and visible "
+                    "context frames.",
                 ),
             ),
             builder.instruction_block(
                 "Resolved Clauses",
                 (
-                    "resolved_clause_text rewrites current_clause_text as a standalone "
-                    "clause for audit and downstream annotations.",
-                    "It must include every required term from dependencies and "
-                    "any selected context frame.",
-                    "Each resolved_clause_text must state the factual meaning of "
-                    "that clause without losing required terms.",
-                    "Do not simplify or generalize a resolved measure, attribute, "
-                    "relation, comparison, action, entity, row set, or scope.",
-                    "For self-sufficient questions, clause_resolutions is empty because "
-                    "current_question_text already carries its own meaning.",
+                    "Write resolution_basis first. State which explicit current "
+                    "meanings replace prior meanings, which prior meanings remain, and "
+                    "why the resulting question is coherent.",
+                    "contextualized_question is the complete question formed from all "
+                    "resolved clauses.",
+                    "For every answerable clause, copy current_clause_text exactly and "
+                    "write resolved_text as a complete standalone factual clause.",
+                    "A resolved clause must retain every current constraint and every "
+                    "prior meaning needed to answer it.",
+                    "Every meaning added to the resolved clause but absent from the "
+                    "current clause must be represented by a resolved value with a "
+                    "visible prior source.",
+                    "Writing the complete text is part of the resolution task: use it "
+                    "to check that the selected meanings form one coherent question.",
                 ),
             ),
             builder.instruction_block(
-                "Needs Clarification",
+                "Retained Frame Shape",
                 (
-                    "Use unresolved only when the current question "
-                    "plus visible context cannot determine one standalone factual "
-                    "question.",
-                    "When unresolved is used, set clause_resolutions=[].",
-                    "If there are multiple plausible meanings, set "
-                    "unresolved_kind=multiple_meanings and provide at least two "
-                    "candidate_interpretations with complete integrated_question values.",
-                    "If a required input is missing, set unresolved_kind=missing_input "
-                    "and explain the missing input in why_unresolved.",
-                    "Do not use needs_clarification when visible context is sufficient "
-                    "to form a standalone question.",
+                    "retained_frame_parts records fixed prior question meaning that "
+                    "the resolved clause still uses but the current clause omits.",
+                    "Select only retained subject, output, population, or grouping "
+                    "parts. Do not select a part that explicit current meaning replaces.",
+                    "Fixed question shape belongs here, not in resolved values.",
                 ),
             ),
             builder.instruction_block(
-                "Boundaries",
+                "Resolved Values",
                 (
-                    "Do not produce requested facts, endpoint IDs, field IDs, "
-                    "source candidates, plans, or final answer text.",
-                    "Conversation resolution only produces the standalone question "
-                    "and clause-level context resolution that justifies it.",
-                    "Later turns decide requested facts, grounding, source binding, "
-                    "planning, and execution.",
+                    "Create a resolved value for every meaning needed to interpret the "
+                    "current clause that is established by a current span, context "
+                    "anchor, or prior frame part.",
+                    "resolved_text states the value's standalone meaning.",
+                    "A current_span source copies one exact occurrence from the current "
+                    "clause. A context_anchor source copies one shown typed anchor. A "
+                    "frame_part source carries one shown part of a prior question.",
+                    "Do not emit a resolved value for prior meaning that explicit "
+                    "current wording replaces. When only part of a prior frame part "
+                    "remains relevant, resolved_text states only that retained meaning.",
+                    "A prior frame part is a source only when its own meaning is "
+                    "retained. Do not cite a replaced frame part as support for a new "
+                    "current value merely because both occupy the same structural "
+                    "position, and do not blend the new value into the retained part.",
+                    "Use every source that materially establishes the resolved value. "
+                    "Current text and prior verified evidence may both support the same "
+                    "value.",
+                    "Every contextual meaning integrated into the complete clause must "
+                    "also be represented as a resolved value; resolved values are the "
+                    "structured handoff to later interpretation.",
+                    "Do not classify values by linguistic operation or by whether they "
+                    "are self-sufficient.",
+                ),
+            ),
+            builder.instruction_block(
+                "Callable Frames",
+                (
+                    "Use frame_call=call when and only when the complete resolved "
+                    "question is exactly another invocation of one shown callable "
+                    "frame's fixed factual function. A matching call is required, not "
+                    "optional.",
+                    "Write exactly one argument for every shown parameter. Use carry "
+                    "when its prior value remains unchanged and resolved_value when a "
+                    "resolved value supplies the new argument.",
+                    "Before writing frame_call=none, compare the resolved question to "
+                    "each frame as a function signature. If its fixed subject, outputs, "
+                    "population, grouping, and computation are unchanged and every "
+                    "changed value maps to a shown parameter, the frame matches and "
+                    "must be called.",
+                    "Use frame_call=none only when no callable frame matches, including "
+                    "when the resolved question changes fixed subject, outputs, "
+                    "population meaning, grouping, computation, or otherwise asks a "
+                    "new factual function.",
+                    "Do not force a new question into a frame merely because it refers "
+                    "to the same entities or prior result.",
+                ),
+            ),
+            builder.instruction_block(
+                "Outcome",
+                (
+                    "Use resolved when the visible evidence supports one complete "
+                    "factual question.",
+                    "Use multiple_meanings when visible evidence supports competing "
+                    "complete interpretations, explain why, and include at least two "
+                    "candidates.",
+                    "Each competing interpretation must be a complete factual question "
+                    "that retains all explicit current meaning and is directly supported "
+                    "by visible evidence. A hypothetical alternative without such "
+                    "evidence is not an ambiguity.",
+                    "Use missing_input when required information is absent and explain "
+                    "what is missing.",
                 ),
             ),
             builder.instruction_block(
@@ -265,8 +200,6 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                 (
                     f"Return exactly one {CONVERSATION_RESOLUTION_TOOL_NAME} tool call.",
                     "Return only valid JSON arguments for that tool call.",
-                    "Always include kind, current_question_text, "
-                    "clause_resolutions, and unresolved.",
                 ),
             ),
         )

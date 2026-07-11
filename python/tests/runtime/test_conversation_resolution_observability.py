@@ -56,7 +56,6 @@ def test_question_contract_failure_includes_conversation_resolution_usage():
                         "answer_outputs": [
                             {
                                 "description": "total money",
-                                "requested_value_frame": "total money",
                             }
                         ],
                         "used_question_inputs": [],

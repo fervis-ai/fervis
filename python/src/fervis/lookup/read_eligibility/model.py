@@ -6,9 +6,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from fervis.lookup.relation_catalog.selection import CatalogSelectionResult
-from fervis.lookup.conversation_resolution.overlay import (
-    ConversationResolutionOverlay,
-)
 from fervis.lookup.answer_program.values import FactValue
 from fervis.lookup.question_contract import QuestionContract, RequestedFact
 from fervis.lookup.turn_prompts.context import HostPromptContext
@@ -26,7 +23,6 @@ class ReadEligibilityRequest:
     catalog_selection: CatalogSelectionResult
     conversation_context: dict[str, Any]
     available_values: tuple[FactValue, ...]
-    conversation_resolution_overlay: ConversationResolutionOverlay | None = None
     host: HostPromptContext = field(default_factory=HostPromptContext)
 
 

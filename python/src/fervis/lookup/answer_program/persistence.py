@@ -7,6 +7,7 @@ import hashlib
 from typing import Protocol
 
 from fervis.lineage.ports import LineageRecorderPort
+from fervis.lineage.enums import ProgramInvocationKind
 from fervis.lineage.recorder import (
     AnswerProgramWrite,
     ProgramInvocationBundleWrite,
@@ -42,8 +43,18 @@ class ProgramInvocation:
     run_id: str
     program_id: str
     bindings: BindingSet
+    kind: ProgramInvocationKind
+    base_invocation_id: str | None = None
     binding_patch: BindingPatch | None = None
     revision_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind is ProgramInvocationKind.COMPILED_QUESTION:
+            if self.base_invocation_id is not None:
+                raise ValueError("compiled question cannot have a base invocation")
+            return
+        if self.base_invocation_id is None:
+            raise ValueError("continued and rerun invocations require a base invocation")
 
     @property
     def patch_id(self) -> str | None:
@@ -69,7 +80,23 @@ class StoredProgramInvocation:
 
 
 class ProgramInvocationBinding(Protocol):
-    def bind(self, execution: VerifiedExecution) -> ProgramInvocation: ...
+    def bind(
+        self,
+        execution: VerifiedExecution,
+        *,
+        kind: ProgramInvocationKind,
+        base_invocation_id: str | None,
+    ) -> ProgramInvocation: ...
+
+
+class PriorProgramInvocationReader(Protocol):
+    def load_prior_answered_invocation(
+        self,
+        *,
+        run_id: str,
+        conversation_id: str,
+        tenant_id: str,
+    ) -> StoredProgramInvocation | None: ...
 
 
 @dataclass(frozen=True)
@@ -77,12 +104,20 @@ class LineageProgramInvocationBinding:
     run_id: str
     recorder: LineageRecorderPort
 
-    def bind(self, execution: VerifiedExecution) -> ProgramInvocation:
+    def bind(
+        self,
+        execution: VerifiedExecution,
+        *,
+        kind: ProgramInvocationKind,
+        base_invocation_id: str | None,
+    ) -> ProgramInvocation:
         program_id = answer_program_id(execution.answer)
         invocation = program_invocation(
             run_id=self.run_id,
             program_id=program_id,
             bindings=execution.bindings,
+            kind=kind,
+            base_invocation_id=base_invocation_id,
         )
         self.recorder.record_program_invocation(
             program_invocation_bundle(
@@ -97,11 +132,21 @@ class LineageProgramInvocationBinding:
 class StoredProgramInvocationBinding:
     stored: StoredProgramInvocation
 
-    def bind(self, execution: VerifiedExecution) -> ProgramInvocation:
+    def bind(
+        self,
+        execution: VerifiedExecution,
+        *,
+        kind: ProgramInvocationKind,
+        base_invocation_id: str | None,
+    ) -> ProgramInvocation:
         if answer_program_id(execution.answer) != self.stored.invocation.program_id:
             raise ValueError("stored invocation program does not match execution")
         if execution.bindings != self.stored.invocation.bindings:
             raise ValueError("stored invocation bindings do not match execution")
+        if self.stored.invocation.kind is not kind:
+            raise ValueError("stored invocation kind does not match execution")
+        if self.stored.invocation.base_invocation_id != base_invocation_id:
+            raise ValueError("stored invocation base does not match execution")
         return self.stored.invocation
 
 
@@ -124,6 +169,8 @@ def program_invocation_bundle(
             run_id=invocation.run_id,
             program_id=invocation.program_id,
             bindings_json=canonical_binding_set_json(invocation.bindings),
+            kind=invocation.kind,
+            base_invocation_id=invocation.base_invocation_id,
             patch_id=invocation.patch_id,
             binding_patch_json=(
                 canonical_binding_patch_json(invocation.binding_patch)
@@ -171,6 +218,8 @@ def program_invocation(
     run_id: str,
     program_id: str,
     bindings: BindingSet,
+    kind: ProgramInvocationKind,
+    base_invocation_id: str | None = None,
     patch: BindingPatch | None = None,
     revision_id: str | None = None,
 ) -> ProgramInvocation:
@@ -183,6 +232,8 @@ def program_invocation(
         run_id=run_id,
         program_id=program_id,
         bindings=bindings,
+        kind=kind,
+        base_invocation_id=base_invocation_id,
         binding_patch=patch,
         revision_id=revision_id,
     )
@@ -204,6 +255,8 @@ def parse_stored_program_invocation(
     program_id: str,
     canonical_json: str,
     bindings_json: str,
+    kind: str,
+    base_invocation_id: str | None = None,
     patch_id: str | None = None,
     binding_patch_json: str | None = None,
     revision_id: str | None = None,
@@ -234,6 +287,8 @@ def parse_stored_program_invocation(
             run_id=run_id,
             program_id=program_id,
             bindings=bindings,
+            kind=ProgramInvocationKind(kind),
+            base_invocation_id=base_invocation_id,
             binding_patch=patch,
             revision_id=revision_id,
         ),

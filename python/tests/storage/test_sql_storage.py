@@ -50,6 +50,7 @@ from fervis.lineage.recorder import (
     RunStepWrite,
 )
 from fervis.lineage.enums import (
+    ProgramInvocationKind,
     FactResultKind,
     MemoryArtifactSourceKind,
     ModelCallStatus,
@@ -189,6 +190,7 @@ def test_sql_program_and_invocation_persistence_is_atomic(
                     run_id=result.run_id,
                     program_id="ap_test",
                     bindings_json="{}",
+                    kind=ProgramInvocationKind.COMPILED_QUESTION,
                 ),
             )
         )
@@ -227,6 +229,7 @@ def test_sql_content_addressed_program_is_shared_by_independent_runs(
                     run_id=run.run_id,
                     program_id=program.program_id,
                     bindings_json="{}",
+                    kind=ProgramInvocationKind.COMPILED_QUESTION,
                 ),
             )
         )
@@ -261,7 +264,7 @@ def test_sql_rerun_persists_child_invocation_and_queue_atomically(
         "trigger_kind": "rerun",
         "base_run_id": base.run_id,
         "patch_id": row["patch_id"],
-        "spec_kind": "deterministic",
+        "spec_kind": "rerun_program",
     }
     assert str(row["patch_id"]).startswith("bp_")
 
@@ -326,6 +329,7 @@ def test_sql_program_revision_persistence_is_atomic(tmp_path: Path) -> None:
                 run_id=base.run_id,
                 program_id=answer_program_id(program),
                 bindings=bindings,
+                kind=ProgramInvocationKind.COMPILED_QUESTION,
             ),
         )
     )
@@ -519,6 +523,7 @@ def _sql_answered_base(
                 run_id=base.run_id,
                 program_id=answer_program_id(program),
                 bindings=bindings,
+                kind=ProgramInvocationKind.COMPILED_QUESTION,
             ),
         )
     )

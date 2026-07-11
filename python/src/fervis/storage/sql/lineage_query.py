@@ -377,6 +377,12 @@ def _program_invocation_row(row: dict[str, Any]) -> ProgramInvocationRow:
         invocation_id=str(row["invocation_id"]),
         run_id=str(row["run_id"]),
         program_id=str(row["program_id"]),
+        kind=str(row["kind"]),
+        base_invocation_id=(
+            str(row["base_invocation_id"])
+            if row["base_invocation_id"] is not None
+            else None
+        ),
         bindings_json=str(row["bindings_json"]),
         patch=patch,
         revision_id=(

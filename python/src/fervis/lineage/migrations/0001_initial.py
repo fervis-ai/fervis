@@ -147,6 +147,8 @@ class Migration(migrations.Migration):
             fields=[
                 ('invocation_id', models.CharField(max_length=80, primary_key=True, serialize=False)),
                 ('bindings_json', models.TextField()),
+                ('kind', models.CharField(choices=[('compiled_question', 'compiled_question'), ('continue_prior_request', 'continue_prior_request'), ('rerun_program', 'rerun_program')], max_length=32)),
+                ('base_invocation_id', models.CharField(blank=True, max_length=80, null=True)),
                 ('patch_id', models.CharField(blank=True, max_length=80, null=True)),
                 ('binding_patch_json', models.TextField(blank=True, null=True)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),

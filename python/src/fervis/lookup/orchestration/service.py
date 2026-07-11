@@ -38,6 +38,7 @@ from fervis.lookup.orchestration.host_runtime import (
 
 if TYPE_CHECKING:
     from fervis.lookup.fact_planning.request import RuntimeValueContext
+    from fervis.lookup.answer_program.persistence import PriorProgramInvocationReader
 
 
 class LookupService:
@@ -49,6 +50,7 @@ class LookupService:
         host_api_context: HostApiContext | None = None,
         observability_query: ObservabilityQueryPort | None = None,
         lineage_recorder: LineageRecorderPort | None = None,
+        prior_program_invocations: PriorProgramInvocationReader | None = None,
     ) -> None:
         self.host_api_context = host_api_context or get_host_api_context()
         self.provider_backbone = provider_backbone or build_provider_backbone(
@@ -58,6 +60,7 @@ class LookupService:
             raise RuntimeError("Observability query is required.")
         self.observability_query = observability_query
         self.lineage_recorder = lineage_recorder
+        self.prior_program_invocations = prior_program_invocations
         self.model_router = self.provider_backbone.model_router
 
     def run_lookup(
@@ -157,6 +160,7 @@ class LookupService:
                     run_id=run_id,
                     recorder=self.lineage_recorder,
                 ),
+                prior_program_invocations=self.prior_program_invocations,
                 lineage_step_sink=_lineage_step_sink(
                     run_id=run_id,
                     recorder=self.lineage_recorder,

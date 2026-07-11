@@ -21,6 +21,7 @@ from fervis.lineage.enums import (
     ModelUsageUnit,
     PresentationClientKey,
     PresentationKind,
+    ProgramInvocationKind,
     RunResultKind,
     RunStepKey,
     RunStepKind,
@@ -139,11 +140,17 @@ class ProgramInvocationWrite:
     run_id: str
     program_id: str
     bindings_json: str
+    kind: ProgramInvocationKind
+    base_invocation_id: str | None = None
     patch_id: str | None = None
     binding_patch_json: str | None = None
     revision_id: str | None = None
 
     def __post_init__(self) -> None:
+        if self.kind is ProgramInvocationKind.COMPILED_QUESTION:
+            _require_absent(self.base_invocation_id, "base_invocation_id")
+        else:
+            _require_present(self.base_invocation_id, "base_invocation_id")
         if (self.patch_id is None) != (self.binding_patch_json is None):
             raise ValueError(
                 "program invocation patch id and payload must be present together"

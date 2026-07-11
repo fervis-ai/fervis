@@ -538,7 +538,7 @@ def test_lookup_derives_finite_choice_membership_from_answer_population_tests():
         "answer_requests": [
             {
                 "answer_fact": "count of in-person sales",
-                "answer_expression": {"family": "scalar_aggregate"},
+                    "answer_expression": {"family": "list_rows"},
                 "answer_subject": _answer_subject_payload("sales"),
                 "answer_population": {
                     "population_label": "in-person sales",
@@ -1700,10 +1700,11 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
 
     planner = _NoisyResolverPlannerPort(
         responses={
-            "submit_answer_request_contract": _question_contract_response(
-                subject="Jane Doe staff ID",
-                answer_subject="staff ID",
-                parts=("staff ID",),
+                "submit_answer_request_contract": _question_contract_response(
+                    subject="Jane Doe staff ID",
+                    answer_subject="staff ID",
+                    answer_expression_family="list_rows",
+                    parts=("staff ID",),
                 question_inputs=(
                     {
                         "kind": KnownInputKind.LITERAL.value,
@@ -2002,10 +2003,11 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
             ),
         ),
         responses={
-            "submit_answer_request_contract": _question_contract_response(
-                subject="Jane Doe staff ID",
-                answer_subject="staff ID",
-                parts=("staff ID",),
+                "submit_answer_request_contract": _question_contract_response(
+                    subject="Jane Doe staff ID",
+                    answer_subject="staff ID",
+                    answer_expression_family="list_rows",
+                    parts=("staff ID",),
                 question_inputs=(
                     {
                         "kind": KnownInputKind.LITERAL.value,
@@ -2508,9 +2510,10 @@ def test_lookup_cutover_runs_combined_source_and_split_planning_turns():
             ),
         ),
         responses={
-            "submit_answer_request_contract": _question_contract_response(
-                subject="sales",
-                parts=("sales",),
+                "submit_answer_request_contract": _question_contract_response(
+                    subject="sales",
+                    answer_expression_family="list_rows",
+                    parts=("sales",),
             ),
             "submit_source_binding": source_binding_payload,
             "submit_source_alignment_reviews": {
@@ -2710,11 +2713,12 @@ def test_lookup_source_binding_uses_first_class_fulfillment_usage():
             ),
         ),
         responses={
-            "submit_answer_request_contract": _question_contract_response(
-                subject="staff and sales amount",
-                answer_subject="staff",
-                parts=("staff", "sales amount"),
-            ),
+                "submit_answer_request_contract": _question_contract_response(
+                    subject="staff and sales amount",
+                    answer_subject="staff",
+                    parts=("staff", "sales amount"),
+                    answer_expression_family="list_rows",
+                ),
             "submit_source_binding": source_binding_payload,
             "submit_pattern_fact_plan": {
                 "outcome": {
@@ -3001,30 +3005,12 @@ def test_lookup_plan_selection_uses_backend_projected_candidates():
             self.prompts.append(prompt)
             tool_name = tool_specs[0].name if tool_specs else ""
             if tool_name == "submit_answer_request_contract":
-                arguments = _question_contract_response_with_prompt_memory(
-                    _question_contract_response(
-                        subject="total sales",
-                        answer_subject="sales",
-                        parts=("total sales",),
-                        demand_text="sales",
-                    ),
-                    prompt=prompt,
-                    fact_plan={
-                        "outcome": {
-                            "kind": "fact_plan",
-                            "answers": [
-                                {
-                                    "requested_fact_id": "fact_1",
-                                    "pattern": "direct_field_value",
-                                    "source": {
-                                        "kind": "read",
-                                        "read_id": "sales_summary",
-                                    },
-                                    "output_field": {"field_id": "total_sales"},
-                                }
-                            ],
-                        }
-                    },
+                arguments = _question_contract_response(
+                    subject="total sales",
+                    answer_subject="sales",
+                    answer_expression_family="scalar_value",
+                    parts=("total sales",),
+                    demand_text="sales",
                 )
             elif tool_name == "submit_query_enrichment":
                 arguments = _query_enrichment_payload_from_prompt(prompt)

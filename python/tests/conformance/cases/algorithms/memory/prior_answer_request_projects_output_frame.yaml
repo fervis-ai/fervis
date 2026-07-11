@@ -20,6 +20,7 @@ input:
                 answer_outputs:
                   - id: answer_1
                     description: sales total
+                    role: MEASURED_VALUE
                 used_question_inputs: []
         addresses:
           - address: value.answer_1
@@ -35,4 +36,4 @@ expect:
         output_frames:
           - output_id: answer_1
             description: sales total
-            requested_value_frame: sales total
+            role: MEASURED_VALUE
