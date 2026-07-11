@@ -39,6 +39,8 @@ from fervis.lookup.read_eligibility import (
 
 def _raw_source_binding_candidate_payload(
     request: SourceCandidateInputRequest,
+    *,
+    selected_value_ids: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     relation_payload = available_relation_catalog_payload(
         request.relation_catalog,
@@ -74,6 +76,13 @@ def _raw_source_binding_candidate_payload(
         if eligible_candidate is not None:
             memory_sources_by_id[candidate_id] = eligible_candidate
     memory_value_sources = _memory_value_candidate_payloads(request.memory_inputs)
+    if selected_value_ids:
+        memory_value_sources.extend(
+            _memory_value_candidate_payloads(
+                request.memory_inputs,
+                source_linked=True,
+            )
+        )
     utility_sources = _utility_source_candidates(
         relation_payload,
         request=request,
@@ -147,7 +156,11 @@ def _raw_source_binding_candidate_payload(
     visible_memory_value_candidates = [
         eligible_candidate
         for candidate in memory_value_sources
-        if _candidate_is_active_memory_value(candidate, request=request)
+        if _candidate_is_active_memory_value(
+            candidate,
+            request=request,
+            selected_value_ids=selected_value_ids,
+        )
         for eligible_candidate in (
             _memory_candidate_with_fact_eligibility(candidate, request=request),
         )
@@ -261,7 +274,10 @@ def _candidate_is_active_memory_value(
     candidate: dict[str, Any],
     *,
     request: SourceCandidateInputRequest,
+    selected_value_ids: frozenset[str] = frozenset(),
 ) -> bool:
+    if str(candidate.get("value_id") or "") in selected_value_ids:
+        return True
     active_ids = {str(item) for item in request.active_memory_ids if str(item)}
     if not active_ids:
         return True

@@ -349,7 +349,10 @@ class _ToolNamePlannerPort:
                     "costUsd": 0,
                 },
             }
-        if tool_name == "submit_source_alignment_reviews" and tool_name not in self.responses:
+        if (
+            tool_name == "submit_source_alignment_reviews"
+            and tool_name not in self.responses
+        ):
             arguments = plan_selection_payload_from_fact_plan(
                 self.responses.get("submit_pattern_fact_plan", {}),
                 prompt=prompt,
@@ -482,33 +485,33 @@ class _PromptSurfacePlannerPort:
                 requested_fact_id="fact_1",
                 required=("staff_name",),
             )
+            binding_target_id = source_binding_target_id_for_candidate(
+                prompt,
+                requested_fact_id="fact_1",
+                source_candidate_id=str(candidate["source_candidate_id"]),
+                plan_shape="list_rows",
+            )
             arguments = {
                 "outcome": {
                     "kind": "source_bindings",
-                    "source_invocations": [
-                        {
-                            "binding_target_id": source_binding_target_id_for_candidate(
-                                prompt,
-                                requested_fact_id="fact_1",
-                                source_candidate_id=str(
-                                    candidate["source_candidate_id"]
-                                ),
-                                plan_shape="list_rows",
-                            ),
-                            "answer_population": source_candidate_answer_population(
-                                prompt,
-                                source_candidate_id=str(
-                                    candidate["source_candidate_id"]
-                                ),
-                            ),
-                            "fulfillment_decisions": source_fulfills_for_candidate(
-                                candidate,
-                                field_ids=("staff_name",),
-                            ),
-                            "param_decisions": {},
-                            "finite_choice_param_reviews": {},
+                    "bindings_for_fact_1": {
+                        "plan_shape": "list_rows",
+                        "primary": {
+                                    "binding_target_id": binding_target_id,
+                                    "answer_population": source_candidate_answer_population(
+                                        prompt,
+                                        source_candidate_id=str(
+                                            candidate["source_candidate_id"]
+                                        ),
+                                    ),
+                                    "fulfillment_decisions": source_fulfills_for_candidate(
+                                        candidate,
+                                        field_ids=("staff_name",),
+                                    ),
+                                    "param_decisions": {},
+                                    "finite_choice_param_reviews": {},
                         }
-                    ],
+                    },
                 }
             }
             arguments = source_binding_payload_for_one_call(arguments, prompt=prompt)

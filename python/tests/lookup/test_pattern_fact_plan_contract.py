@@ -533,7 +533,8 @@ def _question_contract(
                     {"description": description} for description in output_descriptions
                 ],
                 "used_question_inputs": [
-                    f"input_{index}" for index, _item in enumerate(known_inputs, start=1)
+                    f"input_{index}"
+                    for index, _item in enumerate(known_inputs, start=1)
                 ],
             }
         ],
@@ -1448,33 +1449,35 @@ class _OpaqueSourceHandlePlannerPort(_PlannerPort):
             )
             candidate_id = str(candidate["source_candidate_id"])
             assert candidate_id.startswith("source_")
+            binding_target_id = source_binding_target_id_for_candidate(
+                prompt,
+                requested_fact_id="fact_1",
+                source_candidate_id=candidate_id,
+                plan_shape="list_rows",
+            )
             self.source_binding_payload = {
                 "outcome": {
                     "kind": "source_bindings",
-                    "source_invocations": [
-                        {
-                            "binding_target_id": source_binding_target_id_for_candidate(
-                                prompt,
-                                requested_fact_id="fact_1",
-                                source_candidate_id=candidate_id,
-                                plan_shape="list_rows",
-                            ),
-                            "answer_population": source_candidate_answer_population(
-                                prompt,
-                                source_candidate_id=candidate_id,
-                            ),
-                            "fulfillment_decisions": (
-                                source_fulfills_fields_for_candidate(
-                                    candidate,
-                                    field_ids_by_answer_output={
-                                        "answer_1": ("location_name",),
-                                        "answer_2": ("metric_total",),
-                                    },
-                                )
-                            ),
-                            "param_decisions": {},
+                    "bindings_for_fact_1": {
+                        "plan_shape": "list_rows",
+                        "primary": {
+                                    "binding_target_id": binding_target_id,
+                                    "answer_population": source_candidate_answer_population(
+                                        prompt,
+                                        source_candidate_id=candidate_id,
+                                    ),
+                                    "fulfillment_decisions": (
+                                        source_fulfills_fields_for_candidate(
+                                            candidate,
+                                            field_ids_by_answer_output={
+                                                "answer_1": ("location_name",),
+                                                "answer_2": ("metric_total",),
+                                            },
+                                        )
+                                    ),
+                                    "param_decisions": {},
                         }
-                    ],
+                    },
                 }
             }
             return _tool_response(
@@ -1652,36 +1655,38 @@ class _TwoAnswerOutputPlannerPort(_PlannerPort):
                 forbidden=(),
             )
             candidate_id = str(candidate["source_candidate_id"])
+            binding_target_id = source_binding_target_id_for_candidate(
+                prompt,
+                requested_fact_id="fact_1",
+                source_candidate_id=candidate_id,
+                plan_shape="list_rows",
+            )
             self.source_binding_payload = {
                 "outcome": {
                     "kind": "source_bindings",
-                    "source_invocations": [
-                        {
-                            "binding_target_id": source_binding_target_id_for_candidate(
-                                prompt,
-                                requested_fact_id="fact_1",
-                                source_candidate_id=candidate_id,
-                                plan_shape="list_rows",
-                            ),
-                            "answer_population": source_candidate_answer_population(
-                                prompt,
-                                source_candidate_id=candidate_id,
-                            ),
-                            "fulfillment_decisions": {
-                                **source_fulfills_for_candidate(
-                                    candidate,
-                                    field_ids=("snapshot_merch_name",),
-                                    answer_output_ids=("answer_1",),
-                                ),
-                                **source_fulfills_for_candidate(
-                                    candidate,
-                                    field_ids=("snapshot_shade_name",),
-                                    answer_output_ids=("answer_2",),
-                                ),
-                            },
-                            "param_decisions": {},
+                    "bindings_for_fact_1": {
+                        "plan_shape": "list_rows",
+                        "primary": {
+                                    "binding_target_id": binding_target_id,
+                                    "answer_population": source_candidate_answer_population(
+                                        prompt,
+                                        source_candidate_id=candidate_id,
+                                    ),
+                                    "fulfillment_decisions": {
+                                        **source_fulfills_for_candidate(
+                                            candidate,
+                                            field_ids=("snapshot_merch_name",),
+                                            answer_output_ids=("answer_1",),
+                                        ),
+                                        **source_fulfills_for_candidate(
+                                            candidate,
+                                            field_ids=("snapshot_shade_name",),
+                                            answer_output_ids=("answer_2",),
+                                        ),
+                                    },
+                                    "param_decisions": {},
                         }
-                    ],
+                    },
                 }
             }
             self.source_binding_payload = source_binding_payload_for_one_call(
@@ -1846,28 +1851,30 @@ class _SameScopeFieldPlannerPort:
                         value="true",
                     ),
                 }
+            binding_target_id = source_binding_target_id_for_candidate(
+                prompt,
+                requested_fact_id="fact_1",
+                source_candidate_id=candidate_id,
+                plan_shape="list_rows",
+            )
             self.source_binding_payload = {
                 "outcome": {
                     "kind": "source_bindings",
-                    "source_invocations": [
-                        {
-                            "binding_target_id": source_binding_target_id_for_candidate(
-                                prompt,
-                                requested_fact_id="fact_1",
-                                source_candidate_id=candidate_id,
-                                plan_shape="list_rows",
-                            ),
-                            "answer_population": source_candidate_answer_population(
-                                prompt,
-                                source_candidate_id=candidate_id,
-                            ),
-                            "fulfillment_decisions": _same_scope_fulfillment_decisions(
-                                candidate,
-                                field_id=self.field_id,
-                            ),
-                            "param_decisions": param_decisions,
+                    "bindings_for_fact_1": {
+                        "plan_shape": "list_rows",
+                        "primary": {
+                                    "binding_target_id": binding_target_id,
+                                    "answer_population": source_candidate_answer_population(
+                                        prompt,
+                                        source_candidate_id=candidate_id,
+                                    ),
+                                    "fulfillment_decisions": _same_scope_fulfillment_decisions(
+                                        candidate,
+                                        field_id=self.field_id,
+                                    ),
+                                    "param_decisions": param_decisions,
                         }
-                    ],
+                    },
                 }
             }
             return _source_binding_response(

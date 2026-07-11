@@ -182,6 +182,10 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Outcome",
                 (
+                    "Report ambiguity or missing information only when deciding how "
+                    "the current utterance depends on prior conversation context. "
+                    "Preserve coherent explicit current wording unchanged for "
+                    "downstream question interpretation.",
                     "Use resolved when the visible evidence supports one complete "
                     "factual question.",
                     "Use multiple_meanings when visible evidence supports competing "
@@ -191,6 +195,10 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                     "that retains all explicit current meaning and is directly supported "
                     "by visible evidence. A hypothetical alternative without such "
                     "evidence is not an ambiguity.",
+                    "For each candidate, context_evidence cites the exact prior-context "
+                    "evidence that produces that resolution. Competing candidates must "
+                    "cite different context evidence; the same context evidence with "
+                    "different imagined readings is not a conversation ambiguity.",
                     "Use missing_input when required information is absent and explain "
                     "what is missing.",
                 ),

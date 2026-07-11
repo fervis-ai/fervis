@@ -823,12 +823,14 @@ def _run_source_binding_phase(state: _LookupPipelineState) -> LookupResult | Non
     state.source_binding_turn_number = state.plan_selection_turn_number + 1
     if _selected_plan_uses_only_values(state):
         assert isinstance(state.plan_selection_outcome, PlanSelectionSet)
-        state.source_binding_outcome = value_only_source_binding_plan(
+        value_only_plan = value_only_source_binding_plan(
             state.plan_selection_outcome,
             requested_facts=state.question_contract.requested_facts,
         )
-        _set_fact_plan_request_from_source_binding(state)
-        return None
+        if value_only_plan is not None:
+            state.source_binding_outcome = value_only_plan
+            _set_fact_plan_request_from_source_binding(state)
+            return None
     if not isinstance(state.plan_selection_outcome, PlanSelectionSet):
         return _runtime_error_terminal(
             state,

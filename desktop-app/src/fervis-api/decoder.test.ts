@@ -239,6 +239,50 @@ describe("Fervis API boundary decoder", () => {
     );
   });
 
+  it("decodes the current conversation-resolution clause projection", () => {
+    const decoded = decodeQuestionRunList({
+      questionId: "q_followup",
+      runs: [
+        {
+          ...completedRunFixture,
+          questionId: "q_followup",
+          steps: [
+            {
+              stepId: "step_conversation_resolution",
+              stepKey: "conversation_resolution",
+              decisions: [],
+              semantic: {
+                requestedFacts: [],
+                knownInputs: [],
+                resolverCandidates: [],
+                groundingResults: [],
+                interpretedInputs: [],
+                conversationClauses: [
+                  {
+                    currentClauseText: "what is the name of that location?",
+                    resolvedText: "what is the name of the selected store?",
+                    resolvedValues: ["the selected store"]
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    });
+
+    if (!decoded.ok) {
+      throw new Error(decoded.error.message);
+    }
+    expect(decoded.value.runs[0]?.steps[0]?.semantic.conversationClauses).toEqual([
+      {
+        currentClauseText: "what is the name of that location?",
+        resolvedText: "what is the name of the selected store?",
+        resolvedValues: ["the selected store"]
+      }
+    ]);
+  });
+
   it("decodes lineage runtime errors using errorKind", () => {
     const decoded = decodeRun({
       runId: "run_failed",

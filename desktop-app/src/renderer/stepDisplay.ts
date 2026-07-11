@@ -339,18 +339,13 @@ function conversationClauseSignals(
 ): readonly StepSignal[] {
   return compactSignals([
     semanticSignal("Current clause", clause.currentClauseText),
-    semanticSignal("Resolved value", resolvedValueText(clause)),
-    semanticSignal("Resolved question", clause.resolvedClauseText)
+    signalFromValues(
+      clause.resolvedValues.length === 1 ? "Resolved value" : "Resolved values",
+      clause.resolvedValues,
+      3
+    ),
+    semanticSignal("Resolved question", clause.resolvedText)
   ]);
-}
-
-function resolvedValueText(
-  clause: StepSemantic["conversationClauses"][number]
-): string {
-  if (clause.currentValueText === "" || clause.resolvedFrameText === "") {
-    return "";
-  }
-  return `${clause.currentValueText} -> ${clause.resolvedFrameText}`;
 }
 
 function sourceReferenceFromDecision(line: string): SourceReferenceLabel | null {

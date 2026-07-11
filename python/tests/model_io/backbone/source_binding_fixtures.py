@@ -1,4 +1,9 @@
 from fervis.lookup.source_binding.schema import build_source_binding_schema
+from fervis.lookup.plan_selection.family_specs import SourceMemberConstraint
+from fervis.lookup.source_binding.plan_targets import (
+    SourceBindingPlanFamily,
+    SourceBindingTarget,
+)
 from fervis.model_io.backbone.dto import ToolSpec
 
 
@@ -80,6 +85,36 @@ def source_binding_tool_spec() -> ToolSpec:
             target_population_binding_ids=_candidate_population_bindings(
                 "target.source_1",
                 "target.source_2",
+            ),
+            plan_families=(
+                SourceBindingPlanFamily(
+                    requested_fact_id="fact_1",
+                    plan_shape="aggregate_scalar",
+                    member_constraint=SourceMemberConstraint.ANY,
+                    required_answer_output_ids=("answer_1",),
+                    role_targets=(
+                        (
+                            "metric",
+                            tuple(
+                                SourceBindingTarget(
+                                    binding_target_id=target_id,
+                                    requested_fact_id="fact_1",
+                                    plan_shape="aggregate_scalar",
+                                    source_candidate_id=target_id.removeprefix(
+                                        "target."
+                                    ),
+                                    requirement_id="metric",
+                                    answer_output_ids=("answer_1",),
+                                    required_answer_output_ids=("answer_1",),
+                                )
+                                for target_id in (
+                                    "target.source_1",
+                                    "target.source_2",
+                                )
+                            ),
+                        ),
+                    ),
+                ),
             ),
         ),
     )

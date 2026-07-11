@@ -24,10 +24,35 @@ from fervis.lookup.source_binding.parser_common import _dict, _text
 
 
 __all__ = [
+    "fulfillment_row_source_id",
     "parse_source_fulfillments",
 ]
 
 MetricFitReviews = dict[str, dict[str, dict[str, str]]]
+
+
+def fulfillment_row_source_id(
+    fulfillments: tuple[SourceFulfillment, ...],
+    *,
+    evidence_items: tuple[Any, ...],
+) -> str:
+    evidence_ids = {
+        evidence_id
+        for fulfillment in fulfillments
+        for evidence_id in (
+            *fulfillment.metric_measure_evidence_ids,
+            *fulfillment.row_count_basis_evidence_ids,
+            *fulfillment.group_key_evidence_ids,
+        )
+    }
+    row_source_ids = {
+        item.row_source_id
+        for item in evidence_items
+        if item.evidence_id in evidence_ids and item.row_source_id
+    }
+    if len(row_source_ids) != 1:
+        return ""
+    return next(iter(row_source_ids))
 
 
 def parse_source_fulfillments(

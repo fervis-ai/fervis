@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any, Protocol
 
 
@@ -33,6 +34,12 @@ _MEMBER_REQUIREMENT_BINDING_ROLES: dict[str, frozenset[str]] = {
 }
 
 
+class SourceMemberConstraint(StrEnum):
+    ANY = "ANY"
+    SAME_SOURCE_CANDIDATE = "SAME_SOURCE_CANDIDATE"
+    DISTINCT_SOURCE_CANDIDATES = "DISTINCT_SOURCE_CANDIDATES"
+
+
 @dataclass(frozen=True)
 class PlanSelectionShapeSpec:
     plan_shape: str
@@ -44,6 +51,14 @@ class PlanSelectionShapeSpec:
     answer_fulfillment_requirements: frozenset[str] | None = None
     complete_answer_fulfillment_requirements: frozenset[str] | None = None
     support_set_grouper: SupportSetGrouper | None = None
+
+    @property
+    def member_constraint(self) -> SourceMemberConstraint:
+        if self.distinct_members:
+            return SourceMemberConstraint.DISTINCT_SOURCE_CANDIDATES
+        if self.single_source:
+            return SourceMemberConstraint.SAME_SOURCE_CANDIDATE
+        return SourceMemberConstraint.ANY
 
     def validation_roles_for_requirement(
         self,

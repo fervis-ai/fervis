@@ -11,10 +11,17 @@ from fervis.lookup.relation_catalog import (
 from fervis.lookup.plan_execution.relations import api_read_completeness_proof
 from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
+    PopulationChoiceControllerKind,
     Relation,
     RelationField,
     RelationSource,
     SourceKind,
+)
+from fervis.lookup.fact_planning.pattern_plan.shared import (
+    _relation_fields_with_source_requirements,
+)
+from fervis.lookup.source_binding.compiler_ir import (
+    DraftRelationSourcePopulationChoice,
 )
 from fervis.lookup.fact_plan.row_sources import (
     build_row_source_catalog,
@@ -25,7 +32,7 @@ from fervis.lookup.fact_plan.row_sources import (
 )
 from fervis.lookup.fact_plan.row_sources import row_source_for_relation
 
-from tests.testkit.assertions import subset_mismatches
+from tests.testkit.assertions import exact_mismatches, subset_mismatches
 from tests.testkit.catalog import catalog_from_payload
 
 
@@ -80,6 +87,39 @@ def run_relation_contract_case(payload: dict[str, Any]) -> list[str]:
         return subset_mismatches(
             actual={"row_source_id": source.id, "row_path_id": source.row_path_id},
             expected_subset=payload["expect"]["result_contains"],
+        )
+    if mode == "relation_fields_for_source_requirements":
+        relation_fields = tuple(
+            RelationField(
+                field_id=str(item["field_id"]),
+                roles=tuple(
+                    FieldBindingRole(str(role)) for role in item.get("roles") or ()
+                ),
+            )
+            for item in payload["input"].get("fields") or ()
+        )
+        population_choices = tuple(
+            DraftRelationSourcePopulationChoice(
+                controller_kind=PopulationChoiceControllerKind(
+                    str(item["controller_kind"])
+                ),
+                controller_id=str(item["controller_id"]),
+                field_id=str(item["field_id"]),
+                requested_fact_ids=tuple(item["requested_fact_ids"]),
+                included_values=tuple(item["included_values"]),
+                excluded_values=tuple(item.get("excluded_values") or ()),
+            )
+            for item in payload["input"].get("population_choices") or ()
+        )
+        fields = _relation_fields_with_source_requirements(
+            relation_fields,
+            source_filters=(),
+            row_filters=(),
+            population_choices=population_choices,
+        )
+        return exact_mismatches(
+            actual={"field_ids": [field.field_id for field in fields]},
+            expected=payload["expect"]["result_equals"],
         )
     if mode == "api_read_completeness":
         read_payload = payload["input"]["read"]

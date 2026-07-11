@@ -340,6 +340,8 @@ def _relation_fields_with_source_requirements(
     for choice in population_choices:
         if choice.controller_kind is not PopulationChoiceControllerKind.ROW_PREDICATE:
             continue
+        if choice.selection_expr is None and not choice.excluded_values:
+            continue
         if choice.field_id in existing:
             continue
         output.append(

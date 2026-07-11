@@ -12,6 +12,7 @@ from fervis.lookup.source_binding.candidates import (
     source_candidate_required_param_decision_ids,
 )
 from fervis.lookup.source_binding.closed_key_params import (
+    ClosedKeyParamBindingIndex,
     closed_key_param_binding_index,
 )
 from fervis.lookup.source_binding import provider_contract as provider_output
@@ -20,10 +21,18 @@ from fervis.lookup.source_binding.parser.context import source_binding_parse_con
 from fervis.lookup.source_binding.parser.finite_choices import (
     derive_finite_choice_param_decisions,
 )
+from fervis.lookup.source_binding.parser.model import (
+    ParsedRoleBinding,
+    ParsedSourceBindingPlan,
+)
 from fervis.lookup.source_binding.parser.params import normalize_param_decisions
 from fervis.lookup.source_binding.parser.plan_builder import build_source_binding_plan
-from fervis.lookup.source_binding.parser_common import _dict, _required_dicts, _text
-from fervis.lookup.source_binding.plan_targets import SourceBindingTargetIndex
+from fervis.lookup.source_binding.parser_common import _dict, _text
+from fervis.lookup.source_binding.plan_targets import (
+    SourceBindingTarget,
+    SourceBindingTargetIndex,
+    source_binding_fact_field_id,
+)
 from fervis.lookup.source_binding.review_scope import SourceBindingReviewScope
 from fervis.lookup.source_binding.terminal_parser import (
     _plan_clarification,
@@ -44,14 +53,9 @@ def parse_source_binding(
     outcome = _dict(payload.get("outcome"), "outcome")
     kind = _text(outcome.get("kind"))
     if kind == "source_bindings":
-        plan_output = provider_output.SourceBindingPlanOutput.parse(outcome)
         context = source_binding_parse_context(request)
-        (
-            normalized_plan,
-            effective_param_ids_by_index,
-            population_choices_by_index,
-        ) = _normalize_source_binding_payload_with_derived_finite_choices(
-            plan_output,
+        normalized_plan = _normalize_source_binding_payload_with_derived_finite_choices(
+            outcome,
             request,
             target_index=context.target_index,
             review_scope=context.review_scope,
@@ -64,8 +68,6 @@ def parse_source_binding(
                 target_index=context.target_index,
                 review_scope=context.review_scope,
                 candidates=context.candidates,
-                effective_param_ids_by_index=effective_param_ids_by_index,
-                population_choices_by_index=population_choices_by_index,
             )
         )
     if kind == "needs_clarification":
@@ -76,91 +78,239 @@ def parse_source_binding(
 
 
 def _normalize_source_binding_payload_with_derived_finite_choices(
-    payload: provider_output.SourceBindingPlanOutput,
+    payload: dict[str, Any],
     request: SourceBindingRequest,
     *,
     target_index: SourceBindingTargetIndex,
     review_scope: SourceBindingReviewScope,
     candidates: dict[str, SourceCandidate],
-) -> tuple[
-    provider_output.SourceBindingPlanOutput,
-    dict[int, tuple[str, ...]],
-    dict[int, tuple[DraftRelationSourcePopulationChoice, ...]],
-]:
-    normalized_invocations: list[provider_output.SourceInvocationOutput] = []
-    effective_param_ids_by_index: dict[int, tuple[str, ...]] = {}
-    population_choices_by_index: dict[
-        int, tuple[DraftRelationSourcePopulationChoice, ...]
-    ] = {}
+) -> ParsedSourceBindingPlan:
     closed_key_bindings = closed_key_param_binding_index(
         request,
         targets=target_index.targets,
         candidates_by_id=candidates,
     )
-    for index, raw in enumerate(
-        _required_dicts(payload.source_invocations, "source_invocations"),
-        start=1,
+    normalized_bindings: list[ParsedRoleBinding] = []
+    for requested_fact_id, raw_fact_binding in _fact_binding_payloads(
+        payload,
+        request=request,
     ):
-        parsed_invocation = provider_output.SourceInvocationOutput.parse(raw)
-        target = target_index.require(_text(parsed_invocation.binding_target_id))
-        candidate = candidates.get(target.source_candidate_id)
-        if candidate is None:
-            raise ValueError("source binding references unknown source candidate")
-        raw_param_decisions = normalize_param_decisions(
-            parsed_invocation.param_decisions,
-            parse_provider_output=True,
-        )
-        raw_param_decisions = closed_key_bindings.model_visible_param_map(
-            target.binding_target_id,
-            raw_param_decisions,
-        )
-        derived = derive_finite_choice_param_decisions(
-            parsed_invocation.finite_choice_param_reviews,
-            candidate=candidate,
-            requested_fact_id=target.requested_fact_id,
-            binding_target_id=target.binding_target_id,
-            request=request,
-            review_scope=review_scope,
-            answer_population=provider_output.AnswerPopulationOutput.parse(
-                parsed_invocation.answer_population
-            ),
-            raw_param_decision_ids=tuple(raw_param_decisions),
-        )
-        combined_decisions = {**raw_param_decisions, **derived.param_decisions}
-        normalized_invocations.append(
-            provider_output.SourceInvocationOutput(
-                binding_target_id=parsed_invocation.binding_target_id,
-                answer_population=parsed_invocation.answer_population,
-                fulfillment_decisions=parsed_invocation.fulfillment_decisions,
-                param_decisions=combined_decisions,
-                row_predicate_reviews=parsed_invocation.row_predicate_reviews,
-                finite_choice_param_reviews=(
-                    parsed_invocation.finite_choice_param_reviews
-                ),
+        normalized_bindings.extend(
+            _normalize_requested_fact_binding(
+                requested_fact_id,
+                raw_fact_binding,
+                request=request,
+                target_index=target_index,
+                review_scope=review_scope,
+                candidates=candidates,
+                closed_key_bindings=closed_key_bindings,
             )
         )
-        population_choices_by_index[index] = derived.population_choices
-        effective_param_ids = tuple(
-            dict.fromkeys(
-                (
-                    *source_candidate_required_param_decision_ids(candidate),
-                    *combined_decisions.keys(),
-                )
-            )
-        )
-        effective_param_ids_by_index[index] = tuple(
-            closed_key_bindings.model_visible_param_map(
-                target.binding_target_id,
-                dict.fromkeys(effective_param_ids),
-            )
-        )
-    return (
-        provider_output.SourceBindingPlanOutput(
-            kind="source_bindings",
-            metric_fit_bases=payload.metric_fit_bases,
-            fit_basis_interpretations=payload.fit_basis_interpretations,
-            source_invocations=tuple(normalized_invocations),
-        ),
-        effective_param_ids_by_index,
-        population_choices_by_index,
+    return ParsedSourceBindingPlan(
+        metric_fit_bases=payload.get("metric_fit_bases"),
+        fit_basis_interpretations=payload.get("fit_basis_interpretations"),
+        role_bindings=tuple(normalized_bindings),
     )
+
+
+def _fact_binding_payloads(
+    payload: dict[str, Any],
+    *,
+    request: SourceBindingRequest,
+) -> tuple[tuple[str, dict[str, Any]], ...]:
+    fact_fields = tuple(
+        (fact.id, source_binding_fact_field_id(fact.id))
+        for fact in request.requested_facts
+    )
+    required_fields = {
+        "kind",
+        "metric_fit_bases",
+        "fit_basis_interpretations",
+        *(field_id for _, field_id in fact_fields),
+    }
+    unexpected_fields = set(payload) - required_fields
+    if unexpected_fields:
+        field_id = min(unexpected_fields)
+        raise ValueError(f"source binding contains unexpected field: {field_id}")
+    return tuple(
+        (
+            requested_fact_id,
+            _dict(payload.get(field_id), field_id),
+        )
+        for requested_fact_id, field_id in fact_fields
+    )
+
+
+def _normalize_requested_fact_binding(
+    requested_fact_id: str,
+    raw_fact_binding: object,
+    *,
+    request: SourceBindingRequest,
+    target_index: SourceBindingTargetIndex,
+    review_scope: SourceBindingReviewScope,
+    candidates: dict[str, SourceCandidate],
+    closed_key_bindings: ClosedKeyParamBindingIndex,
+) -> tuple[ParsedRoleBinding, ...]:
+    fact_binding = _dict(
+        raw_fact_binding,
+        source_binding_fact_field_id(requested_fact_id),
+    )
+    plan_shape = _text(fact_binding.get("plan_shape"))
+    role_bindings = {
+        requirement_id: raw_invocation
+        for requirement_id, raw_invocation in fact_binding.items()
+        if requirement_id != "plan_shape"
+    }
+    return tuple(
+        _normalize_role_binding(
+            requested_fact_id=requested_fact_id,
+            plan_shape=plan_shape,
+            requirement_id=requirement_id,
+            raw_invocation=raw_invocation,
+            request=request,
+            target_index=target_index,
+            review_scope=review_scope,
+            candidates=candidates,
+            closed_key_bindings=closed_key_bindings,
+        )
+        for requirement_id, raw_invocation in role_bindings.items()
+    )
+
+
+def _normalize_role_binding(
+    *,
+    requested_fact_id: str,
+    plan_shape: str,
+    requirement_id: str,
+    raw_invocation: object,
+    request: SourceBindingRequest,
+    target_index: SourceBindingTargetIndex,
+    review_scope: SourceBindingReviewScope,
+    candidates: dict[str, SourceCandidate],
+    closed_key_bindings: ClosedKeyParamBindingIndex,
+) -> ParsedRoleBinding:
+    parsed_invocation = provider_output.SourceInvocationOutput.parse(raw_invocation)
+    target = target_index.require(_text(parsed_invocation.binding_target_id))
+    _require_enclosing_binding_address(
+        target,
+        requested_fact_id=requested_fact_id,
+        plan_shape=plan_shape,
+        requirement_id=requirement_id,
+    )
+    candidate = _require_source_candidate(target, candidates=candidates)
+    param_decisions, population_choices = _normalize_binding_decisions(
+        parsed_invocation,
+        target=target,
+        candidate=candidate,
+        request=request,
+        review_scope=review_scope,
+        closed_key_bindings=closed_key_bindings,
+    )
+    invocation = provider_output.SourceInvocationOutput(
+        binding_target_id=parsed_invocation.binding_target_id,
+        answer_population=parsed_invocation.answer_population,
+        fulfillment_decisions=parsed_invocation.fulfillment_decisions,
+        param_decisions=param_decisions,
+        row_predicate_reviews=parsed_invocation.row_predicate_reviews,
+        finite_choice_param_reviews=parsed_invocation.finite_choice_param_reviews,
+    )
+    effective_param_ids = _effective_param_ids(
+        candidate,
+        param_decisions=param_decisions,
+        target=target,
+        closed_key_bindings=closed_key_bindings,
+    )
+    return ParsedRoleBinding(
+        target=target,
+        invocation=invocation,
+        effective_param_ids=effective_param_ids,
+        population_choices=population_choices,
+    )
+
+
+def _require_enclosing_binding_address(
+    target: SourceBindingTarget,
+    *,
+    requested_fact_id: str,
+    plan_shape: str,
+    requirement_id: str,
+) -> None:
+    address = (requested_fact_id, plan_shape, requirement_id)
+    target_address = (
+        target.requested_fact_id,
+        target.plan_shape,
+        target.requirement_id,
+    )
+    if target_address != address:
+        raise ValueError(
+            "source binding target does not match its fact, shape, and role"
+        )
+
+
+def _require_source_candidate(
+    target: SourceBindingTarget,
+    *,
+    candidates: dict[str, SourceCandidate],
+) -> SourceCandidate:
+    candidate = candidates.get(target.source_candidate_id)
+    if candidate is None:
+        raise ValueError("source binding references unknown source candidate")
+    return candidate
+
+
+def _normalize_binding_decisions(
+    invocation: provider_output.SourceInvocationOutput,
+    *,
+    target: SourceBindingTarget,
+    candidate: SourceCandidate,
+    request: SourceBindingRequest,
+    review_scope: SourceBindingReviewScope,
+    closed_key_bindings: ClosedKeyParamBindingIndex,
+) -> tuple[
+    dict[str, Any],
+    tuple[DraftRelationSourcePopulationChoice, ...],
+]:
+    authored_decisions = normalize_param_decisions(
+        invocation.param_decisions,
+        parse_provider_output=True,
+    )
+    visible_decisions = closed_key_bindings.model_visible_param_map(
+        target.binding_target_id,
+        authored_decisions,
+    )
+    derived = derive_finite_choice_param_decisions(
+        invocation.finite_choice_param_reviews,
+        candidate=candidate,
+        requested_fact_id=target.requested_fact_id,
+        binding_target_id=target.binding_target_id,
+        request=request,
+        review_scope=review_scope,
+        answer_population=provider_output.AnswerPopulationOutput.parse(
+            invocation.answer_population
+        ),
+        raw_param_decision_ids=tuple(visible_decisions),
+    )
+    decisions = {**visible_decisions, **derived.param_decisions}
+    return decisions, derived.population_choices
+
+
+def _effective_param_ids(
+    candidate: SourceCandidate,
+    *,
+    param_decisions: dict[str, Any],
+    target: SourceBindingTarget,
+    closed_key_bindings: ClosedKeyParamBindingIndex,
+) -> tuple[str, ...]:
+    effective_param_ids = tuple(
+        dict.fromkeys(
+            (
+                *source_candidate_required_param_decision_ids(candidate),
+                *param_decisions,
+            )
+        )
+    )
+    visible_param_ids = closed_key_bindings.model_visible_param_map(
+        target.binding_target_id,
+        dict.fromkeys(effective_param_ids),
+    )
+    return tuple(visible_param_ids)

@@ -67,6 +67,8 @@ from fervis.lookup.source_binding import (
     parse_source_binding,
 )
 from fervis.lookup.source_binding.plan_targets import (
+    source_binding_fact_field_id,
+    source_binding_fact_id_from_field,
     source_binding_targets_for_plan_selection,
 )
 from fervis.lookup.source_binding.candidates.compact import (
@@ -100,6 +102,31 @@ from tests.testkit.assertions import (
 )
 from tests.testkit.catalog import catalog_from_payload
 from tests.lookup.prompt_sections import prompt_section_text
+
+
+def run_source_binding_plan_families_case(payload: dict[str, Any]) -> list[str]:
+    request = _plan_family_request()
+    projected = SourceBindingTurnPrompt(request).binding_plan_families_payload()
+    facts = projected["bindings_by_requested_fact"]
+    actual = {
+        requested_fact_id: {
+            plan_shape: {
+                "member_constraint": shape["member_constraint"],
+                "required_answer_output_ids": shape["required_answer_output_ids"],
+                "roles": list(shape["role_targets"]),
+                "role_target_counts": {
+                    role_id: len(targets)
+                    for role_id, targets in shape["role_targets"].items()
+                },
+            }
+            for plan_shape, shape in fact["plan_shapes"].items()
+        }
+        for requested_fact_id, fact in facts.items()
+    }
+    return exact_mismatches(
+        actual=actual,
+        expected=payload["expect"]["result_equals"],
+    )
 
 
 def run_source_binding_row_predicates_case(payload: dict[str, Any]) -> list[str]:
@@ -322,147 +349,146 @@ def run_source_binding_prompt_surface_case(payload: dict[str, Any]) -> list[str]
         str(item) for item in expected.get("prompt_text_contains") or ()
     ]
     actual = {
-            "tool_name": invocation.tool_specs[0].name,
-            "prompt_text_contains": [
-                term for term in expected_prompt_terms if term in invocation.prompt_text
-            ],
-            "rendered_fulfillment_evidence": _rendered_fulfillment_evidence(
-                invocation.prompt_text
-            ),
-            "source_candidate_ids": [
-                str(item.get("source_candidate_id") or "") for item in candidates
-            ],
-            "candidate_count": len(candidates),
-            "read_ids": [str(item.get("read_id") or "") for item in candidates],
-            "read_id_presence": {
-                read_id: read_id
-                in {str(item.get("read_id") or "") for item in candidates}
-                for read_id in payload["expect"]
-                .get("result_contains", {})
-                .get("read_id_presence", {})
-            },
-            "read_id": candidate.get("read_id"),
-            "response_rows": candidate.get("response_rows") or [],
-            "response_row_paths": [
-                str(item.get("path") or "")
-                for item in candidate.get("response_rows") or ()
-                if isinstance(item, dict)
-            ],
-            "response_row_cardinalities": {
-                str(item.get("path") or ""): str(item.get("cardinality") or "")
-                for item in candidate.get("response_rows") or ()
-                if isinstance(item, dict)
-            },
-            "response_row_fields_by_path": {
-                str(item.get("path") or ""): [
-                    _response_row_field_id(field)
-                    for field in item.get("fields") or ()
-                    if isinstance(field, (dict, str))
-                ]
-                for item in candidate.get("response_rows") or ()
-                if isinstance(item, dict)
-            },
-            "input_param_names": [
-                str(item.get("name") or "")
-                for item in candidate.get("input_params") or ()
-                if isinstance(item, dict)
-            ],
-            "bound_params": surface.get("bound_params") or [],
-            "candidate_keys": sorted(candidate),
-            "candidate_key_presence": {
-                key: key in candidate
-                for key in payload["expect"]
-                .get("result_contains", {})
-                .get("candidate_key_presence", {})
-            },
-            "surface_keys": sorted(surface),
-            "surface_key_presence": {
-                key: key in surface
-                for key in payload["expect"]
-                .get("result_contains", {})
-                .get("surface_key_presence", {})
-            },
-            "slot_answer_output_ids": sorted(
-                {
-                    str(slot.get("answer_output_id") or "")
-                    for support_set in surface.get("fulfillment_support_sets") or ()
-                    if isinstance(support_set, dict)
-                    for slot in support_set.get("fulfillment_slots") or ()
-                    if isinstance(slot, dict)
-                }
-            ),
-            "param_ids": [
-                str(item.get("param_id") or "")
-                for item in surface.get("params") or ()
-                if isinstance(item, dict)
-            ],
-            "param_required_by_id": {
-                str(item.get("param_id") or ""): item.get("required") is True
-                for item in surface.get("params") or ()
-                if isinstance(item, dict)
-            },
-            "finite_choice_review_param_ids": [
-                str(item.get("param_id") or "")
-                for item in surface.get("params") or ()
-                if isinstance(item, dict)
-                and isinstance(item.get("population_contract"), dict)
-            ],
-            "row_predicate_field_ids": [
-                str(item.get("field_id") or "")
-                for item in surface.get("row_predicates") or ()
-                if isinstance(item, dict)
-            ],
-            "population_roles": candidate.get("population_roles") or [],
-            "has_fulfillment_support": bool(surface.get("fulfillment_support_sets")),
-            "excluded_state_role_names": sorted(
-                {
-                    str(item.get("role") or "")
-                    for param in surface.get("params") or ()
-                    if isinstance(param, dict)
-                    for profile in param.get("normal_instance_role_profiles") or ()
-                    if isinstance(profile, dict)
-                    for item in profile.get("excluded_state_roles") or ()
-                    if isinstance(item, dict) and str(item.get("role") or "")
-                }
-            ),
-            "excluded_state_role_definitions": {
-                str(item.get("role") or ""): str(item.get("role_definition") or "")
+        "tool_name": invocation.tool_specs[0].name,
+        "prompt_text_contains": [
+            term for term in expected_prompt_terms if term in invocation.prompt_text
+        ],
+        "rendered_fulfillment_evidence": _rendered_fulfillment_evidence(
+            invocation.prompt_text
+        ),
+        "source_candidate_ids": [
+            str(item.get("source_candidate_id") or "") for item in candidates
+        ],
+        "candidate_count": len(candidates),
+        "read_ids": [str(item.get("read_id") or "") for item in candidates],
+        "read_id_presence": {
+            read_id: read_id in {str(item.get("read_id") or "") for item in candidates}
+            for read_id in payload["expect"]
+            .get("result_contains", {})
+            .get("read_id_presence", {})
+        },
+        "read_id": candidate.get("read_id"),
+        "response_rows": candidate.get("response_rows") or [],
+        "response_row_paths": [
+            str(item.get("path") or "")
+            for item in candidate.get("response_rows") or ()
+            if isinstance(item, dict)
+        ],
+        "response_row_cardinalities": {
+            str(item.get("path") or ""): str(item.get("cardinality") or "")
+            for item in candidate.get("response_rows") or ()
+            if isinstance(item, dict)
+        },
+        "response_row_fields_by_path": {
+            str(item.get("path") or ""): [
+                _response_row_field_id(field)
+                for field in item.get("fields") or ()
+                if isinstance(field, (dict, str))
+            ]
+            for item in candidate.get("response_rows") or ()
+            if isinstance(item, dict)
+        },
+        "input_param_names": [
+            str(item.get("name") or "")
+            for item in candidate.get("input_params") or ()
+            if isinstance(item, dict)
+        ],
+        "bound_params": surface.get("bound_params") or [],
+        "candidate_keys": sorted(candidate),
+        "candidate_key_presence": {
+            key: key in candidate
+            for key in payload["expect"]
+            .get("result_contains", {})
+            .get("candidate_key_presence", {})
+        },
+        "surface_keys": sorted(surface),
+        "surface_key_presence": {
+            key: key in surface
+            for key in payload["expect"]
+            .get("result_contains", {})
+            .get("surface_key_presence", {})
+        },
+        "slot_answer_output_ids": sorted(
+            {
+                str(slot.get("answer_output_id") or "")
+                for support_set in surface.get("fulfillment_support_sets") or ()
+                if isinstance(support_set, dict)
+                for slot in support_set.get("fulfillment_slots") or ()
+                if isinstance(slot, dict)
+            }
+        ),
+        "param_ids": [
+            str(item.get("param_id") or "")
+            for item in surface.get("params") or ()
+            if isinstance(item, dict)
+        ],
+        "param_required_by_id": {
+            str(item.get("param_id") or ""): item.get("required") is True
+            for item in surface.get("params") or ()
+            if isinstance(item, dict)
+        },
+        "finite_choice_review_param_ids": [
+            str(item.get("param_id") or "")
+            for item in surface.get("params") or ()
+            if isinstance(item, dict)
+            and isinstance(item.get("population_contract"), dict)
+        ],
+        "row_predicate_field_ids": [
+            str(item.get("field_id") or "")
+            for item in surface.get("row_predicates") or ()
+            if isinstance(item, dict)
+        ],
+        "population_roles": candidate.get("population_roles") or [],
+        "has_fulfillment_support": bool(surface.get("fulfillment_support_sets")),
+        "excluded_state_role_names": sorted(
+            {
+                str(item.get("role") or "")
                 for param in surface.get("params") or ()
                 if isinstance(param, dict)
                 for profile in param.get("normal_instance_role_profiles") or ()
                 if isinstance(profile, dict)
                 for item in profile.get("excluded_state_roles") or ()
                 if isinstance(item, dict) and str(item.get("role") or "")
-            },
-            "absent_candidate_keys": {
-                key: key not in candidate_keys
-                for key in payload["input"].get("absent_candidate_keys") or ()
-            },
-            "schema_property_order": {
-                "finite_choice_param_review": _schema_property_order(
-                    schema,
-                    markers=(
-                        "controlled_population_role_id",
-                        "population_test_basis",
-                        "choice_reviews",
-                    ),
+            }
+        ),
+        "excluded_state_role_definitions": {
+            str(item.get("role") or ""): str(item.get("role_definition") or "")
+            for param in surface.get("params") or ()
+            if isinstance(param, dict)
+            for profile in param.get("normal_instance_role_profiles") or ()
+            if isinstance(profile, dict)
+            for item in profile.get("excluded_state_roles") or ()
+            if isinstance(item, dict) and str(item.get("role") or "")
+        },
+        "absent_candidate_keys": {
+            key: key not in candidate_keys
+            for key in payload["input"].get("absent_candidate_keys") or ()
+        },
+        "schema_property_order": {
+            "finite_choice_param_review": _schema_property_order(
+                schema,
+                markers=(
+                    "controlled_population_role_id",
+                    "population_test_basis",
+                    "choice_reviews",
                 ),
-                "population_test_result": _schema_property_order(
-                    schema,
-                    markers=("test_basis", "population_consequence", "test_effect"),
+            ),
+            "population_test_result": _schema_property_order(
+                schema,
+                markers=("test_basis", "population_consequence", "test_effect"),
+            ),
+            "normal_instance_test_result": _schema_property_order(
+                schema,
+                markers=(
+                    "role_match_basis",
+                    "explicit_user_override_applies",
+                    "population_consequence",
+                    "disposition",
                 ),
-                "normal_instance_test_result": _schema_property_order(
-                    schema,
-                    markers=(
-                        "role_match_basis",
-                        "explicit_user_override_applies",
-                        "population_consequence",
-                        "disposition",
-                    ),
-                ),
-            },
-            "schema_review_test_ids": _schema_review_test_ids(schema),
-            "schema_review_test_id_counts": _schema_review_test_id_counts(schema),
+            ),
+        },
+        "schema_review_test_ids": _schema_review_test_ids(schema),
+        "schema_review_test_id_counts": _schema_review_test_id_counts(schema),
     }
     errors = subset_mismatches(
         actual=actual,
@@ -617,7 +643,9 @@ def _param_with_axis_owner_edge(
     if not isinstance(param, dict):
         return param
     param_id = str(param.get("param_id") or "")
-    owners = tuple(str(item) for item in owners_by_param.get(param_id) or () if str(item))
+    owners = tuple(
+        str(item) for item in owners_by_param.get(param_id) or () if str(item)
+    )
     if not owners:
         return param
     output = dict(param)
@@ -633,7 +661,9 @@ def _row_predicate_with_axis_owner_edge(
 ) -> dict[str, Any]:
     predicate_id = str(item.get("predicate_id") or "")
     owners = tuple(
-        str(owner) for owner in owners_by_predicate.get(predicate_id) or () if str(owner)
+        str(owner)
+        for owner in owners_by_predicate.get(predicate_id) or ()
+        if str(owner)
     )
     if not owners:
         return dict(item)
@@ -863,7 +893,13 @@ def run_source_binding_schema_surface_case(payload: dict[str, Any]) -> list[str]
         ),
     )
     if payload["input"].get("empty_fulfillment_decisions"):
-        outcome["source_invocations"][0]["fulfillment_decisions"] = {}
+        next(
+            invocation
+            for field_id, fact in outcome.items()
+            if source_binding_fact_id_from_field(field_id) is not None
+            for role_id, invocation in fact.items()
+            if role_id != "plan_shape"
+        )["fulfillment_decisions"] = {}
     try:
         validate(instance={"outcome": outcome}, schema=schema)
         validation_result = "valid"
@@ -1158,8 +1194,17 @@ def run_source_binding_parse_case(payload: dict[str, Any]) -> list[str]:
         )
     }
     if payload["input"].get("duplicate_source_invocation") is True:
-        invocations = model_payload["outcome"]["source_invocations"]
-        invocations.append(dict(invocations[0]))
+        fact_binding = next(
+            fact_binding
+            for field_id, fact_binding in model_payload["outcome"].items()
+            if source_binding_fact_id_from_field(field_id) is not None
+        )
+        invocation = next(
+            invocation
+            for role_id, invocation in fact_binding.items()
+            if role_id != "plan_shape"
+        )
+        fact_binding["duplicate"] = dict(invocation)
     try:
         validate(
             instance=model_payload,
@@ -1178,6 +1223,11 @@ def run_source_binding_parse_case(payload: dict[str, Any]) -> list[str]:
     bound_source = result.outcome.bound_sources[0]
     return subset_mismatches(
         actual={
+            "source_row_source_id": (
+                bound_source.source.row_source_id
+                if bound_source.source is not None
+                else ""
+            ),
             "applied_filters": list(bound_source.applied_filters),
             "source_param_bindings": [
                 {
@@ -1300,18 +1350,28 @@ def _run_reused_answer_output_metric_fit_parse(
                 }
             },
         },
-        "source_invocations": [
-            _source_invocation_for_metric_candidate(
-                request,
-                sales_candidate,
-                requested_fact_id="fact_sales",
-            ),
-            _source_invocation_for_metric_candidate(
-                request,
-                payments_candidate,
-                requested_fact_id="fact_payments",
-            ),
-        ],
+        **{
+            source_binding_fact_field_id(requested_fact_id): {
+                "plan_shape": _binding_target_for_candidate(
+                    request,
+                    requested_fact_id=requested_fact_id,
+                    source_candidate_id=str(candidate["source_candidate_id"]),
+                ).plan_shape,
+                _binding_target_for_candidate(
+                        request,
+                        requested_fact_id=requested_fact_id,
+                        source_candidate_id=str(candidate["source_candidate_id"]),
+                    ).requirement_id: _source_invocation_for_metric_candidate(
+                        request,
+                        candidate,
+                        requested_fact_id=requested_fact_id,
+                    )
+            }
+            for requested_fact_id, candidate in (
+                ("fact_sales", sales_candidate),
+                ("fact_payments", payments_candidate),
+            )
+        },
     }
     model_payload = {"outcome": outcome}
     try:
@@ -1456,6 +1516,48 @@ def _boolean_row_predicate_request() -> SourceBindingRequest:
 
 def _prompt_surface_request(payload: object) -> SourceBindingRequest:
     return _source_binding_request(payload)
+
+
+def _plan_family_request() -> SourceBindingRequest:
+    base = _choice_param_request()
+    fact = replace(
+        base.requested_facts[0],
+        answer_expression=RequestedFactAnswerExpression(
+            family=RequestedFactAnswerExpressionFamily.LIST_ROWS,
+        ),
+    )
+    member = base.plan_selection.plan_selections[0].source_members[0]
+    plans = (
+        SelectedSourceStrategy(
+            plan_selection_id="plan.fact_1.list_rows",
+            requested_fact_id="fact_1",
+            source_strategy_id="strategy.fact_1.list_rows",
+            plan_shape="list_rows",
+            required_answer_output_ids=("answer_1",),
+            source_members=(replace(member, requirement_ids=("primary",)),),
+            basis="One-role conformance plan.",
+        ),
+        SelectedSourceStrategy(
+            plan_selection_id="plan.fact_1.grouped_rows",
+            requested_fact_id="fact_1",
+            source_strategy_id="strategy.fact_1.grouped_rows",
+            plan_shape="grouped_rows",
+            required_answer_output_ids=("answer_1",),
+            source_members=(
+                replace(
+                    member,
+                    requirement_ids=("primary", "group_identity"),
+                ),
+            ),
+            basis="Two-role conformance plan.",
+        ),
+    )
+    return replace(
+        base,
+        question_contract=QuestionContract(requested_facts=(fact,)),
+        requested_facts=(fact,),
+        plan_selection=PlanSelectionSet(plan_selections=plans),
+    )
 
 
 def _source_binding_request(
@@ -3443,9 +3545,9 @@ def _source_invocation_item_schemas(schema: object) -> tuple[dict[str, Any], ...
         return ()
     properties = schema.get("properties")
     if isinstance(properties, dict):
-        source_invocations = properties.get("source_invocations")
-        if isinstance(source_invocations, dict):
-            return _expand_schema_variants(source_invocations.get("items"))
+        target_id = properties.get("binding_target_id")
+        if isinstance(target_id, dict):
+            return (schema,)
     for value in schema.values():
         if isinstance(value, dict):
             found = _source_invocation_item_schemas(value)
@@ -3487,7 +3589,9 @@ def _finite_choice_review_test_ids(schema: object) -> list[str]:
 def _row_predicate_review_test_ids(schema: object) -> list[str]:
     properties = _schema_properties(schema)
     choice_reviews = properties.get("choice_reviews")
-    choice_item = choice_reviews.get("items") if isinstance(choice_reviews, dict) else {}
+    choice_item = (
+        choice_reviews.get("items") if isinstance(choice_reviews, dict) else {}
+    )
     item_properties = _schema_properties(choice_item)
     results = _schema_properties(item_properties.get("population_test_results"))
     return list(results)
@@ -3570,29 +3674,36 @@ def _source_binding_outcome(
         candidate,
         fulfillment_decisions=selected_fulfillment_decisions,
     )
+    target = next(
+        target
+        for target in source_binding_targets_for_plan_selection(
+            request.plan_selection,
+            requested_facts=request.requested_facts,
+        )
+        if target.requested_fact_id == "fact_1"
+        and target.source_candidate_id == str(candidate["source_candidate_id"])
+    )
     return {
         "kind": "source_bindings",
         **metric_fit_contract,
-        "source_invocations": [
-            {
-                "binding_target_id": _binding_target_id_for_candidate(
-                    request,
-                    requested_fact_id="fact_1",
-                    source_candidate_id=str(candidate["source_candidate_id"]),
-                ),
-                "answer_population": {
-                    "population_binding_id": _binding_surface(candidate)[
-                        "population_bindings"
-                    ][0]["population_binding_id"],
-                    "intent_text": "active sales",
-                    "match_basis_explanation": "The requested fact asks for active sales.",
-                },
-                "fulfillment_decisions": selected_fulfillment_decisions,
-                "param_decisions": param_decisions or {},
-                "row_predicate_reviews": row_predicate_reviews or {},
-                "finite_choice_param_reviews": finite_choice_param_reviews or {},
+        "bindings_for_fact_1": {
+            "plan_shape": target.plan_shape,
+            target.requirement_id: {
+                        "binding_target_id": target.binding_target_id,
+                        "answer_population": {
+                            "population_binding_id": _binding_surface(candidate)[
+                                "population_bindings"
+                            ][0]["population_binding_id"],
+                            "intent_text": "active sales",
+                            "match_basis_explanation": "The requested fact asks for active sales.",
+                        },
+                        "fulfillment_decisions": selected_fulfillment_decisions,
+                        "param_decisions": param_decisions or {},
+                        "row_predicate_reviews": row_predicate_reviews or {},
+                        "finite_choice_param_reviews": finite_choice_param_reviews
+                        or {},
             }
-        ],
+        },
     }
 
 
@@ -3602,6 +3713,19 @@ def _binding_target_id_for_candidate(
     requested_fact_id: str,
     source_candidate_id: str,
 ) -> str:
+    return _binding_target_for_candidate(
+        request,
+        requested_fact_id=requested_fact_id,
+        source_candidate_id=source_candidate_id,
+    ).binding_target_id
+
+
+def _binding_target_for_candidate(
+    request: SourceBindingRequest,
+    *,
+    requested_fact_id: str,
+    source_candidate_id: str,
+):
     targets = tuple(
         target
         for target in source_binding_targets_for_plan_selection(
@@ -3616,7 +3740,7 @@ def _binding_target_id_for_candidate(
             "source binding conformance fixture must identify exactly one "
             f"binding target for {(requested_fact_id, source_candidate_id)}"
         )
-    return targets[0].binding_target_id
+    return targets[0]
 
 
 def _fulfillment_decisions(
@@ -4045,7 +4169,9 @@ def _effects_by_membership_test(
     if isinstance(effect, str):
         return {test["test_id"]: str(effect) for test in membership_tests}
     effect_spec = dict(effect)
-    return {test["test_id"]: str(effect_spec[test["test_id"]]) for test in membership_tests}
+    return {
+        test["test_id"]: str(effect_spec[test["test_id"]]) for test in membership_tests
+    }
 
 
 def _membership_test_definition(test_id: str) -> dict[str, str]:

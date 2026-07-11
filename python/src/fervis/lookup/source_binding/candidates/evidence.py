@@ -97,6 +97,7 @@ def _candidate_result_grains_with_evidence_items(
             )
             if grain_id and not evidence_item.get("row_path_id"):
                 evidence_item["row_path_id"] = grain_id
+            evidence_item["row_source_id"] = str(grain.get("row_source_id") or "")
             grain_items.append(evidence_item)
             evidence_items.append(evidence_item)
         row_population_item = row_population_evidence_item(

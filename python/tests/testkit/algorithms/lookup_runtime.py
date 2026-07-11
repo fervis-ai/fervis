@@ -141,9 +141,7 @@ def _run_scripted_pattern(payload: dict[str, Any]) -> list[str]:
             "error": result.error,
             "answer": result.answer,
             "outcome_kind": getattr(getattr(outcome, "kind", ""), "value", ""),
-            "clarifications": [
-                clarification_payload(item) for item in clarifications
-            ],
+            "clarifications": [clarification_payload(item) for item in clarifications],
             "rendered_rows": rendered_rows,
             "rendered_scalars": rendered_scalars,
             "proof_refs": list(
@@ -422,42 +420,46 @@ class _VariantGroundingPlannerPort:
             for item in _source_options_for_fact_sources(fact_sources)
             if _candidate_has_field(item, "snapshot_merch_name")
         )
+        binding_target_id = source_binding_target_id_for_candidate(
+            prompt,
+            requested_fact_id="fact_1",
+            source_candidate_id=str(relation["source_candidate_id"]),
+            plan_shape="list_rows",
+        )
         return {
             "outcome": {
                 "kind": "source_bindings",
-                "source_invocations": [
-                    {
-                        "binding_target_id": source_binding_target_id_for_candidate(
-                            prompt,
-                            requested_fact_id="fact_1",
-                            source_candidate_id=str(relation["source_candidate_id"]),
-                            plan_shape="list_rows",
-                        ),
-                        "answer_population": {
-                            "population_binding_id": _candidate_binding_surface(
-                                relation
-                            )["population_bindings"][0]["population_binding_id"],
-                            "intent_text": "products did Alice sell today",
-                            "match_basis_explanation": (
-                                "The question asks for sale item rows for Alice."
-                            ),
-                        },
-                        "fulfillment_decisions": source_fulfills_for_candidate(
-                            relation,
-                            field_ids=("snapshot_merch_name",),
-                        ),
-                        "param_decisions": _param_decisions(
-                            relation,
-                            bindings={
-                                "staff_id": "Alice",
-                                "start_date": "today",
-                                "end_date": "today",
-                            },
-                        ),
-                        "row_predicate_reviews": {},
-                        "finite_choice_param_reviews": {},
+                "bindings_for_fact_1": {
+                    "plan_shape": "list_rows",
+                    "primary": {
+                                "binding_target_id": binding_target_id,
+                                "answer_population": {
+                                    "population_binding_id": _candidate_binding_surface(
+                                        relation
+                                    )["population_bindings"][0][
+                                        "population_binding_id"
+                                    ],
+                                    "intent_text": "products did Alice sell today",
+                                    "match_basis_explanation": (
+                                        "The question asks for sale item rows for Alice."
+                                    ),
+                                },
+                                "fulfillment_decisions": source_fulfills_for_candidate(
+                                    relation,
+                                    field_ids=("snapshot_merch_name",),
+                                ),
+                                "param_decisions": _param_decisions(
+                                    relation,
+                                    bindings={
+                                        "staff_id": "Alice",
+                                        "start_date": "today",
+                                        "end_date": "today",
+                                    },
+                                ),
+                                "row_predicate_reviews": {},
+                                "finite_choice_param_reviews": {},
                     }
-                ],
+                },
             }
         }
 
@@ -640,9 +642,7 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
 
 
 def _scripted_answer_expression(payload: dict[str, Any]) -> dict[str, Any]:
-    output = {
-        "family": str(payload.get("answer_expression_family") or "list_rows")
-    }
+    output = {"family": str(payload.get("answer_expression_family") or "list_rows")}
     if isinstance(payload.get("group_key"), dict):
         output["group_key"] = dict(payload["group_key"])
     return output
@@ -716,7 +716,9 @@ def _scripted_query_enrichment_payload(payload: dict[str, Any]) -> dict[str, Any
                         "answer_output_id": f"answer_{index}",
                         "support_role": _scripted_answer_output_support_role(
                             answer_output,
-                            default=str(payload.get("support_role") or "ROW_POPULATION"),
+                            default=str(
+                                payload.get("support_role") or "ROW_POPULATION"
+                            ),
                         ),
                         "source_text": _scripted_answer_output_description(
                             answer_output
@@ -781,9 +783,7 @@ def _source_binding_invocation_override(item: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(default_param_ids, list):
         raise AssertionError("source_binding default_params must be a list")
     if not isinstance(row_predicate_choices, dict):
-        raise AssertionError(
-            "source_binding row_predicate_choices must be an object"
-        )
+        raise AssertionError("source_binding row_predicate_choices must be an object")
     if not choices and not default_param_ids and not row_predicate_choices:
         raise AssertionError(
             "source_binding item requires param_value_choices, default_params, "

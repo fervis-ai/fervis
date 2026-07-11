@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from fervis.lookup.fact_planning.available_relations import (
     operation_input_values_payload,
@@ -45,8 +45,10 @@ from fervis.lookup.source_binding.param_surface import (
     param_decision_ids_by_effective_param,
 )
 from fervis.lookup.source_binding.plan_targets import (
+    SourceBindingPlanFamily,
     SourceBindingTarget,
     SourceBindingTargetIndex,
+    source_binding_plan_families,
     source_binding_target_index,
 )
 from fervis.lookup.source_binding.review_scope import source_binding_review_scope
@@ -108,13 +110,28 @@ def source_binding_transport_context_payload(
     request: SourceBindingRequest,
 ) -> dict[str, object]:
     registry = source_candidate_registry(request)
-    targets = _prompt_binding_targets(request, registry=registry)
+    target_index = source_binding_target_index(request)
+    targets = _prompt_binding_targets(
+        request, registry=registry, target_index=target_index
+    )
+    closed_key_bindings = closed_key_param_binding_index(
+        request,
+        targets=targets,
+        candidates_by_id=registry.candidates_by_id,
+    )
     return {
         "current_question": request.question,
         "requested_facts": source_binding_requested_facts_payload(request),
         "grounded_values": source_binding_grounded_values_payload(request),
         "memory_context": source_binding_memory_context_payload(request),
-        "binding_targets": [target.to_payload() for target in targets],
+        "binding_plan_families": _plan_families_payload(
+            source_binding_plan_families(
+                request,
+                target_index=target_index,
+                visible_targets=targets,
+            ),
+            target_payload=closed_key_bindings.model_visible_target_payload,
+        ),
         "source_candidates_by_id": {
             candidate_id: candidate.payload or {}
             for candidate_id, candidate in registry.candidates_by_id.items()
@@ -153,8 +170,8 @@ class SourceBindingTurnPrompt(TurnPromptBase):
         return (
             builder.json_section("Requested facts:", self.requested_facts_payload()),
             builder.json_section(
-                "Binding targets:",
-                self.binding_targets_payload(),
+                "Binding plan families:",
+                self.binding_plan_families_payload(),
             ),
             builder.json_section("Grounded values:", self.grounded_values_payload()),
             builder.json_section("Memory context:", self.memory_context_payload()),
@@ -178,10 +195,9 @@ class SourceBindingTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Source Binding",
                 (
-                    "For each requested fact, select one complete compatible set of source invocations required by the selected operation plan.",
-                    "Bind every operation-required role target in that set, including targets with no answer outputs.",
-                    "A source invocation chooses one binding_target, answer population, fulfillment choice when required by that target, scalar param bindings, and finite-choice population reviews.",
-                    "Do not bind backup alternatives or invocations outside the selected operation plan.",
+                    "For each requested fact, complete its bindings_for_<requested_fact_id> object: choose one shown plan_shape and bind every role shown for that shape exactly once, including roles with no answer outputs.",
+                    "Choose each binding_target_id only from its enclosing role and obey the shape's member_constraint.",
+                    "The role binding also chooses its answer population, required fulfillment, params, and population reviews.",
                 ),
             ),
             builder.instruction_block(
@@ -373,11 +389,9 @@ class SourceBindingTurnPrompt(TurnPromptBase):
             source_binding_candidate_payload(self.request),
             self.request,
         )
-        return closed_key_bindings.model_visible_candidate_payload(
-            payload
-        )
+        return closed_key_bindings.model_visible_candidate_payload(payload)
 
-    def binding_targets_payload(self) -> dict[str, object]:
+    def binding_plan_families_payload(self) -> dict[str, object]:
         registry = source_candidate_registry(self.request)
         target_index = source_binding_target_index(self.request)
         targets = _prompt_binding_targets(
@@ -386,12 +400,15 @@ class SourceBindingTurnPrompt(TurnPromptBase):
             target_index=target_index,
         )
         closed_key_bindings = self._closed_key_bindings(targets, registry=registry)
-        return {
-            "binding_targets": [
-                closed_key_bindings.model_visible_target_payload(target)
-                for target in targets
-            ]
-        }
+        families = source_binding_plan_families(
+            self.request,
+            target_index=target_index,
+            visible_targets=targets,
+        )
+        return _plan_families_payload(
+            families,
+            target_payload=closed_key_bindings.model_visible_target_payload,
+        )
 
     def metric_fit_surface_payload(self) -> dict[str, object]:
         return source_binding_metric_fit_surface_payload(self.request)
@@ -528,7 +545,8 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                 target_required_fulfillment_output_ids
             ),
             target_population_binding_ids=target_population_binding_ids,
-            source_invocations_max_items=_source_invocations_max_items(
+            plan_families=source_binding_plan_families(
+                self.request,
                 target_index=target_index,
                 visible_targets=targets,
             ),
@@ -588,39 +606,18 @@ def _selection_notes_by_fact_source(
             notes = grouped.setdefault(key, [])
             if basis not in notes:
                 notes.append(basis)
-    return {
-        key: " | ".join(notes)
-        for key, notes in grouped.items()
-        if notes
-    }
+    return {key: " | ".join(notes) for key, notes in grouped.items() if notes}
 
 
-def _source_invocations_max_items(
+def _plan_families_payload(
+    families: tuple[SourceBindingPlanFamily, ...],
     *,
-    target_index: SourceBindingTargetIndex,
-    visible_targets: tuple[SourceBindingTarget, ...],
-) -> int:
-    visible_target_ids = {target.binding_target_id for target in visible_targets}
-    plan_target_ids = tuple(
-        target_ids
-        for target_ids in target_index.target_ids_by_plan().values()
-        if target_ids <= visible_target_ids
-    )
-    if not plan_target_ids:
-        return len(visible_targets)
-    target_requested_fact_ids = {
-        target.binding_target_id: target.requested_fact_id for target in visible_targets
-    }
-    max_items_by_fact: dict[str, int] = {}
-    for target_ids in plan_target_ids:
-        requested_fact_ids = {
-            target_requested_fact_ids[target_id] for target_id in target_ids
-        }
-        if len(requested_fact_ids) != 1:
-            continue
-        requested_fact_id = next(iter(requested_fact_ids))
-        max_items_by_fact[requested_fact_id] = max(
-            max_items_by_fact.get(requested_fact_id, 0),
-            len(target_ids),
-        )
-    return sum(max_items_by_fact.values()) or len(visible_targets)
+    target_payload: Any | None = None,
+) -> dict[str, object]:
+    render_target = target_payload or (lambda target: target.to_payload())
+    facts: dict[str, dict[str, object]] = {}
+    for family in families:
+        fact = facts.setdefault(family.requested_fact_id, {"plan_shapes": {}})
+        shapes = cast(dict[str, object], fact["plan_shapes"])
+        shapes[family.plan_shape] = family.payload(target_payload=render_target)
+    return {"bindings_by_requested_fact": facts}

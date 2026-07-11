@@ -25,13 +25,13 @@ input:
       why_unresolved: More than one complete interpretation is plausible.
       candidate_interpretations:
         - contextualized_question: How much was that? (1)
-          supporting_evidence:
-            - source_id: current_question
-              exact_source_texts: ["How much was that?"]
+          context_evidence:
+            - source_id: prior_1
+              exact_source_texts: ["What was yesterday's metric?"]
         - contextualized_question: How much was that? (2)
-          supporting_evidence:
-            - source_id: current_question
-              exact_source_texts: ["How much was that?"]
+          context_evidence:
+            - source_id: prior_2
+              exact_source_texts: ["Yesterday's metric was 10."]
   question_contract:
     fact_description: metric amount
     subject_text: metric

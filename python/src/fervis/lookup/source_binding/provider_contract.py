@@ -5,10 +5,6 @@ from __future__ import annotations
 from fervis.lookup.provider_contract import provider_output_type
 
 
-SourceBindingPlanOutput = provider_output_type(
-    "SourceBindingPlanOutput",
-    ("kind", "metric_fit_bases", "fit_basis_interpretations", "source_invocations"),
-)
 SourceInvocationOutput = provider_output_type(
     "SourceInvocationOutput",
     (

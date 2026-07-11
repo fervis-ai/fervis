@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
-from fervis.lookup.operation_families.source_binding_registry import source_binding_metric_evidence_ids_by_requested_fact
+from fervis.lookup.operation_families.source_binding_registry import (
+    source_binding_metric_evidence_ids_by_requested_fact,
+)
 from fervis.lookup.source_binding import provider_contract as provider_output
-from fervis.lookup.source_binding.metric_fit import METRIC_FIT_DECISION, METRIC_FIT_DECISIONS
-from fervis.lookup.source_binding.model import SourceBindingRequest, SourceMetricFitBasis
+from fervis.lookup.source_binding.parser.model import ParsedSourceBindingPlan
+from fervis.lookup.source_binding.metric_fit import (
+    METRIC_FIT_DECISION,
+    METRIC_FIT_DECISIONS,
+)
+from fervis.lookup.source_binding.model import (
+    SourceBindingRequest,
+    SourceMetricFitBasis,
+)
 from fervis.lookup.source_binding.parser_common import _dict, _text
 
 
@@ -21,7 +30,7 @@ __all__ = [
 
 
 def metric_fit_interpretations_by_requested_fact(
-    payload: provider_output.SourceBindingPlanOutput,
+    payload: ParsedSourceBindingPlan,
     *,
     request: SourceBindingRequest,
 ) -> dict[str, dict[str, dict[str, str]]]:

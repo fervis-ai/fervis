@@ -1,0 +1,18 @@
+id: all_included_population_choice_does_not_change_row_grain
+description: A governed choice that includes every value remains semantic evidence without adding an unrelated physical predicate field to the selected row population.
+kind: algorithm
+algorithm: planning.relation_contract
+input:
+  mode: relation_fields_for_source_requirements
+  fields:
+    - {field_id: location_name, roles: [output]}
+  population_choices:
+    - controller_kind: row_predicate
+      controller_id: deposits.is_verified
+      field_id: is_verified
+      requested_fact_ids: [fact_1]
+      included_values: ["true", "false"]
+      excluded_values: []
+expect:
+  result_equals:
+    field_ids: [location_name]

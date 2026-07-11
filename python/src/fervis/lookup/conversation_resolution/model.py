@@ -104,9 +104,7 @@ class FramePartSource:
         return True
 
 
-ResolutionSource: TypeAlias = (
-    CurrentSpanSource | ContextAnchorSource | FramePartSource
-)
+ResolutionSource: TypeAlias = CurrentSpanSource | ContextAnchorSource | FramePartSource
 
 
 @dataclass(frozen=True)
@@ -249,17 +247,17 @@ class SourceEvidence:
 @dataclass(frozen=True)
 class CandidateInterpretation:
     contextualized_question: str
-    supporting_evidence: tuple[SourceEvidence, ...]
+    context_evidence: tuple[SourceEvidence, ...]
 
     def __post_init__(self) -> None:
-        if not self.contextualized_question.strip() or not self.supporting_evidence:
+        if not self.contextualized_question.strip() or not self.context_evidence:
             raise ValueError("candidate interpretation requires text and evidence")
 
     def to_model_dict(self) -> dict[str, Any]:
         return {
             "contextualized_question": self.contextualized_question,
-            "supporting_evidence": [
-                item.to_model_dict() for item in self.supporting_evidence
+            "context_evidence": [
+                item.to_model_dict() for item in self.context_evidence
             ],
         }
 

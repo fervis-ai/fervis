@@ -33,3 +33,5 @@ expect:
     resolved_required: [clauses, contextualized_question, frame_call, kind, resolution_basis]
     source_kinds: [current_span, context_anchor, frame_part]
     frame_call_kinds: [none, call]
+    ambiguity_candidate_fields: [context_evidence, contextualized_question]
+    ambiguity_evidence_source_ids: [prior_question]

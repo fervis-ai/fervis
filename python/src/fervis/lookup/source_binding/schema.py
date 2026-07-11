@@ -21,6 +21,10 @@ from fervis.lookup.source_binding.metric_fit import (
     METRIC_FIT_DECISIONS,
 )
 from fervis.lookup.source_binding import provider_contract as provider_output
+from fervis.lookup.source_binding.plan_targets import (
+    SourceBindingPlanFamily,
+    source_binding_fact_field_id,
+)
 
 _POPULATION_TEST_EFFECT_SCHEMA = {
     "enum": [
@@ -40,9 +44,7 @@ class _SourceBindingSchemaScope:
     target_finite_choice_values: dict[str, dict[str, tuple[str, ...]]]
     target_row_predicate_values: dict[str, dict[str, tuple[str, ...]]]
     target_finite_choice_test_ids: dict[str, dict[str, tuple[str, ...]]]
-    target_finite_choice_normal_instance_test_ids: dict[
-        str, dict[str, tuple[str, ...]]
-    ]
+    target_finite_choice_normal_instance_test_ids: dict[str, dict[str, tuple[str, ...]]]
     target_row_predicate_test_ids: dict[str, dict[str, tuple[str, ...]]]
     target_population_roles: dict[str, tuple[dict[str, object], ...]]
     target_requested_fact_ids: dict[str, str]
@@ -52,7 +54,7 @@ class _SourceBindingSchemaScope:
     ]
     target_required_fulfillment_answer_output_ids: dict[str, tuple[str, ...]]
     target_population_binding_ids: dict[str, tuple[str, ...]]
-    source_invocations_max_items: int | None = None
+    plan_families: tuple[SourceBindingPlanFamily, ...]
 
     @property
     def binding_target_ids(self) -> tuple[str, ...]:
@@ -107,7 +109,7 @@ def build_source_binding_schema(
     ],
     target_required_fulfillment_answer_output_ids: dict[str, tuple[str, ...]],
     target_population_binding_ids: dict[str, tuple[str, ...]] | None = None,
-    source_invocations_max_items: int | None = None,
+    plan_families: tuple[SourceBindingPlanFamily, ...],
 ) -> dict[str, object]:
     scope = _SourceBindingSchemaScope(
         required_catalog_input_ids=required_catalog_input_ids,
@@ -130,7 +132,7 @@ def build_source_binding_schema(
             target_required_fulfillment_answer_output_ids
         ),
         target_population_binding_ids=target_population_binding_ids or {},
-        source_invocations_max_items=source_invocations_max_items,
+        plan_families=plan_families,
     )
     outcome_schema = _source_binding_outcome_schema(scope)
     return {
@@ -141,9 +143,11 @@ def build_source_binding_schema(
     }
 
 
-def _source_binding_outcome_schema(scope: _SourceBindingSchemaScope) -> dict[str, object]:
+def _source_binding_outcome_schema(
+    scope: _SourceBindingSchemaScope,
+) -> dict[str, object]:
     variants: list[dict[str, object]] = []
-    if scope.binding_target_ids:
+    if scope.plan_families:
         variants.append(_source_binding_plan_schema(scope))
         variants.append(
             _impossible_schema(
@@ -156,7 +160,7 @@ def _source_binding_outcome_schema(scope: _SourceBindingSchemaScope) -> dict[str
         required_catalog_choice_input_ids=scope.required_catalog_choice_input_ids,
     )
     if (
-        not scope.binding_target_ids
+        not scope.plan_families
         and not scope.required_catalog_input_ids
         and not scope.required_catalog_choice_input_ids
     ):
@@ -167,47 +171,67 @@ def _source_binding_outcome_schema(scope: _SourceBindingSchemaScope) -> dict[str
 
 
 def _source_binding_plan_schema(scope: _SourceBindingSchemaScope) -> dict[str, object]:
-    return provider_output.SourceBindingPlanOutput.schema(
-        {
-            "kind": {"enum": ["source_bindings"]},
-            "metric_fit_bases": _metric_fit_bases_schema(
-                scope.metric_evidence_ids_by_requested_fact
-            ),
-            "fit_basis_interpretations": _fit_basis_interpretations_schema(
-                scope.metric_evidence_ids_by_requested_fact
-            ),
-            "source_invocations": _source_invocations_schema(scope),
-        }
+    properties = {
+        "kind": {"enum": ["source_bindings"]},
+        "metric_fit_bases": _metric_fit_bases_schema(
+            scope.metric_evidence_ids_by_requested_fact
+        ),
+        "fit_basis_interpretations": _fit_basis_interpretations_schema(
+            scope.metric_evidence_ids_by_requested_fact
+        ),
+        **_fact_binding_schemas(scope),
+    }
+    return _strict_object(
+        properties,
+        required=tuple(properties),
     )
 
 
-def _source_invocations_schema(scope: _SourceBindingSchemaScope) -> dict[str, object]:
+def _fact_binding_schemas(
+    scope: _SourceBindingSchemaScope,
+) -> dict[str, dict[str, object]]:
+    families_by_fact: dict[str, list[SourceBindingPlanFamily]] = {}
+    for family in scope.plan_families:
+        families_by_fact.setdefault(family.requested_fact_id, []).append(family)
     return {
-        "type": "array",
-        "minItems": 1,
-        "maxItems": _source_invocations_max_items(scope),
-        "items": _source_binding_invocation_items_schema(scope),
+        source_binding_fact_field_id(requested_fact_id): _requested_fact_variants_schema(
+            tuple(families),
+            scope=scope,
+        )
+        for requested_fact_id, families in families_by_fact.items()
     }
 
 
-def _source_invocations_max_items(scope: _SourceBindingSchemaScope) -> int:
-    if scope.source_invocations_max_items is None:
-        return len(scope.binding_target_ids)
-    return max(1, min(scope.source_invocations_max_items, len(scope.binding_target_ids)))
-
-
-def _source_binding_invocation_items_schema(
+def _requested_fact_variants_schema(
+    families: tuple[SourceBindingPlanFamily, ...],
+    *,
     scope: _SourceBindingSchemaScope,
 ) -> dict[str, object]:
-    return _variant_schema(
-        tuple(
-            _source_binding_item_schema(
-                target_id,
-                scope=scope,
-            )
-            for target_id in scope.binding_target_ids
-        )
+    variants = tuple(
+        _requested_fact_binding_schema(family, scope=scope) for family in families
     )
+    return _variant_schema(variants)
+
+
+def _requested_fact_binding_schema(
+    family: SourceBindingPlanFamily,
+    *,
+    scope: _SourceBindingSchemaScope,
+) -> dict[str, object]:
+    role_schemas = {
+        role_id: _variant_schema(
+            tuple(
+                _source_binding_item_schema(target.binding_target_id, scope=scope)
+                for target in targets
+            )
+        )
+        for role_id, targets in family.role_targets
+    }
+    properties = {
+        "plan_shape": {"enum": [family.plan_shape]},
+        **role_schemas,
+    }
+    return _strict_object(properties, required=tuple(properties))
 
 
 def _source_binding_item_schema(
@@ -549,7 +573,10 @@ def _metric_reviews_schema(
 ) -> dict[str, object]:
     properties = {
         requested_fact_id: _strict_object(
-            {metric_evidence_id: item_schema for metric_evidence_id in metric_evidence_ids},
+            {
+                metric_evidence_id: item_schema
+                for metric_evidence_id in metric_evidence_ids
+            },
             required=metric_evidence_ids,
         )
         for requested_fact_id, metric_evidence_ids in (

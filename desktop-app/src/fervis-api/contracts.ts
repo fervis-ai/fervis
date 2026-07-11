@@ -356,9 +356,8 @@ export interface SemanticInterpretedInput {
 
 export interface SemanticConversationClause {
   readonly currentClauseText: string;
-  readonly currentValueText: string;
-  readonly resolvedFrameText: string;
-  readonly resolvedClauseText: string;
+  readonly resolvedText: string;
+  readonly resolvedValues: readonly string[];
 }
 
 export interface StepDecision {

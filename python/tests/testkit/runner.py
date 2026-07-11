@@ -110,6 +110,7 @@ from tests.testkit.algorithms.source_binding import (
     run_source_binding_fulfillment_support_case,
     run_source_binding_metric_fit_surface_case,
     run_source_binding_metric_fit_parse_case,
+    run_source_binding_plan_families_case,
     run_source_binding_parse_case,
     run_source_binding_prompt_surface_case,
     run_source_binding_row_predicate_parse_case,
@@ -132,9 +133,7 @@ _RUNNERS: dict[tuple[str, str], CaseRunner] = {
     ),
     ("algorithm", "answer_program.compile"): run_answer_program_compile_case,
     ("algorithm", "answer_program.decode"): run_answer_program_decode_case,
-    ("algorithm", "answer_program.instantiate"): (
-        run_answer_program_instantiate_case
-    ),
+    ("algorithm", "answer_program.instantiate"): (run_answer_program_instantiate_case),
     ("algorithm", "answer_program.invoke"): run_answer_program_invoke_case,
     ("algorithm", "answer_program.patch"): run_answer_program_patch_case,
     ("adapter", "host_api.endpoint_contract_projection"): run_host_api_projection_case,
@@ -236,6 +235,9 @@ _RUNNERS: dict[tuple[str, str], CaseRunner] = {
         run_source_binding_metric_fit_surface_case
     ),
     ("algorithm", "source_binding.parse"): run_source_binding_parse_case,
+    ("algorithm", "source_binding.plan_families"): (
+        run_source_binding_plan_families_case
+    ),
     ("algorithm", "source_binding.prompt_surface"): (
         run_source_binding_prompt_surface_case
     ),

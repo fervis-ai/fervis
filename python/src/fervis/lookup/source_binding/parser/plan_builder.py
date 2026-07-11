@@ -4,10 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from fervis.lookup.source_binding.compiler_ir import (
-    DraftRelationSourcePopulationChoice,
-)
-from fervis.lookup.source_binding import provider_contract as provider_output
 from fervis.lookup.source_binding.candidates import SourceCandidate
 from fervis.lookup.source_binding.closed_key_params import (
     closed_key_param_binding_index,
@@ -26,10 +22,14 @@ from fervis.lookup.source_binding.parser.candidate_access import (
     candidate_source_fields,
     candidate_value_is_used_by_bound_source,
 )
-from fervis.lookup.source_binding.parser.fulfillment import parse_source_fulfillments
+from fervis.lookup.source_binding.parser.fulfillment import (
+    fulfillment_row_source_id,
+    parse_source_fulfillments,
+)
 from fervis.lookup.source_binding.parser.metric_fit import (
     metric_fit_interpretations_by_requested_fact,
 )
+from fervis.lookup.source_binding.parser.model import ParsedSourceBindingPlan
 from fervis.lookup.source_binding.parser.params import (
     merged_param_bindings,
     parse_param_decision_binding_sets,
@@ -41,7 +41,6 @@ from fervis.lookup.source_binding.parser.population import (
 from fervis.lookup.source_binding.parser.row_predicates import (
     parse_row_predicate_filters,
 )
-from fervis.lookup.source_binding.parser_common import _text
 from fervis.lookup.source_binding.plan_targets import SourceBindingTargetIndex
 from fervis.lookup.source_binding.review_scope import SourceBindingReviewScope
 from fervis.lookup.source_binding.role_selection import (
@@ -55,16 +54,12 @@ __all__ = [
 
 
 def build_source_binding_plan(
-    payload: provider_output.SourceBindingPlanOutput,
+    payload: ParsedSourceBindingPlan,
     request: SourceBindingRequest,
     *,
     target_index: SourceBindingTargetIndex,
     review_scope: SourceBindingReviewScope,
     candidates: dict[str, SourceCandidate],
-    effective_param_ids_by_index: dict[int, tuple[str, ...]] | None = None,
-    population_choices_by_index: (
-        dict[int, tuple[DraftRelationSourcePopulationChoice, ...]] | None
-    ) = None,
 ) -> SourceBindingPlan:
     value_candidates_by_relation_id = _value_candidates_by_source_relation_id(
         candidates.values()
@@ -85,8 +80,9 @@ def build_source_binding_plan(
     )
     seen_binding_target_ids: set[str] = set()
     output: list[BoundSource] = []
-    for index, parsed_invocation in enumerate(payload.source_invocations, start=1):
-        target = target_index.require(_text(parsed_invocation.binding_target_id))
+    for parsed_binding in payload.role_bindings:
+        parsed_invocation = parsed_binding.invocation
+        target = parsed_binding.target
         if target.binding_target_id in seen_binding_target_ids:
             raise ValueError("duplicate source binding target")
         seen_binding_target_ids.add(target.binding_target_id)
@@ -121,7 +117,7 @@ def build_source_binding_plan(
             parameter_namespace=(
                 f"semantic.{requested_fact_id}.{target.binding_target_id}"
             ),
-            effective_param_ids=(effective_param_ids_by_index or {}).get(index),
+            effective_param_ids=parsed_binding.effective_param_ids,
         )
         row_predicates = parse_row_predicate_filters(
             parsed_invocation.row_predicate_reviews,
@@ -138,20 +134,25 @@ def build_source_binding_plan(
             target.binding_target_id,
         )
         row_sources = build_row_source_catalog(request.relation_catalog)
-        try:
-            candidate_row_source = row_sources.source(candidate.source.row_source_id)
-        except KeyError:
+        if candidate.source is None:
             grounded_bindings = ()
         else:
-            grounded_bindings = grounded_param_bindings(
-                available_values=request.available_values,
-                available_value_uses=request.available_value_uses,
-                row_source=candidate_row_source,
-                requested_fact_id=candidate.requested_fact_id,
-                excluded_param_ids=closed_key_bindings.owned_param_ids(
-                    target.binding_target_id
-                ),
-            )
+            try:
+                candidate_row_source = row_sources.source(
+                    candidate.source.row_source_id
+                )
+            except KeyError:
+                grounded_bindings = ()
+            else:
+                grounded_bindings = grounded_param_bindings(
+                    available_values=request.available_values,
+                    available_value_uses=request.available_value_uses,
+                    row_source=candidate_row_source,
+                    requested_fact_id=candidate.requested_fact_id,
+                    excluded_param_ids=closed_key_bindings.owned_param_ids(
+                        target.binding_target_id
+                    ),
+                )
         param_binding_sets = tuple(
             merged_param_bindings(
                 merged_param_bindings(
@@ -168,7 +169,7 @@ def build_source_binding_plan(
             for model_param_bindings in param_decisions.binding_sets
         )
         population_choices = (
-            *((population_choices_by_index or {}).get(index, ())),
+            *parsed_binding.population_choices,
             *row_predicates.population_choices,
         )
         fulfillments = parse_source_fulfillments(
@@ -189,13 +190,18 @@ def build_source_binding_plan(
             candidate=candidate,
             fulfillments=fulfillments,
         )
+        evidence_items = candidate_source_evidence_items(candidate)
+        selected_row_source_id = fulfillment_row_source_id(
+            fulfillments,
+            evidence_items=evidence_items,
+        )
         source, source_invocations = bound_relation_source(
             candidate=candidate,
             population_binding=population_binding,
             param_binding_sets=param_binding_sets,
             population_choices=population_choices,
+            row_source_id=selected_row_source_id,
         )
-        evidence_items = candidate_source_evidence_items(candidate)
         available_fields = candidate_source_fields(
             candidate,
             evidence_items=evidence_items,

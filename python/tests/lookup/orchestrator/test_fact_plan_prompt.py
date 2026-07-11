@@ -47,7 +47,7 @@ def test_lookup_cutover_renders_runtime_values_in_fact_plan_prompt():
     assert "2026-05-06" in source_binding_prompt
 
 
-def test_lookup_cutover_renders_scalar_memory_values_in_fact_plan_prompt():
+def test_lookup_cutover_renders_scalar_memory_values_in_source_binding_prompt():
     artifact = build_fact_artifact(
         artifact_id="run_prior_total",
         outcome=FactOutcome.ANSWERED,
@@ -88,8 +88,8 @@ def test_lookup_cutover_renders_scalar_memory_values_in_fact_plan_prompt():
 
     assert result.status == "FAILED"
     assert result.error == "planning_failed"
-    fact_plan_prompt = _fact_plan_prompt(planner)
-    assert '"value": "125"' in fact_plan_prompt
+    source_binding_prompt = _source_binding_prompt(planner)
+    assert "125" in source_binding_prompt
 
 
 def test_lookup_cutover_projects_terminal_outcome_memory_into_resolution_prompt():

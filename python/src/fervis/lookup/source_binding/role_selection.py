@@ -71,7 +71,9 @@ class SourceBindingRoleSelection:
         output: dict[str, list[str]] = {}
         for item in self.bound_sources:
             output.setdefault(item.target.binding_target_id, []).append(item.source.id)
-        return {target_id: tuple(dict.fromkeys(ids)) for target_id, ids in output.items()}
+        return {
+            target_id: tuple(dict.fromkeys(ids)) for target_id, ids in output.items()
+        }
 
     def target_ids_for_fact(self, requested_fact_id: str) -> frozenset[str]:
         return frozenset(
@@ -112,13 +114,24 @@ def value_only_source_binding_plan(
     plan_selection: PlanSelectionSet,
     *,
     requested_facts: tuple[RequestedFact, ...],
-) -> SourceBindingPlan:
+) -> SourceBindingPlan | None:
     target_index = source_binding_target_index_for_plan_selection(
         plan_selection,
         requested_facts=requested_facts,
     )
     bound_sources: list[BoundSource] = []
-    for plan in _first_plan_per_fact(plan_selection):
+    selected_plans: list[SelectedSourceStrategy] = []
+    for requested_fact_id in _requested_fact_ids(plan_selection):
+        fact_plans = tuple(
+            plan
+            for plan in plan_selection.plan_selections
+            if plan.requested_fact_id == requested_fact_id
+        )
+        selected_plan = _single_compatible_plan(fact_plans)
+        if selected_plan is None:
+            return None
+        selected_plans.append(selected_plan)
+    for plan in selected_plans:
         for member in plan.source_members:
             for target in _targets_for_plan_member(
                 target_index,
@@ -431,16 +444,3 @@ def _requested_fact_ids(plan_selection: PlanSelectionSet) -> tuple[str, ...]:
     return tuple(
         dict.fromkeys(plan.requested_fact_id for plan in plan_selection.plan_selections)
     )
-
-
-def _first_plan_per_fact(
-    plan_selection: PlanSelectionSet,
-) -> tuple[SelectedSourceStrategy, ...]:
-    selected: list[SelectedSourceStrategy] = []
-    seen: set[str] = set()
-    for plan in plan_selection.plan_selections:
-        if plan.requested_fact_id in seen:
-            continue
-        seen.add(plan.requested_fact_id)
-        selected.append(plan)
-    return tuple(selected)

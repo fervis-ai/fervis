@@ -116,7 +116,7 @@ def generate_source_binding(
         derived_payload=lineage_explanation_metadata(
             (
                 "outcome",
-                "source_invocations",
+                "*",
                 "*",
                 "finite_choice_param_reviews",
                 "*",
@@ -124,7 +124,7 @@ def generate_source_binding(
             ),
             (
                 "outcome",
-                "source_invocations",
+                "*",
                 "*",
                 "finite_choice_param_reviews",
                 "*",

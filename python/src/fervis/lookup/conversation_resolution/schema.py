@@ -216,7 +216,7 @@ def _frame_call_schema(
                 for frame in context_frames
                 if frame.callable is not None
             ),
-        ]
+        ],
     }
 
 
@@ -266,7 +266,7 @@ def _callable_frame_schema(
                                 "value_id": {"type": "string", "minLength": 1},
                             }
                         ),
-                    ]
+                    ],
                 },
             },
         }
@@ -301,7 +301,7 @@ def _unresolved_outcome_schema(
 ) -> dict[str, object]:
     source_id_schema = {
         "type": "string",
-        "enum": ["current_question", *(item.source_id for item in context_sources)],
+        "enum": [item.source_id for item in context_sources],
     }
     return output.UnresolvedOutcomeOutput.schema(
         {
@@ -316,7 +316,7 @@ def _unresolved_outcome_schema(
                             "type": "string",
                             "minLength": 1,
                         },
-                        "supporting_evidence": {
+                        "context_evidence": {
                             "type": "array",
                             "minItems": 1,
                             "items": output.SourceEvidenceOutput.schema(
