@@ -21,7 +21,7 @@ from tests.testkit.catalog import catalog_from_payload
 def run_relation_catalog_case(payload: dict[str, Any]) -> list[str]:
     catalog = catalog_from_payload(payload["input"]["catalog"])
     try:
-        validate_relation_catalog(catalog)
+        catalog = validate_relation_catalog(catalog)
     except Exception as exc:
         if expects_rejection(payload["expect"]):
             return status_mismatches(

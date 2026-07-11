@@ -1,6 +1,6 @@
 """Render output builders for aggregate pattern compilers."""
 
-from fervis.lookup.fact_plan.render_spec import RenderRelationOutput
+from fervis.lookup.answer_program.render_spec import RenderRelationOutput
 
 from .render_ids import _render_output_id
 

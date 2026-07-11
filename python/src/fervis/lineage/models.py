@@ -14,11 +14,13 @@ from fervis.lineage.enums import (
     ModelUsageUnit,
     PresentationClientKey,
     PresentationKind,
+    ProgramInvocationKind,
     RunResultKind,
     RunStepKey,
     RunStepKind,
     RunStepScopeType,
     RunTriggerKind,
+    QuestionRunKind,
     RuntimeErrorKind,
     SourceReadStatus,
     choices,
@@ -123,31 +125,24 @@ class QuestionRun(models.Model):
         related_name="runs",
     )
     run_number = models.PositiveIntegerField()
+    kind = models.CharField(max_length=32, choices=choices(QuestionRunKind))
     trigger_kind = models.CharField(
         max_length=32,
         choices=choices(RunTriggerKind),
         default=RunTriggerKind.INITIAL.value,
     )
-    previous_run = models.ForeignKey(
+    base_run = models.ForeignKey(
         "self",
         null=True,
         blank=True,
         on_delete=models.PROTECT,
-        related_name="triggered_runs",
-    )
-    trigger_clarification_response_run = models.ForeignKey(
-        "self",
-        null=True,
-        blank=True,
-        on_delete=models.PROTECT,
-        related_name="clarification_triggered_runs",
+        related_name="derived_runs",
     )
     trigger_clarification_response_id = models.CharField(
         max_length=128,
         blank=True,
         default="",
     )
-    integrated_question = models.TextField()
     adapter_ref = models.CharField(max_length=128)
     runtime_version = models.CharField(max_length=128)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -168,10 +163,97 @@ class QuestionRun(models.Model):
             models.Index(
                 fields=["question", "run_number"], name="fervis_run_question_num_idx"
             ),
-            models.Index(fields=["previous_run"], name="fervis_run_previous_idx"),
+            models.Index(fields=["base_run"], name="fervis_run_base_idx"),
+        ]
+
+
+class AnswerProgram(models.Model):
+    lineage_record_key = records.ANSWER_PROGRAM.key
+
+    program_id = models.CharField(max_length=80, primary_key=True)
+    schema_revision = models.PositiveIntegerField()
+    canonical_json = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "fervis_answer_program"
+
+
+class ProgramInvocation(models.Model):
+    lineage_record_key = records.PROGRAM_INVOCATION.key
+
+    invocation_id = models.CharField(max_length=80, primary_key=True)
+    run = models.OneToOneField(
+        QuestionRun,
+        on_delete=models.PROTECT,
+        related_name="program_invocation",
+    )
+    program = models.ForeignKey(
+        AnswerProgram,
+        on_delete=models.PROTECT,
+        related_name="invocations",
+    )
+    bindings_json = models.TextField()
+    kind = models.CharField(
+        max_length=32,
+        choices=choices(ProgramInvocationKind),
+    )
+    base_invocation_id = models.CharField(max_length=80, null=True, blank=True)
+    patch_id = models.CharField(max_length=80, null=True, blank=True)
+    binding_patch_json = models.TextField(null=True, blank=True)
+    revision = models.ForeignKey(
+        "ProgramRevision",
+        on_delete=models.PROTECT,
+        related_name="invocations",
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "fervis_program_invocation"
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(patch_id__isnull=True, binding_patch_json__isnull=True)
+                    | models.Q(
+                        patch_id__isnull=False,
+                        binding_patch_json__isnull=False,
+                    )
+                ),
+                name="fervis_program_invocation_patch_pair_ck",
+            )
+        ]
+
+
+class ProgramRevision(models.Model):
+    lineage_record_key = records.PROGRAM_REVISION.key
+
+    revision_id = models.CharField(max_length=80, primary_key=True)
+    base_program = models.ForeignKey(
+        AnswerProgram,
+        on_delete=models.PROTECT,
+        related_name="outgoing_revisions",
+    )
+    revised_program = models.ForeignKey(
+        AnswerProgram,
+        on_delete=models.PROTECT,
+        related_name="incoming_revisions",
+    )
+    capability_id = models.CharField(max_length=128)
+    application_json = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "fervis_program_revision"
+        indexes = [
             models.Index(
-                fields=["trigger_clarification_response_run"],
-                name="fervis_run_clarify_idx",
+                fields=["base_program"],
+                name="fervis_program_rev_base_idx",
+            ),
+            models.Index(
+                fields=["revised_program"],
+                name="fervis_program_rev_revised_idx",
             ),
         ]
 

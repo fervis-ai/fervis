@@ -36,6 +36,7 @@ def test_fact_plan_prompt_marks_grounded_required_params_as_satisfied():
                 expression="April 8",
                 resolved_start="2026-04-08",
                 resolved_end="2026-04-08",
+                granularity="day",
             ),
         ),
         available_value_uses=(
@@ -76,6 +77,7 @@ def test_fact_plan_prompt_marks_grounded_required_params_as_satisfied():
             "kind": "time",
             "resolved_end": "2026-04-08",
             "resolved_start": "2026-04-08",
+            "value_id": "april_8",
         }
     ]
 
@@ -139,6 +141,7 @@ def test_fact_plan_prompt_marks_grounded_optional_params_as_satisfied():
             "display_value": "Azraah Fatuma",
             "identity_type": "staff",
             "kind": "identity",
+            "value_id": "azraah",
         }
     ]
 
@@ -186,6 +189,7 @@ def test_fact_plan_prompt_projects_grounded_inputs_as_scoped_row_set():
         available_values=(
             FactValue.identity(
                 id="azraah",
+                known_input_id="fact_1_input_1",
                 identity_type="staff",
                 identity_field="staff_id",
                 value="staff_1",
@@ -197,6 +201,7 @@ def test_fact_plan_prompt_projects_grounded_inputs_as_scoped_row_set():
                 expression="February 14, 2026",
                 resolved_start="2026-02-14",
                 resolved_end="2026-02-14",
+                granularity="day",
             ),
         ),
         available_value_uses=(
@@ -240,14 +245,16 @@ def test_fact_plan_prompt_projects_grounded_inputs_as_scoped_row_set():
         {
             "display_value": "Azraah Fatuma",
             "identity_type": "staff",
-            "kind": "identity",
-            "known_input_id": "fact_1_input_1",
+                "kind": "identity",
+                "known_input_id": "fact_1_input_1",
+                "value_id": "azraah",
         },
         {
             "display_value": "February 14, 2026",
-            "kind": "time",
-            "resolved_end": "2026-02-14",
-            "resolved_start": "2026-02-14",
+                "kind": "time",
+                "resolved_end": "2026-02-14",
+                "resolved_start": "2026-02-14",
+                "value_id": "feb_14",
         },
     ]
     assert "staff_1" not in json.dumps(relation_catalog)
@@ -324,6 +331,7 @@ def test_fact_plan_prompt_projects_identity_value_to_matching_source_field_filte
         available_values=(
             FactValue.identity(
                 id="nairobi_area",
+                known_input_id="input_1",
                 identity_type="area",
                 identity_field="area_id",
                 value="area_nairobi",
@@ -353,6 +361,7 @@ def test_fact_plan_prompt_projects_identity_value_to_matching_source_field_filte
             "identity_type": "area",
             "kind": "identity",
             "known_input_id": "input_1",
+            "value_id": "nairobi_area",
         }
     ]
 
@@ -392,12 +401,14 @@ def test_fact_plan_prompt_treats_duplicate_grounded_dates_as_satisfied_once():
                 expression="January 1",
                 resolved_start="2030-01-01",
                 resolved_end="2030-01-01",
+                granularity="day",
             ),
             FactValue.time(
                 id="jan_1_average_ticket",
                 expression="January 1",
                 resolved_start="2030-01-01",
                 resolved_end="2030-01-01",
+                granularity="day",
             ),
         ),
         available_value_uses=(
@@ -450,6 +461,7 @@ def test_fact_plan_prompt_treats_duplicate_grounded_dates_as_satisfied_once():
             "kind": "time",
             "resolved_end": "2030-01-01",
             "resolved_start": "2030-01-01",
+            "value_id": "jan_1_revenue",
         }
     ]
 
@@ -481,12 +493,14 @@ def test_fact_plan_prompt_uses_explicit_source_binding_for_required_dates():
                 expression="January 1",
                 resolved_start="2030-01-01",
                 resolved_end="2030-01-01",
+                granularity="day",
             ),
             FactValue.time(
                 id="jan_2",
                 expression="January 2",
                 resolved_start="2030-01-02",
                 resolved_end="2030-01-02",
+                granularity="day",
             ),
         ),
         bound_sources=(
@@ -494,11 +508,11 @@ def test_fact_plan_prompt_uses_explicit_source_binding_for_required_dates():
                 id="sb_sales_jan_1",
                 requested_fact_id="rf_answer",
                 answer_population=_answer_population(),
-                source=RelationSource(
+                source=DraftRelationSource(
                     kind=SourceKind.API_READ,
                     read_id="sales",
                     param_bindings=(
-                        EndpointParamBinding(
+                        DraftEndpointParamBinding(
                             param_id="start_date",
                             value="2030-01-01",
                         ),

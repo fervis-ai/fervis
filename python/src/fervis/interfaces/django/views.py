@@ -113,7 +113,7 @@ class QuestionRunListView(FervisAPIView):
         _require_authenticated_subject(request)
 
         try:
-            response = django_question_interface().continue_question(
+            response = django_question_interface().create_question_run(
                 str(question_id),
                 request.data,
                 principal=_principal_from_request(request),

@@ -1,0 +1,23 @@
+id: exact_decimal_compute_input_is_preserved
+kind: algorithm
+algorithm: answer_program.invoke
+description: An exact decimal constant reaches deterministic computation without binary-float rounding.
+input:
+  schema_revision: 1
+  program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/compute_versioned_constant}
+  catalog: {reads: []}
+  environment: {authority_ref: authority:current}
+  invocations:
+    - id: exact_decimal
+      bindings: []
+      evidence: []
+expect:
+  result_contains:
+    invocations:
+      - id: exact_decimal
+        status: completed
+        fact_result:
+          outcome:
+            scalars:
+              answer_1: '0.1234567890123456789012345'
+        requests: []

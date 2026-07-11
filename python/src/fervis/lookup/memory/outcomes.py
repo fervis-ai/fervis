@@ -20,11 +20,11 @@ from fervis.lookup.outcomes.terminal_details import (
     needs_clarification_payload,
     undefined_operation_payload,
 )
-from fervis.lookup.fact_plan.values import (
+from fervis.lookup.answer_program.values import (
     FactValue,
     ValueKind,
 )
-from fervis.lookup.fact_plan.values import (
+from fervis.lookup.answer_program.values import (
     IdentityValuePayload,
     TimeValuePayload,
 )

@@ -10,7 +10,14 @@ from fervis.lookup.plan_execution.generated_relations import (
 )
 from fervis.lookup.plan_execution.operation_engine import execute_operations
 from fervis.lookup.plan_execution.operation_runtime import (
+    ExecutableOperation,
     RelationEngineInput,
+    ResolvedComputeBinary,
+    ResolvedComputeNegation,
+    ResolvedComputeOutput,
+    ResolvedComputeSpec,
+    ResolvedComputeValue,
+    ResolvedRankSpec,
     ScalarInput,
 )
 from fervis.lookup.plan_execution.relations import (
@@ -20,23 +27,21 @@ from fervis.lookup.plan_execution.relations import (
     RelationRows,
     RelationSetKind,
 )
-from fervis.lookup.fact_plan.operations import (
+from fervis.lookup.answer_program.operations import (
     AggregateSpec,
     AggregationFunction,
     AggregationSpec,
     AntiJoinSpec,
-    ComputeSpec,
+    ComputeBinaryOperator,
     CrossJoinSpec,
     FilterSpec,
     JoinKey,
     JoinSpec,
-    Operation,
     Predicate,
     PredicateOperator,
     ProjectField,
     ProjectSpec,
     ProjectToIdentitySpec,
-    RankSpec,
     RelationRole,
     RelationRoleRef,
     RoleExpandSpec,
@@ -170,8 +175,8 @@ def _relation(payload: dict[str, Any]) -> RelationRows:
     )
 
 
-def _operation(payload: dict[str, Any]) -> Operation:
-    return Operation(
+def _operation(payload: dict[str, Any]) -> ExecutableOperation:
+    return ExecutableOperation(
         id=str(payload["id"]),
         spec=_operation_spec(payload["spec"]),
         output_relation=str(payload["output_relation"]),
@@ -249,7 +254,7 @@ def _operation_spec(payload: dict[str, Any]) -> Any:
             ),
         )
     if kind == "rank":
-        return RankSpec(
+        return ResolvedRankSpec(
             input_relation=str(payload["input_relation"]),
             order_by=tuple(_sort_key(item) for item in payload["order_by"]),
             tie_policy=TiePolicy(str(payload.get("tie_policy") or "field")),
@@ -259,12 +264,38 @@ def _operation_spec(payload: dict[str, Any]) -> Any:
             ),
         )
     if kind == "compute":
-        return ComputeSpec(
-            expression=str(payload["expression"]),
-            scalar_inputs=tuple(str(item) for item in payload.get("scalar_inputs") or ()),
+        return ResolvedComputeSpec(
+            expression=_compute_expression(payload["expression"]),
             output_scalar=str(payload.get("output_scalar") or ""),
         )
     raise ValueError(f"unsupported relation operation kind: {kind}")
+
+
+def _compute_expression(payload: dict[str, Any]):
+    if set(payload) == {"value"}:
+        value = payload["value"]
+        return ResolvedComputeValue(
+            input_ref=str(value["input_ref"]),
+            value=value["value"],
+            proof_refs=tuple(str(ref) for ref in value.get("proof_refs") or ()),
+        )
+    if set(payload) == {"output"}:
+        output = payload["output"]
+        return ResolvedComputeOutput(
+            node_id=str(output["node_id"]),
+            output_id=str(output["output_id"]),
+        )
+    if set(payload) == {"negate"}:
+        return ResolvedComputeNegation(
+            operand=_compute_expression(payload["negate"])
+        )
+    if set(payload) == {"operator", "left", "right"}:
+        return ResolvedComputeBinary(
+            operator=ComputeBinaryOperator(str(payload["operator"])),
+            left=_compute_expression(payload["left"]),
+            right=_compute_expression(payload["right"]),
+        )
+    raise ValueError("compute expression does not match the closed contract")
 
 
 def _role_ref(payload: dict[str, Any]) -> RelationRoleRef:

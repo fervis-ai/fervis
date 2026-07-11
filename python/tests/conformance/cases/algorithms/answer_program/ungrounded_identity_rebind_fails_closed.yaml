@@ -1,0 +1,35 @@
+id: ungrounded_identity_rebind_fails_closed
+kind: algorithm
+algorithm: answer_program.patch
+description: An identity-valued input cannot bypass current-authority grounding through a typed patch.
+input:
+  schema_revision: 1
+  parameters:
+    - id: question.store_ids
+      role: question_input
+      value_type: identity_set
+      required: true
+  bindings:
+    - parameter_id: question.store_ids
+      value:
+        kind: identity_set
+        identity_type: store
+        identity_field: store_id
+        values: [store_1]
+      provenance: {kind: question_input}
+  patch:
+    operations:
+      - kind: set
+        parameter_id: question.store_ids
+        value:
+          kind: identity_set
+          identity_type: store
+          identity_field: store_id
+          values: [store_2]
+expect:
+  result_contains:
+    status: rejected
+    code: identity_patch_requires_current_grounding
+    base:
+      question.store_ids: [store_1]
+

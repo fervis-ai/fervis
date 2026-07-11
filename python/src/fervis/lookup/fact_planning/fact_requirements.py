@@ -21,7 +21,8 @@ from fervis.lookup.fact_plan.row_sources import (
     build_row_source_catalog,
     row_source_ids_for_read_ids,
 )
-from fervis.lookup.fact_plan.values import FactValue
+from fervis.lookup.answer_program.values import FactValue
+from fervis.lookup.grounding.model import GroundedInputUse
 
 
 @dataclass(frozen=True)
@@ -63,7 +64,7 @@ def fact_endpoint_requirements(
     catalog: RelationCatalog,
     catalog_selection: CatalogSelectionResult | None,
     available_values: tuple[FactValue, ...],
-    available_value_uses: tuple[object, ...],
+    available_value_uses: tuple[GroundedInputUse, ...],
     row_sources: RowSourceCatalog | None = None,
     grounded_params: dict[tuple[str, str], GroundedParamValue] | None = None,
 ) -> FactEndpointRequirements:

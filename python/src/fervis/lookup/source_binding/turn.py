@@ -8,9 +8,6 @@ from typing import Any
 from fervis.lookup.lineage.explanation_metadata import (
     lineage_explanation_metadata,
 )
-from fervis.lookup.conversation_resolution import (
-    conversation_resolution_source_binding_prompt_payload,
-)
 from fervis.model_io.turn_artifacts import (
     ModelTurnArtifact,
 )
@@ -83,9 +80,6 @@ def generate_source_binding(
             conversation_context=request.conversation_context,
             host=request.host,
             memory_payload=request.memory_inputs,
-            conversation_resolution_overlay=conversation_resolution_source_binding_prompt_payload(
-                request.conversation_resolution_overlay
-            ),
         )
     )
     try:
@@ -167,9 +161,6 @@ def _backend_impossible_turn_result(
             conversation_context=request.conversation_context,
             host=request.host,
             memory_payload=request.memory_inputs,
-            conversation_resolution_overlay=conversation_resolution_source_binding_prompt_payload(
-                request.conversation_resolution_overlay
-            ),
         )
     )
     submitted_payload = {

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy.engine import Engine
 
 from fervis.lineage.recorder_core import LineageRecorder
+from fervis.lineage.enums import QuestionRunKind, RunResultKind
 from fervis.host_api.contracts.authority import ReadAuthority, ReadContextRef
 from fervis.host_api.credentials import (
     delegated_credential_from_runtime_context,
@@ -27,15 +27,29 @@ from fervis.questions.ports import (
     AuthorizedQuestionAccess,
     QueuedRun,
     QuestionRunRecord,
+    ParsedQuestionRunSubmission,
     QuestionRunSubmissionKind,
     QuestionRunSubmissionResult,
     RunSubmission,
 )
 from fervis.questions.service import QuestionService
+from fervis.lookup.answer_program.persistence import (
+    StoredProgramInvocation,
+    parse_stored_program_invocation,
+)
+from fervis.questions.projection import (
+    QuestionMemoryRunSelection,
+    QuestionRunProjection,
+    QuestionRunStatus,
+    QuestionRunSummary,
+    project_question_runs,
+    select_conversation_memory_runs,
+)
 from fervis.run_work.service import RunWorkService
 
 from .lineage_query import SQLLineageQuery
 from .lineage_store import SQLLineageRecorderStore
+from .run_views import get_sql_run_view
 from .authority_scope import (
     conversation_is_authorized,
     question_is_authorized,
@@ -43,7 +57,6 @@ from .authority_scope import (
 from .terminal import (
     record_runtime_error_result,
     run_has_terminal_result,
-    terminal_result_for_run,
 )
 from .transaction import sql_connection, sql_transaction
 from .work_items import (
@@ -66,17 +79,40 @@ class SQLQuestionLineagePort:
         *,
         conversation_id: str,
         authority: ReadAuthority,
+        context_run_id: str | None = None,
+        continuation_run_id: str | None = None,
     ) -> dict[str, Any]:
+        if context_run_id is not None and continuation_run_id is not None:
+            raise ValueError("memory context accepts one selected run")
         if not conversation_is_authorized(
             self.engine,
             conversation_id=conversation_id,
             authority=authority,
         ):
             return {}
+        if context_run_id is not None and not _is_answered_context_run(
+            self.engine,
+            conversation_id=conversation_id,
+            run_id=context_run_id,
+            tenant_id=authority.tenant_id,
+        ):
+            raise PermissionError("context run is not an authorized answered run")
+        if continuation_run_id is not None and not _is_terminal_context_run(
+            self.engine,
+            conversation_id=conversation_id,
+            run_id=continuation_run_id,
+            tenant_id=authority.tenant_id,
+        ):
+            raise PermissionError("continuation run is not an authorized terminal run")
+        selected_run_id = context_run_id or continuation_run_id
         from fervis.memory.lineage import LineageMemoryArtifactService
 
-        artifacts = LineageMemoryArtifactService(self.lineage_query).for_conversation(
-            conversation_id
+        artifacts = LineageMemoryArtifactService(self.lineage_query).for_runs(
+            _primary_run_ids_for_conversation(
+                self.engine,
+                conversation_id,
+                context_run_id=selected_run_id,
+            )
         )
         if not artifacts:
             return {}
@@ -164,6 +200,97 @@ class SQLQuestionLifecyclePort:
         ):
             raise PermissionError("conversation is not owned by read authority")
 
+    def load_answered_program_invocation(
+        self,
+        *,
+        run_id: str,
+        access: AuthorizedQuestionAccess,
+    ) -> StoredProgramInvocation | None:
+        access.require_valid()
+        question = metadata.tables["fervis_question"]
+        with sql_connection(self.engine) as connection:
+            row = connection.execute(
+                _answered_program_invocation_statement(
+                    run_id=run_id,
+                    tenant_id=access.tenant_id,
+                ).where(question.c.question_id == access.question_id)
+            ).first()
+        if row is None:
+            return None
+        return _stored_program_invocation(row)
+
+    def load_prior_answered_invocation(
+        self,
+        *,
+        run_id: str,
+        conversation_id: str,
+        tenant_id: str,
+    ) -> StoredProgramInvocation | None:
+        question = metadata.tables["fervis_question"]
+        with sql_connection(self.engine) as connection:
+            row = connection.execute(
+                _answered_program_invocation_statement(
+                    run_id=run_id,
+                    tenant_id=tenant_id,
+                ).where(question.c.conversation_id == conversation_id)
+            ).first()
+        return _stored_program_invocation(row) if row is not None else None
+
+    def load_program_invocation_for_execution(
+        self,
+        *,
+        invocation_id: str,
+        run_id: str,
+        question_id: str,
+        tenant_id: str,
+    ) -> StoredProgramInvocation | None:
+        invocation = metadata.tables["fervis_program_invocation"]
+        program = metadata.tables["fervis_answer_program"]
+        run = metadata.tables["fervis_question_run"]
+        question = metadata.tables["fervis_question"]
+        conversation = metadata.tables["fervis_conversation"]
+        result = metadata.tables["fervis_run_result"]
+        base_run = run.alias("base_run")
+        base_result = result.alias("base_result")
+        with sql_connection(self.engine) as connection:
+            row = connection.execute(
+                sa.select(
+                    invocation.c.invocation_id,
+                    invocation.c.run_id,
+                    invocation.c.program_id,
+                    invocation.c.bindings_json,
+                    invocation.c.kind,
+                    invocation.c.base_invocation_id,
+                    invocation.c.patch_id,
+                    invocation.c.binding_patch_json,
+                    invocation.c.revision_id,
+                    program.c.canonical_json,
+                )
+                .select_from(
+                    invocation.join(
+                        program,
+                        invocation.c.program_id == program.c.program_id,
+                    )
+                    .join(run, invocation.c.run_id == run.c.run_id)
+                    .join(question, run.c.question_id == question.c.question_id)
+                    .join(
+                        conversation,
+                        question.c.conversation_id == conversation.c.conversation_id,
+                    )
+                    .join(base_run, base_run.c.run_id == run.c.base_run_id)
+                    .join(base_result, base_result.c.run_id == base_run.c.run_id)
+                )
+                .where(
+                    invocation.c.invocation_id == invocation_id,
+                    invocation.c.run_id == run_id,
+                    run.c.question_id == question_id,
+                    base_run.c.question_id == question_id,
+                    conversation.c.tenant_id == tenant_id,
+                    base_result.c.result_kind == RunResultKind.ANSWERED.value,
+                )
+            ).first()
+        return _stored_program_invocation(row) if row is not None else None
+
     def find_idempotent_run(
         self,
         *,
@@ -192,6 +319,9 @@ class SQLQuestionLifecyclePort:
         submission: RunSubmission,
         record: QuestionRunRecord,
     ) -> QuestionRunSubmissionResult:
+        parsed = ParsedQuestionRunSubmission(submission=submission, record=record)
+        submission = parsed.submission
+        record = parsed.record
         try:
             with sql_transaction(self.engine):
                 enqueued = self.queue.enqueue_run_work_item(submission=submission)
@@ -205,6 +335,10 @@ class SQLQuestionLifecyclePort:
                     sequence_store=SQLQuestionRunSequenceStore(self.engine),
                     recorder=self.recorder,
                 )
+                if record.program_revision is not None:
+                    self.recorder.record_program_revision(record.program_revision)
+                if record.program_invocation is not None:
+                    self.recorder.record_program_invocation(record.program_invocation)
         except ActiveRunConflict as exc:
             return QuestionRunSubmissionResult(
                 kind=QuestionRunSubmissionKind.ACTIVE_CONFLICT,
@@ -271,6 +405,7 @@ class SQLQuestionLifecyclePort:
         worker_id: str = "",
         active_attempt: int | None = None,
     ) -> QueuedRun:
+        del answer, result_data
         self.queue.mark_work_item_terminal(
             run_id=run_id,
             status=status,
@@ -278,17 +413,9 @@ class SQLQuestionLifecyclePort:
             worker_id=worker_id,
             active_attempt=active_attempt,
         )
-        terminal = _queued_run_from_work_item(
+        return _queued_run_from_work_item(
             self.engine,
             self.queue.get_work_item_for_run(run_id),
-        )
-        return replace(
-            terminal,
-            answer=answer if answer is not None else terminal.answer,
-            result_data=result_data
-            if result_data is not None
-            else terminal.result_data,
-            error=error or terminal.error,
         )
 
 
@@ -339,11 +466,21 @@ class SQLQuestionStateReaderPort:
                     row.read_context_ref or {}
                 ),
             )
-            current_run_id = self._latest_run_id(access.question_id)
-            current = (
-                self.get_question_run(current_run_id, access=access)
-                if current_run_id
+            projection = self._question_run_projection(access.question_id)
+            primary = (
+                self.get_question_run(projection.primary_run_id, access=access)
+                if projection.primary_run_id is not None
                 else None
+            )
+            active = (
+                self.get_question_run(projection.active_run_id, access=access)
+                if projection.active_run_id is not None
+                else None
+            )
+            projected_state = _required_projected_run_state(
+                projection,
+                primary=primary,
+                active=active,
             )
             items.append(
                 {
@@ -354,8 +491,10 @@ class SQLQuestionStateReaderPort:
                         else access.original_question
                     ),
                     "latestQuestionId": access.question_id,
-                    "currentRunId": (current or {}).get("runId"),
-                    "status": str((current or {}).get("status") or "RUNNING"),
+                    "primaryRunId": projection.primary_run_id,
+                    "latestRunId": projection.latest_run_id,
+                    "activeRunId": projection.active_run_id,
+                    "status": str(projected_state["status"]),
                     "runCount": self._run_count_for_question(access.question_id),
                     "updatedAt": _iso_datetime(
                         self._latest_activity_at(access.question_id) or row.created_at
@@ -377,25 +516,29 @@ class SQLQuestionStateReaderPort:
         question = self._question_row(access)
         if question is None:
             return None
-        latest_run_id = self._latest_run_id(access.question_id)
-        current = (
+        projection = self._question_run_projection(access.question_id)
+        primary = (
             self.get_question_run(
-                latest_run_id,
+                projection.primary_run_id,
                 access=access,
             )
-            if latest_run_id
+            if projection.primary_run_id is not None
             else None
         )
+        if primary is None:
+            raise RuntimeError("question projection is missing its primary run state")
         return {
             "questionId": str(question.question_id),
             "conversationId": str(question.conversation_id),
             "tenantId": str(question.tenant_id),
-            "status": str((current or {}).get("status") or "RUNNING"),
-            "currentRunId": (current or {}).get("runId"),
+            "status": str(primary["status"]),
+            "primaryRunId": projection.primary_run_id,
+            "latestRunId": projection.latest_run_id,
+            "activeRunId": projection.active_run_id,
             "question": str(question.original_question),
-            "answer": (current or {}).get("answer"),
-            "resultData": (current or {}).get("resultData"),
-            "error": (current or {}).get("error"),
+            "answer": (primary or {}).get("answer"),
+            "resultData": (primary or {}).get("resultData"),
+            "error": (primary or {}).get("error"),
         }
 
     def list_question_runs(
@@ -437,22 +580,11 @@ class SQLQuestionStateReaderPort:
             return None
         if item.tenant_id != access.tenant_id:
             return None
-        terminal = terminal_result_for_run(self.engine, run_id)
-        return {
-            "runId": item.run_id,
-            "runNumber": self._run_number_for_run(item.run_id, access=access),
-            "triggerKind": self._trigger_kind_for_run(item.run_id, access=access),
-            "questionId": access.question_id,
-            "conversationId": item.conversation_id,
-            "tenantId": item.tenant_id,
-            "status": terminal.status if terminal is not None else item.status,
-            "question": item.question,
-            "answer": terminal.answer if terminal is not None else None,
-            "resultData": terminal.result_data if terminal is not None else None,
-            "error": (terminal.error if terminal is not None else item.last_error)
-            or None,
-            "modelKey": item.model_key,
-        }
+        return get_sql_run_view(
+            self.engine,
+            run_id,
+            tenant_id=access.tenant_id,
+        )
 
     def _question_row(
         self,
@@ -480,17 +612,43 @@ class SQLQuestionStateReaderPort:
             row = connection.execute(statement).first()
         return row
 
-    def _latest_run_id(self, question_id: str) -> str:
+    def _question_run_projection(self, question_id: str) -> QuestionRunProjection:
         run = metadata.tables["fervis_question_run"]
+        result = metadata.tables["fervis_run_result"]
+        work = metadata.tables["fervis_run_work_item"]
         with sql_connection(self.engine) as connection:
-            value = connection.execute(
-                sa.select(run.c.run_id)
+            rows = connection.execute(
+                sa.select(
+                    run.c.run_id,
+                    run.c.run_number,
+                    run.c.kind,
+                    work.c.status,
+                    result.c.result_kind,
+                )
+                .select_from(
+                    run.outerjoin(work, work.c.run_id == run.c.run_id).outerjoin(
+                        result,
+                        result.c.run_id == run.c.run_id,
+                    )
+                )
                 .where(run.c.question_id == question_id)
-                .order_by(run.c.run_number.desc(), run.c.created_at.desc())
-                .limit(1)
-            ).scalar()
-        return str(value or "")
-
+                .order_by(run.c.run_number, run.c.run_id)
+            ).all()
+        if any(row.status is None for row in rows):
+            raise RuntimeError("question run is missing its persisted work state")
+        return project_question_runs(
+            tuple(
+                QuestionRunSummary(
+                    run_id=str(row.run_id),
+                    run_number=int(row.run_number),
+                    kind=QuestionRunKind(str(row.kind)),
+                    status=QuestionRunStatus(str(row.status)),
+                    answered=(row.result_kind == RunResultKind.ANSWERED.value),
+                    terminal=(row.result_kind is not None),
+                )
+                for row in rows
+            )
+        )
     def _latest_question_for_conversation(self, conversation_id: str):
         question = metadata.tables["fervis_question"]
         statement = (
@@ -603,55 +761,19 @@ class SQLQuestionStateReaderPort:
             return ""
         return question_id
 
-    def _run_number_for_run(
-        self,
-        run_id: str,
-        *,
-        access: AuthorizedQuestionAccess,
-    ) -> int:
-        run = metadata.tables["fervis_question_run"]
-        question = metadata.tables["fervis_question"]
-        conversation = metadata.tables["fervis_conversation"]
-        statement = (
-            sa.select(run.c.run_number)
-            .select_from(
-                run.join(question, run.c.question_id == question.c.question_id).join(
-                    conversation,
-                    question.c.conversation_id == conversation.c.conversation_id,
-                )
-            )
-            .where(run.c.run_id == run_id)
-            .where(run.c.question_id == access.question_id)
-            .where(conversation.c.tenant_id == access.tenant_id)
-        )
-        with sql_connection(self.engine) as connection:
-            value = connection.execute(statement).scalar()
-        return int(value or 0)
-
-    def _trigger_kind_for_run(
-        self,
-        run_id: str,
-        *,
-        access: AuthorizedQuestionAccess,
-    ) -> str:
-        run = metadata.tables["fervis_question_run"]
-        question = metadata.tables["fervis_question"]
-        conversation = metadata.tables["fervis_conversation"]
-        statement = (
-            sa.select(run.c.trigger_kind)
-            .select_from(
-                run.join(question, run.c.question_id == question.c.question_id).join(
-                    conversation,
-                    question.c.conversation_id == conversation.c.conversation_id,
-                )
-            )
-            .where(run.c.run_id == run_id)
-            .where(run.c.question_id == access.question_id)
-            .where(conversation.c.tenant_id == access.tenant_id)
-        )
-        with sql_connection(self.engine) as connection:
-            value = connection.execute(statement).scalar()
-        return str(value or "")
+def _required_projected_run_state(
+    projection: QuestionRunProjection,
+    *,
+    primary: dict[str, Any] | None,
+    active: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if projection.primary_run_id is None or primary is None:
+        raise RuntimeError("question projection is missing its primary run state")
+    if projection.active_run_id is not None:
+        if active is None:
+            raise RuntimeError("question projection is missing its active run state")
+        return active
+    return primary
 
 
 def _iso_datetime(value: Any) -> str:
@@ -692,6 +814,7 @@ def sql_question_service(
     *,
     engine: Engine,
     lookup,
+    program,
     adapter_ref: str = DEFAULT_ADAPTER_REF,
     runtime_version: str = DEFAULT_RUNTIME_VERSION,
 ) -> QuestionService:
@@ -699,6 +822,7 @@ def sql_question_service(
         lineage=SQLQuestionLineagePort(engine=engine),
         runs=SQLQuestionLifecyclePort(engine=engine),
         lookup=lookup,
+        program=program,
         state_reader=SQLQuestionStateReaderPort(engine),
         adapter_ref=adapter_ref,
         runtime_version=runtime_version,
@@ -709,11 +833,13 @@ def sql_run_work_service(
     *,
     engine: Engine,
     lookup,
+    program,
 ) -> RunWorkService:
     return RunWorkService(
         lineage=SQLQuestionLineagePort(engine=engine),
         runs=SQLQuestionLifecyclePort(engine=engine),
         lookup=lookup,
+        program=program,
     )
 
 
@@ -736,14 +862,11 @@ def _spine_question_run_start(record: QuestionRunRecord) -> QuestionRunStartRequ
         run=SpineQuestionRunStart(
             question_id=record.run.question_id,
             run_id=record.run.run_id,
+            kind=record.run.kind,
             trigger_kind=record.run.trigger_kind,
-            integrated_question=record.run.integrated_question,
             adapter_ref=record.run.adapter_ref,
             runtime_version=record.run.runtime_version,
-            previous_run_id=record.run.previous_run_id,
-            trigger_clarification_response_run_id=(
-                record.run.trigger_clarification_response_run_id
-            ),
+            base_run_id=record.run.base_run_id,
             trigger_clarification_response_id=(
                 record.run.trigger_clarification_response_id
             ),
@@ -763,38 +886,108 @@ def _spine_clarification_response(response):
     )
 
 
+def _answered_program_invocation_statement(
+    *,
+    run_id: str,
+    tenant_id: str,
+):
+    invocation = metadata.tables["fervis_program_invocation"]
+    program = metadata.tables["fervis_answer_program"]
+    run = metadata.tables["fervis_question_run"]
+    question = metadata.tables["fervis_question"]
+    conversation = metadata.tables["fervis_conversation"]
+    result = metadata.tables["fervis_run_result"]
+    return (
+        sa.select(
+            invocation.c.invocation_id,
+            invocation.c.run_id,
+            invocation.c.program_id,
+            invocation.c.bindings_json,
+            invocation.c.kind,
+            invocation.c.base_invocation_id,
+            invocation.c.patch_id,
+            invocation.c.binding_patch_json,
+            invocation.c.revision_id,
+            program.c.canonical_json,
+        )
+        .select_from(
+            invocation.join(
+                program,
+                invocation.c.program_id == program.c.program_id,
+            )
+            .join(run, invocation.c.run_id == run.c.run_id)
+            .join(question, run.c.question_id == question.c.question_id)
+            .join(
+                conversation,
+                question.c.conversation_id == conversation.c.conversation_id,
+            )
+            .join(result, result.c.run_id == run.c.run_id)
+        )
+        .where(
+            invocation.c.run_id == run_id,
+            conversation.c.tenant_id == tenant_id,
+            result.c.result_kind == RunResultKind.ANSWERED.value,
+        )
+    )
+
+
+def _stored_program_invocation(row: Any) -> StoredProgramInvocation:
+    return parse_stored_program_invocation(
+        invocation_id=str(row.invocation_id),
+        run_id=str(row.run_id),
+        program_id=str(row.program_id),
+        canonical_json=str(row.canonical_json),
+        bindings_json=str(row.bindings_json),
+        kind=str(row.kind),
+        base_invocation_id=(
+            str(row.base_invocation_id)
+            if row.base_invocation_id is not None
+            else None
+        ),
+        patch_id=str(row.patch_id) if row.patch_id is not None else None,
+        binding_patch_json=(
+            str(row.binding_patch_json)
+            if row.binding_patch_json is not None
+            else None
+        ),
+        revision_id=(
+            str(row.revision_id) if row.revision_id is not None else None
+        ),
+    )
+
+
 def _queued_run_from_work_item(engine: Engine, item: SQLRunWorkItem) -> QueuedRun:
-    terminal = terminal_result_for_run(engine, item.run_id)
+    run_view = (
+        get_sql_run_view(engine, item.run_id, tenant_id=item.tenant_id)
+        if run_has_terminal_result(engine, item.run_id)
+        else None
+    )
+    spec = item.spec
     return QueuedRun(
         submission=RunSubmission(
             conversation_id=item.conversation_id,
             tenant_id=item.tenant_id,
             question_id=_question_id_for_run(engine, item.run_id),
             run_id=item.run_id,
-            question=item.question,
             principal=QuestionPrincipal(
                 principal_id=item.user_id,
                 tenant_id=item.tenant_id,
                 read_context_ref=item.read_context_ref,
                 delegated_credential=delegated_credential_from_runtime_context(
-                    item.runtime_context
+                    spec.runtime_context
                 ),
             ),
-            provider=item.provider,
-            model_key=item.model_key,
+            spec=spec,
             execution_mode=ExecutionMode.INLINE
             if item.lease_owner == "inline"
             else ExecutionMode.QUEUED,
-            conversation_context=dict(item.conversation_context or {}),
-            runtime_context=dict(item.runtime_context or {}),
             idempotency_key=item.idempotency_key,
-            max_budget_usd=item.max_budget_usd,
-            max_thinking_tokens=item.max_thinking_tokens,
         ),
-        status=terminal.status if terminal is not None else item.status,
-        answer=terminal.answer if terminal is not None else None,
-        result_data=terminal.result_data if terminal is not None else None,
-        error=terminal.error if terminal is not None else item.last_error or None,
+        status=str((run_view or {}).get("status") or item.status),
+        answer=(run_view or {}).get("answer"),
+        result_data=(run_view or {}).get("resultData"),
+        error=(run_view or {}).get("error") or item.last_error or None,
+        duration_ms=(run_view or {}).get("durationMs") or _duration_ms(item),
     )
 
 
@@ -807,6 +1000,12 @@ def _terminal_run_from_lineage(
     return _queued_run_from_work_item(engine, item)
 
 
+def _duration_ms(item: SQLRunWorkItem) -> int | None:
+    if item.started_at is None or item.completed_at is None:
+        return None
+    return max(0, int((item.completed_at - item.started_at).total_seconds() * 1000))
+
+
 def _question_id_for_run(engine: Engine, run_id: str) -> str:
     run = metadata.tables["fervis_question_run"]
     with sql_connection(engine) as connection:
@@ -816,3 +1015,96 @@ def _question_id_for_run(engine: Engine, run_id: str) -> str:
     if value is None:
         raise RuntimeError(f"Fervis run has no lineage question: {run_id}")
     return str(value)
+
+
+def _primary_run_ids_for_conversation(
+    engine: Engine,
+    conversation_id: str,
+    *,
+    context_run_id: str | None = None,
+) -> tuple[str, ...]:
+    from fervis.memory.lineage import DEFAULT_RECENT_MEMORY_RUN_LIMIT
+
+    question = metadata.tables["fervis_question"]
+    with sql_connection(engine) as connection:
+        question_ids = tuple(
+            str(value)
+            for value in connection.execute(
+                sa.select(question.c.question_id)
+                .where(question.c.conversation_id == conversation_id)
+                .order_by(question.c.conversation_sequence.desc())
+                .limit(DEFAULT_RECENT_MEMORY_RUN_LIMIT)
+            ).scalars()
+        )
+    reader = SQLQuestionStateReaderPort(engine)
+    context_question_id = (
+        _question_id_for_run(engine, context_run_id)
+        if context_run_id is not None
+        else None
+    )
+    return select_conversation_memory_runs(
+        tuple(
+            QuestionMemoryRunSelection(
+                question_id=question_id,
+                primary_run_id=(
+                    reader._question_run_projection(question_id).primary_run_id
+                ),
+            )
+            for question_id in reversed(question_ids)
+        ),
+        selected_run_id=context_run_id,
+        selected_question_id=context_question_id,
+    )
+
+
+def _is_answered_context_run(
+    engine: Engine,
+    *,
+    conversation_id: str,
+    run_id: str,
+    tenant_id: str,
+) -> bool:
+    return _is_terminal_context_run(
+        engine,
+        conversation_id=conversation_id,
+        run_id=run_id,
+        tenant_id=tenant_id,
+        result_kind=RunResultKind.ANSWERED,
+    )
+
+
+def _is_terminal_context_run(
+    engine: Engine,
+    *,
+    conversation_id: str,
+    run_id: str,
+    tenant_id: str,
+    result_kind: RunResultKind | None = None,
+) -> bool:
+    run = metadata.tables["fervis_question_run"]
+    question = metadata.tables["fervis_question"]
+    conversation = metadata.tables["fervis_conversation"]
+    result = metadata.tables["fervis_run_result"]
+    with sql_connection(engine) as connection:
+        value = connection.execute(
+            sa.select(run.c.run_id)
+            .select_from(
+                run.join(question, run.c.question_id == question.c.question_id)
+                .join(
+                    conversation,
+                    question.c.conversation_id == conversation.c.conversation_id,
+                )
+                .join(result, result.c.run_id == run.c.run_id)
+            )
+            .where(
+                run.c.run_id == run_id,
+                question.c.conversation_id == conversation_id,
+                conversation.c.tenant_id == tenant_id,
+                *(
+                    (result.c.result_kind == result_kind.value,)
+                    if result_kind is not None
+                    else ()
+                ),
+            )
+        ).scalar()
+    return value is not None

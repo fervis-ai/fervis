@@ -6,7 +6,7 @@ from collections import OrderedDict
 
 from fervis.lookup.plan_execution.operation_runtime import RelationEngineError
 from fervis.lookup.plan_execution.relations import RelationRows
-from fervis.lookup.fact_plan.operations import (
+from fervis.lookup.answer_program.operations import (
     AntiJoinSpec,
     CrossJoinSpec,
     FilterSpec,

@@ -20,6 +20,7 @@ from fervis.lineage.payloads.execution_proof_graph import (
 from fervis.lineage.proof_projection import project_proof_payload
 from fervis.lineage.run_chain import run_chain_ids
 from fervis.lineage.views.model import (
+    AnswerProgramRefView,
     AnswerOutputView,
     AnswerPresentationView,
     AnswerView,
@@ -32,6 +33,9 @@ from fervis.lineage.views.model import (
     LineageRootKind,
     LineageView,
     MemoryArtifactView,
+    BindingPatchRefView,
+    ProgramDerivationView,
+    ProgramRevisionView,
     ProofComputationLinkView,
     ProofEndpointArgView,
     ProofAppliedInputView,
@@ -179,6 +183,7 @@ def _run_view(run: RunRow, *, rows: LineageRows) -> RunView:
     return RunView(
         run_id=run.run_id,
         run_number=run.run_number,
+        kind=run.kind.value,
         trigger_kind=run.trigger_kind.value,
         result_kind=run_result.result_kind.value if run_result else "unknown",
         activated_memory_ids=_activated_memory_ids(run, rows=rows),
@@ -188,12 +193,70 @@ def _run_view(run: RunRow, *, rows: LineageRows) -> RunView:
         steps=steps,
         runtime_errors=_run_runtime_errors(run, rows=rows, steps=steps),
         memory_artifacts=_run_memory_artifacts(run, rows=rows),
-        trigger_clarification_response_run_id=(
-            run.trigger_clarification_response_run_id
-        ),
+        program_derivation=_program_derivation_view(run, rows=rows),
+        base_run_id=run.base_run_id,
         trigger_clarification_response_id=run.trigger_clarification_response_id,
         clarification_requests=_run_clarification_requests(run, rows=rows),
         clarification_responses=_run_clarification_responses(run, rows=rows),
+    )
+
+
+def _program_derivation_view(
+    run: RunRow,
+    *,
+    rows: LineageRows,
+) -> ProgramDerivationView | None:
+    invocations = tuple(
+        item for item in rows.program_invocations if item.run_id == run.run_id
+    )
+    if not invocations:
+        return None
+    if len(invocations) != 1:
+        raise ValueError(f"run {run.run_id} has multiple program invocations")
+    invocation = invocations[0]
+    programs = {
+        program.program_id: program for program in rows.answer_programs
+    }
+    program = programs.get(invocation.program_id)
+    if program is None:
+        raise ValueError(
+            f"program invocation {invocation.invocation_id} has no program record"
+        )
+    revision = None
+    if invocation.revision_id is not None:
+        revisions = {
+            item.revision_id: item for item in rows.program_revisions
+        }
+        revision_row = revisions.get(invocation.revision_id)
+        if revision_row is None:
+            raise ValueError(
+                f"program invocation {invocation.invocation_id} has no revision record"
+            )
+        if revision_row.revised_program_id != invocation.program_id:
+            raise ValueError(
+                f"program revision {revision_row.revision_id} does not produce "
+                f"invocation program {invocation.program_id}"
+            )
+        revision = ProgramRevisionView(
+            revision_id=revision_row.revision_id,
+            base_program_id=revision_row.base_program_id,
+            revised_program_id=revision_row.revised_program_id,
+            capability_id=revision_row.capability_id,
+        )
+    return ProgramDerivationView(
+        invocation_id=invocation.invocation_id,
+        kind=invocation.kind,
+        base_invocation_id=invocation.base_invocation_id,
+        program=AnswerProgramRefView(
+            program_id=program.program_id,
+            schema_revision=program.schema_revision,
+        ),
+        patch=(
+            BindingPatchRefView(patch_id=invocation.patch.patch_id)
+            if invocation.patch is not None
+            else None
+        ),
+        revision=revision,
     )
 
 

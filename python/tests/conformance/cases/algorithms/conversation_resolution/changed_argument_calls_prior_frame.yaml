@@ -1,0 +1,58 @@
+id: changed_argument_calls_prior_frame
+description: A complete frame call replaces one argument and explicitly carries the other.
+kind: algorithm
+algorithm: conversation_resolution.parse
+input:
+  current_question: What about Pivot Mall?
+  context_sources:
+    - source_id: prior_question
+      kind: prior_user_question
+      text: How many sales did we make at Acacia Mall today?
+      source_card_ids: [prior_card]
+      source_memory_ids: [prior_request]
+  context_frames:
+    - frame_id: request:1
+      source_ids: [prior_question]
+      answer_shape: {expression_family: scalar_aggregate, output_roles: [ROW_POPULATION]}
+      parts:
+        - {part_id: location, kind: entity_identity, text: Acacia Mall, source_ref: location}
+        - {part_id: time, kind: time_scope, text: today, source_ref: time}
+      callable:
+        base_run_id: run_1
+        requested_fact_id: sales_count
+        parameters:
+          - {parameter_id: question.location, part_id: location, kind: entity_identity, current_text: Acacia Mall, resolved_text: Acacia Mall}
+          - {parameter_id: question.time, part_id: time, kind: time_scope, current_text: today, resolved_text: today}
+  payload:
+    kind: conversation_resolution
+    current_question_text: What about Pivot Mall?
+    outcome:
+      kind: resolved
+      resolution_basis: Current meaning and retained prior meaning form the resolved question.
+      contextualized_question: How many sales did we make at Pivot Mall today?
+      clauses:
+        - current_clause_text: What about Pivot Mall?
+          occurrence: 1
+          resolved_text: How many sales did we make at Pivot Mall today?
+          retained_frame_parts: []
+          values:
+            - value_id: current_location
+              resolved_text: Pivot Mall
+              sources:
+                - {kind: current_span, text: Pivot Mall, occurrence: 1}
+      frame_call:
+        kind: call
+        frame_id: request:1
+        arguments:
+          - {kind: resolved_value, parameter_id: question.location, value_id: current_location}
+          - {kind: carry, parameter_id: question.time}
+expect:
+  result_contains:
+    frame_call:
+      kind: call
+      frame_id: request:1
+      arguments:
+        - {kind: resolved_value, parameter_id: question.location, value_id: current_location}
+        - {kind: carry, parameter_id: question.time}
+    used_source_card_ids: [prior_card]
+    used_memory_ids: [prior_request]

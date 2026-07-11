@@ -1,4 +1,8 @@
-from fervis.lookup.grounding.model import GroundingIssue, GroundingTerminalKind
+from fervis.lookup.grounding.model import (
+    GroundingCandidate,
+    GroundingIssue,
+    GroundingTerminalKind,
+)
 from fervis.lookup.clarification import clarification_payload
 from fervis.lookup.orchestration.terminal_results import _grounding_issue_fact_result
 from fervis.lookup.outcomes.model import NeedsClarification
@@ -43,3 +47,45 @@ def test_grounding_clarification_payload_carries_resolver_evidence():
         "fieldId": "staff_id",
         "identityField": "staff_id",
     } in payload["evidence"]
+
+
+def test_grounding_issues_for_one_input_produce_one_complete_clarification():
+    result = _grounding_issue_fact_result(
+        tuple(
+            GroundingIssue(
+                kind=GroundingTerminalKind.AMBIGUOUS_REFERENCE,
+                known_input_id="q1_store",
+                requested_fact_id="fact_1",
+                known_input_text="Central",
+                known_input_description="store",
+                candidate_options=(
+                    GroundingCandidate(
+                        id=candidate_id,
+                        label=candidate_id,
+                        resolver_read_id=resolver_read_id,
+                    ),
+                ),
+                resolver_read_id=resolver_read_id,
+                resolver_endpoint_name=resolver_read_id,
+            )
+            for candidate_id, resolver_read_id in (
+                ("store_1", "list_stores"),
+                ("location_1", "list_locations"),
+            )
+        )
+    )
+
+    assert isinstance(result.outcome, NeedsClarification)
+    assert len(result.outcome.clarifications) == 1
+    payload = clarification_payload(result.outcome.clarifications[0])
+    assert [
+        option["id"] for option in payload["subjects"][0]["options"]
+    ] == ["store_1", "location_1"]
+    assert [
+        item["readId"]
+        for item in payload["evidence"]
+        if item["kind"] == "resolver_read"
+    ] == [
+        "list_stores",
+        "list_locations",
+    ]

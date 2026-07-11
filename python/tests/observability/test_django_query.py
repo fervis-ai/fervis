@@ -11,6 +11,8 @@ from fervis.lineage.enums import (
     ModelCallStatus,
     ModelUsageKind,
     ModelUsageUnit,
+    ProgramInvocationKind,
+    QuestionRunKind,
     RunResultKind,
     RunStepKey,
     RunStepKind,
@@ -22,6 +24,7 @@ from fervis.lineage.recorder import (
     AnswerOutputWrite,
     AnswerWrite,
     AnsweredRunResultWrite,
+    AnswerProgramWrite,
     ClarificationRequestWrite,
     ClarificationResponseWrite,
     ConversationWrite,
@@ -31,6 +34,8 @@ from fervis.lineage.recorder import (
     ModelCallAuditWrite,
     ModelCallUsageWrite,
     ModelCallWrite,
+    ProgramInvocationBundleWrite,
+    ProgramInvocationWrite,
     QuestionRunWrite,
     QuestionWrite,
     RequestedFactWrite,
@@ -173,9 +178,9 @@ def test_django_observability_query_answer_scope_includes_previous_runs() -> Non
             run_id="run_2",
             question_id="question_1",
             run_number=2,
-            trigger_kind=RunTriggerKind.RERUN,
-            previous_run_id="run_1",
-            integrated_question="How many stores are open?",
+            kind=QuestionRunKind.MODEL_ASSISTED,
+            trigger_kind=RunTriggerKind.RETRY,
+            base_run_id="run_1",
             adapter_ref="django_drf:test",
             runtime_version="test",
         )
@@ -220,6 +225,7 @@ def test_django_observability_query_answer_scope_includes_previous_runs() -> Non
             response_hash="sha256:stores",
         )
     )
+    _record_program_invocation(recorder, run_id="run_2")
     recorder.record_answered_result(
         AnsweredRunResultWrite(
             result=RunResultWrite(
@@ -380,10 +386,10 @@ def test_django_observability_query_answer_scope_includes_clarification_trigger_
             run_id="run_2",
             question_id="question_1",
             run_number=2,
+            kind=QuestionRunKind.MODEL_ASSISTED,
             trigger_kind=RunTriggerKind.CLARIFICATION_RESPONSE,
-            trigger_clarification_response_run_id="run_1",
+            base_run_id="run_1",
             trigger_clarification_response_id="clarification_response_1",
-            integrated_question="How many stores are open?",
             adapter_ref="django_drf:test",
             runtime_version="test",
         )
@@ -428,6 +434,7 @@ def test_django_observability_query_answer_scope_includes_clarification_trigger_
             response_hash="sha256:stores",
         )
     )
+    _record_program_invocation(recorder, run_id="run_2")
     recorder.record_answered_result(
         AnsweredRunResultWrite(
             result=RunResultWrite(
@@ -508,14 +515,35 @@ def _record_run_spine(recorder: LineageRecorderPort) -> None:
             run_id="run_1",
             question_id="question_1",
             run_number=1,
+            kind=QuestionRunKind.MODEL_ASSISTED,
             trigger_kind=RunTriggerKind.INITIAL,
-            integrated_question="How many stores are open?",
             adapter_ref="django_drf:test",
             runtime_version="test",
         )
     )
 
 
+def _record_program_invocation(
+    recorder: LineageRecorderPort,
+    *,
+    run_id: str,
+) -> None:
+    recorder.record_program_invocation(
+        ProgramInvocationBundleWrite(
+            program=AnswerProgramWrite(
+                program_id=f"{run_id}:program",
+                schema_revision=1,
+                canonical_json="{}",
+            ),
+            invocation=ProgramInvocationWrite(
+                invocation_id=f"{run_id}:invocation",
+                run_id=run_id,
+                program_id=f"{run_id}:program",
+                bindings_json="{}",
+                kind=ProgramInvocationKind.COMPILED_QUESTION,
+            ),
+        )
+    )
 def _record_catalog_endpoint(recorder: LineageRecorderPort, *, run_id: str) -> None:
     recorder.record_catalog_endpoint(
         CatalogEndpointWrite(

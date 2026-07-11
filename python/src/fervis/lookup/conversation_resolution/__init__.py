@@ -1,41 +1,41 @@
 """Conversation resolution public boundary."""
 
-from fervis.lookup.conversation_resolution.model import (
+from .compilation import (
+    CompiledConversationResolution,
+    ResolvedCanonicalIdentity,
+    ResolvedLiteralQuestionInput,
+    ResolvedQuestionInput,
+    ResolvedRowSetQuestionInput,
+    compile_conversation_resolution,
+)
+from .model import (
+    CandidateInterpretation,
+    CarriedFrameArgument,
+    ContextAnchorSource,
+    ConversationFrameCall,
     ConversationResolution,
-    ConversationResolutionKind,
     ConversationResolutionRequest,
     ConversationResolutionResult,
+    CurrentSpanSource,
+    FrameArgument,
+    FrameArgumentKind,
+    FramePartSource,
+    ResolutionSource,
+    ResolutionSourceKind,
+    ResolvedConversationClause,
+    ResolvedConversationValue,
+    ResolvedValueFrameArgument,
+    SourceEvidence,
+    UnresolvedResolution,
 )
-from fervis.lookup.conversation_resolution.overlay import (
-    ConversationDependencyOverlay,
-    ConversationResolutionOverlay,
-    ConversationValueFrameOverlay,
-    LiteralQuestionInputOverlay,
-    ResolvedCanonicalIdentityOverlay,
-    ResolvedQuestionInputOverlay,
-    RowSetQuestionInputOverlay,
-    conversation_resolution_overlay_from,
-    conversation_resolution_question_contract_context_texts,
-    conversation_resolution_question_contract_prompt_payload,
-    conversation_resolution_query_enrichment_prompt_payload,
-    conversation_resolution_source_binding_evidence_texts,
-    conversation_resolution_source_binding_prompt_payload,
-    conversation_resolution_value_frame_instruction_lines,
-)
-from fervis.lookup.conversation_resolution.parser import (
-    parse_conversation_resolution,
-)
-from fervis.lookup.conversation_resolution.prompt import (
-    ConversationResolutionTurnPrompt,
-)
-from fervis.lookup.conversation_resolution.schema import (
-    build_conversation_resolution_tool_schemas,
-)
-from fervis.lookup.conversation_resolution.tools import (
+from .parser import parse_conversation_resolution
+from .prompt import ConversationResolutionTurnPrompt
+from .schema import build_conversation_resolution_tool_schemas
+from .tools import (
     CONVERSATION_RESOLUTION_TOOL_NAME,
     CONVERSATION_RESOLUTION_TOOL_NAMES,
 )
-from fervis.lookup.conversation_resolution.turn import (
+from .turn import (
     ConversationResolutionGenerationError,
     ConversationResolutionTurnResult,
     generate_conversation_resolution,
@@ -44,28 +44,34 @@ from fervis.lookup.conversation_resolution.turn import (
 __all__ = [
     "CONVERSATION_RESOLUTION_TOOL_NAME",
     "CONVERSATION_RESOLUTION_TOOL_NAMES",
+    "CandidateInterpretation",
+    "CarriedFrameArgument",
+    "CompiledConversationResolution",
+    "ContextAnchorSource",
+    "ConversationFrameCall",
     "ConversationResolution",
     "ConversationResolutionGenerationError",
-    "ConversationResolutionKind",
-    "ConversationResolutionOverlay",
     "ConversationResolutionRequest",
     "ConversationResolutionResult",
     "ConversationResolutionTurnPrompt",
     "ConversationResolutionTurnResult",
-    "ConversationDependencyOverlay",
-    "ConversationValueFrameOverlay",
-    "LiteralQuestionInputOverlay",
-    "ResolvedCanonicalIdentityOverlay",
-    "ResolvedQuestionInputOverlay",
-    "RowSetQuestionInputOverlay",
-    "conversation_resolution_question_contract_context_texts",
-    "conversation_resolution_question_contract_prompt_payload",
-    "conversation_resolution_query_enrichment_prompt_payload",
-    "conversation_resolution_source_binding_evidence_texts",
-    "conversation_resolution_source_binding_prompt_payload",
-    "conversation_resolution_value_frame_instruction_lines",
+    "CurrentSpanSource",
+    "FrameArgument",
+    "FrameArgumentKind",
+    "FramePartSource",
+    "ResolutionSource",
+    "ResolutionSourceKind",
+    "ResolvedCanonicalIdentity",
+    "ResolvedConversationClause",
+    "ResolvedConversationValue",
+    "ResolvedLiteralQuestionInput",
+    "ResolvedQuestionInput",
+    "ResolvedRowSetQuestionInput",
+    "ResolvedValueFrameArgument",
+    "SourceEvidence",
+    "UnresolvedResolution",
     "build_conversation_resolution_tool_schemas",
-    "conversation_resolution_overlay_from",
+    "compile_conversation_resolution",
     "generate_conversation_resolution",
     "parse_conversation_resolution",
 ]

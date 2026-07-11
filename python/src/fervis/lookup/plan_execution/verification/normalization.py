@@ -2,7 +2,7 @@
 
 from ._shared import (
     AggregateSpec,
-    AnswerPlan,
+    AnswerProgram,
     FactPlan,
     FieldBindingRole,
     Operation,
@@ -27,7 +27,7 @@ def _normalize_fact_plan_for_verification(
     memory_relations: tuple[RelationRows, ...],
 ) -> FactPlan:
     outcome = plan.outcome
-    if isinstance(outcome, AnswerPlan) and catalog is not None:
+    if isinstance(outcome, AnswerProgram) and catalog is not None:
         row_sources = build_row_source_catalog(
             catalog,
             memory_relations=memory_relations,
@@ -40,9 +40,9 @@ def _normalize_fact_plan_for_verification(
 
 
 def _with_backend_identity_fields(
-    answer: AnswerPlan,
+    answer: AnswerProgram,
     row_sources: RowSourceCatalog,
-) -> AnswerPlan:
+) -> AnswerProgram:
     relations = tuple(
         _relation_with_backend_identity_fields(relation, row_sources=row_sources)
         for relation in answer.relations

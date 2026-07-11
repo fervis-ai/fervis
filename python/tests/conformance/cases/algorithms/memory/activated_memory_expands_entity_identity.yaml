@@ -5,6 +5,7 @@ migrates:
 kind: algorithm
 algorithm: conversation_memory.expand_activated
 input:
+  current_question: What about Jane Doe?
   conversation_context:
     factArtifacts:
       - artifactId: turn_1
@@ -15,16 +16,10 @@ input:
             resource: staff
             referenceText: Jane Doe
             identity: {staff_key: staff-1}
-  memory_cards:
-    mem.entity:
-      kind: entity_identity
-      artifact_id: turn_1
-      address: entity.staff.jane
-  used_memory_ids: [mem.entity]
+  used_memory_ids: [turn_1.entity.staff.jane]
 expect:
   result_contains:
     activatedMemory:
-      mem.entity:
+      turn_1.entity.staff.jane:
         kind: entity_identity
         canonical_id: staff-1
-

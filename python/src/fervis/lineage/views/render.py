@@ -90,6 +90,7 @@ def _append_run(
 ) -> None:
     lines.append(f"  Run {run.run_id} (#{run.run_number}): {run.result_kind}")
     _append_run_trigger(lines, run, indent=4)
+    _append_program_derivation(lines, run, indent=4)
     _append_clarification_responses(lines, run.clarification_responses, indent=4)
     _append_activated_memory(lines, run.activated_memory_ids, indent=4)
     _append_memory_artifacts(lines, run.memory_artifacts, indent=4)
@@ -102,6 +103,26 @@ def _append_run(
             answer_output=answer_output,
             fact_filter=fact_filter,
             detail=detail,
+        )
+
+
+def _append_program_derivation(lines: list[str], run, *, indent: int) -> None:
+    derivation = run.program_derivation
+    if derivation is None:
+        return
+    prefix = " " * indent
+    lines.append(
+        f"{prefix}Program invocation {derivation.invocation_id} uses "
+        f"{derivation.program.program_id}"
+    )
+    if derivation.patch is not None:
+        lines.append(f"{prefix}Binding patch {derivation.patch.patch_id}")
+    if derivation.revision is not None:
+        revision = derivation.revision
+        lines.append(
+            f"{prefix}Program revision {revision.revision_id}: "
+            f"{revision.base_program_id} -> {revision.revised_program_id} "
+            f"via {revision.capability_id}"
         )
 
 
@@ -288,7 +309,7 @@ def _payload_objects(value: object) -> tuple[dict[str, object], ...]:
 def _append_run_trigger(lines: list[str], run, *, indent: int) -> None:
     if not run.trigger_clarification_response_id:
         return
-    source_run = run.trigger_clarification_response_run_id or "unknown run"
+    source_run = run.base_run_id or "unknown run"
     lines.append(
         f"{' ' * indent}Triggered by clarification response "
         f"{run.trigger_clarification_response_id} from run {source_run}"

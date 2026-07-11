@@ -1,0 +1,32 @@
+id: compute_versioned_constant_is_closed
+kind: algorithm
+algorithm: answer_program.compile
+description: A compute coefficient with explicit constant identity and version compiles into the closed operator tree.
+input:
+  schema_revision: 1
+  program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/compute_versioned_constant}
+  question_contract: {$ref: ../../../fixtures/answer_program_v1.yaml#/question_contracts/computed_scalar}
+  catalog: {reads: []}
+  bindings: []
+expect:
+  result_contains:
+    status: compiled
+    program_id: ap_cddac8c47a50da22a5ee019c8cb29f2a03b6551ec05c89274862dbacec98830f
+    program:
+      program:
+        fields:
+          operations:
+            $tuple:
+              - fields:
+                  spec:
+                    fields:
+                      expression:
+                        $type: ComputeBinary
+                        fields:
+                          operator: {value: multiply}
+                          left:
+                            $type: ConstantRef
+                            fields: {constant_id: amount, version_ref: calculation@1}
+                          right:
+                            $type: ConstantRef
+                            fields: {constant_id: rate, version_ref: calculation@1}

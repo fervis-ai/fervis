@@ -4,15 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from fervis.lookup.fact_plan.operations import (
+from fervis.lookup.answer_program.operations import (
     Operation,
     ProjectField,
     ProjectSpec,
 )
-from fervis.lookup.fact_plan.render_spec import RenderRelationOutput
+from fervis.lookup.answer_program.render_spec import RenderRelationOutput
 from fervis.lookup.source_binding import BoundSource
 
 from .shared import (
+    RelationBuilder,
     _answer_value_field_ids_by_answer_output,
     _bound_source,
     _compiled_pattern,
@@ -33,6 +34,7 @@ def _compile_project_pattern_answer(
     payload: dict[str, Any],
     namespace_render_outputs: bool,
     bound_sources: dict[str, BoundSource],
+    relation_builder: RelationBuilder,
 ) -> dict[str, Any]:
     relation_id = _pattern_relation_id(index)
     output_relation_id = _pattern_output_relation_id(index)
@@ -107,6 +109,7 @@ def _compile_project_pattern_answer(
             render_pairs=render_pairs,
         ),
         bound_sources=bound_sources,
+        relation_builder=relation_builder,
     )
 
 
@@ -116,6 +119,7 @@ def _compile_direct_field_value_answer(
     payload: dict[str, Any],
     namespace_render_outputs: bool,
     bound_sources: dict[str, BoundSource],
+    relation_builder: RelationBuilder,
 ) -> dict[str, Any]:
     field = _field_spec(_dict(payload.get("output_field"), "output_field"))
     return _compile_project_pattern_answer(
@@ -130,6 +134,7 @@ def _compile_direct_field_value_answer(
             ],
         },
         bound_sources=bound_sources,
+        relation_builder=relation_builder,
     )
 
 

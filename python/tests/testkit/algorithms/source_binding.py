@@ -30,7 +30,7 @@ from fervis.lookup.plan_selection import (
     SourceStrategyMember,
 )
 from fervis.lookup.fact_plan.row_sources import api_row_source_id
-from fervis.lookup.fact_plan.values import (
+from fervis.lookup.answer_program.values import (
     FactValue,
     TimeComponent,
 )
@@ -932,17 +932,8 @@ def run_source_binding_row_predicate_parse_case(payload: dict[str, Any]) -> list
     if expects_rejection(payload["expect"]):
         return status_mismatches(actual_status="accepted", expected=payload["expect"])
     bound_source = result.outcome.bound_sources[0]
-    row_filters = tuple(getattr(bound_source.source, "row_filters", ()))
     return subset_mismatches(
         actual={
-            "row_filters": [
-                {
-                    "field_id": item.field_id,
-                    "operator": item.operator,
-                    "values": list(item.values),
-                }
-                for item in row_filters
-            ],
             "population_choices": _population_choices(bound_source.source),
             "available_field_ids": list(bound_source.available_field_ids),
         },
@@ -1023,7 +1014,7 @@ def run_source_binding_finite_choice_parse_case(payload: dict[str, Any]) -> list
     bound_source = result.outcome.bound_sources[0]
     param_values = [
         {
-            binding.param_id: binding.value
+            binding.param_id: binding.compiler_value
             for binding in source_invocation.param_bindings
         }
         for source_invocation in bound_source.source_invocations
@@ -1044,6 +1035,7 @@ def _population_choices(source: object) -> list[dict[str, object]]:
             "controller_kind": item.controller_kind,
             "controller_id": item.controller_id,
             "field_id": item.field_id,
+            "requested_fact_ids": list(item.requested_fact_ids),
             "included_values": list(item.included_values),
             "excluded_values": list(item.excluded_values),
             "review_scope_decisions": [
@@ -1187,6 +1179,19 @@ def run_source_binding_parse_case(payload: dict[str, Any]) -> list[str]:
     return subset_mismatches(
         actual={
             "applied_filters": list(bound_source.applied_filters),
+            "source_param_bindings": [
+                {
+                    "param_id": binding.param_id,
+                    "value": binding.value,
+                    "origin_kind": binding.origin_kind.value,
+                    "value_id": binding.value_id,
+                }
+                for binding in (
+                    bound_source.source.param_bindings
+                    if bound_source.source is not None
+                    else ()
+                )
+            ],
             "available_field_ids": list(bound_source.available_field_ids),
             "fulfillment_evidence_ids": (
                 list(bound_source.fulfillments[0].all_evidence_ids())
@@ -1484,7 +1489,9 @@ def _source_binding_request(
     if mode == "optional_population_params":
         return _optional_population_params_request()
     if mode == "grounded_time_filter":
-        return _grounded_time_filter_request()
+        return _grounded_time_filter_request(
+            start_param_name=str(data.get("raw_start_param_name") or "start_date")
+        )
     if mode == "scoped_review_owned_input":
         return _scoped_review_owned_input_request()
     if mode == "scoped_review_owned_input_unbound":
@@ -2218,6 +2225,7 @@ def _scoped_review_owned_input_request(
             (
                 FactValue.identity(
                     id="staff_identity_1",
+                    known_input_id="staff_id_1",
                     identity_type="staff",
                     identity_field="staff_id",
                     value="51515151-0000-0000-0002-000000000001",
@@ -2233,9 +2241,11 @@ def _scoped_review_owned_input_request(
             (
                 FactValue.time(
                     id="time_1",
+                    known_input_id="time_1",
                     expression="today",
                     resolved_start="2026-07-06",
                     resolved_end="2026-07-07",
+                    granularity="day",
                     proof_refs=("known_input:time_1",),
                     applies_to_requested_fact_ids=("fact_1",),
                 ),
@@ -3010,7 +3020,10 @@ def _optional_population_params_request() -> SourceBindingRequest:
     )
 
 
-def _grounded_time_filter_request() -> SourceBindingRequest:
+def _grounded_time_filter_request(
+    *,
+    start_param_name: str = "start_date",
+) -> SourceBindingRequest:
     root_row_source_id = api_row_source_id("sales", "root")
     fact = RequestedFact(
         id="fact_1",
@@ -3036,7 +3049,7 @@ def _grounded_time_filter_request() -> SourceBindingRequest:
                 params=(
                     CatalogParam(
                         ref="sales.query.start_date",
-                        name="start_date",
+                        name=start_param_name,
                         source=ParamSource.QUERY,
                         type="date",
                     ),
@@ -3095,9 +3108,11 @@ def _grounded_time_filter_request() -> SourceBindingRequest:
         available_values=(
             FactValue.time(
                 id="time_1",
+                known_input_id="time_1",
                 expression="today",
                 resolved_start="2026-05-22",
                 resolved_end="2026-05-22",
+                granularity="day",
                 proof_refs=("known_input:time_1",),
                 applies_to_requested_fact_ids=("fact_1",),
             ),
@@ -3209,6 +3224,7 @@ def _identity_field_filter_request() -> SourceBindingRequest:
         available_values=(
             FactValue.identity(
                 id="nairobi_area",
+                known_input_id="area_1",
                 identity_type="area",
                 identity_field="area_id",
                 value="area_nairobi",
@@ -3860,7 +3876,8 @@ def _finite_choice_option_review(
         "choice_option_id": str(value),
         "choice_domain_meaning": f"{str(value).lower()} sales",
         "choice_inclusion_basis": f"{value} is reviewed for inclusion.",
-        "choice_inclusion": (
+        "choice_inclusion": effect_spec.get("choice_inclusion")
+        or (
             "EXCLUDE"
             if any(v == "CONFLICTS_WITH_TEST" for v in effects.values())
             else "INCLUDE"
@@ -4016,6 +4033,7 @@ def _effect_membership_test_ids(effect: object) -> tuple[str, ...]:
         "omit_tests",
         "include_normal_guard_result",
         "normal_instance_match",
+        "choice_inclusion",
     }
     return tuple(str(key) for key in effect_spec if str(key) not in special_keys)
 

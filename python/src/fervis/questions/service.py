@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 
 from .contracts import (
     AskRequest,
     AskResult,
     ContinueQuestionRequest,
     ExecutionMode,
+    RerunQuestionRequest,
+    QuestionLifecycleError,
 )
-from fervis.lineage.enums import RunTriggerKind
+from fervis.lineage.enums import ProgramInvocationKind, QuestionRunKind, RunTriggerKind
 from fervis.host_api.contracts.authority import ReadAuthority
 from fervis.run_work.contracts import QueuedRunRequest
 from fervis.run_work.events import (
@@ -21,18 +24,33 @@ from fervis.run_work.events import (
     run_terminal_event,
 )
 from fervis.run_work.service import RunWorkService
+from fervis.lookup.answer_program.codec import answer_program_id
+from fervis.lookup.answer_program.inputs import apply_binding_patch
+from fervis.lookup.answer_program.revisions import apply_capability
+from fervis.lookup.answer_program.persistence import (
+    program_invocation,
+    program_invocation_bundle,
+    program_revision_bundle,
+)
+from fervis.lookup.answer_program.rerun import (
+    ProgramNotRerunnableError,
+    RerunnableProgramInvocation,
+)
 from .ports import (
     ClarificationResponseStart,
     QuestionRunRecord,
     QuestionRunStart,
     QuestionRunSubmissionKind,
     QueuedRun,
+    ResolveQuestionRunSpec,
+    RerunProgramSpec,
     RunSubmission,
     QuestionIdPort,
     QuestionStart,
     QuestionStateReaderPort,
     QuestionLineagePort,
     QuestionLookupPort,
+    QuestionProgramPort,
     QuestionLifecyclePort,
 )
 
@@ -58,6 +76,7 @@ class QuestionService:
         lineage: QuestionLineagePort,
         runs: QuestionLifecyclePort,
         lookup: QuestionLookupPort,
+        program: QuestionProgramPort,
         state_reader: QuestionStateReaderPort | None = None,
         ids: QuestionIdPort | None = None,
         adapter_ref: str = "questions",
@@ -66,11 +85,17 @@ class QuestionService:
         self.lineage = lineage
         self.runs = runs
         self.lookup = lookup
+        self.program = program
         self.state_reader = state_reader
         self.ids = ids or UuidQuestionIdPort()
         self.adapter_ref = adapter_ref
         self.runtime_version = runtime_version
-        self.run_work = RunWorkService(lineage=lineage, runs=runs, lookup=lookup)
+        self.run_work = RunWorkService(
+            lineage=lineage,
+            runs=runs,
+            lookup=lookup,
+            program=program,
+        )
 
     def ask(
         self,
@@ -106,19 +131,23 @@ class QuestionService:
             tenant_id=authority.tenant_id,
             question_id=self.ids.new_question_id(),
             run_id=self.ids.new_run_id(),
-            question=question,
             principal=request.principal,
-            provider=request.provider,
-            model_key=request.model_key,
-            execution_mode=request.execution_mode,
-            conversation_context=self.lineage.conversation_memory_context(
-                conversation_id=conversation_id,
-                authority=authority,
+            spec=ResolveQuestionRunSpec(
+                question=question,
+                provider=request.provider,
+                model_key=request.model_key,
+                context_run_id=request.context_run_id,
+                conversation_context=self.lineage.conversation_memory_context(
+                    conversation_id=conversation_id,
+                    context_run_id=request.context_run_id,
+                    authority=authority,
+                ),
+                runtime_context=dict(request.runtime_context),
+                max_budget_usd=request.max_budget_usd,
+                max_thinking_tokens=request.max_thinking_tokens,
             ),
-            runtime_context=dict(request.runtime_context),
+            execution_mode=request.execution_mode,
             idempotency_key=request.idempotency_key,
-            max_budget_usd=request.max_budget_usd,
-            max_thinking_tokens=request.max_thinking_tokens,
         )
         record = QuestionRunRecord(
             question=QuestionStart(
@@ -126,14 +155,14 @@ class QuestionService:
                 tenant_id=submission.tenant_id,
                 read_context_ref=authority.read_context_ref,
                 question_id=submission.question_id,
-                question=submission.question,
+                question=question,
                 principal_id=submission.principal.principal_id,
             ),
             run=QuestionRunStart(
                 question_id=submission.question_id,
                 run_id=submission.run_id,
+                kind=QuestionRunKind.MODEL_ASSISTED,
                 trigger_kind=RunTriggerKind.INITIAL,
-                integrated_question=submission.question,
                 adapter_ref=self.adapter_ref,
                 runtime_version=self.runtime_version,
             ),
@@ -158,8 +187,6 @@ class QuestionService:
         question_text = request.question.strip()
         if not question_text:
             raise ValueError("continue request question must not be empty")
-        if request.trigger_kind is RunTriggerKind.INITIAL:
-            raise ValueError("question continuation trigger must not be initial")
         authority = ReadAuthority.from_principal(request.principal)
         stored = self.runs.get_question(
             question_id=request.question_id,
@@ -172,19 +199,22 @@ class QuestionService:
             tenant_id=request.principal.tenant_id,
             question_id=stored.question_id,
             run_id=self.ids.new_run_id(),
-            question=question_text,
             principal=request.principal,
-            provider=request.provider,
-            model_key=request.model_key,
-            execution_mode=request.execution_mode,
-            conversation_context=self.lineage.conversation_memory_context(
-                conversation_id=stored.conversation_id,
-                authority=authority,
+            spec=ResolveQuestionRunSpec(
+                question=question_text,
+                provider=request.provider,
+                model_key=request.model_key,
+                conversation_context=self.lineage.conversation_memory_context(
+                    conversation_id=stored.conversation_id,
+                    continuation_run_id=request.base_run_id,
+                    authority=authority,
+                ),
+                runtime_context=dict(request.runtime_context),
+                max_budget_usd=request.max_budget_usd,
+                max_thinking_tokens=request.max_thinking_tokens,
             ),
-            runtime_context=dict(request.runtime_context),
+            execution_mode=request.execution_mode,
             idempotency_key=request.idempotency_key,
-            max_budget_usd=request.max_budget_usd,
-            max_thinking_tokens=request.max_thinking_tokens,
         )
         clarification_response = _clarification_response_start(
             request,
@@ -194,14 +224,11 @@ class QuestionService:
             run=QuestionRunStart(
                 question_id=stored.question_id,
                 run_id=submission.run_id,
+                kind=QuestionRunKind.MODEL_ASSISTED,
                 trigger_kind=request.trigger_kind,
-                integrated_question=question_text,
                 adapter_ref=self.adapter_ref,
                 runtime_version=self.runtime_version,
-                previous_run_id=request.previous_run_id,
-                trigger_clarification_response_run_id=(
-                    request.trigger_clarification_response_run_id
-                ),
+                base_run_id=request.base_run_id,
                 trigger_clarification_response_id=(
                     clarification_response.response_id
                     if clarification_response is not None
@@ -220,10 +247,136 @@ class QuestionService:
             events=events,
         )
 
+    def rerun_question(
+        self,
+        request: RerunQuestionRequest,
+        *,
+        event_sink: QuestionRunEventSink | None = None,
+    ) -> AskResult:
+        events = event_sink or NullQuestionRunEventSink()
+        authority = ReadAuthority.from_principal(request.principal)
+        question = self.runs.get_question(
+            question_id=request.question_id,
+            authority=authority,
+        )
+        if question is None:
+            raise ValueError(f"question not found: {request.question_id}")
+        existing = self.runs.find_idempotent_run(
+            authority=authority,
+            conversation_id=question.conversation_id,
+            idempotency_key=request.idempotency_key,
+        )
+        if existing is not None:
+            result = self._ask_result_from_queued_run(existing)
+            self._emit_result_events(result, events=events)
+            return result
+        stored_base = self.runs.load_answered_program_invocation(
+            run_id=request.base_run_id,
+            access=question,
+        )
+        if stored_base is None:
+            raise QuestionLifecycleError(
+                "rerun_base_not_reusable",
+                "rerun base must be an answered reusable program run",
+            )
+        try:
+            base = RerunnableProgramInvocation.parse(stored_base)
+        except ProgramNotRerunnableError as exc:
+            raise QuestionLifecycleError(
+                "rerun_base_not_reusable",
+                "rerun base must be executable without conversation memory",
+            ) from exc
+        patch = (
+            replace(
+                request.patch,
+                provenance_refs=(
+                    f"run:{request.base_run_id}",
+                    f"invocation:{base.invocation.invocation_id}",
+                ),
+            )
+            if request.patch is not None
+            else None
+        )
+        revision = (
+            apply_capability(
+                program=base.program,
+                bindings=base.bindings,
+                application=request.capability_application,
+            )
+            if request.capability_application is not None
+            else None
+        )
+        program = revision.program if revision is not None else base.program
+        bindings = (
+            revision.bindings
+            if revision is not None
+            else (
+                apply_binding_patch(
+                    program=program,
+                    bindings=base.bindings,
+                    patch=patch,
+                )
+                if patch is not None
+                else base.bindings
+            )
+        )
+        run_id = self.ids.new_run_id()
+        invocation = program_invocation(
+            run_id=run_id,
+            program_id=answer_program_id(program),
+            bindings=bindings,
+            kind=ProgramInvocationKind.RERUN_PROGRAM,
+            base_invocation_id=base.invocation.invocation_id,
+            patch=patch,
+            revision_id=(revision.revision_id if revision is not None else None),
+        )
+        submission = RunSubmission(
+            conversation_id=question.conversation_id,
+            tenant_id=question.tenant_id,
+            question_id=question.question_id,
+            run_id=run_id,
+            principal=request.principal,
+            spec=RerunProgramSpec(
+                invocation_id=invocation.invocation_id,
+                runtime_context=dict(request.runtime_context),
+            ),
+            execution_mode=request.execution_mode,
+            idempotency_key=request.idempotency_key,
+        )
+        record = QuestionRunRecord(
+            run=QuestionRunStart(
+                question_id=question.question_id,
+                run_id=run_id,
+                kind=QuestionRunKind.DETERMINISTIC,
+                trigger_kind=RunTriggerKind.RERUN,
+                adapter_ref=self.adapter_ref,
+                runtime_version=self.runtime_version,
+                base_run_id=request.base_run_id,
+            ),
+            program_invocation=program_invocation_bundle(
+                program=program,
+                invocation=invocation,
+            ),
+            program_revision=(
+                program_revision_bundle(revision=revision)
+                if revision is not None
+                else None
+            ),
+        )
+        submitted = self.runs.submit_question_run_atomically(
+            submission=submission,
+            record=record,
+        )
+        return self._finish_submitted_question_run(
+            request=request,
+            submitted=submitted,
+            events=events,
+        )
+
     def _finish_submitted_question_run(
         self,
         *,
-        request: AskRequest | ContinueQuestionRequest,
+        request: AskRequest | ContinueQuestionRequest | RerunQuestionRequest,
         submitted,
         events: QuestionRunEventSink,
     ) -> AskResult:
@@ -289,6 +442,7 @@ class QuestionService:
             answer=executed.answer,
             result_data=executed.result_data,
             error=executed.error,
+            duration_ms=executed.duration_ms,
         )
 
     def get_question_state(
@@ -362,13 +516,14 @@ class QuestionService:
             answer=queued.answer,
             result_data=queued.result_data,
             error=queued.error,
+            duration_ms=queued.duration_ms,
         )
 
     def _emit_accepted(
         self,
         queued: QueuedRun,
         *,
-        request: AskRequest | ContinueQuestionRequest,
+        request: AskRequest | ContinueQuestionRequest | RerunQuestionRequest,
         events: QuestionRunEventSink,
     ) -> None:
         status = "QUEUED" if queued.status == "QUEUED" else "RUNNING"
@@ -378,7 +533,7 @@ class QuestionService:
                 question_id=queued.submission.question_id,
                 run_id=queued.submission.run_id,
                 status=status,
-                trigger=_accepted_trigger(request),
+                trigger=request.accepted_trigger(),
             )
         )
 
@@ -417,26 +572,6 @@ class QuestionService:
         )
 
 
-def _accepted_trigger(
-    request: AskRequest | ContinueQuestionRequest,
-) -> dict[str, object] | None:
-    if not isinstance(request, ContinueQuestionRequest):
-        return None
-    trigger: dict[str, object] = {
-        "kind": request.trigger_kind.value,
-    }
-    previous_run_id = (
-        request.trigger_clarification_response_run_id
-        if request.trigger_kind is RunTriggerKind.CLARIFICATION_RESPONSE
-        else request.previous_run_id
-    )
-    if previous_run_id:
-        trigger["previous_run_id"] = previous_run_id
-    if request.trigger_clarification_response_id:
-        trigger["clarification_id"] = request.trigger_clarification_response_id
-    return trigger
-
-
 def _clarification_response_start(
     request: ContinueQuestionRequest,
     *,
@@ -444,13 +579,13 @@ def _clarification_response_start(
 ) -> ClarificationResponseStart | None:
     if request.trigger_kind is not RunTriggerKind.CLARIFICATION_RESPONSE:
         return None
-    trigger_run_id = request.trigger_clarification_response_run_id
+    base_run_id = request.base_run_id
     clarification_id = request.trigger_clarification_response_id
-    if not trigger_run_id or not clarification_id:
+    if not base_run_id or not clarification_id:
         return None
     return ClarificationResponseStart(
         response_id=response_id,
-        run_id=trigger_run_id,
+        run_id=base_run_id,
         clarification_id=clarification_id,
         response_text=request.question,
         selected_option_id=request.trigger_clarification_selected_option_id or "",

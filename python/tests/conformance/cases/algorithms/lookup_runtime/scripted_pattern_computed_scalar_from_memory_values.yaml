@@ -9,7 +9,7 @@ input:
   question: What is the increase between the current and previous totals?
   conversation_resolution:
     mode: use_visible_memory
-    integrated_question: What is the increase between the prior current and previous totals?
+    contextualized_question: What is the increase between the prior current and previous totals?
   memory_artifacts:
     - artifact_id: prior_totals
       outcome: answered
@@ -42,7 +42,10 @@ input:
           scalar_inputs:
             - {input_id: current, value_id: prior_totals.value.current}
             - {input_id: previous, value_id: prior_totals.value.previous}
-          expression: current - previous
+          expression:
+            - {input_id: current}
+            - {input_id: previous}
+            - {operator: subtract}
           output: {scalar_id: increase, label: increase}
   responses: {}
 expect:

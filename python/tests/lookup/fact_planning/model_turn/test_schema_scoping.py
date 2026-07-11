@@ -33,7 +33,7 @@ def test_pattern_fact_planning_schema_scopes_answer_body_to_selected_shape():
                 id="sb_1",
                 requested_fact_id="fact_1",
                 answer_population=_answer_population(),
-                source=RelationSource(
+                source=DraftRelationSource(
                     kind=SourceKind.API_READ,
                     read_id="get_staff_sales",
                 ),
@@ -64,7 +64,7 @@ def test_pattern_fact_planning_schema_scopes_answer_body_to_selected_shape():
                 id="sb_2",
                 requested_fact_id="fact_2",
                 answer_population=_answer_population(),
-                source=RelationSource(
+                source=DraftRelationSource(
                     kind=SourceKind.API_READ,
                     read_id="get_staff_sales",
                 ),
@@ -195,7 +195,7 @@ def test_set_difference_schema_respects_selected_member_roles():
                 id="sb_products",
                 requested_fact_id="fact_1",
                 answer_population=_answer_population(),
-                source=RelationSource(kind=SourceKind.API_READ, read_id="products"),
+                source=DraftRelationSource(kind=SourceKind.API_READ, read_id="products"),
                 cardinality="many",
                 available_field_ids=("product_id", "name"),
                 available_fields=(
@@ -216,7 +216,7 @@ def test_set_difference_schema_respects_selected_member_roles():
                 id="sb_sales",
                 requested_fact_id="fact_1",
                 answer_population=_answer_population(),
-                source=RelationSource(kind=SourceKind.API_READ, read_id="sales"),
+                source=DraftRelationSource(kind=SourceKind.API_READ, read_id="sales"),
                 cardinality="many",
                 available_field_ids=("product_id",),
                 available_fields=(
@@ -339,7 +339,7 @@ def test_set_difference_schema_limits_identity_fields_to_primary_identity_metada
                 id="sb_products",
                 requested_fact_id="fact_1",
                 answer_population=_answer_population(),
-                source=RelationSource(kind=SourceKind.API_READ, read_id="products"),
+                source=DraftRelationSource(kind=SourceKind.API_READ, read_id="products"),
                 cardinality="many",
                 available_field_ids=("product_id", "name", "stock_count"),
                 available_fields=(
@@ -361,7 +361,7 @@ def test_set_difference_schema_limits_identity_fields_to_primary_identity_metada
                 id="sb_sales",
                 requested_fact_id="fact_1",
                 answer_population=_answer_population(),
-                source=RelationSource(kind=SourceKind.API_READ, read_id="sales"),
+                source=DraftRelationSource(kind=SourceKind.API_READ, read_id="sales"),
                 cardinality="many",
                 available_field_ids=("product_id", "name"),
                 available_fields=(
@@ -485,7 +485,7 @@ def test_joined_rows_schema_keeps_join_keys_outside_support_fields():
                 id="sb_products",
                 requested_fact_id="fact_1",
                 answer_population=_answer_population(),
-                source=RelationSource(kind=SourceKind.API_READ, read_id="products"),
+                source=DraftRelationSource(kind=SourceKind.API_READ, read_id="products"),
                 cardinality="many",
                 available_field_ids=("product_id", "name"),
                 available_fields=(
@@ -497,7 +497,7 @@ def test_joined_rows_schema_keeps_join_keys_outside_support_fields():
                 id="sb_sales",
                 requested_fact_id="fact_1",
                 answer_population=_answer_population(),
-                source=RelationSource(kind=SourceKind.API_READ, read_id="sales"),
+                source=DraftRelationSource(kind=SourceKind.API_READ, read_id="sales"),
                 cardinality="many",
                 available_field_ids=("product_id", "amount"),
                 available_fields=(

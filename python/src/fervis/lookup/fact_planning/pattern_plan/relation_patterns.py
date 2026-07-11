@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any
 from collections.abc import Mapping
 
-from fervis.lookup.fact_plan.fact_plan import FactFulfillment
-from fervis.lookup.fact_plan.operations import (
+from fervis.lookup.answer_program.model import FactFulfillment
+from fervis.lookup.answer_program.operations import (
     AntiJoinSpec,
     JoinKey,
     JoinSpec,
@@ -16,11 +16,12 @@ from fervis.lookup.fact_plan.operations import (
     RelationRole,
     RelationRoleRef,
 )
-from fervis.lookup.fact_plan.relations import Relation
-from fervis.lookup.fact_plan.render_spec import RenderRelationOutput
+from fervis.lookup.answer_program.relations import Relation
+from fervis.lookup.answer_program.render_spec import RenderRelationOutput
 from fervis.lookup.source_binding import BoundSource
 
 from .shared import (
+    RelationBuilder,
     _dict,
     _field_specs,
     _identity_relation_fields,
@@ -44,6 +45,7 @@ def _compile_set_difference_answer(
     bound_sources: dict[str, BoundSource],
     allowed_source_binding_ids: tuple[str, ...],
     allowed_source_binding_ids_by_requirement: Mapping[str, tuple[str, ...]],
+    relation_builder: RelationBuilder,
 ) -> dict[str, Any]:
     candidate = _relation_operand(_dict(payload.get("candidate"), "candidate"))
     observed = _relation_operand(_dict(payload.get("observed"), "observed"))
@@ -93,6 +95,7 @@ def _compile_set_difference_answer(
                 ),
                 relation_fields=candidate_relation_fields,
                 bound_sources=bound_sources,
+                relation_builder=relation_builder,
             ),
             _relation_for_bound_source(
                 relation_id=observed_relation_id,
@@ -102,6 +105,7 @@ def _compile_set_difference_answer(
                 ),
                 relation_fields=observed_relation_fields,
                 bound_sources=bound_sources,
+                relation_builder=relation_builder,
             ),
         ),
         operations=(
@@ -152,6 +156,7 @@ def _compile_joined_rows_answer(
     bound_sources: dict[str, BoundSource],
     allowed_source_binding_ids: tuple[str, ...],
     allowed_source_binding_ids_by_requirement: Mapping[str, tuple[str, ...]],
+    relation_builder: RelationBuilder,
 ) -> dict[str, Any]:
     left = _relation_operand(_dict(payload.get("left"), "left"))
     right = _relation_operand(_dict(payload.get("right"), "right"))
@@ -194,6 +199,7 @@ def _compile_joined_rows_answer(
                 ),
                 relation_fields=left_relation_fields,
                 bound_sources=bound_sources,
+                relation_builder=relation_builder,
             ),
             _relation_for_bound_source(
                 relation_id=right_relation_id,
@@ -203,6 +209,7 @@ def _compile_joined_rows_answer(
                 ),
                 relation_fields=right_relation_fields,
                 bound_sources=bound_sources,
+                relation_builder=relation_builder,
             ),
         ),
         operations=(
@@ -270,8 +277,6 @@ def _compiled_multi_relation_pattern(
             )
             for output_index, answer_output_id in enumerate(answer_output_ids)
         ),
-        "values": (),
-        "value_uses": (),
         "relations": relations,
         "operations": operations,
         "relation_outputs": tuple(

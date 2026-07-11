@@ -6,7 +6,8 @@ from fervis.lookup.relation_catalog import IdentityMetadata
 from fervis.lookup.fact_planning.grouped_ranked_choices import (
     grouped_ranked_choice_payload,
 )
-from fervis.lookup.fact_plan.relations import RelationSource, SourceKind
+from fervis.lookup.source_binding.compiler_ir import DraftRelationSource
+from fervis.lookup.answer_program.relations import SourceKind
 from fervis.lookup.source_binding import (
     AnswerPopulation,
     BoundSource,
@@ -83,7 +84,7 @@ def _bound_source(payload: dict[str, Any]) -> BoundSource:
             intent_text="requested rows",
             match_basis_explanation="Conformance source rows match the requested fact.",
         ),
-        source=RelationSource(
+        source=DraftRelationSource(
             kind=SourceKind.API_READ,
             read_id=str(payload.get("read_id") or "read_1"),
             row_source_id=str(payload.get("row_source_id") or ""),

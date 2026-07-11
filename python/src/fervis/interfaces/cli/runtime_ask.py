@@ -239,7 +239,7 @@ def _ask_request(
         project=project,
     )
     if continuation is not None:
-        question_id, previous_run_id, clarification_id = continuation
+        question_id, base_run_id, clarification_id = continuation
         return ContinueQuestionRequest(
             question_id=question_id,
             question=args.question,
@@ -249,8 +249,7 @@ def _ask_request(
             provider=model.provider,
             model_key=model.model_key,
             idempotency_key=args.idempotency_key,
-            previous_run_id=None,
-            trigger_clarification_response_run_id=previous_run_id,
+            base_run_id=base_run_id,
             trigger_clarification_response_id=clarification_id,
             max_budget_usd=args.max_budget_usd,
             max_thinking_tokens=args.max_thinking_tokens,
@@ -273,7 +272,7 @@ def _ask_request(
 def _continuation_args(args) -> tuple[str, str, str] | None:
     values = {
         "question_id": getattr(args, "question_id", None),
-        "previous_run_id": getattr(args, "previous_run_id", None),
+        "base_run_id": getattr(args, "base_run_id", None),
         "clarification_id": getattr(args, "clarification_id", None),
     }
     present = {key: str(value).strip() for key, value in values.items() if value}
@@ -287,7 +286,7 @@ def _continuation_args(args) -> tuple[str, str, str] | None:
         )
     return (
         present["question_id"],
-        present["previous_run_id"],
+        present["base_run_id"],
         present["clarification_id"],
     )
 

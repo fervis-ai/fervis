@@ -144,7 +144,7 @@ class CommandBuilders:
         answer: object,
         *,
         question_id: object,
-        previous_run_id: object,
+        base_run_id: object,
         clarification_id: object,
         conversation_id: object,
         tenant_id: object,
@@ -155,7 +155,7 @@ class CommandBuilders:
             (
                 Positional(answer),
                 Option("--question-id", question_id),
-                Option("--previous-run-id", previous_run_id),
+                Option("--base-run-id", base_run_id),
                 Option("--clarification-id", clarification_id),
                 Option("--conversation-id", conversation_id),
                 Option("--tenant-id", tenant_id),

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from fervis.lookup.plan_execution.relations import (
@@ -13,15 +13,13 @@ from fervis.lookup.plan_execution.relations import (
     RelationRows,
     RelationSetKind,
 )
-from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
-from fervis.memory.answer_outputs import (
-    prior_answer_request_artifacts,
-    PriorAnswerKnownInput,
-    PriorAnswerOutputFrame,
-    PriorAnswerRequestArtifact,
+from fervis.memory.prior_requests import (
+    PriorRequestMemory,
+    PriorRequestSlot,
+    prior_requests_from_artifact,
 )
-from fervis.memory.artifacts import FactOutcome
-from fervis.memory.addresses import FactAddressKind
+from fervis.memory.artifacts import FactArtifact, FactOutcome
+from fervis.memory.addresses import FactAddress, FactAddressKind
 from fervis.memory.identities import (
     MemoryIdentitySet,
     MemoryIdentityValue,
@@ -29,9 +27,16 @@ from fervis.memory.identities import (
 )
 from fervis.memory.projection import fact_artifacts_from_context
 from fervis.memory.conversation_context import (
+    ConversationAnswerShape,
+    ConversationCallableSignature,
     ConversationContextFrame,
     ConversationContextSource,
+    ConversationFrameParameter,
+    ConversationFramePart,
+    ConversationFramePartKind,
     ConversationMeaningAnchor,
+    ConversationMemoryActivation,
+    ConversationMemoryActivationKind,
     ConversationMemoryCard,
     ConversationMemoryCardProjection,
 )
@@ -221,9 +226,19 @@ def project_conversation_memory_cards(
     max_cards: int = 12,
 ) -> ConversationMemoryCardProjection:
     artifacts = fact_artifacts_from_context(conversation_context)
+    prior_requests_by_artifact_id = {
+        artifact.artifact_id: prior_requests_from_artifact(artifact)
+        for artifact in artifacts
+    }
+    prior_requests = tuple(
+        request
+        for requests in prior_requests_by_artifact_id.values()
+        for request in requests
+    )
     ranked = _ranked_memory_card_records(
         artifacts,
         current_question=current_question,
+        prior_requests_by_artifact_id=prior_requests_by_artifact_id,
     )
     must_include_ids = _must_include_memory_ids(artifacts)
     must_include = tuple(
@@ -265,15 +280,61 @@ def project_conversation_memory_cards(
     )
     return ConversationMemoryCardProjection(
         cards=visible_cards,
+        activations=_memory_activations(
+            artifacts,
+            prior_requests_by_artifact_id=prior_requests_by_artifact_id,
+        ),
         context_sources=context_sources,
         context_frames=_context_frames(
             cards=visible_cards,
-            private_cards=private_cards,
             context_sources=context_sources,
+            prior_requests_by_memory_id={
+                request.memory_id: request for request in prior_requests
+            },
         ),
+        prior_requests=prior_requests,
         private_cards=private_cards,
         omitted_counts_by_kind=omitted_counts,
     )
+
+
+def _memory_activations(
+    artifacts: tuple[FactArtifact, ...],
+    *,
+    prior_requests_by_artifact_id: dict[str, tuple[PriorRequestMemory, ...]],
+) -> tuple[ConversationMemoryActivation, ...]:
+    activations: list[ConversationMemoryActivation] = []
+    for artifact in artifacts:
+        for prior_request in prior_requests_by_artifact_id[artifact.artifact_id]:
+            card, _private = _prior_request_memory_card(
+                artifact=artifact,
+                prior_request=prior_request,
+                use_fact_scoped_display=(
+                    len(prior_requests_by_artifact_id[artifact.artifact_id]) > 1
+                ),
+            )
+            activations.append(
+                ConversationMemoryActivation(
+                    card=card,
+                    kind=ConversationMemoryActivationKind.PRIOR_REQUEST,
+                    artifact_id=artifact.artifact_id,
+                    prior_request=prior_request,
+                )
+            )
+        for address in artifact.addresses:
+            projected = _memory_card_for_address(artifact=artifact, address=address)
+            if projected is None:
+                continue
+            card, _private = projected
+            activations.append(
+                ConversationMemoryActivation(
+                    card=card,
+                    kind=ConversationMemoryActivationKind(card.kind),
+                    artifact_id=artifact.artifact_id,
+                    address_id=address.address,
+                )
+            )
+    return tuple(activations)
 
 
 def _must_include_memory_ids(artifacts: tuple[Any, ...]) -> frozenset[str]:
@@ -396,7 +457,7 @@ def _meaning_anchor_text_candidates(private: dict[str, Any]) -> tuple[str, ...]:
     values: list[str] = []
     for raw in (
         private.get("reference_text"),
-        private.get("pending_integrated_question"),
+        private.get("question_being_clarified"),
         private.get("clarification_question"),
         private.get("display"),
         private.get("expression"),
@@ -440,19 +501,16 @@ def _meaning_anchor_label(*, kind: str, private: dict[str, Any]) -> str:
 def _context_frames(
     *,
     cards: tuple[ConversationMemoryCard, ...],
-    private_cards: dict[str, dict[str, Any]],
     context_sources: tuple[ConversationContextSource, ...],
+    prior_requests_by_memory_id: dict[str, PriorRequestMemory],
 ) -> tuple[ConversationContextFrame, ...]:
     output: list[ConversationContextFrame] = []
-    seen: set[tuple[frozenset[str], str, str]] = set()
+    seen: set[tuple[object, ...]] = set()
     for card in cards:
-        private = private_cards.get(card.memory_id) or {}
-        request_shape = private.get("request_shape")
-        if not isinstance(request_shape, dict):
+        prior_request = prior_requests_by_memory_id.get(card.memory_id)
+        if prior_request is None:
             continue
-        output_frames = tuple(private.get("answer_output_frames") or ())
-        prior_answer_fact = str(request_shape.get("answer_fact_template") or "").strip()
-        if not prior_answer_fact:
+        if prior_request.answer_shape is None:
             continue
         source_ids = _context_frame_source_ids(
             card=card,
@@ -460,27 +518,123 @@ def _context_frames(
         )
         if not source_ids:
             continue
-        if len(output_frames) != 1:
+        answer_shape = ConversationAnswerShape(
+            expression_family=prior_request.answer_shape.expression_family,
+            output_roles=prior_request.answer_shape.output_roles,
+        )
+        parts = _context_frame_parts(prior_request)
+        candidate = ConversationContextFrame(
+            frame_id="candidate",
+            source_ids=source_ids,
+            answer_shape=answer_shape,
+            parts=parts,
+            callable=_callable_signature(
+                prior_request,
+                parts=parts,
+            ),
+        )
+        key = (frozenset(source_ids), *candidate.control_key())
+        if key in seen:
             continue
-        for output_shape in output_frames:
-            if not isinstance(output_shape, PriorAnswerOutputFrame):
-                continue
-            requested_frame = output_shape.requested_value_frame
-            if not requested_frame:
-                continue
-            key = (frozenset(source_ids), requested_frame, prior_answer_fact)
-            if key in seen:
-                continue
-            seen.add(key)
-            output.append(
-                ConversationContextFrame(
-                    frame_id=f"context_frame_{len(output) + 1}",
-                    source_ids=source_ids,
-                    requested_frame=requested_frame,
-                    prior_answer_fact=prior_answer_fact,
-                )
-            )
+        seen.add(key)
+        output.append(
+            replace(candidate, frame_id=f"request:{len(output) + 1}")
+        )
     return tuple(output)
+
+
+def _context_frame_parts(
+    prior_request: PriorRequestMemory,
+) -> tuple[ConversationFramePart, ...]:
+    parts: list[ConversationFramePart] = []
+    answer_subject = prior_request.answer_subject_text
+    if answer_subject:
+        parts.append(
+            ConversationFramePart(
+                part_id="subject",
+                kind=ConversationFramePartKind.ANSWER_SUBJECT,
+                text=answer_subject,
+            )
+        )
+    parts.extend(
+        ConversationFramePart(
+            part_id=f"output:{index}",
+            kind=ConversationFramePartKind.ANSWER_OUTPUT,
+            text=output.description,
+            source_ref=output.output_id,
+        )
+        for index, output in enumerate(prior_request.output_frames, start=1)
+    )
+    parts.extend(_input_frame_parts(prior_request.slots))
+    role_counts: dict[tuple[str, str], int] = {}
+    for part in prior_request.semantic_parts:
+        count_key = (part.kind.value, part.role)
+        role_counts[count_key] = role_counts.get(count_key, 0) + 1
+        index = role_counts[count_key]
+        if part.kind.value == "grouping":
+            part_id = f"grouping:{index}"
+        else:
+            part_id = f"population:{part.role}:{index}"
+        parts.append(
+            ConversationFramePart(
+                part_id=part_id,
+                kind=ConversationFramePartKind(part.kind.value),
+                text=part.text,
+            )
+        )
+    return tuple(parts)
+
+
+def _input_frame_parts(
+    slots: tuple[PriorRequestSlot, ...],
+) -> tuple[ConversationFramePart, ...]:
+    kind_counts: dict[str, int] = {}
+    parts: list[ConversationFramePart] = []
+    for slot in slots:
+        kind_counts[slot.kind.value] = kind_counts.get(slot.kind.value, 0) + 1
+        parts.append(
+            ConversationFramePart(
+                part_id=f"input:{slot.kind.value}:{kind_counts[slot.kind.value]}",
+                kind=ConversationFramePartKind(slot.kind.value),
+                text=slot.text,
+                source_ref=slot.slot_id,
+            )
+        )
+    return tuple(parts)
+
+
+def _callable_signature(
+    prior_request: PriorRequestMemory,
+    *,
+    parts: tuple[ConversationFramePart, ...],
+) -> ConversationCallableSignature | None:
+    if (
+        not prior_request.run_id
+        or prior_request.program_request_ids != (prior_request.request_id,)
+    ):
+        return None
+    parts_by_source_ref = {
+        part.source_ref: part
+        for part in parts
+        if part.source_ref
+    }
+    parameters = tuple(
+        ConversationFrameParameter(
+            parameter_id=f"question.{slot.slot_id}",
+            part_id=parts_by_source_ref[slot.slot_id].part_id,
+            kind=ConversationFramePartKind(slot.kind.value),
+            current_text=slot.text,
+            resolved_text=slot.resolved_value_text,
+            field_label_text=slot.field_label_text,
+            value_meaning_hint=slot.value_meaning_hint,
+        )
+        for slot in prior_request.slots
+    )
+    return ConversationCallableSignature(
+        base_run_id=prior_request.run_id,
+        requested_fact_id=prior_request.request_id,
+        parameters=parameters,
+    )
 
 
 def _context_frame_source_ids(
@@ -568,20 +722,14 @@ def _must_include_artifacts(artifacts: tuple[Any, ...]) -> tuple[Any, ...]:
     return tuple(output)
 
 
-def _direct_artifact_memory_ids(artifact: Any) -> tuple[str, ...]:
+def _direct_artifact_memory_ids(artifact: FactArtifact) -> tuple[str, ...]:
     output: list[str] = []
-    artifact_id = str(getattr(artifact, "artifact_id", "") or "").strip()
-    if not artifact_id:
-        return ()
-    if getattr(artifact, "outcome", None) == FactOutcome.ANSWERED:
+    artifact_id = artifact.artifact_id
+    if artifact.outcome is FactOutcome.ANSWERED:
         output.extend(
-            _prior_request_memory_id(
-                artifact_id=artifact_id,
-                request_id=answer_request.id,
-            )
-            for answer_request in _artifact_answer_requests(artifact)
+            request.memory_id for request in prior_requests_from_artifact(artifact)
         )
-    for address in getattr(artifact, "addresses", ()) or ():
+    for address in artifact.addresses:
         if _memory_card_for_address(artifact=artifact, address=address) is None:
             continue
         output.append(f"{artifact_id}.{address.address}")
@@ -685,6 +833,7 @@ def _ranked_memory_card_records(
     artifacts: tuple[Any, ...],
     *,
     current_question: str,
+    prior_requests_by_artifact_id: dict[str, tuple[PriorRequestMemory, ...]],
 ) -> tuple[tuple[ConversationMemoryCard, dict[str, Any]], ...]:
     records: list[
         tuple[
@@ -699,6 +848,7 @@ def _ranked_memory_card_records(
     ownership = _MemoryOwnershipIndex.from_artifacts(
         artifacts,
         current_question=current_question,
+        prior_requests_by_artifact_id=prior_requests_by_artifact_id,
     )
     for artifact in reversed(artifacts):
         for prior_request in ownership.prior_requests_for_artifact(artifact):
@@ -745,20 +895,26 @@ class _MemoryOwnershipIndex:
         artifacts: tuple[Any, ...],
         *,
         current_question: str,
+        prior_requests_by_artifact_id: dict[str, tuple[PriorRequestMemory, ...]],
     ) -> "_MemoryOwnershipIndex":
-        prior_requests_by_artifact_id = {
-            str(getattr(artifact, "artifact_id", "") or ""): (
-                _memory_cards_for_prior_requests(artifact=artifact)
+        prior_request_cards_by_artifact_id = {
+            artifact_id: _memory_cards_for_prior_requests(
+                artifact=next(
+                    artifact
+                    for artifact in artifacts
+                    if str(artifact.artifact_id) == artifact_id
+                ),
+                prior_requests=requests,
             )
-            for artifact in artifacts
+            for artifact_id, requests in prior_requests_by_artifact_id.items()
         }
         all_prior_requests = tuple(
             prior_request
-            for prior_requests in prior_requests_by_artifact_id.values()
+            for prior_requests in prior_request_cards_by_artifact_id.values()
             for prior_request in prior_requests
         )
         return cls(
-            prior_requests_by_artifact_id=prior_requests_by_artifact_id,
+            prior_requests_by_artifact_id=prior_request_cards_by_artifact_id,
             continued_prior_request_ids=_continued_prior_request_memory_ids(artifacts),
             owned_backing_ids=_owned_backing_memory_ids(all_prior_requests),
             current_question=current_question,
@@ -848,70 +1004,72 @@ def _should_suppress_backing_card(backing: dict[str, Any]) -> bool:
 
 def _memory_cards_for_prior_requests(
     *,
-    artifact: Any,
+    artifact: FactArtifact,
+    prior_requests: tuple[PriorRequestMemory, ...],
 ) -> tuple[tuple[ConversationMemoryCard, dict[str, Any]], ...]:
-    if getattr(artifact, "outcome", None) != FactOutcome.ANSWERED:
-        return ()
-    artifact_id = str(getattr(artifact, "artifact_id", "") or "").strip()
-    if not artifact_id:
+    if artifact.outcome is not FactOutcome.ANSWERED:
         return ()
     output: list[tuple[ConversationMemoryCard, dict[str, Any]]] = []
-    private_cards_by_memory_id = _address_private_cards_by_memory_id(artifact)
-    answer_requests = _artifact_answer_requests(artifact)
-    use_fact_scoped_display = len(answer_requests) > 1
-    for answer_request in answer_requests:
-        display = _prior_request_card_display(
-            artifact,
-            answer_request=answer_request,
-            use_fact_scoped_display=use_fact_scoped_display,
-        )
-        if not display:
-            continue
-        memory_id = _prior_request_memory_id(
-            artifact_id=artifact_id,
-            request_id=answer_request.id,
-        )
-        details = _prior_request_details(
-            artifact,
-            answer_request=answer_request,
-        )
-        private = {
-            "kind": "prior_answer_request",
-            "artifact_id": artifact_id,
-            "address": f"prior_request.{answer_request.id}",
-            "display": display,
-            "activated_memory_ids": _activated_memory_ids_from_artifact(artifact),
-            "answer_output_frames": answer_request.output_frames,
-            **details,
-        }
-        backing_cards = tuple(
-            private_cards_by_memory_id[memory_id]
-            for memory_id in _prior_request_backing_memory_ids(
-                private=private,
-                artifact=artifact,
-            )
-            if memory_id in private_cards_by_memory_id
-        )
-        if backing_cards:
-            private[_BACKING_MEMORY_CARDS] = backing_cards
+    use_fact_scoped_display = len(prior_requests) > 1
+    for prior_request in prior_requests:
         output.append(
-            (
-                ConversationMemoryCard(
-                    card_id=memory_id,
-                    memory_id=memory_id,
-                    kind="prior_answer_request",
-                    display=display,
-                    details=details,
-                ),
-                private,
+            _prior_request_memory_card(
+                artifact=artifact,
+                prior_request=prior_request,
+                use_fact_scoped_display=use_fact_scoped_display,
             )
         )
     return tuple(output)
 
 
-def _address_private_cards_by_memory_id(artifact: Any) -> dict[str, dict[str, Any]]:
+def _prior_request_memory_card(
+    *,
+    artifact: FactArtifact,
+    prior_request: PriorRequestMemory,
+    use_fact_scoped_display: bool,
+) -> tuple[ConversationMemoryCard, dict[str, Any]]:
+    artifact_id = artifact.artifact_id
+    display = _prior_request_card_display(
+        artifact,
+        answer_request=prior_request,
+        use_fact_scoped_display=use_fact_scoped_display,
+    )
+    memory_id = prior_request.memory_id
+    details = _prior_request_details(prior_request)
+    private = {
+        "kind": "prior_answer_request",
+        "artifact_id": artifact_id,
+        "address": f"prior_request.{prior_request.request_id}",
+        "display": display,
+        "activated_memory_ids": _activated_memory_ids_from_artifact(artifact),
+        "answer_output_frames": prior_request.output_frames,
+        **details,
+    }
+    private_cards_by_memory_id = _address_private_cards_by_memory_id(artifact)
+    backing_cards = tuple(
+        private_cards_by_memory_id[source_id]
+        for source_id in prior_request.source_lineage
+        if source_id in private_cards_by_memory_id
+    )
+    if backing_cards:
+        private[_BACKING_MEMORY_CARDS] = backing_cards
+    return (
+        ConversationMemoryCard(
+            card_id=memory_id,
+            memory_id=memory_id,
+            kind="prior_answer_request",
+            display=display,
+            details=details,
+        ),
+        private,
+    )
+
+
+def _address_private_cards_by_memory_id(
+    artifact: FactArtifact,
+) -> dict[str, dict[str, Any]]:
     output: dict[str, dict[str, Any]] = {}
-    for address in getattr(artifact, "addresses", ()) or ():
+    for address in artifact.addresses:
         projected = _memory_card_for_address(artifact=artifact, address=address)
         if projected is None:
             continue
@@ -920,236 +1078,25 @@ def _address_private_cards_by_memory_id(artifact: Any) -> dict[str, dict[str, An
     return output
 
 
-def _prior_request_backing_memory_ids(
-    *,
-    private: dict[str, Any],
-    artifact: Any,
-) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(_prior_request_source_lineage_ids(private)))
-
-
-def _prior_request_source_lineage_ids(private: dict[str, Any]) -> tuple[str, ...]:
-    output: list[str] = []
-    seen: set[str] = set()
-    for frame in private.get("answer_output_frames") or ():
-        if not isinstance(frame, PriorAnswerOutputFrame):
-            continue
-        for raw_memory_id in frame.source_lineage:
-            memory_id = str(raw_memory_id or "").strip()
-            if memory_id and memory_id not in seen:
-                seen.add(memory_id)
-                output.append(memory_id)
-    for binding in (private.get("prior_slot_bindings") or {}).values():
-        if not isinstance(binding, dict):
-            continue
-        for raw_memory_id in binding.get("source_lineage") or ():
-            memory_id = str(raw_memory_id or "").strip()
-            if memory_id and memory_id not in seen:
-                seen.add(memory_id)
-                output.append(memory_id)
-    return tuple(output)
-
-
-def _prior_request_memory_id(
-    *,
-    artifact_id: str,
-    request_id: str,
-) -> str:
-    request_id = str(request_id or "").strip()
-    if not request_id:
-        raise ValueError("prior answer request card requires answer request id")
-    return f"{artifact_id}.prior_request.{request_id}"
-
-
-def _prior_request_details(
-    artifact: Any,
-    *,
-    answer_request: PriorAnswerRequestArtifact,
-) -> dict[str, Any]:
-    known_input_slot_kinds = _answer_request_known_input_slot_kinds(answer_request)
+def _prior_request_details(prior_request: PriorRequestMemory) -> dict[str, Any]:
     return {
-        "request_shape": _prior_request_shape(
-            answer_request.output_frames, answer_request=answer_request
-        ),
-        "prior_slot_bindings": _prior_slot_bindings(
-            artifact,
-            known_input_slot_kinds=known_input_slot_kinds,
-        ),
-    }
-
-
-def _prior_request_shape(
-    output_frames: tuple[PriorAnswerOutputFrame, ...],
-    *,
-    answer_request: PriorAnswerRequestArtifact,
-) -> dict[str, Any]:
-    return {
-        "answer_fact_template": _prior_request_display(answer_request),
-        "answer_outputs": tuple(frame.to_request_shape() for frame in output_frames),
-        "slots": _prior_request_slots(answer_request),
+        "request_shape": prior_request.request_shape_payload(),
+        "prior_slot_bindings": prior_request.slot_bindings_payload(),
     }
 
 
 def _prior_request_card_display(
-    artifact: Any,
+    artifact: FactArtifact,
     *,
-    answer_request: PriorAnswerRequestArtifact,
+    answer_request: PriorRequestMemory,
     use_fact_scoped_display: bool,
 ) -> str:
     if use_fact_scoped_display:
-        return _prior_request_display(answer_request)
-    return str(getattr(artifact, "source_question", "") or "").strip()
-
-
-def _prior_request_display(answer_request: PriorAnswerRequestArtifact) -> str:
-    return answer_request.answer_fact
-
-
-def _artifact_answer_requests(
-    artifact: Any,
-) -> tuple[PriorAnswerRequestArtifact, ...]:
-    return prior_answer_request_artifacts(artifact)
-
-
-def _prior_request_slots(
-    answer_request: PriorAnswerRequestArtifact,
-) -> tuple[dict[str, str], ...]:
-    output: list[dict[str, str]] = []
-    for known in answer_request.known_inputs:
-        slot = _prior_request_slot(known)
-        if slot is not None:
-            output.append(slot)
-    return tuple(output)
-
-
-def _answer_request_known_input_slot_kinds(
-    answer_request: PriorAnswerRequestArtifact,
-) -> dict[str, str]:
-    output: dict[str, str] = {}
-    for known in answer_request.known_inputs:
-        slot = _prior_request_slot(known)
-        if slot is None:
-            continue
-        output[slot["slot_id"]] = slot["slot_kind"]
-    return output
-
-
-def _prior_request_slot(known: PriorAnswerKnownInput) -> dict[str, str] | None:
-    slot_id = known.id
-    slot_kind = (
-        _literal_role_slot_kind(known.role)
-        if known.kind == KnownInputKind.LITERAL.value
-        else ""
+        return answer_request.answer_fact
+    return (
+        artifact.source_question.strip()
+        or answer_request.answer_fact
     )
-    if not slot_id or not slot_kind:
-        return None
-    output = {
-        "slot_id": slot_id,
-        "slot_kind": slot_kind,
-    }
-    text = known.text
-    if text:
-        output["text"] = text
-    description = known.description
-    if description:
-        output["description"] = description
-    return output
-
-
-def _literal_role_slot_kind(role: str) -> str:
-    return {
-        LiteralInputRole.REFERENCE_VALUE.value: "entity_identity",
-        LiteralInputRole.TIME_VALUE.value: "time_scope",
-        LiteralInputRole.RESULT_LIMIT.value: "limit",
-    }.get(role, "")
-
-
-def _prior_slot_bindings(
-    artifact: Any,
-    *,
-    known_input_slot_kinds: dict[str, str],
-) -> dict[str, dict[str, Any]]:
-    output: dict[str, dict[str, Any]] = {}
-    for address in getattr(artifact, "addresses", ()) or ():
-        address_known_input_ids = tuple(
-            known_input_id
-            for known_input_id in _address_known_input_ids(address)
-            if known_input_id in known_input_slot_kinds
-        )
-        if not address_known_input_ids:
-            continue
-        if getattr(address, "kind", None) == FactAddressKind.ENTITY:
-            for slot_id in address_known_input_ids:
-                output[slot_id] = {
-                    "value_kind": "entity_identity",
-                    "identity_type": str(
-                        getattr(address, "resource", "") or ""
-                    ).strip(),
-                    "display": str(
-                        getattr(address, "reference_text", "") or ""
-                    ).strip(),
-                    "canonical_values": dict(getattr(address, "identity", {}) or {}),
-                    "source_lineage": (
-                        f"{artifact.artifact_id}.{getattr(address, 'address', '')}",
-                    ),
-                }
-            continue
-        if getattr(address, "kind", None) != FactAddressKind.VALUE:
-            continue
-        scalar_value = getattr(address, "scalar_value", {}) or {}
-        for slot_id in address_known_input_ids:
-            output[slot_id] = _prior_value_slot_binding(
-                artifact=artifact,
-                address=address,
-                slot_kind=known_input_slot_kinds[slot_id],
-                scalar_value=scalar_value,
-            )
-    return output
-
-
-def _prior_value_slot_binding(
-    *,
-    artifact: Any,
-    address: Any,
-    slot_kind: str,
-    scalar_value: dict[str, Any],
-) -> dict[str, Any]:
-    source_lineage = (f"{artifact.artifact_id}.{getattr(address, 'address', '')}",)
-    if str(scalar_value.get("type") or "") == "time_scope":
-        return {
-            "value_kind": "time_scope",
-            "value": scalar_value.get("value"),
-            "expression": scalar_value.get("expression"),
-            "resolved_start": scalar_value.get("resolvedStart"),
-            "resolved_end": scalar_value.get("resolvedEnd"),
-            "granularity": scalar_value.get("granularity"),
-            "source_lineage": source_lineage,
-        }
-    return {
-        "value_kind": slot_kind,
-        "value": scalar_value.get("value"),
-        "value_type": scalar_value.get("type"),
-        "display": str(getattr(address, "display", "") or "").strip(),
-        "source_lineage": source_lineage,
-    }
-
-
-def _address_known_input_ids(address: Any) -> tuple[str, ...]:
-    evidence = getattr(address, "evidence", None)
-    if evidence is None:
-        return ()
-    output: list[str] = []
-    seen: set[str] = set()
-    for proof_ref in getattr(evidence, "step_ids", ()) or ():
-        text = str(proof_ref or "").strip()
-        if not text.startswith("known_input:"):
-            continue
-        known_input_id = text.removeprefix("known_input:").strip()
-        if not known_input_id or known_input_id in seen:
-            continue
-        seen.add(known_input_id)
-        output.append(known_input_id)
-    return tuple(output)
 
 
 def _memory_card_coalesce_key(address: Any) -> tuple[object, ...] | None:
@@ -1183,8 +1130,8 @@ def _merge_backing_memory_cards(
 
 def _memory_card_for_address(
     *,
-    artifact: Any,
-    address: Any,
+    artifact: FactArtifact,
+    address: FactAddress,
 ) -> tuple[ConversationMemoryCard, dict[str, Any]] | None:
     builder = _MEMORY_CARD_BUILDERS.get(address.kind)
     if builder is None:
@@ -1326,11 +1273,11 @@ def _card_display(*, artifact: Any, address: Any) -> str:
     return str(getattr(address, "address", "") or "").strip()
 
 
-def _single_answer_request_display(artifact: Any) -> str:
-    requests = _artifact_answer_requests(artifact)
+def _single_answer_request_display(artifact: FactArtifact) -> str:
+    requests = prior_requests_from_artifact(artifact)
     if len(requests) != 1:
         return ""
-    return _prior_request_display(requests[0])
+    return requests[0].answer_fact
 
 
 def _clarification_card_details(*, artifact: Any, address: Any) -> dict[str, str]:
@@ -1341,7 +1288,7 @@ def _clarification_card_details(*, artifact: Any, address: Any) -> dict[str, str
                 for raw in getattr(address, "clarification_questions", ()) or ()
                 if (question := str(raw or "").strip())
             ),
-            "pending_integrated_question": str(
+            "question_being_clarified": str(
                 getattr(artifact, "source_question", "") or ""
             ).strip(),
         }

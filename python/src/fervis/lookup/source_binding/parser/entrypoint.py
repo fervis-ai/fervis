@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from fervis.lookup.fact_plan.relations import RelationSourcePopulationChoice
+from fervis.lookup.source_binding.compiler_ir import (
+    DraftRelationSourcePopulationChoice,
+)
 from fervis.lookup.source_binding.candidates import (
     SourceCandidate,
     source_candidate_required_param_decision_ids,
@@ -83,12 +85,12 @@ def _normalize_source_binding_payload_with_derived_finite_choices(
 ) -> tuple[
     provider_output.SourceBindingPlanOutput,
     dict[int, tuple[str, ...]],
-    dict[int, tuple[RelationSourcePopulationChoice, ...]],
+    dict[int, tuple[DraftRelationSourcePopulationChoice, ...]],
 ]:
     normalized_invocations: list[provider_output.SourceInvocationOutput] = []
     effective_param_ids_by_index: dict[int, tuple[str, ...]] = {}
     population_choices_by_index: dict[
-        int, tuple[RelationSourcePopulationChoice, ...]
+        int, tuple[DraftRelationSourcePopulationChoice, ...]
     ] = {}
     closed_key_bindings = closed_key_param_binding_index(
         request,

@@ -1,0 +1,40 @@
+id: parse_accepts_typed_resolved_input
+description: Question contract accepts an input declared by the compiled conversation-resolution boundary.
+kind: algorithm
+algorithm: question_contract.parse
+input:
+  question_context: What about Pivot Mall?
+  conversation_resolution:
+    current_question_text: What about Pivot Mall?
+    contextualized_question: How many sales did we make at Pivot Mall?
+    inputs:
+      - kind: literal_text
+        input_ref: conversation.location
+        value_source_text: Pivot Mall
+        resolved_value_text: Pivot Mall
+        role: reference_value
+        field_label_text: location
+        value_meaning_hint: location identity
+  question_inputs:
+    - input_ref: location
+      kind: literal_text
+      source: conversation_resolution
+      value_source_text: Pivot Mall
+      resolved_input_ref: conversation.location
+      resolved_value_text: Pivot Mall
+      role: reference_value
+      field_label_text: location
+      value_meaning_hint: location identity
+      inventory_check: {why_this_is_an_input: It identifies the location to count sales for.}
+  answer_fact: sales at Pivot Mall
+  answer_expression: {family: scalar_aggregate}
+  answer_subject:
+    subject_text: sales
+    instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
+  answer_outputs: [{description: sales count, role: ROW_POPULATION}]
+  used_input_refs: [location]
+  answer_requests_count: 1
+expect:
+  result_contains:
+    question_inputs:
+      - {id: location, kind: literal_text, source: conversation_resolution, text: Pivot Mall, resolved_input_ref: conversation.location, resolved_value_text: Pivot Mall, role: reference_value}

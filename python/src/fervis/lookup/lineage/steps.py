@@ -36,6 +36,7 @@ _MODEL_TURN_STEP_KEYS = {
 }
 
 _DETERMINISTIC_STEP_SEQUENCE = {
+    RunStepKey.QUESTION_CONTRACT: 100,
     RunStepKey.COMPILE: 8900,
     RunStepKey.EXECUTE: 9000,
     RunStepKey.RENDER: 9100,
@@ -113,6 +114,8 @@ class LineageRuntimeStepSink:
     def record_execution(
         self,
         *,
+        program_id: str = "",
+        invocation_id: str = "",
         relation_count: int | None = None,
         proof_refs: tuple[str, ...] = (),
         error_json: dict[str, Any] | None = None,
@@ -124,6 +127,8 @@ class LineageRuntimeStepSink:
             output_summary_json={
                 key: value
                 for key, value in {
+                    "programId": program_id,
+                    "invocationId": invocation_id,
                     EventPayloadKey.RELATION_COUNT: relation_count,
                     EventPayloadKey.PROOF_REFS: list(proof_refs),
                 }.items()
@@ -166,14 +171,35 @@ class LineageRuntimeStepSink:
     def record_compile(
         self,
         *,
+        program_id: str,
+        invocation_id: str,
         proof_node_count: int,
         proof_edge_count: int,
     ) -> RunStepWrite:
         return self._record_deterministic(
             step_key=RunStepKey.COMPILE,
             output_summary_json={
+                "programId": program_id,
+                "invocationId": invocation_id,
                 "proofNodeCount": proof_node_count,
                 "proofEdgeCount": proof_edge_count,
+            },
+            error_json={},
+        )
+
+    def record_program_contract(
+        self,
+        *,
+        program_id: str,
+        invocation_id: str,
+        requested_fact_count: int,
+    ) -> RunStepWrite:
+        return self._record_deterministic(
+            step_key=RunStepKey.QUESTION_CONTRACT,
+            output_summary_json={
+                "programId": program_id,
+                "invocationId": invocation_id,
+                "requestedFactCount": requested_fact_count,
             },
             error_json={},
         )
@@ -284,6 +310,8 @@ def record_model_turn_audit(
 def record_execution_step(
     ports: LookupRuntimePorts,
     *,
+    program_id: str = "",
+    invocation_id: str = "",
     relation_count: int | None = None,
     proof_refs: tuple[str, ...] = (),
     error_json: dict[str, Any] | None = None,
@@ -294,6 +322,8 @@ def record_execution_step(
     if sink is None:
         return None
     return sink.record_execution(
+        program_id=program_id,
+        invocation_id=invocation_id,
         relation_count=relation_count,
         proof_refs=proof_refs,
         error_json=error_json,
@@ -324,6 +354,8 @@ def record_step_source_context(
 def record_compile_step(
     ports: LookupRuntimePorts,
     *,
+    program_id: str,
+    invocation_id: str,
     proof_node_count: int,
     proof_edge_count: int,
 ) -> RunStepWrite | None:
@@ -331,8 +363,27 @@ def record_compile_step(
     if sink is None:
         return None
     return sink.record_compile(
+        program_id=program_id,
+        invocation_id=invocation_id,
         proof_node_count=proof_node_count,
         proof_edge_count=proof_edge_count,
+    )
+
+
+def record_program_contract_step(
+    ports: LookupRuntimePorts,
+    *,
+    program_id: str,
+    invocation_id: str,
+    requested_fact_count: int,
+) -> RunStepWrite | None:
+    sink = _lineage_step_sink(ports)
+    if sink is None:
+        return None
+    return sink.record_program_contract(
+        program_id=program_id,
+        invocation_id=invocation_id,
+        requested_fact_count=requested_fact_count,
     )
 
 

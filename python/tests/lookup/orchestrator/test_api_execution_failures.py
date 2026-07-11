@@ -372,7 +372,7 @@ def test_lookup_cutover_stops_before_fact_planning_when_no_source_candidates_exi
                                 "value_id": "missing_location_value",
                             }
                         ],
-                        "expression": "location_a",
+                        "expression": [{"input_id": "location_a"}],
                         "output": {"scalar_id": "metric_total"},
                     }
                 ],

@@ -25,7 +25,7 @@ from fervis.lookup.clarification import (
     TargetReferenceNotFound,
     clarify,
 )
-from fervis.lookup.plan_execution.compiled_execution import (
+from fervis.lookup.answer_program.instantiation import (
     ExecutionProofEdge,
     ExecutionProofGraph,
     ExecutionProofNode,
@@ -40,12 +40,19 @@ from fervis.lookup.outcomes.model import (
     NoData,
     OutcomeKind,
 )
-from fervis.lookup.fact_plan.render_spec import (
+from fervis.lookup.answer_program.render_spec import (
     RenderRelationOutput,
     RenderScalarOutput,
     RenderSpec,
 )
-from fervis.lookup.fact_plan.fact_plan import AnswerPlan, FactFulfillment
+from fervis.lookup.answer_program.model import AnswerProgram, FactFulfillment
+from fervis.lookup.question_contract import (
+    QuestionContract,
+    RequestedFact,
+    RequestedFactAnswerExpression,
+    RequestedFactAnswerExpressionFamily,
+    RequestedFactAnswerOutput,
+)
 from fervis.lookup.turn_prompts.context import active_clarification_context
 from fervis.lookup.answer_rendering import RenderedFact
 from fervis.lookup.lineage.results import (
@@ -83,7 +90,7 @@ def test_answered_lineage_records_only_fulfilled_answer_outputs() -> None:
         execute_step_id="step_execute",
         render_step_id="step_render",
         proof_graph=_proof_graph("answer_1"),
-        answer_plan=AnswerPlan(
+        answer_plan=AnswerProgram(
             fulfillment=(
                 FactFulfillment(
                     requested_fact_id="fact_1",
@@ -129,7 +136,7 @@ def test_answered_lineage_records_memory_artifact_from_fact_addresses() -> None:
         execute_step_id="step_execute",
         render_step_id="step_render",
         proof_graph=_proof_graph("answer_1"),
-        answer_plan=AnswerPlan(
+        answer_plan=AnswerProgram(
             fulfillment=(
                 FactFulfillment(
                     requested_fact_id="fact_1",
@@ -210,7 +217,7 @@ def test_answered_lineage_records_entity_output_from_execution_relation() -> Non
         execute_step_id="step_execute",
         render_step_id="step_render",
         proof_graph=_proof_graph("answer_1"),
-        answer_plan=AnswerPlan(
+        answer_plan=AnswerProgram(
             fulfillment=(
                 FactFulfillment(
                     requested_fact_id="fact_1",
@@ -260,7 +267,7 @@ def test_answered_lineage_links_each_output_to_its_requested_fact() -> None:
         execute_step_id="step_execute",
         render_step_id="step_render",
         proof_graph=_proof_graph("answer_1", "answer_2"),
-        answer_plan=AnswerPlan(
+        answer_plan=AnswerProgram(
             fulfillment=(
                 FactFulfillment(
                     requested_fact_id="fact_1",
@@ -347,7 +354,7 @@ def test_answered_lineage_memory_artifacts_are_requested_fact_scoped() -> None:
         execute_step_id="step_execute",
         render_step_id="step_render",
         proof_graph=_proof_graph("answer_1", "answer_2"),
-        answer_plan=AnswerPlan(
+        answer_plan=AnswerProgram(
             fulfillment=(
                 FactFulfillment(
                     requested_fact_id="fact_1",
@@ -379,7 +386,7 @@ def test_answered_lineage_memory_artifacts_are_requested_fact_scoped() -> None:
         fact_id: (
             [address["address"] for address in payload["addresses"]],
             [
-                item["requested_fact_id"]
+                item["id"]
                 for item in payload["provenance"]["question_contract"][
                     "answer_requests"
                 ]
@@ -438,7 +445,7 @@ def test_answered_lineage_rejects_missing_fulfillment_render_output() -> None:
             execute_step_id="step_execute",
             render_step_id="step_render",
             proof_graph=_proof_graph("answer_1"),
-            answer_plan=AnswerPlan(
+            answer_plan=AnswerProgram(
                 fulfillment=(
                     FactFulfillment(
                         requested_fact_id="fact_1",
@@ -706,7 +713,7 @@ def test_lineage_required_rejects_missing_sink() -> None:
             execute_step_id="step_execute",
             render_step_id="step_render",
             proof_graph=_proof_graph("answer_1"),
-            answer_plan=AnswerPlan(
+            answer_plan=AnswerProgram(
                 fulfillment=(
                     FactFulfillment(
                         requested_fact_id="fact_1",
@@ -789,7 +796,7 @@ def test_rendering_lineage_failure_fails_closed_with_runtime_error_result() -> N
         compile_step_id="step_compile",
         execute_step_id="step_execute",
         proof_graph=_proof_graph("answer_1"),
-        answer_plan=AnswerPlan(
+        answer_plan=AnswerProgram(
             fulfillment=(
                 FactFulfillment(
                     requested_fact_id="fact_1",
@@ -872,7 +879,7 @@ def test_lineage_failure_terminal_still_returns_failed_result_when_error_write_f
         compile_step_id="step_compile",
         execute_step_id="step_execute",
         proof_graph=_proof_graph("answer_1"),
-        answer_plan=AnswerPlan(
+        answer_plan=AnswerProgram(
             fulfillment=(
                 FactFulfillment(
                     requested_fact_id="fact_1",
@@ -991,52 +998,22 @@ def _answer_result() -> FactResult:
     return FactResult(outcome=AnswerResult(proof_refs=("source_read:read_1",)))
 
 
-def _question_contract(answer_output_id_by_fact_id: dict[str, str]) -> SimpleNamespace:
-    return _QuestionContract(
+def _question_contract(answer_output_id_by_fact_id: dict[str, str]) -> QuestionContract:
+    return QuestionContract(
         requested_facts=tuple(
-            _RequestedFact(fact_id, answer_output_id)
+            RequestedFact(
+                id=fact_id,
+                description="requested fact",
+                answer_expression=RequestedFactAnswerExpression(
+                    family=RequestedFactAnswerExpressionFamily.SCALAR_VALUE,
+                ),
+                answer_outputs=(
+                    RequestedFactAnswerOutput(id=answer_output_id),
+                ),
+            )
             for fact_id, answer_output_id in answer_output_id_by_fact_id.items()
         ),
     )
-
-
-@dataclass(frozen=True)
-class _QuestionContract:
-    requested_facts: tuple["_RequestedFact", ...]
-
-    def to_model_dict(self) -> dict[str, object]:
-        return {
-            "kind": "question_contract",
-            "answer_requests": [
-                {"id": fact.id, **fact.answer_request_model_dict()}
-                for fact in self.requested_facts
-            ],
-        }
-
-
-@dataclass(frozen=True)
-class _RequestedFact:
-    id: str
-    answer_output_id: str
-    description: str = "requested fact"
-    answer_expression: object = field(
-        default_factory=lambda: SimpleNamespace(family="scalar")
-    )
-
-    @property
-    def answer_outputs(self) -> tuple[object, ...]:
-        return (_AnswerOutput(self.answer_output_id),)
-
-    def answer_request_model_dict(self) -> dict[str, object]:
-        return {"requested_fact_id": self.id}
-
-
-@dataclass(frozen=True)
-class _AnswerOutput:
-    id: str
-
-    def to_model_dict(self) -> dict[str, str]:
-        return {"answer_output_id": self.id}
 
 
 def _proof_graph(*answer_output_ids: str) -> ExecutionProofGraph:

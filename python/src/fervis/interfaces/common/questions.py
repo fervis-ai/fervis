@@ -18,16 +18,23 @@ from fervis.questions import (
     ContinueQuestionRequest,
     ExecutionMode,
     QuestionPrincipal,
+    RerunQuestionRequest,
+)
+from fervis.interfaces.common.binding_patches import (
+    binding_patch_from_payload,
+    capability_application_from_payload,
 )
 from fervis.questions.result_data import result_data_clarifications
 from fervis.run_work.events import QuestionRunEventSink
 
 CLARIFICATION_RESPONSE_TRIGGER = "clarification_response"
+RERUN_TRIGGER = "rerun"
 
 _CREATE_QUESTION_KEYS = frozenset(
     {
         "question",
         "conversationId",
+        "contextRunId",
         "provider",
         "modelKey",
         "maxBudgetUsd",
@@ -38,7 +45,7 @@ _CONTINUE_QUESTION_KEYS = frozenset(
     {
         "question",
         "triggerKind",
-        "triggerRunId",
+        "baseRunId",
         "clarificationId",
         "selectedOptionId",
         "provider",
@@ -46,6 +53,9 @@ _CONTINUE_QUESTION_KEYS = frozenset(
         "maxBudgetUsd",
         "maxThinkingTokens",
     }
+)
+_RERUN_QUESTION_KEYS = frozenset(
+    {"triggerKind", "baseRunId", "patch", "capabilityApplication"}
 )
 
 
@@ -87,6 +97,13 @@ class QuestionLifecycle(Protocol):
     def continue_question(
         self,
         request: ContinueQuestionRequest,
+        *,
+        event_sink: QuestionRunEventSink | None = None,
+    ) -> AskResult: ...
+
+    def rerun_question(
+        self,
+        request: RerunQuestionRequest,
         *,
         event_sink: QuestionRunEventSink | None = None,
     ) -> AskResult: ...
@@ -162,6 +179,11 @@ class QuestionInterface:
                 field=exc.field,
                 message=exc.message,
             ) from exc
+        except PermissionError as exc:
+            raise QuestionInterfaceValidationError(
+                field="contextRunId",
+                message=str(exc),
+            ) from exc
         except ValueError as exc:
             raise QuestionInterfaceValidationError(
                 field=_ask_request_error_field(str(exc)),
@@ -178,7 +200,10 @@ class QuestionInterface:
         )
         return QuestionInterfaceResponse(
             status_code=202,
-            payload=_with_next_actions(question or _result_payload(result), principal),
+            payload=_with_next_actions(
+                _require_admitted_question_state(question),
+                principal,
+            ),
         )
 
     def get_question(
@@ -227,7 +252,7 @@ class QuestionInterface:
             },
         )
 
-    def continue_question(
+    def create_question_run(
         self,
         question_id: str,
         payload: dict[str, Any],
@@ -237,13 +262,25 @@ class QuestionInterface:
         event_sink: QuestionRunEventSink | None = None,
     ) -> QuestionInterfaceResponse:
         try:
-            request = self._continue_request(
-                question_id,
-                payload,
-                principal=principal,
-                idempotency_key=idempotency_key,
-            )
-            result = self.questions.continue_question(request, event_sink=event_sink)
+            if payload.get("triggerKind") == RERUN_TRIGGER:
+                rerun = self._rerun_request(
+                    question_id,
+                    payload,
+                    principal=principal,
+                    idempotency_key=idempotency_key,
+                )
+                result = self.questions.rerun_question(rerun, event_sink=event_sink)
+            else:
+                continuation = self._continue_request(
+                    question_id,
+                    payload,
+                    principal=principal,
+                    idempotency_key=idempotency_key,
+                )
+                result = self.questions.continue_question(
+                    continuation,
+                    event_sink=event_sink,
+                )
         except QuestionInterfaceValidationError:
             raise
         except ModelPolicyValidationError as exc:
@@ -256,13 +293,21 @@ class QuestionInterface:
                 field=_ask_request_error_field(str(exc)),
                 message=str(exc),
             ) from exc
+        if result.status == "ACTIVE_RUN_CONFLICT":
+            return QuestionInterfaceResponse(
+                status_code=409,
+                payload=_active_conflict_payload(result),
+            )
         question = self.questions.get_question_state(
             result.question_id,
             principal=_question_principal(principal),
         )
         return QuestionInterfaceResponse(
             status_code=202,
-            payload=_with_next_actions(question or _result_payload(result), principal),
+            payload=_with_next_actions(
+                _require_admitted_question_state(question),
+                principal,
+            ),
         )
 
     def get_question_run(
@@ -312,6 +357,7 @@ class QuestionInterface:
         )
         return AskRequest(
             conversation_id=str(payload.get("conversationId") or ""),
+            context_run_id=_optional_identifier(payload, "contextRunId"),
             question=question,
             principal=_question_principal(principal),
             execution_mode=ExecutionMode.QUEUED,
@@ -349,11 +395,11 @@ class QuestionInterface:
                 field="triggerKind",
                 message="Only clarification_response continuations are supported.",
             )
-        trigger_run_id = str(payload.get("triggerRunId") or "").strip()
-        if not trigger_run_id:
+        base_run_id = str(payload.get("baseRunId") or "").strip()
+        if not base_run_id:
             raise QuestionInterfaceValidationError(
-                field="triggerRunId",
-                message="triggerRunId is required.",
+                field="baseRunId",
+                message="baseRunId is required.",
             )
         clarification_id = str(payload.get("clarificationId") or "").strip()
         if not clarification_id:
@@ -375,13 +421,72 @@ class QuestionInterface:
             provider=model.provider,
             model_key=model.model_key,
             idempotency_key=idempotency_key,
-            previous_run_id=None,
-            trigger_clarification_response_run_id=trigger_run_id,
+            base_run_id=base_run_id,
             trigger_clarification_response_id=clarification_id,
             trigger_clarification_selected_option_id=selected_option_id,
             max_budget_usd=_optional_float(payload, "maxBudgetUsd"),
             max_thinking_tokens=_optional_int(payload, "maxThinkingTokens"),
             limits=self.limits,
+        )
+
+    def _rerun_request(
+        self,
+        question_id: str,
+        payload: dict[str, Any],
+        *,
+        principal: InterfacePrincipal,
+        idempotency_key: str | None,
+    ) -> RerunQuestionRequest:
+        if not isinstance(payload, dict):
+            raise QuestionInterfaceValidationError(
+                field="__all__",
+                message="Payload must be an object.",
+            )
+        _reject_unknown_fields(payload, allowed=_RERUN_QUESTION_KEYS)
+        if payload.get("triggerKind") != RERUN_TRIGGER:
+            raise QuestionInterfaceValidationError(
+                field="triggerKind",
+                message="triggerKind must be rerun.",
+            )
+        base_run_id = payload.get("baseRunId")
+        if not isinstance(base_run_id, str) or not base_run_id.strip():
+            raise QuestionInterfaceValidationError(
+                field="baseRunId",
+                message="baseRunId is required.",
+            )
+        patch = None
+        if "patch" in payload:
+            try:
+                patch = binding_patch_from_payload(payload["patch"])
+            except ValueError as exc:
+                raise QuestionInterfaceValidationError(
+                    field="patch",
+                    message=str(exc),
+                ) from exc
+        capability_application = None
+        if "capabilityApplication" in payload:
+            try:
+                capability_application = capability_application_from_payload(
+                    payload["capabilityApplication"]
+                )
+            except ValueError as exc:
+                raise QuestionInterfaceValidationError(
+                    field="capabilityApplication",
+                    message=str(exc),
+                ) from exc
+        if patch is not None and capability_application is not None:
+            raise QuestionInterfaceValidationError(
+                field="__all__",
+                message="Use patch or capabilityApplication, not both.",
+            )
+        return RerunQuestionRequest(
+            question_id=question_id,
+            base_run_id=base_run_id,
+            patch=patch,
+            capability_application=capability_application,
+            principal=_question_principal(principal),
+            execution_mode=ExecutionMode.QUEUED,
+            idempotency_key=idempotency_key,
         )
 
 
@@ -422,6 +527,18 @@ def _optional_string(payload: dict[str, Any], key: str) -> str:
     return value
 
 
+def _optional_identifier(payload: dict[str, Any], key: str) -> str | None:
+    if key not in payload:
+        return None
+    value = payload.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise QuestionInterfaceValidationError(
+            field=key,
+            message=f"{key} must be a non-empty string.",
+        )
+    return value.strip()
+
+
 def _optional_float(payload: dict[str, Any], key: str) -> float | None:
     if key not in payload or payload.get(key) in {None, ""}:
         return None
@@ -458,16 +575,12 @@ def _ask_request_error_field(message: str) -> str:
     return "__all__"
 
 
-def _result_payload(result: AskResult) -> dict[str, Any]:
-    return {
-        "questionId": result.question_id,
-        "conversationId": result.conversation_id,
-        "status": result.status,
-        "currentRunId": result.run_id,
-        "answer": result.answer,
-        "resultData": result.result_data,
-        "error": result.error,
-    }
+def _require_admitted_question_state(
+    question: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if question is None:
+        raise RuntimeError("admitted question is missing its persisted projection")
+    return question
 
 
 def _active_conflict_payload(result: AskResult) -> dict[str, Any]:
@@ -510,7 +623,12 @@ def _with_next_actions(
     if not conversation_id:
         return payload
     question_id = str(payload.get("questionId") or "")
-    run_id = str(payload.get("currentRunId") or payload.get("runId") or "")
+    run_id = str(
+        payload.get("latestRunId")
+        or payload.get("primaryRunId")
+        or payload.get("runId")
+        or ""
+    )
     clarification_id = _first_clarification_id(payload)
     return {
         **payload,
@@ -536,7 +654,7 @@ def _clarification_next_action(
         "kind": "provide_clarification",
         "questionId": question_id,
         "conversationId": conversation_id,
-        "previousRunId": run_id,
+        "baseRunId": run_id,
         "clarificationId": clarification_id,
         "request": {
             "method": "POST",
@@ -544,7 +662,7 @@ def _clarification_next_action(
             "body": {
                 "question": "<clarification-answer>",
                 "triggerKind": CLARIFICATION_RESPONSE_TRIGGER,
-                "triggerRunId": run_id,
+                "baseRunId": run_id,
                 "clarificationId": clarification_id,
                 "selectedOptionId": "<selected-option-id>",
             },

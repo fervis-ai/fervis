@@ -2,6 +2,204 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://fervis.test/conformance/case.schema.json",
   "title": "Fervis conformance case",
+  "$defs": {
+    "portableAnswerProgramBase": {
+      "type": "object",
+      "required": ["schema_revision"],
+      "properties": {
+        "schema_revision": {"const": 1}
+      },
+      "not": {
+        "anyOf": [
+          {"required": ["fixture"]},
+          {"required": ["scenario"]}
+        ]
+      }
+    },
+    "canonicalizeInput": {
+      "allOf": [
+        {"$ref": "#/$defs/portableAnswerProgramBase"},
+        {
+          "required": ["schema_revision", "programs"],
+          "additionalProperties": false,
+          "properties": {
+            "schema_revision": {"const": 1},
+            "programs": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"type": "object"}
+            },
+            "binding_sets": {"type": "array"},
+            "patches": {"type": "array"},
+            "constants": {"type": "array"},
+            "run_id": {"type": "string"}
+          }
+        }
+      ]
+    },
+    "compileInput": {
+      "allOf": [
+        {"$ref": "#/$defs/portableAnswerProgramBase"},
+        {
+          "required": [
+            "schema_revision",
+            "program",
+            "question_contract",
+            "catalog",
+            "bindings"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "schema_revision": {"const": 1},
+            "program": {"type": "object"},
+            "question_contract": {"type": "object"},
+            "catalog": {"type": "object"},
+            "bindings": {"type": "array"}
+          }
+        }
+      ]
+    },
+    "decodeInput": {
+      "allOf": [
+        {"$ref": "#/$defs/portableAnswerProgramBase"},
+        {
+          "required": ["schema_revision", "program"],
+          "additionalProperties": false,
+          "properties": {
+            "schema_revision": {"const": 1},
+            "program": {"type": "object"}
+          }
+        }
+      ]
+    },
+    "patchInput": {
+      "allOf": [
+        {"$ref": "#/$defs/portableAnswerProgramBase"},
+        {
+          "required": ["schema_revision", "parameters", "bindings"],
+          "oneOf": [
+            {"required": ["patch"]},
+            {"required": ["attempts"]}
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "schema_revision": {"const": 1},
+            "parameters": {"type": "array"},
+            "bindings": {"type": "array"},
+            "patch": {"type": "object"},
+            "attempts": {"type": "array"}
+          }
+        }
+      ]
+    },
+    "capabilityInput": {
+      "allOf": [
+        {"$ref": "#/$defs/portableAnswerProgramBase"},
+        {
+          "required": [
+            "schema_revision",
+            "program",
+            "bindings",
+            "application"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "schema_revision": {"const": 1},
+            "program": {"type": "object"},
+            "bindings": {"type": "array"},
+            "application": {"type": "object"}
+          }
+        }
+      ]
+    },
+    "instantiateInput": {
+      "allOf": [
+        {"$ref": "#/$defs/portableAnswerProgramBase"},
+        {
+          "required": ["schema_revision", "attempts"],
+          "additionalProperties": false,
+          "properties": {
+            "schema_revision": {"const": 1},
+            "attempts": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "program",
+                  "bindings",
+                  "catalog",
+                  "environment"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "id": {"type": "string"},
+                  "program": {"type": "object"},
+                  "bindings": {"type": "array"},
+                  "catalog": {"type": "object"},
+                  "environment": {"type": "object"},
+                  "compatibility": {"type": "object"}
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "invokeInput": {
+      "allOf": [
+        {"$ref": "#/$defs/portableAnswerProgramBase"},
+        {
+          "required": [
+            "schema_revision",
+            "program",
+            "catalog",
+            "environment",
+            "invocations"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "schema_revision": {"const": 1},
+            "program": {"type": "object"},
+            "catalog": {"type": "object"},
+            "environment": {"type": "object"},
+            "invocations": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["id", "bindings", "evidence"],
+                "additionalProperties": false,
+                "properties": {
+                  "id": {"type": "string"},
+                  "bindings": {"type": "array"},
+                  "evidence": {"type": "array"}
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "portableQuestionLifecycleInput": {
+      "type": "object",
+      "required": ["schema_revision", "operation"],
+      "oneOf": [
+        {"required": ["state", "command"]},
+        {"required": ["attempts"]}
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema_revision": {"const": 1},
+        "operation": {"enum": ["rerun", "rerun_eligibility"]},
+        "state": {"type": "object"},
+        "command": {"type": "object"},
+        "after_enqueue": {"type": "object"},
+        "attempts": {"type": "array", "minItems": 1}
+      }
+    }
+  },
   "type": "object",
   "required": ["id", "kind", "expect"],
   "additionalProperties": false,
@@ -24,16 +222,26 @@
     },
     "algorithm": {
       "enum": [
+        "answer_program.canonicalize",
+        "answer_program.apply_capability",
+        "answer_program.compile",
+        "answer_program.decode",
+        "answer_program.instantiate",
+        "answer_program.invoke",
+        "answer_program.patch",
         "business_time.resolve",
         "conversation_memory.card_projection",
         "conversation_memory.expand_activated",
+        "conversation_memory.frame_equivalence",
+        "conversation_resolution.compile",
         "conversation_resolution.parse",
-        "conversation_resolution.overlay",
         "conversation_resolution.schema",
         "question_contract.parse",
         "question_contract.schema",
         "question_contract.schema_validate",
         "question_contract.prompt",
+        "questions.projection",
+        "questions.memory_projection",
         "query_enrichment.parse",
         "query_enrichment.schema",
         "query_enrichment.prompt",
@@ -145,6 +353,51 @@
       },
       "then": {
         "required": ["adapter", "input"]
+      }
+    },
+    {
+      "if": {"required": ["algorithm"], "properties": {"algorithm": {"const": "answer_program.canonicalize"}}},
+      "then": {"properties": {"input": {"$ref": "#/$defs/canonicalizeInput"}}}
+    },
+    {
+      "if": {"required": ["algorithm"], "properties": {"algorithm": {"const": "answer_program.compile"}}},
+      "then": {"properties": {"input": {"$ref": "#/$defs/compileInput"}}}
+    },
+    {
+      "if": {"required": ["algorithm"], "properties": {"algorithm": {"const": "answer_program.decode"}}},
+      "then": {"properties": {"input": {"$ref": "#/$defs/decodeInput"}}}
+    },
+    {
+      "if": {"required": ["algorithm"], "properties": {"algorithm": {"const": "answer_program.patch"}}},
+      "then": {"properties": {"input": {"$ref": "#/$defs/patchInput"}}}
+    },
+    {
+      "if": {"required": ["algorithm"], "properties": {"algorithm": {"const": "answer_program.apply_capability"}}},
+      "then": {"properties": {"input": {"$ref": "#/$defs/capabilityInput"}}}
+    },
+    {
+      "if": {"required": ["algorithm"], "properties": {"algorithm": {"const": "answer_program.instantiate"}}},
+      "then": {"properties": {"input": {"$ref": "#/$defs/instantiateInput"}}}
+    },
+    {
+      "if": {"required": ["algorithm"], "properties": {"algorithm": {"const": "answer_program.invoke"}}},
+      "then": {"properties": {"input": {"$ref": "#/$defs/invokeInput"}}}
+    },
+    {
+      "if": {
+        "required": ["algorithm", "input"],
+        "properties": {
+          "algorithm": {"const": "questions.lifecycle"},
+          "input": {
+            "required": ["schema_revision"],
+            "properties": {"schema_revision": {"const": 1}}
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "input": {"$ref": "#/$defs/portableQuestionLifecycleInput"}
+        }
       }
     }
   ]

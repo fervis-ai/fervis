@@ -7,6 +7,9 @@ from fervis.lookup.plan_execution.operation_runtime import (
     RelationEngineInput,
     RelationEngineOutput,
     ScalarInput,
+    ExecutableOperation,
+    ResolvedComputeSpec,
+    ResolvedRankSpec,
 )
 from fervis.lookup.plan_execution.relations import RelationRows
 from fervis.lookup.outcomes.errors import (
@@ -14,17 +17,14 @@ from fervis.lookup.outcomes.errors import (
     UndefinedOperationError,
 )
 from fervis.lookup.outcomes.model import Undefined
-from fervis.lookup.fact_plan.operations import (
+from fervis.lookup.answer_program.operations import (
     AggregateSpec,
     AntiJoinSpec,
-    ComputeSpec,
     CrossJoinSpec,
     FilterSpec,
     JoinSpec,
-    Operation,
     ProjectSpec,
     ProjectToIdentitySpec,
-    RankSpec,
     RoleExpandSpec,
     UnionSpec,
     UniversalConditionSpec,
@@ -63,6 +63,7 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
         relations[relation.id] = relation
     scalars: dict[str, object] = {}
     scalar_proofs: dict[str, tuple[str, ...]] = {}
+    computed_outputs: dict[str, tuple[str, object]] = {}
     for scalar_input in engine_input.scalar_inputs:
         if not isinstance(scalar_input, ScalarInput):
             raise RelationEngineError("scalar input must be ScalarInput")
@@ -71,14 +72,15 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
         scalars[scalar_input.id] = scalar_input.value
         scalar_proofs[scalar_input.id] = scalar_input.proof_refs
     for operation in engine_input.operations:
-        if not isinstance(operation, Operation):
-            raise RelationEngineError("operation must be Operation")
+        if not isinstance(operation, ExecutableOperation):
+            raise RelationEngineError("operation must be ExecutableOperation")
         try:
             result = _execute_operation(
                 operation,
                 relations,
                 scalars,
                 scalar_proofs,
+                computed_outputs,
                 operation_proof_refs=operation_proof_refs,
             )
         except IncompleteEvidenceError as exc:
@@ -111,11 +113,12 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
             if result.id in relations:
                 raise RelationEngineError(f"duplicate relation {result.id}")
             relations[result.id] = result
-        elif isinstance(operation.spec, ComputeSpec):
+        elif isinstance(operation.spec, ResolvedComputeSpec):
             output_scalar = operation.spec.output_scalar
             if output_scalar in scalars:
                 raise RelationEngineError(f"duplicate scalar {output_scalar}")
             scalars[output_scalar] = result
+            computed_outputs[operation.id] = (output_scalar, result)
             scalar_proofs[output_scalar] = _operation_proof_refs(
                 operation,
                 _input_relations(operation, relations),
@@ -134,10 +137,11 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
 
 
 def _execute_operation(
-    operation: Operation,
+    operation: ExecutableOperation,
     relations: dict[str, RelationRows],
     scalars: dict[str, object],
     scalar_proofs: dict[str, tuple[str, ...]],
+    computed_outputs: dict[str, tuple[str, object]],
     *,
     operation_proof_refs: dict[str, tuple[str, ...]],
 ) -> RelationRows | object:
@@ -181,13 +185,13 @@ def _execute_operation(
             relations,
             operation_refs=operation_proof_refs.get(operation.id, ()),
         )
-    if isinstance(spec, RankSpec):
+    if isinstance(spec, ResolvedRankSpec):
         return _rank(
             operation,
             spec,
             relations,
             operation_refs=operation_proof_refs.get(operation.id, ()),
         )
-    if isinstance(spec, ComputeSpec):
-        return _compute(spec, scalars)
+    if isinstance(spec, ResolvedComputeSpec):
+        return _compute(spec, computed_outputs)
     raise RelationEngineError(f"unsupported operation {operation.id}")

@@ -6,16 +6,17 @@ kind: algorithm
 algorithm: outcomes.classify
 input:
   mode: answer
-  scalar_inputs:
-    - {id: current, value: 10}
-    - {id: previous, value: 0}
   operations:
     - id: ratio
       output_relation: ""
       spec:
         kind: compute
-        expression: current / previous
-        scalar_inputs: [current, previous]
+        expression:
+          operator: divide
+          left:
+            value: {input_ref: current, value: 10}
+          right:
+            value: {input_ref: previous, value: 0}
         output_scalar: ratio
   render_outputs: []
 expect:

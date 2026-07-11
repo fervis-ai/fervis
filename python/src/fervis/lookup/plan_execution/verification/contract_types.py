@@ -63,9 +63,7 @@ def _project_contract_grain(
     if not source.grain_keys:
         return ()
     projections = {
-        str(getattr(field, "source")): str(
-            getattr(field, "output") or getattr(field, "source")
-        )
+        field.source: field.output or field.source
         for field in fields
     }
     if not all(field in projections for field in source.grain_keys):

@@ -12,10 +12,6 @@ from fervis.lookup.conversation_resolution.model import (
 from fervis.lookup.conversation_resolution.parser import (
     parse_conversation_resolution,
 )
-from fervis.lookup.conversation_resolution.overlay import (
-    conversation_resolution_overlay_from,
-    conversation_resolution_query_enrichment_prompt_payload,
-)
 from fervis.lookup.conversation_resolution.prompt import (
     ConversationResolutionTurnPrompt,
     conversation_resolution_context_frames,
@@ -97,10 +93,4 @@ def generate_conversation_resolution(
 
 
 def _derived_payload(result: ConversationResolutionResult) -> dict[str, Any]:
-    output = dict(result.outcome.activation_payload())
-    value_frame_payload = conversation_resolution_query_enrichment_prompt_payload(
-        conversation_resolution_overlay_from(result.outcome)
-    )
-    if value_frame_payload is not None:
-        output.update(value_frame_payload)
-    return output
+    return result.outcome.activation_payload()

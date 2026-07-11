@@ -16,7 +16,7 @@ from fervis.lookup.fact_planning.row_set_filters import (
     row_set_filters_for_sources_payload,
 )
 from fervis.lookup.fact_plan.row_sources import RowSource
-from fervis.lookup.fact_plan.values import FactValue
+from fervis.lookup.answer_program.values import FactValue
 from fervis.lookup.question_contract import RequestedFact
 from fervis.lookup.read_eligibility.source_groups import (
     read_card_source_groups_by_read,

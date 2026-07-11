@@ -53,7 +53,7 @@ from fervis.lookup.fact_plan.row_sources import (
     RowSourceParam,
     RowSourceParamSemantics,
 )
-from fervis.lookup.fact_plan.values import FactValue, IdentityValuePayload
+from fervis.lookup.answer_program.values import FactValue, IdentityValuePayload
 from fervis.lookup.question_contract import (
     QuestionContract,
     RequestedFact,
@@ -1130,6 +1130,7 @@ def _fact_value_from_resolved_row(
     )
     return FactValue.identity(
         id=value_id,
+        known_input_id=task.known_input_id,
         identity_type=route.identity_type,
         identity_field=route.identity_field,
         value=str(value),

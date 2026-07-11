@@ -10,7 +10,7 @@ from fervis.memory.activation import (
     UseAs,
 )
 from fervis.memory.addresses import fact_address_from_payload
-from fervis.memory.answer_outputs import prior_answer_request_artifacts
+from fervis.memory.prior_requests import prior_requests_from_artifact
 from fervis.memory.artifacts import (
     build_fact_artifact,
     FactOutcome,
@@ -49,7 +49,7 @@ from fervis.lookup.outcomes.model import (
     UndefinedOperationRef,
     UndefinedReasonCode,
 )
-from fervis.lookup.fact_plan.render_spec import (
+from fervis.lookup.answer_program.render_spec import (
     RenderRelationOutput,
     RenderScalarOutput,
     RenderSpec,
@@ -121,13 +121,13 @@ def run_memory_prior_answer_request_case(payload: dict[str, Any]) -> list[str]:
         actual={
             "requests": [
                 {
-                    "id": item.id,
+                    "id": item.request_id,
                     "answer_fact": item.answer_fact,
                     "output_frames": [
                         frame.to_request_shape() for frame in item.output_frames
                     ],
                 }
-                for item in prior_answer_request_artifacts(artifact)
+                for item in prior_requests_from_artifact(artifact)
             ]
         },
         expected_subset=payload["expect"]["result_contains"],
@@ -138,9 +138,14 @@ def run_conversation_memory_expand_activated_case(
     payload: dict[str, Any],
 ) -> list[str]:
     input_payload = payload["input"]
+    artifacts = fact_artifacts_from_context(input_payload["conversation_context"])
+    projection = project_conversation_memory_cards(
+        input_payload["conversation_context"],
+        current_question=str(input_payload["current_question"]),
+    )
     activated = expand_activated_memory_cards(
-        artifacts=fact_artifacts_from_context(input_payload["conversation_context"]),
-        memory_cards=dict(input_payload["memory_cards"]),
+        artifacts=artifacts,
+        memory_projection=projection,
         used_memory_ids=tuple(input_payload["used_memory_ids"]),
     )
     return subset_mismatches(
@@ -194,11 +199,7 @@ def run_conversation_memory_card_projection_case(
                 for source in projection.context_sources
             ],
             "context_frames": [
-                {
-                    **frame.to_model_dict(),
-                    "prior_answer_fact": frame.prior_answer_fact,
-                }
-                for frame in projection.context_frames
+                frame.to_model_dict() for frame in projection.context_frames
             ],
             "private_cards": projection.private_cards or {},
             "private_backing_ids": _private_backing_ids(projection.private_cards or {}),
@@ -224,6 +225,25 @@ def run_conversation_memory_card_projection_case(
     return errors
 
 
+def run_conversation_memory_frame_equivalence_case(
+    payload: dict[str, Any],
+) -> list[str]:
+    control_frames = [
+        [frame.control_payload() for frame in projection.context_frames]
+        for conversation_context in payload["input"]["conversation_contexts"]
+        for projection in (
+            project_conversation_memory_cards(
+                dict(conversation_context),
+                current_question=str(payload["input"]["current_question"]),
+            ),
+        )
+    ]
+    return exact_mismatches(
+        actual={"control_frames": control_frames},
+        expected=payload["expect"]["result_equals"],
+    )
+
+
 def run_memory_lineage_memory_artifacts_case(payload: dict[str, Any]) -> list[str]:
     from fervis.lineage.enums import MemoryArtifactSourceKind
     from fervis.lineage.memory_artifacts import MemoryArtifactRow
@@ -233,9 +253,7 @@ def run_memory_lineage_memory_artifacts_case(payload: dict[str, Any]) -> list[st
 
     input_payload = payload["input"]
     rows = tuple(
-        _FixtureMemoryArtifactRow(
-            conversation_id=str(item["conversation_id"]),
-            row=MemoryArtifactRow(
+            MemoryArtifactRow(
                 memory_artifact_id=str(item["memory_artifact_id"]),
                 run_id=str(item["run_id"]),
                 produced_by_step_id=str(
@@ -253,17 +271,13 @@ def run_memory_lineage_memory_artifacts_case(payload: dict[str, Any]) -> list[st
                 fact_result_id=(
                     str(item["fact_result_id"]) if item.get("fact_result_id") else None
                 ),
-            ),
-        )
+            )
         for item in input_payload["memory_artifacts"]
     )
     try:
         artifacts = LineageMemoryArtifactService(
             _FixtureMemoryArtifactQuery(rows)
-        ).for_conversation(
-            str(input_payload["conversation_id"]),
-            limit=int(input_payload.get("limit") or 5),
-        )
+        ).for_runs(tuple(str(item) for item in input_payload["selected_run_ids"]))
     except ValueError as exc:
         if expects_rejection(payload["expect"]):
             return status_mismatches(
@@ -289,26 +303,12 @@ class _FixtureMemoryArtifactQuery:
     def __init__(self, rows: tuple[Any, ...]) -> None:
         self._rows = rows
 
-    def memory_artifact_rows_for_conversation(
+    def memory_artifact_rows_for_run_ids(
         self,
-        conversation_id: str,
-        *,
-        limit: int,
+        run_ids: tuple[str, ...],
     ) -> tuple[Any, ...]:
-        rows = [
-            item.row for item in self._rows if item.conversation_id == conversation_id
-        ]
-        run_ids = tuple(
-            dict.fromkeys(reversed([row.run_id for row in rows]))
-        )[:limit]
         selected_run_ids = frozenset(run_ids)
-        return tuple(row for row in rows if row.run_id in selected_run_ids)
-
-
-class _FixtureMemoryArtifactRow:
-    def __init__(self, *, conversation_id: str, row: Any) -> None:
-        self.conversation_id = conversation_id
-        self.row = row
+        return tuple(row for row in self._rows if row.run_id in selected_run_ids)
 
 
 def run_memory_outcome_address_case(payload: dict[str, Any]) -> list[str]:

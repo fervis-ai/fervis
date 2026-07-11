@@ -4,12 +4,13 @@ import type {
   DecodeResult,
   QuestionRunListPayload,
   RunError,
+  RunIdentity,
   QuestionStatePayload,
   RunStep,
   RunPayload
 } from "./contracts";
 import { decodeNextActions } from "./decoding/actions";
-import { decodeRunStatus, decodeTriggerKind } from "./decoding/enums";
+import { decodeRunKind, decodeRunStatus, decodeTriggerKind } from "./decoding/enums";
 import { decodeExplanation, emptyExplanation } from "./decoding/explanation";
 import { decode, expectArray, expectNumber, expectNullableString, expectObject, expectString } from "./decoding/primitives";
 import { decodeResultData } from "./decoding/resultData";
@@ -38,7 +39,9 @@ export function decodeQuestionState(raw: unknown): DecodeResult<QuestionStatePay
       questionId: expectString(object.questionId, "questionId"),
       conversationId: expectString(object.conversationId, "conversationId"),
       question: expectString(object.question, "question"),
-      currentRunId: expectString(object.currentRunId, "currentRunId"),
+      primaryRunId: expectNullableString(object.primaryRunId, "primaryRunId"),
+      latestRunId: expectNullableString(object.latestRunId, "latestRunId"),
+      activeRunId: expectNullableString(object.activeRunId, "activeRunId"),
       status: decodeRunStatus(object.status, "status"),
       answer: expectNullableString(object.answer, "answer"),
       resultData: decodeResultData(object.resultData),
@@ -67,7 +70,9 @@ function decodeConversationSummary(raw: unknown): ConversationSummary {
     conversationId: expectString(object.conversationId, "conversationId"),
     firstQuestion: expectString(object.firstQuestion, "firstQuestion"),
     latestQuestionId: expectString(object.latestQuestionId, "latestQuestionId"),
-    currentRunId: expectNullableString(object.currentRunId, "currentRunId"),
+    primaryRunId: expectNullableString(object.primaryRunId, "primaryRunId"),
+    latestRunId: expectNullableString(object.latestRunId, "latestRunId"),
+    activeRunId: expectNullableString(object.activeRunId, "activeRunId"),
     status: decodeRunStatus(object.status, "status"),
     runCount: expectNumber(object.runCount, "runCount"),
     updatedAt: expectString(object.updatedAt, "updatedAt")
@@ -77,11 +82,13 @@ function decodeConversationSummary(raw: unknown): ConversationSummary {
 function decodeRunPayload(raw: unknown): RunPayload {
   const object = expectObject(raw, "run");
   return {
+    ...decodeRunIdentity(object),
     runId: expectString(object.runId, "runId"),
     questionId: expectString(object.questionId, "questionId"),
     conversationId: expectString(object.conversationId, "conversationId"),
     runNumber: expectNumber(object.runNumber, "runNumber"),
-    triggerKind: decodeTriggerKind(object.triggerKind, "triggerKind"),
+    patchId: expectNullableString(object.patchId, "patchId"),
+    revisionId: expectNullableString(object.revisionId, "revisionId"),
     status: decodeRunStatus(object.status, "status"),
     answer: expectNullableString(object.answer, "answer"),
     resultData: decodeResultData(object.resultData),
@@ -101,6 +108,88 @@ function decodeRunPayload(raw: unknown): RunPayload {
         : decodeUsage(object.usage),
     nextActions: decodeNextActions(object.nextActions)
   };
+}
+
+function decodeRunIdentity(
+  object: ReturnType<typeof expectObject>
+): RunIdentity {
+  const kind = decodeRunKind(object.kind, "kind");
+  const triggerKind = decodeTriggerKind(object.triggerKind, "triggerKind");
+  const invocationId = expectNullableString(object.invocationId, "invocationId");
+  const executionKind = decodeExecutionKind(object.executionKind);
+  const baseInvocationId = expectNullableString(
+    object.baseInvocationId,
+    "baseInvocationId"
+  );
+  if (kind === "deterministic") {
+    if (triggerKind !== "rerun") {
+      throw new Error("deterministic run requires triggerKind rerun");
+    }
+    if (executionKind !== "rerun_program" || baseInvocationId === null) {
+      throw new Error("deterministic run requires a rerun program invocation");
+    }
+    return {
+      kind,
+      triggerKind,
+      baseRunId: expectString(object.baseRunId, "baseRunId"),
+      programId: expectString(object.programId, "programId"),
+      invocationId: expectString(invocationId, "invocationId"),
+      executionKind,
+      baseInvocationId
+    };
+  }
+  if (triggerKind === "rerun") {
+    throw new Error("model-assisted run cannot use triggerKind rerun");
+  }
+  if (executionKind === "rerun_program") {
+    throw new Error("model-assisted run cannot execute a rerun program");
+  }
+  if (
+    (invocationId === null) !== (executionKind === null) ||
+    (executionKind === "compiled_question" && baseInvocationId !== null) ||
+    (executionKind === "continue_prior_request" && baseInvocationId === null)
+  ) {
+    throw new Error("model-assisted run has inconsistent invocation identity");
+  }
+  if (triggerKind === "initial") {
+    if (object.baseRunId !== null) {
+      throw new Error("initial run requires a null baseRunId");
+    }
+    return {
+      kind,
+      triggerKind,
+      baseRunId: null,
+      programId: expectNullableString(object.programId, "programId"),
+      invocationId,
+      executionKind,
+      baseInvocationId
+    };
+  }
+  return {
+    kind,
+    triggerKind,
+    baseRunId: expectString(object.baseRunId, "baseRunId"),
+    programId: expectNullableString(object.programId, "programId"),
+    invocationId,
+    executionKind,
+    baseInvocationId
+  };
+}
+
+function decodeExecutionKind(
+  raw: unknown
+): "compiled_question" | "continue_prior_request" | "rerun_program" | null {
+  if (raw === null) {
+    return null;
+  }
+  if (
+    raw === "compiled_question" ||
+    raw === "continue_prior_request" ||
+    raw === "rerun_program"
+  ) {
+    return raw;
+  }
+  throw new Error("executionKind must identify a supported execution path");
 }
 
 function decodeRunErrorPayload(raw: unknown): RunError | null {

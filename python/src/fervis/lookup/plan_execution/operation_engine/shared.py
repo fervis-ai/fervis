@@ -12,16 +12,17 @@ from fervis.lookup.plan_execution.relations import (
     CompletenessSourceKind,
     CompletenessStatus,
     PaginationCompleteness,
+    RelationEvidence,
     RelationSetKind,
     RelationRows,
     Row,
+    relation_snapshot_hash,
 )
-from fervis.lookup.fact_plan.operations import (
+from fervis.lookup.answer_program.operations import (
     AggregateSpec,
     AggregationFunction,
     AggregationSpec,
     AntiJoinSpec,
-    ComputeSpec,
     CrossJoinSpec,
     FilterSpec,
     JoinKey,
@@ -31,12 +32,17 @@ from fervis.lookup.fact_plan.operations import (
     ProjectField,
     ProjectSpec,
     ProjectToIdentitySpec,
-    RankSpec,
     RelationRole,
     RelationRoleRef,
     RoleExpandSpec,
     UnionSpec,
     UniversalConditionSpec,
+)
+from fervis.lookup.plan_execution.operation_runtime import (
+    ExecutableOperation,
+    ResolvedComputeSpec,
+    ResolvedRankSpec,
+    resolved_compute_references,
 )
 from fervis.lookup.outcomes.errors import UndefinedOperationError
 from fervis.lookup.outcomes.operation_semantics import (
@@ -139,6 +145,31 @@ def _operation_relation(
             inputs=inputs,
         ),
         identity_type=identity_type,
+        evidence=RelationEvidence(
+            source_refs=tuple(
+                dict.fromkeys(
+                    ref for relation in inputs for ref in relation.evidence.source_refs
+                )
+            ),
+            read_refs=tuple(
+                dict.fromkeys(
+                    ref for relation in inputs for ref in relation.evidence.read_refs
+                )
+            ),
+            authority_refs=tuple(
+                dict.fromkeys(
+                    ref
+                    for relation in inputs
+                    for ref in relation.evidence.authority_refs
+                )
+            ),
+            snapshot_hash=relation_snapshot_hash(tuple(rows)),
+            proof_refs=_operation_proof_refs(
+                operation,
+                inputs,
+                scalar_refs=scalar_refs,
+            ),
+        ),
         completeness=CompletenessProof(
             status=(
                 CompletenessStatus.COMPLETE if complete else CompletenessStatus.UNKNOWN
@@ -220,8 +251,8 @@ def _input_scalar_proof_refs(
 
 def _operation_scalar_refs(operation: Operation) -> tuple[str, ...]:
     spec = operation.spec
-    if isinstance(spec, ComputeSpec):
-        return spec.scalar_inputs
+    if isinstance(spec, ResolvedComputeSpec):
+        return resolved_compute_references(spec.expression).output_refs
     if isinstance(spec, FilterSpec):
         return _predicate_scalar_refs(spec.predicate)
     if isinstance(spec, UniversalConditionSpec):
@@ -246,7 +277,7 @@ def _input_relations(
             ProjectToIdentitySpec,
             RoleExpandSpec,
             AggregateSpec,
-            RankSpec,
+            ResolvedRankSpec,
         ),
     ):
         return (_relation(relations, spec.input_relation),)
@@ -285,7 +316,7 @@ def _combined_scope(relations: tuple[RelationRows, ...]) -> str:
 
 
 def _role_set_kind_refs(
-    operations: tuple[Operation, ...],
+    operations: tuple[ExecutableOperation, ...],
 ) -> dict[str, RelationRoleRef]:
     refs: dict[str, RelationRoleRef] = {}
     for operation in operations:
@@ -330,6 +361,7 @@ def _with_role_set_kind(
         field_types=relation.field_types,
         field_answer_output_ids=relation.field_answer_output_ids,
         identity_type=relation.identity_type,
+        evidence=relation.evidence,
         completeness=replace(relation.completeness, set_kind=set_kind),
     )
 

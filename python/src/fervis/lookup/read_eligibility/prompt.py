@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from fervis.lookup.conversation_resolution import (
-    conversation_resolution_value_frame_instruction_lines,
-)
 from fervis.lookup.turn_prompts import (
     ProviderResponseContract,
     ProviderToolContract,
@@ -71,7 +68,6 @@ class ReadEligibilityTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Conversation Resolution",
                 (
-                    *conversation_resolution_value_frame_instruction_lines(),
                     "When conversation-resolution annotations apply to a requested fact, use them as part of the requested fact meaning.",
                 ),
             ),

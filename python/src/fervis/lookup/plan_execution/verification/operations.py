@@ -3,10 +3,9 @@
 from ._shared import (
     AggregateSpec,
     AggregationFunction,
-    AnswerPlan,
+    AnswerProgram,
     AntiJoinSpec,
     ComputeSpec,
-    CrossJoinSpec,
     FieldBindingRole,
     FilterSpec,
     JoinSpec,
@@ -14,25 +13,37 @@ from ._shared import (
     ProjectSpec,
     ProjectToIdentitySpec,
     RankSpec,
-    RoleExpandSpec,
-    ScalarInputUse,
-    UnionSpec,
     UniversalConditionSpec,
     VerificationError,
 )
 from .contract_types import RelationContract, _contract, _field_roles
 from .scalars import _operation_scalar_inputs
+from fervis.lookup.answer_program.operations import (
+    Predicate,
+    RelationRoleRef,
+    compute_expression_references,
+)
 
 
-def _verify_answer_uses_evidence_relation(answer: AnswerPlan) -> None:
+def _verify_answer_uses_evidence_input(answer: AnswerProgram) -> None:
     if any(_operation_input_refs(operation) for operation in answer.operations):
         return
     if any(_operation_scalar_inputs(operation) for operation in answer.operations):
         return
-    raise VerificationError("answer plan requires evidence relation")
+    if any(_compute_uses_direct_value(operation) for operation in answer.operations):
+        return
+    raise VerificationError("answer plan requires evidence input")
 
 
-def _verify_operation_references(answer: AnswerPlan) -> None:
+def _compute_uses_direct_value(operation: Operation) -> bool:
+    spec = operation.spec
+    if not isinstance(spec, ComputeSpec):
+        return False
+    references = compute_expression_references(spec.expression)
+    return bool(references.parameters or references.constants)
+
+
+def _verify_operation_references(answer: AnswerProgram) -> None:
     available = {item.id for item in answer.relations}
     operation_ids: set[str] = set()
     scalar_outputs: set[str] = _operation_field_outputs(answer.operations)
@@ -57,7 +68,7 @@ def _verify_operation_references(answer: AnswerPlan) -> None:
             output_scalar = operation.spec.output_scalar
             if (
                 output_scalar in scalar_outputs
-                or output_scalar in operation.spec.scalar_inputs
+                or output_scalar in _operation_scalar_inputs(operation)
             ):
                 raise VerificationError(f"duplicate scalar {output_scalar}")
             scalar_outputs.add(output_scalar)
@@ -82,65 +93,52 @@ def _operation_field_outputs(operations: tuple[Operation, ...]) -> set[str]:
     return outputs
 
 
-def _verify_compute_scalar_availability(answer: AnswerPlan) -> None:
-    bound_inputs = _bound_scalar_inputs(answer.value_uses)
-    available_outputs: set[str] = set()
+def _verify_compute_scalar_availability(answer: AnswerProgram) -> None:
+    available_outputs: dict[str, str] = {}
     for operation in answer.operations:
-        for scalar_input in _operation_scalar_inputs(operation):
-            if (
-                scalar_input not in available_outputs
-                and (operation.id, scalar_input) not in bound_inputs
-            ):
-                raise VerificationError(
-                    f"operation {operation.id} references unbound scalar input"
-                )
-        if not isinstance(operation.spec, ComputeSpec):
+        spec = operation.spec
+        if not isinstance(spec, ComputeSpec):
+            _require_available_scalar_inputs(operation, available_outputs)
             continue
-        available_outputs.add(operation.spec.output_scalar)
+        _require_available_compute_outputs(operation.id, spec, available_outputs)
+        available_outputs[operation.id] = spec.output_scalar
 
 
-def _bound_scalar_inputs(value_uses: tuple[object, ...]) -> set[tuple[str, str]]:
-    bound: set[tuple[str, str]] = set()
-    for value_use in value_uses:
-        target = getattr(value_use, "target", None)
-        if isinstance(target, ScalarInputUse):
-            bound.add((target.operation_id, target.input_id))
-    return bound
+def _require_available_compute_outputs(
+    operation_id: str,
+    spec: ComputeSpec,
+    available_outputs: dict[str, str],
+) -> None:
+    references = compute_expression_references(spec.expression).outputs
+    if any(
+        available_outputs.get(reference.node_id) != reference.output_id
+        for reference in references
+    ):
+        raise VerificationError(
+            f"operation {operation_id} references unbound scalar input"
+        )
+
+
+def _require_available_scalar_inputs(
+    operation: Operation,
+    available_outputs: dict[str, str],
+) -> None:
+    available_scalar_ids = set(available_outputs.values())
+    if any(
+        scalar_input not in available_scalar_ids
+        for scalar_input in _operation_scalar_inputs(operation)
+    ):
+        raise VerificationError(
+            f"operation {operation.id} references unbound scalar input"
+        )
 
 
 def _operation_input_refs(operation: Operation) -> tuple[str, ...]:
-    spec = operation.spec
-    if isinstance(
-        spec,
-        (
-            FilterSpec,
-            ProjectSpec,
-            ProjectToIdentitySpec,
-            RoleExpandSpec,
-            AggregateSpec,
-            RankSpec,
-        ),
-    ):
-        return (spec.input_relation,)
-    if isinstance(spec, UniversalConditionSpec):
-        return (
-            spec.candidate_subject.relation_id,
-            spec.required_dimension.relation_id,
-            spec.observation.relation_id,
-        )
-    if isinstance(spec, AntiJoinSpec):
-        return (spec.candidate.relation_id, spec.observed.relation_id)
-    if isinstance(spec, (JoinSpec, CrossJoinSpec)):
-        return (spec.left, spec.right)
-    if isinstance(spec, UnionSpec):
-        return spec.inputs
-    if isinstance(spec, ComputeSpec):
-        return ()
-    return ()
+    return operation.input_relation_ids
 
 
 def _verify_coverage_operation_relation_contracts(
-    answer: AnswerPlan,
+    answer: AnswerProgram,
     *,
     relation_contracts: dict[str, RelationContract],
 ) -> None:
@@ -254,7 +252,7 @@ def _verify_coverage_operation_relation_contracts(
 
 
 def _verify_operation_field_references(
-    answer: AnswerPlan,
+    answer: AnswerProgram,
     *,
     relation_contracts: dict[str, RelationContract],
 ) -> None:
@@ -297,13 +295,12 @@ def _verify_operation_field_references(
 def _verify_predicate_fields(
     *,
     contract: RelationContract,
-    predicate: object,
+    predicate: Predicate,
     label: str,
 ) -> None:
-    _field_roles(contract, getattr(predicate, "left", ""), label)
-    right = getattr(predicate, "right", "")
-    if right:
-        _field_roles(contract, right, label)
+    _field_roles(contract, predicate.left, label)
+    if predicate.right:
+        _field_roles(contract, predicate.right, label)
 
 
 def _verify_role_relation_fields(
@@ -325,12 +322,12 @@ def _verify_role_relation_fields(
 
 def _verify_role_grain(
     *,
-    ref: object,
+    ref: RelationRoleRef,
     contract: RelationContract,
     fields: tuple[str, ...],
     role: str,
 ) -> None:
-    required_identity_fields = tuple(getattr(ref, "required_identity_fields", ()) or ())
+    required_identity_fields = ref.required_identity_fields
     if contract.grain_keys != required_identity_fields:
         raise VerificationError(f"{role} requires exact relation grain")
     for field in fields:

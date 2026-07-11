@@ -8,12 +8,14 @@ import type { QuestionRefreshPayload } from "../viewTypes";
 export function AskBar({
   apiClient,
   conversationId,
+  contextRunId,
   status,
   onActionError,
   onQuestionState
 }: {
   readonly apiClient: FervisApiClient | null;
   readonly conversationId: string | null;
+  readonly contextRunId?: string;
   readonly status: RunStatus;
   readonly onActionError: (error: unknown) => void;
   readonly onQuestionState: (
@@ -38,7 +40,11 @@ export function AskBar({
           }
           setSubmitting(true);
           void apiClient
-            .askQuestion({ conversationId, question: submittedQuestion })
+            .askQuestion({
+              conversationId,
+              question: submittedQuestion,
+              ...(contextRunId === undefined ? {} : { contextRunId })
+            })
             .then((state) => onQuestionState(state, submittedQuestion))
             .then(() => setQuestion(""))
             .catch(onActionError)

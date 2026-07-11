@@ -1,0 +1,61 @@
+id: declared_optional_binding_can_activate
+kind: algorithm
+algorithm: answer_program.invoke
+description: An unbound optional fixed-topology constraint can be activated and recomputed through the same program.
+input:
+  schema_revision: 1
+  program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/population_optional}
+  catalog: {$ref: ../../../fixtures/answer_program_v1.yaml#/catalogs/sales}
+  environment: {$ref: ../../../fixtures/answer_program_v1.yaml#/environments/population_optional}
+  invocations:
+    - id: base
+      bindings:
+        - &stores
+          parameter_id: question.store_ids
+          value:
+            kind: identity_set
+            identity_type: store
+            identity_field: store_id
+            values: [store_1, store_2]
+          provenance: {kind: question_input}
+      evidence: &evidence
+        - request:
+            endpoint_name: list_sale_list
+            args: {sales.query.store_id: store_1}
+          response:
+            body:
+              results:
+                - {sale_id: sale_1, store_id: store_1}
+        - request:
+            endpoint_name: list_sale_list
+            args: {sales.query.store_id: store_2}
+          response:
+            body:
+              results:
+                - {sale_id: sale_2, store_id: store_2}
+    - id: activated
+      bindings:
+        - *stores
+        - parameter_id: semantic.store_population
+          value: {kind: string_set, values: [store_2]}
+          provenance: {kind: semantic_choice}
+      evidence: *evidence
+expect:
+  result_contains:
+    invocations:
+      - id: base
+        status: completed
+        relations:
+          - {id: sales_rows}
+          - id: answer_rows
+            rows:
+              - {store_id: store_1}
+              - {store_id: store_2}
+      - id: activated
+        status: completed
+        relations:
+          - {id: sales_rows}
+          - id: answer_rows
+            rows:
+              - {store_id: store_2}
+

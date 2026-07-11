@@ -21,11 +21,13 @@ from fervis.lineage.enums import (
     ModelUsageUnit,
     PresentationClientKey,
     PresentationKind,
+    ProgramInvocationKind,
     RunResultKind,
     RunStepKey,
     RunStepKind,
     RunStepScopeType,
     RunTriggerKind,
+    QuestionRunKind,
     RuntimeErrorKind,
     SourceReadStatus,
 )
@@ -83,49 +85,97 @@ class QuestionRunWrite:
     run_id: str
     question_id: str
     run_number: int
+    kind: QuestionRunKind
     trigger_kind: RunTriggerKind
-    integrated_question: str
     adapter_ref: str
     runtime_version: str
-    previous_run_id: str | None = None
-    trigger_clarification_response_run_id: str | None = None
+    base_run_id: str | None = None
     trigger_clarification_response_id: str | None = None
 
     def __post_init__(self) -> None:
-        _canonicalize_optional_str(self, "previous_run_id")
-        _canonicalize_optional_str(self, "trigger_clarification_response_run_id")
-        _canonicalize_optional_str(self, "trigger_clarification_response_id")
+        _require_optional_nonempty_str(self.base_run_id, "base_run_id")
+        _require_optional_nonempty_str(
+            self.trigger_clarification_response_id,
+            "trigger_clarification_response_id",
+        )
+        valid_pairings = {
+            (QuestionRunKind.MODEL_ASSISTED, RunTriggerKind.INITIAL),
+            (QuestionRunKind.MODEL_ASSISTED, RunTriggerKind.CLARIFICATION_RESPONSE),
+            (QuestionRunKind.MODEL_ASSISTED, RunTriggerKind.RETRY),
+            (QuestionRunKind.DETERMINISTIC, RunTriggerKind.RERUN),
+        }
+        if (self.kind, self.trigger_kind) not in valid_pairings:
+            raise ValueError("invalid question run kind and trigger pairing")
         if self.trigger_kind is RunTriggerKind.INITIAL:
-            _require_absent(self.previous_run_id, "previous_run_id")
-            _require_absent(
-                self.trigger_clarification_response_run_id,
-                "trigger_clarification_response_run_id",
-            )
+            _require_absent(self.base_run_id, "base_run_id")
             _require_absent(
                 self.trigger_clarification_response_id,
                 "trigger_clarification_response_id",
             )
             return
         if self.trigger_kind is RunTriggerKind.CLARIFICATION_RESPONSE:
-            _require_absent(self.previous_run_id, "previous_run_id")
-            _require_present(
-                self.trigger_clarification_response_run_id,
-                "trigger_clarification_response_run_id",
-            )
+            _require_present(self.base_run_id, "base_run_id")
             _require_present(
                 self.trigger_clarification_response_id,
                 "trigger_clarification_response_id",
             )
             return
-        _require_present(self.previous_run_id, "previous_run_id")
-        _require_absent(
-            self.trigger_clarification_response_run_id,
-            "trigger_clarification_response_run_id",
-        )
+        _require_present(self.base_run_id, "base_run_id")
         _require_absent(
             self.trigger_clarification_response_id,
             "trigger_clarification_response_id",
         )
+
+
+@dataclass(frozen=True)
+class AnswerProgramWrite:
+    program_id: str
+    schema_revision: int
+    canonical_json: str
+
+
+@dataclass(frozen=True)
+class ProgramInvocationWrite:
+    invocation_id: str
+    run_id: str
+    program_id: str
+    bindings_json: str
+    kind: ProgramInvocationKind
+    base_invocation_id: str | None = None
+    patch_id: str | None = None
+    binding_patch_json: str | None = None
+    revision_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind is ProgramInvocationKind.COMPILED_QUESTION:
+            _require_absent(self.base_invocation_id, "base_invocation_id")
+        else:
+            _require_present(self.base_invocation_id, "base_invocation_id")
+        if (self.patch_id is None) != (self.binding_patch_json is None):
+            raise ValueError(
+                "program invocation patch id and payload must be present together"
+            )
+
+
+@dataclass(frozen=True)
+class ProgramInvocationBundleWrite:
+    program: AnswerProgramWrite
+    invocation: ProgramInvocationWrite
+
+
+@dataclass(frozen=True)
+class ProgramRevisionWrite:
+    revision_id: str
+    base_program_id: str
+    revised_program_id: str
+    capability_id: str
+    application_json: str
+
+
+@dataclass(frozen=True)
+class ProgramRevisionBundleWrite:
+    program: AnswerProgramWrite
+    revision: ProgramRevisionWrite
 
 
 @dataclass(frozen=True)
@@ -626,6 +676,11 @@ def _require_absent(value: str | None, field_name: str) -> None:
 def _canonicalize_optional_str(instance: object, field_name: str) -> None:
     if getattr(instance, field_name) == "":
         object.__setattr__(instance, field_name, None)
+
+
+def _require_optional_nonempty_str(value: str | None, field_name: str) -> None:
+    if value is not None and not value.strip():
+        raise ValueError(f"{field_name} must be a non-empty string when present")
 
 
 def _required_payload_text(payload: JsonObject, key: str) -> str:

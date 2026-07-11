@@ -28,3 +28,4 @@ class QueuedRunResult:
     answer: str | None = None
     result_data: dict[str, Any] | None = None
     error: str | None = None
+    duration_ms: int | None = None

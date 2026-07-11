@@ -76,7 +76,7 @@ def _bound_sources_prompt_payload(
 
 
 def _bound_param_payload(param: Any) -> dict[str, Any]:
-    output = {"param_id": param.param_id, "value": param.value}
+    output = {"param_id": param.param_id, "value": param.compiler_value}
     if param.proof_refs:
         output["proof_refs"] = list(param.proof_refs)
     return output

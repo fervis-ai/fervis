@@ -43,7 +43,7 @@ input:
     memory_id: turn_sales.relation.sales
     anchor_text: that
     resolved_text: those sales
-    integrated_question: How much is the total sales for the prior sales rows?
+    contextualized_question: How much is the total sales for the prior sales rows?
   question_contract:
     fact_description: total sales for the prior sales rows
     subject_text: sales
@@ -52,8 +52,8 @@ input:
     known_inputs:
       - kind: row_set_reference
         input_ref: cr_input_1
-        text: that
-        resolved_input_ref: cr_input_1
+        text: those sales
+        resolved_input_ref: conversation.selected_memory_value
   catalog:
     reads: []
   fact_plan:

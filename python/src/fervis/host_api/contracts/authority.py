@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 from typing import Any, Literal, Mapping
 
 from fervis.host_api.contracts.credentials import DelegatedReadCredential
@@ -14,7 +16,6 @@ ReadContextScheme = Literal[
     "fastapi_principal",
     "flask_principal",
     "delegated_capability",
-    "unmigrated",
 ]
 
 _READ_CONTEXT_REF_KEYS = frozenset({"scheme", "key", "tenant_key"})
@@ -99,6 +100,18 @@ class ReadAuthority:
             delegated_credential=getattr(principal, "delegated_credential", None),
         )
 
+    @property
+    def evidence_ref(self) -> str:
+        payload = json.dumps(
+            {
+                "tenant_id": self.tenant_id,
+                "read_context_ref": self.read_context_ref.to_storage_dict(),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return "authority:sha256:" + hashlib.sha256(payload.encode()).hexdigest()
+
 
 def _read_context_scheme(value: Any) -> ReadContextScheme:
     scheme = str(value or "").strip()
@@ -108,7 +121,6 @@ def _read_context_scheme(value: Any) -> ReadContextScheme:
         "fastapi_principal",
         "flask_principal",
         "delegated_capability",
-        "unmigrated",
     }:
         raise ValueError(f"unsupported ReadContextRef scheme: {scheme}")
     return scheme  # type: ignore[return-value]

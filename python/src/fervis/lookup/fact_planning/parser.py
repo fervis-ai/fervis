@@ -10,8 +10,8 @@ from fervis.lookup.fact_planning.blocked_evidence import (
     bound_source_evidence_refs,
     canonical_blocked_evidence_refs,
 )
+from fervis.lookup.answer_program.model import AnswerProgram
 from fervis.lookup.fact_plan.fact_plan import (
-    AnswerPlan,
     BlockedFact,
     BlockedFactBasis,
     BlockedFactField,
@@ -25,8 +25,13 @@ from fervis.lookup.fact_plan.fact_plan import (
     PlanOutcomeKind,
 )
 from fervis.lookup.fact_planning import provider_contract as provider_output
-from fervis.lookup.fact_planning.pattern_plan import compile_pattern_answer_plan
+from fervis.lookup.fact_planning.pattern_plan import compile_pattern_answer_program
 from fervis.lookup.source_binding import BoundSource
+from fervis.lookup.answer_program.compiler_inputs import CompilerInputContext
+from fervis.lookup.answer_program.compilation import compile_answer_program
+from fervis.lookup.answer_program.values import BindingSet
+from fervis.lookup.question_contract import QuestionContract
+from fervis.lookup.plan_execution.relations import RelationRows
 
 
 def parse_fact_plan(
@@ -38,8 +43,11 @@ def parse_fact_plan(
         str, Mapping[str, tuple[str, ...]]
     ],
     relation_catalog: RelationCatalog | None = None,
-    requested_fact_ids: tuple[str, ...] = (),
+    question_contract: QuestionContract,
+    memory_relations: tuple[RelationRows, ...] = (),
+    input_context: CompilerInputContext,
 ) -> FactPlan:
+    requested_fact_ids = tuple(fact.id for fact in question_contract.requested_facts)
     evidence_resolver = _bound_source_evidence_resolver(
         bound_sources,
         relation_catalog=relation_catalog,
@@ -49,8 +57,9 @@ def parse_fact_plan(
     kind = _enum(PlanOutcomeKind, outcome.get("kind"), "outcome.kind")
     if kind == PlanOutcomeKind.FACT_PLAN:
         provider_output.FactPlanAnswerOutput.parse(outcome)
-        return FactPlan(
-            outcome=_answer_plan(
+        if relation_catalog is None:
+            raise ValueError("answer-program compilation requires relation catalog")
+        draft, draft_bindings = _answer_plan(
                 outcome,
                 bound_sources=bound_sources,
                 source_binding_ids_by_requested_fact_id=(
@@ -59,7 +68,18 @@ def parse_fact_plan(
                 source_binding_ids_by_requirement_by_requested_fact_id=(
                     source_binding_ids_by_requirement_by_requested_fact_id
                 ),
+                input_context=input_context,
             )
+        program, bindings = compile_answer_program(
+            draft,
+            question_contract=question_contract,
+            catalog=relation_catalog,
+            bindings=draft_bindings,
+            memory_relations=memory_relations,
+        )
+        return FactPlan(
+            outcome=program,
+            bindings=bindings,
         )
     if kind == PlanOutcomeKind.NEEDS_CLARIFICATION:
         clarification = provider_output.PlanClarificationOutput.parse(outcome)
@@ -102,20 +122,22 @@ def _answer_plan(
     source_binding_ids_by_requirement_by_requested_fact_id: Mapping[
         str, Mapping[str, tuple[str, ...]]
     ],
-) -> AnswerPlan:
+    input_context: CompilerInputContext,
+) -> tuple[AnswerProgram, BindingSet]:
     if "values" in payload:
         raise ValueError("fact plan values are not model-authored")
     if "answers" in payload:
-        return compile_pattern_answer_plan(
+        return compile_pattern_answer_program(
             payload,
             bound_sources=bound_sources,
             source_binding_ids_by_requested_fact_id=(
                 source_binding_ids_by_requested_fact_id
             ),
-            source_binding_ids_by_requirement_by_requested_fact_id=(
-                source_binding_ids_by_requirement_by_requested_fact_id
-            ),
-        )
+                source_binding_ids_by_requirement_by_requested_fact_id=(
+                    source_binding_ids_by_requirement_by_requested_fact_id
+                ),
+                input_context=input_context,
+            )
     raise ValueError("fact plan answers must be a list")
 
 

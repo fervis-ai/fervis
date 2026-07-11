@@ -15,7 +15,7 @@ import pytest
 from fervis.interfaces.agent.actions import inspect_question_action
 from fervis.lookup.orchestration.result import LookupResult
 from fervis.lookup.orchestration.request import LookupRequest
-from fervis.host_api.contracts.authority import ReadContextRef
+from fervis.host_api.contracts.authority import ReadAuthority, ReadContextRef
 from fervis.host_api.credentials import (
     CapturedHeaderCredentialPolicy,
     capture_header_credential,
@@ -35,19 +35,24 @@ from fervis.project import discover_project
 from fervis.project.configuration import load_fervis_project_config
 from fervis.lineage.recorder_core import LineageRecorder
 from fervis.lineage.recorder import (
+    AnswerProgramWrite,
     ClarificationRequestWrite,
     ExecutionProofGraphWrite,
     FactResultWrite,
     FactualTerminalRunResultWrite,
-    LineageRecorderConflict,
     ModelCallAuditWrite,
     ModelCallWrite,
+    MemoryArtifactWrite,
+    ProgramInvocationBundleWrite,
+    ProgramInvocationWrite,
     RequestedFactWrite,
     RunResultWrite,
     RunStepWrite,
 )
 from fervis.lineage.enums import (
+    ProgramInvocationKind,
     FactResultKind,
+    MemoryArtifactSourceKind,
     ModelCallStatus,
     RunResultKind,
     RunStepKey,
@@ -58,7 +63,27 @@ from fervis.questions import (
     ContinueQuestionRequest,
     ExecutionMode,
     QuestionPrincipal,
+    RerunQuestionRequest,
 )
+from fervis.lookup.answer_program import (
+    BindingPatch,
+    BindingProvenance,
+    BindingProvenanceKind,
+    CapabilityApplication,
+    ParameterBinding,
+    SetParameter,
+    answer_program_id,
+)
+from fervis.lookup.answer_program.revisions import (
+    apply_capability,
+    decode_capability_application,
+)
+from fervis.lookup.answer_program.persistence import (
+    program_invocation,
+    program_invocation_bundle,
+    program_revision_bundle,
+)
+from fervis.lookup.answer_program.values import FactValue
 from fervis.lineage.enums import RunTriggerKind
 from fervis.run_work.events import CollectingQuestionRunEventSink
 from fervis.run_work.queued_execution import LocalQueuedRunFollower
@@ -70,6 +95,7 @@ from fervis.questions.ports import (
     QuestionLookupPort,
 )
 from fervis.storage.sql.bundle import sql_storage_bundle
+from fervis.storage.sql.question_run_ports import SQLQuestionLineagePort
 from fervis.storage.sql.lineage_store import SQLLineageRecorderStore
 from fervis.storage.sql.rows import now_utc
 from fervis.storage.sql.terminal import (
@@ -85,6 +111,11 @@ from tests.testkit.terminal_lineage import (
 
 
 API_DIR = Path(__file__).resolve().parents[3]
+
+_CANONICAL_ANSWER_RESULT = {
+    "kind": "answer",
+    "outputs": [{"key": "answer_1", "valueKind": "number", "value": "42"}],
+}
 
 
 def test_sql_storage_queued_ask_writes_lineage_and_work_item(tmp_path: Path) -> None:
@@ -120,6 +151,505 @@ def test_sql_storage_queued_ask_writes_lineage_and_work_item(tmp_path: Path) -> 
         == read_context_ref.to_storage_dict()
     )
     assert bundle.lineage_query.run_by_id(result.run_id).run_id == result.run_id
+
+
+def test_sql_program_and_invocation_persistence_is_atomic(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _migrated_fastapi_project(tmp_path)
+    bundle = _storage_bundle(root)
+    result = bundle.questions.ask(
+        AskRequest(
+            question="How many orders came in today?",
+            principal=_principal("owner", "owner"),
+            execution_mode=ExecutionMode.QUEUED,
+        )
+    )
+    store = SQLLineageRecorderStore(bundle.engine)
+    recorder = LineageRecorder(store)
+    persist = store.get_or_insert_row
+
+    def fail_on_invocation(row):
+        if row.key == "program_invocation":
+            raise RuntimeError("injected invocation persistence failure")
+        return persist(row)
+
+    monkeypatch.setattr(store, "get_or_insert_row", fail_on_invocation)
+
+    with pytest.raises(RuntimeError, match="injected invocation persistence failure"):
+        recorder.record_program_invocation(
+            ProgramInvocationBundleWrite(
+                program=AnswerProgramWrite(
+                    program_id="ap_test",
+                    schema_revision=1,
+                    canonical_json="{}",
+                ),
+                invocation=ProgramInvocationWrite(
+                    invocation_id="pi_test",
+                    run_id=result.run_id,
+                    program_id="ap_test",
+                    bindings_json="{}",
+                    kind=ProgramInvocationKind.COMPILED_QUESTION,
+                ),
+            )
+        )
+
+    assert _count_rows(root, "fervis_answer_program") == 0
+    assert _count_rows(root, "fervis_program_invocation") == 0
+
+
+def test_sql_content_addressed_program_is_shared_by_independent_runs(
+    tmp_path: Path,
+) -> None:
+    root = _migrated_fastapi_project(tmp_path)
+    bundle = _storage_bundle(root)
+    runs = tuple(
+        bundle.questions.ask(
+            AskRequest(
+                question="How many orders came in today?",
+                principal=_principal(f"owner_{index}", f"owner_{index}"),
+                execution_mode=ExecutionMode.QUEUED,
+            )
+        )
+        for index in (1, 2)
+    )
+    recorder = LineageRecorder(SQLLineageRecorderStore(bundle.engine))
+    program = AnswerProgramWrite(
+        program_id="ap_shared",
+        schema_revision=1,
+        canonical_json='{"program":"shared"}',
+    )
+    for index, run in enumerate(runs, start=1):
+        recorder.record_program_invocation(
+            ProgramInvocationBundleWrite(
+                program=program,
+                invocation=ProgramInvocationWrite(
+                    invocation_id=f"pi_shared_{index}",
+                    run_id=run.run_id,
+                    program_id=program.program_id,
+                    bindings_json="{}",
+                    kind=ProgramInvocationKind.COMPILED_QUESTION,
+                ),
+            )
+        )
+
+    assert _count_rows(root, "fervis_answer_program") == 1
+    assert _count_rows(root, "fervis_program_invocation") == 2
+
+
+def test_sql_rerun_persists_child_invocation_and_queue_atomically(
+    tmp_path: Path,
+) -> None:
+    root, bundle, _principal_value, base, rerun = _sql_answered_base_and_rerun(
+        tmp_path
+    )
+
+    with bundle.engine.connect() as connection:
+        row = connection.execute(
+            sa.text(
+                "SELECT r.kind, r.trigger_kind, r.base_run_id, "
+                "i.patch_id, w.spec_kind "
+                "FROM fervis_question_run r "
+                "JOIN fervis_program_invocation i ON i.run_id = r.run_id "
+                "JOIN fervis_run_work_item w ON w.run_id = r.run_id "
+                "WHERE r.run_id = :run_id"
+            ),
+            {"run_id": rerun.run_id},
+        ).mappings().one()
+
+    assert rerun.status == "QUEUED"
+    assert dict(row) == {
+        "kind": "deterministic",
+        "trigger_kind": "rerun",
+        "base_run_id": base.run_id,
+        "patch_id": row["patch_id"],
+        "spec_kind": "rerun_program",
+    }
+    assert str(row["patch_id"]).startswith("bp_")
+
+
+def test_sql_capability_rerun_persists_one_revision_and_child_invocation(
+    tmp_path: Path,
+) -> None:
+    root, bundle, principal, base = _sql_answered_base(
+        tmp_path,
+        program_name="capability",
+        binding_set_name="capability",
+        catalog_name="sales_channel",
+    )
+
+    rerun = bundle.questions.rerun_question(
+        _capability_rerun_request(base, principal=principal)
+    )
+
+    with bundle.engine.connect() as connection:
+        row = connection.execute(
+            sa.text(
+                "SELECT i.patch_id, i.program_id, i.revision_id, "
+                "r.base_program_id, r.revised_program_id, r.capability_id "
+                "FROM fervis_program_invocation i "
+                "JOIN fervis_program_revision r ON r.revision_id = i.revision_id "
+                "WHERE i.run_id = :run_id"
+            ),
+            {"run_id": rerun.run_id},
+        ).mappings().one()
+
+    assert rerun.status == "QUEUED"
+    assert row["patch_id"] is None
+    assert row["program_id"] == row["revised_program_id"]
+    assert row["base_program_id"] != row["revised_program_id"]
+    assert row["capability_id"] == "filter_by_sale_channel"
+
+
+def test_sql_program_revision_persistence_is_atomic(tmp_path: Path) -> None:
+    from tests.testkit.answer_program_fixtures import load_answer_program_fixture
+
+    root = _migrated_fastapi_project(tmp_path)
+    bundle = _storage_bundle(root)
+    principal = _principal("owner", "owner")
+    base = bundle.questions.ask(
+        AskRequest(
+            question="How many sales did we make today?",
+            principal=principal,
+            execution_mode=ExecutionMode.QUEUED,
+        )
+    )
+    fixture = load_answer_program_fixture(
+        program="capability",
+        binding_set="capability",
+        catalog="sales_channel",
+    )
+    program, bindings = fixture.program, fixture.bindings
+    recorder = LineageRecorder(SQLLineageRecorderStore(bundle.engine))
+    recorder.record_program_invocation(
+        program_invocation_bundle(
+            program=program,
+            invocation=program_invocation(
+                run_id=base.run_id,
+                program_id=answer_program_id(program),
+                bindings=bindings,
+                kind=ProgramInvocationKind.COMPILED_QUESTION,
+            ),
+        )
+    )
+    revision = apply_capability(
+        program=program,
+        bindings=bindings,
+        application=CapabilityApplication(
+            capability_id="filter_by_sale_channel",
+            binding=ParameterBinding(
+                parameter_id="semantic.sale_channels",
+                value=FactValue.string_set(
+                    id="capability.sale_channels",
+                    values=("STORE",),
+                ),
+                provenance=BindingProvenance(
+                    kind=BindingProvenanceKind.SEMANTIC_CHOICE,
+                    refs=("governance:sales.channel",),
+                ),
+            ),
+        ),
+    )
+    write = program_revision_bundle(
+        revision=revision,
+    )
+    failing_store = SQLLineageRecorderStore(bundle.engine)
+    get_or_insert = failing_store.get_or_insert_row
+
+    def fail_on_revision(row):
+        if row.key == "program_revision":
+            raise RuntimeError("injected program revision persistence failure")
+        return get_or_insert(row)
+
+    failing_store.get_or_insert_row = fail_on_revision
+    with pytest.raises(
+        RuntimeError,
+        match="injected program revision persistence failure",
+    ):
+        LineageRecorder(failing_store).record_program_revision(write)
+
+    assert _count_rows(root, "fervis_answer_program") == 1
+    assert _count_rows(root, "fervis_program_revision") == 0
+
+    recorder.record_program_revision(write)
+    with bundle.engine.connect() as connection:
+        row = connection.execute(
+            sa.select(metadata.tables["fervis_program_revision"])
+        ).mappings().one()
+    assert row["revision_id"] == revision.revision_id
+    assert row["base_program_id"] == revision.base_program_id
+    assert row["revised_program_id"] == revision.revised_program_id
+    assert decode_capability_application(row["application_json"]) == (
+        revision.application
+    )
+
+
+def test_sql_question_memory_uses_primary_unless_context_run_is_selected(
+    tmp_path: Path,
+) -> None:
+    _root, bundle, principal, base, rerun = _sql_answered_base_and_rerun(tmp_path)
+    recorder = LineageRecorder(SQLLineageRecorderStore(bundle.engine))
+    recorder.record_run_result(
+        RunResultWrite(
+            run_result_id="rerun_answered",
+            run_id=rerun.run_id,
+            result_kind=RunResultKind.ANSWERED,
+        )
+    )
+    SQLWorkItemQueue(bundle.engine).mark_work_item_terminal(
+        run_id=rerun.run_id,
+        status="COMPLETED",
+        error="",
+    )
+    _record_sql_memory_artifact(
+        recorder,
+        run_id=base.run_id,
+        value="primary answer",
+    )
+    _record_sql_memory_artifact(
+        recorder,
+        run_id=rerun.run_id,
+        value="deterministic variant",
+    )
+    port = SQLQuestionLineagePort(engine=bundle.engine)
+    authority = ReadAuthority.from_principal(principal)
+
+    default_context = port.conversation_memory_context(
+        conversation_id=base.conversation_id,
+        authority=authority,
+    )
+    selected_context = port.conversation_memory_context(
+        conversation_id=base.conversation_id,
+        context_run_id=rerun.run_id,
+        authority=authority,
+    )
+
+    assert [
+        artifact["sourceAnswer"] for artifact in default_context["factArtifacts"]
+    ] == ["primary answer"]
+    assert [
+        artifact["sourceAnswer"] for artifact in selected_context["factArtifacts"]
+    ] == ["deterministic variant"]
+    with pytest.raises(
+        PermissionError,
+        match="context run is not an authorized answered run",
+    ):
+        port.conversation_memory_context(
+            conversation_id=base.conversation_id,
+            context_run_id="run-unavailable",
+            authority=authority,
+        )
+
+
+def test_sql_rerun_submission_rolls_back_every_child_record_on_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, bundle, principal, base = _sql_answered_base(
+        tmp_path,
+        program_name="capability",
+        binding_set_name="capability",
+        catalog_name="sales_channel",
+    )
+    before = {
+        table: _count_rows(root, table)
+        for table in (
+            "fervis_question_run",
+            "fervis_run_work_item",
+            "fervis_program_invocation",
+            "fervis_program_revision",
+        )
+    }
+
+    def fail_on_child_invocation(_bundle):
+        raise RuntimeError("injected rerun invocation persistence failure")
+
+    monkeypatch.setattr(
+        bundle.questions.runs.recorder,
+        "record_program_invocation",
+        fail_on_child_invocation,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="injected rerun invocation persistence failure",
+    ):
+        bundle.questions.rerun_question(
+            _capability_rerun_request(base, principal=principal)
+        )
+
+    assert {
+        table: _count_rows(root, table) for table in before
+    } == before
+
+
+def _sql_answered_base_and_rerun(tmp_path: Path):
+    root, bundle, principal, base = _sql_answered_base(tmp_path)
+    rerun = bundle.questions.rerun_question(_rerun_request(base, principal=principal))
+    return root, bundle, principal, base, rerun
+
+
+def _sql_answered_base(
+    tmp_path: Path,
+    *,
+    program_name: str = "invocation",
+    binding_set_name: str = "invocation",
+    catalog_name: str = "sales",
+):
+    from tests.testkit.answer_program_fixtures import load_answer_program_fixture
+
+    root = _migrated_fastapi_project(tmp_path)
+    bundle = _storage_bundle(root)
+    principal = _principal("owner", "owner")
+    base = bundle.questions.ask(
+        AskRequest(
+            question="How many sales did we make today?",
+            principal=principal,
+            execution_mode=ExecutionMode.QUEUED,
+        )
+    )
+    fixture = load_answer_program_fixture(
+        program=program_name,
+        binding_set=binding_set_name,
+        catalog=catalog_name,
+    )
+    program, bindings = fixture.program, fixture.bindings
+    recorder = LineageRecorder(SQLLineageRecorderStore(bundle.engine))
+    recorder.record_program_invocation(
+        program_invocation_bundle(
+            program=program,
+            invocation=program_invocation(
+                run_id=base.run_id,
+                program_id=answer_program_id(program),
+                bindings=bindings,
+                kind=ProgramInvocationKind.COMPILED_QUESTION,
+            ),
+        )
+    )
+    recorder.record_run_result(
+        RunResultWrite(
+            run_result_id="base_answered",
+            run_id=base.run_id,
+            result_kind=RunResultKind.ANSWERED,
+        )
+    )
+    SQLWorkItemQueue(bundle.engine).mark_work_item_terminal(
+        run_id=base.run_id,
+        status="COMPLETED",
+        error="",
+    )
+    return root, bundle, principal, base
+
+
+def _rerun_request(base, *, principal: QuestionPrincipal) -> RerunQuestionRequest:
+    return RerunQuestionRequest(
+        question_id=base.question_id,
+        base_run_id=base.run_id,
+        patch=BindingPatch(
+            operations=(
+                SetParameter(
+                    parameter_id="semantic.sale_states",
+                    value=FactValue.string_set(
+                        id="patch.sale_states",
+                        values=("COMPLETED", "PLACED"),
+                    ),
+                ),
+            )
+        ),
+        principal=principal,
+    )
+
+
+def _capability_rerun_request(
+    base,
+    *,
+    principal: QuestionPrincipal,
+) -> RerunQuestionRequest:
+    return RerunQuestionRequest(
+        question_id=base.question_id,
+        base_run_id=base.run_id,
+        capability_application=CapabilityApplication(
+            capability_id="filter_by_sale_channel",
+            binding=ParameterBinding(
+                parameter_id="semantic.sale_channels",
+                value=FactValue.string_set(
+                    id="capability.sale_channels",
+                    values=("STORE",),
+                ),
+                provenance=BindingProvenance(
+                    kind=BindingProvenanceKind.SEMANTIC_CHOICE,
+                    refs=("governance:sales.channel",),
+                ),
+            ),
+        ),
+        principal=principal,
+    )
+
+
+def _record_sql_memory_artifact(
+    recorder: LineageRecorder,
+    *,
+    run_id: str,
+    value: str,
+) -> None:
+    step_id = f"{run_id}:memory-step"
+    fact_id = f"{run_id}:memory-fact"
+    fact_result_id = f"{run_id}:memory-fact-result"
+    artifact_id = f"{run_id}:memory"
+    recorder.record_step(
+        RunStepWrite(
+            step_id=step_id,
+            run_id=run_id,
+            sequence=100,
+            step_key=RunStepKey.RENDER,
+            kind=RunStepKind.DETERMINISTIC,
+        )
+    )
+    recorder.record_requested_fact(
+        RequestedFactWrite(
+            requested_fact_id=fact_id,
+            run_id=run_id,
+            produced_by_step_id=step_id,
+            fact_key="fact_1",
+            answer_expression_family="scalar",
+        )
+    )
+    recorder.record_fact_result(
+        FactResultWrite(
+            fact_result_id=fact_result_id,
+            run_id=run_id,
+            requested_fact_id=fact_id,
+            produced_by_step_id=step_id,
+            result_kind=FactResultKind.ANSWERED,
+        )
+    )
+    recorder.record_memory_artifact(
+        MemoryArtifactWrite(
+            memory_artifact_id=artifact_id,
+            run_id=run_id,
+            produced_by_step_id=step_id,
+            source_kind=MemoryArtifactSourceKind.FACT_RESULT,
+            fact_result_id=fact_result_id,
+            payload_schema="fervis.memory_artifact",
+            payload_schema_rev=1,
+            payload_json={
+                "sourceKind": "fact_result",
+                "artifactId": artifact_id,
+                "outcome": "answered",
+                "addresses": [
+                    {
+                        "address": "value.answer_1",
+                        "kind": "value",
+                        "value": {"type": "text", "value": value},
+                    }
+                ],
+                "provenance": {"runId": run_id},
+                "sourceQuestion": "How many sales did we make today?",
+                "sourceAnswer": value,
+            },
+        )
+    )
 
 
 def test_sql_storage_round_trips_read_context_ref_into_lookup_request(
@@ -293,7 +823,9 @@ def test_sql_storage_lists_authorized_conversations_for_web_client(
             "conversationId": "conversation-newer",
             "firstQuestion": "How many orders came in today?",
             "latestQuestionId": newer.question_id,
-            "currentRunId": newer.run_id,
+            "primaryRunId": newer.run_id,
+            "latestRunId": newer.run_id,
+            "activeRunId": newer.run_id,
             "status": "QUEUED",
             "runCount": 1,
             "updatedAt": "2026-06-27T10:15:00+00:00",
@@ -302,7 +834,9 @@ def test_sql_storage_lists_authorized_conversations_for_web_client(
             "conversationId": "conversation-older",
             "firstQuestion": "How many orders came in yesterday?",
             "latestQuestionId": older.question_id,
-            "currentRunId": older.run_id,
+            "primaryRunId": older.run_id,
+            "latestRunId": older.run_id,
+            "activeRunId": older.run_id,
             "status": "QUEUED",
             "runCount": 1,
             "updatedAt": "2026-06-26T09:00:00+00:00",
@@ -344,6 +878,32 @@ def test_sql_storage_question_state_uses_conversation_owner_not_work_item_contex
     assert state["questionId"] == result.question_id
 
 
+def test_sql_question_projection_rejects_missing_work_state(tmp_path: Path) -> None:
+    root = _migrated_fastapi_project(tmp_path)
+    bundle = _storage_bundle(root)
+    owner = _principal("owner", "owner")
+    result = bundle.questions.ask(
+        AskRequest(
+            question="How many orders came in today?",
+            principal=owner,
+            execution_mode=ExecutionMode.QUEUED,
+            conversation_id="conversation-missing-work",
+        )
+    )
+    with bundle.engine.begin() as connection:
+        work = metadata.tables["fervis_run_work_item"]
+        connection.execute(work.delete().where(work.c.run_id == result.run_id))
+
+    with pytest.raises(
+        RuntimeError,
+        match="question run is missing its persisted work state",
+    ):
+        bundle.questions.get_question_state(
+            result.question_id,
+            principal=owner,
+        )
+
+
 def test_sql_storage_rejects_cross_subject_conversation_reuse(
     tmp_path: Path,
 ) -> None:
@@ -379,7 +939,7 @@ def test_sql_storage_rejects_cross_subject_conversation_reuse(
     )
 
 
-def test_sql_storage_idempotency_replay_is_scoped_to_read_context(
+def test_sql_storage_idempotency_lookup_is_scoped_to_read_context(
     tmp_path: Path,
 ) -> None:
     root = _migrated_fastapi_project(tmp_path)
@@ -473,8 +1033,8 @@ def test_sql_storage_clarification_continuation_authorizes_trigger_run(
     )
 
     with pytest.raises(
-        LineageRecorderConflict,
-        match="clarification trigger run must belong to the same question",
+        PermissionError,
+        match="continuation run is not an authorized terminal run",
     ):
         bundle.questions.continue_question(
             ContinueQuestionRequest(
@@ -483,7 +1043,7 @@ def test_sql_storage_clarification_continuation_authorizes_trigger_run(
                 principal=_principal("other", "other"),
                 trigger_kind=RunTriggerKind.CLARIFICATION_RESPONSE,
                 execution_mode=ExecutionMode.QUEUED,
-                trigger_clarification_response_run_id=owner_result.run_id,
+                base_run_id=owner_result.run_id,
                 trigger_clarification_response_id="owner-clarification",
             )
         )
@@ -723,7 +1283,7 @@ def test_sql_storage_worker_execute_returns_lookup_payload(tmp_path: Path) -> No
 
     assert executed.status == "COMPLETED"
     assert executed.answer == "42 orders"
-    assert executed.result_data == {"value": 42}
+    assert executed.result_data == _CANONICAL_ANSWER_RESULT
     terminal = terminal_result_for_run(bundle.engine, result.run_id)
     assert terminal is not None
     assert terminal.status == "COMPLETED"
@@ -1211,7 +1771,7 @@ def test_fervis_runtime_ask_wait_executes_sqlite_queued_run_to_terminal(
             "event": "run.completed",
             "next_actions": [inspect_question_action(events[0]["question_id"])],
             "question_id": events[0]["question_id"],
-            "result_data": {"value": 42},
+            "result_data": _CANONICAL_ANSWER_RESULT,
             "run_id": run_id,
             "status": "COMPLETED",
         },
@@ -1371,10 +1931,18 @@ def test_fervis_runtime_ask_wait_executes_configured_fastapi_lookup(
         "event": "run.completed",
         "next_actions": [inspect_question_action(events[0]["question_id"])],
         "question_id": events[0]["question_id"],
-        "result_data": {"value": 42},
+        "result_data": _CANONICAL_ANSWER_RESULT,
         "run_id": run_id,
         "status": "COMPLETED",
     }
+    bundle = _storage_bundle(root)
+    run_detail = bundle.questions.get_question_run(
+        events[0]["question_id"],
+        run_id,
+        principal=_principal("u1", "u1"),
+    )
+    assert run_detail is not None
+    assert isinstance(run_detail["durationMs"], int)
     assert _work_item_status(root, run_id) == "COMPLETED"
 
 
@@ -1502,37 +2070,11 @@ def test_database_url_persistence_uses_sql_storage_adapters(
     assert bundle.kind == "database_url"
 
 
-def test_sql_read_context_migration_adds_read_context_column(
-    tmp_path: Path,
-) -> None:
-    import importlib
-
-    from alembic.migration import MigrationContext
-    from alembic.operations import Operations
+def test_fresh_sql_baseline_contains_read_context_columns() -> None:
     from fervis.project.persistence.schema_snapshots import v0001
 
-    database_path = tmp_path / "fervis.sqlite3"
-    engine = create_sqlite_engine(f"sqlite:///{database_path}")
-    v0001.metadata.create_all(engine)
-    revision = importlib.import_module(
-        "fervis.project.persistence_migrations.versions.0002_read_context_ref"
-    )
-    with engine.begin() as connection:
-        original_op = revision.op
-        revision.op = Operations(MigrationContext.configure(connection))
-        try:
-            revision.upgrade()
-        finally:
-            revision.op = original_op
-        columns = {
-            row[1]
-            for row in connection.exec_driver_sql(
-                "PRAGMA table_info(fervis_run_work_item)"
-            )
-        }
-
-    assert "read_context_ref" in columns
-    assert "subject_ref" not in columns
+    assert "read_context_ref" in v0001.fervis_conversation.c
+    assert "read_context_ref" in v0001.fervis_run_work_item.c
 
 
 class _FailingLookup(QuestionLookupPort):
@@ -1878,10 +2420,10 @@ def _work_item_read_context_ref(root: Path, run_id: str) -> dict[str, object]:
 def _work_item_runtime_context(root: Path, run_id: str) -> dict[str, object]:
     with sqlite3.connect(root / ".fervis" / "fervis.sqlite3") as connection:
         row = connection.execute(
-            "SELECT runtime_context FROM fervis_run_work_item WHERE run_id = ?",
+            "SELECT execution_spec FROM fervis_run_work_item WHERE run_id = ?",
             (run_id,),
         ).fetchone()
-    return json.loads(str(row[0]))
+    return dict(json.loads(str(row[0]))["runtime_context"])
 
 
 def _conversation_read_context_ref(

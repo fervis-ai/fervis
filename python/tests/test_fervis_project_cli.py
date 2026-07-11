@@ -1161,7 +1161,7 @@ def test_configured_fervis_fastapi_mount_uses_configured_question_interface(
                 status_code=202,
                 payload={
                     "questionId": "question-1",
-                    "currentRunId": "run-1",
+                    "latestRunId": "run-1",
                     "status": "RUNNING",
                 },
             )
@@ -1210,7 +1210,7 @@ def test_configured_fervis_fastapi_mount_uses_configured_question_interface(
     assert response.status_code == 202
     assert response.json() == {
         "questionId": "question-1",
-        "currentRunId": "run-1",
+        "latestRunId": "run-1",
         "status": "RUNNING",
     }
     assert calls == [
@@ -4281,7 +4281,7 @@ def test_fervis_migrate_creates_sqlite_store_and_unblocks_doctor(
     assert migrate_envelope["payload"]["target"] == "sqlite"
     assert migrate_envelope["payload"]["location"] == ".fervis/fervis.sqlite3"
     assert migrate_envelope["payload"]["status"] == "applied"
-    assert migrate_envelope["payload"]["target_revision"] == "fervis.0002"
+    assert migrate_envelope["payload"]["target_revision"] == "fervis.0001"
     assert migrate_envelope["next_actions"] == [run_doctor_action()]
     assert (root / ".fervis" / "fervis.sqlite3").is_file()
     with sqlite3.connect(root / ".fervis" / "fervis.sqlite3") as connection:
@@ -5009,7 +5009,7 @@ def _insert_minimal_run(connection, *, run_id: str, run_number: int) -> None:
             "(conversation_id, tenant_id, origin_kind, parent_conversation_id, "
             "forked_after_question_id, forked_after_run_id, origin_ref, "
             "read_context_ref, created_at) "
-            "VALUES ('c1', 't1', 'direct', NULL, NULL, NULL, '', "
+            "VALUES ('c1', 't1', 'initial', NULL, NULL, NULL, '', "
             ":read_context_ref, "
             "'2026-06-23T00:00:00')"
         ),
@@ -5033,12 +5033,11 @@ def _insert_minimal_run(connection, *, run_id: str, run_number: int) -> None:
     connection.execute(
         text(
             "INSERT INTO fervis_question_run "
-            "(run_id, question_id, run_number, trigger_kind, previous_run_id, "
-            "trigger_clarification_response_run_id, "
-            "trigger_clarification_response_id, integrated_question, adapter_ref, "
+            "(run_id, question_id, run_number, kind, trigger_kind, base_run_id, "
+            "trigger_clarification_response_id, adapter_ref, "
             "runtime_version, created_at) "
-            "VALUES (:run_id, :question_id, 1, 'initial', NULL, NULL, '', "
-            "'Question?', 'test', 'test', '2026-06-23T00:00:00')"
+            "VALUES (:run_id, :question_id, 1, 'model_assisted', 'initial', NULL, '', "
+            "'test', 'test', '2026-06-23T00:00:00')"
         ),
         {"run_id": run_id, "question_id": question_id},
     )

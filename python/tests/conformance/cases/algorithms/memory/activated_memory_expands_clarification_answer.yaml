@@ -5,6 +5,7 @@ migrates:
 kind: algorithm
 algorithm: conversation_memory.expand_activated
 input:
+  current_question: Which store?
   conversation_context:
     factArtifacts:
       - artifactId: turn_1
@@ -15,21 +16,13 @@ input:
             kind: outcome
             terminal: needs_clarification
             clarificationQuestions: ["Which store do you mean?"]
-  memory_cards:
-    mem.clarification:
-      kind: clarification_answer
-      artifact_id: turn_1
-      address: outcome.needs_clarification
-      clarification_question: Which store do you mean?
-      pending_integrated_question: How much sales did we make yesterday?
-  used_memory_ids: [mem.clarification]
+  used_memory_ids: [turn_1.outcome.needs_clarification]
 expect:
   result_contains:
     activatedMemory:
-      mem.clarification:
+      turn_1.outcome.needs_clarification:
         kind: clarification_answer
         clarification_chain_id: turn_1
         clarification_question: Which store do you mean?
-        pending_integrated_question: How much sales did we make yesterday?
+        question_being_clarified: How much sales did we make yesterday?
         activation_fact_refs: [outcome.needs_clarification]
-

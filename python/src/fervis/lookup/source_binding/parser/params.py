@@ -5,9 +5,15 @@ from __future__ import annotations
 from itertools import product
 from typing import Any
 
-from fervis.lookup.fact_plan.relations import EndpointParamBinding
-from fervis.lookup.fact_plan.values import FactValue, TimeComponent, ValueComponent, ValueKind
+from fervis.lookup.source_binding.compiler_ir import (
+    DraftEndpointParamBinding,
+    RelationInputOrigin,
+)
+from fervis.lookup.answer_program.values import FactValue, TimeComponent, ValueComponent, ValueKind
 from fervis.lookup.fact_planning.value_components import value_component
+from fervis.lookup.relation_catalog.parameter_values import (
+    parse_catalog_parameter_value,
+)
 from fervis.lookup.source_binding import provider_contract as provider_output
 from fervis.lookup.source_binding.model import AnswerPopulation
 from fervis.lookup.source_binding.param_surface import param_has_default_value
@@ -29,6 +35,7 @@ def parse_param_decision_binding_sets(
     candidate: Any,
     available_values: tuple[FactValue, ...],
     answer_population: AnswerPopulation,
+    parameter_namespace: str,
     effective_param_ids: tuple[str, ...] | None = None,
 ) -> ParamDecisionParse:
     params_by_id = {
@@ -44,7 +51,7 @@ def parse_param_decision_binding_sets(
             if param_id in effective
         }
     options_by_id = _param_decision_options_by_id(params_by_id)
-    output: list[tuple[tuple[EndpointParamBinding, ...], ...]] = []
+    output: list[tuple[tuple[DraftEndpointParamBinding, ...], ...]] = []
     normalized_decisions = normalize_param_decisions(raw_decisions)
     if not params_by_id and not normalized_decisions:
         return ParamDecisionParse(binding_sets=((),))
@@ -63,6 +70,8 @@ def parse_param_decision_binding_sets(
                     param_id=param_id,
                     value=choice_set.included_values,
                     param=param,
+                    origin_kind=RelationInputOrigin.SEMANTIC_CONTROL,
+                    parameter_id=f"{parameter_namespace}.param.{param_id}",
                 )
             )
             continue
@@ -78,16 +87,10 @@ def parse_param_decision_binding_sets(
                 raise ValueError(
                     "source param decision uses default but param has no default"
                 )
-            output.append(
-                (
-                    (
-                        EndpointParamBinding(
-                            param_id=param_id,
-                            value=option.get("value", param.get("default")),
-                        ),
-                    ),
-                )
-            )
+            output.append(((),))
+            continue
+        if decision == "omit":
+            output.append(((),))
             continue
         if decision != "bind":
             raise ValueError("unsupported source param decision")
@@ -96,6 +99,8 @@ def parse_param_decision_binding_sets(
         if choices and value not in {str(choice) for choice in choices}:
             raise ValueError("source binding param value is not an available choice")
         proof_refs: tuple[str, ...] = ()
+        value_id = ""
+        value_component = ValueComponent.VALUE
         binding_values = param.get("binding_values")
         if binding_values:
             allowed_value_ids = {
@@ -105,11 +110,17 @@ def parse_param_decision_binding_sets(
             }
             if value not in allowed_value_ids:
                 raise ValueError("source binding param value is not bindable")
-            value, proof_refs = _resolved_binding_value(
+            value, proof_refs, value_id, value_component = _resolved_binding_value(
                 value,
                 param=param,
                 option=option,
                 available_values=available_values,
+            )
+        else:
+            value = parse_catalog_parameter_value(
+                value,
+                type_name=str(param.get("type") or ""),
+                choices=tuple(str(choice) for choice in choices or ()),
             )
         output.append(
             _param_binding_sets(
@@ -117,6 +128,18 @@ def parse_param_decision_binding_sets(
                 value=value,
                 param=param,
                 proof_refs=proof_refs,
+                origin_kind=(
+                    RelationInputOrigin.QUESTION_INPUT
+                    if value_id
+                    else RelationInputOrigin.SEMANTIC_CONTROL
+                ),
+                value_id=value_id,
+                value_component=value_component.value,
+                parameter_id=(
+                    ""
+                    if value_id
+                    else f"{parameter_namespace}.param.{param_id}"
+                ),
             )
         )
     missing_param_ids = {
@@ -174,23 +197,36 @@ def _param_binding_sets(
     value: object,
     param: dict[str, Any],
     proof_refs: tuple[str, ...] = (),
-) -> tuple[tuple[EndpointParamBinding, ...], ...]:
+    origin_kind: RelationInputOrigin,
+    value_id: str = "",
+    value_component: str = "value",
+    parameter_id: str = "",
+) -> tuple[tuple[DraftEndpointParamBinding, ...], ...]:
     if isinstance(value, tuple) and not _param_accepts_collection(param):
         return tuple(
             (
-                EndpointParamBinding(
+                DraftEndpointParamBinding(
                     param_id=param_id,
-                    value=item,
+                    value=value,
+                    origin_kind=origin_kind,
+                    value_id=value_id,
+                    value_component=value_component,
+                    value_item_index=index,
+                    parameter_id=parameter_id,
                     proof_refs=proof_refs,
                 ),
             )
-            for item in value
+            for index, _item in enumerate(value)
         )
     return (
         (
-            EndpointParamBinding(
+            DraftEndpointParamBinding(
                 param_id=param_id,
                 value=value,
+                origin_kind=origin_kind,
+                value_id=value_id,
+                value_component=value_component,
+                parameter_id=parameter_id,
                 proof_refs=proof_refs,
             ),
         ),
@@ -262,18 +298,18 @@ def _resolved_binding_value(
     param: dict[str, Any],
     option: dict[str, Any],
     available_values: tuple[FactValue, ...],
-) -> tuple[object, tuple[str, ...]]:
-    if str(param.get("type") or "") == "boolean" and value in {"true", "false"}:
-        return value == "true", ()
+) -> tuple[object, tuple[str, ...], str, ValueComponent | TimeComponent]:
     values_by_id = {item.id: item for item in available_values}
     fact_value = values_by_id.get(value)
     if fact_value is None:
-        return value, ()
+        if str(param.get("type") or "") == "boolean" and value in {"true", "false"}:
+            return value == "true", (), "", ValueComponent.VALUE
+        return value, (), "", ValueComponent.VALUE
     component = _value_component_from_option(option)
     resolved = value_component(fact_value, component)
     if fact_value.kind == ValueKind.IDENTITY_SET:
-        return resolved, tuple(fact_value.proof_refs)
-    return str(resolved), tuple(fact_value.proof_refs)
+        return resolved, tuple(fact_value.proof_refs), fact_value.id, component
+    return str(resolved), tuple(fact_value.proof_refs), fact_value.id, component
 
 
 def _value_component_from_option(
@@ -290,10 +326,10 @@ def _value_component_from_option(
 
 
 def merged_param_bindings(
-    applied: tuple[EndpointParamBinding, ...],
-    model_authored: tuple[EndpointParamBinding, ...],
-) -> tuple[EndpointParamBinding, ...]:
-    output: list[EndpointParamBinding] = []
+    applied: tuple[DraftEndpointParamBinding, ...],
+    model_authored: tuple[DraftEndpointParamBinding, ...],
+) -> tuple[DraftEndpointParamBinding, ...]:
+    output: list[DraftEndpointParamBinding] = []
     seen: set[str] = set()
     for binding in (*applied, *model_authored):
         if binding.param_id in seen:

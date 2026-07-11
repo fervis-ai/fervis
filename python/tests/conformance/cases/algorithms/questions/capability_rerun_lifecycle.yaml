@@ -1,0 +1,58 @@
+id: capability_rerun_lifecycle
+kind: algorithm
+algorithm: questions.lifecycle
+description: Applying one declared capability creates and executes one deterministic child run with its program revision.
+input:
+  schema_revision: 1
+  operation: rerun
+  state:
+    question_count: 1
+    run_count: 1
+    questions:
+      - question_id: question_1
+        conversation_id: conversation_1
+        original_question: How many sales did we make today?
+        principal: &principal {principal_id: user_1, tenant_id: tenant_1}
+    program_invocations:
+      - run_id: run_base
+        kind: compiled_question
+        program_id: ap_d261575e1831f8d36c1424830364b3f6dda4c4b6e86b1d1bd7e31aea5c415e7c
+        program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/capability}
+        bindings:
+          - parameter_id: question.store_ids
+            value: {kind: identity_set, identity_type: store, identity_field: store_id, values: [store_1, store_2]}
+            provenance: {kind: question_input}
+    program_result:
+      status: COMPLETED
+      answer: '2'
+      result_data: {count: 2}
+      terminal_lineage_recorded: true
+  command:
+    question_id: question_1
+    base_run_id: run_base
+    principal: *principal
+    idempotency_key: rerun_sale_channel
+    capability_application:
+      capability_id: filter_by_sale_channel
+      binding:
+        parameter_id: semantic.sale_channels
+        value: {kind: string_set, values: [STORE]}
+        provenance: {kind: semantic_choice, refs: [governance:sales.channel]}
+  after_enqueue: {process: true, worker_id: worker_1, active_attempt: 1}
+expect:
+  result_contains:
+    result: {status: QUEUED, question_id: question_1, run_id: run_1}
+    execution_result: {status: COMPLETED, answer: '2'}
+    question_count: 1
+    run_count: 2
+    run:
+      kind: rerun_program
+      trigger_kind: rerun
+      base_run_id: run_base
+      patch_id_present: false
+      revision_id_present: true
+      binding_ids: [question.store_ids, semantic.sale_channels]
+    memory_call_count: 0
+    model_call_count: 0
+    program_call_count: 1
+    base_run_unchanged: true

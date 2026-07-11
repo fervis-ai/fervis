@@ -9,9 +9,6 @@ from fervis.lookup.relation_catalog.selection import (
     EntityTargetCatalogSearchTerms,
     RequestedFactResourceNameMatches,
 )
-from fervis.lookup.conversation_resolution.overlay import (
-    ConversationResolutionOverlay,
-)
 from fervis.lookup.question_contract import RequestedFact
 from fervis.lookup.turn_prompts.context import HostPromptContext
 
@@ -25,7 +22,6 @@ class QueryEnrichmentRequest:
     conversation_context: dict[str, object]
     requested_facts: tuple[RequestedFact, ...]
     relation_catalog: RelationCatalog
-    conversation_resolution_overlay: ConversationResolutionOverlay | None = None
     host: HostPromptContext = field(default_factory=HostPromptContext)
 
 

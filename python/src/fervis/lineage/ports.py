@@ -21,6 +21,8 @@ from fervis.lineage.recorder import (
     ModelCallUsageWrite,
     ModelCallWrite,
     QuestionRunWrite,
+    ProgramInvocationBundleWrite,
+    ProgramRevisionBundleWrite,
     QuestionWrite,
     RequestedFactWrite,
     RunArtifactWrite,
@@ -53,6 +55,14 @@ class LineageRecorderPort(Protocol):
     def record_question(self, question: QuestionWrite) -> QuestionWrite: ...
 
     def start_run(self, run: QuestionRunWrite) -> QuestionRunWrite: ...
+
+    def record_program_invocation(
+        self, bundle: ProgramInvocationBundleWrite
+    ) -> ProgramInvocationBundleWrite: ...
+
+    def record_program_revision(
+        self, bundle: ProgramRevisionBundleWrite
+    ) -> ProgramRevisionBundleWrite: ...
 
     def record_step(self, step: RunStepWrite) -> RunStepWrite: ...
 

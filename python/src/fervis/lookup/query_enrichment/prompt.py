@@ -12,9 +12,6 @@ from fervis.lookup.turn_prompts import (
 from fervis.lookup.question_contract.answer_output_support import (
     ANSWER_OUTPUT_SUPPORT_ROLE_VALUES,
 )
-from fervis.lookup.conversation_resolution import (
-    conversation_resolution_value_frame_instruction_lines,
-)
 from fervis.lookup.turn_prompts.projections import answer_output_prompt_payload
 from fervis.lookup.query_enrichment.model import (
     QueryEnrichmentRequest,
@@ -75,9 +72,6 @@ class QueryEnrichmentTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Conversation Resolution Annotations",
                 (
-                    *conversation_resolution_value_frame_instruction_lines(),
-                    "When a value_frames item applies to a requested fact, resolved_frame_text is authoritative for the intended metric, attribute, relation, or comparison.",
-                    "Do not derive source_text entries or matching_resource_names from broad current wording when resolved_frame_text gives the resolved meaning.",
                 ),
             ),
             builder.instruction_block(
@@ -88,8 +82,7 @@ class QueryEnrichmentTurnPrompt(TurnPromptBase):
                     "Each row says: for this answer_output and support_role, this source_text could be backed by these API resource_names.",
                     "Copy answer_output_id verbatim from requested_facts.answer_outputs.",
                     "Copy support_role from the allowed support_roles.",
-                    "Each source_text is an exact phrase from the current question, requested fact, answer output, or conversation-resolution value-frame annotations.",
-                    "Use conversation-resolution value-frame annotations as authoritative source text when they resolve the requested fact, measure, entity, relation, comparison, or value frame.",
+                    "Each source_text is an exact phrase from the current question, requested fact, answer output, or resolved question inputs.",
                     "Create source_text entries for phrases that could name a domain concept, event, record, amount source, actor, object, or grouping entity in the API.",
                     "Do not create entries for words that only express operation, ranking, output shape, or time scope unless they also name an API resource.",
                     "For each answer_output, include every resource_name that could support that output's row population, answer value, measured value, group key, or population scope.",

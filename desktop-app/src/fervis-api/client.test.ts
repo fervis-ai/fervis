@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { completedRunFixture, conversationListFixture } from "./__fixtures__/payloads";
+import {
+  completedRunFixture,
+  conversationListFixture,
+  questionStateFixture
+} from "./__fixtures__/payloads";
 import {
   createFervisHttpClient,
   type FervisApiError
@@ -76,5 +80,82 @@ describe("Fervis HTTP API client", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "http://127.0.0.1:8000/fervis/questions/q%2Fwith%20slash/runs/run%3Apoll/"
     );
+  });
+
+  it("submits typed deterministic reruns without model request fields", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify(questionStateFixture), {
+        headers: { "Content-Type": "application/json" },
+        status: 202
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createFervisHttpClient({
+      authToken: "",
+      baseUrl: "http://127.0.0.1:8000/fervis"
+    });
+
+    await client.rerunQuestion("q_sales", {
+      triggerKind: "rerun",
+      baseRunId: "run_sales",
+      patch: {
+        operations: [
+          {
+            kind: "set",
+            parameterId: "population.sale_states",
+            value: {
+              kind: "string_set",
+              values: ["COMPLETED", "PLACED"]
+            }
+          }
+        ]
+      }
+    });
+
+    const request = fetchMock.mock.calls[0];
+    expect(request?.[0]).toBe(
+      "http://127.0.0.1:8000/fervis/questions/q_sales/runs/"
+    );
+    expect(JSON.parse(String(request?.[1]?.body))).toEqual({
+      triggerKind: "rerun",
+      baseRunId: "run_sales",
+      patch: {
+        operations: [
+          {
+            kind: "set",
+            parameterId: "population.sale_states",
+            value: {
+              kind: "string_set",
+              values: ["COMPLETED", "PLACED"]
+            }
+          }
+        ]
+      }
+    });
+  });
+
+  it("submits same-binding reruns without inventing an empty patch", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify(questionStateFixture), {
+        headers: { "Content-Type": "application/json" },
+        status: 202
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createFervisHttpClient({
+      authToken: "",
+      baseUrl: "http://127.0.0.1:8000/fervis"
+    });
+
+    await client.rerunQuestion("q_sales", {
+      triggerKind: "rerun",
+      baseRunId: "run_sales"
+    });
+
+    const request = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(request?.[1]?.body))).toEqual({
+      triggerKind: "rerun",
+      baseRunId: "run_sales"
+    });
   });
 });

@@ -1,10 +1,10 @@
-"""Conversation-resolution contract models."""
+"""Closed conversation-resolution contracts."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, TypeAlias
 
 from fervis.memory.conversation_context import (
     ConversationContextFrame,
@@ -13,10 +13,219 @@ from fervis.memory.conversation_context import (
 from fervis.lookup.turn_prompts.context import HostPromptContext
 
 
-class ConversationResolutionKind(StrEnum):
-    STANDALONE = "standalone"
-    RESOLVED = "resolved"
-    NEEDS_CLARIFICATION = "needs_clarification"
+class ResolutionSourceKind(StrEnum):
+    CURRENT_SPAN = "current_span"
+    CONTEXT_ANCHOR = "context_anchor"
+    FRAME_PART = "frame_part"
+
+
+@dataclass(frozen=True)
+class CurrentSpanSource:
+    text: str
+    occurrence: int
+    kind: ResolutionSourceKind = ResolutionSourceKind.CURRENT_SPAN
+
+    def __post_init__(self) -> None:
+        if not self.text.strip() or self.occurrence < 1:
+            raise ValueError("current-span source requires one copied occurrence")
+
+    def to_model_dict(self) -> dict[str, object]:
+        return {
+            "kind": self.kind.value,
+            "text": self.text,
+            "occurrence": self.occurrence,
+        }
+
+    def memory_references(self) -> tuple[str, ...]:
+        return ()
+
+    def frame_part_references(self) -> tuple[tuple[str, str], ...]:
+        return ()
+
+    def uses_prior_context(self) -> bool:
+        return False
+
+
+@dataclass(frozen=True)
+class ContextAnchorSource:
+    source_id: str
+    memory_id: str
+    source_text: str
+    kind: ResolutionSourceKind = ResolutionSourceKind.CONTEXT_ANCHOR
+
+    def __post_init__(self) -> None:
+        if not self.source_id.strip() or not self.memory_id.strip():
+            raise ValueError("context-anchor source requires stable identity")
+        if not self.source_text.strip():
+            raise ValueError("context-anchor source requires copied source text")
+
+    def to_model_dict(self) -> dict[str, str]:
+        return {
+            "kind": self.kind.value,
+            "source_id": self.source_id,
+            "memory_id": self.memory_id,
+            "source_text": self.source_text,
+        }
+
+    def memory_references(self) -> tuple[str, ...]:
+        return (self.memory_id,)
+
+    def frame_part_references(self) -> tuple[tuple[str, str], ...]:
+        return ()
+
+    def uses_prior_context(self) -> bool:
+        return True
+
+
+@dataclass(frozen=True)
+class FramePartSource:
+    frame_id: str
+    part_id: str
+    kind: ResolutionSourceKind = ResolutionSourceKind.FRAME_PART
+
+    def __post_init__(self) -> None:
+        if not self.frame_id.strip() or not self.part_id.strip():
+            raise ValueError("frame-part source requires stable identity")
+
+    def to_model_dict(self) -> dict[str, str]:
+        return {
+            "kind": self.kind.value,
+            "frame_id": self.frame_id,
+            "part_id": self.part_id,
+        }
+
+    def memory_references(self) -> tuple[str, ...]:
+        return ()
+
+    def frame_part_references(self) -> tuple[tuple[str, str], ...]:
+        return ((self.frame_id, self.part_id),)
+
+    def uses_prior_context(self) -> bool:
+        return True
+
+
+ResolutionSource: TypeAlias = (
+    CurrentSpanSource | ContextAnchorSource | FramePartSource
+)
+
+
+@dataclass(frozen=True)
+class ResolvedConversationValue:
+    value_id: str
+    resolved_text: str
+    sources: tuple[ResolutionSource, ...]
+
+    def __post_init__(self) -> None:
+        if not self.value_id.strip() or not self.resolved_text.strip():
+            raise ValueError("resolved value requires identity and standalone text")
+        if not self.sources:
+            raise ValueError("resolved value requires attributed sources")
+
+    def to_model_dict(self) -> dict[str, object]:
+        return {
+            "value_id": self.value_id,
+            "resolved_text": self.resolved_text,
+            "sources": [source.to_model_dict() for source in self.sources],
+        }
+
+
+@dataclass(frozen=True)
+class ResolvedConversationClause:
+    current_clause_text: str
+    occurrence: int
+    resolved_text: str
+    retained_frame_parts: tuple[FramePartSource, ...]
+    values: tuple[ResolvedConversationValue, ...]
+
+    def __post_init__(self) -> None:
+        if not self.current_clause_text.strip() or self.occurrence < 1:
+            raise ValueError("resolved clause requires one current-clause occurrence")
+        if not self.resolved_text.strip():
+            raise ValueError("resolved clause requires complete standalone text")
+        value_ids = tuple(value.value_id for value in self.values)
+        if len(value_ids) != len(set(value_ids)):
+            raise ValueError("resolved clause contains duplicate value ids")
+        retained_refs = tuple(
+            (part.frame_id, part.part_id) for part in self.retained_frame_parts
+        )
+        if len(retained_refs) != len(set(retained_refs)):
+            raise ValueError("resolved clause contains duplicate retained frame parts")
+
+    def to_model_dict(self) -> dict[str, object]:
+        return {
+            "current_clause_text": self.current_clause_text,
+            "occurrence": self.occurrence,
+            "resolved_text": self.resolved_text,
+            "retained_frame_parts": [
+                part.to_model_dict() for part in self.retained_frame_parts
+            ],
+            "values": [value.to_model_dict() for value in self.values],
+        }
+
+
+class FrameArgumentKind(StrEnum):
+    CARRY = "carry"
+    RESOLVED_VALUE = "resolved_value"
+
+
+@dataclass(frozen=True)
+class CarriedFrameArgument:
+    parameter_id: str
+    kind: FrameArgumentKind = FrameArgumentKind.CARRY
+
+    def __post_init__(self) -> None:
+        if not self.parameter_id.strip():
+            raise ValueError("carried frame argument requires parameter identity")
+
+    def to_model_dict(self) -> dict[str, str]:
+        return {"kind": self.kind.value, "parameter_id": self.parameter_id}
+
+    def resolved_value_ref(self) -> str:
+        return ""
+
+
+@dataclass(frozen=True)
+class ResolvedValueFrameArgument:
+    parameter_id: str
+    value_id: str
+    kind: FrameArgumentKind = FrameArgumentKind.RESOLVED_VALUE
+
+    def __post_init__(self) -> None:
+        if not self.parameter_id.strip() or not self.value_id.strip():
+            raise ValueError("resolved frame argument requires parameter and value")
+
+    def to_model_dict(self) -> dict[str, str]:
+        return {
+            "kind": self.kind.value,
+            "parameter_id": self.parameter_id,
+            "value_id": self.value_id,
+        }
+
+    def resolved_value_ref(self) -> str:
+        return self.value_id
+
+
+FrameArgument: TypeAlias = CarriedFrameArgument | ResolvedValueFrameArgument
+
+
+@dataclass(frozen=True)
+class ConversationFrameCall:
+    frame_id: str
+    arguments: tuple[FrameArgument, ...]
+
+    def __post_init__(self) -> None:
+        if not self.frame_id.strip():
+            raise ValueError("frame call requires frame identity")
+        parameter_ids = tuple(argument.parameter_id for argument in self.arguments)
+        if len(parameter_ids) != len(set(parameter_ids)):
+            raise ValueError("frame call contains duplicate arguments")
+
+    def to_model_dict(self) -> dict[str, object]:
+        return {
+            "kind": "call",
+            "frame_id": self.frame_id,
+            "arguments": [argument.to_model_dict() for argument in self.arguments],
+        }
 
 
 @dataclass(frozen=True)
@@ -25,12 +234,10 @@ class SourceEvidence:
     exact_source_texts: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        if not self.source_id.strip():
-            raise ValueError("source evidence requires source_id")
-        if not self.exact_source_texts:
-            raise ValueError("source evidence requires exact_source_texts")
+        if not self.source_id.strip() or not self.exact_source_texts:
+            raise ValueError("source evidence requires identity and copied text")
         if any(not text.strip() for text in self.exact_source_texts):
-            raise ValueError("source evidence exact_source_texts must be non-empty")
+            raise ValueError("source evidence text must be non-empty")
 
     def to_model_dict(self) -> dict[str, Any]:
         return {
@@ -39,233 +246,18 @@ class SourceEvidence:
         }
 
 
-class SelectedFrameStatus(StrEnum):
-    LITERAL = "literal"
-    CONTEXTUAL = "contextual"
-
-
-class DependencyKind(StrEnum):
-    REFERENCE = "reference"
-    SCOPE = "scope"
-
-
-class MeaningComponentKind(StrEnum):
-    ENTITY = "entity"
-    SCOPE = "scope"
-    ROW_SET = "row_set"
-    VALUE = "value"
-    OTHER = "other"
-
-
-class CurrentValueSurfaceKind(StrEnum):
-    SELF_SUFFICIENT_CURRENT_VALUE = "self_sufficient_current_value"
-    BROAD_CURRENT_VALUE = "broad_current_value"
-    NO_VALUE_REQUEST = "no_value_request"
-
-
-class ContextFrameChoiceKind(StrEnum):
-    USE_FRAME = "use_frame"
-    CURRENT_TEXT_NAMES_DIFFERENT_VALUE = "current_text_names_different_value"
-    NOT_FOR_THIS_CLAUSE = "not_for_this_clause"
-    AMBIGUOUS = "ambiguous"
-
-
-@dataclass(frozen=True)
-class CurrentValueSurface:
-    text: str
-    kind: CurrentValueSurfaceKind
-
-    def __post_init__(self) -> None:
-        if not self.text.strip():
-            raise ValueError("current value surface requires text")
-        if not isinstance(self.kind, CurrentValueSurfaceKind):
-            object.__setattr__(self, "kind", CurrentValueSurfaceKind(str(self.kind)))
-
-    def to_model_dict(self) -> dict[str, Any]:
-        return {
-            "text": self.text,
-            "kind": self.kind.value,
-        }
-
-
-@dataclass(frozen=True)
-class ContextFrameChoice:
-    frame_id: str
-    choice: ContextFrameChoiceKind
-    current_conflict_quotes: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        if not self.frame_id.strip():
-            raise ValueError("context frame choice requires frame_id")
-        if not isinstance(self.choice, ContextFrameChoiceKind):
-            object.__setattr__(self, "choice", ContextFrameChoiceKind(str(self.choice)))
-        if (
-            self.choice == ContextFrameChoiceKind.CURRENT_TEXT_NAMES_DIFFERENT_VALUE
-            and not self.current_conflict_quotes
-        ):
-            raise ValueError("current-text value rejection requires conflict quotes")
-        if (
-            self.choice != ContextFrameChoiceKind.CURRENT_TEXT_NAMES_DIFFERENT_VALUE
-            and self.current_conflict_quotes
-        ):
-            raise ValueError("only current-text value rejection can include quotes")
-        if any(not text.strip() for text in self.current_conflict_quotes):
-            raise ValueError("current conflict quotes must be non-empty")
-
-    def to_model_dict(self) -> dict[str, Any]:
-        return {
-            "frame_id": self.frame_id,
-            "choice": self.choice.value,
-            "current_conflict_quotes": list(self.current_conflict_quotes),
-        }
-
-
-@dataclass(frozen=True)
-class RequestedValueFrame:
-    current_value_surface: CurrentValueSurface
-    context_frame_choices: tuple[ContextFrameChoice, ...]
-    selected_frame_status: SelectedFrameStatus
-    selected_context_frame_id: str | None
-    resolved_frame_text: str
-    must_preserve_terms: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.selected_frame_status, SelectedFrameStatus):
-            object.__setattr__(
-                self,
-                "selected_frame_status",
-                SelectedFrameStatus(str(self.selected_frame_status)),
-            )
-        if self.selected_frame_status == SelectedFrameStatus.CONTEXTUAL:
-            if not str(self.selected_context_frame_id or "").strip():
-                raise ValueError("contextual value frame requires selected frame")
-            if not self.resolved_frame_text.strip():
-                raise ValueError("contextual value frame requires resolved text")
-            if not self.must_preserve_terms:
-                raise ValueError("contextual value frame requires preserve terms")
-        if self.selected_frame_status == SelectedFrameStatus.LITERAL:
-            if self.selected_context_frame_id is not None:
-                raise ValueError("literal value frame cannot select context frame")
-            if self.resolved_frame_text != self.current_value_surface.text:
-                raise ValueError(
-                    "literal value frame resolved text must match current value text"
-                )
-            if self.must_preserve_terms:
-                raise ValueError("literal value frame cannot require preserve terms")
-
-    def to_model_dict(self) -> dict[str, Any]:
-        return {
-            "current_value_surface": self.current_value_surface.to_model_dict(),
-            "context_frame_choices": [
-                item.to_model_dict() for item in self.context_frame_choices
-            ],
-        }
-
-
-@dataclass(frozen=True)
-class MeaningComponent:
-    kind: MeaningComponentKind
-    source_id: str
-    source_text: str
-    memory_id: str
-    resolved_text: str
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.kind, MeaningComponentKind):
-            object.__setattr__(self, "kind", MeaningComponentKind(str(self.kind)))
-        if not self.source_id.strip():
-            raise ValueError("meaning component requires source_id")
-        if not self.source_text.strip():
-            raise ValueError("meaning component requires source_text")
-        if not self.memory_id.strip():
-            raise ValueError("meaning component requires memory_id")
-        if not self.resolved_text.strip():
-            raise ValueError("meaning component requires resolved_text")
-
-    def to_model_dict(self) -> dict[str, Any]:
-        return {
-            "kind": self.kind.value,
-            "source_id": self.source_id,
-            "source_text": self.source_text,
-            "memory_id": self.memory_id,
-            "resolved_text": self.resolved_text,
-        }
-
-
-@dataclass(frozen=True)
-class ClauseDependency:
-    anchor_text: str
-    occurrence: int
-    kind: DependencyKind
-    meaning_components: tuple[MeaningComponent, ...]
-    resolved_text: str
-    must_preserve_terms: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        if not self.anchor_text.strip():
-            raise ValueError("dependency requires anchor_text")
-        if self.occurrence < 1:
-            raise ValueError("dependency occurrence must be positive")
-        if not isinstance(self.kind, DependencyKind):
-            object.__setattr__(self, "kind", DependencyKind(str(self.kind)))
-        if not self.meaning_components:
-            raise ValueError("dependency requires meaning_components")
-        if not self.resolved_text.strip():
-            raise ValueError("dependency requires resolved_text")
-
-    def to_model_dict(self) -> dict[str, Any]:
-        return {
-            "anchor_text": self.anchor_text,
-            "occurrence": self.occurrence,
-            "kind": self.kind.value,
-            "meaning_components": [
-                item.to_model_dict() for item in self.meaning_components
-            ],
-            "resolved_text": self.resolved_text,
-            "must_preserve_terms": list(self.must_preserve_terms),
-        }
-
-
-@dataclass(frozen=True)
-class ClauseResolution:
-    current_clause_text: str
-    occurrence: int
-    requested_value_frame: RequestedValueFrame
-    dependencies: tuple[ClauseDependency, ...]
-    resolved_clause_text: str
-
-    def __post_init__(self) -> None:
-        if not self.current_clause_text.strip():
-            raise ValueError("clause resolution requires current_clause_text")
-        if self.occurrence < 1:
-            raise ValueError("clause resolution occurrence must be positive")
-        if not self.resolved_clause_text.strip():
-            raise ValueError("clause resolution requires resolved_clause_text")
-
-    def to_model_dict(self) -> dict[str, Any]:
-        return {
-            "current_clause_text": self.current_clause_text,
-            "occurrence": self.occurrence,
-            "requested_value_frame": self.requested_value_frame.to_model_dict(),
-            "dependencies": [item.to_model_dict() for item in self.dependencies],
-            "resolved_clause_text": self.resolved_clause_text,
-        }
-
-
 @dataclass(frozen=True)
 class CandidateInterpretation:
-    integrated_question: str
+    contextualized_question: str
     supporting_evidence: tuple[SourceEvidence, ...]
 
     def __post_init__(self) -> None:
-        if not self.integrated_question.strip():
-            raise ValueError("candidate interpretation requires integrated_question")
-        if not self.supporting_evidence:
-            raise ValueError("candidate interpretation requires supporting_evidence")
+        if not self.contextualized_question.strip() or not self.supporting_evidence:
+            raise ValueError("candidate interpretation requires text and evidence")
 
     def to_model_dict(self) -> dict[str, Any]:
         return {
-            "integrated_question": self.integrated_question,
+            "contextualized_question": self.contextualized_question,
             "supporting_evidence": [
                 item.to_model_dict() for item in self.supporting_evidence
             ],
@@ -291,9 +283,7 @@ class UnresolvedResolution:
             self.unresolved_kind == "multiple_meanings"
             and len(self.candidate_interpretations) < 2
         ):
-            raise ValueError(
-                "multiple meanings require at least two candidate interpretations"
-            )
+            raise ValueError("multiple meanings require at least two candidates")
 
     def to_model_dict(self) -> dict[str, Any]:
         return {
@@ -307,9 +297,11 @@ class UnresolvedResolution:
 
 @dataclass(frozen=True)
 class ConversationResolution:
-    resolution: ConversationResolutionKind
     current_question_text: str
-    clause_resolutions: tuple[ClauseResolution, ...] = ()
+    resolution_basis: str
+    contextualized_question: str
+    clauses: tuple[ResolvedConversationClause, ...]
+    frame_call: ConversationFrameCall | None = None
     unresolved: UnresolvedResolution = UnresolvedResolution(
         unresolved_kind="none",
         why_unresolved="",
@@ -319,42 +311,71 @@ class ConversationResolution:
     used_memory_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if not isinstance(self.resolution, ConversationResolutionKind):
-            object.__setattr__(
-                self,
-                "resolution",
-                ConversationResolutionKind(str(self.resolution)),
-            )
         if not self.current_question_text.strip():
-            raise ValueError("conversation resolution requires current_question_text")
-        if self.resolution == ConversationResolutionKind.STANDALONE:
-            if self.clause_resolutions:
-                raise ValueError("standalone resolution cannot include clauses")
-            if self.unresolved.unresolved_kind != "none":
-                raise ValueError("standalone resolution cannot include unresolved")
-        elif self.resolution == ConversationResolutionKind.RESOLVED:
-            if not self.clause_resolutions:
-                raise ValueError("resolved conversation requires clause_resolutions")
-            if self.unresolved.unresolved_kind != "none":
-                raise ValueError("resolved conversation cannot include unresolved")
-        elif self.resolution == ConversationResolutionKind.NEEDS_CLARIFICATION:
-            if self.clause_resolutions:
+            raise ValueError("conversation resolution requires current question")
+        if self.unresolved.unresolved_kind == "none":
+            if (
+                not self.resolution_basis.strip()
+                or not self.contextualized_question.strip()
+                or not self.clauses
+            ):
+                raise ValueError("resolved conversation requires complete clauses")
+        elif (
+            self.resolution_basis
+            or self.contextualized_question
+            or self.clauses
+            or self.frame_call is not None
+        ):
+            raise ValueError("unresolved conversation cannot contain a resolution")
+        value_ids = tuple(
+            value.value_id for clause in self.clauses for value in clause.values
+        )
+        if len(value_ids) != len(set(value_ids)):
+            raise ValueError("resolved question contains duplicate value ids")
+        if self.frame_call is not None:
+            referenced_values = {
+                argument.value_id
+                for argument in self.frame_call.arguments
+                if argument.kind is FrameArgumentKind.RESOLVED_VALUE
+            }
+            if not referenced_values.issubset(value_ids):
+                raise ValueError("frame call references an unknown resolved value")
+        if not self.needs_clarification and not self.uses_prior_context:
+            if self.contextualized_question != self.current_question_text or any(
+                clause.resolved_text != clause.current_clause_text
+                for clause in self.clauses
+            ):
                 raise ValueError(
-                    "needs_clarification cannot include clause_resolutions"
+                    "a context-free question must pass through without rewriting"
                 )
-            if self.unresolved.unresolved_kind == "none":
-                raise ValueError("needs_clarification requires unresolved meanings")
-        else:
-            raise ValueError("unsupported conversation resolution")
+
+    @property
+    def needs_clarification(self) -> bool:
+        return self.unresolved.unresolved_kind != "none"
+
+    @property
+    def uses_prior_context(self) -> bool:
+        return self.frame_call is not None or any(
+            source.uses_prior_context()
+            for clause in self.clauses
+            for source in (
+                *clause.retained_frame_parts,
+                *(source for value in clause.values for source in value.sources),
+            )
+        )
 
     def to_model_dict(self) -> dict[str, Any]:
         return {
             "kind": "conversation_resolution",
-            "status": self.resolution.value,
             "current_question_text": self.current_question_text,
-            "clause_resolutions": [
-                item.to_model_dict() for item in self.clause_resolutions
-            ],
+            "resolution_basis": self.resolution_basis,
+            "contextualized_question": self.contextualized_question,
+            "clauses": [clause.to_model_dict() for clause in self.clauses],
+            "frame_call": (
+                self.frame_call.to_model_dict()
+                if self.frame_call is not None
+                else {"kind": "none"}
+            ),
             "unresolved": self.unresolved.to_model_dict(),
         }
 

@@ -10,6 +10,7 @@ from fervis.lineage.enums import (
     PresentationKind,
     ProofEdgeRole,
     ProofNodeKind,
+    QuestionRunKind,
     RunResultKind,
     RunStepKind,
     RunStepKey,
@@ -189,9 +190,8 @@ def test_answer_explanation_json_exposes_conversation_resolution_semantics() -> 
     assert step["semantic"]["conversationClauses"] == [
         {
             "currentClauseText": "what about last month?",
-            "currentValueText": "what about last month?",
-            "resolvedFrameText": "count of completed in-person sales",
-            "resolvedClauseText": "how many completed in-person sales last month?",
+            "resolvedText": "how many completed in-person sales last month?",
+            "resolvedValues": ["last month"],
         }
     ]
 
@@ -234,15 +234,15 @@ def _lineage_rows() -> LineageRows:
                 "run_1",
                 "question_1",
                 1,
+                QuestionRunKind.MODEL_ASSISTED,
                 RunTriggerKind.INITIAL,
-                "Which staff earned most?",
             ),
             RunRow(
                 "run_2",
                 "question_1",
                 2,
+                QuestionRunKind.MODEL_ASSISTED,
                 RunTriggerKind.INITIAL,
-                "Which staff earned most?",
             ),
         ),
         steps=(
@@ -484,13 +484,10 @@ def _lineage_rows_with_conversation_resolution_step() -> LineageRows:
                             kind="conversation_clause",
                             payload={
                                 "current_clause_text": "what about last month?",
-                                "current_value_text": "what about last month?",
-                                "resolved_frame_text": (
-                                    "count of completed in-person sales"
-                                ),
-                                "resolved_clause_text": (
+                                "resolved_text": (
                                     "how many completed in-person sales last month?"
                                 ),
+                                "resolved_values": ("last month",),
                             },
                         ),
                     ),

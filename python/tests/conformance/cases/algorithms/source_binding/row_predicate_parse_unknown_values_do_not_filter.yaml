@@ -1,5 +1,5 @@
 id: row_predicate_parse_unknown_values_do_not_filter
-description: Row predicate values with unknown effect do not create a restrictive row filter.
+description: Unknown row-predicate effects preserve the complete governed population.
 migrates:
   - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_unknown_row_predicate_review_does_not_filter_rows
 kind: algorithm
@@ -11,4 +11,10 @@ input:
       "false": UNKNOWN_TEST_EFFECT
 expect:
   result_contains:
-    row_filters: []
+    population_choices:
+      - controller_kind: row_predicate
+        controller_id: rp.source_1.row.root.is_active
+        field_id: is_active
+        requested_fact_ids: [fact_1]
+        included_values: ["true", "false"]
+        excluded_values: []

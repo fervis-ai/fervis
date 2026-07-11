@@ -15,12 +15,14 @@ input:
         sourceAnswer: Staff One sold two products.
         provenance:
           question_contract:
+            question_inputs: []
             answer_requests:
               - id: fact_1
                 answer_fact: products Staff One sold today
                 answer_outputs:
-                  - description: product list
-                    requested_value_frame: product list
+                  - id: answer_1
+                    description: product list
+                used_question_inputs: []
         addresses:
           - address: entity.staff_1
             kind: entity
@@ -41,4 +43,3 @@ input:
 expect:
   result_contains:
     status: rejected
-

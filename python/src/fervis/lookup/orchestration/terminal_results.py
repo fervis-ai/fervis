@@ -60,10 +60,22 @@ def _grounding_issue_fact_result(
     issues: tuple[GroundingIssue, ...],
 ) -> FactResult:
     clarifications = tuple(
-        clarify(_grounding_issue_cause(issue))
-        for issue in issues
+        clarify(_grounding_issue_cause(group))
+        for group in _grounding_issue_groups(issues)
     )
     return FactResult(outcome=NeedsClarification(clarifications=clarifications))
+
+
+def _grounding_issue_groups(
+    issues: tuple[GroundingIssue, ...],
+) -> tuple[tuple[GroundingIssue, ...], ...]:
+    grouped: dict[tuple[str, str], list[GroundingIssue]] = {}
+    for issue in issues:
+        grouped.setdefault(
+            (issue.requested_fact_id, issue.known_input_id),
+            [],
+        ).append(issue)
+    return tuple(tuple(group) for group in grouped.values())
 
 
 def _grounding_issue_proof_refs(issue: GroundingIssue) -> tuple[str, ...]:
@@ -71,26 +83,50 @@ def _grounding_issue_proof_refs(issue: GroundingIssue) -> tuple[str, ...]:
 
 
 def _grounding_issue_cause(
-    issue: GroundingIssue,
+    issues: tuple[GroundingIssue, ...],
 ) -> TargetReferenceNotFound | TargetReferenceAmbiguous | TargetReferenceUnsupported:
+    issue = issues[0]
     common = {
         "clarification_id": f"clarify_{issue.known_input_id}_grounding",
         "requested_fact_id": issue.requested_fact_id,
         "known_input_id": issue.known_input_id,
         "source_text": str(issue.known_input_text or ""),
         "target_label": _grounding_issue_target_label(issue),
-        "evidence": _grounding_issue_structured_evidence(issue),
-        "proof_refs": _grounding_issue_proof_refs(issue),
+        "evidence": tuple(
+            dict.fromkeys(
+                evidence
+                for grouped_issue in issues
+                for evidence in _grounding_issue_structured_evidence(grouped_issue)
+            )
+        ),
+        "proof_refs": tuple(
+            dict.fromkeys(
+                proof_ref
+                for grouped_issue in issues
+                for proof_ref in _grounding_issue_proof_refs(grouped_issue)
+            )
+        ),
     }
-    if issue.kind == GroundingTerminalKind.AMBIGUOUS_REFERENCE:
+    ambiguous = tuple(
+        grouped_issue
+        for grouped_issue in issues
+        if grouped_issue.kind == GroundingTerminalKind.AMBIGUOUS_REFERENCE
+    )
+    if ambiguous:
         return TargetReferenceAmbiguous(
             **common,
             options=tuple(
-                _clarification_option_from_grounding_candidate(item)
-                for item in issue.candidate_options
+                dict.fromkeys(
+                    _clarification_option_from_grounding_candidate(candidate)
+                    for grouped_issue in ambiguous
+                    for candidate in grouped_issue.candidate_options
+                )
             ),
         )
-    if issue.kind == GroundingTerminalKind.UNRESOLVED_REFERENCE:
+    if any(
+        grouped_issue.kind == GroundingTerminalKind.UNRESOLVED_REFERENCE
+        for grouped_issue in issues
+    ):
         return TargetReferenceNotFound(**common)
     return TargetReferenceUnsupported(**common)
 

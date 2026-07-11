@@ -7,7 +7,7 @@ from fervis.lineage.step_summary import (
     step_summary_json,
     step_semantic_items_from_json,
 )
-from fervis.lookup.fact_plan.values import FactValue, LiteralType
+from fervis.lookup.answer_program.values import FactValue, LiteralType
 from fervis.lookup.grounding.model import CanonicalInputLedger
 from fervis.lookup.lineage.explanation_metadata import (
     lineage_explanation_metadata,
@@ -69,43 +69,26 @@ def test_conversation_resolution_model_turn_summary_projects_clause_semantics() 
             EventPayloadKey.PURPOSE: ModelTurnPurpose.CONVERSATION_RESOLUTION,
             EventPayloadKey.PARSED_ARGUMENTS: {
                 "kind": "conversation_resolution",
-                "status": "resolved",
                 "current_question_text": "what about last month?",
-                "clause_resolutions": [
+                "contextualized_question": (
+                    "how many completed in-person sales last month?"
+                ),
+                "clauses": [
                     {
                         "current_clause_text": "what about last month?",
-                        "requested_value_frame": {
-                            "current_value_surface": {
-                                "text": "what about last month?",
-                                "kind": "broad_current_value",
-                            },
-                            "context_frame_choices": [
-                                {
-                                    "frame_id": "context_frame_1",
-                                    "choice": "use_frame",
-                                    "current_conflict_quotes": [],
-                                }
-                            ],
-                        },
-                        "dependencies": [],
-                        "resolved_clause_text": (
+                        "resolved_text": (
                             "how many completed in-person sales last month?"
                         ),
+                        "values": [
+                            {
+                                "value_id": "time_scope",
+                                "resolved_text": "last month",
+                            }
+                        ],
                     }
                 ],
             },
-            EventPayloadKey.DERIVED_ARGUMENTS: {
-                "value_frames": [
-                    {
-                        "current_clause_text": "what about last month?",
-                        "current_value_text": "what about last month?",
-                        "current_value_kind": "broad_current_value",
-                        "resolved_frame_text": "count of completed in-person sales",
-                        "must_preserve_terms": ["completed in-person sales"],
-                        "used_context_frame_ids": ["context_frame_1"],
-                    }
-                ]
-            },
+            EventPayloadKey.DERIVED_ARGUMENTS: {},
         }
     )
 
@@ -114,9 +97,8 @@ def test_conversation_resolution_model_turn_summary_projects_clause_semantics() 
             "kind": "conversation_clause",
             "payload": {
                 "current_clause_text": "what about last month?",
-                "current_value_text": "what about last month?",
-                "resolved_frame_text": "count of completed in-person sales",
-                "resolved_clause_text": "how many completed in-person sales last month?",
+                "resolved_text": "how many completed in-person sales last month?",
+                "resolved_values": ("last month",),
             },
         }
     ]

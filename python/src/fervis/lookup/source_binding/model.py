@@ -7,12 +7,13 @@ from typing import Any
 
 from fervis.lookup.relation_catalog import IdentityMetadata, RelationCatalog
 from fervis.lookup.relation_catalog.selection import CatalogSelectionResult
-from fervis.lookup.conversation_resolution.overlay import (
-    ConversationResolutionOverlay,
+from fervis.lookup.conversation_resolution.compilation import (
+    CompiledConversationResolution,
 )
 from fervis.lookup.fact_plan.fact_plan import PlanClarification, PlanImpossible
-from fervis.lookup.fact_plan.relations import RelationSource
-from fervis.lookup.fact_plan.values import FactValue
+from fervis.lookup.source_binding.compiler_ir import DraftRelationSource
+from fervis.lookup.answer_program.values import FactValue
+from fervis.lookup.grounding.model import GroundedInputUse
 from fervis.lookup.question_contract import QuestionContract, RequestedFact
 from fervis.lookup.read_eligibility import ReadEligibilityResult
 from fervis.lookup.plan_selection import PlanSelectionSet
@@ -30,10 +31,10 @@ class SourceCandidateDiscoveryRequest:
     memory_inputs: dict[str, Any] = field(default_factory=dict)
     active_memory_ids: tuple[str, ...] = ()
     available_values: tuple[FactValue, ...] = ()
-    available_value_uses: tuple[Any, ...] = ()
+    available_value_uses: tuple[GroundedInputUse, ...] = ()
     read_eligibility: ReadEligibilityResult | None = None
     conversation_context: dict[str, Any] = field(default_factory=dict)
-    conversation_resolution_overlay: ConversationResolutionOverlay | None = None
+    conversation_resolution: CompiledConversationResolution | None = None
     host: HostPromptContext = field(default_factory=HostPromptContext)
 
 
@@ -49,10 +50,10 @@ class SourceBindingRequest:
     memory_inputs: dict[str, Any] = field(default_factory=dict)
     active_memory_ids: tuple[str, ...] = ()
     available_values: tuple[FactValue, ...] = ()
-    available_value_uses: tuple[Any, ...] = ()
+    available_value_uses: tuple[GroundedInputUse, ...] = ()
     read_eligibility: ReadEligibilityResult | None = None
     conversation_context: dict[str, Any] = field(default_factory=dict)
-    conversation_resolution_overlay: ConversationResolutionOverlay | None = None
+    conversation_resolution: CompiledConversationResolution | None = None
     host: HostPromptContext = field(default_factory=HostPromptContext)
 
 
@@ -171,8 +172,8 @@ class BoundSource:
     binding_target_id: str = ""
     requirement_id: str = ""
     answer_population: AnswerPopulation | None = None
-    source: RelationSource | None = None
-    source_invocations: tuple[RelationSource, ...] = ()
+    source: DraftRelationSource | None = None
+    source_invocations: tuple[DraftRelationSource, ...] = ()
     value_id: str = ""
     source_candidate_id: str = ""
     cardinality: str = ""

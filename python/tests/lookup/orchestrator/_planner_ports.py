@@ -14,16 +14,10 @@ def _offered_conversation_resolution_tool_names(
     )
 
 
-def _conversation_resolution_tool_name_for_payload(payload: dict[str, Any]) -> str:
-    del payload
-    return CONVERSATION_RESOLUTION_TOOL_NAME
-
-
 def _select_conversation_resolution_tool_name(
     tool_specs: tuple[Any, ...],
     *,
     responses: dict[str, dict[str, Any]] | None = None,
-    payload: dict[str, Any] | None = None,
 ) -> str:
     offered = _offered_conversation_resolution_tool_names(tool_specs)
     if not offered:
@@ -31,8 +25,7 @@ def _select_conversation_resolution_tool_name(
     for name in offered:
         if responses and name in responses:
             return name
-    wanted = _conversation_resolution_tool_name_for_payload(payload or {})
-    return wanted if wanted in offered else offered[0]
+    return offered[0]
 
 
 @dataclass
@@ -99,7 +92,6 @@ class _RawPlannerPort:
                         "tool": "submit_answer_request_contract",
                         "arguments": _question_contract_payload(
                             question_contract,
-                            prompt=prompt,
                         ),
                     },
                     default=str,
@@ -389,13 +381,6 @@ class _ToolNamePlannerPort:
                 prompt,
                 arguments,
             )
-        if tool_name == "submit_answer_request_contract":
-            fact_plan = self.responses.get("submit_pattern_fact_plan")
-            arguments = _question_contract_response_with_prompt_memory(
-                arguments,
-                prompt=prompt,
-                fact_plan=fact_plan if isinstance(fact_plan, dict) else None,
-            )
         if tool_name == "submit_source_binding":
             self.source_binding_selection_prompt = prompt
             arguments = source_binding_payload_for_one_call(arguments, prompt=prompt)
@@ -662,7 +647,6 @@ class _QuestionIntentAwarePlannerPort:
         self.system_prompts.append(system_prompt)
         tool_name = _select_conversation_resolution_tool_name(
             tool_specs,
-            payload={"clauses": [{"clause_id": "c1"}]},
         ) or (tool_specs[0].name if tool_specs else "")
         self.tool_names.append(tool_name)
         question_contract = _question_contract_for_plan(
@@ -672,8 +656,9 @@ class _QuestionIntentAwarePlannerPort:
         if tool_name in CONVERSATION_RESOLUTION_TOOL_NAMES:
             arguments = _conversation_resolution_payload_using_memory(
                 prompt,
-                integrated_question="How much is the prior referenced sales amount in total?",
+                contextualized_question="How much is the prior referenced sales amount in total?",
                 actual_text="that",
+                retained_part_ids=("output:1",),
             )
             return {
                 "answer": json.dumps(
@@ -700,7 +685,7 @@ class _QuestionIntentAwarePlannerPort:
                     "answer_requests": [
                         {
                             "answer_fact": "total for the prior referenced sales amount",
-                            "answer_expression": {"family": "scalar_aggregate"},
+                            "answer_expression": {"family": "list_rows"},
                             "answer_subject": _answer_subject_payload("total"),
                             "answer_population": default_answer_population(
                                 description="total for the prior referenced sales amount",
@@ -717,15 +702,10 @@ class _QuestionIntentAwarePlannerPort:
                             "used_question_inputs": [],
                         }
                     ],
+                    "question_input_inventory_check": {
+                        "all_input_like_phrases_declared": True,
+                    },
                 }
-                arguments = _question_contract_response_with_prompt_memory(
-                    arguments,
-                    prompt=prompt,
-                    fact_plan=_plan_payload(
-                        self.plan,
-                        question_contract=question_contract,
-                    ),
-                )
         elif tool_name == "submit_query_enrichment":
             arguments = _query_enrichment_payload_from_prompt(prompt)
         elif tool_name == "submit_read_eligibility":
@@ -792,7 +772,6 @@ class _ClarificationBiasedPlannerPort:
         )
         conversation_tool_name = _select_conversation_resolution_tool_name(
             tool_specs,
-            payload=conversation_resolution_payload,
         )
         if conversation_tool_name:
             tool_name = conversation_tool_name
@@ -803,7 +782,7 @@ class _ClarificationBiasedPlannerPort:
                 self.plan,
                 description=_current_question_from_prompt(prompt) or None,
             )
-            arguments = _question_contract_payload(question_contract, prompt=prompt)
+            arguments = _question_contract_payload(question_contract)
         elif "submit_query_enrichment" in offered:
             tool_name = "submit_query_enrichment"
             arguments = _query_enrichment_payload_from_prompt(prompt)

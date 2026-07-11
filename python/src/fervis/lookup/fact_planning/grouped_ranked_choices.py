@@ -27,7 +27,7 @@ from fervis.lookup.fact_planning.fulfillment_evidence import (
     source_cardinality_by_evidence_id,
     source_field_id_by_evidence_id,
 )
-from fervis.lookup.fact_plan.operations import AggregationFunction
+from fervis.lookup.answer_program.operations import AggregationFunction
 from fervis.lookup.fact_planning.source_binding_basis import (
     attach_metric_fit_basis,
     metric_fit_bases_by_evidence_id,

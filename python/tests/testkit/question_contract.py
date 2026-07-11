@@ -9,6 +9,7 @@ from fervis.lookup.question_contract import (
     LiteralInputRole,
     QuestionContract,
     RequestedFact,
+    RequestedFactPopulationConstraint,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
     RequestedFactGroupKey,
@@ -48,6 +49,18 @@ def requested_fact_from_payload(payload: dict[str, Any]) -> RequestedFact:
         known_inputs=known_inputs,
         input_refs=tuple(
             payload.get("input_refs") or (item.id for item in known_inputs)
+        ),
+        population_constraints=tuple(
+            RequestedFactPopulationConstraint(
+                id=str(item["id"]),
+                included_values=tuple(
+                    str(value) for value in item.get("included_values") or ()
+                ),
+                excluded_values=tuple(
+                    str(value) for value in item.get("excluded_values") or ()
+                ),
+            )
+            for item in payload.get("population_constraints") or ()
         ),
     )
 

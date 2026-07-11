@@ -21,11 +21,11 @@ from fervis.lookup.plan_execution.authorized_sources import (
     AuthorizedExecutionSources,
 )
 from fervis.lookup.plan_execution.relations import RelationRows
-from fervis.lookup.plan_execution.value_compiler import (
-    compile_value_uses,
+from fervis.lookup.answer_program.expression_instantiation import (
+    instantiate_program_expressions,
 )
+from fervis.lookup.answer_program.model import AnswerProgram
 from fervis.lookup.fact_plan.fact_plan import (
-    AnswerPlan,
     BlockedFact,
     BlockedFactBasis,
     BlockedFactField,
@@ -39,7 +39,7 @@ from .operation_invariants import verify_operation
 from fervis.lookup.fact_planning.grounded_params import (
     unique_grounded_param_ids_by_row_source,
 )
-from fervis.lookup.fact_plan.operations import (
+from fervis.lookup.answer_program.operations import (
     AggregateSpec,
     AggregationFunction,
     AntiJoinSpec,
@@ -56,7 +56,7 @@ from fervis.lookup.fact_plan.operations import (
     UnionSpec,
     UniversalConditionSpec,
 )
-from fervis.lookup.fact_plan.relations import (
+from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
     Relation,
     RelationField,
@@ -79,11 +79,9 @@ from fervis.lookup.fact_plan.row_sources import (
     row_source_for_relation,
 )
 from fervis.lookup.fact_planning.value_validation import verify_value_contract
-from fervis.lookup.fact_plan.values import (
+from fervis.lookup.answer_program.values import (
     FactValue,
     LiteralType,
     LiteralValuePayload,
-    RankLimitUse,
-    ScalarInputUse,
 )
 from fervis.lookup.question_contract import QuestionContract, RequestedFact

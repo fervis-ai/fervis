@@ -14,10 +14,22 @@ class GoldsetCase:
     case_id: str
     question: str
     setup_questions: tuple[str, ...] = ()
+    clarification_answers: tuple[str, ...] = ()
+    optional_clarification_answers: tuple[str, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "setup_questions", tuple(self.setup_questions))
+        object.__setattr__(
+            self,
+            "clarification_answers",
+            tuple(self.clarification_answers),
+        )
+        object.__setattr__(
+            self,
+            "optional_clarification_answers",
+            tuple(self.optional_clarification_answers),
+        )
 
 
 @dataclass(frozen=True)
@@ -37,6 +49,7 @@ class GoldsetCaseResult:
     run_id: str
     answer: str | None
     message: str
+    duration_ms: int | None = None
     details: dict[str, Any] = field(default_factory=dict)
 
     def to_payload(self) -> dict[str, object]:
@@ -49,6 +62,7 @@ class GoldsetCaseResult:
             "run_id": self.run_id,
             "answer": self.answer,
             "message": self.message,
+            "duration_ms": self.duration_ms,
             "details": self.details,
         }
 

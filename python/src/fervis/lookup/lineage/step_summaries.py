@@ -12,7 +12,7 @@ from fervis.lineage.step_summary import (
     merge_step_summary_json,
     step_summary_json,
 )
-from fervis.lookup.fact_plan.values import (
+from fervis.lookup.answer_program.values import (
     FactValue,
     IdentitySetValuePayload,
     IdentityValuePayload,
@@ -111,36 +111,26 @@ def _conversation_resolution_semantic_items(
     payload: dict[str, Any],
     derived: dict[str, Any],
 ) -> tuple[StepSemanticItem, ...]:
-    clauses = _dicts(payload.get("clause_resolutions"))
-    value_frames = _dicts(derived.get("value_frames"))
+    del derived
+    clauses = _dicts(payload.get("clauses"))
     items: list[StepSemanticItem] = []
-    for index, clause in enumerate(clauses):
-        value_frame = value_frames[index] if index < len(value_frames) else {}
-        requested_value_frame = _dict_or_empty(clause.get("requested_value_frame"))
-        current_value_surface = _dict_or_empty(
-            requested_value_frame.get("current_value_surface")
-        )
+    for clause in clauses:
         current_clause_text = _text(clause.get("current_clause_text"))
-        current_value_text = _text(current_value_surface.get("text"))
-        resolved_frame_text = _text(value_frame.get("resolved_frame_text"))
-        resolved_clause_text = _text(clause.get("resolved_clause_text"))
-        if not any(
-            (
-                current_clause_text,
-                current_value_text,
-                resolved_frame_text,
-                resolved_clause_text,
-            )
-        ):
+        resolved_text = _text(clause.get("resolved_text"))
+        resolved_values = tuple(
+            text
+            for value in _dicts(clause.get("values"))
+            if (text := _text(value.get("resolved_text")))
+        )
+        if not current_clause_text and not resolved_text:
             continue
         items.append(
             StepSemanticItem(
                 kind="conversation_clause",
                 payload={
                     "current_clause_text": current_clause_text,
-                    "current_value_text": current_value_text,
-                    "resolved_frame_text": resolved_frame_text,
-                    "resolved_clause_text": resolved_clause_text,
+                    "resolved_text": resolved_text,
+                    "resolved_values": resolved_values,
                 },
             )
         )

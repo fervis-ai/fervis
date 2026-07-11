@@ -1,0 +1,68 @@
+id: initial_invocation_matches_direct_invocation
+kind: algorithm
+algorithm: answer_program.invoke
+description: Repeated invocation of one persisted program and binding set has the same deterministic result.
+input:
+  schema_revision: 1
+  program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/invocation}
+  catalog: {$ref: ../../../fixtures/answer_program_v1.yaml#/catalogs/sales}
+  environment: {$ref: ../../../fixtures/answer_program_v1.yaml#/environments/invocation}
+  invocations:
+    - id: initial
+      bindings: &bindings
+        - parameter_id: question.store_ids
+          value:
+            kind: identity_set
+            identity_type: store
+            identity_field: store_id
+            values: [store_1]
+            known_input_id: store_ids
+            applies_to_requested_fact_ids: [fact_1]
+          provenance: {kind: question_input}
+        - parameter_id: semantic.sale_states
+          value: {kind: string_set, values: [COMPLETED]}
+          provenance: {kind: semantic_choice}
+      evidence: &evidence
+        - request:
+            endpoint_name: list_sale_list
+            args: {sales.query.store_id: store_1}
+          response:
+            status: 200
+            body:
+              results:
+                - {sale_id: sale_1, store_id: store_1}
+                - {sale_id: sale_2, store_id: store_1}
+    - id: direct
+      bindings: *bindings
+      evidence: *evidence
+expect:
+  result_contains:
+    invocations:
+      - id: initial
+        status: completed
+        relations:
+          - id: sales_rows
+            rows:
+              - {sale_id: sale_1, store_id: store_1}
+              - {sale_id: sale_2, store_id: store_1}
+          - id: answer_rows
+            rows:
+              - {answer_sale_id: sale_1, store_id: store_1}
+              - {answer_sale_id: sale_2, store_id: store_1}
+        requests:
+          - endpoint_name: list_sale_list
+            args: {sales.query.store_id: store_1}
+      - id: direct
+        status: completed
+        relations:
+          - id: sales_rows
+            rows:
+              - {sale_id: sale_1, store_id: store_1}
+              - {sale_id: sale_2, store_id: store_1}
+          - id: answer_rows
+            rows:
+              - {answer_sale_id: sale_1, store_id: store_1}
+              - {answer_sale_id: sale_2, store_id: store_1}
+        requests:
+          - endpoint_name: list_sale_list
+            args: {sales.query.store_id: store_1}

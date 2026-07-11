@@ -11,6 +11,9 @@ MODEL_REFS = (
     "fervis.lineage.models.Conversation",
     "fervis.lineage.models.Question",
     "fervis.lineage.models.QuestionRun",
+    "fervis.lineage.models.AnswerProgram",
+    "fervis.lineage.models.ProgramInvocation",
+    "fervis.lineage.models.ProgramRevision",
     "fervis.lineage.models.RunStep",
     "fervis.lineage.models.ModelCall",
     "fervis.lineage.models.ModelCallUsage",
@@ -54,10 +57,81 @@ def test_persistence_metadata_uses_fervis_work_item_table() -> None:
     assert "fervis_run_work_item" in schema.metadata.tables
 
 
+def test_fresh_schema_matches_program_and_run_contract() -> None:
+    expected_columns = {
+        "fervis_question_run": {
+            "run_id",
+            "question_id",
+            "run_number",
+            "kind",
+            "trigger_kind",
+            "base_run_id",
+            "trigger_clarification_response_id",
+            "adapter_ref",
+            "runtime_version",
+            "created_at",
+        },
+        "fervis_answer_program": {
+            "program_id",
+            "schema_revision",
+            "canonical_json",
+            "created_at",
+        },
+        "fervis_program_invocation": {
+            "invocation_id",
+            "run_id",
+                "program_id",
+                "bindings_json",
+                "kind",
+                "base_invocation_id",
+                "patch_id",
+            "binding_patch_json",
+            "revision_id",
+            "created_at",
+        },
+        "fervis_program_revision": {
+            "revision_id",
+            "base_program_id",
+            "revised_program_id",
+            "capability_id",
+            "application_json",
+            "created_at",
+        },
+        "fervis_run_work_item": {
+            "id",
+            "run_id",
+            "conversation_id",
+            "tenant_id",
+            "user_id",
+            "read_context_ref",
+            "status",
+            "spec_kind",
+            "execution_spec",
+            "idempotency_key",
+            "attempt_count",
+            "active_attempt",
+            "max_attempts",
+            "lease_owner",
+            "lease_expires_at",
+            "next_attempt_at",
+            "last_error",
+            "started_at",
+            "completed_at",
+            "created_at",
+            "updated_at",
+        },
+    }
+
+    assert {
+        table_name: set(schema.metadata.tables[table_name].columns.keys())
+        for table_name in expected_columns
+    } == expected_columns
+
+
 def test_initial_revision_fingerprint_matches_current_metadata() -> None:
     assert (
         schema.metadata_fingerprint()
-        == "8ce3627a220b28017ab1a4b8414d7bcb5f5041ad6f494a14597912fc2d973a7f"
+        == "0f709421843a2bd09b9e40cbdce435ed781a0ec637fdeea01e91833786e462a5"
     )
     schema.assert_head_schema_fingerprint_is_current()
 

@@ -14,19 +14,20 @@ input:
       sourceAnswer: Five products.
       provenance:
         question_contract:
+          question_inputs:
+          - id: fact_1_limit_1
+            kind: literal_text
+            source: question_context
+            text: top 5
+            resolved_value_text: '5'
+            role: result_limit
           answer_requests:
           - id: fact_1
             answer_fact: top 5 products Staff One sold
             answer_outputs:
-            - description: product names
-              requested_value_frame: product names
-            known_inputs:
-            - id: fact_1_limit_1
-              kind: literal_text
-              source: question_context
-              text: top 5
-              resolved_value_text: '5'
-              role: result_limit
+            - id: answer_1
+              description: product names
+            used_question_inputs: [fact_1_limit_1]
       addresses:
       - address: value.grounded_fact_1_limit_1
         kind: value
@@ -46,7 +47,6 @@ expect:
           fact_1_limit_1:
             value_kind: limit
             value: 5
-            value_type: integer
             display: top 5
             source_lineage:
             - turn_top_products.value.grounded_fact_1_limit_1

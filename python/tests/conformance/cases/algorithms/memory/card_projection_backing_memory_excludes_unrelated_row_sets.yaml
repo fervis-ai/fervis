@@ -13,18 +13,20 @@ input:
         sourceQuestion: Show sales totals and inventory counts.
         provenance:
           question_contract:
+            question_inputs: []
             answer_requests:
               - id: fact_sales
                 answer_fact: sales totals
                 answer_outputs:
                   - id: answer_output_1
                     description: sales total
+                used_question_inputs: []
               - id: fact_inventory
                 answer_fact: inventory counts
                 answer_outputs:
                   - id: answer_output_2
                     description: inventory count
-            question_inputs: []
+                used_question_inputs: []
         addresses:
           - address: relation.sales_rows
             kind: relation

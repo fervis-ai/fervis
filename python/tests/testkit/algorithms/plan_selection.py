@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from fervis.lookup.fact_plan.values import FactValue
+from fervis.lookup.answer_program.values import FactValue
 from fervis.lookup.operation_families.plan_selection_registry import (
     plan_selection_shape_specs_for_family,
 )
@@ -249,7 +249,7 @@ def _fact_values(payload: object) -> tuple[FactValue, ...]:
             expression=str(item["expression"]),
             resolved_start=str(item["resolved_start"]),
             resolved_end=str(item["resolved_end"]),
-            granularity=str(item.get("granularity") or ""),
+            granularity=str(item["granularity"]),
             applies_to_requested_fact_ids=tuple(
                 str(fact_id) for fact_id in item.get("applies_to_requested_fact_ids") or ()
             ),

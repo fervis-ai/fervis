@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fervis.lookup.fact_plan.relations import RelationSourceReviewScopeDecision, ReviewScopeDecisionKind as RelationReviewScopeDecisionKind
+from fervis.lookup.answer_program.relations import RelationSourceReviewScopeDecision, ReviewScopeDecisionKind as RelationReviewScopeDecisionKind
 from fervis.lookup.question_contract import AnswerPopulationMembershipTestKind, AnswerPopulationMembershipTestPolarity, NormalInstanceExplicitOverrideReason
 from fervis.lookup.source_binding import provider_contract as provider_output
 from fervis.lookup.source_binding.membership_tests import membership_test_key, membership_tests_by_key
@@ -370,14 +370,14 @@ def choice_is_included(
     test_ids: tuple[str, ...],
     choice_inclusion: str | None,
 ) -> bool:
+    if choice_inclusion == "EXCLUDE":
+        return False
     tests_decide = _population_tests_decide(
         test_effects=test_effects,
         test_ids=test_ids,
     )
     if not tests_decide:
-        if choice_inclusion is None:
-            return True
-        return choice_inclusion == "INCLUDE"
+        return True
     return population_tests_allow_choice(
         test_effects=test_effects,
         tests_by_id=tests_by_id,

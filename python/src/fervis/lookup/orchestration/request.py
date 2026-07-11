@@ -15,6 +15,10 @@ from fervis.lookup.relation_catalog.selection import (
 from fervis.lookup.turn_prompts.context import HostPromptContext
 
 if TYPE_CHECKING:
+    from fervis.lookup.answer_program.persistence import (
+        PriorProgramInvocationReader,
+        ProgramInvocationBinding,
+    )
     from fervis.lookup.fact_planning.request import RuntimeValueContext
 
 
@@ -28,6 +32,7 @@ class LookupRequest:
     conversation_context: dict[str, Any] = field(default_factory=dict)
     run_id: str = ""
     tenant_id: str = ""
+    authority_ref: str = ""
     user_context: dict[str, Any] = field(default_factory=dict)
     provider_preferences: dict[str, Any] = field(default_factory=dict)
     max_thinking_tokens: int = 64
@@ -42,6 +47,8 @@ class LookupRuntimePorts:
     relation_catalog_port: RelationCatalogProvider
     data_access_port: RelationDataAccessPort
     planner_model_port: Any
+    program_invocation_binding: ProgramInvocationBinding | None = None
+    prior_program_invocations: PriorProgramInvocationReader | None = None
     lineage_step_sink: Any = None
     progress_sink: LookupProgressSink | None = None
     lineage_required: bool = False

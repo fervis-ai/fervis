@@ -1,4 +1,9 @@
-import type { AnswerValueKind, RunStatus } from "../contracts";
+import type {
+  AnswerValueKind,
+  RunKind,
+  RunStatus,
+  RunTriggerKind
+} from "../contracts";
 import { expectString } from "./primitives";
 
 export function decodeRunStatus(raw: unknown, label: string): RunStatus {
@@ -18,12 +23,25 @@ export function decodeRunStatus(raw: unknown, label: string): RunStatus {
 export function decodeTriggerKind(
   raw: unknown,
   label: string
-): "initial" | "clarification_response" {
+): RunTriggerKind {
   const value = expectString(raw, label);
-  if (value === "initial" || value === "clarification_response") {
+  if (
+    value === "initial" ||
+    value === "clarification_response" ||
+    value === "retry" ||
+    value === "rerun"
+  ) {
     return value;
   }
   throw new Error(`${label} has unsupported trigger kind: ${value}`);
+}
+
+export function decodeRunKind(raw: unknown, label: string): RunKind {
+  const value = expectString(raw, label);
+  if (value === "model_assisted" || value === "deterministic") {
+    return value;
+  }
+  throw new Error(`${label} has unsupported run kind: ${value}`);
 }
 
 export function decodeValueKind(raw: unknown, label: string): AnswerValueKind {

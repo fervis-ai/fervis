@@ -19,11 +19,9 @@ MEMORY_ARTIFACT_SCHEMA_REV = 1
 
 
 class MemoryArtifactQueryPort(Protocol):
-    def memory_artifact_rows_for_conversation(
+    def memory_artifact_rows_for_run_ids(
         self,
-        conversation_id: str,
-        *,
-        limit: int,
+        run_ids: tuple[str, ...],
     ) -> tuple[MemoryArtifactRow, ...]: ...
 
 
@@ -33,17 +31,12 @@ class LineageMemoryArtifactService:
     def __init__(self, query: MemoryArtifactQueryPort) -> None:
         self._query = query
 
-    def for_conversation(
+    def for_runs(
         self,
-        conversation_id: str,
-        *,
-        limit: int = DEFAULT_RECENT_MEMORY_RUN_LIMIT,
+        run_ids: tuple[str, ...],
     ) -> tuple[FactArtifact, ...]:
         return fact_artifacts_from_memory_rows(
-            self._query.memory_artifact_rows_for_conversation(
-                conversation_id,
-                limit=limit,
-            )
+            self._query.memory_artifact_rows_for_run_ids(run_ids)
         )
 
 

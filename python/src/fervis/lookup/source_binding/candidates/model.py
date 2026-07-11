@@ -2,9 +2,9 @@
 
 from ._shared import (
     Any,
-    EndpointParamBinding,
-    RelationSource,
-    RelationSourceAppliedFilter,
+    DraftEndpointParamBinding,
+    DraftRelationSource,
+    DraftRelationSourceAppliedFilter,
     dataclass,
 )
 
@@ -14,13 +14,13 @@ class SourceCandidate:
     id: str
     requested_fact_id: str
     kind: str
-    source: RelationSource | None = None
+    source: DraftRelationSource | None = None
     value_id: str = ""
     applies_to_requested_fact_ids: tuple[str, ...] = ()
     params: tuple[dict[str, Any], ...] = ()
-    applied_param_bindings: tuple[EndpointParamBinding, ...] = ()
-    applied_param_binding_sets: tuple[tuple[EndpointParamBinding, ...], ...] = ()
-    applied_filters: tuple[RelationSourceAppliedFilter, ...] = ()
+    applied_param_bindings: tuple[DraftEndpointParamBinding, ...] = ()
+    applied_param_binding_sets: tuple[tuple[DraftEndpointParamBinding, ...], ...] = ()
+    applied_filters: tuple[DraftRelationSourceAppliedFilter, ...] = ()
     fields: tuple[dict[str, Any], ...] = ()
     population_bindings: tuple[dict[str, Any], ...] = ()
     payload: dict[str, Any] | None = None

@@ -15,19 +15,19 @@ from fervis.lookup.fact_planning.available_relations import (
     available_relation_catalog_payload,
     operation_input_values_payload,
 )
-from fervis.lookup.fact_plan.relations import (
-    EndpointParamBinding,
-    RelationSourceAppliedFilter,
-    RelationSource,
-    SourceKind,
+from fervis.lookup.source_binding.compiler_ir import (
+    DraftEndpointParamBinding,
+    DraftRelationSource,
+    DraftRelationSourceAppliedFilter,
 )
+from fervis.lookup.answer_program.relations import SourceKind
 from fervis.lookup.fact_plan.row_sources import (
     RowSource,
     RowSourceField,
     build_row_source_catalog,
     row_sources_for_read_id,
 )
-from fervis.lookup.fact_plan.values import (
+from fervis.lookup.answer_program.values import (
     FactValue,
     IdentitySetValuePayload,
     IdentityValuePayload,

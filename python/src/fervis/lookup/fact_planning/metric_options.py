@@ -24,7 +24,7 @@ from fervis.lookup.fact_planning.fulfillment_evidence import (
     field_ids_by_answer_output_from_evidence,
 )
 from fervis.lookup.fact_plan.field_types import field_is_numeric
-from fervis.lookup.fact_plan.operations import AggregationFunction
+from fervis.lookup.answer_program.operations import AggregationFunction
 from fervis.lookup.fact_planning.source_binding_basis import (
     metric_fit_bases_by_evidence_id,
 )
