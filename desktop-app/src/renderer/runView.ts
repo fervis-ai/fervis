@@ -26,7 +26,11 @@ export function runSummary(run: RunPayload): string {
   if (run.status === "FAILED") {
     return `failed · ${run.steps.length} steps`;
   }
-  return `${run.steps.length} steps · ${formatTriggerKind(run.triggerKind)}`;
+  const executionLabel =
+    run.executionKind === "continue_prior_request"
+      ? formatTriggerKind(run.executionKind)
+      : formatTriggerKind(run.triggerKind);
+  return `${run.steps.length} steps · ${executionLabel}`;
 }
 
 export function statusClassName(status: RunStatus): string {

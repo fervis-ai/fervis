@@ -306,6 +306,32 @@ export const runningRunFixture = {
   }
 } as const;
 
+export const completedContinuedRunFixture = {
+  ...completedRunFixture,
+  runId: "run_store_followup",
+  questionId: "q_store_followup",
+  invocationId: "pi_store_followup",
+  executionKind: "continue_prior_request",
+  baseInvocationId: completedRunFixture.invocationId,
+  answer: "5 sales happened at Pivot Mall today.",
+  resultData: {
+    kind: "answer",
+    outputs: [{ key: "total_count", valueKind: "number", value: "5" }]
+  }
+} as const;
+
+export const runningContinuedRunFixture = {
+  ...runningRunFixture,
+  runId: completedContinuedRunFixture.runId,
+  questionId: completedContinuedRunFixture.questionId,
+  programId: completedContinuedRunFixture.programId,
+  invocationId: completedContinuedRunFixture.invocationId,
+  executionKind: completedContinuedRunFixture.executionKind,
+  baseInvocationId: completedContinuedRunFixture.baseInvocationId,
+  answer: null,
+  resultData: null
+} as const;
+
 export const clarificationRunFixture = {
   ...completedRunFixture,
   runId: "run_clarify",

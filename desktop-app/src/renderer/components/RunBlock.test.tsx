@@ -1,7 +1,11 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { completedRunFixture } from "../../fervis-api/__fixtures__/payloads";
+import {
+  completedContinuedRunFixture,
+  completedRunFixture,
+  runningContinuedRunFixture
+} from "../../fervis-api/__fixtures__/payloads";
 import { RunBlock } from "./RunBlock";
 
 describe("RunBlock", () => {
@@ -26,5 +30,23 @@ describe("RunBlock", () => {
 
     expect(screen.getByText("13", { selector: ".answer-prose" })).toBeInTheDocument();
     expect(screen.queryByText("no answer produced")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["running", runningContinuedRunFixture],
+    ["completed", completedContinuedRunFixture]
+  ] as const)("identifies a %s callable prior-request run", (_state, run) => {
+    render(
+      <RunBlock
+        apiClient={null}
+        onActionError={vi.fn()}
+        onClarificationState={vi.fn()}
+        onToggle={vi.fn()}
+        open
+        run={run}
+      />
+    );
+
+    expect(screen.getByText(/Continue Prior Request/)).toBeInTheDocument();
   });
 });
