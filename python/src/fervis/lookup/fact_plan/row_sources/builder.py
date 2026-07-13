@@ -283,8 +283,11 @@ def _row_source_candidate_keys(
     row_paths: tuple[RowPath, ...],
 ) -> tuple[RowSourceCandidateKey, ...]:
     fields_by_ref = {field.ref: field for field in read.fields}
-    row_path = _row_path_for_id(row_path_id, row_paths=row_paths)
-    field_ids = _field_ids(read.fields, row_path=row_path, row_paths=row_paths)
+    field_ids = _row_source_field_ids(
+        read,
+        row_path_id=row_path_id,
+        row_paths=row_paths,
+    )
     candidate_keys: list[RowSourceCandidateKey] = []
     for key in read.candidate_keys:
         if not _candidate_key_belongs_to_row_path(
@@ -351,9 +354,9 @@ def _row_source_entity_references(
     row_paths: tuple[RowPath, ...],
 ) -> tuple[RowSourceEntityReference, ...]:
     fields_by_ref = {field.ref: field for field in read.fields}
-    field_ids = _field_ids(
-        read.fields,
-        row_path=_row_path_for_id(row_path_id, row_paths=row_paths),
+    field_ids = _row_source_field_ids(
+        read,
+        row_path_id=row_path_id,
         row_paths=row_paths,
     )
     references: list[RowSourceEntityReference] = []
@@ -384,6 +387,21 @@ def _row_source_entity_references(
         )
         references.append(row_source_reference)
     return tuple(references)
+
+
+def _row_source_field_ids(
+    read: EndpointRead,
+    *,
+    row_path_id: str,
+    row_paths: tuple[RowPath, ...],
+) -> dict[str, str]:
+    fields = _selected_api_fields_for_source(
+        read.fields,
+        row_path_id=row_path_id,
+        row_paths=row_paths,
+    )
+    row_path = _row_path_for_id(row_path_id, row_paths=row_paths)
+    return _field_ids(fields, row_path=row_path, row_paths=row_paths)
 
 
 def _entity_reference_belongs_to_row_path(

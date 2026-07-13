@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Any, Mapping
 
 from fervis.lookup.errors import ErrorCode
+from fervis.lookup.canonical_data import runtime_value_to_payload
 from fervis.lookup.clarification import clarification_payload
 from fervis.lineage.enums import (
     AnswerValueKind,
@@ -919,13 +920,11 @@ def _lineage_value(value: object) -> tuple[AnswerValueKind, dict[str, Any]]:
 def _json_safe(value: object) -> object:
     if isinstance(value, EntityKeyValue):
         return _entity_key_json(value)
-    if isinstance(value, Decimal):
-        return str(value)
     if isinstance(value, Mapping):
         return {str(key): _json_safe(item) for key, item in value.items()}
     if isinstance(value, list | tuple):
         return [_json_safe(item) for item in value]
-    return value
+    return runtime_value_to_payload(value)
 
 
 def _entity_key_json(value: EntityKeyValue) -> dict[str, object]:

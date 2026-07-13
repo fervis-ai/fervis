@@ -23,7 +23,6 @@ from fervis.host_api.adapters.resource_names import endpoint_resource_names
 from .loading import import_fastapi_app
 from .routes import effective_api_routes
 from .schema_introspection import (
-    fastapi_detail_path_parameters,
     fastapi_route_parameters,
     inspect_fastapi_response,
 )
@@ -97,7 +96,7 @@ def _endpoint_contract(
         path_template=route.path,
         docstring=str(route.description or ""),
         view_class=handler_ref,
-        path_params=fastapi_detail_path_parameters(route, response=response),
+        path_params=fastapi_route_parameters(route, source="path"),
         query_params=fastapi_route_parameters(route, source="query"),
         response_fields=response.fields,
         response_schema=response.schema,

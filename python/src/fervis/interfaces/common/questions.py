@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -136,6 +137,15 @@ class QuestionInterface:
     questions: QuestionLifecycle
     limits: AskRequestLimits = field(default_factory=AskRequestLimits)
     model_policy: ConfiguredModelPolicy = field(default_factory=ConfiguredModelPolicy)
+    close_callback: Callable[[], None] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+
+    def close(self) -> None:
+        if self.close_callback is not None:
+            self.close_callback()
 
     def list_conversations(
         self,

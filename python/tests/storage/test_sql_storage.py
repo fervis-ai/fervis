@@ -2485,6 +2485,8 @@ def _write_order_count_fastapi_app(root: Path) -> None:
         "configured_fervis().mount(app)\n",
         encoding="utf-8",
     )
+    sys.modules.pop("app.main", None)
+    sys.modules.pop("app", None)
     schema = _read_project_schema(root)
     schema["host"] = {
         "organization_name": "Test Shop",
@@ -2541,40 +2543,40 @@ def _run_default_runtime_ask(
     *,
     wait: bool = False,
 ) -> tuple[int, list[dict[str, object]]]:
-    bundle = _storage_bundle(root)
-    stdout = StringIO()
-    args = [
-        "runtime",
-        "ask",
-        "How many orders came in today?",
-        "--tenant-id",
-        "t1",
-        "--principal-id",
-        "u1",
-        "--conversation-id",
-        "c1",
-    ]
-    if wait:
-        args.extend(("--wait", "60"))
-    exit_code = run_fervis(
-        tuple(args),
-        ports=FervisCliPorts(
-            lineage_query=bundle.lineage_query,
-            observability_query=bundle.observability_query,
-            prompt_capture_query=bundle.prompt_capture_query,
-            questions=bundle.questions,
-            question_run_follower=LocalQueuedRunFollower(
-                run_work=bundle.run_work,
-                work_queue=SQLWorkItemQueue(bundle.engine),
-                worker_id="cli-test-worker",
-                lease_seconds=60,
+    with _storage_bundle(root) as bundle:
+        stdout = StringIO()
+        args = [
+            "runtime",
+            "ask",
+            "How many orders came in today?",
+            "--tenant-id",
+            "t1",
+            "--principal-id",
+            "u1",
+            "--conversation-id",
+            "c1",
+        ]
+        if wait:
+            args.extend(("--wait", "60"))
+        exit_code = run_fervis(
+            tuple(args),
+            ports=FervisCliPorts(
+                lineage_query=bundle.lineage_query,
+                observability_query=bundle.observability_query,
+                prompt_capture_query=bundle.prompt_capture_query,
+                questions=bundle.questions,
+                question_run_follower=LocalQueuedRunFollower(
+                    run_work=bundle.run_work,
+                    work_queue=SQLWorkItemQueue(bundle.engine),
+                    worker_id="cli-test-worker",
+                    lease_seconds=60,
+                ),
+                project=discover_project(root),
+                model_policy=_model_policy(root),
             ),
-            project=discover_project(root),
-            model_policy=_model_policy(root),
-        ),
-        stdout=stdout,
-        stderr=StringIO(),
-    )
+            stdout=stdout,
+            stderr=StringIO(),
+        )
     return exit_code, [
         json.loads(line) for line in stdout.getvalue().splitlines() if line.strip()
     ]

@@ -13,4 +13,5 @@ def sql_question_interface(*, project, loaded_config) -> QuestionInterface:
     return QuestionInterface(
         questions=bundle.questions,
         model_policy=ConfiguredModelPolicy.from_config(loaded_config.config.model),
+        close_callback=bundle.close,
     )

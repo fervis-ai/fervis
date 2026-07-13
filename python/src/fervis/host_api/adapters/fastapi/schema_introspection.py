@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
@@ -25,7 +25,6 @@ from fervis.host_api.contracts import (
     CandidateKeyContract,
     EntityReferenceComponentContract,
     EntityReferenceContract,
-    EntityKeyComponentTargetContract,
     ParameterContract,
     ResponseFieldContract,
 )
@@ -135,47 +134,6 @@ def fastapi_route_parameters(
     return tuple(_parameter(field, source=source) for field in fields)
 
 
-def fastapi_detail_path_parameters(
-    route: APIRoute,
-    *,
-    response: FastAPIResponseInspection,
-) -> tuple[ParameterContract, ...]:
-    parameters = fastapi_route_parameters(route, source="path")
-    target = _single_component_detail_target(parameters, response=response)
-    if target is None:
-        return parameters
-    return (replace(parameters[0], entity_target=target),)
-
-
-def _single_component_detail_target(
-    parameters: tuple[ParameterContract, ...],
-    *,
-    response: FastAPIResponseInspection,
-) -> EntityKeyComponentTargetContract | None:
-    if response.cardinality != "one" or len(parameters) != 1:
-        return None
-    keys = tuple(
-        key
-        for key in response.candidate_keys
-        if key.primary and key.stable and len(key.components) == 1
-    )
-    if len(keys) != 1:
-        return None
-    key = keys[0]
-    component = key.components[0]
-    field = next(
-        (field for field in response.fields if field.path == component.field_path),
-        None,
-    )
-    if field is None or field.type != parameters[0].type:
-        return None
-    return EntityKeyComponentTargetContract(
-        entity_kind=key.entity_kind,
-        key_id=key.key_id,
-        component_id=component.component_id,
-    )
-
-
 def _parameter(field: ModelField, *, source: str) -> ParameterContract:
     annotation = _response_annotation(field.field_info.annotation)
     return ParameterContract(
@@ -241,24 +199,7 @@ def _response_model_table(model: type[BaseModel]) -> Table | None:
     direct_table = getattr(model, "__table__", None)
     if isinstance(direct_table, Table):
         return direct_table
-    shared_base_tables = _shared_base_tables(model)
-    if len(shared_base_tables) == 1:
-        return shared_base_tables[0]
     return None
-
-
-def _shared_base_tables(model: type[BaseModel]) -> tuple[Table, ...]:
-    tables: list[Table] = []
-    for base in model.__bases__:
-        if base is BaseModel or base.__module__ != model.__module__:
-            continue
-        for sibling in base.__subclasses__():
-            if sibling is model or sibling.__module__ != model.__module__:
-                continue
-            table = getattr(sibling, "__table__", None)
-            if isinstance(table, Table):
-                tables.append(table)
-    return tuple(dict.fromkeys(tables))
 
 
 def _common_response_fields(

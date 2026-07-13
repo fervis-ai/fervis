@@ -38,11 +38,25 @@ class ProofLineage:
 
 
 @dataclass(frozen=True)
+class RelationEntityKeyComponent:
+    component_id: str
+    field_id: str
+
+
+@dataclass(frozen=True)
+class RelationEntityKey:
+    entity_kind: str
+    key_id: str
+    components: tuple[RelationEntityKeyComponent, ...]
+
+
+@dataclass(frozen=True)
 class RelationContract:
     fields: dict[str, frozenset[FieldBindingRole]]
     grain_keys: tuple[str, ...]
     field_proofs: dict[str, ProofLineage]
     field_types: dict[str, str] = field(default_factory=dict)
+    entity_keys: tuple[RelationEntityKey, ...] = ()
     population_proof: ProofLineage = ProofLineage()
 
 
@@ -56,8 +70,53 @@ def _copy_contract(
         grain_keys=contract.grain_keys,
         field_proofs=dict(contract.field_proofs),
         field_types=dict(contract.field_types),
+        entity_keys=contract.entity_keys,
         population_proof=contract.population_proof,
     )
+
+
+def _project_entity_keys(
+    source: RelationContract,
+    projections: dict[str, str],
+) -> tuple[RelationEntityKey, ...]:
+    projected: list[RelationEntityKey] = []
+    for key in source.entity_keys:
+        if any(component.field_id not in projections for component in key.components):
+            continue
+        components = tuple(
+            RelationEntityKeyComponent(
+                component_id=component.component_id,
+                field_id=projections[component.field_id],
+            )
+            for component in key.components
+        )
+        projected.append(
+            RelationEntityKey(
+                entity_kind=key.entity_kind,
+                key_id=key.key_id,
+                components=components,
+            )
+        )
+    return tuple(dict.fromkeys(projected))
+
+
+def _combined_entity_keys(
+    *contracts: RelationContract,
+) -> tuple[RelationEntityKey, ...]:
+    return tuple(
+        dict.fromkeys(key for contract in contracts for key in contract.entity_keys)
+    )
+
+
+def _common_entity_keys(
+    contracts: tuple[RelationContract, ...],
+) -> tuple[RelationEntityKey, ...]:
+    if not contracts:
+        return ()
+    common = set(contracts[0].entity_keys)
+    for contract in contracts[1:]:
+        common.intersection_update(contract.entity_keys)
+    return tuple(key for key in contracts[0].entity_keys if key in common)
 
 
 def _project_contract_grain(

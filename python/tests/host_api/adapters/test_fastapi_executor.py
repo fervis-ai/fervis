@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from threading import get_ident
 
@@ -253,6 +254,33 @@ def test_fastapi_runtime_runs_lifespan_on_the_calling_worker_thread(
     runtime.close()
 
     assert lifecycle_threads == [worker_thread, worker_thread]
+
+
+def test_fastapi_runtime_uses_python_3_10_event_loop_api(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delattr(asyncio, "Runner", raising=False)
+    app = FastAPI()
+
+    @app.get("/api/value/", operation_id="read_value")
+    async def read_value() -> dict[str, int]:
+        return {"value": 1}
+
+    runtime = FastAPIApplicationRuntime(app, project_root=tmp_path)
+    contract = EndpointContract(
+        endpoint_name="read_value",
+        url_name="read_value",
+        method="GET",
+        path_template="/api/value/",
+        docstring="",
+        view_class="",
+    )
+
+    result = runtime.execute_get(contract=contract)
+    runtime.close()
+
+    assert result.response_body == {"value": 1}
 
 
 def _sources() -> tuple[FastAPIAppSource, ...]:

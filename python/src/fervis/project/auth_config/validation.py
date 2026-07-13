@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass
 
 from fervis.interfaces.agent.actions import run_doctor_probe_action
@@ -84,7 +85,17 @@ def _read_probe_checks(
                 project=project,
                 loaded_config=loaded_config,
             )
-            contracts = context.describe_sources()
+            with closing(context):
+                contracts = context.describe_sources()
+                return [
+                    _read_probe_check(
+                        context=context,
+                        contracts=contracts,
+                        source_name=source_name,
+                        authority=ReadAuthority.from_read_context(read_context_ref),
+                    )
+                    for source_name in _source_names(loaded_config)
+                ]
     except Exception as exc:
         return [
             AuthProbeCheck(
@@ -93,15 +104,6 @@ def _read_probe_checks(
                 message=f"Auth probe could not load configured source contracts: {exc}",
             )
         ]
-    return [
-        _read_probe_check(
-            context=context,
-            contracts=contracts,
-            source_name=source_name,
-            authority=ReadAuthority.from_read_context(read_context_ref),
-        )
-        for source_name in _source_names(loaded_config)
-    ]
 
 
 def _read_probe_check(

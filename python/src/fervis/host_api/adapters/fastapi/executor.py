@@ -48,7 +48,7 @@ class FastAPIApplicationRuntime:
         self._project_root = project_root
         self._lock = RLock()
         self._resources: AsyncExitStack | None = None
-        self._runner: asyncio.Runner | None = None
+        self._event_loop: asyncio.AbstractEventLoop | None = None
         self._client: AsyncClient | None = None
         self._closed = False
 
@@ -65,7 +65,7 @@ class FastAPIApplicationRuntime:
         with self._lock, project_import_context(self._project_root):
             if self._closed:
                 raise EndpointExecutionError("FastAPI application runtime is closed.")
-            runner, client = self._open()
+            event_loop, client = self._open()
             overrides = _resolved_overrides(dependency_override)
             prepared = prepare_get_endpoint(
                 contract=contract,
@@ -81,7 +81,7 @@ class FastAPIApplicationRuntime:
                     prepared=prepared,
                     page_policy=page_policy,
                 )
-                return runner.run(execution)
+                return event_loop.run_until_complete(execution)
 
     def close(self) -> None:
         with self._lock:
@@ -89,34 +89,34 @@ class FastAPIApplicationRuntime:
                 return
             self._closed = True
             resources = self._resources
-            runner = self._runner
+            event_loop = self._event_loop
             self._resources = None
-            self._runner = None
+            self._event_loop = None
             self._client = None
-            if resources is not None and runner is not None:
+            if resources is not None and event_loop is not None:
                 with suppress_host_output():
                     try:
-                        runner.run(resources.aclose())
+                        event_loop.run_until_complete(resources.aclose())
                     finally:
-                        runner.close()
+                        event_loop.close()
 
-    def _open(self) -> tuple[asyncio.Runner, AsyncClient]:
-        if self._runner is not None and self._client is not None:
-            return self._runner, self._client
-        runner = asyncio.Runner()
+    def _open(self) -> tuple[asyncio.AbstractEventLoop, AsyncClient]:
+        if self._event_loop is not None and self._client is not None:
+            return self._event_loop, self._client
+        event_loop = asyncio.new_event_loop()
         try:
             with suppress_host_output():
-                resources, client = runner.run(
+                resources, client = event_loop.run_until_complete(
                     _open_application_client(self._app)
                 )
         except BaseException:
             with suppress_host_output():
-                runner.close()
+                event_loop.close()
             raise
         self._resources = resources
-        self._runner = runner
+        self._event_loop = event_loop
         self._client = client
-        return runner, client
+        return event_loop, client
 
 
 async def _open_application_client(

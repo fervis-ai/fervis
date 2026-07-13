@@ -447,6 +447,7 @@ class _VariantGroundingPlannerPort:
                                 "answer_1": "merch_shade_key",
                                 "answer_2": "sale_key",
                             },
+                            row_path_ids_by_answer_output={"answer_2": "items"},
                         ),
                         "param_decisions": _param_decisions(
                             relation,

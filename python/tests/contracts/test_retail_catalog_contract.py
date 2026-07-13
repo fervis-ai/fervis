@@ -57,10 +57,13 @@ class RetailCatalogCase:
 )
 def retail_catalog_case(request) -> RetailCatalogCase:
     if request.param == "django":
-        return _django_retail_case()
-    if request.param == "fastapi":
-        return _fastapi_retail_case()
-    return _flask_retail_case()
+        case = _django_retail_case()
+    elif request.param == "fastapi":
+        case = _fastapi_retail_case()
+    else:
+        case = _flask_retail_case()
+    request.addfinalizer(case.adapter.close)
+    return case
 
 
 def test_retail_catalog_discovers_generic_read_routes(

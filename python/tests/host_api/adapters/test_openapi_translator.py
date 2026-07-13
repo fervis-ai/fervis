@@ -368,9 +368,7 @@ def test_openapi_contract_translation_treats_path_params_as_required() -> None:
     ]
 
 
-def test_openapi_detail_path_parameter_targets_matching_declared_key_component() -> (
-    None
-):
+def test_openapi_path_parameter_does_not_inherit_response_identity() -> None:
     contracts = endpoint_contracts_from_openapi(
         {
             "openapi": "3.1.0",
@@ -433,12 +431,7 @@ def test_openapi_detail_path_parameter_targets_matching_declared_key_component()
         source_namespace_path=("warehouses",),
     )
 
-    target = contracts[0].path_params[0].entity_target
-
-    assert target is not None
-    assert target.entity_kind == "warehouse"
-    assert target.key_id == "primary_key"
-    assert target.component_id == "warehouse_id"
+    assert contracts[0].path_params[0].entity_target is None
 
 
 def test_openapi_contract_translation_merges_simple_all_of_object_schema() -> None:
