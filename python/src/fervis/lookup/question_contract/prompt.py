@@ -44,17 +44,22 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                 resolution_payload,
                 indent=2,
             ))
-        source = self.request.clarification_source
-        if source is not None:
+        responses = self.request.clarification_responses
+        if responses:
             sections.append(
                 builder.json_section(
-                    "Attributed clarification response:",
+                    "Attributed clarification responses:",
                     {
-                        "response_id": source.response_id,
-                        "clarification_id": source.clarification_id,
-                        "exact_user_text": source.exact_user_text,
-                        "missing_item_id": self.request.clarification_missing_item_id,
-                        "expected_value_kind": self.request.clarification_expected_value_kind,
+                        "responses": [
+                            {
+                                "response_id": response.source.response_id,
+                                "clarification_id": response.source.clarification_id,
+                                "exact_user_text": response.source.exact_user_text,
+                                "missing_item_id": response.missing_item_id,
+                                "expected_value_kind": response.expected_value_kind,
+                            }
+                            for response in responses
+                        ]
                     },
                     indent=2,
                 )

@@ -31,6 +31,7 @@ from fervis.lookup.answer_program.values import (
     TimeComponent,
     ValueComponent,
 )
+from fervis.lookup.canonical_data import entity_key_value
 from fervis.lookup.fact_planning.value_validation import verify_value_contract
 from fervis.lookup.answer_program import (
     BindingProvenance,
@@ -176,10 +177,11 @@ def _value(payload: dict[str, Any]) -> FactValue:
     if kind == "identity":
         return FactValue.identity(
             id=str(payload["id"]),
-            entity_kind=str(payload["entity_kind"]),
-            key_id=str(payload["key_id"]),
-            key_component_id=str(payload["key_component_id"]),
-            value=str(payload["value"]),
+            key=entity_key_value(
+                str(payload["entity_kind"]),
+                str(payload["key_id"]),
+                {str(payload["key_component_id"]): str(payload["value"])},
+            ),
             proof_refs=tuple(payload.get("proof_refs") or ()),
         )
     if kind == "named":

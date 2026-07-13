@@ -19,6 +19,7 @@ from fervis.lookup.answer_program.persistence import (
     program_invocation,
 )
 from fervis.lookup.answer_program.values import FactValue
+from fervis.lookup.canonical_data import entity_key_value
 from fervis.lookup.conversation_resolution.callable_frames import (
     callable_frame_bindings,
     load_callable_frame_program,
@@ -87,10 +88,11 @@ def test_callable_frame_reuses_shape_and_rebinds_only_changed_argument() -> None
     current_value = FactValue.identity(
         id="grounded_place",
         known_input_id="place",
-        entity_kind="mall",
-        key_id="primary_key",
-        key_component_id="id",
-        value="mall_2",
+        key=entity_key_value(
+            "mall",
+            "tenant_mall_key",
+            {"tenant_id": "tenant_1", "id": "mall_2"},
+        ),
         display_value="Pivot Mall",
         proof_refs=("source_read:mall_2",),
         applies_to_requested_fact_ids=("sales_count",),
@@ -102,7 +104,11 @@ def test_callable_frame_reuses_shape_and_rebinds_only_changed_argument() -> None
 
     rebound_value = rebound.get("question.place").value
     assert rebound_value.known_input_id == "place"
-    assert rebound_value.payload.canonical_value() == "mall_2"
+    assert rebound_value.payload.canonical_value() == entity_key_value(
+        "mall",
+        "tenant_mall_key",
+        {"tenant_id": "tenant_1", "id": "mall_2"},
+    )
     assert reader.request == ("run_1", "conversation_1", "tenant_1")
 
 
@@ -159,10 +165,11 @@ def _base_program() -> tuple[AnswerProgram, BindingSet]:
     base_value = FactValue.identity(
         id="grounded_place",
         known_input_id="place",
-        entity_kind="mall",
-        key_id="primary_key",
-        key_component_id="id",
-        value="mall_1",
+        key=entity_key_value(
+            "mall",
+            "tenant_mall_key",
+            {"tenant_id": "tenant_1", "id": "mall_1"},
+        ),
         display_value="Acacia Mall",
         proof_refs=("source_read:mall_1",),
         applies_to_requested_fact_ids=("sales_count",),

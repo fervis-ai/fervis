@@ -100,6 +100,7 @@ from fervis.lookup.answer_program.values import (
 from fervis.lookup.answer_program import BindingSet, compiler_input_context
 from fervis.lookup.answer_program import AnswerProgramContractError
 from fervis.lookup.answer_program.values import LiteralType
+from fervis.lookup.canonical_data import entity_key_value
 from fervis.lookup.question_contract import (
     KnownInputSource,
     LiteralInputRole,
@@ -2506,10 +2507,9 @@ def test_relation_source_applied_filter_constrains_rows_before_operation():
     area_expression = _constant_expression(
         FactValue.identity(
             id="nairobi_area",
-            entity_kind="area",
-            key_id="primary_key",
-            key_component_id="area_id",
-            value="area_nairobi",
+            key=entity_key_value(
+                "area", "primary_key", {"area_id": "area_nairobi"}
+            ),
             display_value="Nairobi",
             proof_refs=("known_input:input_1",),
         ),

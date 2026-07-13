@@ -400,7 +400,10 @@ class SQLQuestionLifecyclePort:
         with sql_transaction(self.engine):
             resumed = self.queue.resume_from_clarification(
                 run_id=resume.run_id,
-                spec=replace(item.spec, clarification_response=response),
+                spec=replace(
+                    item.spec,
+                    clarification_responses=(*item.spec.clarification_responses, response),
+                ),
                 execution_mode=resume.execution_mode.value,
             )
             self.recorder.record_clarification_response(

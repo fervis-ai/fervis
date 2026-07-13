@@ -14,6 +14,7 @@ from fervis.lookup.question_contract import (
     parse_question_contract,
 )
 from fervis.lookup.question_inputs import KnownInputKind
+from fervis.lookup.conversation_resolution.compilation import ResolvedIdentityInput
 from fervis.lookup.turn_prompts import build_turn_prompt_context
 from tests.testkit.algorithms.conversation_resolution import (
     compiled_conversation_resolution_from_payload,
@@ -25,6 +26,24 @@ from tests.testkit.assertions import (
     status_mismatches,
     subset_mismatches,
 )
+
+
+def _conversation_identity_payload(
+    item: ResolvedIdentityInput,
+) -> dict[str, object]:
+    identity = item.canonical_identity
+    payload: dict[str, object] = {
+        "input_ref": item.input_ref,
+        "entity_kind": identity.key.entity_kind,
+        "key_id": identity.key.key_id,
+    }
+    if len(identity.key.components) == 1:
+        component = identity.key.components[0]
+        payload["key_component_id"] = component.component_id
+        payload["value"] = component.value
+    else:
+        payload["components"] = identity.key.component_values()
+    return payload
 
 
 def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
@@ -102,13 +121,7 @@ def run_question_contract_parse_case(payload: dict[str, Any]) -> list[str]:
     )
     if "conversation_identity_inputs" in expected_result:
         actual["conversation_identity_inputs"] = [
-            {
-                "input_ref": item.input_ref,
-                "entity_kind": item.canonical_identity.entity_kind,
-                "key_id": item.canonical_identity.key_id,
-                "key_component_id": item.canonical_identity.key_component_id,
-                "value": item.canonical_identity.value,
-            }
+            _conversation_identity_payload(item)
             for item in (
                 conversation_resolution.identity_inputs()
                 if conversation_resolution is not None

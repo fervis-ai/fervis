@@ -45,6 +45,7 @@ from fervis.lookup.question_contract import (
 )
 from fervis.lookup.fact_plan.row_sources import api_row_source_id
 from fervis.lookup.answer_program.values import FactValue, TimeComponent
+from fervis.lookup.canonical_data import entity_key_value
 from fervis.lookup.fact_planning.pattern_plan import compile_pattern_answer_program
 from fervis.lookup.fact_planning.provider_contract import parse_pattern_answer
 from fervis.lookup.provider_contract import ProviderObject
@@ -581,9 +582,15 @@ def test_grounded_endpoint_params_are_backend_owned_not_model_authored():
         {},
     )
     backend_bindings = target["backend_owned_param_bindings"]
-    backend_param_ids = {
+    direct_param_ids = {
         binding["param_id"] for binding in backend_bindings if "param_id" in binding
     }
+    key_param_ids = {
+        param_id
+        for binding in backend_bindings
+        for param_id in binding.get("params_by_component_id", {}).values()
+    }
+    backend_param_ids = direct_param_ids | key_param_ids
 
     assert {"staff_id", "start_date", "end_date"}.isdisjoint(param_properties)
     assert backend_param_ids == {"staff_id", "start_date", "end_date"}
@@ -1420,10 +1427,11 @@ def _closed_key_grouped_staff_sales_request() -> SourceBindingRequest:
         FactValue.identity(
             id="staff_identity_1",
             known_input_id="staff_id_1",
-            entity_kind="staff",
-            key_id="staff_key",
-            key_component_id="staff_id",
-            value="51515151-0000-0000-0002-000000000001",
+            key=entity_key_value(
+                "staff",
+                "staff_key",
+                {"staff_id": "51515151-0000-0000-0002-000000000001"},
+            ),
             display_value="51515151-0000-0000-0002-000000000001",
             proof_refs=("known_input:staff_id_1",),
             applies_to_requested_fact_ids=("fact_1",),
@@ -1431,10 +1439,11 @@ def _closed_key_grouped_staff_sales_request() -> SourceBindingRequest:
         FactValue.identity(
             id="staff_identity_2",
             known_input_id="staff_id_2",
-            entity_kind="staff",
-            key_id="staff_key",
-            key_component_id="staff_id",
-            value="51515151-0000-0000-0002-000000000002",
+            key=entity_key_value(
+                "staff",
+                "staff_key",
+                {"staff_id": "51515151-0000-0000-0002-000000000002"},
+            ),
             display_value="51515151-0000-0000-0002-000000000002",
             proof_refs=("known_input:staff_id_2",),
             applies_to_requested_fact_ids=("fact_1",),

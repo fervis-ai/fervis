@@ -348,8 +348,8 @@ def test_clarification_response_resumes_the_waiting_run(adapter):
     request = adapter.lookup.last_request()
     assert request is not None
     assert request.question == "How many orders came in today?"
-    assert request.clarification_response is not None
-    assert request.clarification_response.option.id == "area_nairobi"
+    assert len(request.clarification_responses) == 1
+    assert request.clarification_responses[0].option.id == "area_nairobi"
 
 
 def test_clarification_cycles_expose_only_the_current_request(adapter):
@@ -381,6 +381,29 @@ def test_clarification_cycles_expose_only_the_current_request(adapter):
     clarifications = persisted["resultData"]["details"]["clarifications"]
     assert second_wait.status == "WAITING_FOR_CLARIFICATION"
     assert [item["id"] for item in clarifications] == ["clarification_period"]
+
+    adapter.lookup.complete_with_terminal(answer="42")
+    completed = adapter.questions.respond_to_clarification(
+        ClarificationResponseRequest(
+            question_id=first.question_id,
+            run_id=first.run_id,
+            clarification_id="clarification_period",
+            response_text="This month",
+            principal=QuestionPrincipal(
+                principal_id=adapter.principal_id,
+                tenant_id=adapter.tenant_id,
+            ),
+            execution_mode=ExecutionMode.INLINE,
+            selected_option_id="area_nairobi",
+        )
+    )
+
+    assert completed.status == "COMPLETED", completed.error
+    request = adapter.lookup.last_request()
+    assert request is not None
+    assert tuple(
+        response.clarification_id for response in request.clarification_responses
+    ) == ("clarification_area", "clarification_period")
 
 
 def test_idempotent_waiting_run_emits_actionable_clarification(adapter):

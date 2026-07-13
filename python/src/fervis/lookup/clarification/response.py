@@ -25,6 +25,7 @@ from fervis.lookup.clarification.model import (
     SourceBindingCatalogInputContinuation,
     SourceBindingCatalogInputResponse,
 )
+from fervis.lookup.canonical_data import entity_key_from_payload, entity_key_to_payload
 
 
 def clarification_response_payload(
@@ -52,7 +53,7 @@ def clarification_response_payload(
             "clarificationId": response.clarification_id,
             "requestedFactId": response.requested_fact_id,
             "knownInputId": response.known_input_id,
-            "option": vars(response.option),
+            "option": _option_payload(response.option),
         }
     if isinstance(response, GroundingTextResponse):
         return {
@@ -201,14 +202,31 @@ def _option_from_payload(payload: Mapping[str, object]) -> ClarificationOption:
         id=_required_text(payload, "id"),
         label=_optional_text(payload, "label"),
         value=_optional_text(payload, "value"),
-        entity_kind=_optional_text(payload, "entity_kind"),
-        key_id=_optional_text(payload, "key_id"),
+        key=(
+            entity_key_from_payload(payload["key"])
+            if payload.get("key") is not None
+            else None
+        ),
         matched_label=_optional_text(payload, "matched_label"),
         matched_field=_optional_text(payload, "matched_field"),
         matched_value=_optional_text(payload, "matched_value"),
         resolver_read_id=_optional_text(payload, "resolver_read_id"),
         resolver_label=_optional_text(payload, "resolver_label"),
     )
+
+
+def _option_payload(option: ClarificationOption) -> dict[str, object]:
+    return {
+        "id": option.id,
+        "label": option.label,
+        "value": option.value,
+        "key": entity_key_to_payload(option.key) if option.key is not None else None,
+        "matched_label": option.matched_label,
+        "matched_field": option.matched_field,
+        "matched_value": option.matched_value,
+        "resolver_read_id": option.resolver_read_id,
+        "resolver_label": option.resolver_label,
+    }
 
 
 def _mapping(payload: Mapping[str, object], field: str) -> Mapping[str, object]:

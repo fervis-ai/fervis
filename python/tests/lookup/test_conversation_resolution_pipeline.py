@@ -637,10 +637,10 @@ def test_subject_change_preserves_prior_canonical_identity() -> None:
     )
 
     identity = compiled.identity_inputs()[0].canonical_identity
-    assert identity.entity_kind == "staff"
-    assert identity.key_id == "primary_key"
-    assert identity.key_component_id == "staff_id"
-    assert identity.value == "staff_alice"
+    assert identity is not None
+    assert identity.key.entity_kind == "staff"
+    assert identity.key.key_id == "primary_key"
+    assert identity.key.component_value("staff_id") == "staff_alice"
     prompt_payload = str(compiled.to_prompt_payload())
     assert "canonical_identity" not in prompt_payload
     assert "staff_alice" not in prompt_payload

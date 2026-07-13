@@ -9,6 +9,7 @@ from fervis.lookup.conversation_resolution import (
 )
 from fervis.lookup.conversation_resolution.compilation import CompiledResolvedClause
 from fervis.lookup.answer_program.values import FactValue, IdentityValuePayload
+from fervis.lookup.canonical_data import entity_key_value
 from fervis.lookup.fact_planning.request import RuntimeValueContext
 from fervis.lookup.grounding.resolution import ground_question_inputs
 from fervis.lookup.question_contract import (
@@ -56,7 +57,7 @@ def _run_grounding_runtime_case(payload: dict[str, Any]) -> list[str]:
         model_key="test",
         max_thinking_tokens=0,
         conversation_resolution=_compiled_resolution_from_input(input_payload),
-        clarification_response=_clarification_response_from_input(input_payload),
+        clarification_responses=_clarification_responses_from_input(input_payload),
     )
     actual = {
         "values": [_value_payload(value) for value in output.ledger.values],
@@ -130,17 +131,19 @@ def _compiled_resolution_from_input(
     )
 
 
-def _clarification_response_from_input(
+def _clarification_responses_from_input(
     payload: dict[str, Any],
-) -> ClarificationOwnerResponse | None:
+) -> tuple[ClarificationOwnerResponse, ...]:
     answer = payload.get("clarification_response")
     if not isinstance(answer, dict):
-        return None
-    return parse_clarification_response(
-        clarification_from_payload(answer["clarification"]),
-        response_id=str(answer["response_id"]),
-        response_text=str(answer["response_text"]),
-        selected_option_id=str(answer.get("selected_option_id") or ""),
+        return ()
+    return (
+        parse_clarification_response(
+            clarification_from_payload(answer["clarification"]),
+            response_id=str(answer["response_id"]),
+            response_text=str(answer["response_text"]),
+            selected_option_id=str(answer.get("selected_option_id") or ""),
+        ),
     )
 
 
@@ -163,10 +166,11 @@ def _resolved_canonical_identity(
     payload: dict[str, Any],
 ) -> ResolvedCanonicalIdentity:
     return ResolvedCanonicalIdentity(
-        entity_kind=str(payload["entity_kind"]),
-        key_id=str(payload["key_id"]),
-        key_component_id=str(payload["key_component_id"]),
-        value=str(payload["value"]),
+        key=entity_key_value(
+            str(payload["entity_kind"]),
+            str(payload["key_id"]),
+            {str(payload["key_component_id"]): str(payload["value"])},
+        ),
         authority_refs=tuple(str(ref) for ref in payload["authority_refs"]),
         lineage_refs=tuple(str(ref) for ref in payload["lineage_refs"]),
     )
@@ -179,8 +183,8 @@ def _value_payload(value: FactValue) -> dict[str, object]:
             "kind": value.kind.value,
             "entity_kind": value.payload.entity_kind,
             "key_id": value.payload.key_id,
-            "key_component_id": value.payload.key_component_id,
-            "value": value.payload.value,
+            "key_component_id": value.payload.only_component().component_id,
+            "value": value.payload.only_component().value,
             "display_value": value.payload.display_value,
             "proof_refs": list(value.proof_refs),
             "applies_to_requested_fact_ids": list(value.applies_to_requested_fact_ids),

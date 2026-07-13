@@ -104,7 +104,9 @@ def ground_question_inputs(
     host: HostPromptContext = HostPromptContext(),
     selected_input_ids: frozenset[str] | None = None,
     expected_input_identities: Mapping[str, ExpectedInputIdentity] | None = None,
-    clarification_response: GroundingIdentityResponse | GroundingTextResponse | None = None,
+    clarification_responses: tuple[
+        GroundingIdentityResponse | GroundingTextResponse, ...
+    ] = (),
 ) -> GroundingOutput:
     values: list[FactValue] = []
     uses: list[GroundedInputUse] = []
@@ -120,7 +122,7 @@ def ground_question_inputs(
         active_memory_ids if active_memory_ids is not None else frozenset()
     )
     clarified = _clarification_identity_imports(
-        clarification_response,
+        clarification_responses,
         question_contract=question_contract,
     )
     values.extend(clarified.values)
@@ -214,15 +216,10 @@ def ground_question_inputs(
                 time_tasks=time_tasks,
                 conversation_context=dict(conversation_context or {}),
                 host=host,
-                clarification_source=(
-                    clarification_response.source
-                    if isinstance(clarification_response, GroundingTextResponse)
-                    else None
-                ),
-                clarification_known_input_id=(
-                    clarification_response.known_input_id
-                    if isinstance(clarification_response, GroundingTextResponse)
-                    else ""
+                clarification_responses=tuple(
+                    response
+                    for response in clarification_responses
+                    if isinstance(response, GroundingTextResponse)
                 ),
             ),
             model_port=model_port,
@@ -280,14 +277,30 @@ def _selected(
 
 
 def _clarification_identity_imports(
-    answer: GroundingIdentityResponse | GroundingTextResponse | None,
+    responses: tuple[GroundingIdentityResponse | GroundingTextResponse, ...],
     *,
     question_contract: QuestionContract,
 ) -> CanonicalInputLedger:
-    if answer is None:
-        return CanonicalInputLedger()
-    if not isinstance(answer, GroundingIdentityResponse):
-        return CanonicalInputLedger()
+    ledgers = tuple(
+        _clarification_identity_import(response, question_contract=question_contract)
+        for response in responses
+        if isinstance(response, GroundingIdentityResponse)
+    )
+    return CanonicalInputLedger(
+        values=tuple(value for ledger in ledgers for value in ledger.values),
+        certifications=tuple(
+            certification
+            for ledger in ledgers
+            for certification in ledger.certifications
+        ),
+    )
+
+
+def _clarification_identity_import(
+    answer: GroundingIdentityResponse,
+    *,
+    question_contract: QuestionContract,
+) -> CanonicalInputLedger:
     option = answer.option
     requested_facts = {
         fact.id: {known.id for known in fact.known_inputs}
@@ -296,17 +309,12 @@ def _clarification_identity_imports(
     fact_inputs = requested_facts.get(answer.requested_fact_id)
     if fact_inputs is None or answer.known_input_id not in fact_inputs:
         raise ValueError("clarification subject does not match the current contract")
-    if not all(
-        (option.entity_kind, option.key_id, option.matched_field, option.matched_value)
-    ):
+    if option.key is None:
         return CanonicalInputLedger()
     value = FactValue.identity(
         id=_grounded_value_id(answer.known_input_id),
         known_input_id=answer.known_input_id,
-        entity_kind=option.entity_kind,
-        key_id=option.key_id,
-        key_component_id=option.matched_field,
-        value=option.matched_value,
+        key=option.key,
         display_value=option.matched_label or option.label,
         proof_refs=(
             f"clarification:{answer.clarification_id}",
@@ -436,10 +444,7 @@ def _resolved_identity_value(
     return FactValue.identity(
         id=_grounded_value_id(known.id),
         known_input_id=known.id,
-        entity_kind=canonical.entity_kind,
-        key_id=canonical.key_id,
-        key_component_id=canonical.key_component_id,
-        value=canonical.value,
+        key=canonical.key,
         display_value=known.resolved_value_text,
         proof_refs=(
             f"known_input:{known.id}",

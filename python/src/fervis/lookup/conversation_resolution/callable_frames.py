@@ -175,10 +175,7 @@ def _parameter_value(
             return replace(
                 value,
                 payload=IdentitySetValuePayload(
-                    entity_kind=identity.entity_kind,
-                    key_id=identity.key_id,
-                    key_component_id=identity.key_component_id,
-                    values=(identity.value,),
+                    keys=(identity.key,),
                     display_value=identity.display_value,
                 ),
             )
@@ -192,7 +189,14 @@ def _expected_input_identity(value: FactValue) -> ExpectedInputIdentity | None:
             return ExpectedInputIdentity(
                 entity_kind=identity.entity_kind,
                 key_id=identity.key_id,
-                key_component_id=identity.key_component_id,
+                key_component_ids=tuple(
+                    component.component_id
+                    for component in (
+                        identity.key.components
+                        if isinstance(identity, IdentityValuePayload)
+                        else identity.keys[0].components
+                    )
+                ),
             )
         case _:
             return None

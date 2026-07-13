@@ -73,7 +73,7 @@ class LookupServiceQuestionLookupPort(QuestionLookupPort):
             user_context=self.runtime_context(request),
             active_attempt=request.active_attempt,
             progress_sink=progress_sink,
-            clarification_response=request.clarification_response,
+            clarification_responses=request.clarification_responses,
         )
         self.lookup_service.provider_backbone.trace(
             event_type=f"run.{result.status.lower()}",

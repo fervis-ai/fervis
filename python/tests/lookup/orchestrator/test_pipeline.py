@@ -2113,8 +2113,9 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
             "resolver_label": "Staff List",
             "entity_kind": "staff",
             "key_id": "staff_key",
-            "key_component_id": "staff_id",
-            "matched_value": "staff-1",
+            "key_components": [
+                {"component_id": "staff_id", "value": "staff-1"}
+            ],
             "matched_label": "Jane Doe",
         }
     ]

@@ -3,6 +3,7 @@ from fervis.lookup.grounding.model import (
     GroundingIssue,
     GroundingTerminalKind,
 )
+from fervis.lookup.canonical_data import EntityKeyComponentValue, EntityKeyValue
 from fervis.lookup.clarification import clarification_payload
 from fervis.lookup.orchestration.terminal_results import _grounding_issue_fact_result
 from fervis.lookup.outcomes.model import NeedsClarification
@@ -59,15 +60,23 @@ def test_grounding_issues_for_one_input_produce_one_complete_clarification():
                 known_input_text="Central",
                 known_input_description="store",
                 candidate_options=(
-                        GroundingCandidate(
-                            id=candidate_id,
-                            label=candidate_id,
+                    GroundingCandidate(
+                        id=candidate_id,
+                        label=candidate_id,
+                        key=EntityKeyValue(
                             entity_kind="store",
                             key_id="store_id",
-                            matched_field="store_id",
-                            matched_value=candidate_id,
-                            resolver_read_id=resolver_read_id,
+                            components=(
+                                EntityKeyComponentValue(
+                                    component_id="store_id",
+                                    value=candidate_id,
+                                ),
+                            ),
                         ),
+                        matched_field="store_id",
+                        matched_value=candidate_id,
+                        resolver_read_id=resolver_read_id,
+                    ),
                 ),
                 resolver_read_id=resolver_read_id,
                 resolver_endpoint_name=resolver_read_id,

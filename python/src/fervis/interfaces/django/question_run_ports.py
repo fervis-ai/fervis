@@ -367,7 +367,10 @@ class DjangoQuestionLifecyclePort:
                 response_text=resume.response_text,
                 selected_option_id=resume.selected_option_id,
             )
-            resumed_spec = replace(spec, clarification_response=response)
+            resumed_spec = replace(
+                spec,
+                clarification_responses=(*spec.clarification_responses, response),
+            )
             item.execution_spec = execution_spec_to_storage_dict(resumed_spec)
             _resume_work_item(item, execution_mode=resume.execution_mode)
             DjangoLineageRecorder().record_clarification_response(

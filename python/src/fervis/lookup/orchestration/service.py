@@ -81,7 +81,7 @@ class LookupService:
         user_context: dict[str, Any] | None = None,
         active_attempt: int | None = None,
         progress_sink: LookupProgressSink | None = None,
-        clarification_response: ClarificationOwnerResponse | None = None,
+        clarification_responses: tuple[ClarificationOwnerResponse, ...] = (),
     ) -> PlannerRunResult:
         from fervis.lookup.orchestration.pipeline import run_lookup_question
 
@@ -149,7 +149,7 @@ class LookupService:
                 runtime_values=_runtime_values(self.host_api_context),
                 host=_host_prompt_context(self.host_api_context),
                 active_attempt=active_attempt,
-                clarification_response=clarification_response,
+                clarification_responses=clarification_responses,
             ),
             LookupRuntimePorts(
                 relation_catalog_port=_ConfiguredRelationCatalogProvider(

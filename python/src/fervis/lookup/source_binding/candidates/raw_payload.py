@@ -547,12 +547,12 @@ def _param_covers_identity_value(
     target = param.get("entity_target")
     if not isinstance(target, dict):
         return False
-    identity = _identity_value_contract(value)
-    return identity == (
+    identity = (
         str(target.get("entity_kind") or ""),
         str(target.get("key_id") or ""),
         str(target.get("component_id") or ""),
     )
+    return identity in _identity_value_contracts(value)
 
 
 def _entity_declaration_covers_identity_value(
@@ -560,7 +560,7 @@ def _entity_declaration_covers_identity_value(
     *,
     value: FactValue,
 ) -> bool:
-    identity = _identity_value_contract(value)
+    identities = _identity_value_contracts(value)
     raw_grains = candidate.get("result_grains")
     if not isinstance(raw_grains, (list, tuple)):
         return False
@@ -568,28 +568,27 @@ def _entity_declaration_covers_identity_value(
         parse_result_grain(grain) for grain in raw_grains if isinstance(grain, dict)
     )
     return any(
-        identity in _entity_declaration_component_targets(grain) for grain in grains
+        bool(identities & set(_entity_declaration_component_targets(grain)))
+        for grain in grains
     )
 
 
-def _identity_value_contract(value: FactValue) -> tuple[str, str, str]:
+def _identity_value_contracts(value: FactValue) -> set[tuple[str, str, str]]:
     if value.kind == ValueKind.IDENTITY and isinstance(
         value.payload, IdentityValuePayload
     ):
-        return (
-            value.payload.entity_kind,
-            value.payload.key_id,
-            value.payload.key_component_id,
-        )
+        return {
+            (value.payload.entity_kind, value.payload.key_id, component.component_id)
+            for component in value.payload.key.components
+        }
     if value.kind == ValueKind.IDENTITY_SET and isinstance(
         value.payload, IdentitySetValuePayload
     ):
-        return (
-            value.payload.entity_kind,
-            value.payload.key_id,
-            value.payload.key_component_id,
-        )
-    return ("", "", "")
+        return {
+            (value.payload.entity_kind, value.payload.key_id, component.component_id)
+            for component in value.payload.keys[0].components
+        }
+    return set()
 
 
 def _entity_declaration_component_targets(

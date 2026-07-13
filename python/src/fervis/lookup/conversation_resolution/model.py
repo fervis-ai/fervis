@@ -12,8 +12,7 @@ from fervis.memory.conversation_context import (
 )
 from fervis.lookup.turn_prompts.context import HostPromptContext
 from fervis.lookup.clarification.model import (
-    ClarificationResponseSource,
-    ConversationInterpretationCandidate,
+    ConversationResolutionResponse,
 )
 
 
@@ -435,5 +434,4 @@ class ConversationResolutionRequest:
     host: HostPromptContext = field(default_factory=HostPromptContext)
     context_sources: tuple[ConversationContextSource, ...] = ()
     context_frames: tuple[ConversationContextFrame, ...] = ()
-    clarification_source: ClarificationResponseSource | None = None
-    selected_clarification_candidate: ConversationInterpretationCandidate | None = None
+    clarification_responses: tuple[ConversationResolutionResponse, ...] = ()

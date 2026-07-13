@@ -9,6 +9,7 @@ from fervis.lookup.question_inputs import (
     KnownInputKind,
     LiteralInputRole,
 )
+from fervis.lookup.canonical_data import EntityKeyComponentValue, EntityKeyValue
 from fervis.memory.conversation_context import (
     ConversationAnswerShape,
     ConversationContextFrame,
@@ -38,18 +39,13 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ResolvedCanonicalIdentity:
-    entity_kind: str
-    key_id: str
-    key_component_id: str
-    value: str
+    key: EntityKeyValue
     authority_refs: tuple[str, ...]
     lineage_refs: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        if not all(
-            (self.entity_kind, self.key_id, self.key_component_id, self.value)
-        ):
-            raise ValueError("resolved identity requires a complete candidate-key value")
+        if not isinstance(self.key, EntityKeyValue):
+            raise TypeError("resolved identity requires a complete entity key")
         if not self.authority_refs or not self.lineage_refs:
             raise ValueError("resolved identity requires authority and lineage")
 
@@ -481,15 +477,15 @@ def _parameter_canonical_identity(
         PriorEntityIdentityBinding,
     ):
         return None
-    components = tuple(parameter.binding.canonical_values.items())
-    if len(components) != 1:
-        raise ValueError("resolved identity requires one candidate-key component")
-    key_component_id, value = components[0]
     return ResolvedCanonicalIdentity(
-        entity_kind=parameter.binding.entity_kind,
-        key_id=parameter.binding.key_id,
-        key_component_id=key_component_id,
-        value=value,
+        key=EntityKeyValue(
+            entity_kind=parameter.binding.entity_kind,
+            key_id=parameter.binding.key_id,
+            components=tuple(
+                EntityKeyComponentValue(component_id=component_id, value=value)
+                for component_id, value in parameter.binding.canonical_values.items()
+            ),
+        ),
         authority_refs=parameter.binding.source_lineage,
         lineage_refs=parameter.binding.source_lineage,
     )
@@ -709,9 +705,8 @@ def _canonical_identity(
         if not isinstance(entity_key, dict):
             continue
         components = entity_key.get("components")
-        if not isinstance(components, dict) or len(components) != 1:
+        if not isinstance(components, dict) or not components:
             continue
-        key_component_id, value = next(iter(components.items()))
         entity_kind = str(entity_key.get("entity_kind") or "").strip()
         key_id = str(entity_key.get("key_id") or "").strip()
         authority_refs = tuple(
@@ -724,10 +719,17 @@ def _canonical_identity(
             continue
         candidates.append(
             ResolvedCanonicalIdentity(
-                entity_kind=entity_kind,
-                key_id=key_id,
-                key_component_id=str(key_component_id),
-                value=str(value),
+                key=EntityKeyValue(
+                    entity_kind=entity_kind,
+                    key_id=key_id,
+                    components=tuple(
+                        EntityKeyComponentValue(
+                            component_id=str(component_id),
+                            value=str(value),
+                        )
+                        for component_id, value in components.items()
+                    ),
+                ),
                 authority_refs=authority_refs,
                 lineage_refs=(f"memory:{memory_id}",),
             )

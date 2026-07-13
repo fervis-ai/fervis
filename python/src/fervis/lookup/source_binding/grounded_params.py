@@ -99,7 +99,7 @@ def _record_identity_param_bindings(
             and _identity_matches_target(value, target=target)
         )
         distinct_values = {
-            value.payload.value
+            value.payload.key.component_value(target.component_id)
             for value in matching_values
             if isinstance(value.payload, IdentityValuePayload)
         }
@@ -113,7 +113,7 @@ def _record_identity_param_bindings(
                 grounded,
                 param_id=param.id,
                 value=value,
-                concrete_value=payload.value,
+                concrete_value=payload.key.component_value(target.component_id),
                 value_component="value",
             )
 
@@ -128,7 +128,8 @@ def _identity_matches_target(
         isinstance(payload, IdentityValuePayload)
         and payload.entity_kind == target.entity_kind
         and payload.key_id == target.key_id
-        and payload.key_component_id == target.component_id
+        and target.component_id
+        in {component.component_id for component in payload.key.components}
     )
 
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+from fervis.lookup.canonical_data import EntityKeyValue
 from fervis.types.enums import StrEnum
 
 
@@ -57,8 +59,7 @@ class ClarificationOption:
     id: str
     label: str = ""
     value: str = ""
-    entity_kind: str = ""
-    key_id: str = ""
+    key: EntityKeyValue | None = None
     matched_label: str = ""
     matched_field: str = ""
     matched_value: str = ""
@@ -68,7 +69,6 @@ class ClarificationOption:
     def __post_init__(self) -> None:
         if not self.id:
             raise ValueError("clarification option requires id")
-
 
 @dataclass(frozen=True)
 class ClarificationSubject:
@@ -275,14 +275,7 @@ def _validate_continuation_authority(clarification: Clarification) -> None:
                 "grounding continuation requires canonical options or a free-text slot"
             )
         if any(
-            not all(
-                (
-                    option.entity_kind,
-                    option.key_id,
-                    option.matched_field,
-                    option.matched_value,
-                )
-            )
+            option.key is None
             for option in subject.options
         ):
             raise ValueError("grounding options require complete canonical identity")

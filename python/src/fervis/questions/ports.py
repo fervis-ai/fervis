@@ -86,7 +86,7 @@ class ResolveQuestionRunSpec:
     runtime_context: dict[str, Any] = field(default_factory=dict)
     max_budget_usd: Any = None
     max_thinking_tokens: int | None = None
-    clarification_response: ClarificationOwnerResponse | None = None
+    clarification_responses: tuple[ClarificationOwnerResponse, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.question.strip():
@@ -330,7 +330,7 @@ class LookupExecutionRequest:
     max_thinking_tokens: int | None
     active_attempt: int | None = None
     delegated_credential: DelegatedReadCredential | None = None
-    clarification_response: ClarificationOwnerResponse | None = None
+    clarification_responses: tuple[ClarificationOwnerResponse, ...] = ()
 
 
 @dataclass(frozen=True)

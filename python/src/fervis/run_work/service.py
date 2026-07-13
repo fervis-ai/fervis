@@ -200,7 +200,7 @@ class RunWorkService:
                 max_budget_usd=spec.max_budget_usd,
                 max_thinking_tokens=spec.max_thinking_tokens,
                 active_attempt=active_attempt,
-                clarification_response=spec.clarification_response,
+                clarification_responses=spec.clarification_responses,
             ),
             progress_sink=event_sink,
         )
