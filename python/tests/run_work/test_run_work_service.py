@@ -227,6 +227,4 @@ class _RecordingLineage:
         error,
     ) -> None:
         del answer, result_data
-        self.failures.append(
-            {"run_id": run_id, "status": status, "error": error}
-        )
+        self.failures.append({"run_id": run_id, "status": status, "error": error})

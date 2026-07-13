@@ -42,7 +42,8 @@ input:
     fact_description: amount for the prior sales
     subject_text: sales
     answer_expression_family: list_rows
-    answer_outputs: [amount]
+    answer_outputs:
+      - {description: amount, role: ANSWER_VALUE}
   catalog:
     reads: []
   fact_plan:
@@ -63,7 +64,7 @@ expect:
       - answer_1: "10.00"
     tool_names:
       - submit_conversation_resolution
-      - submit_answer_request_contract
+      - submit_question_contract_outcome
       - submit_query_enrichment
       - submit_read_eligibility
       - submit_source_alignment_reviews

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from enum import StrEnum
-from typing import TypeAlias, TypeVar, assert_never
+from fervis.types.enums import StrEnum
+from typing import TypeAlias, TypeVar
+from typing_extensions import assert_never
 
 from fervis.lookup.answer_program.values import (
     ConstantRef,
@@ -18,7 +19,7 @@ from fervis.lookup.answer_program.values import (
 class OperationKind(StrEnum):
     FILTER = "filter"
     PROJECT = "project"
-    PROJECT_TO_IDENTITY = "project_to_identity"
+    PROJECT_TO_KEY = "project_to_key"
     JOIN = "join"
     UNION = "union"
     ROLE_EXPAND = "role_expand"
@@ -136,11 +137,10 @@ class ProjectSpec:
 
 
 @dataclass(frozen=True)
-class ProjectToIdentitySpec:
+class ProjectToKeySpec:
     input_relation: str
-    identity_fields: tuple[str, ...]
-    fields: tuple[ProjectField, ...] = ()
-    kind: OperationKind = field(default=OperationKind.PROJECT_TO_IDENTITY, init=False)
+    key_fields: tuple[str, ...]
+    kind: OperationKind = field(default=OperationKind.PROJECT_TO_KEY, init=False)
 
 
 @dataclass(frozen=True)
@@ -205,7 +205,6 @@ class AggregateSpec:
     input_relation: str
     group_by: tuple[str, ...]
     aggregations: tuple[AggregationSpec, ...]
-    carry_fields: tuple[ProjectField, ...] = ()
     kind: OperationKind = field(default=OperationKind.AGGREGATE, init=False)
 
 
@@ -322,7 +321,7 @@ def compute_expression_leaves(
 OperationSpec: TypeAlias = (
     FilterSpec
     | ProjectSpec
-    | ProjectToIdentitySpec
+    | ProjectToKeySpec
     | JoinSpec
     | UnionSpec
     | RoleExpandSpec
@@ -353,6 +352,7 @@ class Operation:
     def output_scalar(self) -> str:
         return self.spec.output_scalar if isinstance(self.spec, ComputeSpec) else ""
 
+
 def operation_input_relation_ids(spec: OperationSpec) -> tuple[str, ...]:
     """Project relation dependencies from the closed operation union."""
 
@@ -361,7 +361,7 @@ def operation_input_relation_ids(spec: OperationSpec) -> tuple[str, ...]:
         (
             FilterSpec,
             ProjectSpec,
-            ProjectToIdentitySpec,
+            ProjectToKeySpec,
             RoleExpandSpec,
             AggregateSpec,
             RankSpec,

@@ -10,6 +10,7 @@ from tests.testkit.algorithms.answer_program import (
     run_answer_program_instantiate_case,
     run_answer_program_invoke_case,
     run_answer_program_patch_case,
+    run_answer_program_rank_limit_case,
 )
 
 from tests.testkit.algorithms.business_time import run_business_time_case
@@ -74,7 +75,6 @@ from tests.testkit.algorithms.memory import (
     run_conversation_memory_card_projection_case,
     run_conversation_memory_expand_activated_case,
     run_conversation_memory_frame_equivalence_case,
-    run_memory_activate_case,
     run_memory_answer_addresses_case,
     run_memory_available_values_case,
     run_memory_build_artifact_case,
@@ -82,7 +82,6 @@ from tests.testkit.algorithms.memory import (
     run_memory_lineage_memory_artifacts_case,
     run_memory_lookup_projection_case,
     run_memory_outcome_address_case,
-    run_memory_planner_contract_case,
     run_memory_prior_answer_request_case,
     run_memory_project_conversation_case,
 )
@@ -136,6 +135,7 @@ _RUNNERS: dict[tuple[str, str], CaseRunner] = {
     ("algorithm", "answer_program.instantiate"): (run_answer_program_instantiate_case),
     ("algorithm", "answer_program.invoke"): run_answer_program_invoke_case,
     ("algorithm", "answer_program.patch"): run_answer_program_patch_case,
+    ("algorithm", "answer_program.rank_limit"): run_answer_program_rank_limit_case,
     ("adapter", "host_api.endpoint_contract_projection"): run_host_api_projection_case,
     ("algorithm", "business_time.resolve"): run_business_time_case,
     (
@@ -174,7 +174,6 @@ _RUNNERS: dict[tuple[str, str], CaseRunner] = {
     ("algorithm", "lineage.explain"): run_lineage_explain_case,
     ("algorithm", "lineage.input_lineage"): run_lineage_input_lineage_case,
     ("algorithm", "lookup.orchestration"): run_lookup_runtime_case,
-    ("algorithm", "memory.activate"): run_memory_activate_case,
     ("algorithm", "memory.answer_addresses"): run_memory_answer_addresses_case,
     ("algorithm", "memory.available_values"): run_memory_available_values_case,
     ("algorithm", "memory.build_artifact"): run_memory_build_artifact_case,
@@ -184,7 +183,6 @@ _RUNNERS: dict[tuple[str, str], CaseRunner] = {
     ),
     ("algorithm", "memory.lookup_projection"): run_memory_lookup_projection_case,
     ("algorithm", "memory.outcome_address"): run_memory_outcome_address_case,
-    ("algorithm", "memory.planner_contract"): run_memory_planner_contract_case,
     ("algorithm", "memory.prior_answer_request"): run_memory_prior_answer_request_case,
     ("algorithm", "memory.project_conversation"): run_memory_project_conversation_case,
     ("algorithm", "outcomes.classify"): run_outcomes_classify_case,

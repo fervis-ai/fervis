@@ -74,6 +74,38 @@ def test_fervis_auth_configure_fastapi_writes_env_scoped_transport(
     }
 
 
+def test_fastapi_auth_imports_dependency_and_resolver_in_one_host_context(
+    tmp_path: Path,
+) -> None:
+    root = _fastapi_project(tmp_path)
+    _write_project_config(root, framework="fastapi")
+    marker = root / "auth_imported"
+    (root / "app" / "auth.py").write_text(
+        "from pathlib import Path\n"
+        f"marker = Path({str(marker)!r})\n"
+        "if marker.exists():\n"
+        "    raise RuntimeError('host module imported twice')\n"
+        "marker.write_text('imported')\n"
+        "def current_user():\n"
+        "    return object()\n"
+        "def resolve_user(key, tenant_id=None):\n"
+        "    return object()\n",
+        encoding="utf-8",
+    )
+
+    result = configure_auth(
+        discover_project(root),
+        framework="fastapi",
+        security_mode="principal_reauthorization",
+        transport_mode="in_process",
+        principal_dependency="app.auth:current_user",
+        principal_id_attr="id",
+        principal_resolver="app.auth:resolve_user",
+    )
+
+    assert not result.is_blocked
+
+
 def test_fervis_auth_configure_flask_login_writes_json_schema(tmp_path: Path) -> None:
     root = _flask_project(tmp_path)
     _write_project_config(root, framework="flask")
@@ -230,13 +262,11 @@ def _fastapi_project(tmp_path: Path) -> Path:
     (root / "app" / "__init__.py").write_text("", encoding="utf-8")
     (root / "app" / "api" / "__init__.py").write_text("", encoding="utf-8")
     (root / "app" / "api" / "deps.py").write_text(
-        "def get_current_user():\n"
-        "    return object()\n",
+        "def get_current_user():\n    return object()\n",
         encoding="utf-8",
     )
     (root / "app" / "users.py").write_text(
-        "def get_user_by_id(subject_key):\n"
-        "    return object()\n",
+        "def get_user_by_id(subject_key):\n    return object()\n",
         encoding="utf-8",
     )
     return root
@@ -251,8 +281,7 @@ def _flask_project(tmp_path: Path) -> Path:
     )
     (root / "app" / "__init__.py").write_text("", encoding="utf-8")
     (root / "app" / "users.py").write_text(
-        "def get_user_by_id(subject_key):\n"
-        "    return object()\n",
+        "def get_user_by_id(subject_key):\n    return object()\n",
         encoding="utf-8",
     )
     return root
@@ -299,17 +328,13 @@ def _write_project_config(
         }
     environments = {
         "local": {
-            "models": {
-                "default": {"provider": "openai", "model_key": "gpt-5.4-mini"}
-            },
+            "models": {"default": {"provider": "openai", "model_key": "gpt-5.4-mini"}},
             "persistence": {"kind": "sqlite", "path": ".fervis/fervis.sqlite3"},
         }
     }
     if extra_environment is not None:
         environments[extra_environment] = {
-            "models": {
-                "default": {"provider": "openai", "model_key": "gpt-5.4-mini"}
-            },
+            "models": {"default": {"provider": "openai", "model_key": "gpt-5.4-mini"}},
             "persistence": {
                 "kind": "sqlite",
                 "path": f".fervis/{extra_environment}.sqlite3",
@@ -323,9 +348,7 @@ def _write_project_config(
         "routes": {"prefix": "/fervis/" if framework == "django" else "/fervis"},
         "sources": [source],
         "models": {
-            "providers": [
-                {"name": "openai", "allowed_model_keys": ["gpt-5.4-mini"]}
-            ]
+            "providers": [{"name": "openai", "allowed_model_keys": ["gpt-5.4-mini"]}]
         },
         "environments": environments,
     }

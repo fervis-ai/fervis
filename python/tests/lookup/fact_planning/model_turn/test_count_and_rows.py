@@ -18,7 +18,9 @@ class _RowsDataAccess:
         rows = tuple(
             row
             for row in self.rows
-            if all(row.get(str(key).split(".")[-1]) == value for key, value in args.items())
+            if all(
+                row.get(str(key).split(".")[-1]) == value for key, value in args.items()
+            )
         )
         return {
             "endpointName": endpoint_name,
@@ -44,7 +46,8 @@ def _count_function_selection() -> dict[str, object]:
         "value": "count",
     }
 
-def test_pattern_prompt_count_metric_uses_source_identity_not_predicate_fulfillment():
+
+def test_pattern_prompt_count_metric_uses_declared_row_population():
     request = FactPlanRequest(
         question="How many active records are there?",
         question_contract=QuestionContract(
@@ -55,6 +58,7 @@ def test_pattern_prompt_count_metric_uses_source_identity_not_predicate_fulfillm
                     answer_outputs=(
                         RequestedFactAnswerOutput(
                             id="answer_1",
+                            role="ANSWER_VALUE",
                             description="count of active records",
                         ),
                     ),
@@ -70,6 +74,7 @@ def test_pattern_prompt_count_metric_uses_source_identity_not_predicate_fulfillm
                 source=DraftRelationSource(
                     kind=SourceKind.API_READ,
                     read_id="list_records",
+                    row_source_id="api:list_records:data",
                 ),
                 cardinality="many",
                 available_field_ids=("record_key", "is_active"),
@@ -78,20 +83,16 @@ def test_pattern_prompt_count_metric_uses_source_identity_not_predicate_fulfillm
                         field_id="record_key",
                         type="uuid",
                         roles=("identity",),
-                        identity=IdentityMetadata(
-                            entity_ref="record",
-                            identity_field="record_key",
-                            primary_key=True,
-                            stable=True,
-                        ),
                     ),
                     SourceField(field_id="is_active", type="boolean"),
                 ),
                 evidence_items=(
                     SourceEvidenceItem(
-                        evidence_id="source_1.record_key",
-                        field_id="record_key",
+                        evidence_id="row_population.source_1.data",
+                        field_id="data",
+                        type="row_population",
                         row_cardinality="many",
+                        row_source_id="api:list_records:data",
                     ),
                     SourceEvidenceItem(
                         evidence_id="source_1.is_active",
@@ -107,9 +108,9 @@ def test_pattern_prompt_count_metric_uses_source_identity_not_predicate_fulfillm
                             "The active record count is determined by rows where "
                             "is_active is true."
                         ),
-                        row_count_basis_evidence_ids=("source_1.record_key",),
-                        group_key_evidence_ids=("source_1.is_active",),
-                        scope_evidence_ids=("source_1.is_active",),
+                        row_count_basis_evidence_ids=(
+                            "row_population.source_1.data",
+                        ),
                     ),
                 ),
             ),
@@ -495,6 +496,7 @@ def test_structural_row_count_metric_executes_count_over_selected_row_population
                     answer_outputs=(
                         RequestedFactAnswerOutput(
                             id="answer_1",
+                            role="ANSWER_VALUE",
                             description="count",
                         ),
                     ),
@@ -618,7 +620,9 @@ def test_pattern_prompt_does_not_require_raw_record_fields_for_count_metric_answ
                 RequestedFact(
                     id="fact_1",
                     description="active records count",
-                    answer_outputs=(RequestedFactAnswerOutput(id="answer_1"),),
+                    answer_outputs=(
+                        RequestedFactAnswerOutput(id="answer_1", role="ANSWER_VALUE"),
+                    ),
                 ),
             )
         ),
@@ -628,7 +632,11 @@ def test_pattern_prompt_does_not_require_raw_record_fields_for_count_metric_answ
                 id="sb_1",
                 requested_fact_id="fact_1",
                 answer_population=_answer_population(),
-                source=DraftRelationSource(kind=SourceKind.API_READ, read_id="list_records"),
+                source=DraftRelationSource(
+                    kind=SourceKind.API_READ,
+                    read_id="list_records",
+                    row_source_id="api:list_records:data",
+                ),
                 cardinality="many",
                 available_field_ids=("record_key", "name", "is_active"),
                 available_fields=(
@@ -642,9 +650,11 @@ def test_pattern_prompt_does_not_require_raw_record_fields_for_count_metric_answ
                 ),
                 evidence_items=(
                     SourceEvidenceItem(
-                        evidence_id="source_1.record_key",
-                        field_id="record_key",
+                        evidence_id="row_population.source_1.data",
+                        field_id="data",
+                        type="row_population",
                         row_cardinality="many",
+                        row_source_id="api:list_records:data",
                     ),
                     SourceEvidenceItem(
                         evidence_id="source_1.name",
@@ -662,12 +672,10 @@ def test_pattern_prompt_does_not_require_raw_record_fields_for_count_metric_answ
                         requested_fact_id="fact_1",
                         answer_output_id="answer_1",
                         match_basis_explanation=(
-                            "The records are countable by their record identity."
+                            "The declared row population is the count basis."
                         ),
-                        group_key_evidence_ids=(
-                            "source_1.record_key",
-                            "source_1.name",
-                            "source_1.is_active",
+                        row_count_basis_evidence_ids=(
+                            "row_population.source_1.data",
                         ),
                     ),
                 ),
@@ -694,6 +702,8 @@ def test_pattern_prompt_does_not_require_raw_record_fields_for_count_metric_answ
     )
 
     assert "Required fulfillment evidence:" not in prompt
+    assert '<metric id="metric_1" kind="count_records"' in prompt
+
 
 def test_list_rows_preserves_source_identity_field_as_relation_grain():
     plan = compile_pattern_answer_plan(
@@ -724,12 +734,6 @@ def test_list_rows_preserves_source_identity_field_as_relation_grain():
                             FieldBindingRole.IDENTITY.value,
                             FieldBindingRole.OUTPUT.value,
                         ),
-                        identity=IdentityMetadata(
-                            entity_ref="sale",
-                            identity_field="sale_id",
-                            primary_key=True,
-                            stable=True,
-                        ),
                     ),
                 ),
                 fulfillments=(
@@ -737,7 +741,11 @@ def test_list_rows_preserves_source_identity_field_as_relation_grain():
                         requested_fact_id="fact_1",
                         answer_output_id="answer_1",
                         match_basis_explanation="sale_id answers answer_1.",
-                        group_key_evidence_ids=("sale_id",),
+                        entity_evidence=candidate_key_evidence(
+                            "sale_id",
+                            entity_kind="sale",
+                            key_id="sale_key",
+                        ),
                     ),
                 ),
             ),
@@ -745,6 +753,7 @@ def test_list_rows_preserves_source_identity_field_as_relation_grain():
     )
 
     assert plan.relations[0].grain_keys == ("sale_id",)
+
 
 def test_grouped_rows_deduplicates_output_fields_that_repeat_group_fields():
     plan = compile_pattern_answer_plan(
@@ -776,13 +785,17 @@ def test_grouped_rows_deduplicates_output_fields_that_repeat_group_fields():
                         requested_fact_id="fact_1",
                         answer_output_id="answer_1",
                         match_basis_explanation="sale_id answers answer_1.",
-                        group_key_evidence_ids=("sale_id",),
+                        entity_evidence=candidate_key_evidence(
+                            "sale_id",
+                            entity_kind="sale",
+                            key_id="sale_key",
+                        ),
                     ),
                     SourceFulfillment(
                         requested_fact_id="fact_1",
                         answer_output_id="answer_2",
                         match_basis_explanation="item_count answers answer_2.",
-                        group_key_evidence_ids=("item_count",),
+                        value_evidence_ids=("item_count",),
                     ),
                 ),
             ),
@@ -799,7 +812,8 @@ def test_grouped_rows_deduplicates_output_fields_that_repeat_group_fields():
         "item_count",
     ]
 
-def test_grouped_rows_fulfillment_tracks_answer_value_field_after_output_dedupe():
+
+def test_grouped_rows_fulfillment_tracks_candidate_key_after_output_dedupe():
     plan = compile_pattern_answer_plan(
         {
             "answers": [
@@ -810,11 +824,11 @@ def test_grouped_rows_fulfillment_tracks_answer_value_field_after_output_dedupe(
                     "source_binding_id": "sb_sales",
                     "group_fields": [
                         {"field_id": "sale_id"},
-                        {"field_id": "snapshot_merch_name"},
+                        {"field_id": "merch_shade_id"},
                     ],
                     "output_fields": [
                         {"field_id": "sale_id"},
-                        {"field_id": "snapshot_merch_name"},
+                        {"field_id": "merch_shade_id"},
                     ],
                 }
             ]
@@ -826,25 +840,34 @@ def test_grouped_rows_fulfillment_tracks_answer_value_field_after_output_dedupe(
                 answer_population=_answer_population(),
                 source=DraftRelationSource(kind=SourceKind.API_READ, read_id="sales"),
                 cardinality="many",
-                available_field_ids=("sale_id", "snapshot_merch_name"),
+                available_field_ids=("sale_id", "merch_shade_id"),
                 fulfillments=(
                     SourceFulfillment(
                         requested_fact_id="fact_1",
                         answer_output_id="answer_1",
                         match_basis_explanation=(
-                            "snapshot_merch_name answers answer_1."
+                            "merch_shade_id identifies the product."
                         ),
-                        group_key_evidence_ids=("snapshot_merch_name",),
+                        entity_evidence=candidate_key_evidence(
+                            "merch_shade_id",
+                            entity_kind="merch_shade",
+                            key_id="merch_shade_key",
+                        ),
                     ),
                 ),
             ),
         ),
     )
 
-    render_field_by_id = {
-        output.id: output.field_id for output in plan.render_spec.relation_outputs
-    }
-
-    assert render_field_by_id[plan.fulfillment[0].render_output_id] == (
-        "snapshot_merch_name"
+    result_output = next(
+        output
+        for output in plan.result_projection.relation_outputs
+        if output.id == plan.fulfillment[0].result_output_id
     )
+
+    assert result_output.entity_key is not None
+    assert result_output.entity_key.entity_kind == "merch_shade"
+    assert result_output.entity_key.key_id == "merch_shade_key"
+    assert tuple(
+        component.field_id for component in result_output.entity_key.components
+    ) == ("merch_shade_id",)

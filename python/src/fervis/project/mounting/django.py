@@ -354,7 +354,13 @@ def _plan_django_settings(
     assignment = _installed_apps_assignment(loaded.tree, path=settings_path)
     if isinstance(assignment, BlockedPatch):
         return assignment
-    installed_apps = _static_installed_app_names(assignment.value)
+    sequence = assignment.value
+    if not isinstance(sequence, ast.List | ast.Tuple):
+        return BlockedPatch(
+            settings_path,
+            "INSTALLED_APPS must be a literal list or tuple before Fervis can patch it.",
+        )
+    installed_apps = _static_installed_app_names(sequence)
     if installed_apps is None:
         return BlockedPatch(
             settings_path,
@@ -369,7 +375,7 @@ def _plan_django_settings(
         )
     updated = append_literal_sequence_items(
         loaded.text,
-        assignment.value,
+        sequence,
         [app for app in REQUIRED_DJANGO_APPS if app not in installed_apps],
         path=settings_path,
     )
@@ -391,10 +397,16 @@ def _plan_django_urls(
     target = _urlpattern_mount_target(loaded.tree, path=relative_path)
     if isinstance(target, BlockedPatch):
         return target
+    list_node = target.list_assignment.value
+    if not isinstance(list_node, ast.List):
+        return BlockedPatch(
+            relative_path,
+            "urlpatterns must be a literal list before Fervis can patch it.",
+        )
     updated = _append_urlpattern(
         loaded.text,
         loaded.tree,
-        target.list_assignment.value,
+        list_node,
         loaded.relative_path,
     )
     if isinstance(updated, BlockedPatch):
@@ -445,10 +457,10 @@ def _append_urlpattern(
             f"[\n    {DJANGO_URL_MOUNT}\n]",
         )
     newline = newline_for(text)
-    text = ensure_multiline_sequence_trailing_comma(text, node, path=relative_path)
-    if isinstance(text, BlockedPatch):
-        return text
-    lines = text.splitlines(keepends=True)
+    updated = ensure_multiline_sequence_trailing_comma(text, node, path=relative_path)
+    if isinstance(updated, BlockedPatch):
+        return updated
+    lines = updated.splitlines(keepends=True)
     closing_index = (node.end_lineno or node.lineno) - 1
     closing_line = lines[closing_index]
     closing_indent = closing_line[: len(closing_line) - len(closing_line.lstrip())]
@@ -604,8 +616,11 @@ def _fervis_urlpattern_mount(
     target = _urlpattern_mount_target(tree, path="urls.py")
     if isinstance(target, BlockedPatch):
         return None
-    for item in target.list_assignment.value.elts:
-        if _is_fervis_path_call(item):
+    list_node = target.list_assignment.value
+    if not isinstance(list_node, ast.List):
+        return None
+    for item in list_node.elts:
+        if isinstance(item, ast.Call) and _is_fervis_path_call(item):
             return item, target.wrapper_call
     return None
 
@@ -752,7 +767,7 @@ def _installed_apps_assignment(
     return assignments[0]
 
 
-def _static_installed_app_names(node: ast.AST) -> list[str] | None:
+def _static_installed_app_names(node: ast.AST | None) -> list[str] | None:
     if not isinstance(node, ast.List | ast.Tuple):
         return None
     apps: list[str] = []

@@ -60,7 +60,7 @@ input:
         owned_question_input_refs: [today]
     answer_outputs:
     - description: sales count
-      role: ROW_POPULATION
+      role: ROW_COUNT
     used_question_inputs: [staff_a, staff_b, today]
 expect:
   result_contains:
@@ -77,7 +77,7 @@ expect:
             question_input_refs: [staff_a, staff_b]
         answer_outputs:
         - description: sales count
-          role: ROW_POPULATION
+          role: ROW_COUNT
         answer_population:
           membership_tests:
           - test_id: subject_identity

@@ -1,5 +1,5 @@
 id: union_complete_inputs_create_complete_materialized_output
-description: Union of complete inputs produces a complete materialized output and preserves identity type.
+description: Union of complete inputs produces a complete materialized output.
 migrates:
   - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_union_of_complete_inputs_is_complete_materialized_output
 kind: algorithm
@@ -9,7 +9,6 @@ input:
     - id: placed_sales
       rows: [{sale_id: sale_1}]
       grain_keys: [sale_id]
-      identity_type: sale
       completeness:
         status: complete
         source_kind: api_read
@@ -17,7 +16,6 @@ input:
     - id: completed_sales
       rows: [{sale_id: sale_2}]
       grain_keys: [sale_id]
-      identity_type: sale
       completeness:
         status: complete
         source_kind: api_read
@@ -35,4 +33,3 @@ expect:
     sale_rows:
       completeness_status: complete
       completeness_pagination: not_paginated
-      identity_type: sale

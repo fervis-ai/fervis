@@ -33,15 +33,15 @@ def models_result(
         "use",
     }:
         if args.model_command == "allow":
-            result = allow_model(project, args.model_ref)
+            edit_result = allow_model(project, args.model_ref)
         else:
-            result = use_model(project, args.model_ref, explicit_env=args.env)
+            edit_result = use_model(project, args.model_ref, explicit_env=args.env)
         return project_command_result(
             kind=FervisCommandKind.MODEL,
             command=f"model.{args.model_command}",
             project=project,
             payload_schema="fervis-config-edit-result.v0.1",
-            payload=result.to_payload(),
-            exit_code=2 if result.is_blocked else 0,
+            payload=edit_result.to_payload(),
+            exit_code=2 if edit_result.is_blocked else 0,
         )
     raise ValueError(f"unsupported model command: {args.command}")

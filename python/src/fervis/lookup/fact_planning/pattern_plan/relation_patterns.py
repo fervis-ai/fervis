@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
 from collections.abc import Mapping
 
 from fervis.lookup.answer_program.model import FactFulfillment
@@ -17,58 +16,64 @@ from fervis.lookup.answer_program.operations import (
     RelationRoleRef,
 )
 from fervis.lookup.answer_program.relations import Relation
-from fervis.lookup.answer_program.render_spec import RenderRelationOutput
-from fervis.lookup.source_binding import BoundSource
+from fervis.lookup.answer_program.result_projection import RelationResultOutput
+from fervis.lookup.answer_program.result_projection import (
+    EntityKeyProjection,
+    EntityKeyProjectionComponent,
+)
+from fervis.lookup.source_binding import (
+    BoundSource,
+    SourceFulfillment,
+    entity_evidence_entity_kind,
+    entity_evidence_key_id,
+)
+from fervis.lookup.fact_planning.provider_contract import (
+    JoinedRowsAnswerOutput,
+    SetDifferenceAnswerOutput,
+)
 
 from .shared import (
     RelationBuilder,
-    _dict,
-    _field_specs,
+    _field_spec,
     _identity_relation_fields,
-    _join_key_specs,
-    _joined_output_fields,
     _pattern_output_relation_id,
     _relation_fields,
     _relation_for_bound_source,
-    _relation_operand,
-    _required_strings,
-    _text,
 )
-from .render_ids import _render_output_id
+from .result_ids import _result_output_id
+from fervis.lookup.fact_planning.compiled_patterns import (
+    CompiledPattern,
+    PatternAddress,
+)
 
 
 def _compile_set_difference_answer(
     *,
     index: int,
-    payload: dict[str, Any],
-    namespace_render_outputs: bool,
+    answer: SetDifferenceAnswerOutput,
+    namespace_result_outputs: bool,
     bound_sources: dict[str, BoundSource],
     allowed_source_binding_ids: tuple[str, ...],
     allowed_source_binding_ids_by_requirement: Mapping[str, tuple[str, ...]],
     relation_builder: RelationBuilder,
-) -> dict[str, Any]:
-    candidate = _relation_operand(_dict(payload.get("candidate"), "candidate"))
-    observed = _relation_operand(_dict(payload.get("observed"), "observed"))
-    output_fields = _field_specs(candidate.get("output_fields"))
-    candidate_identity_fields = _required_strings(
-        candidate.get("identity_fields"), "candidate.identity_fields"
-    )
-    observed_identity_fields = _required_strings(
-        observed.get("identity_fields"), "observed.identity_fields"
-    )
+) -> CompiledPattern:
+    candidate = answer.candidate
+    observed = answer.observed
+    candidate_identity_fields = candidate.identity_fields
+    observed_identity_fields = observed.identity_fields
     _validate_relation_operand_sources_selected(
-        (candidate, observed),
+        (candidate.source_binding_id, observed.source_binding_id),
         allowed_source_binding_ids=allowed_source_binding_ids,
     )
     _validate_relation_operand_source_role(
-        candidate,
+        candidate.source_binding_id,
         requirement_id="candidate_set",
         allowed_source_binding_ids_by_requirement=(
             allowed_source_binding_ids_by_requirement
         ),
     )
     _validate_relation_operand_source_role(
-        observed,
+        observed.source_binding_id,
         requirement_id="observed_set",
         allowed_source_binding_ids_by_requirement=(
             allowed_source_binding_ids_by_requirement
@@ -76,107 +81,230 @@ def _compile_set_difference_answer(
     )
     if len(candidate_identity_fields) != len(observed_identity_fields):
         raise ValueError("set_difference identity field counts must match")
+    requested_fact_id = answer.requested_fact_id
+    answer_output_ids = answer.answer_output_ids
+    candidate_source = bound_sources[candidate.source_binding_id]
+    fulfillments = _set_difference_fulfillments(
+        candidate_source,
+        requested_fact_id=requested_fact_id,
+        answer_output_ids=answer_output_ids,
+        identity_field_ids=candidate_identity_fields,
+    )
     candidate_relation_id = f"answer_{index}_candidate"
     observed_relation_id = f"answer_{index}_observed"
     output_relation_id = _pattern_output_relation_id(index)
-    candidate_relation_fields = (
-        *_identity_relation_fields(candidate_identity_fields),
-        *_relation_fields(output_fields),
-    )
+    candidate_relation_fields = _identity_relation_fields(candidate_identity_fields)
     observed_relation_fields = _identity_relation_fields(observed_identity_fields)
-    return _compiled_multi_relation_pattern(
-        payload=payload,
-        relations=(
-            _relation_for_bound_source(
-                relation_id=candidate_relation_id,
-                payload=_operand_payload_with_parent_context(
-                    payload,
-                    operand=candidate,
-                ),
-                relation_fields=candidate_relation_fields,
-                bound_sources=bound_sources,
-                relation_builder=relation_builder,
+    relations = (
+        _relation_for_bound_source(
+            relation_id=candidate_relation_id,
+            address=PatternAddress(
+                requested_fact_id=requested_fact_id,
+                answer_output_ids=answer_output_ids,
+                plan_shape=answer.pattern,
+                source_binding_id=candidate.source_binding_id,
             ),
-            _relation_for_bound_source(
-                relation_id=observed_relation_id,
-                payload=_operand_payload_with_parent_context(
-                    payload,
-                    operand=observed,
-                ),
-                relation_fields=observed_relation_fields,
-                bound_sources=bound_sources,
-                relation_builder=relation_builder,
-            ),
+            relation_fields=candidate_relation_fields,
+            bound_sources=bound_sources,
+            relation_builder=relation_builder,
         ),
-        operations=(
-            Operation(
-                id=f"{output_relation_id}_anti_join",
-                spec=AntiJoinSpec(
-                    candidate=RelationRoleRef(
-                        relation_id=candidate_relation_id,
-                        role=RelationRole.ANTI_JOIN_CANDIDATE,
-                        required_identity_fields=candidate_identity_fields,
-                    ),
-                    observed=RelationRoleRef(
-                        relation_id=observed_relation_id,
-                        role=RelationRole.ANTI_JOIN_OBSERVED,
-                        required_identity_fields=observed_identity_fields,
-                    ),
-                    join_keys=tuple(
-                        JoinKey(left=left, right=right)
-                        for left, right in zip(
-                            candidate_identity_fields,
-                            observed_identity_fields,
-                            strict=True,
-                        )
-                    ),
-                    output_fields=tuple(
-                        ProjectField(
-                            source=item["field_id"],
-                            output=item["output_field_id"],
-                        )
-                        for item in output_fields
-                    ),
-                ),
-                output_relation=output_relation_id,
+        _relation_for_bound_source(
+            relation_id=observed_relation_id,
+            address=PatternAddress(
+                requested_fact_id=requested_fact_id,
+                answer_output_ids=answer_output_ids,
+                plan_shape=answer.pattern,
+                source_binding_id=observed.source_binding_id,
             ),
+            relation_fields=observed_relation_fields,
+            bound_sources=bound_sources,
+            relation_builder=relation_builder,
         ),
-        output_relation_id=output_relation_id,
-        output_fields=output_fields,
-        answer_index=index,
-        namespace_render_outputs=namespace_render_outputs,
     )
+    operations = (
+        Operation(
+            id=f"{output_relation_id}_anti_join",
+            spec=AntiJoinSpec(
+                candidate=RelationRoleRef(
+                    relation_id=candidate_relation_id,
+                    role=RelationRole.ANTI_JOIN_CANDIDATE,
+                    required_identity_fields=candidate_identity_fields,
+                ),
+                observed=RelationRoleRef(
+                    relation_id=observed_relation_id,
+                    role=RelationRole.ANTI_JOIN_OBSERVED,
+                    required_identity_fields=observed_identity_fields,
+                ),
+                join_keys=tuple(
+                    JoinKey(left=left, right=right)
+                    for left, right in zip(
+                        candidate_identity_fields,
+                        observed_identity_fields,
+                        strict=True,
+                    )
+                ),
+                output_fields=tuple(
+                    ProjectField(source=field_id, output=field_id)
+                    for field_id in candidate_identity_fields
+                ),
+            ),
+            output_relation=output_relation_id,
+        ),
+    )
+    fact_fulfillment = _set_difference_fact_fulfillment(
+        fulfillments,
+        requested_fact_id=requested_fact_id,
+        answer_index=index,
+        namespace_result_outputs=namespace_result_outputs,
+    )
+    result_outputs = _set_difference_result_outputs(
+        fulfillments,
+        output_relation_id=output_relation_id,
+        answer_index=index,
+        namespace_result_outputs=namespace_result_outputs,
+    )
+    return CompiledPattern(
+        fulfillment=fact_fulfillment,
+        relations=relations,
+        operations=operations,
+        relation_outputs=result_outputs,
+        scalar_outputs=(),
+    )
+
+
+def _set_difference_fulfillments(
+    source: BoundSource,
+    *,
+    requested_fact_id: str,
+    answer_output_ids: tuple[str, ...],
+    identity_field_ids: tuple[str, ...],
+) -> tuple[SourceFulfillment, ...]:
+    fulfillments_by_output = {
+        fulfillment.answer_output_id: fulfillment
+        for fulfillment in source.fulfillments
+        if fulfillment.requested_fact_id == requested_fact_id
+    }
+    fulfillments: list[SourceFulfillment] = []
+    for answer_output_id in answer_output_ids:
+        fulfillment = fulfillments_by_output.get(answer_output_id)
+        if fulfillment is None or fulfillment.entity_evidence is None:
+            raise ValueError("set_difference requires candidate-key answer evidence")
+        evidence_field_ids = tuple(
+            component.field_id for component in fulfillment.entity_evidence.components
+        )
+        if evidence_field_ids != identity_field_ids:
+            raise ValueError(
+                "set_difference identity fields must match candidate-key evidence"
+            )
+        fulfillments.append(fulfillment)
+    return tuple(fulfillments)
+
+
+def _set_difference_fact_fulfillment(
+    fulfillments: tuple[SourceFulfillment, ...],
+    *,
+    requested_fact_id: str,
+    answer_index: int,
+    namespace_result_outputs: bool,
+) -> tuple[FactFulfillment, ...]:
+    return tuple(
+        FactFulfillment(
+            requested_fact_id=requested_fact_id,
+            answer_output_id=fulfillment.answer_output_id,
+            result_output_id=_result_output_id(
+                answer_index,
+                fulfillment.answer_output_id,
+                namespace_result_outputs=namespace_result_outputs,
+            ),
+        )
+        for fulfillment in fulfillments
+    )
+
+
+def _set_difference_result_outputs(
+    fulfillments: tuple[SourceFulfillment, ...],
+    *,
+    output_relation_id: str,
+    answer_index: int,
+    namespace_result_outputs: bool,
+) -> tuple[RelationResultOutput, ...]:
+    outputs: list[RelationResultOutput] = []
+    for fulfillment in fulfillments:
+        evidence = fulfillment.entity_evidence
+        if evidence is None:
+            raise ValueError("set_difference requires candidate-key answer evidence")
+        components = tuple(
+            EntityKeyProjectionComponent(
+                component_id=component.component_id,
+                field_id=component.field_id,
+            )
+            for component in evidence.components
+        )
+        entity_key = EntityKeyProjection(
+            entity_kind=entity_evidence_entity_kind(evidence),
+            key_id=entity_evidence_key_id(evidence),
+            components=components,
+        )
+        result_output_id = _result_output_id(
+            answer_index,
+            fulfillment.answer_output_id,
+            namespace_result_outputs=namespace_result_outputs,
+        )
+        outputs.append(
+            RelationResultOutput(
+                id=result_output_id,
+                relation_id=output_relation_id,
+                entity_key=entity_key,
+                role="answer_value",
+            )
+        )
+    return tuple(outputs)
 
 
 def _compile_joined_rows_answer(
     *,
     index: int,
-    payload: dict[str, Any],
-    namespace_render_outputs: bool,
+    answer: JoinedRowsAnswerOutput,
+    namespace_result_outputs: bool,
     bound_sources: dict[str, BoundSource],
     allowed_source_binding_ids: tuple[str, ...],
     allowed_source_binding_ids_by_requirement: Mapping[str, tuple[str, ...]],
     relation_builder: RelationBuilder,
-) -> dict[str, Any]:
-    left = _relation_operand(_dict(payload.get("left"), "left"))
-    right = _relation_operand(_dict(payload.get("right"), "right"))
-    left_fields = _field_specs(left.get("fields"))
-    right_fields = _field_specs(right.get("fields"))
-    join_keys = _join_key_specs(payload.get("join_keys"))
-    output_fields = _joined_output_fields(payload.get("output_fields"))
+) -> CompiledPattern:
+    left = answer.left
+    right = answer.right
+    left_fields = tuple(
+        _field_spec({"field_id": item.field_id}) for item in left.fields
+    )
+    right_fields = tuple(
+        _field_spec({"field_id": item.field_id}) for item in right.fields
+    )
+    join_keys = tuple(
+        {"left_field_id": item.left_field_id, "right_field_id": item.right_field_id}
+        for item in answer.join_keys
+    )
+    output_fields = tuple(
+        {
+            "field_id": item.field_id,
+            "output_field_id": item.field_id,
+            "label": item.field_id,
+            "side": item.side,
+        }
+        for item in answer.output_fields
+    )
     _validate_relation_operand_sources_selected(
-        (left, right),
+        (left.source_binding_id, right.source_binding_id),
         allowed_source_binding_ids=allowed_source_binding_ids,
     )
     _validate_relation_operand_source_role(
-        left,
+        left.source_binding_id,
         requirement_id="left",
         allowed_source_binding_ids_by_requirement=(
             allowed_source_binding_ids_by_requirement
         ),
     )
     _validate_relation_operand_source_role(
-        right,
+        right.source_binding_id,
         requirement_id="right",
         allowed_source_binding_ids_by_requirement=(
             allowed_source_binding_ids_by_requirement
@@ -189,13 +317,16 @@ def _compile_joined_rows_answer(
     left_relation_fields = _relation_fields(left_fields)
     right_relation_fields = _relation_fields(right_fields)
     return _compiled_multi_relation_pattern(
-        payload=payload,
+        requested_fact_id=answer.requested_fact_id,
+        answer_output_ids=answer.answer_output_ids,
         relations=(
             _relation_for_bound_source(
                 relation_id=left_relation_id,
-                payload=_operand_payload_with_parent_context(
-                    payload,
-                    operand=left,
+                address=PatternAddress(
+                    requested_fact_id=answer.requested_fact_id,
+                    answer_output_ids=answer.answer_output_ids,
+                    plan_shape=answer.pattern,
+                    source_binding_id=left.source_binding_id,
                 ),
                 relation_fields=left_relation_fields,
                 bound_sources=bound_sources,
@@ -203,9 +334,11 @@ def _compile_joined_rows_answer(
             ),
             _relation_for_bound_source(
                 relation_id=right_relation_id,
-                payload=_operand_payload_with_parent_context(
-                    payload,
-                    operand=right,
+                address=PatternAddress(
+                    requested_fact_id=answer.requested_fact_id,
+                    answer_output_ids=answer.answer_output_ids,
+                    plan_shape=answer.pattern,
+                    source_binding_id=right.source_binding_id,
                 ),
                 relation_fields=right_relation_fields,
                 bound_sources=bound_sources,
@@ -245,84 +378,71 @@ def _compile_joined_rows_answer(
         output_relation_id=output_relation_id,
         output_fields=output_fields,
         answer_index=index,
-        namespace_render_outputs=namespace_render_outputs,
+        namespace_result_outputs=namespace_result_outputs,
     )
 
 
 def _compiled_multi_relation_pattern(
     *,
-    payload: dict[str, Any],
+    requested_fact_id: str,
+    answer_output_ids: tuple[str, ...],
     relations: tuple[Relation, ...],
     operations: tuple[Operation, ...],
     output_relation_id: str,
     output_fields: tuple[dict[str, str], ...],
     answer_index: int,
-    namespace_render_outputs: bool,
-) -> dict[str, Any]:
-    answer_output_ids = _required_strings(
-        payload.get("answer_output_ids"), "answer_output_ids"
+    namespace_result_outputs: bool,
+) -> CompiledPattern:
+    fulfillment = tuple(
+        FactFulfillment(
+            requested_fact_id=requested_fact_id,
+            answer_output_id=answer_output_id,
+            result_output_id=_result_output_id(
+                answer_index,
+                output_fields[min(output_index, len(output_fields) - 1)][
+                    "output_field_id"
+                ],
+                namespace_result_outputs=namespace_result_outputs,
+            ),
+        )
+        for output_index, answer_output_id in enumerate(answer_output_ids)
     )
-    return {
-        "fulfillment": tuple(
-            FactFulfillment(
-                requested_fact_id=_text(payload.get("requested_fact_id")),
-                answer_output_id=answer_output_id,
-                render_output_id=_render_output_id(
-                    answer_index,
-                    output_fields[min(output_index, len(output_fields) - 1)][
-                        "output_field_id"
-                    ],
-                    namespace_render_outputs=namespace_render_outputs,
-                ),
-            )
-            for output_index, answer_output_id in enumerate(answer_output_ids)
-        ),
-        "relations": relations,
-        "operations": operations,
-        "relation_outputs": tuple(
-            RenderRelationOutput(
-                id=_render_output_id(
-                    answer_index,
-                    item["output_field_id"],
-                    namespace_render_outputs=namespace_render_outputs,
-                ),
-                relation_id=output_relation_id,
-                field_id=item["output_field_id"],
-                label=item["label"] if namespace_render_outputs else "",
-                role="answer_value",
-            )
-            for item in output_fields
-        ),
-        "scalar_outputs": (),
-    }
-
-
-def _operand_payload_with_parent_context(
-    parent: dict[str, Any],
-    *,
-    operand: dict[str, Any],
-) -> dict[str, Any]:
-    return {
-        **operand,
-        "requested_fact_id": parent.get("requested_fact_id"),
-        "answer_output_ids": parent.get("answer_output_ids"),
-        "pattern": parent.get("pattern"),
-    }
+    relation_outputs = tuple(
+        RelationResultOutput(
+            id=_result_output_id(
+                answer_index,
+                item["output_field_id"],
+                namespace_result_outputs=namespace_result_outputs,
+            ),
+            relation_id=output_relation_id,
+            field_id=item["output_field_id"],
+            label=item["label"] if namespace_result_outputs else "",
+            role="answer_value",
+        )
+        for item in output_fields
+    )
+    return CompiledPattern(
+        fulfillment=fulfillment,
+        relations=relations,
+        operations=operations,
+        relation_outputs=relation_outputs,
+        scalar_outputs=(),
+    )
 
 
 def _validate_relation_operand_sources_selected(
-    operands: tuple[dict[str, Any], ...],
+    source_binding_ids: tuple[str, ...],
     *,
     allowed_source_binding_ids: tuple[str, ...],
 ) -> None:
     allowed = set(allowed_source_binding_ids)
-    for operand in operands:
-        if _text(operand.get("source_binding_id")) not in allowed:
+    for source_binding_id in source_binding_ids:
+        if source_binding_id not in allowed:
             raise ValueError("fact plan references source outside selected plan shape")
 
 
 def _validate_relation_operand_source_role(
-    operand: dict[str, Any],
+    source_binding_id: str,
     *,
     requirement_id: str,
     allowed_source_binding_ids_by_requirement: Mapping[str, tuple[str, ...]],
@@ -330,5 +450,5 @@ def _validate_relation_operand_source_role(
     allowed = set(allowed_source_binding_ids_by_requirement.get(requirement_id, ()))
     if not allowed:
         return
-    if _text(operand.get("source_binding_id")) not in allowed:
+    if source_binding_id not in allowed:
         raise ValueError("fact plan references source outside selected operand role")

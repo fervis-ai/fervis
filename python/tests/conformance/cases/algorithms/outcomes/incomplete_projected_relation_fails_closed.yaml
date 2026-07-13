@@ -1,0 +1,21 @@
+id: incomplete_projected_relation_fails_closed
+description: Every projected answer relation must be complete before an answer can be returned.
+kind: algorithm
+algorithm: outcomes.classify
+input:
+  mode: answer
+  precomputed: true
+  relations:
+    - id: totals
+      rows: [{total: 12}]
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown, proof_refs: [read:totals]}
+    - id: labels
+      rows: [{label: Alpha}]
+      completeness: {status: incomplete, source_kind: api_read, set_kind: unknown, proof_refs: [read:labels]}
+  result_outputs:
+    - {id: total, relation_id: totals, field_id: total}
+    - {id: label, relation_id: labels, field_id: label}
+expect:
+  result_contains:
+    issue_kind: incomplete_evidence
+    relation_id: labels

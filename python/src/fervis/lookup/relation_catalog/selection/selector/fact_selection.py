@@ -9,10 +9,10 @@ from fervis.lookup.relation_catalog import (
     CatalogFact,
     CatalogField,
     EndpointRead,
+    EntityKeyComponentTarget,
     ParamSource,
 )
 from fervis.lookup.relation_catalog.selection.model import (
-    ActiveMemoryCatalogSignal,
     CatalogSelectionRanking,
     CatalogSelectionRequest,
     CatalogSelectionResult,
@@ -24,6 +24,11 @@ from fervis.lookup.relation_catalog.selection.results import (
     selected_read_ids_from_fact_selections,
 )
 from fervis.lookup.question_contract import RequestedFact
+from fervis.lookup.answer_program.values import (
+    FactValue,
+    IdentitySetValuePayload,
+    IdentityValuePayload,
+)
 
 from .constants import (
     _CATALOG_TERM_SCORE,
@@ -38,11 +43,6 @@ from .terms import (
     _explicit_catalog_search_query_terms,
     _ordered_terms,
 )
-
-_PRIOR_LINEAGE_READ_SCORE = 8
-_PRIOR_LINEAGE_RESOURCE_SCORE = 6
-_PRIOR_LINEAGE_FIELD_SCORE = 2
-
 
 def select_relation_catalog(
     request: CatalogSelectionRequest,
@@ -81,16 +81,11 @@ def _select_for_requested_fact(
     read_facts: dict[str, tuple[CatalogFact, ...]],
     resource_name_matches: RequestedFactResourceNameMatches,
 ) -> RequestedFactCatalogSelection:
-    active_memory_signals = _active_memory_signals_for_fact(
-        request.active_memory_signals,
-        requested_fact_id=fact.id,
-    )
     candidate_limit = _candidate_limit(request.max_reads_per_fact)
     source_text_selections = _source_text_selections(
         fact,
         request=request,
         read_facts=read_facts,
-        active_memory_signals=active_memory_signals,
         resource_name_matches=resource_name_matches,
     )
     selected_rankings = _merge_selected_rankings(
@@ -154,7 +149,6 @@ def _source_text_selections(
     *,
     request: CatalogSelectionRequest,
     read_facts: dict[str, tuple[CatalogFact, ...]],
-    active_memory_signals: tuple[ActiveMemoryCatalogSignal, ...],
     resource_name_matches: RequestedFactResourceNameMatches,
 ) -> tuple[_SourceTextSelection, ...]:
     resource_name_requests = _resource_name_requests(resource_name_matches)
@@ -163,7 +157,6 @@ def _source_text_selections(
             resource_name_request,
             request=request,
             read_facts=read_facts,
-            active_memory_signals=active_memory_signals,
         )
         for resource_name_request in resource_name_requests
     )
@@ -206,7 +199,6 @@ def _rank_for_source_text(
     *,
     request: CatalogSelectionRequest,
     read_facts: dict[str, tuple[CatalogFact, ...]],
-    active_memory_signals: tuple[ActiveMemoryCatalogSignal, ...],
 ) -> _SourceTextSelection:
     query_terms = _explicit_catalog_search_query_terms(
         resource_name_request.resource_names,
@@ -218,10 +210,8 @@ def _rank_for_source_text(
                 resource_name,
                 request=request,
                 read_facts=read_facts,
-                active_memory_signals=active_memory_signals,
             ),
             reads_by_id=reads_by_id,
-            max_reads_per_fact=request.max_reads_per_fact,
             available_values=request.available_values,
         )
         for resource_name in resource_name_request.resource_names
@@ -296,7 +286,6 @@ def _rankings_for_resource_name(
     *,
     request: CatalogSelectionRequest,
     read_facts: dict[str, tuple[CatalogFact, ...]],
-    active_memory_signals: tuple[ActiveMemoryCatalogSignal, ...],
 ) -> tuple[_ResourceNameRanking, ...]:
     ranked_matches: list[_ResourceNameRanking] = []
     for read in request.relation_catalog.reads:
@@ -305,6 +294,18 @@ def _rankings_for_resource_name(
             read_resource_names=read.resource_names,
         )
         if match is None:
+            ranking = _catalog_evidence_ranking(
+                read,
+                requested_resource_name=resource_name,
+                read_facts=read_facts.get(read.id, ()),
+            )
+            if ranking is not None:
+                ranked_matches.append(
+                    _ResourceNameRanking(
+                        is_exact_resource_name=False,
+                        ranking=ranking,
+                    )
+                )
             continue
         ranked_matches.append(
             _ResourceNameRanking(
@@ -314,7 +315,6 @@ def _rankings_for_resource_name(
                         read,
                         match.query_terms,
                         read_facts=read_facts.get(read.id, ()),
-                        active_memory_signals=active_memory_signals,
                     ),
                     match=match,
                 ),
@@ -331,6 +331,20 @@ def _rankings_for_resource_name(
             ),
         )
     )
+
+
+def _catalog_evidence_ranking(
+    read: EndpointRead,
+    *,
+    requested_resource_name: str,
+    read_facts: tuple[CatalogFact, ...],
+) -> CatalogSelectionRanking | None:
+    query_terms = _explicit_catalog_search_query_terms((requested_resource_name,))
+    ranking = _rank_resource_read(read, query_terms, read_facts=read_facts)
+    evidence_count = len(ranking.matched_fact_refs) + len(ranking.matched_field_refs)
+    if evidence_count == 0:
+        return None
+    return replace(ranking, score=_CATALOG_TERM_SCORE * evidence_count)
 
 
 def _round_robin_rankings(
@@ -420,22 +434,11 @@ def _unselected_positive_read_ids(
     )
 
 
-def _active_memory_signals_for_fact(
-    signals: tuple[ActiveMemoryCatalogSignal, ...],
-    *,
-    requested_fact_id: str,
-) -> tuple[ActiveMemoryCatalogSignal, ...]:
-    return tuple(
-        signal for signal in signals if signal.requested_fact_id == requested_fact_id
-    )
-
-
 def _positive_rankings(
     rankings: tuple[_ResourceNameRanking, ...],
     *,
     reads_by_id: dict[str, EndpointRead],
-    max_reads_per_fact: int,
-    available_values: tuple[object, ...] = (),
+    available_values: tuple[FactValue, ...] = (),
 ) -> tuple[_ResourceNameRanking, ...]:
     positive = tuple(item for item in rankings if item.ranking.score > 0)
     positive = _drop_unbound_required_reads_with_open_alternatives(
@@ -450,7 +453,7 @@ def _drop_unbound_required_reads_with_open_alternatives(
     rankings: tuple[_ResourceNameRanking, ...],
     *,
     reads_by_id: dict[str, EndpointRead],
-    available_values: tuple[object, ...] = (),
+    available_values: tuple[FactValue, ...] = (),
 ) -> tuple[_ResourceNameRanking, ...]:
     open_rankings = tuple(
         ranking
@@ -468,56 +471,36 @@ def _drop_unbound_required_reads_with_open_alternatives(
 def _requires_unbound_required_input(
     read: EndpointRead,
     *,
-    available_values: tuple[object, ...] = (),
+    available_values: tuple[FactValue, ...] = (),
 ) -> bool:
     for param in read.params:
         if not param.required or param.default is not None:
             continue
-        if param.identity is not None and _has_matching_identity_value(
-            param.identity,
+        if param.entity_target is not None and _has_matching_entity_value(
+            param.entity_target,
             available_values,
         ):
             continue
-        if param.source == ParamSource.PATH or param.identity is not None:
+        if param.source == ParamSource.PATH or param.entity_target is not None:
             return True
     return False
 
 
-def _has_matching_identity_value(
-    identity: object,
-    values: tuple[object, ...],
+def _has_matching_entity_value(
+    target: EntityKeyComponentTarget,
+    values: tuple[FactValue, ...],
 ) -> bool:
-    identity_field = str(getattr(identity, "identity_field", "") or "")
-    entity_ref = str(getattr(identity, "entity_ref", "") or "")
-    if not identity_field and not entity_ref:
-        return False
     for value in values:
-        kind = str(getattr(value, "kind", ""))
-        if kind not in {"identity", "identity_set"}:
+        payload = value.payload
+        if not isinstance(payload, (IdentityValuePayload, IdentitySetValuePayload)):
             continue
-        payload = getattr(value, "payload", None)
-        payload_type = str(getattr(payload, "identity_type", "") or "")
-        payload_field = str(getattr(payload, "identity_field", "") or "")
-        if _identity_payload_matches(
-            payload_type,
-            payload_field,
-            entity_ref=entity_ref,
-            identity_field=identity_field,
+        if (
+            payload.entity_kind == target.entity_kind
+            and payload.key_id == target.key_id
+            and payload.key_component_id == target.component_id
         ):
             return True
     return False
-
-
-def _identity_payload_matches(
-    payload_type: str,
-    payload_field: str,
-    *,
-    entity_ref: str,
-    identity_field: str,
-) -> bool:
-    return bool(identity_field and payload_field == identity_field) or bool(
-        entity_ref and payload_type == entity_ref
-    )
 
 
 @dataclass(frozen=True)
@@ -570,7 +553,6 @@ def _rank_resource_read(
     query_terms: tuple[str, ...],
     *,
     read_facts: tuple[CatalogFact, ...] = (),
-    active_memory_signals: tuple[ActiveMemoryCatalogSignal, ...] = (),
 ) -> CatalogSelectionRanking:
     matched_fact_refs = _matched_catalog_fact_refs(
         (*read.facts, *read_facts),
@@ -583,58 +565,12 @@ def _rank_resource_read(
     score = _RESOURCE_TERM_SCORE * max(1, len(query_terms))
     score += _CATALOG_TERM_SCORE * len(matched_fact_refs)
     score += _CATALOG_TERM_SCORE * len(matched_field_refs)
-    score += _active_memory_lineage_score(
-        read,
-        active_memory_signals=active_memory_signals,
-    )
     return CatalogSelectionRanking(
         read_id=read.id,
         score=score,
         matched_terms=query_terms,
         matched_fact_refs=matched_fact_refs,
         matched_field_refs=matched_field_refs,
-    )
-
-
-def _active_memory_lineage_score(
-    read: EndpointRead,
-    *,
-    active_memory_signals: tuple[ActiveMemoryCatalogSignal, ...],
-) -> int:
-    if not active_memory_signals:
-        return 0
-    read_resource_terms = _resource_terms(read)
-    read_field_terms = _read_field_terms(read)
-    score = 0
-    for signal in active_memory_signals:
-        if read.id in signal.related_read_ids:
-            score += _PRIOR_LINEAGE_READ_SCORE
-        if read_resource_terms.intersection(
-            _ordered_terms(tuple(signal.related_identity_types))
-        ):
-            score += _PRIOR_LINEAGE_RESOURCE_SCORE
-        score += (
-            len(
-                read_field_terms.intersection(
-                    _ordered_terms(tuple(signal.field_names), stopwords=frozenset())
-                )
-            )
-            * _PRIOR_LINEAGE_FIELD_SCORE
-        )
-    return score
-
-
-def _resource_terms(read: EndpointRead) -> frozenset[str]:
-    return frozenset(_ordered_terms(tuple(read.resource_names)))
-
-
-def _read_field_terms(read: EndpointRead) -> frozenset[str]:
-    return frozenset(
-        _ordered_terms(
-            tuple(field.ref for field in read.fields)
-            + tuple(field.path for field in read.fields),
-            stopwords=frozenset(),
-        )
     )
 
 

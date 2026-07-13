@@ -18,7 +18,7 @@ input:
           right:
             value: {input_ref: previous, value: 0}
         output_scalar: ratio
-  render_outputs: []
+  result_outputs: []
 expect:
   result_contains:
     outcome_kind: undefined

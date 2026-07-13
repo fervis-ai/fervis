@@ -1,5 +1,5 @@
-id: support_keeps_answer_text_and_identity_group_keys
-description: Source-binding support keeps both requested answer text fields and structural identity fields available as group keys.
+id: support_keeps_candidate_key_and_excludes_display_field
+description: Source-binding support exposes the declared staff key while keeping its display field out of computation choices.
 migrates:
   - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_keeps_answer_text_and_structural_identity_group_keys
 kind: algorithm
@@ -16,17 +16,18 @@ input:
       - row_path_id: data
         row_source_id: rs_source_1_data
         cardinality: many
+        candidate_keys:
+          - key_id: staff_key
+            entity_kind: staff
+            components:
+              - {component_id: staff_id, field_id: staff_id}
+            context_field_ids: [staff_name]
         evidence_items:
           - evidence_id: source_1.data.staff_id
             field_id: staff_id
             row_path_id: data
             type: uuid
             roles: [identity]
-            identity:
-              entity_ref: staff
-              identity_field: staff_id
-              primary_key: true
-              stable: true
           - evidence_id: source_1.data.staff_name
             field_id: staff_name
             row_path_id: data
@@ -42,11 +43,6 @@ input:
         row_path_id: data
         type: uuid
         roles: [identity]
-        identity:
-          entity_ref: staff
-          identity_field: staff_id
-          primary_key: true
-          stable: true
       - evidence_id: source_1.data.staff_name
         field_id: staff_name
         row_path_id: data
@@ -58,6 +54,6 @@ input:
         type: decimal
 expect:
   result_contains:
-    group_key_fields:
+    entity_fields:
       staff_id: true
-      staff_name: true
+      staff_name: false

@@ -60,6 +60,7 @@ input:
           value: 3
         proof_node_refs_json:
           - answer_output:fact_1:count
+        role: ANSWER_VALUE
     catalog_endpoints:
       - catalog_endpoint_id: 33333333-3333-4333-8333-333333333333
         run_id: run_1

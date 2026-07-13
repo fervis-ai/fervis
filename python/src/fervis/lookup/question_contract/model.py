@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 import re
 from typing import Any, TypeAlias
 
@@ -14,8 +14,12 @@ from fervis.lookup.question_contract.answer_output_support import (
     ANSWER_OUTPUT_SUPPORT_ROLE_VALUES,
 )
 from fervis.lookup.question_contract._text_spans import contains_copied_span
-from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
+from fervis.lookup.question_inputs import (
+    KnownInputKind,
+    LiteralInputRole,
+)
 from fervis.lookup.turn_prompts.context import HostPromptContext
+from fervis.lookup.clarification.model import ClarificationResponseSource
 
 
 class KnownInputSource(StrEnum):
@@ -77,9 +81,14 @@ class RequestedFactAnswerExpressionFamily(StrEnum):
     COMPARISON_CHECK = "comparison_check"
 
 
-class MissingQuestionInputType(StrEnum):
-    TARGET_REFERENCE = "target_reference"
-    ANSWER_DEFINITION = "answer_definition"
+class ResultSelectionKind(StrEnum):
+    ALL_RESULTS = "all_results"
+    LIMITED_RESULTS = "limited_results"
+
+
+class IncompleteFactualRequestKind(StrEnum):
+    UNRESOLVED_PRIOR_TURN_REFERENCE = "unresolved_prior_turn_reference"
+    MISSING_REQUESTED_FACT = "missing_requested_fact"
 
 
 class GroupKeyDomainKind(StrEnum):
@@ -214,9 +223,7 @@ class RequestedFactGroupKey:
         if not isinstance(self.domain, GroupKeyDomainKind):
             raise ValueError("group key requires structured domain")
         refs = tuple(
-            str(item).strip()
-            for item in self.question_input_refs
-            if str(item).strip()
+            str(item).strip() for item in self.question_input_refs if str(item).strip()
         )
         if refs != self.question_input_refs:
             object.__setattr__(self, "question_input_refs", refs)
@@ -248,8 +255,8 @@ class RequestedFactGroupKey:
 @dataclass(frozen=True)
 class RequestedFactAnswerOutput:
     id: str
+    role: str
     description: str = ""
-    role: str = ""
 
     def __post_init__(self) -> None:
         if not self.id.strip():
@@ -257,7 +264,7 @@ class RequestedFactAnswerOutput:
         if not self.description.strip():
             object.__setattr__(self, "description", self.id)
         role = self.role.strip()
-        if role and role not in ANSWER_OUTPUT_SUPPORT_ROLE_VALUES:
+        if role not in ANSWER_OUTPUT_SUPPORT_ROLE_VALUES:
             raise ValueError("answer output role is invalid")
         if role != self.role:
             object.__setattr__(self, "role", role)
@@ -267,16 +274,14 @@ class RequestedFactAnswerOutput:
             "id": self.id,
             "description": self.description,
         }
-        if self.role:
-            payload["role"] = self.role
+        payload["role"] = self.role
         return payload
 
     def to_answer_request_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
             "description": self.description,
         }
-        if self.role:
-            payload["role"] = self.role
+        payload["role"] = self.role
         return payload
 
 
@@ -284,6 +289,8 @@ class RequestedFactAnswerOutput:
 class RequestedFactAnswerExpression:
     family: RequestedFactAnswerExpressionFamily
     group_key: RequestedFactGroupKey | None = None
+    selection_kind: ResultSelectionKind | None = None
+    limit_input_ref: str = ""
 
     def __post_init__(self) -> None:
         if (
@@ -296,11 +303,42 @@ class RequestedFactAnswerExpression:
             and self.group_key is not None
         ):
             raise ValueError("group key requires grouped_aggregate answer expression")
+        selects_rows = self.family in {
+            RequestedFactAnswerExpressionFamily.LIST_ROWS,
+            RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+        }
+        if selects_rows and self.selection_kind is None:
+            raise ValueError("row answer expression requires result selection")
+        if not selects_rows and self.selection_kind is not None:
+            raise ValueError("result selection requires a row answer expression")
+        if (
+            self.family is RequestedFactAnswerExpressionFamily.LIST_ROWS
+            and self.selection_kind is not ResultSelectionKind.ALL_RESULTS
+        ):
+            raise ValueError("list rows requires all results")
+        if (
+            self.family is RequestedFactAnswerExpressionFamily.RANKED_SELECTION
+            and self.selection_kind is not ResultSelectionKind.LIMITED_RESULTS
+        ):
+            raise ValueError("ranked selection requires a limited result selection")
+        if self.selection_kind is ResultSelectionKind.LIMITED_RESULTS:
+            if (
+                not self.limit_input_ref
+                and self.family
+                is not RequestedFactAnswerExpressionFamily.RANKED_SELECTION
+            ):
+                raise ValueError("limited result selection requires a limit input")
+        elif self.limit_input_ref:
+            raise ValueError("limit input requires limited result selection")
 
     def to_answer_request_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {"family": self.family.value}
         if self.group_key is not None:
             payload["group_key"] = self.group_key.to_answer_request_dict()
+        if self.selection_kind is not None:
+            payload["selection_kind"] = self.selection_kind.value
+        if self.limit_input_ref:
+            payload["limit_input_ref"] = self.limit_input_ref
         return payload
 
 
@@ -518,6 +556,16 @@ class RequestedFactAnswerPopulationMembershipTest:
         if owned_refs != self.owned_question_input_refs:
             object.__setattr__(self, "owned_question_input_refs", owned_refs)
         if (
+            self.kind is AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT
+            and not owned_refs
+        ):
+            raise ValueError("explicit user constraint requires an owned input")
+        if (
+            self.kind is not AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT
+            and owned_refs
+        ):
+            raise ValueError("only explicit user constraints own question inputs")
+        if (
             self.kind != AnswerPopulationMembershipTestKind.NORMAL_INSTANCE_GUARD
             and self.normal_instance_profile is not None
         ):
@@ -722,10 +770,10 @@ class RequestedFact:
             raise ValueError("requested fact requires id and description")
         if not self.answer_outputs:
             raise ValueError("requested fact requires answer outputs")
-        row_population_outputs = tuple(
-            output for output in self.answer_outputs if output.role == "ROW_POPULATION"
+        row_count_outputs = tuple(
+            output for output in self.answer_outputs if output.role == "ROW_COUNT"
         )
-        if len(row_population_outputs) > 1:
+        if len(row_count_outputs) > 1:
             raise ValueError(
                 "requested fact can have at most one row population answer output"
             )
@@ -790,20 +838,29 @@ class RequestedFact:
 
     @property
     def support_answer_outputs(self) -> tuple[RequestedFactAnswerOutput, ...]:
+        answer_outputs = self.answer_outputs
+        if (
+            self.answer_expression is not None
+            and self.answer_expression.family
+            is RequestedFactAnswerExpressionFamily.EXISTENCE_CHECK
+        ):
+            answer_outputs = tuple(
+                replace(output, role="ROW_COUNT") for output in answer_outputs
+            )
         group_key = (
             self.answer_expression.group_key
             if self.answer_expression is not None
             else None
         )
         if group_key is None:
-            return self.answer_outputs
+            return answer_outputs
         return (
             RequestedFactAnswerOutput(
                 id=group_key.id,
                 description=group_key.description,
                 role="GROUP_KEY",
             ),
-            *self.answer_outputs,
+            *answer_outputs,
         )
 
     def answer_request_model_dict(self) -> dict[str, object]:
@@ -825,8 +882,7 @@ class RequestedFact:
         ]
         if self.population_constraints:
             payload["population_constraints"] = [
-                constraint.to_model_dict()
-                for constraint in self.population_constraints
+                constraint.to_model_dict() for constraint in self.population_constraints
             ]
         return payload
 
@@ -951,41 +1007,74 @@ class QuestionContract:
 
 
 @dataclass(frozen=True)
-class MissingQuestionInput:
-    type: MissingQuestionInputType
+class IncompleteFactualRequestItem:
+    missing_kind: IncompleteFactualRequestKind
     source_text: str
-    why_context_is_insufficient: str
-    entity_type: str = ""
+    why_question_is_incomplete: str
+    target_label: str = ""
 
     def __post_init__(self) -> None:
-        if not isinstance(self.type, MissingQuestionInputType):
-            raise ValueError("missing question input requires structured type")
+        if not isinstance(self.missing_kind, IncompleteFactualRequestKind):
+            raise ValueError("incomplete factual request requires structured kind")
         if not self.source_text.strip():
-            raise ValueError("missing question input requires source text")
-        if not self.why_context_is_insufficient.strip():
-            raise ValueError("missing question input requires insufficiency reason")
+            raise ValueError("incomplete factual request requires source text")
+        if not self.why_question_is_incomplete.strip():
+            raise ValueError("incomplete factual request requires a reason")
+        if (
+            self.missing_kind
+            is IncompleteFactualRequestKind.UNRESOLVED_PRIOR_TURN_REFERENCE
+            and not self.target_label.strip()
+        ):
+            raise ValueError("missing target reference requires target label")
 
     def to_model_dict(self) -> dict[str, object]:
         return {
-            "type": self.type.value,
+            "missing_kind": self.missing_kind.value,
             "source_text": self.source_text,
-            "entity_type": self.entity_type,
-            "why_context_is_insufficient": self.why_context_is_insufficient,
+            "target_label": self.target_label or None,
+            "why_question_is_incomplete": self.why_question_is_incomplete,
         }
 
 
 @dataclass(frozen=True)
 class QuestionContractNeedsClarification:
-    missing: tuple[MissingQuestionInput, ...]
+    missing: tuple[IncompleteFactualRequestItem, ...]
 
     def __post_init__(self) -> None:
         if not self.missing:
             raise ValueError("question-contract clarification requires missing inputs")
+        kinds = {item.missing_kind for item in self.missing}
+        if len(kinds) != 1:
+            raise ValueError("question-contract clarification cannot mix missing kinds")
+        if (
+            IncompleteFactualRequestKind.MISSING_REQUESTED_FACT in kinds
+            and len(self.missing) != 1
+        ):
+            raise ValueError("missing requested fact must be singular")
 
     def to_model_dict(self) -> dict[str, object]:
+        if all(
+            item.missing_kind
+            is IncompleteFactualRequestKind.UNRESOLVED_PRIOR_TURN_REFERENCE
+            for item in self.missing
+        ):
+            references = [
+                {
+                    "source_text": item.source_text,
+                    "target_label": item.target_label,
+                    "why_question_is_incomplete": item.why_question_is_incomplete,
+                }
+                for item in self.missing
+            ]
+            return {
+                "kind": "unresolved_prior_turn_references",
+                "references": references,
+            }
+        item = self.missing[0]
         return {
-            "kind": "needs_clarification",
-            "missing": [item.to_model_dict() for item in self.missing],
+            "kind": "missing_requested_fact",
+            "source_text": item.source_text,
+            "why_question_is_incomplete": item.why_question_is_incomplete,
         }
 
 
@@ -994,7 +1083,18 @@ QuestionContractOutcome = QuestionContract | QuestionContractNeedsClarification
 
 @dataclass(frozen=True)
 class QuestionContractResult:
+    decision_basis: str
     outcome: QuestionContractOutcome
+
+    def __post_init__(self) -> None:
+        if not self.decision_basis.strip():
+            raise ValueError("question contract result requires a decision basis")
+
+    def to_model_dict(self) -> dict[str, object]:
+        return {
+            "decision_basis": self.decision_basis,
+            "outcome": self.outcome.to_model_dict(),
+        }
 
 
 @dataclass(frozen=True)
@@ -1003,6 +1103,9 @@ class QuestionContractRequest:
     conversation_context: dict[str, Any]
     conversation_resolution: CompiledConversationResolution | None = None
     host: HostPromptContext = field(default_factory=HostPromptContext)
+    clarification_source: ClarificationResponseSource | None = None
+    clarification_missing_item_id: str = ""
+    clarification_expected_value_kind: str = ""
 
 
 def _answer_request_contract_dict(

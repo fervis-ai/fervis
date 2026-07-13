@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 from typing import Any
 
 
@@ -41,12 +41,60 @@ class CatalogFactAvailability(StrEnum):
 
 
 @dataclass(frozen=True)
-class IdentityMetadata:
-    entity_ref: str = ""
-    identity_field: str = ""
-    primary_key: bool = False
+class EntityKeyComponentTarget:
+    entity_kind: str
+    key_id: str
+    component_id: str
+
+    def __post_init__(self) -> None:
+        if not self.entity_kind or not self.key_id or not self.component_id:
+            raise ValueError("entity key component target is incomplete")
+
+
+@dataclass(frozen=True)
+class CandidateKeyComponent:
+    id: str
+    field_ref: str
+
+
+@dataclass(frozen=True)
+class CandidateKey:
+    id: str
+    entity_kind: str
+    components: tuple[CandidateKeyComponent, ...]
+    primary: bool = False
     stable: bool = True
-    display_fields: tuple[str, ...] = ()
+    context_field_refs: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class CandidateKeyAuthorityComponent:
+    id: str
+    type: str
+
+
+@dataclass(frozen=True)
+class CandidateKeyAuthority:
+    id: str
+    entity_kind: str
+    components: tuple[CandidateKeyAuthorityComponent, ...]
+    primary: bool = False
+    stable: bool = True
+
+
+@dataclass(frozen=True)
+class EntityReferenceComponent:
+    target_component_id: str
+    local_field_ref: str
+
+
+@dataclass(frozen=True)
+class EntityReference:
+    id: str
+    target_entity_kind: str
+    target_key_id: str
+    components: tuple[EntityReferenceComponent, ...]
+    context_field_refs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -66,7 +114,7 @@ class CatalogParam:
     choices: tuple[str, ...] = ()
     choice_labels: dict[str, str] | None = None
     default: Any = None
-    identity: IdentityMetadata | None = None
+    entity_target: EntityKeyComponentTarget | None = None
     semantics: str = ""
 
 
@@ -102,7 +150,6 @@ class CatalogField:
     row_path_id: str = ""
     nullable: bool = False
     choices: tuple[str, ...] = ()
-    identity: IdentityMetadata | None = None
     requirements: tuple[FieldRequirement, ...] = ()
     metadata: dict[str, Any] | None = None
 
@@ -141,6 +188,8 @@ class EndpointRead:
     params: tuple[CatalogParam, ...] = ()
     row_paths: tuple[RowPath, ...] = ()
     fields: tuple[CatalogField, ...] = ()
+    candidate_keys: tuple[CandidateKey, ...] = ()
+    entity_references: tuple[EntityReference, ...] = ()
     facts: tuple[CatalogFact, ...] = ()
     response_envelope: ResponseEnvelopeMetadata = ResponseEnvelopeMetadata()
     pagination: PaginationMetadata | None = PaginationMetadata()
@@ -157,6 +206,7 @@ class EndpointRead:
 class RelationCatalog:
     reads: tuple[EndpointRead, ...] = ()
     facts: tuple[CatalogFact, ...] = ()
+    candidate_key_authorities: tuple[CandidateKeyAuthority, ...] = ()
 
     def read(self, read_id: str) -> EndpointRead:
         for item in self.reads:

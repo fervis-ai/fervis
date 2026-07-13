@@ -7,13 +7,18 @@ from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 
 from fervis.host_api.adapters.django.adapter import DjangoHostApiAdapter
-from fervis.host_api.context import HostApiContext, configure_host_api_context
+from fervis.host_api.context import (
+    HostApiContext,
+    HostContext,
+    configure_host_api_context,
+)
 from fervis.interfaces.django.composition import reset_runtime_for_tests
 from fervis.model_io.backbone.factory import build_test_provider_backbone
 from fervis.project.source_scope import configured_django_source_scopes
 from fervis.run_work.queue.django.queue import reset_question_run_queue_for_tests
 from tests.testkit.django import SEEDED_USER_PK
 from tests.testkit.provider_native import provider_native_test_arguments
+
 
 @pytest.fixture
 def api_client(db):
@@ -30,7 +35,16 @@ def anon_client():
 @pytest.fixture
 def fervis_foundation_reset(db):
     configure_host_api_context(
-        HostApiContext(adapter=DjangoHostApiAdapter(sources=configured_django_source_scopes()))
+        HostApiContext(
+            adapter=DjangoHostApiAdapter(sources=configured_django_source_scopes()),
+            host_context=HostContext(
+                organization_name="Fervis Test",
+                about_api=(
+                    "The Fervis test API helps operators work with generic "
+                    "business records."
+                ),
+            ),
+        )
     )
     reset_question_run_queue_for_tests()
     reset_runtime_for_tests(provider_backbone=_fervis_test_provider_backbone())

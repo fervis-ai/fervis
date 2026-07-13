@@ -31,6 +31,7 @@ input:
     answer_outputs:
     - id: output_1
       description: Yes or no answer
+      role: ANSWER_VALUE
     known_inputs:
     - id: reference_1
       kind: literal_text

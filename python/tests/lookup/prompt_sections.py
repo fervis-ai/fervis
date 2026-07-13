@@ -129,7 +129,9 @@ def _source_payload(element: ElementTree.Element) -> dict[str, Any]:
     )
     if evidence:
         output["evidence_items"] = evidence
-    population_bindings = _generic_children_payloads(element.find("population_bindings"))
+    population_bindings = _generic_children_payloads(
+        element.find("population_bindings")
+    )
     if population_bindings:
         output["population_bindings"] = population_bindings
     fulfillment_choices = _fulfillment_choices_payload(
@@ -183,7 +185,9 @@ def _api_read_payload(element: ElementTree.Element) -> dict[str, Any]:
     population_roles = _population_roles_payload(element.find("population_roles"))
     if population_roles:
         output["population_roles"] = population_roles
-    population_bindings = _generic_children_payloads(element.find("population_bindings"))
+    population_bindings = _generic_children_payloads(
+        element.find("population_bindings")
+    )
     if population_bindings:
         output["population_bindings"] = population_bindings
     fulfillment_choices = _fulfillment_choices_payload(
@@ -240,7 +244,9 @@ def _input_params_payload(element: ElementTree.Element | None) -> list[dict[str,
     return output
 
 
-def _binding_params_payload(element: ElementTree.Element | None) -> list[dict[str, Any]]:
+def _binding_params_payload(
+    element: ElementTree.Element | None,
+) -> list[dict[str, Any]]:
     if element is None:
         return []
     output = []
@@ -260,9 +266,7 @@ def _binding_params_payload(element: ElementTree.Element | None) -> list[dict[st
             item["choices"] = choices
         binding_values_node = child.find("binding_values")
         binding_values = [
-            _attrs(value)
-            for value in binding_values_node or ()
-            if value.tag == "value"
+            _attrs(value) for value in binding_values_node or () if value.tag == "value"
         ]
         if binding_values:
             item["binding_values"] = binding_values
@@ -328,9 +332,7 @@ def _population_contract_payload(
     if omission is not None:
         omission_payload = _attrs(omission)
         consequences = [
-            _attrs(child)
-            for child in omission
-            if child.tag == "requested_fact_effect"
+            _attrs(child) for child in omission if child.tag == "requested_fact_effect"
         ]
         if consequences:
             omission_payload["omission_consequence_by_requested_fact"] = consequences
@@ -450,7 +452,9 @@ def _fulfillment_evidence_key(kind: str) -> str:
         "scope": "scope_evidence",
         "metric": "metric_measure_evidence",
         "row_count_basis": "row_count_basis_evidence",
-        "group_key": "group_key_evidence",
+        "value": "value_evidence",
+        "candidate_key": "entity_evidence",
+        "entity_reference": "entity_evidence",
     }.get(kind, "")
 
 

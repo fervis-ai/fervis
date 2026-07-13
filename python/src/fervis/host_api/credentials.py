@@ -7,7 +7,7 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone as datetime_timezone
 from typing import Any, Mapping
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -82,15 +82,8 @@ def capture_header_credential(
 ) -> DelegatedReadCredential | None:
     if policy is None:
         return None
-    captured = _selected_headers(request_headers, policy.headers)
-    if not captured:
-        from fervis.host_api.contracts.ports import EndpointExecutionError
-
-        raise EndpointExecutionError(
-            "Delegated read credential is missing configured auth headers: "
-            + ", ".join(policy.headers)
-        )
-    current = now or datetime.now(UTC)
+    captured = _complete_policy_headers(request_headers, policy=policy)
+    current = now or datetime.now(datetime_timezone.utc)
     expires_at = current + timedelta(seconds=policy.ttl_seconds)
     payload = json.dumps({"headers": captured}, sort_keys=True, separators=(",", ":"))
     encrypted = _fernet(policy.encryption_key_env).encrypt(payload.encode()).decode()
@@ -109,7 +102,7 @@ def overlay_from_header_credential(
 ) -> ReadTransportOverlay:
     if credential is None or policy is None:
         return ReadTransportOverlay()
-    current = now or datetime.now(UTC)
+    current = now or datetime.now(datetime_timezone.utc)
     if _parse_timestamp(credential.expires_at) <= current:
         from fervis.host_api.contracts.ports import EndpointExecutionError
 
@@ -126,12 +119,7 @@ def overlay_from_header_credential(
         ) from exc
     payload = json.loads(decoded.decode())
     headers = _mapping(payload.get("headers"))
-    allowed_lookup_keys = {_header_lookup_key(item) for item in policy.headers}
-    replay_headers = {
-        _header_name(name): str(value)
-        for name, value in headers.items()
-        if _header_lookup_key(name) in allowed_lookup_keys and str(value or "").strip()
-    }
+    replay_headers = _complete_policy_headers(headers, policy=policy)
     return ReadTransportOverlay(headers=replay_headers)
 
 
@@ -206,6 +194,23 @@ def _selected_headers(
     }
 
 
+def _complete_policy_headers(
+    request_headers: Mapping[str, Any],
+    *,
+    policy: CapturedHeaderCredentialPolicy,
+) -> dict[str, str]:
+    selected = _selected_headers(request_headers, policy.headers)
+    missing = tuple(header for header in policy.headers if header not in selected)
+    if missing:
+        from fervis.host_api.contracts.ports import EndpointExecutionError
+
+        raise EndpointExecutionError(
+            "Delegated read credential is missing configured auth headers: "
+            + ", ".join(missing)
+        )
+    return selected
+
+
 def _header_name(value: object) -> str:
     text = str(value or "").strip()
     if not text:
@@ -230,14 +235,16 @@ def _fernet(env_name: str) -> Fernet:
 
 
 def _format_timestamp(value: datetime) -> str:
-    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    return value.astimezone(datetime_timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _parse_timestamp(value: str) -> datetime:
     text = str(value or "").strip()
     if not text:
         raise ValueError("delegated credential expires_at is required")
-    return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(UTC)
+    return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(
+        datetime_timezone.utc
+    )
 
 
 def _mapping(value: object) -> dict[str, Any]:

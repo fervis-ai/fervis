@@ -16,11 +16,19 @@ input:
             source: path
             type: uuid
             required: true
-            identity: {entity_ref: shift_record, identity_field: shift_record_id, primary_key: true, stable: true}
+            entity_target: {entity_kind: shift_record, key_id: primary_key, component_id: shift_record_id}
         fields:
+          - ref: shift_revenue.shift_record_id
+            path: shift_record_id
+            type: uuid
           - ref: shift_revenue.total_revenue
             path: summary.total_revenue
             type: decimal
+        candidate_keys:
+          - id: primary_key
+            entity_kind: shift_record
+            primary: true
+            components: [{id: shift_record_id, field_ref: shift_revenue.shift_record_id}]
       - id: sales_summary_read
         endpoint_name: list_sales_summary
         resource_names: [sales summary]
@@ -37,6 +45,7 @@ input:
       answer_outputs:
         - id: answer_1
           description: total revenue amount
+          role: ANSWER_VALUE
   resource_name_matches:
     - requested_fact_id: fact_1
       answer_output_resource_lineage:
@@ -51,4 +60,3 @@ expect:
       - requested_fact_id: fact_1
         selected_read_ids: [sales_summary_read]
         unselected_positive_read_ids: []
-

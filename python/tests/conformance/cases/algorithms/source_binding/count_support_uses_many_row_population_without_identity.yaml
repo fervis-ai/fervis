@@ -8,6 +8,7 @@ input:
   requested_fact:
     description: featured merch count
     subject_text: featured merch
+    answer_output_role: ROW_COUNT
   candidate:
     source_candidate_id: source_1
     result_grains:

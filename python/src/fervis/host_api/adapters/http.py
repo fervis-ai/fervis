@@ -56,11 +56,7 @@ def http_read_config_from_auth_schema(
     return HttpReadExecutionConfig(
         base_url_env=str(transport.get("base_url_env") or ""),
         request_overlay_source=str(transport.get("request_overlay_source") or ""),
-        auth_query_params=tuple(
-            str(item)
-            for item in transport.get("auth_query_params", ())
-            if str(item or "").strip()
-        ),
+        auth_query_params=_string_sequence(transport.get("auth_query_params")),
         credential_policy=credential_policy_from_auth_schema(schema),
     )
 
@@ -240,3 +236,9 @@ def _get(
 
 def _mapping(value: object) -> dict[str, object]:
     return value if isinstance(value, dict) else {}
+
+
+def _string_sequence(value: object) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(str(item) for item in value if str(item or "").strip())

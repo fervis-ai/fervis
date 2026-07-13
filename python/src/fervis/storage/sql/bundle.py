@@ -6,11 +6,13 @@ from dataclasses import dataclass
 
 from sqlalchemy.engine import Engine
 
+from fervis.host_api.context import HostApiContext
 from fervis.lineage.views.query import LineageQueryPort
 from fervis.observability.prompt_captures import PromptCaptureQueryPort
 from fervis.observability.query import ObservabilityQueryPort
 from fervis.project.configuration import LoadedFervisConfig
 from fervis.project.discovery import ProjectInspection
+from fervis.project.host_api_context import host_api_context_from_config
 from fervis.questions.service import QuestionService
 from fervis.run_work.service import RunWorkService
 from fervis.questions.ports import (
@@ -30,6 +32,7 @@ from .question_run_ports import sql_question_service, sql_run_work_service
 @dataclass(frozen=True)
 class SQLStorageBundle:
     engine: Engine
+    host_api_context: HostApiContext
     lineage_query: LineageQueryPort
     observability_query: ObservabilityQueryPort
     prompt_capture_query: PromptCaptureQueryPort
@@ -37,6 +40,15 @@ class SQLStorageBundle:
     run_work: RunWorkService
     kind: str
     location: str
+
+    def close(self) -> None:
+        self.host_api_context.close()
+
+    def __enter__(self) -> "SQLStorageBundle":
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.close()
 
 
 def sql_storage_bundle(
@@ -49,18 +61,25 @@ def sql_storage_bundle(
         project=project,
         loaded_config=loaded_config,
     )
+    host_api_context = host_api_context_from_config(
+        project=project,
+        loaded_config=loaded_config,
+    )
     lookup_port = lookup or _LazyConfiguredLookup(
         project=project,
         loaded_config=loaded_config,
         engine=target.engine,
+        host_api_context=host_api_context,
     )
     program_port = sql_configured_program_port(
         project=project,
         loaded_config=loaded_config,
         engine=target.engine,
+        host_api_context=host_api_context,
     )
     return SQLStorageBundle(
         engine=target.engine,
+        host_api_context=host_api_context,
         kind=target.kind,
         location=target.location,
         lineage_query=SQLLineageQuery(target.engine),
@@ -86,10 +105,12 @@ class _LazyConfiguredLookup(QuestionLookupPort):
         project: ProjectInspection,
         loaded_config: LoadedFervisConfig,
         engine: Engine,
+        host_api_context: HostApiContext,
     ) -> None:
         self.project = project
         self.loaded_config = loaded_config
         self.engine = engine
+        self.host_api_context = host_api_context
         self._lookup: QuestionLookupPort | None = None
 
     def run_lookup(
@@ -106,5 +127,6 @@ class _LazyConfiguredLookup(QuestionLookupPort):
                 project=self.project,
                 loaded_config=self.loaded_config,
                 engine=self.engine,
+                host_api_context=self.host_api_context,
             )
         return self._lookup

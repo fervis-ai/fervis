@@ -17,12 +17,16 @@ from fervis.lookup.orchestration.request import (
     LookupRuntimePorts,
 )
 from fervis.lookup.relation_catalog import (
+    CandidateKey,
+    CandidateKeyComponent,
     CatalogField,
     CatalogParam,
     CompletenessPolicy,
     EndpointRead,
+    EntityKeyComponentTarget,
+    EntityReference,
+    EntityReferenceComponent,
     FieldRequirement,
-    IdentityMetadata,
     PaginationMetadata,
     PaginationMode,
     ParamSource,
@@ -70,7 +74,7 @@ from tests.lookup.source_binding_helpers import (
     source_binding_payload_from_fact_plan_with_invocation_overrides,
     source_binding_payload_for_one_call,
     source_binding_target_id_for_candidate,
-    source_fulfills_for_candidate,
+    source_fulfills_keys_for_candidate,
 )
 from fervis.lookup.clarification import clarification_payload
 from tests.testkit.assertions import subset_mismatches
@@ -273,10 +277,12 @@ def _run_grounded_identity_endpoint_variant(payload: dict[str, Any]) -> list[str
                         "items": [
                             {
                                 "sale_id": "sale-1",
+                                "merch_shade_id": "merch-shade-lipstick",
                                 "snapshot_merch_name": "Lipstick",
                             },
                             {
                                 "sale_id": "sale-1",
+                                "merch_shade_id": "merch-shade-mascara",
                                 "snapshot_merch_name": "Mascara",
                             },
                         ]
@@ -340,8 +346,10 @@ class _VariantGroundingPlannerPort:
         del provider, max_thinking_tokens, system_prompt, output_mode
         tool_name = tool_specs[0].name if tool_specs else ""
         self.tool_names.append(tool_name)
-        if tool_name == "submit_answer_request_contract":
-            arguments = _question_contract_decisions_payload()
+        if tool_name == "submit_question_contract_outcome":
+            arguments = _question_contract_decision(
+                _question_contract_decisions_payload()
+            )
         elif tool_name == "submit_query_enrichment":
             arguments = _query_enrichment_payload()
         elif tool_name == "submit_grounding":
@@ -349,7 +357,7 @@ class _VariantGroundingPlannerPort:
         elif tool_name == "submit_read_eligibility":
             arguments = read_eligibility_response_for_retained_fields(
                 prompt,
-                answer_value_fields=("snapshot_merch_name",),
+                answer_value_fields=("merch_shade_id", "data.items.sale_id"),
             )
             return arguments
         elif tool_name == "submit_source_alignment_reviews":
@@ -379,8 +387,8 @@ class _VariantGroundingPlannerPort:
         return _tool_output(tool_name=tool_name, arguments=arguments)
 
     def _grounding_arguments(self, prompt: str) -> dict[str, Any]:
-        task_texts = {
-            item["known_input_id"]: item["known_input_text"]
+        lookup_texts = {
+            item["known_input_id"]: item["lookup_text"]
             for item in prompt_section_payload(prompt, "Known inputs to ground")[
                 "known_input_binding_tasks"
             ]
@@ -388,27 +396,18 @@ class _VariantGroundingPlannerPort:
         option_groups = prompt_section_payload(prompt, "Binding options")[
             "known_input_binding_options"
         ]
-        reviews = {}
+        bindings = {}
         for group in option_groups:
-            selected = _selected_grounding_option(group, task_texts=task_texts)
-            reviews[group["known_input_id"]] = {
-                "option_reviews": {
-                    option["binding_option_id"]: {
-                        "resolver_fit_question": option["resolver_fit_question"],
-                        "because": "Selected by deterministic conformance model.",
-                        "decision": (
-                            "CAN_RESOLVE_LOOKUP_TEXT"
-                            if option["binding_option_id"]
-                            == selected["binding_option_id"]
-                            else "CANNOT_RESOLVE_LOOKUP_TEXT"
-                        ),
-                    }
-                    for option in group["binding_options"]
-                }
+            selected = _selected_grounding_option(group, task_texts=lookup_texts)
+            bindings[group["known_input_id"]] = {
+                "selected_option_id": selected["binding_option_id"],
+                "input_value": lookup_texts[group["known_input_id"]],
+                "result_kind": "canonical_identity",
+                "selection_basis": "Selected by deterministic conformance model.",
             }
         return {
             "known_time_resolutions": _time_resolution_payload_from_prompt(prompt),
-            "known_input_binding_reviews": reviews,
+            "known_input_bindings": bindings,
         }
 
     def _source_binding_arguments(self, prompt: str) -> dict[str, Any]:
@@ -418,7 +417,7 @@ class _VariantGroundingPlannerPort:
         relation = next(
             item
             for item in _source_options_for_fact_sources(fact_sources)
-            if _candidate_has_field(item, "snapshot_merch_name")
+            if _candidate_has_field(item, "merch_shade_id")
         )
         binding_target_id = source_binding_target_id_for_candidate(
             prompt,
@@ -432,33 +431,33 @@ class _VariantGroundingPlannerPort:
                 "bindings_for_fact_1": {
                     "plan_shape": "list_rows",
                     "primary": {
-                                "binding_target_id": binding_target_id,
-                                "answer_population": {
-                                    "population_binding_id": _candidate_binding_surface(
-                                        relation
-                                    )["population_bindings"][0][
-                                        "population_binding_id"
-                                    ],
-                                    "intent_text": "products did Alice sell today",
-                                    "match_basis_explanation": (
-                                        "The question asks for sale item rows for Alice."
-                                    ),
-                                },
-                                "fulfillment_decisions": source_fulfills_for_candidate(
-                                    relation,
-                                    field_ids=("snapshot_merch_name",),
-                                ),
-                                "param_decisions": _param_decisions(
-                                    relation,
-                                    bindings={
-                                        "staff_id": "Alice",
-                                        "start_date": "today",
-                                        "end_date": "today",
-                                    },
-                                ),
-                                "row_predicate_reviews": {},
-                                "finite_choice_param_reviews": {},
-                    }
+                        "binding_target_id": binding_target_id,
+                        "answer_population": {
+                            "population_binding_id": _candidate_binding_surface(
+                                relation
+                            )["population_bindings"][0]["population_binding_id"],
+                            "intent_text": "products did Alice sell today",
+                            "match_basis_explanation": (
+                                "The question asks for sale item rows for Alice."
+                            ),
+                        },
+                        "fulfillment_decisions": source_fulfills_keys_for_candidate(
+                            relation,
+                            key_ids_by_answer_output={
+                                "answer_1": "merch_shade_key",
+                                "answer_2": "sale_key",
+                            },
+                        ),
+                        "param_decisions": _param_decisions(
+                            relation,
+                            bindings={
+                                "start_date": "today",
+                                "end_date": "today",
+                            },
+                        ),
+                        "row_predicate_reviews": {},
+                        "finite_choice_param_reviews": {},
+                    },
                 },
             }
         }
@@ -492,8 +491,10 @@ class _ScriptedPatternPlannerPort:
                 prompt,
                 payload=self.conversation_resolution,
             )
-        elif tool_name == "submit_answer_request_contract":
-            arguments = _scripted_question_contract_payload(self.question_contract)
+        elif tool_name == "submit_question_contract_outcome":
+            arguments = _question_contract_decision(
+                _scripted_question_contract_payload(self.question_contract)
+            )
         elif tool_name == "submit_query_enrichment":
             arguments = _scripted_query_enrichment_payload(
                 self.question_contract,
@@ -555,32 +556,70 @@ def _grounding_payload_for_compatible_resolver_reads(
         "known_input_binding_options"
     ]
     compatible_by_input = _compatible_resolver_reads(payload)
+    result_kind_by_input = _grounding_result_kinds(payload)
+    matched_field_by_input = _grounding_matched_fields(payload)
+    lookup_text_by_input = {
+        item["known_input_id"]: item["lookup_text"]
+        for item in prompt_section_payload(prompt, "Known inputs to ground")[
+            "known_input_binding_tasks"
+        ]
+    }
     return {
         "known_time_resolutions": _time_resolution_payload_from_prompt(prompt),
-        "known_input_binding_reviews": {
-            group["known_input_id"]: {
-                "option_reviews": {
-                    option["binding_option_id"]: {
-                        "resolver_fit_question": option["resolver_fit_question"],
-                        "because": (
-                            "The scripted conformance model follows the compatible "
-                            "resolver reads declared by this scenario."
-                        ),
-                        "decision": (
-                            "CAN_RESOLVE_LOOKUP_TEXT"
-                            if option.get("read_id")
-                            in compatible_by_input.get(
-                                str(group["known_input_id"]), set()
-                            )
-                            else "CANNOT_RESOLVE_LOOKUP_TEXT"
-                        ),
-                    }
-                    for option in group.get("binding_options") or ()
-                }
-            }
+        "known_input_bindings": {
+            group["known_input_id"]: _scripted_selected_binding(
+                group,
+                compatible_read_ids=compatible_by_input.get(
+                    str(group["known_input_id"]), set()
+                ),
+                lookup_text=lookup_text_by_input[str(group["known_input_id"])],
+                result_kind=result_kind_by_input.get(
+                    str(group["known_input_id"]),
+                    "canonical_identity",
+                ),
+                matched_field_ref=matched_field_by_input.get(
+                    str(group["known_input_id"]),
+                    "",
+                ),
+            )
             for group in option_groups
         },
     }
+
+
+def _scripted_selected_binding(
+    group: dict[str, Any],
+    *,
+    compatible_read_ids: set[str],
+    lookup_text: str,
+    result_kind: str,
+    matched_field_ref: str,
+) -> dict[str, object]:
+    options = tuple(group.get("binding_options") or ())
+    selected = next(
+        (
+            option
+            for option in options
+            if option.get("read_id") in compatible_read_ids
+        ),
+        None,
+    )
+    if selected is None:
+        return {
+            "selected_option_id": "none",
+            "input_value": "",
+            "result_kind": "none",
+            "selection_basis": "No declared resolver read was selected.",
+        }
+    selection: dict[str, object] = {
+        "selected_option_id": selected["binding_option_id"],
+        "input_value": lookup_text,
+        "result_kind": result_kind,
+        "selection_basis": "Selected by scripted conformance model.",
+    }
+    if matched_field_ref:
+        selection["matched_field_ref"] = matched_field_ref
+    return selection
 
 
 def _compatible_resolver_reads(payload: dict[str, Any]) -> dict[str, set[str]]:
@@ -595,6 +634,20 @@ def _compatible_resolver_reads(payload: dict[str, Any]) -> dict[str, set[str]]:
             )
         output[str(known_input_id)] = {str(read_id) for read_id in read_ids}
     return output
+
+
+def _grounding_result_kinds(payload: dict[str, Any]) -> dict[str, str]:
+    raw = payload.get("result_kinds") or {}
+    if not isinstance(raw, dict):
+        raise AssertionError("grounding.result_kinds must be an object")
+    return {str(input_id): str(result_kind) for input_id, result_kind in raw.items()}
+
+
+def _grounding_matched_fields(payload: dict[str, Any]) -> dict[str, str]:
+    raw = payload.get("matched_field_refs") or {}
+    if not isinstance(raw, dict):
+        raise AssertionError("grounding.matched_field_refs must be an object")
+    return {str(input_id): str(field_ref) for input_id, field_ref in raw.items()}
 
 
 def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -627,7 +680,12 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
                     ).instance_interpretation,
                 ).to_question_contract_dict(),
                 "answer_outputs": [
-                    _scripted_answer_output(answer_output)
+                    _scripted_answer_output(
+                        answer_output,
+                        default_role=str(
+                            payload.get("support_role") or "ROW_COUNT"
+                        ),
+                    )
                     for answer_output in answer_outputs
                 ],
                 "used_question_inputs": [
@@ -641,20 +699,32 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
     }
 
 
+def _question_contract_decision(outcome: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "decision_basis": "The current wording supports the selected outcome.",
+        "outcome": outcome,
+    }
+
+
 def _scripted_answer_expression(payload: dict[str, Any]) -> dict[str, Any]:
-    output = {"family": str(payload.get("answer_expression_family") or "list_rows")}
+    family = str(payload.get("answer_expression_family") or "list_rows")
+    output = {"family": family}
     if isinstance(payload.get("group_key"), dict):
         output["group_key"] = dict(payload["group_key"])
     return output
 
 
-def _scripted_answer_output(payload: object) -> dict[str, Any]:
+def _scripted_answer_output(
+    payload: object,
+    *,
+    default_role: str,
+) -> dict[str, Any]:
     if not isinstance(payload, dict):
-        return {"description": str(payload)}
-    output: dict[str, Any] = {"description": str(payload.get("description") or "")}
-    if payload.get("role"):
-        output["role"] = str(payload["role"])
-    return output
+        return {"description": str(payload), "role": default_role}
+    return {
+        "description": str(payload.get("description") or ""),
+        "role": str(payload.get("role") or default_role),
+    }
 
 
 def _scripted_answer_output_description(payload: object) -> str:
@@ -684,7 +754,11 @@ def _scripted_question_input(*, index: int, payload: dict[str, Any]) -> dict[str
     if kind == KnownInputKind.LITERAL:
         role = LiteralInputRole(str(payload["role"]))
         output["value_source_text"] = text
-        output["resolved_value_text"] = str(payload.get("resolved_value_text") or text)
+        output["operand_text"] = str(
+            payload.get("operand_text")
+            or payload.get("resolved_value_text")
+            or text
+        )
         output["role"] = role.value
         if payload.get("value_meaning_hint"):
             output["value_meaning_hint"] = str(payload["value_meaning_hint"])
@@ -717,7 +791,7 @@ def _scripted_query_enrichment_payload(payload: dict[str, Any]) -> dict[str, Any
                         "support_role": _scripted_answer_output_support_role(
                             answer_output,
                             default=str(
-                                payload.get("support_role") or "ROW_POPULATION"
+                                payload.get("support_role") or "ROW_COUNT"
                             ),
                         ),
                         "source_text": _scripted_answer_output_description(
@@ -872,7 +946,6 @@ def _scripted_conversation_resolution_payload(
                     "values": [],
                 }
             ],
-            "frame_call": {"kind": "none"},
         },
     }
 
@@ -913,13 +986,13 @@ def _conversation_resolution_using_visible_memory(
                         {
                             "value_id": f"memory_value_{index}",
                             "resolved_text": component["resolved_text"],
+                            "frame_parameter": {"kind": "none"},
                             "sources": [_context_anchor_source(component)],
                         }
                         for index, component in enumerate(components, start=1)
                     ],
                 }
             ],
-            "frame_call": {"kind": "none"},
         },
     }
 
@@ -963,6 +1036,7 @@ def _conversation_resolution_selecting_visible_memory(
                         {
                             "value_id": "selected_memory_value",
                             "resolved_text": resolved,
+                            "frame_parameter": {"kind": "none"},
                             "sources": [
                                 {
                                     "kind": "current_span",
@@ -975,7 +1049,6 @@ def _conversation_resolution_selecting_visible_memory(
                     ],
                 }
             ],
-            "frame_call": {"kind": "none"},
         },
     }
 
@@ -1093,7 +1166,7 @@ def _selected_grounding_option(
         option
         for option in group["binding_options"]
         if option.get("read_id") == "list_staff_list"
-        and option.get("returned_identity", {}).get("identity_field") == "staff_id"
+        and option.get("returned_identity", {}).get("key_component_id") == "staff_id"
         and all(
             param.get("name") != "include_items"
             for param in option.get("query_params", ())
@@ -1152,15 +1225,10 @@ def _variant_staff_sales_catalog() -> RelationCatalog:
                         name="staff_id",
                         source=ParamSource.QUERY,
                         type="uuid",
-                        identity=IdentityMetadata(
-                            entity_ref="staff",
-                            identity_field="staff_id",
-                            primary_key=True,
-                            stable=True,
-                            display_fields=(
-                                "field.staff.full_name",
-                                "field.staff.first_name",
-                            ),
+                        entity_target=EntityKeyComponentTarget(
+                            entity_kind="staff",
+                            key_id="staff_key",
+                            component_id="staff_id",
                         ),
                     ),
                     CatalogParam(
@@ -1197,24 +1265,24 @@ def _variant_staff_sales_catalog() -> RelationCatalog:
                         path="data.sale_id",
                         row_path_id="data",
                         type="uuid",
-                        identity=IdentityMetadata(
-                            entity_ref="sale",
-                            identity_field="sale_id",
-                            primary_key=True,
-                            stable=True,
-                        ),
                     ),
                     CatalogField(
                         ref="field.data.items.sale_id",
                         path="data.items.sale_id",
                         row_path_id="items",
                         type="uuid",
-                        identity=IdentityMetadata(
-                            entity_ref="sale",
-                            identity_field="sale_id",
-                            primary_key=True,
-                            stable=True,
+                        requirements=(
+                            FieldRequirement(
+                                param_ref="list_sale_list.query.include_items",
+                                value=True,
+                            ),
                         ),
+                    ),
+                    CatalogField(
+                        ref="field.data.items.merch_shade_id",
+                        path="data.items.merch_shade_id",
+                        row_path_id="items",
+                        type="uuid",
                         requirements=(
                             FieldRequirement(
                                 param_ref="list_sale_list.query.include_items",
@@ -1231,6 +1299,44 @@ def _variant_staff_sales_catalog() -> RelationCatalog:
                             FieldRequirement(
                                 param_ref="list_sale_list.query.include_items",
                                 value=True,
+                            ),
+                        ),
+                    ),
+                ),
+                candidate_keys=(
+                    CandidateKey(
+                        id="sale_key",
+                        entity_kind="sale",
+                        components=(
+                            CandidateKeyComponent(
+                                id="sale_id",
+                                field_ref="field.data.sale_id",
+                            ),
+                        ),
+                        primary=True,
+                        stable=True,
+                    ),
+                ),
+                entity_references=(
+                    EntityReference(
+                        id="item_merch_shade",
+                        target_entity_kind="merch_shade",
+                        target_key_id="merch_shade_key",
+                        components=(
+                            EntityReferenceComponent(
+                                target_component_id="merch_shade_id",
+                                local_field_ref="field.data.items.merch_shade_id",
+                            ),
+                        ),
+                    ),
+                    EntityReference(
+                        id="item_sale",
+                        target_entity_kind="sale",
+                        target_key_id="sale_key",
+                        components=(
+                            EntityReferenceComponent(
+                                target_component_id="sale_id",
+                                local_field_ref="field.data.items.sale_id",
                             ),
                         ),
                     ),
@@ -1265,16 +1371,6 @@ def _variant_staff_sales_catalog() -> RelationCatalog:
                         path="data.staff_id",
                         row_path_id="data",
                         type="uuid",
-                        identity=IdentityMetadata(
-                            entity_ref="staff",
-                            identity_field="staff_id",
-                            primary_key=True,
-                            stable=True,
-                            display_fields=(
-                                "field.staff.full_name",
-                                "field.staff.first_name",
-                            ),
-                        ),
                     ),
                     CatalogField(
                         ref="field.staff.full_name",
@@ -1289,10 +1385,56 @@ def _variant_staff_sales_catalog() -> RelationCatalog:
                         type="string",
                     ),
                 ),
+                candidate_keys=(
+                    CandidateKey(
+                        id="staff_key",
+                        entity_kind="staff",
+                        components=(
+                            CandidateKeyComponent(
+                                id="staff_id",
+                                field_ref="field.staff.staff_id",
+                            ),
+                        ),
+                        primary=True,
+                        context_field_refs=(
+                            "field.staff.full_name",
+                            "field.staff.first_name",
+                        ),
+                    ),
+                ),
                 source_metadata={"description": "List staff people by name."},
                 pagination=PaginationMetadata(
                     mode=PaginationMode.NONE,
                     completeness_policy=CompletenessPolicy.COMPLETE,
+                ),
+            ),
+            EndpointRead(
+                id="get_merch_shade",
+                endpoint_name="get_merch_shade",
+                resource_names=("merch shade authority",),
+                row_paths=(
+                    RowPath(id="data", path="data", cardinality=RowCardinality.ONE),
+                ),
+                fields=(
+                    CatalogField(
+                        ref="field.merch_shade.merch_shade_id",
+                        path="data.merch_shade_id",
+                        row_path_id="data",
+                        type="uuid",
+                    ),
+                ),
+                candidate_keys=(
+                    CandidateKey(
+                        id="merch_shade_key",
+                        entity_kind="merch_shade",
+                        components=(
+                            CandidateKeyComponent(
+                                id="merch_shade_id",
+                                field_ref="field.merch_shade.merch_shade_id",
+                            ),
+                        ),
+                        primary=True,
+                    ),
                 ),
             ),
         )
@@ -1310,7 +1452,7 @@ def _question_contract_decisions_payload() -> dict[str, Any]:
                 "source": "question_context",
                 "kind": KnownInputKind.LITERAL.value,
                 "value_source_text": "Alice",
-                "resolved_value_text": "Alice",
+                "operand_text": "Alice",
                 "value_meaning_hint": "staff member",
                 "role": LiteralInputRole.REFERENCE_VALUE.value,
                 "inventory_check": {
@@ -1322,7 +1464,7 @@ def _question_contract_decisions_payload() -> dict[str, Any]:
                 "source": "question_context",
                 "kind": KnownInputKind.LITERAL.value,
                 "value_source_text": "today",
-                "resolved_value_text": "today",
+                "operand_text": "today",
                 "role": LiteralInputRole.TIME_VALUE.value,
                 "inventory_check": {
                     "why_this_is_an_input": "today is a declared question input"
@@ -1342,7 +1484,11 @@ def _question_contract_decisions_payload() -> dict[str, Any]:
                     ).instance_interpretation,
                 ).to_question_contract_dict(),
                 "answer_outputs": [
-                    {"description": "products sold by sale, sale grouping"}
+                    {"description": "products sold", "role": "ANSWER_VALUE"},
+                    {
+                        "description": "sale containing each product",
+                        "role": "ANSWER_VALUE",
+                    },
                 ],
                 "used_question_inputs": ["input_1", "input_2"],
             }
@@ -1365,10 +1511,12 @@ def _variant_grounding_question_contract() -> QuestionContract:
                 answer_outputs=(
                     RequestedFactAnswerOutput(
                         id="answer_1",
+                        role="ANSWER_VALUE",
                         description="products sold by sale",
                     ),
                     RequestedFactAnswerOutput(
                         id="answer_2",
+                        role="ANSWER_VALUE",
                         description="sale grouping",
                     ),
                 ),
@@ -1402,7 +1550,7 @@ def _query_enrichment_payload() -> dict[str, Any]:
                 "answer_output_resource_lineage": [
                     {
                         "answer_output_id": "answer_1",
-                        "support_role": "ROW_POPULATION",
+                        "support_role": "ROW_COUNT",
                         "source_text": "sales",
                         "matching_resource_names": ["sale"],
                     }
@@ -1560,17 +1708,15 @@ def _pattern_sale_items_answer_plan(*, read_id: str) -> dict[str, Any]:
             "answers": [
                 {
                     "requested_fact_id": "fact_1",
-                    "answer_output_ids": ["answer_1"],
+                    "answer_output_ids": ["answer_1", "answer_2"],
                     "pattern": "list_rows",
                     "source": {"kind": "read", "read_id": read_id},
                     "output_fields": [
                         {
-                            "field_id": "snapshot_merch_name",
-                            "label": "answer_1",
+                            "field_id": "merch_shade_id",
                         },
                         {
                             "field_id": "sale_id",
-                            "label": "sale_id",
                         },
                     ],
                 }

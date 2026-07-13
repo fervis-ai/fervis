@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from fervis.interfaces.agent.actions import (
+    add_schema_metadata_action,
     choose_framework_init_action,
     chmod_action,
     configure_auth_action,
@@ -43,7 +44,7 @@ def test_agent_actions_are_self_describing() -> None:
         provide_clarification_action(
             "conversation-1",
             question_id="question-1",
-            base_run_id="run-1",
+            run_id="run-1",
             clarification_id="clarification-1",
             tenant_id="tenant-1",
             principal_id="principal-1",
@@ -84,12 +85,28 @@ def test_schema_cardinality_action_names_all_supported_flask_schema_surfaces() -
     assert "Flask-AppBuilder" in description
 
 
+def test_fastapi_schema_action_uses_framework_native_response_contracts() -> None:
+    action = add_schema_metadata_action(
+        "list_orders",
+        framework_kind="fastapi",
+    )
+
+    assert action == {
+        "kind": "add_schema_metadata",
+        "endpoint": "list_orders",
+        "description": (
+            "Declare this FastAPI route's response through response_model or an "
+            "equivalent precise return annotation, then rerun fervis catalog."
+        ),
+    }
+
+
 def test_provide_clarification_action_requires_real_clarification_id() -> None:
     with pytest.raises(ValueError, match="clarification_id is required"):
         provide_clarification_action(
             "conversation-1",
             question_id="question-1",
-            base_run_id="run-1",
+            run_id="run-1",
             clarification_id="",
             tenant_id="tenant-1",
             principal_id="principal-1",
@@ -99,7 +116,7 @@ def test_provide_clarification_action_requires_real_clarification_id() -> None:
         provide_clarification_action(
             "conversation-1",
             question_id="question-1",
-            base_run_id="run-1",
+            run_id="run-1",
             clarification_id=None,
             tenant_id="tenant-1",
             principal_id="principal-1",

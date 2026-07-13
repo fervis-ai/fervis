@@ -34,11 +34,3 @@ def field_id_schema(
 
 def non_empty_string_array() -> dict[str, object]:
     return {"type": "array", "items": handle_schema(), "minItems": 1}
-
-
-def non_empty_field_id_array(field_ids: tuple[str, ...]) -> dict[str, object]:
-    return {
-        "type": "array",
-        "items": field_id_schema(field_ids),
-        "minItems": 1,
-    }

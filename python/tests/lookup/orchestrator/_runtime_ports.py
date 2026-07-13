@@ -94,13 +94,13 @@ class _PlannerPort:
             question_contract,
             _plan_payload(self.plan, question_contract=question_contract),
         )
-        if tool_name == "submit_answer_request_contract":
+        if tool_name == "submit_question_contract_outcome":
             return {
                 "answer": json.dumps(
                     {
-                        "tool": "submit_answer_request_contract",
-                        "arguments": _question_contract_payload(
-                            question_contract,
+                        "tool": "submit_question_contract_outcome",
+                        "arguments": _question_contract_decision(
+                            _question_contract_payload(question_contract)
                         ),
                     },
                     default=str,
@@ -238,7 +238,7 @@ def _grounding_payload_from_prompt(prompt: str) -> dict[str, Any]:
     option_groups = _prompt_json_section(prompt, "Binding options")[
         "known_input_binding_options"
     ]
-    reviews: dict[str, dict[str, Any]] = {}
+    bindings: dict[str, dict[str, Any]] = {}
     for group in option_groups:
         options = group["binding_options"]
         selected = _select_grounding_route_option(
@@ -247,23 +247,16 @@ def _grounding_payload_from_prompt(prompt: str) -> dict[str, Any]:
                 tasks.get(group["known_input_id"], {}).get("value_meaning_hint") or ""
             ),
         )
-        reviews[group["known_input_id"]] = {
-            "option_reviews": {
-                option["binding_option_id"]: {
-                    "resolver_fit_question": option["resolver_fit_question"],
-                    "because": "Selected by deterministic test model.",
-                    "decision": (
-                        "CAN_RESOLVE_LOOKUP_TEXT"
-                        if option["binding_option_id"] == selected["binding_option_id"]
-                        else "CANNOT_RESOLVE_LOOKUP_TEXT"
-                    ),
-                }
-                for option in options
-            }
+        task = tasks[group["known_input_id"]]
+        bindings[group["known_input_id"]] = {
+            "selected_option_id": selected["binding_option_id"],
+            "input_value": task["lookup_text"],
+            "result_kind": "canonical_identity",
+            "selection_basis": "Selected by deterministic test model.",
         }
     return {
         "known_time_resolutions": _time_resolution_payload_from_prompt(prompt),
-        "known_input_binding_reviews": reviews,
+        "known_input_bindings": bindings,
     }
 
 
@@ -400,15 +393,19 @@ def _select_grounding_route_option(
     *,
     value_meaning_hint: str,
 ) -> dict[str, Any]:
-    usable = list(options)
     normalized_hint = value_meaning_hint.casefold().strip()
-    for option in usable:
-        identity_type = str(
-            (option.get("returned_identity") or {}).get("identity_type") or ""
+    reference_options = tuple(
+        option for option in options if option.get("purpose") == "reference_grounding"
+    )
+    for option in reference_options:
+        entity_kind = str(
+            (option.get("returned_identity") or {}).get("entity_kind") or ""
         ).casefold()
-        if identity_type and normalized_hint.endswith(identity_type):
+        if entity_kind and normalized_hint.endswith(entity_kind):
             return option
-    return usable[0] if usable else options[0]
+    if reference_options:
+        return reference_options[0]
+    return options[0]
 
 
 def _prompt_json_section(prompt: str, section_name: str) -> dict[str, Any]:

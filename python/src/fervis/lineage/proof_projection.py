@@ -16,7 +16,9 @@ def project_proof_payload(
     if not target_node_ids:
         return payload
     included_node_ids = _upstream_node_ids(payload, target_node_ids)
-    included_nodes = tuple(node for node in payload.nodes if node.id in included_node_ids)
+    included_nodes = tuple(
+        node for node in payload.nodes if node.id in included_node_ids
+    )
     included_edges = tuple(
         edge
         for edge in payload.edges

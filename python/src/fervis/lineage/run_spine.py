@@ -9,12 +9,7 @@ from typing import Protocol
 from fervis.host_api.contracts.authority import ReadContextRef
 from fervis.lineage.enums import ConversationOriginKind, QuestionRunKind, RunTriggerKind
 from fervis.lineage.ports import LineageRecorderPort
-from fervis.lineage.recorder import (
-    ClarificationResponseWrite,
-    ConversationWrite,
-    QuestionRunWrite,
-    QuestionWrite,
-)
+from fervis.lineage.recorder import ConversationWrite, QuestionRunWrite, QuestionWrite
 
 
 @dataclass(frozen=True)
@@ -36,23 +31,12 @@ class QuestionRunStart:
     adapter_ref: str
     runtime_version: str
     base_run_id: str | None = None
-    trigger_clarification_response_id: str | None = None
-
-
-@dataclass(frozen=True)
-class ClarificationResponseStart:
-    response_id: str
-    run_id: str
-    clarification_id: str
-    response_text: str
-    selected_option_id: str = ""
 
 
 @dataclass(frozen=True)
 class QuestionRunStartRequest:
     run: QuestionRunStart
     question: QuestionStart | None = None
-    clarification_response: ClarificationResponseStart | None = None
 
 
 class QuestionRunSequenceStore(Protocol):
@@ -88,22 +72,6 @@ def record_question_run_start(
                     original_question=request.question.question,
                 )
             )
-        if request.clarification_response is not None:
-            recorder.record_clarification_response(
-                ClarificationResponseWrite(
-                    response_id=request.clarification_response.response_id,
-                    run_id=request.clarification_response.run_id,
-                    clarification_id=request.clarification_response.clarification_id,
-                    evidence_ref=(
-                        f"clarification_response:"
-                        f"{request.clarification_response.response_id}"
-                    ),
-                    response_text=request.clarification_response.response_text,
-                    selected_option_id=(
-                        request.clarification_response.selected_option_id
-                    ),
-                )
-            )
         recorder.start_run(
             QuestionRunWrite(
                 run_id=request.run.run_id,
@@ -116,9 +84,6 @@ def record_question_run_start(
                 adapter_ref=request.run.adapter_ref,
                 runtime_version=request.run.runtime_version,
                 base_run_id=request.run.base_run_id,
-                trigger_clarification_response_id=(
-                    request.run.trigger_clarification_response_id
-                ),
             )
         )
 

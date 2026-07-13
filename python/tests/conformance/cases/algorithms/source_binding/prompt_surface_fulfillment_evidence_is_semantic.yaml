@@ -39,16 +39,17 @@ input:
               path: data.sale_id
               row_path_id: data
               type: uuid
-              identity:
-                entity_ref: sale
-                identity_field: sale_id
-                primary_key: true
-                stable: true
             - ref: sales.field.sale_type
               path: data.sale_type
               row_path_id: data
               type: choice
               choices: [STORE, ONLINE]
+          candidate_keys:
+            - id: sale_key
+              entity_kind: sale
+              components: [{id: sale_id, field_ref: sales.field.sale_id}]
+              primary: true
+              stable: true
     selected_read_ids: [inventory, staff, sales]
     retained_read_ids: [sales]
     selected_source_candidate_count: 3
@@ -58,13 +59,11 @@ expect:
       - '<choice'
       - 'answer_output="answer_2"'
       - '<evidence'
-      - 'kind="group_key"'
+      - 'kind="candidate_key"'
       - 'field="sale_id"'
-      - 'label="Sale ID"'
       - 'row_path="data"'
-      - 'type="uuid"'
-      - 'evidence_id="source_3.data.sale_id"'
+      - 'evidence_id="source_3.data.key.sale_key"'
+      - 'entity_key="sale.sale_key"'
       - 'field="sale_type"'
-      - 'label="Sale Type"'
       - 'type="choice"'
       - 'meaning="Choices: STORE, ONLINE."'

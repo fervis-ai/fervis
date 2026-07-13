@@ -2,27 +2,38 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from fervis.lookup.question_contract.answer_output_support import (
     ANSWER_OUTPUT_SUPPORT_ROLE_VALUES,
 )
 from fervis.lookup.question_contract import provider_contract as provider_output
-from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
+from fervis.lookup.question_inputs import (
+    KnownInputKind,
+    LiteralInputRole,
+)
+from fervis.lookup.conversation_resolution.compilation import (
+    ResolvedLiteralQuestionInput,
+    ResolvedQuestionInput,
+    ResolvedRowSetQuestionInput,
+)
 
-if TYPE_CHECKING:
-    from fervis.lookup.conversation_resolution.compilation import (
-        ResolvedQuestionInput,
+
+def build_question_contract_decisions_schema(
+    *,
+    conversation_inputs: tuple[ResolvedQuestionInput, ...] = (),
+) -> dict[str, object]:
+    return provider_output.QuestionContractDecisionOutput.schema(
+        {
+            "decision_basis": {"type": "string", "minLength": 1},
+            "outcome": {
+                "oneOf": [
+                    build_answer_request_contract_schema(
+                        conversation_inputs=conversation_inputs,
+                    ),
+                    *_incomplete_factual_request_schemas(),
+                ]
+            },
+        }
     )
-
-
-def build_question_contract_decisions_schema() -> dict[str, object]:
-    return {
-        "oneOf": [
-            build_answer_request_contract_schema(),
-            build_missing_input_clarification_schema(),
-        ]
-    }
 
 
 def build_answer_request_contract_schema(
@@ -46,41 +57,59 @@ def build_answer_request_contract_schema(
             },
             "question_input_inventory_check": (
                 provider_output.QuestionInputInventoryCheckOutput.schema(
-                {
-                    "all_input_like_phrases_declared": {"type": "boolean"},
-                },
+                    {
+                        "all_input_like_phrases_declared": {"type": "boolean"},
+                    },
                 )
             ),
         },
     )
 
 
-def build_missing_input_clarification_schema() -> dict[str, object]:
-    return provider_output.MissingInputClarificationOutput.schema(
+def build_incomplete_factual_request_schema() -> dict[str, object]:
+    return {"oneOf": list(_incomplete_factual_request_schemas())}
+
+
+def _incomplete_factual_request_schemas() -> tuple[dict[str, object], ...]:
+    return (
+        _missing_requested_fact_schema(),
+        _unresolved_prior_turn_references_schema(),
+    )
+
+
+def _missing_requested_fact_schema() -> dict[str, object]:
+    return provider_output.MissingRequestedFactOutput.schema(
         {
-            "kind": {"enum": ["needs_clarification"]},
-            "missing": {
-                "type": "array",
-                "minItems": 1,
-                "maxItems": 4,
-                "items": _missing_question_input_schema(),
+            "kind": {"enum": ["missing_requested_fact"]},
+            "source_text": {"type": "string", "minLength": 1},
+            "why_question_is_incomplete": {
+                "type": "string",
+                "minLength": 1,
             },
         },
     )
 
 
-def _missing_question_input_schema() -> dict[str, object]:
-    return provider_output.MissingQuestionInputOutput.schema(
+def _unresolved_prior_turn_references_schema() -> dict[str, object]:
+    return provider_output.UnresolvedPriorTurnReferencesOutput.schema(
         {
-            "type": {
-                "enum": [
-                    "target_reference",
-                    "answer_definition",
-                ]
+            "kind": {"enum": ["unresolved_prior_turn_references"]},
+            "references": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 4,
+                "items": _unresolved_prior_turn_reference_schema(),
             },
+        },
+    )
+
+
+def _unresolved_prior_turn_reference_schema() -> dict[str, object]:
+    return provider_output.UnresolvedPriorTurnReferenceOutput.schema(
+        {
             "source_text": {"type": "string", "minLength": 1},
-            "entity_type": {"type": "string"},
-            "why_context_is_insufficient": {
+            "target_label": {"type": "string", "minLength": 1},
+            "why_question_is_incomplete": {
                 "type": "string",
                 "minLength": 1,
             },
@@ -135,9 +164,9 @@ def _ordinary_answer_expression_schema() -> dict[str, object]:
             "family": {
                 "enum": [
                     "list_rows",
+                    "ranked_selection",
                     "scalar_value",
                     "scalar_aggregate",
-                    "ranked_selection",
                     "computed_scalar",
                     "set_difference",
                     "coverage_check",
@@ -155,14 +184,14 @@ def _answer_subject_schema() -> dict[str, object]:
             "subject_text": {"type": "string", "minLength": 1},
             "instance_interpretation": (
                 provider_output.AnswerSubjectInstanceInterpretationOutput.schema(
-                {
-                    "kind": {
-                        "enum": [
-                            "NORMAL_BUSINESS_INSTANCE",
-                            "RAW_DATA_RECORD",
-                        ]
+                    {
+                        "kind": {
+                            "enum": [
+                                "NORMAL_BUSINESS_INSTANCE",
+                                "RAW_DATA_RECORD",
+                            ]
+                        },
                     },
-                },
                 )
             ),
         },
@@ -184,24 +213,48 @@ def _answer_population_schema() -> dict[str, object]:
 
 
 def _answer_population_membership_test_schema() -> dict[str, object]:
+    return {
+        "oneOf": [
+            _answer_population_membership_test_variant(
+                kind="EXPLICIT_USER_CONSTRAINT",
+                minimum_owned_inputs=1,
+            ),
+            *(
+                _answer_population_membership_test_variant(
+                    kind=kind,
+                    minimum_owned_inputs=0,
+                )
+                for kind in (
+                    "SUBJECT_IDENTITY",
+                    "NORMAL_INSTANCE_GUARD",
+                    "RAW_RECORD_GUARD",
+                )
+            ),
+        ]
+    }
+
+
+def _answer_population_membership_test_variant(
+    *,
+    kind: str,
+    minimum_owned_inputs: int,
+) -> dict[str, object]:
+    maximum_owned_inputs = None if minimum_owned_inputs else 0
+    owned_inputs_schema: dict[str, object] = {
+        "type": "array",
+        "minItems": minimum_owned_inputs,
+        "items": {"type": "string", "minLength": 1},
+    }
+    if maximum_owned_inputs is not None:
+        owned_inputs_schema["maxItems"] = maximum_owned_inputs
     return provider_output.AnswerPopulationMembershipTestOutput.schema(
         {
             "test_id": {"type": "string", "minLength": 1},
-            "kind": {
-                "enum": [
-                    "SUBJECT_IDENTITY",
-                    "EXPLICIT_USER_CONSTRAINT",
-                    "NORMAL_INSTANCE_GUARD",
-                    "RAW_RECORD_GUARD",
-                ]
-            },
+            "kind": {"enum": [kind]},
             "polarity": {"enum": ["MUST_PASS", "MUST_FAIL"]},
             "test_question": {"type": "string", "minLength": 1},
-            "owned_question_input_refs": {
-                "type": "array",
-                "items": {"type": "string", "minLength": 1},
-            },
-        },
+            "owned_question_input_refs": owned_inputs_schema,
+        }
     )
 
 
@@ -211,7 +264,8 @@ def _answer_output_schema() -> dict[str, object]:
             "description": {"type": "string", "minLength": 1},
             "role": {
                 "enum": [
-                    role for role in ANSWER_OUTPUT_SUPPORT_ROLE_VALUES
+                    role
+                    for role in ANSWER_OUTPUT_SUPPORT_ROLE_VALUES
                     if role != "GROUP_KEY"
                 ]
             },
@@ -263,18 +317,17 @@ def _question_input_schema(
             include_conversation_resolution_inputs=False,
         ),
         _literal_text_input_role_schema(
-            role=LiteralInputRole.RESULT_LIMIT,
+            role=LiteralInputRole.TIME_VALUE,
             include_conversation_resolution_inputs=False,
         ),
         _literal_text_input_role_schema(
-            role=LiteralInputRole.TIME_VALUE,
+            role=LiteralInputRole.RESULT_LIMIT,
             include_conversation_resolution_inputs=False,
         ),
     ]
     if conversation_inputs:
         branches.extend(
-            _declared_conversation_input_schema(item)
-            for item in conversation_inputs
+            _declared_conversation_input_schema(item) for item in conversation_inputs
         )
     return {"oneOf": branches}
 
@@ -282,13 +335,15 @@ def _question_input_schema(
 def _declared_conversation_input_schema(
     item: ResolvedQuestionInput,
 ) -> dict[str, object]:
-    if item.kind is KnownInputKind.LITERAL:
-        return _declared_literal_input_schema(item)
-    return _declared_row_set_input_schema(item)
+    match item:
+        case ResolvedLiteralQuestionInput():
+            return _declared_literal_input_schema(item)
+        case ResolvedRowSetQuestionInput():
+            return _declared_row_set_input_schema(item)
 
 
 def _declared_literal_input_schema(
-    item: ResolvedQuestionInput,
+    item: ResolvedLiteralQuestionInput,
 ) -> dict[str, object]:
     if item.role is None:
         raise ValueError("literal conversation input requires role")
@@ -296,7 +351,7 @@ def _declared_literal_input_schema(
         "input_ref": {"type": "string", "minLength": 1},
         "source": {"enum": ["conversation_resolution"]},
         "value_source_text": {"enum": [item.value_source_text]},
-        "resolved_value_text": {"enum": [item.resolved_value_text]},
+        "operand_text": {"enum": [item.resolved_value_text]},
         "role": {"enum": [item.role.value]},
         "occurrence": {"type": "integer", "minimum": 1},
         "resolved_input_ref": {"enum": [item.input_ref]},
@@ -319,7 +374,7 @@ def _declared_literal_input_schema(
 
 
 def _declared_row_set_input_schema(
-    item: ResolvedQuestionInput,
+    item: ResolvedRowSetQuestionInput,
 ) -> dict[str, object]:
     return provider_output.RowSetReferenceInputOutput.schema(
         {
@@ -349,7 +404,7 @@ def _literal_text_input_role_schema(
             )
         },
         "value_source_text": {"type": "string", "minLength": 1},
-        "resolved_value_text": {"type": "string", "minLength": 1},
+        "operand_text": {"type": "string", "minLength": 1},
         "field_label_text": {"type": "string", "minLength": 1},
         "value_meaning_hint": {"type": "string", "minLength": 1},
         "role": {"enum": [role.value]},
@@ -359,28 +414,13 @@ def _literal_text_input_role_schema(
     }
     if include_conversation_resolution_inputs:
         properties["resolved_input_ref"] = {"type": "string", "minLength": 1}
-    return provider_output.LiteralTextInputOutput.schema(
-        properties,
-    )
+    schema = provider_output.LiteralTextInputOutput.schema(properties)
+    return schema
 
 
 def _question_input_inventory_check_schema() -> dict[str, object]:
     return provider_output.QuestionInputItemInventoryCheckOutput.schema(
         {
             "why_this_is_an_input": {"type": "string", "minLength": 1},
-        },
-    )
-
-
-def _row_set_reference_input_schema() -> dict[str, object]:
-    return provider_output.RowSetReferenceInputOutput.schema(
-        {
-            "input_ref": {"type": "string", "minLength": 1},
-            "source": {"enum": ["conversation_resolution"]},
-            "reference_text": {"type": "string", "minLength": 1},
-            "occurrence": {"type": "integer", "minimum": 1},
-            "resolved_input_ref": {"type": "string", "minLength": 1},
-            "inventory_check": _question_input_inventory_check_schema(),
-            "kind": {"enum": [KnownInputKind.ROW_SET_REFERENCE.value]},
         },
     )

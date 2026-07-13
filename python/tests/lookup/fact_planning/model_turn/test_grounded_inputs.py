@@ -1,5 +1,6 @@
 from ._helpers import *  # noqa: F403
 
+
 def test_fact_plan_prompt_marks_grounded_required_params_as_satisfied():
     row_source_id = api_row_source_id("sales", "root")
     request = FactPlanRequest(
@@ -81,6 +82,7 @@ def test_fact_plan_prompt_marks_grounded_required_params_as_satisfied():
         }
     ]
 
+
 def test_fact_plan_prompt_marks_grounded_optional_params_as_satisfied():
     row_source_id = api_row_source_id("sales", "root")
     request = FactPlanRequest(
@@ -106,8 +108,9 @@ def test_fact_plan_prompt_marks_grounded_optional_params_as_satisfied():
         available_values=(
             FactValue.identity(
                 id="azraah",
-                identity_type="staff",
-                identity_field="staff_id",
+                entity_kind="staff",
+                key_id="primary_key",
+                key_component_id="staff_id",
                 value="staff_1",
                 display_value="Azraah Fatuma",
             ),
@@ -139,7 +142,6 @@ def test_fact_plan_prompt_marks_grounded_optional_params_as_satisfied():
     assert sales_source["applied_filters"] == [
         {
             "display_value": "Azraah Fatuma",
-            "identity_type": "staff",
             "kind": "identity",
             "value_id": "azraah",
         }
@@ -151,6 +153,7 @@ def test_fact_plan_prompt_marks_grounded_optional_params_as_satisfied():
         next_label="Bound sources",
     )
     assert operation_values == {"values": []}
+
 
 def test_fact_plan_prompt_projects_grounded_inputs_as_scoped_row_set():
     row_source_id = api_row_source_id("sales", "root")
@@ -190,8 +193,9 @@ def test_fact_plan_prompt_projects_grounded_inputs_as_scoped_row_set():
             FactValue.identity(
                 id="azraah",
                 known_input_id="fact_1_input_1",
-                identity_type="staff",
-                identity_field="staff_id",
+                entity_kind="staff",
+                key_id="primary_key",
+                key_component_id="staff_id",
                 value="staff_1",
                 display_value="Azraah Fatuma",
                 proof_refs=("known_input:fact_1_input_1",),
@@ -244,17 +248,16 @@ def test_fact_plan_prompt_projects_grounded_inputs_as_scoped_row_set():
     assert sales_relation["applied_filters"] == [
         {
             "display_value": "Azraah Fatuma",
-            "identity_type": "staff",
-                "kind": "identity",
-                "known_input_id": "fact_1_input_1",
-                "value_id": "azraah",
+            "kind": "identity",
+            "known_input_id": "fact_1_input_1",
+            "value_id": "azraah",
         },
         {
             "display_value": "February 14, 2026",
-                "kind": "time",
-                "resolved_end": "2026-02-14",
-                "resolved_start": "2026-02-14",
-                "value_id": "feb_14",
+            "kind": "time",
+            "resolved_end": "2026-02-14",
+            "resolved_start": "2026-02-14",
+            "value_id": "feb_14",
         },
     ]
     assert "staff_1" not in json.dumps(relation_catalog)
@@ -265,6 +268,7 @@ def test_fact_plan_prompt_projects_grounded_inputs_as_scoped_row_set():
         next_label="Bound sources",
     )
     assert operation_values == {"values": []}
+
 
 def test_fact_plan_prompt_projects_identity_value_to_matching_source_field_filter():
     request = FactPlanRequest(
@@ -298,12 +302,6 @@ def test_fact_plan_prompt_projects_identity_value_to_matching_source_field_filte
                             path="data.location_id",
                             row_path_id="data",
                             type="uuid",
-                            identity=IdentityMetadata(
-                                entity_ref="location",
-                                identity_field="location_id",
-                                primary_key=True,
-                                stable=True,
-                            ),
                         ),
                         CatalogField(
                             ref="field.type",
@@ -317,12 +315,65 @@ def test_fact_plan_prompt_projects_identity_value_to_matching_source_field_filte
                             path="data.area.area_id",
                             row_path_id="data",
                             type="uuid",
-                            identity=IdentityMetadata(
-                                entity_ref="area",
-                                identity_field="area_id",
-                                primary_key=True,
-                                stable=True,
+                        ),
+                    ),
+                    candidate_keys=(
+                        CandidateKey(
+                            id="primary_key",
+                            entity_kind="location",
+                            components=(
+                                CandidateKeyComponent(
+                                    id="location_id",
+                                    field_ref="field.location_id",
+                                ),
                             ),
+                            primary=True,
+                        ),
+                    ),
+                    entity_references=(
+                        EntityReference(
+                            id="area_reference",
+                            target_entity_kind="area",
+                            target_key_id="primary_key",
+                            components=(
+                                EntityReferenceComponent(
+                                    target_component_id="area_id",
+                                    local_field_ref="field.area_id",
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+                EndpointRead(
+                    id="areas",
+                    endpoint_name="list_area_list",
+                    resource_names=("area",),
+                    row_paths=(
+                        RowPath(
+                            id="data",
+                            path="data",
+                            cardinality=RowCardinality.MANY,
+                        ),
+                    ),
+                    fields=(
+                        CatalogField(
+                            ref="field.area_authority_id",
+                            path="data.area_id",
+                            row_path_id="data",
+                            type="uuid",
+                        ),
+                    ),
+                    candidate_keys=(
+                        CandidateKey(
+                            id="primary_key",
+                            entity_kind="area",
+                            components=(
+                                CandidateKeyComponent(
+                                    id="area_id",
+                                    field_ref="field.area_authority_id",
+                                ),
+                            ),
+                            primary=True,
                         ),
                     ),
                 ),
@@ -332,8 +383,9 @@ def test_fact_plan_prompt_projects_identity_value_to_matching_source_field_filte
             FactValue.identity(
                 id="nairobi_area",
                 known_input_id="input_1",
-                identity_type="area",
-                identity_field="area_id",
+                entity_kind="area",
+                key_id="primary_key",
+                key_component_id="area_id",
                 value="area_nairobi",
                 display_value="London",
                 proof_refs=("known_input:input_1",),
@@ -358,12 +410,12 @@ def test_fact_plan_prompt_projects_identity_value_to_matching_source_field_filte
         {
             "display_value": "London",
             "field_ids": ["area_area_id"],
-            "identity_type": "area",
             "kind": "identity",
             "known_input_id": "input_1",
             "value_id": "nairobi_area",
         }
     ]
+
 
 def test_fact_plan_prompt_treats_duplicate_grounded_dates_as_satisfied_once():
     row_source_id = api_row_source_id("sales", "root")
@@ -465,6 +517,7 @@ def test_fact_plan_prompt_treats_duplicate_grounded_dates_as_satisfied_once():
         }
     ]
 
+
 def test_fact_plan_prompt_uses_explicit_source_binding_for_required_dates():
     request = FactPlanRequest(
         question="How much revenue on January 1 and January 2?",
@@ -523,7 +576,7 @@ def test_fact_plan_prompt_uses_explicit_source_binding_for_required_dates():
                     SourceFulfillment(
                         requested_fact_id="rf_answer",
                         answer_output_id="answer",
-                        group_key_evidence_ids=("total",),
+                        value_evidence_ids=("total",),
                         match_basis_explanation=(
                             "answer is fulfilled by total because total provides "
                             "the requested revenue value."
@@ -553,6 +606,7 @@ def test_fact_plan_prompt_uses_explicit_source_binding_for_required_dates():
     ]
     assert "missing_required_inputs" not in relation_catalog
 
+
 def test_fact_plan_prompt_hides_missing_inputs_when_fact_has_executable_relation():
     request = _request_with_executable_relation_and_required_detail()
 
@@ -566,6 +620,7 @@ def test_fact_plan_prompt_hides_missing_inputs_when_fact_has_executable_relation
     assert "sales" in available_ids
     assert "sale_detail" not in available_ids
     assert "missing_required_inputs" not in relation_catalog
+
 
 def test_fact_plan_schema_hides_clarification_when_fact_has_executable_relation():
     class ProviderAssertsNoClarificationBranch:

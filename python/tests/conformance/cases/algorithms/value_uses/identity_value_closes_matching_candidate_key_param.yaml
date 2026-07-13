@@ -1,0 +1,59 @@
+id: identity_value_closes_matching_candidate_key_param
+description: A validated identity value closes a read-owned source parameter exactly once when the endpoint exposes multiple row grains.
+kind: algorithm
+algorithm: planning.value_uses
+input:
+  catalog:
+    reads:
+      - id: shipment_detail
+        endpoint_name: get_shipment
+        params:
+          - ref: shipment_detail.path.tracking_number
+            name: tracking_number
+            source: path
+            type: string
+            required: true
+            entity_target:
+              entity_kind: shipment
+              key_id: tracking_number
+              component_id: tracking_number
+        row_paths:
+          - {id: shipment, path: shipment, cardinality: one}
+          - {id: events, path: shipment.events, cardinality: many, parent_id: shipment}
+        fields:
+          - ref: shipment.tracking_number
+            path: shipment.tracking_number
+            row_path_id: shipment
+            type: string
+          - ref: shipment.events.event_id
+            path: shipment.events.event_id
+            row_path_id: events
+            type: string
+        candidate_keys:
+          - id: tracking_number
+            entity_kind: shipment
+            components:
+              - {id: tracking_number, field_ref: shipment.tracking_number}
+            stable: true
+  relations:
+    - id: shipment
+      source: {kind: api_read, read_id: shipment_detail}
+      fields:
+        - {field_id: tracking_number, roles: [identity]}
+  values:
+    - id: validated_tracking_number
+      kind: identity
+      entity_kind: shipment
+      key_id: tracking_number
+      key_component_id: tracking_number
+      value: TRK-42
+      proof_refs: [source_read:get_shipment]
+expect:
+  result_contains:
+    endpoint_args:
+      - relation_id: shipment
+        read_id: shipment_detail
+        param_ref: shipment_detail.path.tracking_number
+        value: TRK-42
+        proof_refs: [source_read:get_shipment]
+    row_filters: []

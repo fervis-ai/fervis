@@ -48,10 +48,10 @@ from fervis.lookup.question_contract import (
     RequestedFact,
     RequestedFactAnswerOutput,
 )
-from fervis.lookup.answer_program.render_spec import (
-    RenderRelationOutput,
-    RenderScalarOutput,
-    RenderSpec,
+from fervis.lookup.answer_program.result_projection import (
+    RelationResultOutput,
+    ScalarResultOutput,
+    ResultProjection,
 )
 
 
@@ -102,12 +102,12 @@ def _plan_with(operation: Operation) -> FactPlan:
             fulfillment=fulfillment,
             relations=tuple(_relation(item) for item in sorted(relation_ids)),
             operations=(operation,),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
                     ()
                     if isinstance(operation.spec, ComputeSpec)
                     else (
-                        RenderRelationOutput(
+                        RelationResultOutput(
                             id="answer",
                             relation_id="result",
                             field_id=render_field,
@@ -130,7 +130,7 @@ def _question_contract(
                 id="rf_answer",
                 description=description,
                 answer_outputs=tuple(
-                    RequestedFactAnswerOutput(id=binding_target_id)
+                    RequestedFactAnswerOutput(id=binding_target_id, role="ANSWER_VALUE")
                     for binding_target_id in binding_target_ids
                 ),
             ),
@@ -144,7 +144,7 @@ def verify_fact_plan(plan: FactPlan, **kwargs):
         "question_contract",
         _question_contract(
             _default_description(plan),
-            binding_target_ids=_render_output_ids(plan),
+            binding_target_ids=_result_output_ids(plan),
         ),
     )
     memory_relations = kwargs.pop("memory_relations", _memory_relations(plan))
@@ -182,24 +182,22 @@ def verify_fact_plan(plan: FactPlan, **kwargs):
 
 def _default_description(plan: FactPlan) -> str:
     outcome = plan.outcome
-    render_spec = outcome.render_spec
-    if render_spec is not None and render_spec.scalar_outputs:
-        return render_spec.scalar_outputs[0].scalar_id
-    if render_spec is not None and render_spec.relation_outputs:
-        return render_spec.relation_outputs[0].field_id
+    result_projection = outcome.result_projection
+    if result_projection.scalar_outputs:
+        return result_projection.scalar_outputs[0].scalar_id
+    if result_projection.relation_outputs:
+        return result_projection.relation_outputs[0].field_id
     return "name"
 
 
-def _render_output_ids(plan: FactPlan) -> tuple[str, ...]:
+def _result_output_ids(plan: FactPlan) -> tuple[str, ...]:
     outcome = plan.outcome
-    if outcome.render_spec is None:
-        return ("answer",)
     binding_target_ids = tuple(
         dict.fromkeys(
             slot.id
             for slot in (
-                *outcome.render_spec.relation_outputs,
-                *outcome.render_spec.scalar_outputs,
+                *outcome.result_projection.relation_outputs,
+                *outcome.result_projection.scalar_outputs,
             )
         )
     )
@@ -215,14 +213,14 @@ def _fulfillment(
             FactFulfillment(
                 requested_fact_id="rf_answer",
                 answer_output_id="answer",
-                render_output_id="answer",
+                result_output_id="answer",
             ),
         )
     return (
         FactFulfillment(
             requested_fact_id="rf_answer",
             answer_output_id="answer",
-            render_output_id="answer",
+            result_output_id="answer",
         ),
     )
 
@@ -508,12 +506,12 @@ def test_compute_references_declared_value_origins_only():
                     FactFulfillment(
                         requested_fact_id="rf_answer",
                         answer_output_id="answer",
-                        render_output_id="answer",
+                        result_output_id="answer",
                     ),
                     FactFulfillment(
                         requested_fact_id="rf_answer",
                         answer_output_id="remaining",
-                        render_output_id="remaining",
+                        result_output_id="remaining",
                     ),
                 ),
                 relations=(_relation("rows"),),
@@ -528,16 +526,16 @@ def test_compute_references_declared_value_origins_only():
                     ),
                     valid,
                 ),
-                render_spec=RenderSpec(
+                result_projection=ResultProjection(
                     relation_outputs=(
-                        RenderRelationOutput(
+                        RelationResultOutput(
                             id="answer",
                             relation_id="result",
                             field_id="name",
                         ),
                     ),
                     scalar_outputs=(
-                        RenderScalarOutput(
+                        ScalarResultOutput(
                             id="remaining",
                             scalar_id="remaining",
                         ),
@@ -548,19 +546,19 @@ def test_compute_references_declared_value_origins_only():
     )
 
 
-def test_one_answer_output_can_be_fulfilled_by_multiple_distinct_render_outputs():
+def test_one_answer_output_can_be_fulfilled_by_multiple_distinct_result_outputs():
     plan = FactPlan(
         outcome=AnswerProgram(
             fulfillment=(
                 FactFulfillment(
                     requested_fact_id="rf_answer",
                     answer_output_id="answer",
-                    render_output_id="day_1_amount",
+                    result_output_id="day_1_amount",
                 ),
                 FactFulfillment(
                     requested_fact_id="rf_answer",
                     answer_output_id="answer",
-                    render_output_id="day_2_amount",
+                    result_output_id="day_2_amount",
                 ),
             ),
             relations=(
@@ -609,14 +607,14 @@ def test_one_answer_output_can_be_fulfilled_by_multiple_distinct_render_outputs(
                     output_relation="day_2_result",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="day_1_amount",
                         relation_id="day_1_result",
                         field_id="amount",
                     ),
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="day_2_amount",
                         relation_id="day_2_result",
                         field_id="amount",
@@ -633,6 +631,7 @@ def test_one_answer_output_can_be_fulfilled_by_multiple_distinct_render_outputs(
                 answer_outputs=(
                     RequestedFactAnswerOutput(
                         id="answer",
+                        role="ANSWER_VALUE",
                         description="Amounts shown separately by day.",
                     ),
                 ),
@@ -650,7 +649,7 @@ def test_compute_only_literal_answer_requires_evidence_proof():
                 FactFulfillment(
                     requested_fact_id="rf_answer",
                     answer_output_id="answer",
-                    render_output_id="answer",
+                    result_output_id="answer",
                 ),
             ),
             operations=(
@@ -665,10 +664,10 @@ def test_compute_only_literal_answer_requires_evidence_proof():
                     ),
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(),
                 scalar_outputs=(
-                    RenderScalarOutput(id="answer", scalar_id="remaining"),
+                    ScalarResultOutput(id="answer", scalar_id="remaining"),
                 ),
             ),
         )
@@ -685,7 +684,7 @@ def test_scalar_only_terminal_answer_cannot_launder_unrelated_relation_evidence(
                 FactFulfillment(
                     requested_fact_id="rf_answer",
                     answer_output_id="answer",
-                    render_output_id="answer",
+                    result_output_id="answer",
                 ),
             ),
             relations=(_relation("rows"),),
@@ -709,10 +708,10 @@ def test_scalar_only_terminal_answer_cannot_launder_unrelated_relation_evidence(
                     ),
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(),
                 scalar_outputs=(
-                    RenderScalarOutput(id="answer", scalar_id="remaining"),
+                    ScalarResultOutput(id="answer", scalar_id="remaining"),
                 ),
             ),
         )
@@ -722,14 +721,14 @@ def test_scalar_only_terminal_answer_cannot_launder_unrelated_relation_evidence(
         verify_fact_plan(plan)
 
 
-def test_unrendered_compute_outputs_are_not_legal_answer_work():
+def test_unprojected_compute_outputs_are_not_legal_answer_work():
     plan = FactPlan(
         outcome=AnswerProgram(
             fulfillment=(
                 FactFulfillment(
                     requested_fact_id="rf_answer",
                     answer_output_id="answer",
-                    render_output_id="answer",
+                    result_output_id="answer",
                 ),
             ),
             relations=(_relation("rows"),),
@@ -750,9 +749,9 @@ def test_unrendered_compute_outputs_are_not_legal_answer_work():
                     ),
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer", relation_id="result", field_id="name"
                     ),
                 )
@@ -760,18 +759,18 @@ def test_unrendered_compute_outputs_are_not_legal_answer_work():
         )
     )
 
-    with pytest.raises(VerificationError, match="unrendered scalar output"):
+    with pytest.raises(VerificationError, match="unprojected scalar output"):
         verify_fact_plan(plan)
 
 
-def test_render_output_ids_must_be_unique():
+def test_result_output_ids_must_be_unique():
     plan = FactPlan(
         outcome=AnswerProgram(
             fulfillment=(
                 FactFulfillment(
                     requested_fact_id="rf_answer",
                     answer_output_id="answer",
-                    render_output_id="answer",
+                    result_output_id="answer",
                 ),
             ),
             relations=(_relation("rows"),),
@@ -788,12 +787,12 @@ def test_render_output_ids_must_be_unique():
                     output_relation="result",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer", relation_id="result", field_id="name"
                     ),
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer", relation_id="result", field_id="total"
                     ),
                 )
@@ -801,11 +800,11 @@ def test_render_output_ids_must_be_unique():
         )
     )
 
-    with pytest.raises(VerificationError, match="duplicate render output"):
+    with pytest.raises(VerificationError, match="duplicate result output"):
         verify_fact_plan(plan)
 
 
-def test_relation_answer_requires_render_outputs():
+def test_relation_answer_requires_result_outputs():
     plan = _plan_with(
         Operation(
             id="project",
@@ -823,16 +822,16 @@ def test_relation_answer_requires_render_outputs():
                 FactFulfillment(
                     requested_fact_id="rf_answer",
                     answer_output_id="answer",
-                    render_output_id="answer",
+                    result_output_id="answer",
                 ),
             ),
             relations=plan.outcome.relations,
             operations=plan.outcome.operations,
-            render_spec=RenderSpec(relation_outputs=()),
+            result_projection=ResultProjection(relation_outputs=()),
         )
     )
 
-    with pytest.raises(VerificationError, match="render output"):
+    with pytest.raises(VerificationError, match="result output"):
         verify_fact_plan(plan)
 
 
@@ -907,7 +906,7 @@ def test_count_aggregate_can_fulfill_requested_answer_output():
                 FactFulfillment(
                     requested_fact_id="rf_answer",
                     answer_output_id="row_count",
-                    render_output_id="row_count",
+                    result_output_id="row_count",
                 ),
             ),
             relations=(_relation("rows"),),
@@ -927,9 +926,9 @@ def test_count_aggregate_can_fulfill_requested_answer_output():
                     output_relation="counts",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="row_count",
                         relation_id="counts",
                         field_id="row_count",

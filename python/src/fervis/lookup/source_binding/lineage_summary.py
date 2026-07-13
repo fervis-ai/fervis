@@ -188,9 +188,3 @@ def _dict_or_empty(value: object) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
     return value
-
-
-def _list_of_dicts(value: object) -> tuple[dict[str, Any], ...]:
-    if not isinstance(value, list):
-        return ()
-    return tuple(item for item in value if isinstance(item, dict))

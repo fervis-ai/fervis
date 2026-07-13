@@ -30,4 +30,3 @@ class StockTransfer(models.Model):
     class Meta:
         app_label = "retail_ops_fulfillment"
         ordering = ["reference"]
-

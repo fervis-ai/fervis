@@ -1,5 +1,5 @@
 id: prompt_uses_literal_text_roles
-description: Question-contract prompt describes question inputs with literal_text roles.
+description: Question-contract prompt describes the closed literal_text roles owned by question inputs.
 kind: algorithm
 algorithm: question_contract.prompt
 input:
@@ -9,6 +9,8 @@ input:
   - kind=literal_text with role=time_value
   - kind=literal_text with role=result_limit
   - Use source=conversation_resolution only for declared resolved question inputs.
+  - operand_text contains only the operand.
+  - A complete phrase used as answer_subject.subject_text or answer_population.counted_unit is not a reference_value; do not split it into a generic noun plus modifier merely to create an attribute_value.
 expect:
   result_contains:
     contains:
@@ -16,4 +18,8 @@ expect:
       kind=literal_text with role=time_value: true
       kind=literal_text with role=result_limit: true
       ? Use source=conversation_resolution only for declared resolved question inputs.
+      : true
+      ? operand_text contains only the operand.
+      : true
+      ? A complete phrase used as answer_subject.subject_text or answer_population.counted_unit is not a reference_value; do not split it into a generic noun plus modifier merely to create an attribute_value.
       : true

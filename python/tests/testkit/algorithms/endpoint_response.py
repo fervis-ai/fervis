@@ -43,6 +43,11 @@ def _extract_rows(payload: dict[str, Any]) -> tuple[dict[str, Any], ...]:
         label="case row source",
         row_path=str(payload["row_path"]),
         parent_row_path=str(payload.get("parent_row_path") or ""),
+        parent_row_cardinality=(
+            RowCardinality(str(payload["parent_cardinality"]))
+            if payload.get("parent_cardinality")
+            else None
+        ),
         row_cardinality=RowCardinality(str(payload.get("cardinality") or "many")),
     )
     return extract_row_source_rows(body, row_source=row_source)

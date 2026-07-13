@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 
 from fervis.observability.usage import RuntimeUsageReport
 

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, assert_never
+from typing import Any
+from typing_extensions import assert_never
 
 from fervis.lookup.answer_program.contracts import (
     AnswerProgramContractError,
@@ -41,7 +42,7 @@ from fervis.lookup.answer_program.operations import (
     JoinSpec,
     Operation,
     ProjectSpec,
-    ProjectToIdentitySpec,
+    ProjectToKeySpec,
     RankSpec,
     RoleExpandSpec,
     UnionSpec,
@@ -140,8 +141,7 @@ def _validate_compute_parameters(
             continue
         references = compute_expression_references(spec.expression)
         if any(
-            by_id[reference.parameter_id].value_type
-            is not ParameterValueType.NUMBER
+            by_id[reference.parameter_id].value_type is not ParameterValueType.NUMBER
             or reference.component != ValueComponent.VALUE.value
             or reference.item_index is not None
             for reference in references.parameters
@@ -223,7 +223,7 @@ def _operation_value_expressions(
         (
             FilterSpec,
             ProjectSpec,
-            ProjectToIdentitySpec,
+            ProjectToKeySpec,
             JoinSpec,
             UnionSpec,
             RoleExpandSpec,

@@ -1,0 +1,45 @@
+id: existence_check_uses_qualifying_row_population
+description: An existence answer selects a qualifying row population without requiring a source field that directly contains the derived boolean result.
+kind: algorithm
+algorithm: plan_selection.prompt_surface
+input:
+  question: Did any qualifying transactions occur on the stated date?
+  query_terms: [transactions, date]
+  selected_read_ids: [list_transactions]
+  read_eligibility:
+    - requested_fact_id: fact_1
+      read_id: list_transactions
+      relevant_row_path_ids: [data]
+      relevant_field_refs:
+        - list_transactions.field.transaction_id
+        - list_transactions.field.occurred_at
+        - list_transactions.field.status
+      retention_basis: Transaction rows establish whether the requested population is empty.
+  requested_fact:
+    id: fact_1
+    description: whether any qualifying transactions occurred on the stated date
+    answer_expression_family: existence_check
+    subject_text: transactions
+    answer_outputs:
+      - id: answer_1
+        description: whether any qualifying transactions exist
+        role: ANSWER_VALUE
+  catalog:
+    reads:
+      - id: list_transactions
+        endpoint_name: list_transactions
+        resource_names: [transaction]
+        row_paths:
+          - {id: data, path: data, cardinality: many}
+        fields:
+          - {ref: list_transactions.field.transaction_id, path: data.transaction_id, row_path_id: data, type: uuid}
+          - {ref: list_transactions.field.occurred_at, path: data.occurred_at, row_path_id: data, type: datetime}
+          - {ref: list_transactions.field.status, path: data.status, row_path_id: data, type: string}
+expect:
+  result_contains:
+    strategy_alternatives_by_read:
+      list_transactions:
+        "":
+          requested_fact_id: fact_1
+          read_id: list_transactions
+          plan_shape: aggregate_scalar

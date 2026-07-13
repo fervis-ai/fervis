@@ -175,7 +175,9 @@ def run_answer_program_execution(
                 else ErrorCode.FACT_PLAN_EXECUTION_FAILED
             ),
         )
-        return LookupResult(status=RunStatus.FAILED, error=error_code, usage=usage or {})
+        return LookupResult(
+            status=RunStatus.FAILED, error=error_code, usage=usage or {}
+        )
     return _synthesize_result(
         request=request,
         ports=ports,
@@ -193,8 +195,8 @@ def run_answer_program_execution(
         execute_step_id=execution_step_id(ports),
         proof_graph=execution.proof_graph,
         answer_plan=execution.program,
-        proof_node_refs_by_render_output_id=(
-            execution.proof_node_refs_by_render_output_id
+        proof_node_refs_by_result_output_id=(
+            execution.proof_node_refs_by_result_output_id
         ),
         conversation_resolution_activation=conversation_resolution_activation,
     )

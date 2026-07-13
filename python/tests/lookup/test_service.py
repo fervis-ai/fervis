@@ -1,8 +1,11 @@
+from unittest.mock import Mock
+
 import pytest
 
 import fervis.host_api.context as host_api_context_module
 from fervis.host_api.context import (
     HostApiContext,
+    HostContext,
 )
 from fervis.host_api.contracts.authority import ReadAuthority, ReadContextRef
 from fervis.host_api.contracts.read import ReadInvocation
@@ -11,7 +14,11 @@ from fervis.lookup.orchestration.host_runtime import HostRelationDataAccess
 from fervis.lookup.orchestration.service import (
     _ConfiguredRelationCatalogProvider,
 )
-from fervis.host_api.contracts import EndpointContract
+from fervis.host_api.contracts import (
+    EndpointContract,
+    PaginationContract,
+    PaginationKind,
+)
 from fervis.host_api.contracts import ParameterContract
 from fervis.host_api.contracts import ResponseFieldContract
 from fervis.host_api.contracts.ports import EndpointExecutionResult
@@ -48,7 +55,6 @@ def test_endpoint_relation_data_access_uses_all_pages_only_for_paginated_endpoin
                 path_template="/v1/record/",
                 docstring="Record detail.",
                 view_class="RecordDetail",
-                paginated=False,
             ),
             EndpointContract(
                 endpoint_name="list_records",
@@ -57,7 +63,15 @@ def test_endpoint_relation_data_access_uses_all_pages_only_for_paginated_endpoin
                 path_template="/v1/records/",
                 docstring="Record list.",
                 view_class="RecordList",
-                paginated=True,
+                pagination=PaginationContract(
+                    kind=PaginationKind.OFFSET,
+                    position_query_param="after",
+                    page_size_query_param="batch",
+                    results_path="records",
+                    page_size=25,
+                    max_page_size=100,
+                    continuation_path="meta.more",
+                ),
             ),
         ),
         execute_read=execute_read,
@@ -234,6 +248,7 @@ def test_fervis_runtime_resolves_provider_from_model_key(monkeypatch):
         host_api_context=context,
         provider_backbone=build_test_provider_backbone(adapters={}),
         observability_query=_EmptyObservabilityQuery(),
+        lineage_recorder=Mock(),
     )
 
     runtime.run_lookup(
@@ -251,6 +266,53 @@ def test_fervis_runtime_resolves_provider_from_model_key(monkeypatch):
 
     assert captured["provider_preferences"]["provider"] == "openai"
     assert captured["provider_preferences"]["modelKey"] == "GPT_5_4_MINI"
+
+
+def test_fervis_runtime_rejects_missing_host_prompt_context_before_lookup(
+    monkeypatch,
+):
+    lookup_called = False
+
+    def run_lookup_question(_request, _ports):
+        nonlocal lookup_called
+        lookup_called = True
+        return LookupResult(status="COMPLETED", answer="unsupported")
+
+    monkeypatch.setattr(
+        "fervis.lookup.orchestration.pipeline.run_lookup_question",
+        run_lookup_question,
+    )
+    runtime = LookupService(
+        host_api_context=_host_api_context(host_context=HostContext()),
+        provider_backbone=build_test_provider_backbone(adapters={}),
+        observability_query=_EmptyObservabilityQuery(),
+        lineage_recorder=Mock(),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "Fervis lookup cannot start: host.organization_name and "
+            "host.about_api are required"
+        ),
+    ):
+        runtime.run_lookup(
+            run_id="run_missing_host_context",
+            conversation_id="conversation_missing_host_context",
+            tenant_id="tenant_missing_host_context",
+            question="How many records are there?",
+            read_context_ref=ReadContextRef(
+                scheme="delegated_capability",
+                key="user_1",
+            ),
+            provider="",
+            model_key="GPT_5_4_MINI",
+            conversation_context={},
+            max_budget_usd="1",
+            max_thinking_tokens=64,
+        )
+
+    assert lookup_called is False
 
 
 def test_fervis_runtime_pre_lookup_limit_preserves_policy_error_without_lineage() -> (
@@ -308,12 +370,20 @@ def _host_api_context(
     *,
     contracts: tuple[EndpointContract, ...] = (),
     execute_read=None,
+    host_context: HostContext | None = None,
 ) -> HostApiContext:
     return HostApiContext(
         adapter=_FakeHostApiAdapter(
             contracts=contracts,
             execute_read=execute_read,
-        )
+        ),
+        host_context=host_context
+        or HostContext(
+            organization_name="Example",
+            about_api=(
+                "The Example API helps operators work with operational records."
+            ),
+        ),
     )
 
 
@@ -330,9 +400,7 @@ class _FakeHostApiAdapter:
         return ReadContextRef(scheme="delegated_capability", key="user_1")
 
     def execute_read(self, *, authority, invocation):
-        return self._execute_read(
-            authority=authority, invocation=invocation
-        )
+        return self._execute_read(authority=authority, invocation=invocation)
 
 
 def _default_execute_read(*, authority, invocation):

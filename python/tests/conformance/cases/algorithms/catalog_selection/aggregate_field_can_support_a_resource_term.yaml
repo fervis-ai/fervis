@@ -1,0 +1,41 @@
+id: aggregate_field_can_support_a_resource_term
+description: A summary read remains selectable when its declared field directly names the requested resource measure.
+kind: algorithm
+algorithm: catalog_selection.select
+input:
+  catalog:
+    reads:
+      - id: raw_messages
+        endpoint_name: list_messages
+        resource_names: [messages]
+        fields:
+          - {ref: message.id, path: id, type: string}
+      - id: dashboard_summary
+        endpoint_name: get_dashboard_summary
+        resource_names: [dashboard summary]
+        fields:
+          - {ref: summary.total_messages, path: total_messages, type: integer}
+  requested_facts:
+    - id: message_count
+      description: number of messages
+      answer_outputs:
+        - {id: answer_1, role: ROW_COUNT}
+  resource_name_matches:
+    - requested_fact_id: message_count
+      answer_output_resource_lineage:
+        - answer_output_id: answer_1
+          support_role: ROW_COUNT
+          source_text: number of messages
+          matching_resource_names: [messages]
+  max_reads_per_fact: 2
+expect:
+  result_contains:
+    selected_read_membership:
+      raw_messages: true
+      dashboard_summary: true
+    requested_fact_selections:
+      - requested_fact_id: message_count
+        rankings:
+          - {read_id: raw_messages}
+          - read_id: dashboard_summary
+            matched_field_refs: [summary.total_messages]

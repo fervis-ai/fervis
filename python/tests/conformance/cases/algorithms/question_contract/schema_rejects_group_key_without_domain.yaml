@@ -19,7 +19,7 @@ input:
       why_this_is_an_input: this month is the requested time scope
   answer_outputs:
   - description: sales count
-    role: ROW_POPULATION
+    role: ROW_COUNT
   used_input_refs: [this_month]
 expect:
   result_contains:

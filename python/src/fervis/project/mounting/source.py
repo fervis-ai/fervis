@@ -7,7 +7,11 @@ import ast
 from .common import BlockedPatch, parse_python_source
 
 
-def replace_node_source(text: str, node: ast.AST, replacement: str) -> str:
+def replace_node_source(
+    text: str,
+    node: ast.stmt | ast.expr,
+    replacement: str,
+) -> str:
     newline = newline_for(text)
     lines = text.splitlines(keepends=True)
     start = node.lineno - 1
@@ -49,10 +53,10 @@ def append_literal_sequence_items(
         return replace_node_source(text, node, replacement)
 
     newline = newline_for(text)
-    text = ensure_multiline_sequence_trailing_comma(text, node, path=path)
-    if isinstance(text, BlockedPatch):
-        return text
-    lines = text.splitlines(keepends=True)
+    updated = ensure_multiline_sequence_trailing_comma(text, node, path=path)
+    if isinstance(updated, BlockedPatch):
+        return updated
+    lines = updated.splitlines(keepends=True)
     closing_index = (node.end_lineno or node.lineno) - 1
     closing_line = lines[closing_index]
     closing_indent = closing_line[: len(closing_line) - len(closing_line.lstrip())]
@@ -66,13 +70,13 @@ def insert_import_line(text: str, import_line: str) -> str:
     return "".join(lines)
 
 
-def insert_after_node(text: str, node: ast.AST, line: str) -> str:
+def insert_after_node(text: str, node: ast.stmt | ast.expr, line: str) -> str:
     lines = text.splitlines(keepends=True)
     lines.insert(node.end_lineno or node.lineno, line + newline_for(text))
     return "".join(lines)
 
 
-def insert_before_node(text: str, node: ast.AST, line: str) -> str:
+def insert_before_node(text: str, node: ast.stmt | ast.expr, line: str) -> str:
     lines = text.splitlines(keepends=True)
     lines.insert(node.lineno - 1, line + newline_for(text))
     return "".join(lines)

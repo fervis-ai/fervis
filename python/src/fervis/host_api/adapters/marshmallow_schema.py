@@ -52,20 +52,22 @@ def _schema_fields(schema: object) -> Mapping[str, object]:
 
 
 def _field_type(field: object) -> str:
-    class_name = field.__class__.__name__.lower()
-    if "integer" in class_name or class_name in {"int"}:
+    class_names = {
+        cls.__name__.lstrip("_").casefold() for cls in field.__class__.__mro__
+    }
+    if class_names & {"integer", "int"}:
         return "integer"
-    if any(name in class_name for name in ("decimal", "float", "number")):
+    if class_names & {"decimal", "float", "number"}:
         return "decimal"
-    if "boolean" in class_name or class_name == "bool":
+    if class_names & {"boolean", "bool"}:
         return "boolean"
-    if class_name == "date":
-        return "date"
-    if "datetime" in class_name:
+    if "datetime" in class_names:
         return "datetime"
-    if "list" in class_name:
+    if "date" in class_names:
+        return "date"
+    if "list" in class_names:
         return "array"
-    if "nested" in class_name:
+    if "nested" in class_names:
         return "object"
     return "string"
 

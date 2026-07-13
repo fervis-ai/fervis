@@ -1,0 +1,25 @@
+id: answer_addresses_reject_null_entity_key_component
+kind: algorithm
+algorithm: memory.answer_addresses
+description: A projected entity key is complete only when every declared component has a non-null canonical value.
+input:
+  fact_result:
+    outcome:
+      kind: answer
+      relation_outputs:
+        - id: sale_id
+          relation_id: sales_rows
+          entity_key:
+            entity_kind: sale
+            key_id: primary_key
+            components:
+              - component_id: sale_id
+                field_id: sale_id
+      relations:
+        - id: sales_rows
+          rows:
+            - sale_id: null
+          grain_keys: [sale_id]
+expect:
+  result_contains:
+    status: rejected

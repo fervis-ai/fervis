@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -31,7 +31,11 @@ from fervis.lineage.enums import (
     RuntimeErrorKind,
     SourceReadStatus,
 )
-from fervis.lookup.clarification import ClarificationNeed, ClarificationReason
+from fervis.lookup.clarification import (
+    ClarificationNeed,
+    ClarificationReason,
+    clarification_from_payload,
+)
 
 
 JsonObject = dict[str, Any]
@@ -90,17 +94,11 @@ class QuestionRunWrite:
     adapter_ref: str
     runtime_version: str
     base_run_id: str | None = None
-    trigger_clarification_response_id: str | None = None
 
     def __post_init__(self) -> None:
         _require_optional_nonempty_str(self.base_run_id, "base_run_id")
-        _require_optional_nonempty_str(
-            self.trigger_clarification_response_id,
-            "trigger_clarification_response_id",
-        )
         valid_pairings = {
             (QuestionRunKind.MODEL_ASSISTED, RunTriggerKind.INITIAL),
-            (QuestionRunKind.MODEL_ASSISTED, RunTriggerKind.CLARIFICATION_RESPONSE),
             (QuestionRunKind.MODEL_ASSISTED, RunTriggerKind.RETRY),
             (QuestionRunKind.DETERMINISTIC, RunTriggerKind.RERUN),
         }
@@ -108,23 +106,8 @@ class QuestionRunWrite:
             raise ValueError("invalid question run kind and trigger pairing")
         if self.trigger_kind is RunTriggerKind.INITIAL:
             _require_absent(self.base_run_id, "base_run_id")
-            _require_absent(
-                self.trigger_clarification_response_id,
-                "trigger_clarification_response_id",
-            )
-            return
-        if self.trigger_kind is RunTriggerKind.CLARIFICATION_RESPONSE:
-            _require_present(self.base_run_id, "base_run_id")
-            _require_present(
-                self.trigger_clarification_response_id,
-                "trigger_clarification_response_id",
-            )
             return
         _require_present(self.base_run_id, "base_run_id")
-        _require_absent(
-            self.trigger_clarification_response_id,
-            "trigger_clarification_response_id",
-        )
 
 
 @dataclass(frozen=True)
@@ -416,7 +399,6 @@ class FactualTerminalRunResultWrite:
     requested_facts: tuple["RequestedFactWrite", ...]
     fact_results: tuple["FactResultWrite", ...]
     proof_graphs: tuple["ExecutionProofGraphWrite", ...] = ()
-    clarifications: tuple["ClarificationRequestWrite", ...] = ()
     memory_artifacts: tuple["MemoryArtifactWrite", ...] = ()
 
     def __post_init__(self) -> None:
@@ -428,7 +410,6 @@ class FactualTerminalRunResultWrite:
                 *self.requested_facts,
                 *self.fact_results,
                 *self.proof_graphs,
-                *self.clarifications,
                 *self.memory_artifacts,
             ),
         )
@@ -527,14 +508,16 @@ class ClarificationRequestWrite:
     clarification_id: str
     run_id: str
     payload_json: JsonObject
-    fact_result_id: str | None = None
-    step_id: str | None = None
+    step_id: str
     need: ClarificationNeed = field(init=False)
     reason: ClarificationReason = field(init=False)
 
     def __post_init__(self) -> None:
         if not self.payload_json:
             raise ValueError("clarification request requires payload")
+        parsed = clarification_from_payload(self.payload_json)
+        if parsed.id != self.clarification_id:
+            raise ValueError("clarification request identity must match payload")
         object.__setattr__(
             self,
             "need",
@@ -545,12 +528,8 @@ class ClarificationRequestWrite:
             "reason",
             ClarificationReason(_required_payload_text(self.payload_json, "reason")),
         )
-        _canonicalize_optional_str(self, "fact_result_id")
-        _canonicalize_optional_str(self, "step_id")
-        if (self.fact_result_id is None) == (self.step_id is None):
-            raise ValueError(
-                "clarification request requires exactly one of fact_result_id or step_id"
-            )
+        if not self.step_id.strip():
+            raise ValueError("clarification request requires producing step")
 
 
 @dataclass(frozen=True)

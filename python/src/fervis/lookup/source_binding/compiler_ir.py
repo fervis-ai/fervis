@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
-from typing import Any, Iterable, Mapping
+from fervis.types.enums import StrEnum
+from typing import TypeAlias
 
 from fervis.lookup.answer_program.relations import (
     PopulationChoiceControllerKind,
@@ -15,6 +15,9 @@ from fervis.lookup.answer_program.values import (
     ParameterRef,
     ValueExpression,
 )
+
+
+_SourceAppliedFilterPayloadValue: TypeAlias = str | list[str]
 
 
 class RelationInputOrigin(StrEnum):
@@ -47,7 +50,9 @@ class DraftEndpointParamBinding:
     def compiler_value(self) -> object | None:
         if self.value_item_index is None:
             return self.value
-        if not isinstance(self.value, tuple) or self.value_item_index >= len(self.value):
+        if not isinstance(self.value, tuple) or self.value_item_index >= len(
+            self.value
+        ):
             raise ValueError("endpoint param binding item is outside its value")
         return self.value[self.value_item_index]
 
@@ -59,7 +64,7 @@ class DraftRelationSourceAppliedFilter:
     value_id: str = ""
     value_expr: ValueExpression | None = None
     value_kind: str = ""
-    identity_type: str = ""
+    operator: str = "equals"
 
     def __post_init__(self) -> None:
         if not self.predicate_field_ids:
@@ -71,37 +76,58 @@ class DraftRelationSourceAppliedFilter:
                 "relation source applied filter cannot contain input and expression"
             )
 
-    @classmethod
-    def from_payloads(
-        cls,
-        payloads: Iterable[Mapping[str, Any]],
-    ) -> tuple[DraftRelationSourceAppliedFilter, ...]:
-        filters: list[DraftRelationSourceAppliedFilter] = []
-        for payload in payloads:
-            item = cls.from_payload(payload)
-            if item is not None:
-                filters.append(item)
-        return tuple(filters)
+@dataclass(frozen=True)
+class SourceAppliedFilter:
+    known_input_id: str
+    predicate_field_ids: tuple[str, ...] = ()
+    value_id: str = ""
+    value_kind: str = ""
+    display_value: str = ""
+    matched_field_ref: str = ""
+    matched_field_path: str = ""
+    resolved_start: str = ""
+    resolved_end: str = ""
+    literal_type: str = ""
+    operator: str = "equals"
 
-    @classmethod
-    def from_payload(
-        cls,
-        payload: Mapping[str, Any],
-    ) -> DraftRelationSourceAppliedFilter | None:
-        predicate_field_ids = tuple(
-            str(field_id)
-            for field_id in payload.get("field_ids") or ()
-            if str(field_id)
-        )
-        if not predicate_field_ids:
+    def __post_init__(self) -> None:
+        if not self.known_input_id and not self.value_id:
+            raise ValueError("source applied filter requires a value authority")
+
+    def relation_filter(self) -> DraftRelationSourceAppliedFilter | None:
+        if not self.predicate_field_ids:
             return None
-        return cls(
-            predicate_field_ids=predicate_field_ids,
-            known_input_id=str(payload.get("known_input_id") or ""),
-            value_id=str(payload.get("value_id") or ""),
-            value_kind=str(payload.get("kind") or ""),
-            identity_type=str(payload.get("identity_type") or ""),
+        return DraftRelationSourceAppliedFilter(
+            predicate_field_ids=self.predicate_field_ids,
+            known_input_id=self.known_input_id,
+            value_id=self.value_id,
+            value_kind=self.value_kind,
+            operator=self.operator,
         )
+
+    def to_payload(self) -> dict[str, _SourceAppliedFilterPayloadValue]:
+        payload: dict[str, _SourceAppliedFilterPayloadValue] = {}
+        if self.predicate_field_ids:
+            payload["field_ids"] = list(self.predicate_field_ids)
+        if self.known_input_id:
+            payload["known_input_id"] = self.known_input_id
+        if self.value_id:
+            payload["value_id"] = self.value_id
+        if self.value_kind:
+            payload["kind"] = self.value_kind
+        if self.operator != "equals":
+            payload["operator"] = self.operator
+        for key, value in (
+            ("display_value", self.display_value),
+            ("matched_field_ref", self.matched_field_ref),
+            ("matched_field_path", self.matched_field_path),
+            ("resolved_start", self.resolved_start),
+            ("resolved_end", self.resolved_end),
+            ("literal_type", self.literal_type),
+        ):
+            if value:
+                payload[key] = value
+        return payload
 
 
 @dataclass(frozen=True)

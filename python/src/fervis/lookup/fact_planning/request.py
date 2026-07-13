@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from fervis.lookup.relation_catalog import RelationCatalog
-from fervis.lookup.relation_catalog import primary_stable_identity_field_ids
+from fervis.lookup.relation_catalog import entity_identity_field_ids
 from fervis.lookup.relation_catalog.selection import CatalogSelectionResult
 from fervis.lookup.fact_planning.available_relations import (
     operation_input_values_payload,
@@ -304,7 +304,7 @@ def _identity_field_ids_by_source_binding_id(
         for source_binding_id in plan.source_binding_ids
     }
     return {
-        source.id: primary_stable_identity_field_ids(source.available_fields)
+        source.id: entity_identity_field_ids(source.available_fields)
         for source in request.bound_sources
         if source.id in selected_source_ids
     }
@@ -364,14 +364,11 @@ def _required_fulfillment_evidence_items(
         ):
             continue
         evidence = []
-        scope_evidence_ids = set(fulfillment.scope_evidence_ids)
         fulfillment_evidence_ids = required_fulfillment_evidence_ids(
             fulfillment,
             plan_shape=plan_shape,
         )
         for evidence_id in fulfillment_evidence_ids:
-            if evidence_id in scope_evidence_ids:
-                continue
             cardinality = cardinality_by_evidence_id.get(evidence_id, "")
             if not evidence_is_compatible_with_plan_shape(
                 cardinality,
@@ -530,7 +527,7 @@ def _shape_compatible_bound_sources_payload(
     *,
     plan_selection: BoundPlanSelectionSet,
 ) -> dict[str, Any]:
-    output = {"bound_sources": []}
+    output: dict[str, Any] = {"bound_sources": []}
     for source in payload.get("bound_sources") or ():
         if not isinstance(source, dict):
             continue
@@ -587,8 +584,20 @@ def _fulfilled_operation_field_evidence_ids(source: dict[str, Any]) -> set[str]:
         if isinstance(fulfillment, dict)
         for evidence_id in (
             *(fulfillment.get("metric_measure_evidence_ids") or ()),
+            *(fulfillment.get("value_evidence_ids") or ()),
             *(fulfillment.get("row_count_basis_evidence_ids") or ()),
-            *(fulfillment.get("group_key_evidence_ids") or ()),
+            *(
+                tuple(
+                    str(component.get("field_evidence_id") or "")
+                    for component in fulfillment.get("entity_evidence", {}).get(
+                        "components",
+                        (),
+                    )
+                    if isinstance(component, dict)
+                )
+                if isinstance(fulfillment.get("entity_evidence"), dict)
+                else ()
+            ),
         )
         if isinstance(evidence_id, str) and evidence_id
     }

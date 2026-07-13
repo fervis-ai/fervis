@@ -6,14 +6,6 @@ from ..discovery import ProjectInspection
 from ..integration import FervisConfig
 from ..source_detection import detect_django_source_schema
 from .common import BlockedPatch, FrameworkCheck, FrameworkPatchResult
-from .django import django_checks, patch_django
-from .fastapi import (
-    fastapi_checks,
-    fastapi_factory_source_schema,
-    fastapi_source_schema,
-    patch_fastapi,
-)
-from .flask import flask_checks, flask_source_schema, patch_flask
 
 
 def patch_framework_mount(
@@ -24,10 +16,16 @@ def patch_framework_mount(
     app_target: str | None = None,
 ) -> FrameworkPatchResult:
     if framework == "django":
+        from .django import patch_django
+
         return patch_django(project)
     if framework == "fastapi":
+        from .fastapi import patch_fastapi
+
         return patch_fastapi(project, app_factory=app_factory)
     if framework == "flask":
+        from .flask import patch_flask
+
         return patch_flask(project, app_target=app_target)
     return FrameworkPatchResult(
         blocked=[("config/fervis.json", f"Unsupported framework {framework}.")]
@@ -39,10 +37,16 @@ def framework_mount_checks(
     config: FervisConfig,
 ) -> list[FrameworkCheck]:
     if project.framework == "django":
+        from .django import django_checks
+
         return django_checks(project, config)
     if project.framework == "fastapi":
+        from .fastapi import fastapi_checks
+
         return fastapi_checks(project, config)
     if project.framework == "flask":
+        from .flask import flask_checks
+
         return flask_checks(project, config)
     return [
         FrameworkCheck(
@@ -65,6 +69,8 @@ def framework_source_schema(
     if framework == "django":
         return detect_django_source_schema(project.root_path)
     if framework == "fastapi":
+        from .fastapi import fastapi_factory_source_schema, fastapi_source_schema
+
         if app_factory:
             return fastapi_factory_source_schema(
                 project.root_path,
@@ -73,6 +79,8 @@ def framework_source_schema(
             )
         return fastapi_source_schema(project.root_path, path_prefixes=path_prefixes)
     if framework == "flask":
+        from .flask import flask_source_schema
+
         return flask_source_schema(
             app_target,
             path_prefixes=path_prefixes,

@@ -22,7 +22,7 @@ def command_envelope_result(
     command: str,
     project: ProjectInspection,
     payload_schema: str,
-    payload: object,
+    payload: dict[str, object],
     view_kind: FervisViewKind,
     exit_code: int = 0,
     next_actions: list[dict[str, object]] | None = None,
@@ -49,7 +49,7 @@ def project_command_result(
     command: str,
     project: ProjectInspection,
     payload_schema: str,
-    payload: object,
+    payload: dict[str, object],
     exit_code: int = 0,
 ) -> FervisCommandResult:
     return command_envelope_result(

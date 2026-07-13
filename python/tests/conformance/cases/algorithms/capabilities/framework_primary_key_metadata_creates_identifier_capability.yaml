@@ -11,9 +11,8 @@ input:
   response_fields:
     - name: staff_id
       path: staff_id
-      identity:
-        idField: staff_id
-  primary_key_fields: [staff_id]
+  candidate_keys:
+    - components: [{field_path: staff_id}]
 expect:
   result_contains:
     has:

@@ -1,0 +1,60 @@
+id: single_entity_row_result_becomes_canonical_literal
+description: A resolved value backed by one canonical entity result becomes a literal identity input, not a row-set population.
+kind: algorithm
+algorithm: conversation_resolution.compile
+input:
+  current_question: Where did Nadia work?
+  context_sources:
+    - source_id: prior_answer
+      kind: prior_fervis_answer
+      text: Nadia's staff identity
+      source_card_ids: [staff_card]
+      source_memory_ids: [staff_rows]
+      meaning_anchors:
+        - {memory_id: staff_rows, text: Nadia, occurrence: 1, kind: row_set, label: staff identity}
+  memories:
+    - memory_id: staff_rows
+      kind: row_set
+      private:
+        entity_key:
+          entity_kind: staff
+          key_id: primary_key
+          components: {staff_id: 40404040-0000-0000-0002-000000000001}
+        proof_refs: [source_read:list_staff]
+  payload:
+    kind: conversation_resolution
+    current_question_text: Where did Nadia work?
+    outcome:
+      kind: resolved
+      resolution_basis: The current name and prior verified identity establish one person.
+      contextualized_question: Where did Nadia work?
+      clauses:
+        - current_clause_text: Where did Nadia work?
+          occurrence: 1
+          resolved_text: Where did Nadia work?
+          retained_frame_parts: []
+          values:
+            - value_id: staff
+              resolved_text: Nadia
+              frame_parameter: {kind: none}
+              sources:
+                - {kind: current_span, text: Nadia, occurrence: 1}
+                - {kind: context_anchor, source_id: prior_answer, memory_id: staff_rows, source_text: Nadia}
+expect:
+  result_contains:
+    question_contract_context:
+      resolved_question_inputs:
+        - kind: literal_text
+          input_ref: conversation.staff
+          value_source_text: Nadia
+          resolved_value_text: Nadia
+          role: reference_value
+          occurrence: 1
+          value_meaning_hint: staff identity
+    canonical_identity_inputs:
+      - input_ref: conversation.staff
+        entity_kind: staff
+        key_id: primary_key
+        key_component_id: staff_id
+        value: 40404040-0000-0000-0002-000000000001
+        authority_refs: [prior_source_read:list_staff]

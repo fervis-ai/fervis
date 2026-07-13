@@ -15,7 +15,6 @@ input:
             source:
               kind: operation_output
               relationId: answer_rows
-              identityType: sale
             grainKeys: [sale_id]
             fieldCoverage:
               sale_id: answer_rows.sale_id
@@ -39,4 +38,3 @@ expect:
     relation_answer_outputs:
       turn_sales.relation.answer_rows:
         amount: [answer_1]
-

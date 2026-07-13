@@ -5,6 +5,7 @@ requested_facts:
     description: booked money total
     answer_outputs:
       - id: answer_1
+        role: ANSWER_VALUE
 reads:
   - id: sales_read
     endpoint_name: list_sale_list

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
-from typing import Any, Protocol
+from typing import Any, Mapping, Protocol
 
 from fervis.model_io.backbone.dto import ToolSpec, ProviderOutputMode
 from fervis.model_io.backbone.model_routing import resolve_model_route
@@ -36,7 +36,7 @@ class ModelAdapter(Protocol):
 class ModelRouter:
     """Provider router with structured-output validation gate."""
 
-    def __init__(self, adapters: dict[str, ModelAdapter] | None = None):
+    def __init__(self, adapters: Mapping[str, ModelAdapter] | None = None):
         self.adapters = dict(adapters or {})
 
     def _validate_output(self, payload: dict[str, Any]) -> dict[str, Any]:

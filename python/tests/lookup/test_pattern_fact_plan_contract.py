@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from decimal import Decimal
 import json
 import re
 from typing import Any
@@ -12,12 +13,13 @@ from fervis.lookup.conversation_resolution import (
     CONVERSATION_RESOLUTION_TOOL_NAMES,
 )
 from fervis.lookup.relation_catalog import (
+    CandidateKey,
+    CandidateKeyComponent,
     CatalogField,
     CatalogParam,
     CompletenessPolicy,
     EndpointRead,
     FieldRequirement,
-    IdentityMetadata,
     PaginationMetadata,
     PaginationMode,
     ParamSource,
@@ -29,10 +31,10 @@ from fervis.lookup.question_contract import (
     RequestedFactAnswerSubject,
     default_answer_population,
 )
-from fervis.lookup.fact_planning.request import RuntimeValueContext
 from fervis.memory.addresses import (
     EvidenceRef,
     FactAddress,
+    FactAddressValue,
     RelationSourceKind,
 )
 from fervis.memory.artifacts import (
@@ -53,6 +55,7 @@ from tests.lookup.source_binding_helpers import (
 )
 from tests.lookup.orchestrator._payloads import (
     ReadEligibilityRetentionSpec,
+    _question_contract_decision,
     _query_enrichment_payload,
     _query_enrichment_payload_from_prompt,
     _conversation_resolution_clause_payload,
@@ -68,6 +71,21 @@ from tests.lookup.prompt_sections import prompt_section_payload
 def _conversation_resolution_tool_name_for_payload(payload: dict[str, Any]) -> str:
     del payload
     return CONVERSATION_RESOLUTION_TOOL_NAME
+
+
+def _primary_key(
+    entity_kind: str,
+    component_id: str,
+    field_ref: str,
+) -> tuple[CandidateKey, ...]:
+    return (
+        CandidateKey(
+            id="primary_key",
+            entity_kind=entity_kind,
+            components=(CandidateKeyComponent(id=component_id, field_ref=field_ref),),
+            primary=True,
+        ),
+    )
 
 
 def test_pattern_contract_source_binding_uses_opaque_source_handles_end_to_end():
@@ -108,7 +126,7 @@ def test_pattern_contract_source_binding_uses_opaque_source_handles_end_to_end()
     assert result.status == "COMPLETED", result
     assert result.rendered_fact is not None
     assert result.rendered_fact.rows == (
-        {"answer_1": "Location Alpha", "answer_2": "125.00"},
+        {"answer_1": "Location Alpha", "answer_2": Decimal("125.00")},
     )
 
 
@@ -136,6 +154,7 @@ def test_pattern_contract_fact_plan_prompt_uses_bound_sources_end_to_end():
                     fact_description="count of completed store records",
                     subject_text="records",
                     answer_outputs=("count",),
+                    answer_output_roles=("ROW_COUNT",),
                 ),
                 fact_plan=_fact_plan_answer(
                     pattern="aggregate_scalar",
@@ -155,7 +174,6 @@ def test_pattern_contract_fact_plan_prompt_uses_bound_sources_end_to_end():
                             "row_path_id": "data",
                             "row_cardinality": "many",
                         },
-                        "record_id_field_id": "record_id",
                         "label": "count",
                     },
                 ),
@@ -200,6 +218,7 @@ def test_pattern_contract_anthropic_uses_canonical_source_binding_end_to_end():
                     fact_description="count of completed store records",
                     subject_text="records",
                     answer_outputs=("count",),
+                    answer_output_roles=("ROW_COUNT",),
                 ),
                 fact_plan=_fact_plan_answer(
                     pattern="aggregate_scalar",
@@ -219,7 +238,6 @@ def test_pattern_contract_anthropic_uses_canonical_source_binding_end_to_end():
                             "row_path_id": "data",
                             "row_cardinality": "many",
                         },
-                        "record_id_field_id": "record_id",
                         "label": "count",
                     },
                 ),
@@ -269,6 +287,7 @@ def test_pattern_contract_gpt_keeps_canonical_source_binding_end_to_end():
                     fact_description="count of completed store records",
                     subject_text="records",
                     answer_outputs=("count",),
+                    answer_output_roles=("ROW_COUNT",),
                 ),
                 fact_plan=_fact_plan_answer(
                     pattern="aggregate_scalar",
@@ -288,7 +307,6 @@ def test_pattern_contract_gpt_keeps_canonical_source_binding_end_to_end():
                             "row_path_id": "data",
                             "row_cardinality": "many",
                         },
-                        "record_id_field_id": "record_id",
                         "label": "count",
                     },
                 ),
@@ -367,8 +385,11 @@ def test_pattern_contract_same_scope_candidate_keeps_field_params_together_end_t
                 relation="relation.answer_1_rows",
                 grain={"staff_name": "Amina", "product_name": "Lipstick"},
                 values={
-                    "staff_name": {"type": "string", "value": "Amina"},
-                    "product_name": {"type": "string", "value": "Lipstick"},
+                    "staff_name": FactAddressValue(type="string", value="Amina"),
+                    "product_name": FactAddressValue(
+                        type="string",
+                        value="Lipstick",
+                    ),
                 },
                 evidence=EvidenceRef(step_ids=("read:sales_read",)),
             ),
@@ -417,7 +438,9 @@ def test_pattern_contract_same_scope_candidate_keeps_field_params_together_end_t
                                     subject_text="shade names"
                                 ).instance_interpretation,
                             ).to_question_contract_dict(),
-                            "answer_outputs": [{"description": "shade names"}],
+                            "answer_outputs": [
+                                {"description": "shade names", "role": "ANSWER_VALUE"}
+                            ],
                             "used_question_inputs": [],
                         }
                     ],
@@ -478,6 +501,7 @@ def _question_contract(
     *,
     fact_description: str,
     answer_outputs: tuple[str, ...],
+    answer_output_roles: tuple[str, ...] | None = None,
     subject_text: str | None = None,
     known_inputs: tuple[dict[str, Any], ...] = (),
     split_answer_outputs: bool = True,
@@ -485,6 +509,11 @@ def _question_contract(
     output_descriptions = (
         list(answer_outputs) if split_answer_outputs else [", ".join(answer_outputs)]
     )
+    output_roles = answer_output_roles or tuple(
+        "ANSWER_VALUE" for _ in output_descriptions
+    )
+    if len(output_roles) != len(output_descriptions):
+        raise ValueError("answer output roles must match answer outputs")
     question_inputs = [
         {
             "input_ref": f"input_{index}",
@@ -530,7 +559,12 @@ def _question_contract(
                     subject_text=subject_text or fact_description,
                 ),
                 "answer_outputs": [
-                    {"description": description} for description in output_descriptions
+                    {"description": description, "role": role}
+                    for description, role in zip(
+                        output_descriptions,
+                        output_roles,
+                        strict=True,
+                    )
                 ],
                 "used_question_inputs": [
                     f"input_{index}"
@@ -563,7 +597,8 @@ def _question_contract_for_fact_plan(
         )
         family = family_by_fact_id.get(requested_fact_id)
         if family:
-            answer_request["answer_expression"] = {"family": family}
+            expression: dict[str, Any] = {"family": family}
+            answer_request["answer_expression"] = expression
     return updated
 
 
@@ -756,12 +791,6 @@ def _metric_catalog() -> RelationCatalog:
                         path="data.location_id",
                         row_path_id="data",
                         type="uuid",
-                        identity=IdentityMetadata(
-                            entity_ref="location",
-                            identity_field="location_id",
-                            primary_key=True,
-                            stable=True,
-                        ),
                     ),
                     CatalogField(
                         ref="field.location_name",
@@ -775,6 +804,9 @@ def _metric_catalog() -> RelationCatalog:
                         row_path_id="data",
                         type="number",
                     ),
+                ),
+                candidate_keys=_primary_key(
+                    "location", "location_id", "field.location_id"
                 ),
                 pagination=PaginationMetadata(
                     mode=PaginationMode.NONE,
@@ -887,13 +919,9 @@ def _records_catalog_with_channel_param() -> RelationCatalog:
                         path="data.record_id",
                         row_path_id="data",
                         type="uuid",
-                        identity=IdentityMetadata(
-                            entity_ref="record",
-                            identity_field="record_id",
-                            primary_key=True,
-                        ),
                     ),
                 ),
+                candidate_keys=_primary_key("record", "record_id", "field.record_id"),
                 pagination=PaginationMetadata(
                     mode=PaginationMode.NONE,
                     completeness_policy=CompletenessPolicy.COMPLETE,
@@ -941,13 +969,9 @@ def _records_catalog_with_optional_params() -> RelationCatalog:
                         path="data.record_id",
                         row_path_id="data",
                         type="uuid",
-                        identity=IdentityMetadata(
-                            entity_ref="record",
-                            identity_field="record_id",
-                            primary_key=True,
-                        ),
                     ),
                 ),
+                candidate_keys=_primary_key("record", "record_id", "field.record_id"),
                 pagination=PaginationMetadata(
                     mode=PaginationMode.NONE,
                     completeness_policy=CompletenessPolicy.COMPLETE,
@@ -993,11 +1017,6 @@ def _same_scope_items_catalog() -> RelationCatalog:
                         path="data.sale_id",
                         row_path_id="data",
                         type="string",
-                        identity=IdentityMetadata(
-                            entity_ref="sale",
-                            identity_field="sale_id",
-                            primary_key=True,
-                        ),
                     ),
                     CatalogField(
                         ref="field.staff_name",
@@ -1024,6 +1043,7 @@ def _same_scope_items_catalog() -> RelationCatalog:
                         ),
                     ),
                 ),
+                candidate_keys=_primary_key("sale", "sale_id", "field.sale_id"),
                 pagination=PaginationMetadata(
                     mode=PaginationMode.NONE,
                     completeness_policy=CompletenessPolicy.COMPLETE,
@@ -1139,11 +1159,6 @@ def _variant_read(read_id: str, *, include_name: bool) -> EndpointRead:
             path="data.variant_id",
             row_path_id="data",
             type="string",
-            identity=IdentityMetadata(
-                entity_ref="variant",
-                identity_field="variant_id",
-                primary_key=True,
-            ),
         )
     ]
     if include_name:
@@ -1161,6 +1176,9 @@ def _variant_read(read_id: str, *, include_name: bool) -> EndpointRead:
         resource_names=("variant",),
         row_paths=(RowPath(id="data", path="data", cardinality=RowCardinality.MANY),),
         fields=tuple(fields),
+        candidate_keys=_primary_key(
+            "variant", "variant_id", f"field.{read_id}.variant_id"
+        ),
         pagination=PaginationMetadata(
             mode=PaginationMode.NONE,
             completeness_policy=CompletenessPolicy.COMPLETE,
@@ -1356,7 +1374,7 @@ class _PlannerPort:
             )
         else:
             tool_name = tool_specs[0].name if tool_specs else ""
-        if tool_name == "submit_answer_request_contract":
+        if tool_name == "submit_question_contract_outcome":
             arguments = _question_contract_with_prompt_memory(
                 self.question_contract,
                 prompt,
@@ -1394,6 +1412,8 @@ class _PlannerPort:
             )
         else:
             raise AssertionError(f"unexpected tool: {tool_name}")
+        if tool_name == "submit_question_contract_outcome":
+            arguments = _question_contract_decision(arguments)
         return {
             "answer": json.dumps({"tool": tool_name, "arguments": arguments}),
             "usage": {
@@ -1424,7 +1444,7 @@ class _OpaqueSourceHandlePlannerPort(_PlannerPort):
             return _tool_response(
                 _conversation_resolution_tool_name_for_payload(arguments), arguments
             )
-        if tool_name == "submit_answer_request_contract":
+        if tool_name == "submit_question_contract_outcome":
             return _tool_response(
                 tool_name,
                 _question_contract_with_prompt_memory(
@@ -1461,22 +1481,22 @@ class _OpaqueSourceHandlePlannerPort(_PlannerPort):
                     "bindings_for_fact_1": {
                         "plan_shape": "list_rows",
                         "primary": {
-                                    "binding_target_id": binding_target_id,
-                                    "answer_population": source_candidate_answer_population(
-                                        prompt,
-                                        source_candidate_id=candidate_id,
-                                    ),
-                                    "fulfillment_decisions": (
-                                        source_fulfills_fields_for_candidate(
-                                            candidate,
-                                            field_ids_by_answer_output={
-                                                "answer_1": ("location_name",),
-                                                "answer_2": ("metric_total",),
-                                            },
-                                        )
-                                    ),
-                                    "param_decisions": {},
-                        }
+                            "binding_target_id": binding_target_id,
+                            "answer_population": source_candidate_answer_population(
+                                prompt,
+                                source_candidate_id=candidate_id,
+                            ),
+                            "fulfillment_decisions": (
+                                source_fulfills_fields_for_candidate(
+                                    candidate,
+                                    field_ids_by_answer_output={
+                                        "answer_1": ("location_name",),
+                                        "answer_2": ("metric_total",),
+                                    },
+                                )
+                            ),
+                            "param_decisions": {},
+                        },
                     },
                 }
             }
@@ -1526,7 +1546,7 @@ class _AllSalesAnswerEvidencePlannerPort(_PlannerPort):
             return _tool_response(
                 _conversation_resolution_tool_name_for_payload(arguments), arguments
             )
-        if tool_name == "submit_answer_request_contract":
+        if tool_name == "submit_question_contract_outcome":
             return _tool_response(
                 tool_name,
                 _question_contract_with_prompt_memory(
@@ -1617,7 +1637,7 @@ class _TwoAnswerOutputPlannerPort(_PlannerPort):
             return _tool_response(
                 _conversation_resolution_tool_name_for_payload(arguments), arguments
             )
-        if tool_name == "submit_answer_request_contract":
+        if tool_name == "submit_question_contract_outcome":
             return _tool_response(
                 tool_name,
                 _question_contract_with_prompt_memory(
@@ -1667,25 +1687,25 @@ class _TwoAnswerOutputPlannerPort(_PlannerPort):
                     "bindings_for_fact_1": {
                         "plan_shape": "list_rows",
                         "primary": {
-                                    "binding_target_id": binding_target_id,
-                                    "answer_population": source_candidate_answer_population(
-                                        prompt,
-                                        source_candidate_id=candidate_id,
-                                    ),
-                                    "fulfillment_decisions": {
-                                        **source_fulfills_for_candidate(
-                                            candidate,
-                                            field_ids=("snapshot_merch_name",),
-                                            answer_output_ids=("answer_1",),
-                                        ),
-                                        **source_fulfills_for_candidate(
-                                            candidate,
-                                            field_ids=("snapshot_shade_name",),
-                                            answer_output_ids=("answer_2",),
-                                        ),
-                                    },
-                                    "param_decisions": {},
-                        }
+                            "binding_target_id": binding_target_id,
+                            "answer_population": source_candidate_answer_population(
+                                prompt,
+                                source_candidate_id=candidate_id,
+                            ),
+                            "fulfillment_decisions": {
+                                **source_fulfills_for_candidate(
+                                    candidate,
+                                    field_ids=("snapshot_merch_name",),
+                                    answer_output_ids=("answer_1",),
+                                ),
+                                **source_fulfills_for_candidate(
+                                    candidate,
+                                    field_ids=("snapshot_shade_name",),
+                                    answer_output_ids=("answer_2",),
+                                ),
+                            },
+                            "param_decisions": {},
+                        },
                     },
                 }
             }
@@ -1802,7 +1822,7 @@ class _SameScopeFieldPlannerPort:
             return _tool_response(
                 _conversation_resolution_tool_name_for_payload(arguments), arguments
             )
-        if tool_name == "submit_answer_request_contract":
+        if tool_name == "submit_question_contract_outcome":
             return _tool_response(
                 tool_name,
                 _question_contract_with_prompt_memory(self.question_contract, prompt),
@@ -1863,17 +1883,17 @@ class _SameScopeFieldPlannerPort:
                     "bindings_for_fact_1": {
                         "plan_shape": "list_rows",
                         "primary": {
-                                    "binding_target_id": binding_target_id,
-                                    "answer_population": source_candidate_answer_population(
-                                        prompt,
-                                        source_candidate_id=candidate_id,
-                                    ),
-                                    "fulfillment_decisions": _same_scope_fulfillment_decisions(
-                                        candidate,
-                                        field_id=self.field_id,
-                                    ),
-                                    "param_decisions": param_decisions,
-                        }
+                            "binding_target_id": binding_target_id,
+                            "answer_population": source_candidate_answer_population(
+                                prompt,
+                                source_candidate_id=candidate_id,
+                            ),
+                            "fulfillment_decisions": _same_scope_fulfillment_decisions(
+                                candidate,
+                                field_id=self.field_id,
+                            ),
+                            "param_decisions": param_decisions,
+                        },
                     },
                 }
             }
@@ -1901,6 +1921,8 @@ class _SameScopeFieldPlannerPort:
 
 
 def _tool_response(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    if tool_name == "submit_question_contract_outcome":
+        arguments = _question_contract_decision(arguments)
     return {
         "answer": json.dumps({"tool": tool_name, "arguments": arguments}),
         "usage": {
@@ -1949,7 +1971,6 @@ def _conversation_resolution_from_prompt(prompt: str) -> dict[str, Any]:
                     "values": [],
                 }
             ],
-            "frame_call": {"kind": "none"},
         },
     }
 
@@ -1991,7 +2012,7 @@ def _memory_kind_for_test_id(memory_id: str) -> str:
     if ".entity." in memory_id:
         return "entity_identity"
     if ".outcome." in memory_id:
-        return "clarification_answer"
+        return "clarification_response"
     if ".value." in memory_id:
         return "scalar_value"
     return ""

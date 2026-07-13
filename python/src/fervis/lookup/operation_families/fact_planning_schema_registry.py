@@ -136,7 +136,6 @@ def _multi_relation_pattern_answer_variants(
             answer_output_ids_schema=answer_output_ids_schema,
             source_binding_ids=source_binding_ids,
             source_binding_ids_by_requirement=source_binding_ids_by_requirement,
-            field_ids_by_source_binding_id=field_ids_by_source_binding_id,
             identity_field_ids_by_source_binding_id=(
                 identity_field_ids_by_source_binding_id
             ),
@@ -155,6 +154,7 @@ def _pattern_answer_variants(
     source_binding_id: str | None,
     field_ids: tuple[str, ...] | None,
     include_source_binding_id: bool = True,
+    rank_limit_value_ids: tuple[str, ...] | None = None,
 ) -> list[dict[str, object]]:
     if not pattern_names:
         return []
@@ -171,6 +171,7 @@ def _pattern_answer_variants(
             source_binding_id=source_binding_id,
             include_source_binding_id=include_source_binding_id,
             field_ids=field_ids,
+            rank_limit_value_ids=rank_limit_value_ids,
         )
         for name in source_bound_pattern_names:
             builder = _SOURCE_BOUND_PATTERN_SCHEMA_BUILDERS.get(name)
@@ -234,7 +235,7 @@ def _selected_pattern_answer_variants(
         requested_fact_id,
         plan_shapes,
     ) in selected_plan_shapes_by_requested_fact_id.items():
-        requested_fact_id_schema = {"enum": [requested_fact_id]}
+        requested_fact_id_schema: dict[str, object] = {"enum": [requested_fact_id]}
         answer_output_ids = answer_output_ids_by_requested_fact_id.get(
             requested_fact_id,
             (),
@@ -373,6 +374,7 @@ def _selected_plan_shape_answer_variants(
                     source_binding_id_schema={"enum": [source_binding_id]},
                     source_binding_id=source_binding_id,
                     field_ids=field_ids,
+                    rank_limit_value_ids=rank_limit_value_ids,
                 )
             )
         return variants
@@ -385,6 +387,7 @@ def _selected_plan_shape_answer_variants(
             source_binding_id_schema=_handle_schema(),
             source_binding_id=None,
             field_ids=None,
+            rank_limit_value_ids=rank_limit_value_ids,
         )
     )
     return variants

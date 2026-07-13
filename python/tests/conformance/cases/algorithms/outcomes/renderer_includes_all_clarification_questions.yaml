@@ -11,6 +11,11 @@ input:
       requestedFactId: rf_answer
       need: catalog_input
       reason: catalog_requires_choice
+      owner: question_contract
+      continuation:
+        kind: question_contract
+        missingItemId: location
+        expectedValueKind: entity
       question: Which location should I use?
       subjects:
         - kind: catalog_choice
@@ -23,6 +28,11 @@ input:
       requestedFactId: rf_answer
       need: catalog_input
       reason: catalog_requires_choice
+      owner: question_contract
+      continuation:
+        kind: question_contract
+        missingItemId: metric
+        expectedValueKind: metric
       question: Which metric should I use?
       subjects:
         - kind: catalog_choice

@@ -1,0 +1,38 @@
+id: ranked_scalar_group_value_remains_selectable
+description: Ranked selection keeps a scalar grouping value selectable while excluding the measure from answer fulfillment.
+kind: algorithm
+algorithm: source_binding.fulfillment_support
+input:
+  project_model_visible: true
+  requested_fact:
+    description: location with the highest total
+    subject_text: location
+    answer_expression_family: ranked_selection
+  catalog:
+    reads:
+      - id: list_summary
+        endpoint_name: list_summary
+        resource_names: [summary]
+        row_paths:
+          - {id: data, path: data, cardinality: many}
+        fields:
+          - {ref: summary.location_id, path: data.location_id, row_path_id: data, type: uuid}
+          - {ref: summary.total, path: data.total, row_path_id: data, type: decimal}
+  candidate:
+    source_candidate_id: source_1
+    kind: new_api_read
+    read_id: list_summary
+    result_grains:
+      - row_path_id: data
+        row_source_id: rs_source_1_data
+        cardinality: many
+        evidence_items:
+          - field_id: location_id
+            type: uuid
+          - field_id: total
+            type: decimal
+expect:
+  result_contains:
+    value_field_ids: [location_id]
+    metric_fields:
+      total: false

@@ -215,7 +215,7 @@ def _write_auth_schema(
 
 
 def _configure_checks(schema: dict[str, object]) -> list[dict[str, object]]:
-    checks = [
+    checks: list[dict[str, object]] = [
         {"id": "auth.schema_valid", "status": "passed"},
         {"id": "auth.security_mode_configured", "status": "passed"},
         {"id": "auth.transport_mode_configured", "status": "passed"},
@@ -293,21 +293,15 @@ def _validate_import_paths(
                 str(principal.get("resolver") or ""),
             )
         )
-    for prefix, label, import_path in paths:
-        try:
-            value = _import_object(project, import_path)
-        except (ImportError, AttributeError, ValueError) as exc:
-            return f"{prefix} {label} could not be imported: {exc}"
-        if not callable(value):
-            return f"{prefix} {label} is not callable: {import_path}"
-    return None
-
-
-def _import_object(project: ProjectInspection, import_path: str) -> object:
-    if ":" not in import_path:
-        raise ValueError(f"Import path must use module:object: {import_path}")
     with project_import_context(project.root_path):
-        return import_object(import_path)
+        for prefix, label, import_path in paths:
+            try:
+                value = import_object(import_path)
+            except (ImportError, AttributeError, ValueError) as exc:
+                return f"{prefix} {label} could not be imported: {exc}"
+            if not callable(value):
+                return f"{prefix} {label} is not callable: {import_path}"
+    return None
 
 
 def _dict(value: object) -> dict[str, object]:

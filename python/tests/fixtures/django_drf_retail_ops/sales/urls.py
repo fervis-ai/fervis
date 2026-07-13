@@ -11,6 +11,9 @@ router.register("order-items", OrderItemViewSet, basename="order-items")
 
 urlpatterns = [
     path("", include(router.urls)),
-    path("orders/<int:order_id>/cancel/", CancelOrderAPIView.as_view(), name="cancel-order"),
+    path(
+        "orders/<int:order_id>/cancel/",
+        CancelOrderAPIView.as_view(),
+        name="cancel-order",
+    ),
 ]
-

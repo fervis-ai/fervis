@@ -30,6 +30,7 @@ input:
                 answer_outputs:
                   - id: answer_1
                     description: sales counts by region
+                    role: ANSWER_VALUE
                 used_question_inputs: [q_time]
         addresses:
           - address: value.answer_1

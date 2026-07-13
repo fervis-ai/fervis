@@ -27,6 +27,7 @@ input:
               owned_question_input_refs: []
         answer_outputs:
           - description: sales total
+            role: ANSWER_VALUE
         used_question_inputs: []
 expect:
   result_contains:

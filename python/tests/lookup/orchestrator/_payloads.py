@@ -8,6 +8,13 @@ from tests.lookup.orchestrator._plans import *  # noqa: F403
 from tests.lookup.prompt_sections import prompt_section_payload
 
 
+def _question_contract_decision(outcome: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "decision_basis": "The current wording supports the selected outcome.",
+        "outcome": outcome,
+    }
+
+
 def _without_empty_values(payload: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if value}
 
@@ -336,9 +343,7 @@ def _read_eligibility_retention_specs_from_fact_plan(
         )
         metric = answer.get("metric") or {}
         metric_field = (
-            str(metric.get("field_id") or metric.get("record_id_field_id") or "")
-            if isinstance(metric, dict)
-            else ""
+            str(metric.get("field_id") or "") if isinstance(metric, dict) else ""
         )
         measured_fields = (
             (metric_field,)
@@ -347,19 +352,11 @@ def _read_eligibility_retention_specs_from_fact_plan(
             and metric_field
             else ()
         )
-        count_row_fields = (
-            (metric_field,)
-            if isinstance(metric, dict)
-            and metric.get("kind") == "count_records"
-            and metric_field
-            else ()
-        )
         row_path_fields = _row_path_fields_for_answer(
             pattern=pattern,
             output_fields=output_fields,
             measured_fields=measured_fields,
             group_fields=group_fields,
-            count_row_fields=count_row_fields,
         )
         specs.append(
             ReadEligibilityRetentionSpec(
@@ -380,7 +377,6 @@ def _row_path_fields_for_answer(
     output_fields: tuple[str, ...],
     measured_fields: tuple[str, ...],
     group_fields: tuple[str, ...],
-    count_row_fields: tuple[str, ...],
 ) -> tuple[str, ...]:
     if pattern not in {
         "list_rows",
@@ -389,10 +385,9 @@ def _row_path_fields_for_answer(
         "aggregate_by_group",
         "ranked_aggregate",
     }:
-        return count_row_fields
+        return ()
     return _unique(
         (
-            *count_row_fields,
             *output_fields,
             *measured_fields,
             *group_fields,
@@ -807,13 +802,13 @@ def _question_contract_for_arguments(
                         _answer_expression_family_by_fact_id_from_fact_plan(
                             arguments
                         ).get(fact_id, "scalar_aggregate")
-                    )
+                    ),
                 ),
                 answer_subject=RequestedFactAnswerSubject(
                     subject_text=description or fact_id
                 ),
                 answer_outputs=tuple(
-                    RequestedFactAnswerOutput(id=output_id)
+                    RequestedFactAnswerOutput(id=output_id, role="ANSWER_VALUE")
                     for output_id in (output_ids or ["answer"])
                 ),
             )
@@ -834,7 +829,8 @@ def _question_contract_with_answer_expression_from_fact_plan(
             replace(
                 fact,
                 answer_expression=_requested_fact_answer_expression(
-                    RequestedFactAnswerExpressionFamily(family)
+                    RequestedFactAnswerExpressionFamily(family),
+                    known_inputs=fact.known_inputs,
                 ),
             )
             if (
@@ -889,26 +885,33 @@ def _question_contract_answer_request_payload(
     )
     payload = {
         "answer_fact": fact.description,
-        "answer_expression": (
-            fact.answer_expression.to_answer_request_dict()
-            if fact.answer_expression is not None
-            else {"family": "scalar_aggregate"}
-        ),
+        "answer_expression": _answer_expression_payload(fact),
         "answer_subject": _answer_subject_payload(subject_text),
         "answer_population": _answer_population_payload(
             fact,
             subject_text=subject_text,
         ),
         "answer_outputs": [
-            output.to_answer_request_dict()
-            for output in fact.answer_outputs
+            output.to_answer_request_dict() for output in fact.answer_outputs
         ],
         "used_question_inputs": [
-            input_ref
-            for input_ref in id_map.known_input_ids.values()
-            if input_ref in used_input_refs
+            id_map.known_input_ids[known.id]
+            for known in fact.known_inputs
+            if id_map.known_input_ids[known.id] in used_input_refs
         ],
     }
+    return payload
+
+
+def _answer_expression_payload(
+    fact: RequestedFact,
+) -> dict[str, Any]:
+    expression = fact.answer_expression
+    if expression is None:
+        return {"family": "scalar_aggregate"}
+    payload: dict[str, Any] = {"family": expression.family.value}
+    if expression.group_key is not None:
+        payload["group_key"] = expression.group_key.to_answer_request_dict()
     return payload
 
 
@@ -949,7 +952,7 @@ def _known_input_payload(
         return payload
     payload["value_source_text"] = known.text
     payload["role"] = known.role.value if known.role else ""
-    payload["resolved_value_text"] = known.resolved_value_text
+    payload["operand_text"] = known.resolved_value_text
     if known.field_label_text:
         payload["field_label_text"] = known.field_label_text
     if known.value_meaning_hint:
@@ -973,6 +976,8 @@ def _question_contract_response(
     answer_subject: str | None = None,
     answer_expression_family: str = "scalar_aggregate",
     parts: tuple[str, ...] = ("answer",),
+    answer_output_role: str | None = None,
+    answer_output_roles: tuple[str, ...] | None = None,
     demand_text: str = "How",
     question_inputs: tuple[dict[str, Any], ...] = (),
 ) -> dict[str, Any]:
@@ -998,15 +1003,26 @@ def _question_contract_response(
             )
         )
         input_refs.append(input_ref)
+    default_output_role = answer_output_role or _answer_output_role_for_family(
+        answer_expression_family
+    )
+    output_roles = answer_output_roles or tuple(default_output_role for _ in parts)
+    if len(output_roles) != len(parts):
+        raise ValueError("answer output roles must match answer outputs")
+    answer_expression: dict[str, Any] = {"family": answer_expression_family}
+    input_refs = [str(item["input_ref"]) for item in input_payloads]
     answer_request = {
         "answer_fact": subject,
-        "answer_expression": {"family": answer_expression_family},
+        "answer_expression": answer_expression,
         "answer_subject": _answer_subject_payload(answer_subject or subject),
         "answer_population": _answer_population_payload_from_text(
             description=subject,
             subject_text=answer_subject or subject,
         ),
-        "answer_outputs": [{"description": part} for part in parts],
+        "answer_outputs": [
+            {"description": part, "role": role}
+            for part, role in zip(parts, output_roles, strict=True)
+        ],
         "used_question_inputs": input_refs,
     }
     return {
@@ -1018,6 +1034,16 @@ def _question_contract_response(
             "all_input_like_phrases_declared": True,
         },
     }
+
+
+def _answer_output_role_for_family(answer_expression_family: str) -> str:
+    if answer_expression_family in {
+        "scalar_aggregate",
+        "grouped_aggregate",
+        "computed_scalar",
+    }:
+        return "MEASURED_VALUE"
+    return "ANSWER_VALUE"
 
 
 def _answer_population_payload(
@@ -1115,8 +1141,11 @@ def _question_input_from_response_item(
     output["value_source_text"] = source_text
     role = LiteralInputRole(str(item["role"]))
     output["role"] = role.value
-    output["resolved_value_text"] = str(
-        item.get("resolved_value_text") or item.get("value_text") or source_text
+    output["operand_text"] = str(
+        item.get("operand_text")
+        or item.get("resolved_value_text")
+        or item.get("value_text")
+        or source_text
     )
     if item.get("resolved_input_ref"):
         output["resolved_input_ref"] = str(item["resolved_input_ref"])
@@ -1186,7 +1215,6 @@ def _conversation_resolution_payload_from_prompt(prompt: str) -> dict[str, Any]:
                     "values": [],
                 }
             ],
-            "frame_call": {"kind": "none"},
         },
     }
 
@@ -1258,7 +1286,7 @@ def _memory_kind_for_test_id(memory_id: str) -> str:
     if ".entity." in memory_id:
         return "entity_identity"
     if ".outcome." in memory_id:
-        return "clarification_answer"
+        return "clarification_response"
     if ".value." in memory_id:
         return "scalar_value"
     return ""
@@ -1354,7 +1382,6 @@ def _conversation_resolution_clause_payload(
                     "values": values,
                 }
             ],
-            "frame_call": {"kind": "none"},
         },
     }
 
@@ -1369,6 +1396,7 @@ def _resolved_values_for_sources(
         {
             "value_id": f"context_value_{index}",
             "resolved_text": str(anchor["text"]),
+            "frame_parameter": {"kind": "none"},
             "sources": [
                 {
                     "kind": "context_anchor",
@@ -1426,7 +1454,7 @@ def _retained_frame_part_refs(
 
 
 def _answer_output_support_role(answer_output: dict[str, Any]) -> str:
-    return str(answer_output.get("role") or "ROW_POPULATION")
+    return str(answer_output.get("role") or "ROW_COUNT")
 
 
 def _query_enrichment_payload_from_prompt(prompt: str) -> dict[str, Any]:
@@ -1529,7 +1557,7 @@ def _query_enrichment_payload(
     *term_groups: tuple[str, ...],
     requested_fact_id: str = "fact_1",
     entity_target_catalog_search_terms: list[dict[str, Any]] | None = None,
-    support_role: str = "ROW_POPULATION",
+    support_role: str = "ROW_COUNT",
 ) -> dict[str, Any]:
     return {
         "requested_fact_resource_name_matches": [
@@ -1590,21 +1618,16 @@ def _pattern_answer_from_answer_plan(plan: AnswerProgram) -> dict[str, Any]:
             "aggregate_by_group" if aggregate.spec.group_by else "aggregate_scalar"
         )
         source_relation = relation_by_id[aggregate.spec.input_relation]
-        metric_payload = (
-            {
-                "kind": "count_records",
-                "record_id_field_id": metric.input_field
-                or next(iter(field.field_id for field in source_relation.fields), ""),
-                "label": metric.output_field,
-            }
-            if metric.function == AggregationFunction.COUNT
-            else {
-                "kind": "aggregate_field",
-                "function": metric.function.value,
-                "field_id": metric.input_field,
-                "label": metric.output_field,
-            }
-        )
+        if metric.function == AggregationFunction.COUNT:
+            raise AssertionError(
+                "compiled count programs cannot be converted back to model choices"
+            )
+        metric_payload = {
+            "kind": "aggregate_field",
+            "function": metric.function.value,
+            "field_id": metric.input_field,
+            "label": metric.output_field,
+        }
         answer = {
             **_pattern_answer_base(plan, source_relation),
             "pattern": pattern,
@@ -1617,13 +1640,23 @@ def _pattern_answer_from_answer_plan(plan: AnswerProgram) -> dict[str, Any]:
         return answer
     if len(plan.operations) == 1 and isinstance(plan.operations[0].spec, ProjectSpec):
         project = plan.operations[0]
-        rendered_output_ids = {
-            fulfillment.render_output_id for fulfillment in plan.fulfillment
+        result_field_ids = {
+            field_id
+            for output in plan.result_projection.relation_outputs
+            for field_id in (
+                tuple(component.field_id for component in output.entity_key.components)
+                if output.entity_key is not None
+                else (output.field_id,)
+            )
         }
+        result_output_ids = {
+            fulfillment.result_output_id for fulfillment in plan.fulfillment
+        }
+        projected_result_ids = result_field_ids | result_output_ids
         output_fields = [
             {"field_id": field.source}
             for field in project.spec.fields
-            if (field.output or field.source) in rendered_output_ids
+            if (field.output or field.source) in projected_result_ids
         ]
         return {
             **_pattern_answer_base(plan, relation_by_id[project.spec.input_relation]),

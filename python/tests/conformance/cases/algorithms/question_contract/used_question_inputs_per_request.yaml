@@ -44,27 +44,29 @@ input:
         owned_question_input_refs: []
     answer_outputs:
     - description: total sales amount
+      role: ANSWER_VALUE
     used_question_inputs:
     - staff
     - period
   - answer_fact: where Alice worked yesterday
     answer_expression:
-      family: scalar_aggregate
+      family: scalar_value
     answer_subject:
-      subject_text: Alice
+      subject_text: work location
       instance_interpretation:
         kind: NORMAL_BUSINESS_INSTANCE
     answer_population:
-      population_label: Alice
-      counted_unit: Alice
+      population_label: work location
+      counted_unit: work location
       membership_tests:
       - test_id: pop_test_1
         kind: SUBJECT_IDENTITY
         polarity: MUST_PASS
-        test_question: Does the row/value represent Alice?
+        test_question: Does the row/value represent a work location?
         owned_question_input_refs: []
     answer_outputs:
     - description: work location
+      role: ANSWER_VALUE
     used_question_inputs:
     - staff
     - period

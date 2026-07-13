@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import NoReturn
 
 from fervis.lookup.answer_program.contracts import (
     BindingProvenance,
@@ -17,9 +18,12 @@ from fervis.lookup.answer_program.contracts import (
 from fervis.lookup.answer_program.values import (
     ConstantRef,
     FactValue,
+    NodeOutputRef,
     ParameterRef,
     ValueExpression,
 )
+from fervis.lookup.answer_program.operations import ComputeExpressionLeaf
+from fervis.lookup.answer_program.values import fold_value_expression
 from fervis.lookup.question_contract import QuestionContract
 
 
@@ -53,6 +57,32 @@ class CompilerInputContext:
         if component != "value" or item_index is not None:
             raise ValueError(f"{value_id} does not support value components")
         return expression
+
+    def compute_expression_for_value(self, value_id: str) -> ComputeExpressionLeaf:
+        expression = self.expression_for_value(value_id)
+        return fold_value_expression(
+            expression,
+            parameter=_compute_parameter,
+            output=_compute_output,
+            constant=_compute_constant,
+            environment=lambda _item: _unsupported_compute_environment(value_id),
+        )
+
+
+def _compute_parameter(item: ParameterRef) -> ComputeExpressionLeaf:
+    return item
+
+
+def _compute_output(item: NodeOutputRef) -> ComputeExpressionLeaf:
+    return item
+
+
+def _compute_constant(item: ConstantRef) -> ComputeExpressionLeaf:
+    return item
+
+
+def _unsupported_compute_environment(value_id: str) -> NoReturn:
+    raise ValueError(f"{value_id} cannot be used as a compute operand")
 
 
 def compiler_input_context(
@@ -116,4 +146,3 @@ def compiler_input_context(
         ),
         expressions_by_value_id=expressions,
     )
-

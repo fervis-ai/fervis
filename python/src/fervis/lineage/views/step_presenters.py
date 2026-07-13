@@ -167,11 +167,13 @@ def _conversation_clause(
     resolved_text = _text(item.payload.get("resolved_text"))
     if not current_clause_text and not resolved_text:
         return None
+    raw_values = item.payload.get("resolved_values")
+    resolved_values = raw_values if isinstance(raw_values, (list, tuple)) else ()
     return SemanticConversationClauseView(
         current_clause_text=current_clause_text,
         resolved_text=resolved_text,
         resolved_values=tuple(
-            _text(value) for value in item.payload.get("resolved_values") or ()
+            _text(value) for value in resolved_values
         ),
     )
 

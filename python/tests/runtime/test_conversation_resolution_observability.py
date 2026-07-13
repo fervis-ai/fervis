@@ -26,11 +26,12 @@ def test_question_contract_failure_includes_conversation_resolution_usage():
                             {
                                 "id": "answer_1",
                                 "description": "total sales amount",
+                                "role": "ANSWER_VALUE",
                             }
                         ],
                         "used_question_inputs": [],
                     }
-                ]
+                ],
             }
         },
         addresses=(
@@ -47,7 +48,7 @@ def test_question_contract_failure_includes_conversation_resolution_usage():
                     _conversation_resolution_payload_from_prompt(prompt)
                 )
             ),
-            "submit_answer_request_contract": {
+            "submit_question_contract_outcome": {
                 "kind": "question_contract",
                 "answer_requests_count": 2,
                 "answer_requests": [
@@ -56,6 +57,7 @@ def test_question_contract_failure_includes_conversation_resolution_usage():
                         "answer_outputs": [
                             {
                                 "description": "total money",
+                                "role": "ANSWER_VALUE",
                             }
                         ],
                         "used_question_inputs": [],

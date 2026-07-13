@@ -195,7 +195,6 @@ def _run_view(run: RunRow, *, rows: LineageRows) -> RunView:
         memory_artifacts=_run_memory_artifacts(run, rows=rows),
         program_derivation=_program_derivation_view(run, rows=rows),
         base_run_id=run.base_run_id,
-        trigger_clarification_response_id=run.trigger_clarification_response_id,
         clarification_requests=_run_clarification_requests(run, rows=rows),
         clarification_responses=_run_clarification_responses(run, rows=rows),
     )
@@ -214,9 +213,7 @@ def _program_derivation_view(
     if len(invocations) != 1:
         raise ValueError(f"run {run.run_id} has multiple program invocations")
     invocation = invocations[0]
-    programs = {
-        program.program_id: program for program in rows.answer_programs
-    }
+    programs = {program.program_id: program for program in rows.answer_programs}
     program = programs.get(invocation.program_id)
     if program is None:
         raise ValueError(
@@ -224,9 +221,7 @@ def _program_derivation_view(
         )
     revision = None
     if invocation.revision_id is not None:
-        revisions = {
-            item.revision_id: item for item in rows.program_revisions
-        }
+        revisions = {item.revision_id: item for item in rows.program_revisions}
         revision_row = revisions.get(invocation.revision_id)
         if revision_row is None:
             raise ValueError(
@@ -308,7 +303,7 @@ def _outputs_for_fact(
     fact: RequestedFactRow,
     *,
     fact_results_by_fact: dict[str, list[FactResultRow]],
-    outputs_by_fact_result: dict[str, tuple[AnswerOutputRow, ...]],
+    outputs_by_fact_result: dict[str, list[AnswerOutputRow]],
 ) -> tuple[AnswerOutputRow, ...]:
     return tuple(
         output
@@ -492,7 +487,10 @@ def _memory_artifact_view(artifact: MemoryArtifactRow) -> MemoryArtifactView:
 
 def _memory_address_summaries(payload: dict[str, object]) -> tuple[str, ...]:
     summaries: list[str] = []
-    for address in payload.get("addresses") or ():
+    addresses = payload.get("addresses")
+    if not isinstance(addresses, (list, tuple)):
+        return ()
+    for address in addresses:
         if not isinstance(address, dict):
             continue
         address_id = str(address.get("address") or "").strip()
@@ -571,7 +569,7 @@ def _presentation_value(presentation: AnswerPresentationRow) -> str:
 def _source_read_view(
     source_read: SourceReadRow,
     *,
-    catalog_endpoints_by_id: dict[str, CatalogEndpointRow],
+    catalog_endpoints_by_id: dict[tuple[str, str], CatalogEndpointRow],
 ) -> SourceReadView:
     return SourceReadView(
         source_read_id=source_read.source_read_id,
@@ -662,7 +660,6 @@ def _clarification_request_view(
     return ClarificationRequestView(
         clarification_id=clarification.clarification_id,
         payload_json=clarification.payload_json,
-        fact_result_id=clarification.fact_result_id,
         step_id=clarification.step_id,
     )
 
@@ -761,7 +758,7 @@ def _proof_view(
     proof_row: ProofGraphRow,
     *,
     source_reads: tuple[SourceReadRow, ...],
-    catalog_endpoints_by_id: dict[str, CatalogEndpointRow],
+    catalog_endpoints_by_id: dict[tuple[str, str], CatalogEndpointRow],
     target_node_refs: tuple[str, ...] = (),
 ) -> ExecutionProofView:
     payload = read_execution_proof_graph_payload(
@@ -839,7 +836,7 @@ def _proof_source_reads(
     *,
     proof_row: ProofGraphRow,
     source_reads: tuple[SourceReadRow, ...],
-    catalog_endpoints_by_id: dict[str, CatalogEndpointRow],
+    catalog_endpoints_by_id: dict[tuple[str, str], CatalogEndpointRow],
 ) -> tuple[SourceReadView, ...]:
     source_read_ids = proof_source_read_ids(payload)
     return tuple(
@@ -873,10 +870,13 @@ def _one_by_run(items: tuple[RunResultRow, ...]) -> dict[str, RunResultRow]:
 
 
 def _format_value(value: dict[str, object]) -> str:
-    entity_type = str(value.get("entity_type") or "")
-    entity_id = str(value.get("entity_id") or "")
-    if entity_type and entity_id:
-        return f"{entity_type}:{entity_id}"
+    entity_kind = str(value.get("entity_kind") or "")
+    components = value.get("components")
+    if entity_kind and isinstance(components, dict):
+        component_text = ",".join(
+            f"{key}={component}" for key, component in components.items()
+        )
+        return f"{entity_kind}:{component_text}"
     if "value" in value:
         return str(value["value"])
     return str(value)

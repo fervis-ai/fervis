@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 
 from fervis.observability.usage_types import CostSource, UsageKey
 from fervis.lineage.enums import ModelUsageKind, ModelUsageUnit, RunStepKey

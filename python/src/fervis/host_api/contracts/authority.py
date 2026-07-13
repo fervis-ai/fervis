@@ -57,7 +57,7 @@ class ReadContextRef:
                 "unexpected ReadContextRef keys: " + ", ".join(sorted(unexpected))
             )
         return cls(
-            scheme=value.get("scheme"),
+            scheme=_read_context_scheme(value.get("scheme")),
             key=value.get("key"),
             tenant_key=value.get("tenant_key"),
         )
@@ -98,6 +98,19 @@ class ReadAuthority:
             tenant_id=principal.tenant_id,
             read_context_ref=principal.read_context_ref,
             delegated_credential=getattr(principal, "delegated_credential", None),
+        )
+
+    @classmethod
+    def from_read_context(
+        cls,
+        read_context_ref: ReadContextRef,
+        *,
+        delegated_credential: DelegatedReadCredential | None = None,
+    ) -> "ReadAuthority":
+        return cls(
+            tenant_id=read_context_ref.tenant_key or "default",
+            read_context_ref=read_context_ref,
+            delegated_credential=delegated_credential,
         )
 
     @property

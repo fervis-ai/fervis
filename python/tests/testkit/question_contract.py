@@ -79,7 +79,7 @@ def answer_subject_from_payload(payload: Any) -> RequestedFactAnswerSubject | No
 
 def answer_output_from_payload(payload: Any) -> RequestedFactAnswerOutput:
     if isinstance(payload, str):
-        return RequestedFactAnswerOutput(id=payload)
+        return RequestedFactAnswerOutput(id=payload, role="ANSWER_VALUE")
     if not isinstance(payload, dict):
         raise ValueError("answer output must be a string or object")
     return RequestedFactAnswerOutput(
@@ -120,6 +120,7 @@ def group_key_from_payload(payload: Any) -> RequestedFactGroupKey | None:
 def known_input_from_payload(payload: dict[str, Any]) -> RequestedFactKnownInput:
     kind = KnownInputKind(str(payload["kind"]))
     if kind == KnownInputKind.LITERAL:
+        role = LiteralInputRole(str(payload["role"]))
         return RequestedFactLiteralInput(
             id=str(payload["id"]),
             source=KnownInputSource(str(payload.get("source") or "question_context")),
@@ -128,7 +129,7 @@ def known_input_from_payload(payload: dict[str, Any]) -> RequestedFactKnownInput
             resolved_value_text=str(payload.get("resolved_value_text") or ""),
             field_label_text=str(payload.get("field_label_text") or ""),
             value_meaning_hint=str(payload.get("value_meaning_hint") or ""),
-            role=LiteralInputRole(str(payload["role"])),
+            role=role,
         )
     return RequestedFactRowSetReferenceInput(
         id=str(payload["id"]),

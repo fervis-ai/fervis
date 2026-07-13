@@ -1,0 +1,52 @@
+id: ranked_measured_output_remains_selectable
+description: Ranked-group visibility hides operation metrics from the entity output while preserving an explicitly requested measured output.
+kind: algorithm
+algorithm: source_binding.fulfillment_support
+input:
+  project_model_visible: true
+  requested_fact:
+    description: location with the highest payroll total
+    subject_text: location
+    answer_expression_family: ranked_selection
+    answer_outputs:
+      - {id: answer_1, description: location, role: ANSWER_VALUE}
+      - {id: answer_2, description: payroll total, role: MEASURED_VALUE}
+  catalog:
+    reads:
+      - id: list_compensation
+        endpoint_name: list_compensation
+        resource_names: [compensation]
+        row_paths:
+          - {id: data, path: data, cardinality: many}
+        fields:
+          - {ref: location.id, path: data.location_id, row_path_id: data, type: uuid}
+          - {ref: compensation.amount, path: data.amount, row_path_id: data, type: decimal}
+        entity_references:
+          - id: location_reference
+            target_entity_kind: location
+            target_key_id: primary_key
+            components:
+              - {target_component_id: location_id, local_field_ref: location.id}
+  candidate:
+    source_candidate_id: source_1
+    kind: new_api_read
+    read_id: list_compensation
+    result_grains:
+      - row_path_id: data
+        row_source_id: rs_source_1_data
+        cardinality: many
+        entity_references:
+          - reference_id: location_reference
+            target_entity_kind: location
+            target_key_id: primary_key
+            components:
+              - {component_id: location_id, field_id: location_id}
+        evidence_items:
+          - {field_id: location_id, type: uuid, answer_output_ids: [answer_1]}
+          - {field_id: amount, type: decimal, answer_output_ids: [answer_2]}
+expect:
+  result_contains:
+    entity_fields_by_answer_output:
+      answer_1: [location_id]
+    metric_fields_by_answer_output:
+      answer_2: [amount]

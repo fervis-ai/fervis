@@ -19,6 +19,7 @@ from fervis.lookup.source_binding.compiler_ir import (
     DraftEndpointParamBinding,
     DraftRelationSource,
     DraftRelationSourceAppliedFilter,
+    SourceAppliedFilter,
 )
 from fervis.lookup.answer_program.relations import SourceKind
 from fervis.lookup.fact_plan.row_sources import (

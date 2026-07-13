@@ -45,17 +45,6 @@ def directly_assigns_name(node: ast.AST, name: str) -> bool:
     )
 
 
-def literal_string_sequence(node: ast.AST) -> list[str] | None:
-    if not isinstance(node, ast.List | ast.Tuple):
-        return None
-    values: list[str] = []
-    for item in node.elts:
-        if not isinstance(item, ast.Constant) or not isinstance(item.value, str):
-            return None
-        values.append(item.value)
-    return values
-
-
 def has_import(tree: ast.Module, module: str, name: str) -> bool:
     return import_lineno(tree, module, name) is not None
 
@@ -292,9 +281,9 @@ def pattern_bound_names(pattern: ast.pattern) -> set[str]:
     if isinstance(pattern, ast.MatchStar):
         return {pattern.name} if pattern.name else set()
     if isinstance(pattern, ast.MatchMapping):
-        names = set()
-        for nested in pattern.patterns:
-            names.update(pattern_bound_names(nested))
+        names: set[str] = set()
+        for child_pattern in pattern.patterns:
+            names.update(pattern_bound_names(child_pattern))
         if pattern.rest:
             names.add(pattern.rest)
         return names

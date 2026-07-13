@@ -21,17 +21,19 @@ input:
                 answer_outputs:
                   - id: answer_1
                     description: product list
+                    role: ANSWER_VALUE
                 used_question_inputs: []
         addresses:
           - address: entity.staff_1
             kind: entity
             resource: staff
+            keyId: primary_key
             referenceText: Staff One
             identity: {staff_key: staff-1}
             evidence: {stepIds: [turn_staff_sales.entity_proof]}
           - address: relation.answer_rows
             kind: relation
-            source: {kind: api_read, read_id: staff_sales_read, identityType: sale}
+            source: {kind: api_read, read_id: staff_sales_read}
             grainKeys: [sale_key]
             fieldCoverage: {sale_key: answer_rows.sale_key}
             completeness: {status: complete, pagination: all_pages}

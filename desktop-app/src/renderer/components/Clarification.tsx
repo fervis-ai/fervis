@@ -25,7 +25,7 @@ export function ClarificationForm({
     return (
       <ContractErrorBlock
         code="invalid_clarification_contract"
-        message="NEEDS_CLARIFICATION did not include a clarification."
+        message="WAITING_FOR_CLARIFICATION did not include a clarification."
       />
     );
   }
@@ -123,10 +123,9 @@ function ChoiceClarification({
           void apiClient
             .answerClarification(run.questionId, {
               clarificationId: clarification.id,
-              question: clarificationOptionAnswer(selectedOption),
+              responseText: clarificationOptionAnswer(selectedOption),
               selectedOptionId: selectedOption.id,
-              triggerKind: "clarification_response",
-              baseRunId: run.runId
+              runId: run.runId
             })
             .then(onClarificationState)
             .catch(onActionError)
@@ -180,9 +179,8 @@ function TextClarification({
           void apiClient
             .answerClarification(run.questionId, {
               clarificationId: clarification.id,
-              question: answer.trim(),
-              triggerKind: "clarification_response",
-              baseRunId: run.runId
+              responseText: answer.trim(),
+              runId: run.runId
             })
             .then(onClarificationState)
             .catch(onActionError)
@@ -220,9 +218,7 @@ function ClarificationPending({
         <span>answer sent</span>
         <strong>{selectedAnswer}</strong>
       </div>
-      <p className="quiet">
-        Creating the next run in this question.
-      </p>
+      <p className="quiet">Continuing this question run.</p>
     </div>
   );
 }

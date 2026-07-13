@@ -12,7 +12,7 @@ export function decodeRunStatus(raw: unknown, label: string): RunStatus {
     value === "QUEUED" ||
     value === "RUNNING" ||
     value === "COMPLETED" ||
-    value === "NEEDS_CLARIFICATION" ||
+    value === "WAITING_FOR_CLARIFICATION" ||
     value === "FAILED"
   ) {
     return value;
@@ -27,7 +27,6 @@ export function decodeTriggerKind(
   const value = expectString(raw, label);
   if (
     value === "initial" ||
-    value === "clarification_response" ||
     value === "retry" ||
     value === "rerun"
   ) {

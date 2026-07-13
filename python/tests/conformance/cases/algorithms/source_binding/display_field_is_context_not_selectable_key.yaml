@@ -1,0 +1,18 @@
+id: display_field_is_context_not_selectable_key
+description: Source binding shows a declared display field as response context while exposing the complete candidate key as the only entity-valued computation choice.
+kind: algorithm
+algorithm: source_binding.prompt_surface
+input:
+  request:
+    mode: multi_row_summary_ranked_metric
+expect:
+  result_contains:
+    response_row_fields_by_path:
+      data: [location_id, label, amount]
+    selectable_entity_evidence:
+      - type: candidate_key
+        key_id: location_key
+        entity_kind: location
+        components:
+          - component_id: location_id
+            field_id: location_id

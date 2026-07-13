@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 from typing import Any
 
 from fervis.memory._serialization import without_empty
+from fervis.lookup.canonical_data import (
+    EntityKeyComponentValue,
+    EntityKeyValue,
+    ResultValue,
+    runtime_value_from_payload,
+    runtime_value_to_payload,
+)
 
 
 class FactAddressKind(StrEnum):
@@ -28,7 +35,6 @@ class RelationSourceKind(StrEnum):
 
 _TERMINAL_OUTCOMES = frozenset(
     {
-        "needs_clarification",
         "impossible",
         "no_data",
         "undefined",
@@ -67,10 +73,47 @@ def evidence_ref_from_payload(payload: Any) -> EvidenceRef | None:
 
 
 @dataclass(frozen=True)
+class FactAddressValue:
+    type: str
+    value: ResultValue
+    answer_output_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.type:
+            raise ValueError("fact address value requires type")
+        if self.type == "entity_key" and not isinstance(self.value, EntityKeyValue):
+            raise ValueError("entity-key fact address value requires typed key")
+        if self.type != "entity_key" and isinstance(self.value, EntityKeyValue):
+            raise ValueError("typed entity key requires entity_key value type")
+
+    def to_dict(self) -> dict[str, Any]:
+        value: Any = self.value
+        if isinstance(self.value, EntityKeyValue):
+            value = {
+                "entityKind": self.value.entity_kind,
+                "keyId": self.value.key_id,
+                "components": {
+                    component.component_id: runtime_value_to_payload(component.value)
+                    for component in self.value.components
+                },
+            }
+        else:
+            value = runtime_value_to_payload(self.value)
+        return without_empty(
+            {
+                "type": self.type,
+                "value": value,
+                "answer_output_ids": list(self.answer_output_ids),
+            }
+        )
+
+
+@dataclass(frozen=True)
 class FactAddress:
     address: str
     kind: FactAddressKind
     resource: str = ""
+    key_id: str = ""
     reference_text: str = ""
     identity: dict[str, str] = field(default_factory=dict)
     accessor: dict[str, Any] = field(default_factory=dict)
@@ -85,7 +128,7 @@ class FactAddress:
     row_addresses: tuple[str, ...] = ()
     source_relation: str = ""
     grain: dict[str, Any] = field(default_factory=dict)
-    values: dict[str, Any] = field(default_factory=dict)
+    values: dict[str, FactAddressValue] = field(default_factory=dict)
     rank: dict[str, Any] = field(default_factory=dict)
     terminal: str = ""
     clarification_questions: tuple[str, ...] = ()
@@ -107,6 +150,7 @@ class FactAddress:
         *,
         address: str,
         resource: str,
+        key_id: str,
         reference_text: str,
         identity: dict[str, str],
         accessor: dict[str, Any] | None = None,
@@ -116,6 +160,7 @@ class FactAddress:
             address=address,
             kind=FactAddressKind.ENTITY,
             resource=resource,
+            key_id=key_id,
             reference_text=reference_text,
             identity=dict(identity),
             accessor=dict(accessor or {}),
@@ -175,7 +220,7 @@ class FactAddress:
         address: str,
         relation: str,
         grain: dict[str, Any] | None = None,
-        values: dict[str, Any] | None = None,
+        values: dict[str, FactAddressValue] | None = None,
         identity: dict[str, str] | None = None,
         rank: dict[str, Any] | None = None,
         evidence: EvidenceRef | None = None,
@@ -240,11 +285,12 @@ class FactAddress:
             "address": self.address,
             "kind": self.kind.value,
             "resource": self.resource,
+            "keyId": self.key_id,
             "referenceText": self.reference_text,
             "identity": dict(self.identity),
             "accessor": dict(self.accessor),
             "display": self.display,
-            "value": dict(self.scalar_value),
+            "value": _scalar_value_payload(self.scalar_value),
             "scope": dict(self.scope),
             "derivation": dict(self.derivation),
             "source": dict(self.source),
@@ -254,7 +300,9 @@ class FactAddress:
             "rowAddresses": list(self.row_addresses),
             "relation": self.source_relation,
             "grain": dict(self.grain),
-            "values": dict(self.values),
+            "values": {
+                field_id: value.to_dict() for field_id, value in self.values.items()
+            },
             "rank": dict(self.rank),
             "terminal": self.terminal,
             "clarificationQuestions": list(self.clarification_questions),
@@ -282,6 +330,7 @@ def fact_address_from_payload(payload: Any) -> FactAddress:
         return FactAddress.entity(
             address=address,
             resource=str(payload.get("resource") or ""),
+            key_id=str(payload.get("keyId") or ""),
             reference_text=str(payload.get("referenceText") or ""),
             identity={
                 str(key): str(value)
@@ -291,9 +340,12 @@ def fact_address_from_payload(payload: Any) -> FactAddress:
             evidence=evidence_ref_from_payload(payload.get("evidence")),
         )
     if kind == FactAddressKind.VALUE:
+        scalar_value = dict(payload.get("value") or {})
+        if "value" in scalar_value:
+            scalar_value["value"] = runtime_value_from_payload(scalar_value["value"])
         return FactAddress.value(
             address=address,
-            value=dict(payload.get("value") or {}),
+            value=scalar_value,
             display=str(payload.get("display") or ""),
             scope=dict(payload.get("scope") or {}),
             derivation=dict(payload.get("derivation") or {}),
@@ -316,11 +368,17 @@ def fact_address_from_payload(payload: Any) -> FactAddress:
             evidence=evidence_ref_from_payload(payload.get("evidence")),
         )
     if kind == FactAddressKind.ROW:
+        raw_values = payload.get("values") or {}
+        if not isinstance(raw_values, dict):
+            raise ValueError("row fact address values must be an object")
         return FactAddress.row(
             address=address,
             relation=str(payload.get("relation") or ""),
             grain=dict(payload.get("grain") or {}),
-            values=dict(payload.get("values") or {}),
+            values={
+                str(field_id): fact_address_value_from_payload(value)
+                for field_id, value in raw_values.items()
+            },
             identity={
                 str(key): str(value)
                 for key, value in (payload.get("identity") or {}).items()
@@ -355,6 +413,47 @@ def fact_address_from_payload(payload: Any) -> FactAddress:
     raise ValueError("fact address requires supported kind")
 
 
+def fact_address_value_from_payload(payload: object) -> FactAddressValue:
+    if not isinstance(payload, dict):
+        raise ValueError("fact address value must be an object")
+    value_type = str(payload.get("type") or "").strip()
+    if not value_type or "value" not in payload:
+        raise ValueError("fact address value requires type and value")
+    value = (
+        _entity_key_value(payload.get("value"))
+        if value_type == "entity_key"
+        else runtime_value_from_payload(payload.get("value"))
+    )
+    raw_output_ids = payload.get("answer_output_ids") or ()
+    if not isinstance(raw_output_ids, (list, tuple)):
+        raise ValueError("fact address value answer_output_ids must be an array")
+    return FactAddressValue(
+        type=value_type,
+        value=value,
+        answer_output_ids=tuple(str(item) for item in raw_output_ids if str(item)),
+    )
+
+
+def _entity_key_value(payload: object) -> EntityKeyValue:
+    if not isinstance(payload, dict):
+        raise ValueError("entity-key fact address value must be an object")
+    raw_components = payload.get("components")
+    if not isinstance(raw_components, dict):
+        raise ValueError("entity-key fact address value requires components")
+    return EntityKeyValue(
+        entity_kind=str(payload.get("entityKind") or "").strip(),
+        key_id=str(payload.get("keyId") or "").strip(),
+        components=tuple(
+            EntityKeyComponentValue(
+                component_id=str(component_id),
+                value=runtime_value_from_payload(component_value),
+            )
+            for component_id, component_value in raw_components.items()
+            if str(component_id)
+        ),
+    )
+
+
 def _address_kind(value: Any) -> FactAddressKind | None:
     try:
         return FactAddressKind(str(value))
@@ -362,10 +461,17 @@ def _address_kind(value: Any) -> FactAddressKind | None:
         return None
 
 
+def _scalar_value_payload(value: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(value)
+    if "value" in payload:
+        payload["value"] = runtime_value_to_payload(payload["value"])
+    return payload
+
+
 def _validate_address_variant(address: FactAddress) -> None:
     if address.kind == FactAddressKind.ENTITY:
-        if not address.resource or not address.identity:
-            raise ValueError("entity fact address requires resource and identity")
+        if not address.resource or not address.key_id or not address.identity:
+            raise ValueError("entity fact address requires a complete candidate key")
         return
     if address.kind == FactAddressKind.VALUE:
         if not address.scalar_value:

@@ -76,6 +76,8 @@ class PlanSelectionTurnPrompt(TurnPromptBase):
                     "Use source_alignment=DIRECT when this source contains the complete raw ingredient set needed to answer the requested fact by itself, even if subsequent steps must choose params, filters, metrics, groups, aggregation, ranking, or rendering.",
                     "Use source_alignment=PARTIAL when this source contains a necessary raw ingredient for the requested fact, but the fact cannot be answered without combining it with another source.",
                     "Use source_alignment=NOT_ALIGNED when the source is only related, adjacent, or shape-compatible, or lacks the raw ingredients needed for the requested fact; do not forward it.",
+                    "Treat applied_filters as backend-owned constraints already attached to the source; assess the source after those filters are applied.",
+                    "A source restricted to a specialized population not requested by the question is NOT_ALIGNED, even when its rows expose every required field.",
                     "For each review, write basis before source_alignment.",
                 ),
             ),
@@ -112,7 +114,7 @@ class PlanSelectionTurnPrompt(TurnPromptBase):
 
     def plan_selection_candidates_payload(self) -> dict[str, object]:
         strategies_by_fact = source_strategies_by_fact(
-            self.request.source_candidate_payload,
+            self.request.source_candidates,
             requested_facts=self.request.requested_facts,
             relation_catalog=self.request.relation_catalog,
             shape_specs_for_family=plan_selection_shape_specs_for_family,
@@ -136,7 +138,7 @@ class PlanSelectionTurnPrompt(TurnPromptBase):
 
     def source_alignment_candidates_payload(self) -> dict[str, object]:
         strategies_by_fact = source_strategies_by_fact(
-            self.request.source_candidate_payload,
+            self.request.source_candidates,
             requested_facts=self.request.requested_facts,
             relation_catalog=self.request.relation_catalog,
             shape_specs_for_family=plan_selection_shape_specs_for_family,
@@ -162,7 +164,7 @@ class PlanSelectionTurnPrompt(TurnPromptBase):
 
     def _schema(self) -> dict[str, Any]:
         strategies_by_fact = source_strategies_by_fact(
-            self.request.source_candidate_payload,
+            self.request.source_candidates,
             requested_facts=self.request.requested_facts,
             relation_catalog=self.request.relation_catalog,
             shape_specs_for_family=plan_selection_shape_specs_for_family,

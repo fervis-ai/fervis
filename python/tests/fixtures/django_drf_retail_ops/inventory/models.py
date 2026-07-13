@@ -34,4 +34,3 @@ class StockRecord(models.Model):
         app_label = "retail_ops_inventory"
         ordering = ["product__sku", "location__name"]
         unique_together = [("product", "location")]
-

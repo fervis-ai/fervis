@@ -1,7 +1,6 @@
 """Lookup catalog selection public boundary."""
 
 from fervis.lookup.relation_catalog.selection.model import (
-    ActiveMemoryCatalogSignal,
     AnswerOutputResourceLineage,
     CatalogSelectionRanking,
     CatalogSelectionRequest,
@@ -26,7 +25,6 @@ from fervis.lookup.relation_catalog.selection.selector import (
 )
 
 __all__ = [
-    "ActiveMemoryCatalogSignal",
     "AnswerOutputResourceLineage",
     "CatalogSelectionRanking",
     "CatalogSelectionRequest",

@@ -218,10 +218,13 @@ def _plan_flask_app_object(
     updated = loaded.text
     if _flask_mount_after_app_assignment(loaded.tree, app_assignment) is None:
         updated = insert_after_node(updated, app_assignment, FLASK_MOUNT)
-    updated = _ensure_config_fervis_import(updated, path=relative_path)
-    if isinstance(updated, BlockedPatch):
-        return updated
-    return loaded.plan_validated(updated, validate=flask_entrypoint_contains_hooks)
+    import_update = _ensure_config_fervis_import(updated, path=relative_path)
+    if isinstance(import_update, BlockedPatch):
+        return import_update
+    return loaded.plan_validated(
+        import_update,
+        validate=flask_entrypoint_contains_hooks,
+    )
 
 
 def _plan_flask_app_factory(
@@ -248,11 +251,11 @@ def _plan_flask_app_factory(
     updated = loaded.text
     if _flask_mount_before_return(factory) is None:
         updated = insert_before_node(updated, factory.return_node, f"    {FLASK_MOUNT}")
-    updated = _ensure_config_fervis_import(updated, path=relative_path)
-    if isinstance(updated, BlockedPatch):
-        return updated
+    import_update = _ensure_config_fervis_import(updated, path=relative_path)
+    if isinstance(import_update, BlockedPatch):
+        return import_update
     return loaded.plan_validated(
-        updated,
+        import_update,
         validate=lambda tree: flask_factory_contains_hooks(
             tree,
             factory_name=factory_name,
@@ -307,7 +310,7 @@ def _flask_app_factory(
         and node.value is not None
         and _is_flask_call(tree, node.value, line=node.lineno)
     ]
-    all_returns = [node for node in ast.walk(function) if isinstance(node, ast.Return)]
+    all_returns = _function_owned_returns(function)
     returns = [
         node
         for node in all_returns
@@ -324,6 +327,31 @@ def _flask_app_factory(
         return_node=return_node,
         function=function,
     )
+
+
+def _function_owned_returns(function: ast.FunctionDef) -> list[ast.Return]:
+    returns: list[ast.Return] = []
+
+    class ReturnVisitor(ast.NodeVisitor):
+        def visit_Return(self, node: ast.Return) -> None:
+            returns.append(node)
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            return
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            return
+
+        def visit_ClassDef(self, node: ast.ClassDef) -> None:
+            return
+
+        def visit_Lambda(self, node: ast.Lambda) -> None:
+            return
+
+    visitor = ReturnVisitor()
+    for statement in function.body:
+        visitor.visit(statement)
+    return returns
 
 
 def flask_factory_contains_hooks(
@@ -345,6 +373,7 @@ def _flask_mount_before_return(factory: _FlaskFactory) -> ast.Expr | None:
         if (
             node.lineno > factory.assignment.lineno
             and node.lineno < factory.return_node.lineno
+            and isinstance(node, ast.Expr)
             and _is_flask_mount_app_expr(node)
         ):
             return node
@@ -386,7 +415,11 @@ def _flask_mount_after_app_assignment(
 ) -> ast.Expr | None:
     app_line = app_assignment.end_lineno or app_assignment.lineno
     for node in tree.body:
-        if node.lineno > app_line and _is_flask_mount_app_expr(node):
+        if (
+            node.lineno > app_line
+            and isinstance(node, ast.Expr)
+            and _is_flask_mount_app_expr(node)
+        ):
             return node
     return None
 

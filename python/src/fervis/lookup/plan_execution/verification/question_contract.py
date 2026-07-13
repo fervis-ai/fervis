@@ -1,5 +1,7 @@
 """Question-contract checks for fact-plan verification."""
 
+from collections.abc import Iterable
+
 from ._shared import QuestionContract, RequestedFact, VerificationError
 
 
@@ -64,7 +66,7 @@ def _verify_requested_facts(
                 raise VerificationError("known input requires text")
 
 
-def _verify_unique_ids(ids: object, *, message: str) -> None:
+def _verify_unique_ids(ids: Iterable[str], *, message: str) -> None:
     seen: set[str] = set()
     for item in ids:
         value = str(item or "")

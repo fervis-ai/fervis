@@ -12,6 +12,14 @@ from ._shared import (
     known_input_id_for_value,
     operation_input_values_payload,
 )
+from fervis.lookup.answer_program.values import NamedValuePayload
+from fervis.lookup.source_binding.candidates.contracts import (
+    CandidateKeyComponent,
+    JsonObject,
+    JsonValue,
+    ResultGrain,
+    parse_result_grain,
+)
 from .api_sources import _api_candidate_payload
 from .eligibility import _memory_candidate_with_fact_eligibility
 from .memory import (
@@ -42,6 +50,7 @@ def _raw_source_binding_candidate_payload(
     *,
     selected_value_ids: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
+    requested_fact_ids = tuple(fact.id for fact in request.requested_facts)
     relation_payload = available_relation_catalog_payload(
         request.relation_catalog,
         catalog_selection=request.catalog_selection,
@@ -83,9 +92,12 @@ def _raw_source_binding_candidate_payload(
                 source_linked=True,
             )
         )
-    utility_sources = _utility_source_candidates(
-        relation_payload,
-        request=request,
+    utility_sources = _with_default_requested_fact_applicability(
+        _utility_source_candidates(
+            relation_payload,
+            request=request,
+        ),
+        requested_fact_ids=requested_fact_ids,
     )
     memory_source_candidates = _question_scoped_memory_source_candidates(
         memory_sources=tuple(memory_sources_by_id.values()),
@@ -131,6 +143,7 @@ def _raw_source_binding_candidate_payload(
             )
         ):
             promoted_utility_sources = True
+            source_options: list[JsonValue] = list(utility_sources)
             source_contexts = [
                 {
                     "context_id": f"requested_fact:{requested_fact_id}:generated_relations",
@@ -138,7 +151,7 @@ def _raw_source_binding_candidate_payload(
                     "ordering_rationale": (
                         "backend-generated relations derived from grounded inputs"
                     ),
-                    "source_options": utility_sources,
+                    "source_options": source_options,
                 }
             ]
         requested_fact_sources.append(
@@ -166,10 +179,10 @@ def _raw_source_binding_candidate_payload(
         )
         if eligible_candidate is not None
     ]
-    value_sources = [
-        *current_value_sources,
-        *visible_memory_value_candidates,
-    ]
+    value_sources = _with_default_requested_fact_applicability(
+        [*current_value_sources, *visible_memory_value_candidates],
+        requested_fact_ids=requested_fact_ids,
+    )
     payload: dict[str, Any] = {
         "requested_fact_sources": requested_fact_sources,
     }
@@ -184,6 +197,25 @@ def _raw_source_binding_candidate_payload(
     if relation_payload.get("missing_required_inputs"):
         payload["missing_required_inputs"] = relation_payload["missing_required_inputs"]
     return payload
+
+
+def _with_default_requested_fact_applicability(
+    candidates: list[dict[str, Any]],
+    *,
+    requested_fact_ids: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    for candidate in candidates:
+        if candidate.get("applies_to_requested_facts"):
+            output.append(candidate)
+            continue
+        output.append(
+            {
+                **candidate,
+                "applies_to_requested_facts": list(requested_fact_ids),
+            }
+        )
+    return output
 
 
 def _same_scope_memory_candidate_catalog(
@@ -306,7 +338,7 @@ def _api_sources_for_fact(
     source_candidate_ids: dict[str, str],
 ) -> list[dict[str, Any]]:
     requested_fact_id = str(item.get("requested_fact_id") or "")
-    available_values = _available_values_for_fact(
+    available_values = _source_parameter_values_for_fact(
         requested_fact_id,
         request=request,
     )
@@ -442,15 +474,23 @@ def _active_values_for_fact(
     )
 
 
-def _available_values_for_fact(
+def _source_parameter_values_for_fact(
     requested_fact_id: str,
     *,
     request: SourceCandidateInputRequest,
 ) -> tuple[FactValue, ...]:
+    result_limit_input_ids = {
+        known.id
+        for fact in request.requested_facts
+        if fact.id == requested_fact_id
+        for known in fact.known_inputs
+        if known.is_result_limit
+    }
     return tuple(
         value
         for value in request.available_values
         if value_applies_to_requested_fact(value, requested_fact_id)
+        and known_input_id_for_value(value) not in result_limit_input_ids
     )
 
 
@@ -465,7 +505,12 @@ def _api_candidate_covers_active_values(
             value=value,
         )
         for value in active_values
-        if value.kind in {ValueKind.IDENTITY, ValueKind.IDENTITY_SET}
+        if value.kind
+        in {
+            ValueKind.IDENTITY,
+            ValueKind.IDENTITY_SET,
+            ValueKind.NAMED,
+        }
     )
 
 
@@ -479,10 +524,17 @@ def _api_candidate_covers_active_value(
             _param_covers_identity_value(param, value=value)
             for param in candidate.get("params") or ()
             if isinstance(param, dict)
-        ) or any(
-            _field_covers_identity_value(field, value=value)
-            for field in candidate.get("fields") or ()
-            if isinstance(field, dict)
+        ) or _entity_declaration_covers_identity_value(
+            candidate,
+            value=value,
+        )
+    if value.kind == ValueKind.NAMED and isinstance(value.payload, NamedValuePayload):
+        if not value.payload.matched_field_ref:
+            return True
+        return any(
+            str(applied_filter.get("value_id") or "") == value.id
+            for applied_filter in candidate.get("applied_filters") or ()
+            if isinstance(applied_filter, dict)
         )
     return True
 
@@ -492,58 +544,87 @@ def _param_covers_identity_value(
     *,
     value: FactValue,
 ) -> bool:
-    identity = param.get("identity")
-    if not isinstance(identity, dict):
+    target = param.get("entity_target")
+    if not isinstance(target, dict):
         return False
-    if value.kind == ValueKind.IDENTITY and isinstance(
-        value.payload, IdentityValuePayload
-    ):
-        payload = value.payload
-    elif value.kind == ValueKind.IDENTITY_SET and isinstance(
-        value.payload, IdentitySetValuePayload
-    ):
-        payload = value.payload
-    else:
-        return False
-    identity_field = str(identity.get("identity_field") or "")
-    entity_ref = str(identity.get("entity_ref") or "")
-    return bool(identity_field and payload.identity_field == identity_field) or bool(
-        entity_ref and payload.identity_type == entity_ref
+    identity = _identity_value_contract(value)
+    return identity == (
+        str(target.get("entity_kind") or ""),
+        str(target.get("key_id") or ""),
+        str(target.get("component_id") or ""),
     )
 
 
-def _field_covers_identity_value(
-    field: dict[str, Any],
+def _entity_declaration_covers_identity_value(
+    candidate: JsonObject,
     *,
     value: FactValue,
 ) -> bool:
-    identity = field.get("identity")
-    if not isinstance(identity, dict):
+    identity = _identity_value_contract(value)
+    raw_grains = candidate.get("result_grains")
+    if not isinstance(raw_grains, (list, tuple)):
         return False
-    return _identity_metadata_covers_value(identity, value=value)
-
-
-def _identity_metadata_covers_value(
-    identity: dict[str, Any],
-    *,
-    value: FactValue,
-) -> bool:
-    if value.kind == ValueKind.IDENTITY and isinstance(
-        value.payload, IdentityValuePayload
-    ):
-        payload = value.payload
-    elif value.kind == ValueKind.IDENTITY_SET and isinstance(
-        value.payload, IdentitySetValuePayload
-    ):
-        payload = value.payload
-    else:
-        return False
-    identity_field = str(identity.get("identity_field") or "")
-    entity_ref = str(identity.get("entity_ref") or "")
-    return bool(identity_field and payload.identity_field == identity_field) or bool(
-        entity_ref and payload.identity_type == entity_ref
+    grains = tuple(
+        parse_result_grain(grain) for grain in raw_grains if isinstance(grain, dict)
+    )
+    return any(
+        identity in _entity_declaration_component_targets(grain) for grain in grains
     )
 
 
-def _candidate_cardinality(candidate: dict[str, Any]) -> str:
-    return str(candidate.get("cardinality") or "")
+def _identity_value_contract(value: FactValue) -> tuple[str, str, str]:
+    if value.kind == ValueKind.IDENTITY and isinstance(
+        value.payload, IdentityValuePayload
+    ):
+        return (
+            value.payload.entity_kind,
+            value.payload.key_id,
+            value.payload.key_component_id,
+        )
+    if value.kind == ValueKind.IDENTITY_SET and isinstance(
+        value.payload, IdentitySetValuePayload
+    ):
+        return (
+            value.payload.entity_kind,
+            value.payload.key_id,
+            value.payload.key_component_id,
+        )
+    return ("", "", "")
+
+
+def _entity_declaration_component_targets(
+    grain: ResultGrain,
+) -> tuple[tuple[str, str, str], ...]:
+    targets: list[tuple[str, str, str]] = []
+    for key_declaration in grain.candidate_keys:
+        entity_kind = key_declaration.entity_kind
+        targets.extend(
+            _declaration_component_targets(
+                key_declaration.components,
+                entity_kind=entity_kind,
+                key_id=key_declaration.key_id,
+            )
+        )
+    for reference_declaration in grain.entity_references:
+        entity_kind = reference_declaration.target_entity_kind
+        targets.extend(
+            _declaration_component_targets(
+                reference_declaration.components,
+                entity_kind=entity_kind,
+                key_id=reference_declaration.target_key_id,
+            )
+        )
+    return tuple(targets)
+
+
+def _declaration_component_targets(
+    components: tuple[CandidateKeyComponent, ...],
+    *,
+    entity_kind: str,
+    key_id: str,
+) -> tuple[tuple[str, str, str], ...]:
+    return tuple(
+        (entity_kind, key_id, component.component_id)
+        for component in components
+        if entity_kind and key_id and component.component_id
+    )

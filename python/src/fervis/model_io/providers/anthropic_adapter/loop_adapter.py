@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
+from types import ModuleType
+from fervis.types.enums import StrEnum
 from typing import Any
 
 import httpx
@@ -34,6 +35,7 @@ from fervis.model_io.providers.anthropic_adapter.conversation_resolution_transpo
 )
 from fervis.model_io.providers.schema_projection import strip_schema_keywords
 
+anthropic: ModuleType | None
 try:  # pragma: no cover - optional dependency for runtime environments
     import anthropic
 except Exception:  # pragma: no cover - optional dependency not installed in tests
@@ -60,10 +62,12 @@ class AnthropicMessageRole(StrEnum):
 
 class AnthropicToolChoiceType(StrEnum):
     ANY = "any"
+    TOOL = "tool"
 
 
 class AnthropicToolChoiceKey(StrEnum):
     TYPE = "type"
+    NAME = "name"
     DISABLE_PARALLEL_TOOL_USE = "disable_parallel_tool_use"
 
 
@@ -106,10 +110,6 @@ class AnthropicLoopRuntime(ConfiguredChatLoopRuntime):
             ),
             system_prompt=request.system_prompt,
         )
-
-    def timeout_reason(self) -> str:
-        return "Anthropic provider hard timeout exceeded."
-
 
 def _anthropic_request_worker(payload: AnthropicRequestPayload, result_queue) -> None:
     try:
@@ -185,12 +185,19 @@ def _system_prompt(payload: AnthropicRequestPayload) -> str:
 
 
 def _tool_call_kwargs(payload: AnthropicRequestPayload) -> dict[str, Any]:
+    tool_choice = {
+        AnthropicToolChoiceKey.TYPE.value: AnthropicToolChoiceType.ANY.value,
+        AnthropicToolChoiceKey.DISABLE_PARALLEL_TOOL_USE.value: True,
+    }
+    if len(payload.tool_specs) == 1:
+        tool_choice = {
+            AnthropicToolChoiceKey.TYPE.value: AnthropicToolChoiceType.TOOL.value,
+            AnthropicToolChoiceKey.NAME.value: payload.tool_specs[0]["name"],
+            AnthropicToolChoiceKey.DISABLE_PARALLEL_TOOL_USE.value: True,
+        }
     return {
         "tools": payload.tool_specs,
-        "tool_choice": {
-            AnthropicToolChoiceKey.TYPE.value: AnthropicToolChoiceType.ANY.value,
-            AnthropicToolChoiceKey.DISABLE_PARALLEL_TOOL_USE.value: True,
-        },
+        "tool_choice": tool_choice,
     }
 
 

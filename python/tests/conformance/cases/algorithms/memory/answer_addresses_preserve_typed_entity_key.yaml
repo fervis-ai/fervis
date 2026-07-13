@@ -1,0 +1,42 @@
+id: answer_addresses_preserve_typed_entity_key
+kind: algorithm
+algorithm: memory.answer_addresses
+input:
+  fact_result:
+    outcome:
+      kind: answer
+      relation_outputs:
+        - id: sale_id
+          relation_id: sales_rows
+          entity_key:
+            entity_kind: sale
+            key_id: primary_key
+            components:
+              - component_id: sale_id
+                field_id: sale_id
+      relations:
+        - id: sales_rows
+          rows:
+            - sale_id: sale-1
+          grain_keys: [sale_id]
+expect:
+  result_contains:
+    addresses:
+      - address: relation.sales_rows
+        kind: relation
+        source:
+          kind: operation_output
+          relationId: sales_rows
+        fieldCoverage:
+          sale_id: sales_rows.sale_id
+        rowAddresses:
+          - row.sales_rows.1
+      - address: row.sales_rows.1
+        kind: row
+        values:
+          sale_id:
+            type: entity_key
+            value:
+              entityKind: sale
+              keyId: primary_key
+              components: {sale_id: sale-1}

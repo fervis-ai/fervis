@@ -35,17 +35,6 @@ def with_normal_instance_role_profiles(
     )
 
 
-def normal_instance_profile_for_param(
-    param: dict[str, Any],
-    *,
-    test_id: str,
-) -> dict[str, Any] | None:
-    for item in param.get(NORMAL_INSTANCE_ROLE_PROFILES_KEY) or ():
-        if isinstance(item, dict) and str(item.get("test_id") or "") == test_id:
-            return item
-    return None
-
-
 def _candidate_with_role_profiles_for_tree(
     candidate: dict[str, Any],
     *,

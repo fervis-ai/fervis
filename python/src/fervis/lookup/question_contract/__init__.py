@@ -1,6 +1,9 @@
 """Catalog-blind requested-fact contract public boundary."""
 
-from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
+from fervis.lookup.question_inputs import (
+    KnownInputKind,
+    LiteralInputRole,
+)
 from fervis.lookup.question_contract.model import (
     AnswerPopulationMembershipTestKind,
     AnswerPopulationMembershipTestPolarity,
@@ -12,8 +15,8 @@ from fervis.lookup.question_contract.model import (
     NormalInstanceExplicitOverrideReason,
     NormalInstanceProfile,
     NormalInstanceProfileId,
-    MissingQuestionInput,
-    MissingQuestionInputType,
+    IncompleteFactualRequestItem,
+    IncompleteFactualRequestKind,
     QuestionContract,
     QuestionContractNeedsClarification,
     QuestionContractOutcome,
@@ -24,6 +27,7 @@ from fervis.lookup.question_contract.model import (
     RequestedFactPopulationConstraint,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
+    ResultSelectionKind,
     RequestedFactGroupKey,
     RequestedFactAnswerPopulation,
     RequestedFactAnswerPopulationMembershipTest,
@@ -42,12 +46,11 @@ from fervis.lookup.question_contract.parser import parse_question_contract
 from fervis.lookup.question_contract.prompt import QuestionContractTurnPrompt
 from fervis.lookup.question_contract.schema import (
     build_answer_request_contract_schema,
-    build_missing_input_clarification_schema,
+    build_incomplete_factual_request_schema,
     build_question_contract_decisions_schema,
 )
 from fervis.lookup.question_contract.tools import (
-    ANSWER_REQUEST_CONTRACT_TOOL_NAME,
-    MISSING_INPUT_CLARIFICATION_TOOL_NAME,
+    QUESTION_CONTRACT_TOOL_NAME,
     QUESTION_CONTRACT_TOOL_NAMES,
 )
 from fervis.lookup.question_contract.turn import (
@@ -66,8 +69,8 @@ __all__ = [
     "NormalInstanceExplicitOverrideReason",
     "NormalInstanceProfile",
     "NormalInstanceProfileId",
-    "MissingQuestionInput",
-    "MissingQuestionInputType",
+    "IncompleteFactualRequestItem",
+    "IncompleteFactualRequestKind",
     "AnswerPopulationMembershipTestKind",
     "AnswerPopulationMembershipTestPolarity",
     "AnswerSubjectInstanceInterpretationKind",
@@ -80,13 +83,13 @@ __all__ = [
     "QuestionContractTurnResult",
     "QuestionContractTurnPrompt",
     "GroupKeyDomainKind",
-    "ANSWER_REQUEST_CONTRACT_TOOL_NAME",
-    "MISSING_INPUT_CLARIFICATION_TOOL_NAME",
+    "QUESTION_CONTRACT_TOOL_NAME",
     "QUESTION_CONTRACT_TOOL_NAMES",
     "RequestedFact",
     "RequestedFactPopulationConstraint",
     "RequestedFactAnswerExpression",
     "RequestedFactAnswerExpressionFamily",
+    "ResultSelectionKind",
     "RequestedFactGroupKey",
     "RequestedFactAnswerPopulation",
     "RequestedFactAnswerPopulationMembershipTest",
@@ -100,7 +103,7 @@ __all__ = [
     "normal_instance_guard_question",
     "normal_instance_profile",
     "build_answer_request_contract_schema",
-    "build_missing_input_clarification_schema",
+    "build_incomplete_factual_request_schema",
     "build_question_contract_decisions_schema",
     "generate_question_contract",
     "parse_question_contract",

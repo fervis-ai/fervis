@@ -1,5 +1,5 @@
 id: identity_projection_rejects_incomplete_pagination_set
-description: Incomplete relation pagination does not project a complete identity set.
+description: A truncated memory projection never becomes a complete identity set even when its source read covered all pages.
 migrates:
   - api/tests/fervis/memory/test_identity_values.py::test_memory_projection_rejects_identity_set_for_incomplete_pagination
 kind: algorithm
@@ -12,19 +12,31 @@ input:
         addresses:
           - address: relation.sales
             kind: relation
-            source: {kind: api_read, identityType: sale}
+            source: {kind: api_read}
             grainKeys: [sale_id]
-            completeness: {status: complete, pagination: truncated, rowCount: 2}
+            completeness:
+              status: complete
+              pagination: all_pages
+              rowCount: 75
+              projectedRowCount: 2
+              truncated: true
             rowAddresses: [row.sales.1, row.sales.2]
           - address: row.sales.1
             kind: row
             relation: relation.sales
             identity: {sale_id: sale-1}
+            values:
+              answer_1:
+                type: entity_key
+                value: {entityKind: sale, keyId: primary_key, components: {sale_id: sale-1}}
           - address: row.sales.2
             kind: row
             relation: relation.sales
             identity: {sale_id: sale-2}
+            values:
+              answer_1:
+                type: entity_key
+                value: {entityKind: sale, keyId: primary_key, components: {sale_id: sale-2}}
 expect:
   result_contains:
     identity_sets: []
-

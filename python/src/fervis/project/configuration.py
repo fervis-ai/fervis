@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from fervis.interfaces.common.questions import QuestionInterface
 
 from .discovery import ProjectInspection
 from .config_io import ActiveEnvironment, ConfigIOError, load_project_json_config
@@ -50,6 +54,12 @@ class LoadedFervisSchema:
     schema: dict[str, object]
     config_path: Path
     active_environment: ActiveEnvironment
+
+
+@dataclass(frozen=True)
+class _FastAPIPrincipalDependency:
+    factory: Callable[[], Callable[..., object]]
+    id_attr: str
 
 
 def load_fervis_project_schema(
@@ -131,39 +141,73 @@ def _integration_from_schema(
     if framework == "django":
         return DjangoIntegration(config=config)
     if framework == "flask":
-        integration: FlaskIntegration
-
-        def question_interface_factory() -> object:
-            loaded = LoadedFervisConfig(
-                integration=integration,
-                config=config,
-                schema=schema,
-                config_path=config_path,
-                active_environment=active_environment,
-            )
-            return _flask_question_interface(project=project, loaded_config=loaded)
-
-        host_api_adapter = _configured_host_api_adapter(
+        return _flask_integration_from_schema(
+            schema,
+            config,
             project=project,
+            config_path=config_path,
+            active_environment=active_environment,
+        )
+    return _fastapi_integration_from_schema(
+        schema,
+        config,
+        project=project,
+        config_path=config_path,
+        active_environment=active_environment,
+    )
+
+
+def _flask_integration_from_schema(
+    schema: dict[str, object],
+    config: FervisConfig,
+    *,
+    project: ProjectInspection,
+    config_path: Path,
+    active_environment: ActiveEnvironment,
+) -> FlaskIntegration:
+    integration: FlaskIntegration
+
+    def question_interface_factory() -> QuestionInterface:
+        loaded = LoadedFervisConfig(
+            integration=integration,
             config=config,
             schema=schema,
             config_path=config_path,
             active_environment=active_environment,
         )
-        integration = FlaskIntegration(
-            config=config,
-            question_interface_factory=question_interface_factory,
-            read_context_capture=host_api_adapter.capture_read_context,
-            delegated_credential_capture=host_api_adapter.capture_delegated_credential,
-            require_read_context=_has_auth_schema(
-                project,
-                active_environment=active_environment,
-            ),
-        )
-        return integration
+        return _flask_question_interface(project=project, loaded_config=loaded)
+
+    host_api_adapter = _configured_host_api_adapter(
+        project=project,
+        config=config,
+        schema=schema,
+        config_path=config_path,
+        active_environment=active_environment,
+    )
+    integration = FlaskIntegration(
+        config=config,
+        question_interface_factory=question_interface_factory,
+        read_context_capture=host_api_adapter.capture_read_context,
+        delegated_credential_capture=host_api_adapter.capture_delegated_credential,
+        require_read_context=_has_auth_schema(
+            project,
+            active_environment=active_environment,
+        ),
+    )
+    return integration
+
+
+def _fastapi_integration_from_schema(
+    schema: dict[str, object],
+    config: FervisConfig,
+    *,
+    project: ProjectInspection,
+    config_path: Path,
+    active_environment: ActiveEnvironment,
+) -> FastAPIIntegration:
     integration: FastAPIIntegration
 
-    def question_interface_factory() -> object:
+    def question_interface_factory() -> QuestionInterface:
         loaded = LoadedFervisConfig(
             integration=integration,
             config=config,
@@ -180,15 +224,18 @@ def _integration_from_schema(
         config_path=config_path,
         active_environment=active_environment,
     )
+    principal = _fastapi_principal_dependency(
+        project,
+        active_environment=active_environment,
+    )
     integration = FastAPIIntegration(
         config=config,
         question_interface_factory=question_interface_factory,
         read_context_capture=host_api_adapter.capture_read_context,
         delegated_credential_capture=host_api_adapter.capture_delegated_credential,
-        **_fastapi_principal_dependency(
-            project,
-            active_environment=active_environment,
-        ),
+        principal_dependency_factory=(principal.factory if principal else None),
+        principal_id_attr=principal.id_attr if principal else "id",
+        require_read_context=principal is not None,
     )
     return integration
 
@@ -197,7 +244,7 @@ def _fastapi_principal_dependency(
     project: ProjectInspection,
     *,
     active_environment: ActiveEnvironment,
-) -> dict[str, Any]:
+) -> _FastAPIPrincipalDependency | None:
     from fervis.project.auth_config.loading import load_auth_project_schema
     from fervis.project.importing import import_object, project_import_context
 
@@ -206,20 +253,25 @@ def _fastapi_principal_dependency(
         active_environment=active_environment,
     )
     if isinstance(loaded_auth, ConfigProblem):
-        return {}
+        return None
     principal = loaded_auth.schema.get("principal")
     if not isinstance(principal, dict):
-        return {}
+        return None
     if principal.get("source") != "fastapi_dependency":
-        return {}
+        return None
     dependency_path = str(principal.get("dependency") or "")
-    with project_import_context(project.root_path):
-        dependency = import_object(dependency_path)
-    return {
-        "principal_dependency": dependency,
-        "principal_id_attr": str(principal.get("id_attr") or "id"),
-        "require_read_context": True,
-    }
+
+    def dependency_factory() -> Callable[..., object]:
+        with project_import_context(project.root_path):
+            dependency = import_object(dependency_path)
+        if not callable(dependency):
+            raise TypeError("FastAPI principal dependency must be callable")
+        return dependency
+
+    return _FastAPIPrincipalDependency(
+        factory=dependency_factory,
+        id_attr=str(principal.get("id_attr") or "id"),
+    )
 
 
 def _has_auth_schema(
@@ -263,7 +315,7 @@ def _fastapi_question_interface(
     *,
     project: ProjectInspection,
     loaded_config: LoadedFervisConfig,
-) -> object:
+) -> QuestionInterface:
     from fervis.storage.sql.question_interface import sql_question_interface
 
     return sql_question_interface(project=project, loaded_config=loaded_config)
@@ -273,7 +325,7 @@ def _flask_question_interface(
     *,
     project: ProjectInspection,
     loaded_config: LoadedFervisConfig,
-) -> object:
+) -> QuestionInterface:
     from fervis.storage.sql.question_interface import sql_question_interface
 
     return sql_question_interface(project=project, loaded_config=loaded_config)
@@ -462,7 +514,7 @@ def _validate_sources(
             code="sources_missing",
             message="sources must include at least one explicit source declaration.",
         )
-    expected_type: type[Any]
+    expected_type: type[DjangoAppSource] | type[FastAPIAppSource] | type[FlaskAppSource]
     if framework == "django":
         expected_type = DjangoAppSource
     elif framework == "fastapi":

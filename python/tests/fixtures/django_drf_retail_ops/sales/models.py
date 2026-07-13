@@ -31,4 +31,3 @@ class OrderItem(models.Model):
     class Meta:
         app_label = "retail_ops_sales"
         ordering = ["order__order_number", "product__sku"]
-

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Mapping
+from fervis.lookup.canonical_data import RuntimeValue
 
 from fervis.lookup.clarification import clarifications_payload
 from fervis.lookup.outcomes.model import (
@@ -31,7 +32,7 @@ TERMINAL_FACT_REF_KEY = "factRef"
 
 def fact_result_terminal_details(
     result: FactResult,
-) -> Mapping[str, object] | None:
+) -> Mapping[str, RuntimeValue] | None:
     outcome = result.outcome
     if isinstance(outcome, NoData):
         return {
@@ -46,7 +47,7 @@ def fact_result_terminal_details(
     return None
 
 
-def empty_relation_payload(empty: EmptyRelation) -> dict[str, object]:
+def empty_relation_payload(empty: EmptyRelation) -> dict[str, RuntimeValue]:
     return {
         "kind": empty.kind.value,
         TERMINAL_RELATION_ID_KEY: empty.relation_id,
@@ -57,7 +58,9 @@ def empty_relation_payload(empty: EmptyRelation) -> dict[str, object]:
     }
 
 
-def undefined_operation_payload(operation: UndefinedOperationRef) -> dict[str, object]:
+def undefined_operation_payload(
+    operation: UndefinedOperationRef,
+) -> dict[str, RuntimeValue]:
     return {
         "operationId": operation.operation_id,
         TERMINAL_REASON_CODE_KEY: operation.reason_code.value,
@@ -66,11 +69,13 @@ def undefined_operation_payload(operation: UndefinedOperationRef) -> dict[str, o
     }
 
 
-def needs_clarification_payload(outcome: NeedsClarification) -> dict[str, object]:
+def needs_clarification_payload(
+    outcome: NeedsClarification,
+) -> dict[str, RuntimeValue]:
     return clarifications_payload(outcome.clarifications)
 
 
-def impossible_payload(outcome: Impossible) -> dict[str, object]:
+def impossible_payload(outcome: Impossible) -> dict[str, RuntimeValue]:
     return {
         TERMINAL_BLOCKED_REQUIREMENTS_KEY: [
             blocked_requirement_payload(item) for item in outcome.blocked_requirements
@@ -80,7 +85,7 @@ def impossible_payload(outcome: Impossible) -> dict[str, object]:
 
 def blocked_requirement_payload(
     requirement: BlockedRequirement,
-) -> dict[str, object]:
+) -> dict[str, RuntimeValue]:
     return {
         "kind": requirement.kind.value,
         "requestedFactId": requirement.requested_fact_id,

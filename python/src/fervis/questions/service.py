@@ -8,19 +8,22 @@ from dataclasses import replace
 from .contracts import (
     AskRequest,
     AskResult,
-    ContinueQuestionRequest,
+    ClarificationResponseRequest,
     ExecutionMode,
     RerunQuestionRequest,
+    RetryQuestionRequest,
     QuestionLifecycleError,
 )
 from fervis.lineage.enums import ProgramInvocationKind, QuestionRunKind, RunTriggerKind
 from fervis.host_api.contracts.authority import ReadAuthority
+from fervis.host_api.credentials import runtime_context_with_delegated_credential
 from fervis.run_work.contracts import QueuedRunRequest
 from fervis.run_work.events import (
     NullQuestionRunEventSink,
     QuestionRunEventSink,
     run_accepted_event,
     run_active_conflict_event,
+    run_result_event,
     run_terminal_event,
 )
 from fervis.run_work.service import RunWorkService
@@ -37,7 +40,7 @@ from fervis.lookup.answer_program.rerun import (
     RerunnableProgramInvocation,
 )
 from .ports import (
-    ClarificationResponseStart,
+    ClarificationRunResume,
     QuestionRunRecord,
     QuestionRunStart,
     QuestionRunSubmissionKind,
@@ -53,6 +56,59 @@ from .ports import (
     QuestionProgramPort,
     QuestionLifecyclePort,
 )
+
+
+def _require_matching_idempotent_ask(
+    request: AskRequest,
+    *,
+    existing: QueuedRun,
+) -> None:
+    stored = existing.submission
+    spec = stored.spec
+    if not isinstance(spec, ResolveQuestionRunSpec) or (
+        _ask_replay_payload(request)
+        != _stored_ask_replay_payload(spec)
+    ):
+        raise QuestionLifecycleError(
+            "idempotency_payload_conflict",
+            "idempotency key was already used for a different request",
+        )
+
+
+def _ask_replay_payload(request: AskRequest) -> dict[str, object]:
+    return {
+        "question": request.question.strip(),
+        "provider": request.provider,
+        "model_key": request.model_key,
+        "context_run_id": request.context_run_id,
+        "runtime_context": runtime_context_with_delegated_credential(
+            request.runtime_context,
+            None,
+        ),
+        "max_budget_usd": _canonical_optional_number(request.max_budget_usd),
+        "max_thinking_tokens": request.max_thinking_tokens,
+    }
+
+
+def _stored_ask_replay_payload(
+    spec: ResolveQuestionRunSpec,
+) -> dict[str, object]:
+    return {
+        "question": spec.question,
+        "provider": spec.provider,
+        "model_key": spec.model_key,
+        "context_run_id": spec.context_run_id,
+        "runtime_context": runtime_context_with_delegated_credential(
+            spec.runtime_context,
+            None,
+        ),
+        "max_budget_usd": _canonical_optional_number(spec.max_budget_usd),
+        "max_thinking_tokens": spec.max_thinking_tokens,
+    }
+
+
+def _canonical_optional_number(value: object) -> str | None:
+    return None if value is None else str(value)
 
 
 class UuidQuestionIdPort:
@@ -111,11 +167,12 @@ class QuestionService:
         requested_conversation_id = request.conversation_id.strip()
         authority = ReadAuthority.from_principal(request.principal)
         existing = self.runs.find_idempotent_run(
-            authority=authority,
+            principal=request.principal,
             conversation_id=requested_conversation_id or None,
             idempotency_key=request.idempotency_key,
         )
         if existing is not None:
+            _require_matching_idempotent_ask(request, existing=existing)
             result = self._ask_result_from_queued_run(existing)
             self._emit_result_events(result, events=events)
             return result
@@ -148,6 +205,9 @@ class QuestionService:
             ),
             execution_mode=request.execution_mode,
             idempotency_key=request.idempotency_key,
+            idempotency_scope=(
+                "" if requested_conversation_id else "new_conversation"
+            ),
         )
         record = QuestionRunRecord(
             question=QuestionStart(
@@ -171,22 +231,54 @@ class QuestionService:
             submission=submission,
             record=record,
         )
+        if submitted.kind is QuestionRunSubmissionKind.EXISTING:
+            _require_matching_idempotent_ask(request, existing=submitted.run)
         return self._finish_submitted_question_run(
             request=request,
             submitted=submitted,
             events=events,
         )
 
-    def continue_question(
+    def respond_to_clarification(
         self,
-        request: ContinueQuestionRequest,
+        request: ClarificationResponseRequest,
+        *,
+        event_sink: QuestionRunEventSink | None = None,
+    ) -> AskResult:
+        events = event_sink or NullQuestionRunEventSink()
+        authority = ReadAuthority.from_principal(request.principal)
+        stored = self.runs.get_question(
+            question_id=request.question_id,
+            authority=authority,
+        )
+        if stored is None:
+            raise ValueError(f"question not found: {request.question_id}")
+        submitted = self.runs.resume_question_run_atomically(
+            ClarificationRunResume(
+                question_id=stored.question_id,
+                run_id=request.run_id,
+                clarification_id=request.clarification_id,
+                response_id=self.ids.new_clarification_response_id(),
+                response_text=request.response_text,
+                selected_option_id=request.selected_option_id,
+                principal=request.principal,
+                execution_mode=request.execution_mode,
+            )
+        )
+        return self._finish_submitted_question_run(
+            request=request,
+            submitted=submitted,
+            events=events,
+        )
+
+    def retry_question(
+        self,
+        request: RetryQuestionRequest,
         *,
         event_sink: QuestionRunEventSink | None = None,
     ) -> AskResult:
         events = event_sink or NullQuestionRunEventSink()
         question_text = request.question.strip()
-        if not question_text:
-            raise ValueError("continue request question must not be empty")
         authority = ReadAuthority.from_principal(request.principal)
         stored = self.runs.get_question(
             question_id=request.question_id,
@@ -216,26 +308,16 @@ class QuestionService:
             execution_mode=request.execution_mode,
             idempotency_key=request.idempotency_key,
         )
-        clarification_response = _clarification_response_start(
-            request,
-            response_id=self.ids.new_clarification_response_id(),
-        )
         record = QuestionRunRecord(
             run=QuestionRunStart(
                 question_id=stored.question_id,
                 run_id=submission.run_id,
                 kind=QuestionRunKind.MODEL_ASSISTED,
-                trigger_kind=request.trigger_kind,
+                trigger_kind=RunTriggerKind.RETRY,
                 adapter_ref=self.adapter_ref,
                 runtime_version=self.runtime_version,
                 base_run_id=request.base_run_id,
-                trigger_clarification_response_id=(
-                    clarification_response.response_id
-                    if clarification_response is not None
-                    else request.trigger_clarification_response_id
-                ),
             ),
-            clarification_response=clarification_response,
         )
         submitted = self.runs.submit_question_run_atomically(
             submission=submission,
@@ -262,7 +344,7 @@ class QuestionService:
         if question is None:
             raise ValueError(f"question not found: {request.question_id}")
         existing = self.runs.find_idempotent_run(
-            authority=authority,
+            principal=request.principal,
             conversation_id=question.conversation_id,
             idempotency_key=request.idempotency_key,
         )
@@ -376,7 +458,12 @@ class QuestionService:
     def _finish_submitted_question_run(
         self,
         *,
-        request: AskRequest | ContinueQuestionRequest | RerunQuestionRequest,
+        request: (
+            AskRequest
+            | ClarificationResponseRequest
+            | RetryQuestionRequest
+            | RerunQuestionRequest
+        ),
         submitted,
         events: QuestionRunEventSink,
     ) -> AskResult:
@@ -430,7 +517,7 @@ class QuestionService:
             QueuedRunRequest(
                 run_id=queued.submission.run_id,
                 worker_id="inline",
-                active_attempt=1,
+                active_attempt=queued.active_attempt or 1,
             ),
             event_sink=events,
         )
@@ -523,7 +610,12 @@ class QuestionService:
         self,
         queued: QueuedRun,
         *,
-        request: AskRequest | ContinueQuestionRequest | RerunQuestionRequest,
+        request: (
+            AskRequest
+            | ClarificationResponseRequest
+            | RetryQuestionRequest
+            | RerunQuestionRequest
+        ),
         events: QuestionRunEventSink,
     ) -> None:
         status = "QUEUED" if queued.status == "QUEUED" else "RUNNING"
@@ -560,7 +652,7 @@ class QuestionService:
             )
             return
         events.emit(
-            run_terminal_event(
+            run_result_event(
                 status=result.status,
                 run_id=result.run_id,
                 question_id=result.question_id,
@@ -570,23 +662,3 @@ class QuestionService:
                 error=result.error,
             )
         )
-
-
-def _clarification_response_start(
-    request: ContinueQuestionRequest,
-    *,
-    response_id: str,
-) -> ClarificationResponseStart | None:
-    if request.trigger_kind is not RunTriggerKind.CLARIFICATION_RESPONSE:
-        return None
-    base_run_id = request.base_run_id
-    clarification_id = request.trigger_clarification_response_id
-    if not base_run_id or not clarification_id:
-        return None
-    return ClarificationResponseStart(
-        response_id=response_id,
-        run_id=base_run_id,
-        clarification_id=clarification_id,
-        response_text=request.question,
-        selected_option_id=request.trigger_clarification_selected_option_id or "",
-    )

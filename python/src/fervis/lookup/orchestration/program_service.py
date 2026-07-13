@@ -32,7 +32,7 @@ from fervis.lookup.orchestration.program_execution import (
 from fervis.lookup.orchestration.request import LookupRequest
 from fervis.lookup.orchestration.result import LookupResult
 from fervis.lookup.plan_execution.authorized_sources import AuthorizedExecutionSources
-from fervis.lookup.relation_catalog import validate_relation_catalog
+from fervis.lookup.relation_catalog import parse_relation_catalog
 
 
 @dataclass(frozen=True)
@@ -60,7 +60,7 @@ class AnswerProgramService:
             read_context_ref=request.read_context_ref,
             delegated_credential=request.delegated_credential,
         )
-        full_catalog = validate_relation_catalog(
+        full_catalog = parse_relation_catalog(
             host_relation_catalog(self.host_api_context)
         )
         program = request.invocation.program

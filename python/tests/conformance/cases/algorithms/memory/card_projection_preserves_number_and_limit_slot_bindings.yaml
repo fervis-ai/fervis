@@ -27,6 +27,7 @@ input:
             answer_outputs:
             - id: answer_1
               description: product names
+              role: ANSWER_VALUE
             used_question_inputs: [fact_1_limit_1]
       addresses:
       - address: value.grounded_fact_1_limit_1

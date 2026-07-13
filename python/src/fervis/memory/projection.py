@@ -190,6 +190,7 @@ def _index_item(artifact: FactArtifact, address: FactAddress) -> dict[str, Any]:
             "address": address.address,
             "kind": address.kind.value,
             "resource": address.resource,
+            "keyId": address.key_id,
             "referenceText": address.reference_text,
             "identity": dict(address.identity),
             "scope": dict(address.scope),

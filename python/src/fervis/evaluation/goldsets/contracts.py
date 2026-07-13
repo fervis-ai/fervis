@@ -19,6 +19,10 @@ class GoldsetCase:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if not self.case_id.strip():
+            raise ValueError("goldset case id is required")
+        if not self.question.strip():
+            raise ValueError("goldset case question is required")
         object.__setattr__(self, "setup_questions", tuple(self.setup_questions))
         object.__setattr__(
             self,
@@ -99,3 +103,8 @@ class GoldsetSuite:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "cases", tuple(self.cases))
+        if not self.name.strip():
+            raise ValueError("goldset suite name is required")
+        case_ids = tuple(case.case_id for case in self.cases)
+        if len(set(case_ids)) != len(case_ids):
+            raise ValueError("goldset suite case ids must be unique")

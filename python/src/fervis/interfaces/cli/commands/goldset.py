@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import argparse
+from functools import partial
 import os
 from pathlib import Path
+import sys
+from typing import TextIO
 
+from fervis.evaluation.goldsets.contracts import GoldsetCaseResult
 from fervis.evaluation.goldsets.loader import load_goldset_suite
 from fervis.evaluation.goldsets.runner import run_goldset_suite
 from fervis.interfaces.cli.commands.common import command_envelope_result
@@ -22,6 +26,7 @@ def goldset_result(
     args: argparse.Namespace,
     *,
     ports: FervisCliPorts,
+    progress_stream: TextIO = sys.stderr,
 ) -> FervisCommandResult:
     suite = load_goldset_suite(_suite_ref(args))
     principal_id = _principal_id(args)
@@ -41,11 +46,16 @@ def goldset_result(
         model_key=args.model_key,
         wait_seconds=args.wait_seconds,
         ledger_file=Path(args.ledger_file) if args.ledger_file else None,
-        determinism_runs=args.determinism_runs,
+        stable_runs=args.stable_runs,
         enforce_structured_determinism=args.enforce_structured_determinism,
         attempts=args.attempts,
         retry_provider_failures=args.retry_provider_failures,
         retry_sleep_seconds=args.retry_sleep_seconds,
+        case_run_observer=(
+            partial(_write_stability_run, stream=progress_stream)
+            if args.stable_runs > 1
+            else None
+        ),
     )
     return command_envelope_result(
         kind=FervisCommandKind.GOLDSET,
@@ -56,6 +66,25 @@ def goldset_result(
         view_kind=FervisViewKind.COMMAND,
         exit_code=result.exit_code,
     )
+
+
+def _write_stability_run(
+    run_number: int,
+    run_count: int,
+    result: GoldsetCaseResult,
+    *,
+    stream: TextIO,
+) -> None:
+    status = "PASS" if result.status == "passed" else "FAIL"
+    answer = result.answer or result.message
+    duration = ""
+    if result.duration_ms is not None:
+        duration = f" | Completed in {result.duration_ms / 1000:.2f} sec"
+    stream.write(
+        f"STABILITY RUN {run_number}/{run_count} {status} "
+        f"(run_id: {result.run_id or 'unavailable'}): {answer}{duration}\n"
+    )
+    stream.flush()
 
 
 def _suite_ref(args: argparse.Namespace) -> str:

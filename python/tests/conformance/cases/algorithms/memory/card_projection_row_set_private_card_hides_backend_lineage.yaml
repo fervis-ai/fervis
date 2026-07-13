@@ -14,11 +14,12 @@ input:
           - address: entity.staff.alice
             kind: entity
             resource: staff
+            keyId: primary_key
             referenceText: Alice
             identity: {staff_id: staff-1}
           - address: relation.sales
             kind: relation
-            source: {kind: api_read, read_id: list_sale_list, identityType: sale}
+            source: {kind: api_read, read_id: list_sale_list}
             grainKeys: [sale_id]
             fieldCoverage: {sale_id: answer_rows.sale_id}
             completeness:

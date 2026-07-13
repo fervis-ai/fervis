@@ -1,0 +1,131 @@
+id: identified_entity_ranked_selection_owns_limit_and_output
+description: A typed identified entity constrains the candidate population while ordinal selection, its explicit limit, and the projected property retain separate owners.
+kind: algorithm
+algorithm: question_contract.parse
+input:
+  question_context: Where did Nadia work on her first two shifts?
+  conversation_resolution:
+    current_question_text: Where did Nadia work on her first two shifts?
+    inputs:
+      - kind: literal_text
+        input_ref: conversation.staff
+        value_source_text: Nadia
+        resolved_value_text: Nadia Wanjiku
+        role: reference_value
+        field_label_text: staff
+        value_meaning_hint: staff identity
+        canonical_identity:
+          entity_kind: staff
+          key_id: primary_key
+          key_component_id: staff_id
+          value: staff-nadia
+          authority_refs: [source_read:list_staff]
+          lineage_refs: [prior_source_read:list_staff]
+  payload:
+    kind: question_contract
+    answer_requests_count: 1
+    question_inputs:
+      - input_ref: nadia
+        kind: literal_text
+        source: conversation_resolution
+        value_source_text: Nadia
+        operand_text: Nadia Wanjiku
+        field_label_text: staff
+        value_meaning_hint: staff identity
+        role: reference_value
+        resolved_input_ref: conversation.staff
+        inventory_check:
+          why_this_is_an_input: Nadia identifies the staff member whose shifts define the population.
+      - input_ref: first_two
+        kind: literal_text
+        source: question_context
+        value_source_text: two
+        operand_text: '2'
+        field_label_text: result limit
+        value_meaning_hint: number of selected shifts
+        role: result_limit
+        inventory_check:
+          why_this_is_an_input: two states the number of chronologically selected results.
+    answer_requests:
+      - answer_fact: work locations from Nadia Wanjiku's first two shifts
+        answer_expression:
+          family: ranked_selection
+        answer_subject:
+          subject_text: shifts
+          instance_interpretation:
+            kind: NORMAL_BUSINESS_INSTANCE
+        answer_population:
+          population_label: Nadia Wanjiku's shifts
+          counted_unit: shift
+          membership_tests:
+            - test_id: shift_identity
+              kind: SUBJECT_IDENTITY
+              polarity: MUST_PASS
+              test_question: Does the candidate represent a shift?
+              owned_question_input_refs: []
+            - test_id: selected_staff
+              kind: EXPLICIT_USER_CONSTRAINT
+              polarity: MUST_PASS
+              test_question: Is the shift associated with the selected staff member?
+              owned_question_input_refs: [nadia]
+            - test_id: ordinary_shift
+              kind: NORMAL_INSTANCE_GUARD
+              polarity: MUST_PASS
+              test_question: Is this an ordinary business instance of a shift?
+              owned_question_input_refs: []
+        answer_outputs:
+          - description: work location
+            role: ANSWER_VALUE
+        used_question_inputs: [nadia, first_two]
+    question_input_inventory_check:
+      all_input_like_phrases_declared: true
+expect:
+  result_contains:
+    conversation_identity_inputs:
+      - input_ref: conversation.staff
+        entity_kind: staff
+        key_id: primary_key
+        key_component_id: staff_id
+        value: staff-nadia
+    question_inputs:
+      - id: nadia
+        kind: literal_text
+        source: conversation_resolution
+        text: Nadia
+        resolved_input_ref: conversation.staff
+        resolved_value_text: Nadia Wanjiku
+        role: reference_value
+      - id: first_two
+        kind: literal_text
+        source: question_context
+        text: two
+        resolved_value_text: '2'
+        role: result_limit
+    requested_facts:
+      - description: work locations from Nadia Wanjiku's first two shifts
+        answer_expression_family: ranked_selection
+        answer_subject_text: shifts
+        input_refs: [nadia, first_two]
+        answer_request:
+          answer_expression:
+            family: ranked_selection
+            selection_kind: limited_results
+            limit_input_ref: first_two
+          answer_population:
+            population_label: Nadia Wanjiku's shifts
+            counted_unit: shift
+            membership_tests:
+              - test_id: shift_identity
+                owned_question_input_refs: []
+              - test_id: selected_staff
+                owned_question_input_refs: [nadia]
+              - test_id: ordinary_shift
+                owned_question_input_refs: []
+          answer_outputs:
+            - description: work location
+              role: ANSWER_VALUE
+  result_exact_fields:
+    requested_fact_input_handoff:
+      - id: fact_1
+        input_refs: [nadia, first_two]
+        known_input_refs: [nadia, first_two]

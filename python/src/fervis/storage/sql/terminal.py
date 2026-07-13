@@ -11,6 +11,7 @@ from sqlalchemy.engine import Engine
 
 from fervis.lineage.enums import RunResultKind, RuntimeErrorKind
 from fervis.lineage.ids import lineage_id
+from fervis.questions.clarification_state import pending_clarification_ids
 from fervis.lineage.recorder import (
     RunResultWrite,
     RuntimeErrorResultWrite,
@@ -51,6 +52,7 @@ def terminal_result_for_run(engine: Engine, run_id: str) -> TerminalResult | Non
     answer = metadata.tables["fervis_answer"]
     presentation = metadata.tables["fervis_answer_presentation"]
     clarification_request = metadata.tables["fervis_clarification_request"]
+    clarification_response = metadata.tables["fervis_clarification_response"]
     with sql_connection(engine) as connection:
         result = connection.execute(
             sa.select(run_result).where(run_result.c.run_id == run_id)
@@ -77,6 +79,7 @@ def terminal_result_for_run(engine: Engine, run_id: str) -> TerminalResult | Non
         result_data = _terminal_result_data(
             connection,
             clarification_request=clarification_request,
+            clarification_response=clarification_response,
             run_id=run_id,
             run_result_id=str(result_values["run_result_id"]),
         )
@@ -93,11 +96,16 @@ def _terminal_result_data(
     connection,
     *,
     clarification_request,
+    clarification_response,
     run_id: str,
     run_result_id: str,
 ) -> dict[str, Any]:
-    clarification_rows = connection.execute(
-        sa.select(clarification_request.c.payload_json)
+    clarification_rows = tuple(
+        connection.execute(
+            sa.select(
+                clarification_request.c.clarification_id,
+                clarification_request.c.payload_json,
+            )
         .where(
             clarification_request.c.run_id == run_id,
             clarification_request.c.payload_json.is_not(None),
@@ -106,9 +114,28 @@ def _terminal_result_data(
             clarification_request.c.created_at,
             clarification_request.c.clarification_id,
         )
-    ).scalars()
+        )
+    )
+    responded_ids = tuple(
+        str(value)
+        for value in connection.execute(
+            sa.select(clarification_response.c.clarification_id).where(
+                clarification_response.c.run_id == run_id
+            )
+        ).scalars()
+    )
+    pending_ids = frozenset(
+        pending_clarification_ids(
+            tuple(str(row.clarification_id) for row in clarification_rows),
+            responded_ids,
+        )
+    )
     clarifications = [
-        payload for row in clarification_rows for payload in (_dict(row),) if payload
+        payload
+        for row in clarification_rows
+        if str(row.clarification_id) in pending_ids
+        for payload in (_dict(row.payload_json),)
+        if payload
     ]
     if clarifications:
         return {
@@ -170,7 +197,7 @@ def _terminal_status(result_kind: str) -> str:
     if result_kind == RunResultKind.RUNTIME_ERROR.value:
         return "FAILED"
     if result_kind == RunResultKind.FACTUAL_TERMINAL.value:
-        return "NEEDS_CLARIFICATION"
+        return "COMPLETED"
     if result_kind == RunResultKind.ANSWERED.value:
         return "COMPLETED"
     return "RUNNING"

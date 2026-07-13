@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 
 from fervis.lookup.source_binding.compiler_ir import (
     DraftEndpointParamBinding,
@@ -15,6 +15,7 @@ from fervis.lookup.question_contract import (
     RequestedFactAnswerPopulationMembershipTest,
 )
 from fervis.lookup.source_binding.candidates import SourceCandidate
+from fervis.lookup.source_binding.candidates.model import CandidateParameter
 from fervis.lookup.source_binding.membership_tests import membership_test_key
 from fervis.lookup.source_binding.model import SourceBindingRequest
 from fervis.lookup.source_binding.plan_targets import (
@@ -23,6 +24,7 @@ from fervis.lookup.source_binding.plan_targets import (
     source_binding_target_index,
 )
 from fervis.lookup.source_binding.review_surface import (
+    SourceBindingReviewSurface,
     SourceBindingReviewAxisKind,
     source_binding_review_surface,
 )
@@ -70,17 +72,6 @@ class ReviewAxisScope:
         )
 
     @property
-    def out_of_scope_proof_refs(self) -> tuple[str, ...]:
-        return tuple(
-            dict.fromkeys(
-                ref
-                for decision in self.test_scope_decisions
-                if decision.decision == ReviewScopeDecisionKind.OUT_OF_SCOPE
-                for ref in decision.proof_refs
-            )
-        )
-
-    @property
     def out_of_scope_decisions(self) -> tuple[ReviewScopeDecision, ...]:
         return tuple(
             decision
@@ -115,17 +106,6 @@ class SourceBindingReviewScope:
             param_id,
         ).normal_instance_test_ids
 
-    def finite_choice_param_out_of_scope_proof_refs(
-        self,
-        binding_target_id: str,
-        param_id: str,
-    ) -> tuple[str, ...]:
-        return self._axis_scope(
-            binding_target_id,
-            SourceBindingReviewAxisKind.FINITE_CHOICE_PARAM,
-            param_id,
-        ).out_of_scope_proof_refs
-
     def finite_choice_param_out_of_scope_decisions(
         self,
         binding_target_id: str,
@@ -147,17 +127,6 @@ class SourceBindingReviewScope:
             SourceBindingReviewAxisKind.ROW_PREDICATE,
             predicate_id,
         ).in_scope_test_ids
-
-    def row_predicate_out_of_scope_proof_refs(
-        self,
-        binding_target_id: str,
-        predicate_id: str,
-    ) -> tuple[str, ...]:
-        return self._axis_scope(
-            binding_target_id,
-            SourceBindingReviewAxisKind.ROW_PREDICATE,
-            predicate_id,
-        ).out_of_scope_proof_refs
 
     def row_predicate_out_of_scope_decisions(
         self,
@@ -273,7 +242,10 @@ def _axis_scope(
     input_owner_surfaces: dict[str, tuple[_OwnerSurfaceProof, ...]],
 ) -> ReviewAxisScope:
     decisions: list[ReviewScopeDecision] = []
-    for test in fact.answer_population.membership_tests:
+    answer_population = fact.answer_population
+    if answer_population is None:
+        raise ValueError("review axis requires answer population")
+    for test in answer_population.membership_tests:
         test_id = membership_test_key(test)
         is_normal_instance = (
             test.kind == AnswerPopulationMembershipTestKind.NORMAL_INSTANCE_GUARD
@@ -332,20 +304,20 @@ def _axis_scope(
 
 
 def _axis_owners(
-    surface: object,
+    surface: SourceBindingReviewSurface,
 ) -> dict[str, tuple[SourceBindingReviewAxisKind, str]]:
     output: dict[str, tuple[SourceBindingReviewAxisKind, str]] = {}
-    for axis in surface.finite_choice_params.values():
-        for test_id in axis.owned_membership_test_ids:
+    for finite_axis in surface.finite_choice_params.values():
+        for test_id in finite_axis.owned_membership_test_ids:
             output[test_id] = (
                 SourceBindingReviewAxisKind.FINITE_CHOICE_PARAM,
-                axis.axis_id,
+                finite_axis.axis_id,
             )
-    for axis in surface.row_predicates.values():
-        for test_id in axis.owned_membership_test_ids:
+    for predicate_axis in surface.row_predicates.values():
+        for test_id in predicate_axis.owned_membership_test_ids:
             output[test_id] = (
                 SourceBindingReviewAxisKind.ROW_PREDICATE,
-                axis.axis_id,
+                predicate_axis.axis_id,
             )
     return output
 
@@ -381,7 +353,9 @@ def _input_owner_surfaces(
     output: dict[str, tuple[_OwnerSurfaceProof, ...]] = {}
     for input_ref, values in values_by_input_ref.items():
         applicable_values = tuple(
-            value for value in values if _value_applies_to_fact(value, requested_fact_id)
+            value
+            for value in values
+            if _value_applies_to_fact(value, requested_fact_id)
         )
         if not applicable_values:
             continue
@@ -451,7 +425,9 @@ def _out_of_scope_decision(
         axis_id=axis_id,
         is_normal_instance=is_normal_instance,
         owner_surface_id=(
-            normalized_owner_surface_ids[0] if len(normalized_owner_surface_ids) == 1 else ""
+            normalized_owner_surface_ids[0]
+            if len(normalized_owner_surface_ids) == 1
+            else ""
         ),
         owner_surface_ids=normalized_owner_surface_ids,
         proof_refs=proof_refs,
@@ -504,8 +480,7 @@ def _candidate_selectable_param_decision_proofs(
             proof_refs=(f"param_decision:{decision_id}",),
         )
         for param in candidate.params
-        if isinstance(param, dict)
-        for param_id in (str(param.get("param_id") or ""),)
+        for param_id in (param.id,)
         if param_id
         for binding_key in _available_binding_value_keys(param, value_ids=value_ids)
         for decision_id in _matching_bind_decision_ids(param, binding_key=binding_key)
@@ -513,33 +488,30 @@ def _candidate_selectable_param_decision_proofs(
 
 
 def _available_binding_value_keys(
-    param: dict[str, object],
+    param: CandidateParameter,
     *,
     value_ids: frozenset[str],
 ) -> tuple[tuple[str, str], ...]:
     return tuple(
-        (value_id, str(item.get("value_component") or ""))
-        for item in param.get("binding_values") or ()
-        if isinstance(item, dict)
-        for value_id in (str(item.get("value") or ""),)
-        if value_id in value_ids and str(item.get("source") or "") == "available_value"
+        (item.value, item.value_component)
+        for item in param.binding_values
+        if item.value in value_ids and item.source == "available_value"
     )
 
 
 def _matching_bind_decision_ids(
-    param: dict[str, object],
+    param: CandidateParameter,
     *,
     binding_key: tuple[str, str],
 ) -> tuple[str, ...]:
     value_id, value_component = binding_key
     return tuple(
         decision_id
-        for option in param.get("decision_options") or ()
-        if isinstance(option, dict)
-        and str(option.get("decision") or "") == "bind"
-        and str(option.get("value") or "") == value_id
-        and str(option.get("value_component") or "") == value_component
-        for decision_id in (str(option.get("param_decision_id") or ""),)
+        for option in param.decision_options
+        if option.decision == "bind"
+        and option.value == value_id
+        and option.value_component == value_component
+        for decision_id in (option.id,)
         if decision_id
     )
 

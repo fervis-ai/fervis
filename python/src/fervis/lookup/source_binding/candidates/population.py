@@ -37,7 +37,7 @@ def _candidate_with_population_bindings(
     context: CandidateTreeContext,
     population_index: PopulationBindingIndex,
 ) -> dict[str, Any] | None:
-    bindings = population_index.bindings_for_candidate(
+    bindings = population_index.bindings_for_card(
         candidate,
         requested_fact_id=context.requested_fact_id,
     )

@@ -287,6 +287,4 @@ def _render_site(tmp_path):
 
 
 def _call_page(site) -> str:
-    return (site / "runs" / "run-a" / "0003-fact-plan.html").read_text(
-        encoding="utf-8"
-    )
+    return (site / "runs" / "run-a" / "0003-fact-plan.html").read_text(encoding="utf-8")

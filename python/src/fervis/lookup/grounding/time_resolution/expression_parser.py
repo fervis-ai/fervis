@@ -247,7 +247,7 @@ def _date_value(text: str) -> dict[str, int | str] | None:
     return value
 
 
-def _iso_date_value(text: str) -> dict[str, int] | None:
+def _iso_date_value(text: str) -> dict[str, int | str] | None:
     match = re.fullmatch(r"(\d{4}) ([0-1]?\d) ([0-3]?\d)", text)
     if match is None:
         return None

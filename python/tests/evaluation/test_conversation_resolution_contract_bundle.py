@@ -69,9 +69,7 @@ def _array_item_type_violations(schema: object, *, path: str) -> list[str]:
     if isinstance(schema, dict):
         if schema.get("type") == "array":
             items = schema.get("items")
-            if not isinstance(items, dict) or not (
-                "type" in items or "oneOf" in items
-            ):
+            if not isinstance(items, dict) or not ("type" in items or "oneOf" in items):
                 violations.append(path)
         for key, value in schema.items():
             violations.extend(_array_item_type_violations(value, path=f"{path}.{key}"))
@@ -132,6 +130,7 @@ class _ConversationResolutionModelPort:
                                         {
                                             "value_id": "prior_rows",
                                             "resolved_text": "prior rows",
+                                            "frame_parameter": {"kind": "none"},
                                             "sources": [
                                                 {
                                                     "kind": "current_span",
@@ -149,7 +148,6 @@ class _ConversationResolutionModelPort:
                                     ],
                                 }
                             ],
-                            "frame_call": {"kind": "none"},
                         },
                     },
                 }
@@ -200,9 +198,7 @@ def test_conversation_resolution_artifact_separates_submitted_and_derived_payloa
         "derived_source_card_ids": result.artifact.derived_payload[
             "used_source_card_ids"
         ],
-        "derived_memory_ids": result.artifact.derived_payload[
-            "activated_memory_ids"
-        ],
+        "derived_memory_ids": result.artifact.derived_payload["activated_memory_ids"],
     } == {
         "submitted_has_derived_keys": False,
         "parsed_has_derived_keys": False,

@@ -6,8 +6,7 @@ import os
 from pathlib import Path
 
 from sqlalchemy.exc import ArgumentError
-from sqlalchemy.engine import make_url
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, URL, make_url
 
 from fervis.interfaces.agent.actions import edit_config_action, set_env_action
 from fervis.interfaces.agent.commands import commands, render_command
@@ -21,6 +20,8 @@ from .sqlite_engine import create_sqlite_engine
 class DatabaseUrlPersistenceBackend(SqlPersistenceBackend):
     def __init__(self, *, config: DatabaseUrlPersistence) -> None:
         self.url_env = config.url_env
+        self._url_value = os.environ.get(self.url_env, "")
+        self._parsed, self._parse_error = _parse_url(self._url_value)
         super().__init__(
             target=ResolvedPersistenceTarget(
                 kind="database_url",
@@ -29,16 +30,16 @@ class DatabaseUrlPersistenceBackend(SqlPersistenceBackend):
         )
 
     def engine(self, *, create: bool = False) -> Engine | None:
-        parsed = self._parsed_url()
+        parsed = self._parsed
         if parsed is None or parsed.get_backend_name() != "sqlite":
             return None
-        target = _sqlite_file_target(str(parsed))
+        target = _sqlite_file_target(parsed)
         if target is not None and not target.exists() and not create:
             return None
         return create_sqlite_engine(str(parsed))
 
     def target_check(self) -> PersistenceCheck:
-        url = self._url()
+        url = self._url_value
         if not url:
             return PersistenceCheck(
                 id="persistence.target",
@@ -46,15 +47,16 @@ class DatabaseUrlPersistenceBackend(SqlPersistenceBackend):
                 message=f"{self.url_env} is not set.",
                 fix=self.connection_fix(),
             )
-        try:
-            parsed = make_url(url)
-        except ArgumentError as exc:
+        if self._parse_error:
             return PersistenceCheck(
                 id="persistence.target",
                 passed=False,
-                message=str(exc) or "Invalid database URL.",
+                message=self._parse_error,
                 fix=self.connection_fix(),
             )
+        parsed = self._parsed
+        if parsed is None:
+            raise AssertionError("parsed database URL is unavailable")
         if parsed.get_backend_name() != "sqlite":
             return PersistenceCheck(
                 id="persistence.target",
@@ -62,6 +64,13 @@ class DatabaseUrlPersistenceBackend(SqlPersistenceBackend):
                 message=(
                     "DatabaseUrlPersistence supports only sqlite URLs in this slice."
                 ),
+                fix=edit_config_action(),
+            )
+        if _sqlite_file_target(parsed) is None:
+            return PersistenceCheck(
+                id="persistence.target",
+                passed=False,
+                message="DatabaseUrlPersistence requires durable file-backed SQLite.",
                 fix=edit_config_action(),
             )
         return PersistenceCheck(
@@ -74,9 +83,9 @@ class DatabaseUrlPersistenceBackend(SqlPersistenceBackend):
         return set_env_action(self.url_env)
 
     def target_unavailable_message(self) -> str:
-        parsed = self._parsed_url()
+        parsed = self._parsed
         if parsed is None:
-            return f"{self.url_env} is not set."
+            return self._parse_error or f"{self.url_env} is not set."
         if parsed.get_backend_name() != "sqlite":
             return "DatabaseUrlPersistence supports only sqlite URLs in this slice."
         return (
@@ -85,16 +94,8 @@ class DatabaseUrlPersistenceBackend(SqlPersistenceBackend):
         )
 
     def connection_check(self) -> PersistenceCheck:
-        try:
-            parsed = self._parsed_url()
-            target = _sqlite_file_target(str(parsed)) if parsed is not None else None
-        except ArgumentError as exc:
-            return PersistenceCheck(
-                id="persistence.connection",
-                passed=False,
-                message=str(exc) or "Invalid database URL.",
-                fix=self.connection_fix(),
-            )
+        parsed = self._parsed
+        target = _sqlite_file_target(parsed) if parsed is not None else None
         if target is not None and not target.exists():
             return PersistenceCheck(
                 id="persistence.connection",
@@ -106,16 +107,16 @@ class DatabaseUrlPersistenceBackend(SqlPersistenceBackend):
             )
         return super().connection_check()
 
-    def _url(self) -> str:
-        return os.environ.get(self.url_env, "")
+def _parse_url(value: str) -> tuple[URL | None, str]:
+    if not value:
+        return None, ""
+    try:
+        return make_url(value), ""
+    except ArgumentError as exc:
+        return None, str(exc) or "Invalid database URL."
 
-    def _parsed_url(self):
-        url = self._url()
-        return make_url(url) if url else None
 
-
-def _sqlite_file_target(url: str) -> Path | None:
-    parsed = make_url(url)
+def _sqlite_file_target(parsed: URL) -> Path | None:
     if parsed.get_backend_name() != "sqlite":
         return None
     database = parsed.database

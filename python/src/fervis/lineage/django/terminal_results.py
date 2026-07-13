@@ -21,7 +21,7 @@ def terminal_status_from_result_kind(result_kind: str) -> str:
     if result_kind == RunResultKind.RUNTIME_ERROR.value:
         return "FAILED"
     if result_kind == RunResultKind.FACTUAL_TERMINAL.value:
-        return "NEEDS_CLARIFICATION"
+        return "COMPLETED"
     if result_kind == RunResultKind.ANSWERED.value:
         return "COMPLETED"
     return "RUNNING"

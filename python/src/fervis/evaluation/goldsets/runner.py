@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 import hashlib
 import json
@@ -10,14 +10,12 @@ from pathlib import Path
 import time
 import uuid
 
-from fervis.interfaces.cli.runtime_ask import RuntimeAskFollower, RuntimeAskQuestions
 from fervis.interfaces.common.admission import ConfiguredModelPolicy
-from fervis.lineage.enums import RunTriggerKind
 from fervis.questions import (
     AskRequest,
     AskRequestLimits,
     AskResult,
-    ContinueQuestionRequest,
+    ClarificationResponseRequest,
     ExecutionMode,
     QuestionPrincipal,
 )
@@ -30,6 +28,7 @@ from .contracts import (
     GoldsetRunResult,
     GoldsetSuite,
 )
+from .ports import GoldsetQuestions, GoldsetRunFollower
 
 
 class GoldsetPreflightError(ValueError):
@@ -59,11 +58,14 @@ class _EvaluatedCaseRun:
     evaluation: GoldsetCaseResult
 
 
+GoldsetCaseRunObserver = Callable[[int, int, GoldsetCaseResult], None]
+
+
 def run_goldset_suite(
     suite: GoldsetSuite,
     *,
-    questions: RuntimeAskQuestions,
-    question_run_follower: RuntimeAskFollower | None,
+    questions: GoldsetQuestions,
+    question_run_follower: GoldsetRunFollower | None,
     question_run_limits: AskRequestLimits,
     model_policy: ConfiguredModelPolicy,
     principal: QuestionPrincipal,
@@ -72,13 +74,14 @@ def run_goldset_suite(
     model_key: str | None = None,
     wait_seconds: float = 60.0,
     ledger_file: Path | None = None,
-    determinism_runs: int = 1,
+    stable_runs: int = 1,
     enforce_structured_determinism: bool = False,
     attempts: int = 1,
     retry_provider_failures: bool = False,
     retry_sleep_seconds: float = 300.0,
+    case_run_observer: GoldsetCaseRunObserver | None = None,
 ) -> GoldsetRunResult:
-    run_count = _positive_int(determinism_runs, field_name="determinism_runs")
+    run_count = _positive_int(stable_runs, field_name="stable_runs")
     attempt_count = _positive_int(attempts, field_name="attempts")
     goldset_run_id = f"goldset:{uuid.uuid4()}"
     cases = _selected_cases(
@@ -99,11 +102,12 @@ def run_goldset_suite(
             principal=principal,
             wait_seconds=wait_seconds,
             goldset_run_id=goldset_run_id,
-            determinism_runs=run_count,
+            stable_runs=run_count,
             enforce_structured_determinism=enforce_structured_determinism,
             attempts=attempt_count,
             retry_provider_failures=retry_provider_failures,
             retry_sleep_seconds=retry_sleep_seconds,
+            case_run_observer=case_run_observer,
         )
         for case in cases
     )
@@ -143,26 +147,28 @@ def _run_case(
     case: GoldsetCase,
     *,
     suite: GoldsetSuite,
-    questions: RuntimeAskQuestions,
-    question_run_follower: RuntimeAskFollower | None,
+    questions: GoldsetQuestions,
+    question_run_follower: GoldsetRunFollower | None,
     question_run_limits: AskRequestLimits,
     model_policy: ConfiguredModelPolicy,
     model_key: str | None,
     principal: QuestionPrincipal,
     wait_seconds: float,
     goldset_run_id: str,
-    determinism_runs: int,
+    stable_runs: int,
     enforce_structured_determinism: bool,
     attempts: int,
     retry_provider_failures: bool,
     retry_sleep_seconds: float,
+    case_run_observer: GoldsetCaseRunObserver | None,
 ) -> GoldsetCaseResult:
     admitted_model = model_policy.admit(
         requested_provider="",
-        requested_model_key=model_key,
+        requested_model_key=model_key or "",
     )
-    runs = tuple(
-        _run_case_once(
+    runs: list[_EvaluatedCaseRun] = []
+    for stability_run in range(1, stable_runs + 1):
+        run = _run_case_once(
             case,
             suite=suite,
             questions=questions,
@@ -175,17 +181,22 @@ def _run_case(
             runtime_context=_evaluation_context(
                 case_id=case.case_id,
                 goldset_run_id=goldset_run_id,
-                determinism_run=determinism_run,
-                determinism_runs=determinism_runs,
+                stability_run=stability_run,
+                stable_runs=stable_runs,
             ),
             attempts=attempts,
             retry_provider_failures=retry_provider_failures,
             retry_sleep_seconds=retry_sleep_seconds,
         )
-        for determinism_run in range(1, determinism_runs + 1)
-    )
+        runs.append(run)
+        if case_run_observer is not None:
+            case_run_observer(
+                stability_run,
+                stable_runs,
+                run.evaluation,
+            )
     return _aggregate_case_runs(
-        runs,
+        tuple(runs),
         enforce_structured_determinism=enforce_structured_determinism,
     )
 
@@ -194,8 +205,8 @@ def _run_case_once(
     case: GoldsetCase,
     *,
     suite: GoldsetSuite,
-    questions: RuntimeAskQuestions,
-    question_run_follower: RuntimeAskFollower | None,
+    questions: GoldsetQuestions,
+    question_run_follower: GoldsetRunFollower | None,
     question_run_limits: AskRequestLimits,
     provider: str,
     model_key: str,
@@ -244,8 +255,8 @@ def _run_case_once(
 def _execute_case(
     case: GoldsetCase,
     *,
-    questions: RuntimeAskQuestions,
-    question_run_follower: RuntimeAskFollower | None,
+    questions: GoldsetQuestions,
+    question_run_follower: GoldsetRunFollower | None,
     question_run_limits: AskRequestLimits,
     provider: str,
     model_key: str,
@@ -256,6 +267,7 @@ def _execute_case(
     conversation_id = ""
     setup_results: list[AskResult] = []
     for setup_question in case.setup_questions:
+        setup_started_at = time.monotonic()
         setup_result = _ask_and_follow(
             setup_question,
             conversation_id=conversation_id,
@@ -268,6 +280,10 @@ def _execute_case(
             wait_seconds=wait_seconds,
             runtime_context=runtime_context,
         )
+        setup_result = _with_wall_clock_duration(
+            setup_result,
+            started_at=setup_started_at,
+        )
         if setup_result.status != "COMPLETED":
             return _CaseExecution(
                 result=setup_result,
@@ -277,6 +293,7 @@ def _execute_case(
             )
         setup_results.append(setup_result)
         conversation_id = setup_result.conversation_id
+    target_started_at = time.monotonic()
     result = _ask_and_follow(
         case.question,
         conversation_id=conversation_id,
@@ -290,7 +307,8 @@ def _execute_case(
         runtime_context=runtime_context,
     )
     for answer in case.clarification_answers:
-        if result.status != "NEEDS_CLARIFICATION":
+        if result.status != "WAITING_FOR_CLARIFICATION":
+            result = _with_wall_clock_duration(result, started_at=target_started_at)
             return _CaseExecution(
                 result=result,
                 setup_results=tuple(setup_results),
@@ -305,14 +323,11 @@ def _execute_case(
             previous=result,
             questions=questions,
             question_run_follower=question_run_follower,
-            question_run_limits=question_run_limits,
-            provider=provider,
-            model_key=model_key,
             principal=principal,
             wait_seconds=wait_seconds,
-            runtime_context=runtime_context,
         )
         if continued is None:
+            result = _with_wall_clock_duration(result, started_at=target_started_at)
             return _CaseExecution(
                 result=result,
                 setup_results=tuple(setup_results),
@@ -321,21 +336,18 @@ def _execute_case(
             )
         result = continued
     for answer in case.optional_clarification_answers:
-        if result.status != "NEEDS_CLARIFICATION":
+        if result.status != "WAITING_FOR_CLARIFICATION":
             break
         continued = _continue_and_follow(
             answer,
             previous=result,
             questions=questions,
             question_run_follower=question_run_follower,
-            question_run_limits=question_run_limits,
-            provider=provider,
-            model_key=model_key,
             principal=principal,
             wait_seconds=wait_seconds,
-            runtime_context=runtime_context,
         )
         if continued is None:
+            result = _with_wall_clock_duration(result, started_at=target_started_at)
             return _CaseExecution(
                 result=result,
                 setup_results=tuple(setup_results),
@@ -343,7 +355,17 @@ def _execute_case(
                 failure_message="Clarification result has no actionable clarification id.",
             )
         result = continued
+    result = _with_wall_clock_duration(result, started_at=target_started_at)
     return _CaseExecution(result=result, setup_results=tuple(setup_results))
+
+
+def _with_wall_clock_duration(
+    result: AskResult,
+    *,
+    started_at: float,
+) -> AskResult:
+    elapsed_ms = int((time.monotonic() - started_at) * 1000)
+    return replace(result, duration_ms=max(0, elapsed_ms))
 
 
 def _evaluate_execution(
@@ -445,14 +467,14 @@ def _aggregate_case_runs(
             subject,
             details={
                 **dict(subject.details),
-                "determinism_runs": records,
+                "stability_runs": records,
             },
         )
     subject = runs[-1].evaluation if passed_count else runs[0].evaluation
     if all_passed:
         message = "All runs passed, but their structured results differed."
     elif passed_count:
-        message = f"{passed_count}/{len(runs)} determinism runs passed."
+        message = f"{passed_count}/{len(runs)} stability runs passed."
     else:
         message = subject.message
     return replace(
@@ -466,7 +488,7 @@ def _aggregate_case_runs(
                 if passed_count or all_passed
                 else subject.details.get("failure_class")
             ),
-            "determinism_runs": records,
+            "stability_runs": records,
         },
     )
 
@@ -485,15 +507,15 @@ def _evaluation_context(
     *,
     case_id: str,
     goldset_run_id: str,
-    determinism_run: int,
-    determinism_runs: int,
+    stability_run: int,
+    stable_runs: int,
 ) -> dict[str, str]:
     return {
         "caseId": case_id,
         "goldsetRunId": goldset_run_id,
         "certificationRunId": goldset_run_id,
-        "determinismRun": str(determinism_run),
-        "determinismRuns": str(determinism_runs),
+        "stabilityRun": str(stability_run),
+        "stableRuns": str(stable_runs),
     }
 
 
@@ -609,8 +631,8 @@ def _ask_and_follow(
     question: str,
     *,
     conversation_id: str,
-    questions: RuntimeAskQuestions,
-    question_run_follower: RuntimeAskFollower | None,
+    questions: GoldsetQuestions,
+    question_run_follower: GoldsetRunFollower | None,
     question_run_limits: AskRequestLimits,
     provider: str,
     model_key: str,
@@ -642,31 +664,22 @@ def _continue_and_follow(
     answer: str,
     *,
     previous: AskResult,
-    questions: RuntimeAskQuestions,
-    question_run_follower: RuntimeAskFollower | None,
-    question_run_limits: AskRequestLimits,
-    provider: str,
-    model_key: str,
+    questions: GoldsetQuestions,
+    question_run_follower: GoldsetRunFollower | None,
     principal: QuestionPrincipal,
     wait_seconds: float,
-    runtime_context: dict[str, str],
 ) -> AskResult | None:
     clarification_id = _first_clarification_id(previous)
     if not clarification_id:
         return None
-    result = questions.continue_question(
-        ContinueQuestionRequest(
+    result = questions.respond_to_clarification(
+        ClarificationResponseRequest(
             question_id=previous.question_id,
-            question=answer,
+            run_id=previous.run_id,
+            clarification_id=clarification_id,
+            response_text=answer,
             principal=principal,
-            trigger_kind=RunTriggerKind.CLARIFICATION_RESPONSE,
             execution_mode=ExecutionMode.QUEUED,
-            provider=provider,
-            model_key=model_key,
-            base_run_id=previous.run_id,
-            trigger_clarification_response_id=clarification_id,
-            runtime_context=runtime_context,
-            limits=question_run_limits,
         ),
         event_sink=_NullEventSink(),
     )
@@ -680,7 +693,7 @@ def _continue_and_follow(
 def _follow_result(
     result: AskResult,
     *,
-    question_run_follower: RuntimeAskFollower | None,
+    question_run_follower: GoldsetRunFollower | None,
     wait_seconds: float,
 ) -> AskResult:
     if (

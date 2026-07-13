@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 from fervis.host_api.adapters.http import (
@@ -22,10 +24,11 @@ from fervis.host_api.contracts.ports import (
     EndpointExecutionResult,
 )
 from fervis.project.integration import FastAPIAppSource
-from fervis.project.importing import project_import_context
+from fervis.project.importing import import_object, project_import_context
 
 from . import catalog
-from .executor import FastAPIDependencyOverride, execute_get_endpoint
+from .executor import FastAPIApplicationRuntime, FastAPIDependencyOverride
+from .loading import load_fastapi_app
 
 
 class FastAPIHostApiAdapter:
@@ -39,12 +42,69 @@ class FastAPIHostApiAdapter:
         self.sources = tuple(sources)
         self.project_root = project_root
         self.auth_schema = auth_schema
+        self._load_lock = RLock()
+        self._loaded = False
+        self._closed = False
+        self._dependency: Callable[..., object] | None = None
+        self._resolver: Callable[..., object] | None = None
+        self._contracts: tuple[EndpointContract, ...] = ()
+        self._runtimes: list[FastAPIApplicationRuntime] = []
+        self._runtimes_by_endpoint: dict[str, FastAPIApplicationRuntime] = {}
+
+    def _load(self) -> None:
+        with self._load_lock:
+            if self._closed:
+                raise EndpointExecutionError("FastAPI host adapter is closed.")
+            if self._loaded:
+                return
+            self._load_applications()
+            self._loaded = True
+
+    def _load_applications(self) -> None:
+        bindings: list[tuple[EndpointContract, FastAPIApplicationRuntime]] = []
+        runtimes: list[FastAPIApplicationRuntime] = []
+        with project_import_context(self.project_root):
+            if http_read_config_from_auth_schema(self.auth_schema) is None:
+                dependency_functions = _dependency_functions(self.auth_schema)
+            else:
+                dependency_functions = (None, None)
+            self._dependency, self._resolver = dependency_functions
+            for source in self.sources:
+                for import_path in source.import_paths:
+                    app = load_fastapi_app(import_path)
+                    runtime = FastAPIApplicationRuntime(
+                        app,
+                        project_root=self.project_root,
+                    )
+                    app_contracts = catalog.endpoint_contracts_from_fastapi_app(
+                        app,
+                        source=source,
+                        import_path=import_path,
+                    )
+                    runtimes.append(runtime)
+                    for contract in app_contracts:
+                        bindings.append((contract, runtime))
+        sorted_bindings = tuple(
+            sorted(bindings, key=lambda binding: binding[0].path_template)
+        )
+        runtimes_by_endpoint: dict[str, FastAPIApplicationRuntime] = {}
+        for contract, runtime in sorted_bindings:
+            runtimes_by_endpoint.setdefault(contract.endpoint_name, runtime)
+        self._contracts = tuple(contract for contract, _ in sorted_bindings)
+        self._runtimes = runtimes
+        self._runtimes_by_endpoint = runtimes_by_endpoint
 
     def describe_sources(self) -> tuple[EndpointContract, ...]:
-        return catalog.get_fastapi_endpoint_contracts(
-            sources=self.sources,
-            project_root=self.project_root,
-        )
+        self._load()
+        return self._contracts
+
+    def close(self) -> None:
+        with self._load_lock:
+            if self._closed:
+                return
+            self._closed = True
+            for runtime in reversed(self._runtimes):
+                runtime.close()
 
     def capture_read_context(self, request: Any) -> ReadContextRef:
         user = getattr(getattr(request, "state", None), "user", None)
@@ -71,6 +131,7 @@ class FastAPIHostApiAdapter:
         authority: ReadAuthority,
         invocation: ReadInvocation,
     ) -> EndpointExecutionResult:
+        self._load()
         http_config = http_read_config_from_auth_schema(self.auth_schema)
         if http_config is not None:
             contract = self._endpoint_contract(invocation.endpoint_name)
@@ -84,10 +145,14 @@ class FastAPIHostApiAdapter:
         dependency_override: FastAPIDependencyOverride | None = None
         if authority.read_context_ref.scheme != "anonymous":
             dependency_override = self._dependency_override(authority)
-        return execute_get_endpoint(
-            endpoint_name=invocation.endpoint_name,
-            sources=self.sources,
-            project_root=self.project_root,
+        contract = self._endpoint_contract(invocation.endpoint_name)
+        runtime = self._runtimes_by_endpoint.get(invocation.endpoint_name)
+        if runtime is None:
+            raise EndpointExecutionError(
+                f"Unknown endpoint: {invocation.endpoint_name}"
+            )
+        return runtime.execute_get(
+            contract=contract,
             path_params=dict(invocation.path_params),
             query_params=dict(invocation.query_params),
             page_policy=(
@@ -109,9 +174,11 @@ class FastAPIHostApiAdapter:
             raise ValueError(
                 "FastAPI reads require configured principal reauthorization."
             )
+        if self._dependency is None or self._resolver is None:
+            raise RuntimeError("FastAPI principal functions were not configured.")
         return FastAPIDependencyOverride(
-            dependency=str(principal["dependency"]),
-            resolver=str(principal["resolver"]),
+            dependency=self._dependency,
+            resolver=self._resolver,
             key=authority.read_context_ref.key,
             tenant_id=authority.tenant_id,
             principal_id_attr=str(principal.get("id_attr") or "id"),
@@ -145,3 +212,16 @@ def _principal_schema(schema: dict[str, object] | None) -> dict[str, object]:
 def _principal_id_attr(schema: dict[str, object] | None) -> str:
     principal = _principal_schema(schema)
     return str(principal.get("id_attr") or "")
+
+
+def _dependency_functions(
+    schema: dict[str, object] | None,
+) -> tuple[Callable[..., object] | None, Callable[..., object] | None]:
+    principal = _principal_schema(schema)
+    if not principal:
+        return None, None
+    dependency = import_object(str(principal["dependency"]))
+    resolver = import_object(str(principal["resolver"]))
+    if not callable(dependency) or not callable(resolver):
+        raise TypeError("FastAPI principal dependency and resolver must be callable.")
+    return dependency, resolver

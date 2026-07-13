@@ -14,7 +14,7 @@ input:
   context_frames:
     - frame_id: request:1
       source_ids: [prior_question]
-      answer_shape: {expression_family: scalar_aggregate, output_roles: [ROW_POPULATION]}
+      answer_shape: {expression_family: scalar_aggregate, output_roles: [ROW_COUNT]}
       parts:
         - {part_id: location, kind: entity_identity, text: Acacia Mall, source_ref: location}
         - {part_id: time, kind: time_scope, text: today, source_ref: time}
@@ -29,9 +29,9 @@ expect:
     top_level_fields: [current_question_text, kind, outcome]
     top_level_required: [current_question_text, kind, outcome]
     outcome_kinds: [resolved, multiple_meanings, missing_input]
-    resolved_fields: [clauses, contextualized_question, frame_call, kind, resolution_basis]
-    resolved_required: [clauses, contextualized_question, frame_call, kind, resolution_basis]
+    resolved_fields: [clauses, contextualized_question, kind, resolution_basis]
+    resolved_required: [clauses, contextualized_question, kind, resolution_basis]
     source_kinds: [current_span, context_anchor, frame_part]
-    frame_call_kinds: [none, call]
+    frame_parameter_kinds: [none, parameter]
     ambiguity_candidate_fields: [context_evidence, contextualized_question]
     ambiguity_evidence_source_ids: [prior_question]

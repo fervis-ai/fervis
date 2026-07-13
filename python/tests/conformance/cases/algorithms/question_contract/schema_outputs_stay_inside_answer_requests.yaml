@@ -20,6 +20,16 @@ expect:
     ordinary_answer_expression_branch:
       required: [family]
       properties: [family]
+      family_enum:
+        - list_rows
+        - ranked_selection
+        - scalar_value
+        - scalar_aggregate
+        - computed_scalar
+        - set_difference
+        - coverage_check
+        - existence_check
+        - comparison_check
       allows_group_key: false
       additional_properties: false
     answer_output_schema_kind: object
@@ -28,7 +38,7 @@ expect:
       required: [description]
       properties: [description, role]
       role_enum:
-        - ROW_POPULATION
+        - ROW_COUNT
         - ANSWER_VALUE
         - MEASURED_VALUE
         - POPULATION_SCOPE

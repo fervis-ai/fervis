@@ -3,7 +3,6 @@ from tests.lookup.orchestrator._runtime_ports import (
     _grounding_payload_from_prompt,
 )
 
-
 def _offered_conversation_resolution_tool_names(
     tool_specs: tuple[Any, ...],
 ) -> tuple[str, ...]:
@@ -85,13 +84,13 @@ class _RawPlannerPort:
             question_contract,
             self.arguments,
         )
-        if tool_name == "submit_answer_request_contract":
+        if tool_name == "submit_question_contract_outcome":
             return {
                 "answer": json.dumps(
                     {
-                        "tool": "submit_answer_request_contract",
-                        "arguments": _question_contract_payload(
-                            question_contract,
+                        "tool": "submit_question_contract_outcome",
+                        "arguments": _question_contract_decision(
+                            _question_contract_payload(question_contract)
                         ),
                     },
                     default=str,
@@ -384,6 +383,8 @@ class _ToolNamePlannerPort:
                 prompt,
                 arguments,
             )
+        if tool_name == "submit_question_contract_outcome":
+            arguments = _question_contract_decision(arguments)
         if tool_name == "submit_source_binding":
             self.source_binding_selection_prompt = prompt
             arguments = source_binding_payload_for_one_call(arguments, prompt=prompt)
@@ -444,7 +445,7 @@ class _PromptSurfacePlannerPort:
         self.calls += 1
         self.prompts.append(prompt)
         tool_name = tool_specs[0].name if tool_specs else ""
-        if tool_name == "submit_answer_request_contract":
+        if tool_name == "submit_question_contract_outcome":
             arguments = {
                 "kind": "question_contract",
                 "answer_requests_count": 1,
@@ -461,7 +462,9 @@ class _PromptSurfacePlannerPort:
                                 subject_text="salespeople"
                             ).instance_interpretation,
                         ).to_question_contract_dict(),
-                        "answer_outputs": [{"description": "staff name"}],
+                        "answer_outputs": [
+                            {"description": "staff name", "role": "ANSWER_VALUE"}
+                        ],
                         "used_question_inputs": [],
                     }
                 ],
@@ -497,20 +500,20 @@ class _PromptSurfacePlannerPort:
                     "bindings_for_fact_1": {
                         "plan_shape": "list_rows",
                         "primary": {
-                                    "binding_target_id": binding_target_id,
-                                    "answer_population": source_candidate_answer_population(
-                                        prompt,
-                                        source_candidate_id=str(
-                                            candidate["source_candidate_id"]
-                                        ),
-                                    ),
-                                    "fulfillment_decisions": source_fulfills_for_candidate(
-                                        candidate,
-                                        field_ids=("staff_name",),
-                                    ),
-                                    "param_decisions": {},
-                                    "finite_choice_param_reviews": {},
-                        }
+                            "binding_target_id": binding_target_id,
+                            "answer_population": source_candidate_answer_population(
+                                prompt,
+                                source_candidate_id=str(
+                                    candidate["source_candidate_id"]
+                                ),
+                            ),
+                            "fulfillment_decisions": source_fulfills_for_candidate(
+                                candidate,
+                                field_ids=("staff_name",),
+                            ),
+                            "param_decisions": {},
+                            "finite_choice_param_reviews": {},
+                        },
                     },
                 }
             }
@@ -552,6 +555,8 @@ class _PromptSurfacePlannerPort:
             }
         else:
             raise AssertionError(f"unexpected tool: {tool_name}")
+        if tool_name == "submit_question_contract_outcome":
+            arguments = _question_contract_decision(arguments)
         return {
             "answer": json.dumps(
                 {"tool": tool_name, "arguments": arguments},
@@ -675,7 +680,7 @@ class _QuestionIntentAwarePlannerPort:
                     "costUsd": 0,
                 },
             }
-        if tool_name == "submit_answer_request_contract":
+        if tool_name == "submit_question_contract_outcome":
             if self.required_prompt_fragments and any(
                 fragment not in prompt for fragment in self.required_prompt_fragments
             ):
@@ -700,6 +705,7 @@ class _QuestionIntentAwarePlannerPort:
                             "answer_outputs": [
                                 {
                                     "description": "metric_total",
+                                    "role": "ANSWER_VALUE",
                                 }
                             ],
                             "used_question_inputs": [],
@@ -736,6 +742,8 @@ class _QuestionIntentAwarePlannerPort:
             )
         else:
             raise AssertionError(f"unexpected tool: {tool_name}")
+        if tool_name == "submit_question_contract_outcome":
+            arguments = _question_contract_decision(arguments)
         return {
             "answer": json.dumps(
                 {"tool": tool_name, "arguments": arguments},
@@ -779,13 +787,15 @@ class _ClarificationBiasedPlannerPort:
         if conversation_tool_name:
             tool_name = conversation_tool_name
             arguments = conversation_resolution_payload
-        elif "submit_answer_request_contract" in offered:
-            tool_name = "submit_answer_request_contract"
+        elif "submit_question_contract_outcome" in offered:
+            tool_name = "submit_question_contract_outcome"
             question_contract = _question_contract_for_plan(
                 self.plan,
                 description=_current_question_from_prompt(prompt) or None,
             )
-            arguments = _question_contract_payload(question_contract)
+            arguments = _question_contract_decision(
+                _question_contract_payload(question_contract)
+            )
         elif "submit_query_enrichment" in offered:
             tool_name = "submit_query_enrichment"
             arguments = _query_enrichment_payload_from_prompt(prompt)

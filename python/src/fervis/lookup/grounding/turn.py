@@ -10,7 +10,7 @@ from fervis.lookup.lineage.explanation_metadata import (
 )
 from fervis.lookup.grounding.model import (
     GroundingRequest,
-    GroundingCompatibilityResult,
+    GroundingSelectionResult,
 )
 from fervis.lookup.grounding.parser import parse_grounding_compatibility
 from fervis.lookup.model_turn import (
@@ -30,7 +30,7 @@ from fervis.lookup.turn_prompts import build_turn_prompt_context
 
 @dataclass(frozen=True)
 class GroundingTurnResult:
-    result: GroundingCompatibilityResult
+    result: GroundingSelectionResult
     usage: dict[str, Any]
     duration_ms: int
     artifact: ModelTurnArtifact
@@ -70,11 +70,9 @@ def generate_grounding(
         output.artifact,
         derived_payload=lineage_explanation_metadata(
             (
-                "known_input_binding_reviews",
+                "known_input_bindings",
                 "*",
-                "option_reviews",
-                "*",
-                "because",
+                "selection_basis",
             ),
         ),
     )

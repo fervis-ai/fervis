@@ -31,11 +31,11 @@ def read_eligibility_candidate_scopes_from_cards(
         read.id: read for read in request.catalog_selection.relation_catalog.reads
     }
     output: list[ReadEligibilityCandidateScope] = []
-    for group in card_payload.get("requested_fact_read_candidates") or ():
+    for group in _array(card_payload.get("requested_fact_read_candidates")):
         if not isinstance(group, dict):
             continue
         requested_fact_id = str(group.get("requested_fact_id") or "")
-        for card in group.get("read_candidates") or ():
+        for card in _array(group.get("read_candidates")):
             if not isinstance(card, dict):
                 continue
             read_id = str(card.get("read_id") or "")
@@ -92,9 +92,9 @@ def read_eligibility_candidate_scopes_from_cards(
 def _response_field_tokens(card: dict[str, object]) -> tuple[str, ...]:
     return tuple(
         token
-        for row in card.get("response_rows") or ()
+        for row in _array(card.get("response_rows"))
         if isinstance(row, dict)
-        for field in row.get("fields") or ()
+        for field in _array(row.get("fields"))
         if isinstance(field, dict)
         for token in (str(field.get("evidence_token") or ""),)
         if token
@@ -104,11 +104,15 @@ def _response_field_tokens(card: dict[str, object]) -> tuple[str, ...]:
 def _response_row_tokens(card: dict[str, object]) -> tuple[str, ...]:
     return tuple(
         token
-        for row in card.get("response_rows") or ()
+        for row in _array(card.get("response_rows"))
         if isinstance(row, dict)
         for token in (str(row.get("evidence_token") or ""),)
         if token
     )
+
+
+def _array(value: object) -> tuple[object, ...]:
+    return tuple(value) if isinstance(value, (list, tuple)) else ()
 
 
 def _field_path_from_token(token: str) -> str:

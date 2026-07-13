@@ -16,7 +16,14 @@ input:
             source: path
             type: uuid
             required: true
-            identity: {entity_ref: sale, identity_field: sale_id, primary_key: true, stable: true}
+            entity_target: {entity_kind: sale, key_id: primary_key, component_id: sale_id}
+        fields:
+          - {ref: sale.field.sale_id, path: sale_id, type: uuid}
+        candidate_keys:
+          - id: primary_key
+            entity_kind: sale
+            primary: true
+            components: [{id: sale_id, field_ref: sale.field.sale_id}]
         facts: [{ref: sale.receipt.item.detail}]
       - id: sale_list
         endpoint_name: list_sales
@@ -27,6 +34,7 @@ input:
       description: sale receipt item detail
       answer_outputs:
         - id: fact_1
+          role: ANSWER_VALUE
   resource_name_matches:
     - requested_fact_id: fact_1
       answer_output_resource_lineage:
@@ -37,11 +45,11 @@ input:
   available_values:
     - id: value_sale_1
       kind: identity
-      identity_type: sale
-      identity_field: sale_id
+      entity_kind: sale
+      key_id: primary_key
+      key_component_id: sale_id
       value: sale-1
   max_reads_per_fact: 4
 expect:
   result_contains:
     selected_read_ids: [sale_detail, sale_list]
-

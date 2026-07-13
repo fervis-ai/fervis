@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from decimal import Decimal
 from uuid import UUID
 
 from fervis import error_codes as common_error_codes
@@ -64,9 +65,9 @@ def test_lookup_uses_semantic_read_eligibility_after_recall():
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer_1",
                         relation_id="answer_rows",
                         field_id="total_revenue",
@@ -142,9 +143,9 @@ def test_lookup_pipeline_emits_runtime_progress_for_major_phases() -> None:
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer_1",
                         relation_id="answer_rows",
                         field_id="total_revenue",
@@ -219,9 +220,9 @@ def test_lookup_runtime_records_source_reads_against_canonical_execute_step():
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer_1",
                         relation_id="answer_rows",
                         field_id="total_revenue",
@@ -273,7 +274,7 @@ def test_lookup_runtime_records_source_reads_against_canonical_execute_step():
     assert len(answered.proof_graphs) == 1
     assert answered.outputs[0].output_key == "answer_1"
     assert answered.outputs[0].value_json == {
-        "kind": "text",
+        "kind": "number",
         "value": "14.00",
     }
     assert execute_steps[0].output_summary_json["relationCount"] == 2
@@ -341,9 +342,9 @@ def test_lookup_retains_ambiguous_read_eligibility_candidates_with_docstring_con
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer_1",
                         relation_id="answer_rows",
                         field_id="total_revenue",
@@ -451,9 +452,9 @@ def test_lookup_source_binding_can_bind_required_finite_choice_param():
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer_1",
                         relation_id="answer_rows",
                         field_id="total_revenue",
@@ -537,11 +538,11 @@ def test_lookup_derives_finite_choice_membership_from_answer_population_tests():
         "question_inputs": [],
         "answer_requests": [
             {
-                "answer_fact": "count of in-person sales",
+                "answer_fact": "count of sales",
                 "answer_expression": {"family": "list_rows"},
                 "answer_subject": _answer_subject_payload("sales"),
                 "answer_population": {
-                    "population_label": "in-person sales",
+                    "population_label": "sales",
                     "counted_unit": "sale",
                     "membership_tests": [
                         {
@@ -549,13 +550,6 @@ def test_lookup_derives_finite_choice_membership_from_answer_population_tests():
                             "kind": "SUBJECT_IDENTITY",
                             "polarity": "MUST_PASS",
                             "test_question": "Does the row/value represent a sale?",
-                            "owned_question_input_refs": [],
-                        },
-                        {
-                            "test_id": "pop_test_2",
-                            "kind": "EXPLICIT_USER_CONSTRAINT",
-                            "polarity": "MUST_PASS",
-                            "test_question": "Is the sale in-person?",
                             "owned_question_input_refs": [],
                         },
                         {
@@ -572,7 +566,7 @@ def test_lookup_derives_finite_choice_membership_from_answer_population_tests():
                         },
                     ],
                 },
-                "answer_outputs": [{"description": "count"}],
+                "answer_outputs": [{"description": "count", "role": "ANSWER_VALUE"}],
                 "used_question_inputs": [],
             }
         ],
@@ -611,7 +605,6 @@ def test_lookup_derives_finite_choice_membership_from_answer_population_tests():
                                 normal_test_ids=("normal_instance_guard",),
                                 test_effects={
                                     "subject_identity": "DOES_NOT_DECIDE_TEST",
-                                    "explicit_user_constraint:pop_test_2": "DOES_NOT_DECIDE_TEST",
                                     "normal_instance_guard": "CONFLICTS_WITH_TEST",
                                 },
                             ),
@@ -620,7 +613,6 @@ def test_lookup_derives_finite_choice_membership_from_answer_population_tests():
                                 normal_test_ids=("normal_instance_guard",),
                                 test_effects={
                                     "subject_identity": "DOES_NOT_DECIDE_TEST",
-                                    "explicit_user_constraint:pop_test_2": "DOES_NOT_DECIDE_TEST",
                                     "normal_instance_guard": "SATISFIES_TEST",
                                 },
                             ),
@@ -629,7 +621,6 @@ def test_lookup_derives_finite_choice_membership_from_answer_population_tests():
                                 normal_test_ids=("normal_instance_guard",),
                                 test_effects={
                                     "subject_identity": "DOES_NOT_DECIDE_TEST",
-                                    "explicit_user_constraint:pop_test_2": "DOES_NOT_DECIDE_TEST",
                                     "normal_instance_guard": "CONFLICTS_WITH_TEST",
                                 },
                             ),
@@ -648,7 +639,7 @@ def test_lookup_derives_finite_choice_membership_from_answer_population_tests():
             ),
         ),
         responses={
-            "submit_answer_request_contract": question_contract_payload,
+            "submit_question_contract_outcome": question_contract_payload,
             "submit_query_enrichment": _query_enrichment_payload(("sales",)),
             "submit_source_binding": source_binding_payload,
             "submit_pattern_fact_plan": fact_plan_payload,
@@ -708,7 +699,7 @@ def test_lookup_derives_finite_choice_membership_from_answer_population_tests():
 
     result = run_lookup_question(
         LookupRequest(
-            question="How many in-person sales are there?",
+            question="How many sales are there?",
             run_id="run_answer_population_tests",
             tenant_id="tenant_1",
             provider_preferences={"provider": "fake", "modelKey": "FAKE"},
@@ -790,12 +781,6 @@ def _finite_choice_param_review(
                     "For returned rows, does this choice pass subject identity?"
                 ),
             },
-            "explicit_user_constraint:pop_test_2": {
-                "test_question": "Does this choice pass the explicit user constraint?",
-                "role_scoped_test_question": (
-                    "For returned rows, does this choice pass the explicit user constraint?"
-                ),
-            },
             "normal_instance_guard": {
                 "test_question": "Does this choice pass the normal instance guard?",
                 "role_scoped_test_question": (
@@ -838,9 +823,9 @@ def test_lookup_allows_omitted_optional_default_finite_choice_param():
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer_1",
                         relation_id="answer_rows",
                         field_id="total_revenue",
@@ -951,14 +936,14 @@ def test_lookup_cutover_runs_single_fact_plan_then_execution_then_response_rende
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="location",
                         relation_id="answer_rows",
                         field_id="location",
                     ),
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="metric_total",
                         relation_id="answer_rows",
                         field_id="metric_total",
@@ -1027,7 +1012,7 @@ def test_lookup_cutover_runs_single_fact_plan_then_execution_then_response_rende
     assert result.answer == "Location Alpha: 125.00"
     assert ports.planner_model_port.calls == 6
     assert result.rendered_fact.rows == (  # type: ignore[union-attr]
-        {"answer_1": "Location Alpha", "answer_2": "125.00"},
+        {"answer_1": "Location Alpha", "answer_2": Decimal("125.00")},
     )
 
 
@@ -1481,30 +1466,30 @@ class _OmitOptionalDefaultChoicePlannerPort(_ReadEligibilityPlannerPort):
                     "bindings_for_fact_1": {
                         "plan_shape": "list_rows",
                         "primary": {
-                                    "binding_target_id": binding_target_id,
-                                    "answer_population": {
-                                        "population_binding_id": (
-                                            "pop.source_1.candidate_population"
-                                        ),
-                                        "intent_text": "What was total sales revenue?",
-                                        "match_basis_explanation": (
-                                            "The selected source provides the requested revenue."
-                                        ),
-                                    },
-                                    "fulfillment_decisions": {
-                                        "answer_1": {
-                                            "match_basis_explanation": (
-                                                "answer_1 is fulfilled by the total_revenue field."
-                                            ),
-                                            "fulfillment_choice_id": (
-                                                "source_1.data.total_revenue"
-                                            ),
-                                        }
-                                    },
-                                    "param_decisions": {},
-                                    "row_predicate_reviews": {},
-                                    "finite_choice_param_reviews": {},
-                        }
+                            "binding_target_id": binding_target_id,
+                            "answer_population": {
+                                "population_binding_id": (
+                                    "pop.source_1.candidate_population"
+                                ),
+                                "intent_text": "What was total sales revenue?",
+                                "match_basis_explanation": (
+                                    "The selected source provides the requested revenue."
+                                ),
+                            },
+                            "fulfillment_decisions": {
+                                "answer_1": {
+                                    "match_basis_explanation": (
+                                        "answer_1 is fulfilled by the total_revenue field."
+                                    ),
+                                    "fulfillment_choice_id": (
+                                        "source_1.data.total_revenue"
+                                    ),
+                                }
+                            },
+                            "param_decisions": {},
+                            "row_predicate_reviews": {},
+                            "finite_choice_param_reviews": {},
+                        },
                     },
                 }
             },
@@ -1530,7 +1515,7 @@ class _OmitOptionalDefaultChoicePlannerPort(_ReadEligibilityPlannerPort):
 def test_lookup_unresolved_named_entity_returns_resource_specific_clarification():
     planner = _ToolNamePlannerPort(
         responses={
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="buyer feedback reasons for store choice",
                 answer_subject="buyer feedback reasons",
                 parts=("buyer feedback reasons",),
@@ -1588,19 +1573,26 @@ def test_lookup_unresolved_named_entity_returns_resource_specific_clarification(
                             path="data.location_id",
                             row_path_id="data",
                             type="string",
-                            identity=IdentityMetadata(
-                                entity_ref="location",
-                                identity_field="location_id",
-                                primary_key=True,
-                                stable=True,
-                                display_fields=("field.name",),
-                            ),
                         ),
                         CatalogField(
                             ref="field.name",
                             path="data.name",
                             row_path_id="data",
                             type="string",
+                        ),
+                    ),
+                    candidate_keys=(
+                        CandidateKey(
+                            id="primary_key",
+                            entity_kind="location",
+                            components=(
+                                CandidateKeyComponent(
+                                    id="location_id",
+                                    field_ref="field.location_id",
+                                ),
+                            ),
+                            primary=True,
+                            context_field_refs=("field.name",),
                         ),
                     ),
                 )
@@ -1629,7 +1621,7 @@ def test_lookup_unresolved_named_entity_returns_resource_specific_clarification(
         result.answer == 'I could not find store "Nextgen". Which store should I use?'
     )
     assert planner.tool_names == [
-        "submit_answer_request_contract",
+        "submit_question_contract_outcome",
         "submit_query_enrichment",
         "submit_grounding",
     ]
@@ -1665,19 +1657,19 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
                         "bindings_for_fact_1": {
                             "plan_shape": "list_rows",
                             "primary": {
-                                        "binding_target_id": binding_target_id,
-                                        "answer_population": source_candidate_answer_population(
-                                            prompt,
-                                            source_candidate_id=candidate[
-                                                "source_candidate_id"
-                                            ],
-                                        ),
-                                        "fulfillment_decisions": source_fulfills_for_candidate(
-                                            candidate,
-                                            field_ids=("staff_id",),
-                                        ),
-                                        "param_decisions": {},
-                            }
+                                "binding_target_id": binding_target_id,
+                                "answer_population": source_candidate_answer_population(
+                                    prompt,
+                                    source_candidate_id=candidate[
+                                        "source_candidate_id"
+                                    ],
+                                ),
+                                "fulfillment_decisions": source_fulfills_for_candidate(
+                                    candidate,
+                                    field_ids=("staff_id",),
+                                ),
+                                "param_decisions": {},
+                            },
                         },
                     }
                 }
@@ -1706,7 +1698,7 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
 
     planner = _NoisyResolverPlannerPort(
         responses={
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="Jane Doe staff ID",
                 answer_subject="staff ID",
                 answer_expression_family="list_rows",
@@ -1736,25 +1728,6 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
                     }
                 ],
             ),
-            "submit_grounding": {
-                "known_time_resolutions": {},
-                "known_input_binding_reviews": {
-                    "fact_1_entity_1": {
-                        "option_reviews": {
-                            "bind_fact_1_entity_1_1": {
-                                "resolver_fit_question": "Can this resolver search lookup text 'Jane Doe' and return canonical API identity 'staff' for target meaning 'staff member'?",
-                                "because": "The detail route requires a canonical staff identity value, not a display name.",
-                                "decision": "CANNOT_RESOLVE_LOOKUP_TEXT",
-                            },
-                            "bind_fact_1_entity_1_2": {
-                                "resolver_fit_question": "Can this resolver search lookup text 'Jane Doe' and return canonical API identity 'staff' for target meaning 'staff member'?",
-                                "because": "The staff list resolver can match Jane Doe against returned staff identity rows.",
-                                "decision": "CAN_RESOLVE_LOOKUP_TEXT",
-                            },
-                        }
-                    }
-                },
-            },
             "submit_pattern_fact_plan": {
                 "outcome": {
                     "kind": "fact_plan",
@@ -1824,7 +1797,7 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
 
     assert result.status == "COMPLETED", result
     assert planner.tool_names == [
-        "submit_answer_request_contract",
+        "submit_question_contract_outcome",
         "submit_query_enrichment",
         "submit_grounding",
         "submit_read_eligibility",
@@ -1850,13 +1823,15 @@ def test_lookup_grounding_executes_ambiguous_resolver_routes_before_source_bindi
             ReadEligibilityRetentionSpec(
                 requested_fact_id="fact_1",
                 read_id="sales",
+                row_path_ids=("data",),
             ),
         ),
         responses={
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="sales at ABC Mall",
                 answer_subject="sales",
                 parts=("sales",),
+                answer_output_role="ROW_COUNT",
                 question_inputs=(
                     {
                         "kind": KnownInputKind.LITERAL.value,
@@ -1917,6 +1892,7 @@ def test_lookup_grounding_executes_ambiguous_resolver_routes_before_source_bindi
                     "deal_location_limit",
                     extra_identity_refs=("deal", "location"),
                 ),
+                _identity_list_read("deal_list", "list_deal_list", "deal"),
                 _identity_list_read("location_list", "list_location_list", "location"),
                 EndpointRead(
                     id="sales",
@@ -1935,9 +1911,10 @@ def test_lookup_grounding_executes_ambiguous_resolver_routes_before_source_bindi
                             name="location_id",
                             source=ParamSource.QUERY,
                             type="string",
-                            identity=IdentityMetadata(
-                                entity_ref="location",
-                                identity_field="location_id",
+                            entity_target=EntityKeyComponentTarget(
+                                entity_kind="location",
+                                key_id="primary_key",
+                                component_id="location_id",
                             ),
                         ),
                     ),
@@ -1953,7 +1930,6 @@ def test_lookup_grounding_executes_ambiguous_resolver_routes_before_source_bindi
                         CatalogFact(
                             ref="sales.records",
                             availability=CatalogFactAvailability.POLICY_BLOCKED,
-                            field_ref="field.sale_id",
                             read_id="sales",
                             proof_refs=("policy:sales_records_restricted",),
                         ),
@@ -1986,7 +1962,7 @@ def test_lookup_grounding_executes_ambiguous_resolver_routes_before_source_bindi
 
     assert result.status == "COMPLETED", result
     assert planner.tool_names == [
-        "submit_answer_request_contract",
+        "submit_question_contract_outcome",
         "submit_query_enrichment",
         "submit_grounding",
         "submit_read_eligibility",
@@ -2009,7 +1985,7 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
             ),
         ),
         responses={
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="Jane Doe staff ID",
                 answer_subject="staff ID",
                 answer_expression_family="list_rows",
@@ -2041,15 +2017,12 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
             ),
             "submit_grounding": {
                 "known_time_resolutions": {},
-                "known_input_binding_reviews": {
+                "known_input_bindings": {
                     "fact_1_entity_1": {
-                        "option_reviews": {
-                            "bind_fact_1_entity_1_1": {
-                                "resolver_fit_question": "Can this resolver search lookup text 'Jane Doe' and return canonical API identity 'staff' for target meaning 'staff member'?",
-                                "because": "The staff resolver returns the staff identity named by Jane Doe.",
-                                "decision": "CAN_RESOLVE_LOOKUP_TEXT",
-                            },
-                        }
+                        "selected_option_id": "bind_fact_1_entity_1_1",
+                        "input_value": "Jane Doe",
+                        "result_kind": "canonical_identity",
+                        "selection_basis": "The staff resolver returns the staff identity named by Jane Doe.",
                     }
                 },
             },
@@ -2139,7 +2112,8 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
             "resolver_read_id": "staff_list",
             "resolver_label": "Staff List",
             "entity_kind": "staff",
-            "matched_field": "staff_id",
+            "key_id": "staff_key",
+            "key_component_id": "staff_id",
             "matched_value": "staff-1",
             "matched_label": "Jane Doe",
         }
@@ -2151,7 +2125,7 @@ def test_lookup_runtime_fails_closed_on_grounding_resolver_source_read_failure()
 ):
     planner = _ToolNamePlannerPort(
         responses={
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="Jane Doe staff ID",
                 answer_subject="staff ID",
                 parts=("staff ID",),
@@ -2182,15 +2156,12 @@ def test_lookup_runtime_fails_closed_on_grounding_resolver_source_read_failure()
             ),
             "submit_grounding": {
                 "known_time_resolutions": {},
-                "known_input_binding_reviews": {
+                "known_input_bindings": {
                     "fact_1_entity_1": {
-                        "option_reviews": {
-                            "bind_fact_1_entity_1_1": {
-                                "resolver_fit_question": "Can this resolver search lookup text 'Jane Doe' and return canonical API identity 'staff' for target meaning 'staff member'?",
-                                "because": "The staff resolver returns the staff identity named by Jane Doe.",
-                                "decision": "CAN_RESOLVE_LOOKUP_TEXT",
-                            },
-                        }
+                        "selected_option_id": "bind_fact_1_entity_1_1",
+                        "input_value": "Jane Doe",
+                        "result_kind": "canonical_identity",
+                        "selection_basis": "The staff resolver returns the staff identity named by Jane Doe.",
                     }
                 },
             },
@@ -2241,7 +2212,7 @@ def test_lookup_runtime_fails_closed_on_grounding_resolver_source_read_failure()
 def test_lookup_runtime_fails_closed_on_grounding_missing_catalog_endpoint() -> None:
     planner = _ToolNamePlannerPort(
         responses={
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="Jane Doe staff ID",
                 answer_subject="staff ID",
                 parts=("staff ID",),
@@ -2272,15 +2243,12 @@ def test_lookup_runtime_fails_closed_on_grounding_missing_catalog_endpoint() -> 
             ),
             "submit_grounding": {
                 "known_time_resolutions": {},
-                "known_input_binding_reviews": {
+                "known_input_bindings": {
                     "fact_1_entity_1": {
-                        "option_reviews": {
-                            "bind_fact_1_entity_1_1": {
-                                "resolver_fit_question": "Can this resolver search lookup text 'Jane Doe' and return canonical API identity 'staff' for target meaning 'staff member'?",
-                                "because": "The staff resolver returns the staff identity named by Jane Doe.",
-                                "decision": "CAN_RESOLVE_LOOKUP_TEXT",
-                            },
-                        }
+                        "selected_option_id": "bind_fact_1_entity_1_1",
+                        "input_value": "Jane Doe",
+                        "result_kind": "canonical_identity",
+                        "selection_basis": "The staff resolver returns the staff identity named by Jane Doe.",
                     }
                 },
             },
@@ -2434,9 +2402,9 @@ def test_lookup_cutover_runs_combined_source_and_split_planning_turns():
                         output_relation="answer_rows",
                     ),
                 ),
-                render_spec=RenderSpec(
+                result_projection=ResultProjection(
                     relation_outputs=(
-                        RenderRelationOutput(
+                        RelationResultOutput(
                             id="amount",
                             relation_id="answer_rows",
                             field_id="amount",
@@ -2485,24 +2453,24 @@ def test_lookup_cutover_runs_combined_source_and_split_planning_turns():
                     "bindings_for_fact_1": {
                         "plan_shape": "list_rows",
                         "primary": {
-                                    "binding_target_id": binding_target_id,
-                                    "answer_population": {
-                                        "population_binding_id": "pop.source_1.candidate_population",
-                                        "intent_text": "sales",
-                                        "match_basis_explanation": "sales defines the source population",
-                                    },
-                                    "fulfillment_decisions": {
-                                        "answer_1": {
-                                            "match_basis_explanation": (
-                                                "answer_1 is fulfilled by source_1.data.amount "
-                                                "because that source evidence provides the "
-                                                "requested output."
-                                            ),
-                                            "fulfillment_choice_id": "source_1.data.amount",
-                                        }
-                                    },
-                                    "param_decisions": {},
-                        }
+                            "binding_target_id": binding_target_id,
+                            "answer_population": {
+                                "population_binding_id": "pop.source_1.candidate_population",
+                                "intent_text": "sales",
+                                "match_basis_explanation": "sales defines the source population",
+                            },
+                            "fulfillment_decisions": {
+                                "answer_1": {
+                                    "match_basis_explanation": (
+                                        "answer_1 is fulfilled by source_1.data.amount "
+                                        "because that source evidence provides the "
+                                        "requested output."
+                                    ),
+                                    "fulfillment_choice_id": "source_1.data.amount",
+                                }
+                            },
+                            "param_decisions": {},
+                        },
                     },
                 }
             },
@@ -2518,7 +2486,7 @@ def test_lookup_cutover_runs_combined_source_and_split_planning_turns():
             ),
         ),
         responses={
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="sales",
                 answer_expression_family="list_rows",
                 parts=("sales",),
@@ -2570,7 +2538,7 @@ def test_lookup_cutover_runs_combined_source_and_split_planning_turns():
 
     assert result.status == "COMPLETED", result
     assert planner.tool_names == [
-        "submit_answer_request_contract",
+        "submit_question_contract_outcome",
         "submit_query_enrichment",
         "submit_read_eligibility",
         "submit_source_alignment_reviews",
@@ -2615,14 +2583,14 @@ def test_lookup_source_binding_uses_first_class_fulfillment_usage():
                         output_relation="answer_rows",
                     ),
                 ),
-                render_spec=RenderSpec(
+                result_projection=ResultProjection(
                     relation_outputs=(
-                        RenderRelationOutput(
+                        RelationResultOutput(
                             id="staff_name",
                             relation_id="answer_rows",
                             field_id="staff_name",
                         ),
-                        RenderRelationOutput(
+                        RelationResultOutput(
                             id="amount",
                             relation_id="answer_rows",
                             field_id="amount",
@@ -2685,24 +2653,24 @@ def test_lookup_source_binding_uses_first_class_fulfillment_usage():
                     "bindings_for_fact_1": {
                         "plan_shape": "list_rows",
                         "primary": {
-                                    "binding_target_id": binding_target_id,
-                                    "answer_population": {
-                                        "population_binding_id": "pop.source_1.candidate_population",
-                                        "intent_text": "staff and sales amount",
-                                        "match_basis_explanation": "staff and sales amount defines the source population",
-                                    },
-                                    "fulfillment_decisions": {
-                                        "answer_1": {
-                                            "match_basis_explanation": "answer_1 is fulfilled by source_1.data.staff_name because that evidence provides the requested staff value.",
-                                            "fulfillment_choice_id": "source_1.data.staff_name",
-                                        },
-                                        "answer_2": {
-                                            "match_basis_explanation": "answer_2 is fulfilled by source_1.data.amount because that evidence provides the requested sales amount value.",
-                                            "fulfillment_choice_id": "source_1.data.amount",
-                                        },
-                                    },
-                                    "param_decisions": {},
-                        }
+                            "binding_target_id": binding_target_id,
+                            "answer_population": {
+                                "population_binding_id": "pop.source_1.candidate_population",
+                                "intent_text": "staff and sales amount",
+                                "match_basis_explanation": "staff and sales amount defines the source population",
+                            },
+                            "fulfillment_decisions": {
+                                "answer_1": {
+                                    "match_basis_explanation": "answer_1 is fulfilled by source_1.data.staff_name because that evidence provides the requested staff value.",
+                                    "fulfillment_choice_id": "source_1.data.staff_name",
+                                },
+                                "answer_2": {
+                                    "match_basis_explanation": "answer_2 is fulfilled by source_1.data.amount because that evidence provides the requested sales amount value.",
+                                    "fulfillment_choice_id": "source_1.data.amount",
+                                },
+                            },
+                            "param_decisions": {},
+                        },
                     },
                 }
             },
@@ -2723,7 +2691,7 @@ def test_lookup_source_binding_uses_first_class_fulfillment_usage():
             ),
         ),
         responses={
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="staff and sales amount",
                 answer_subject="staff",
                 parts=("staff", "sales amount"),
@@ -2773,7 +2741,7 @@ def test_lookup_rejects_param_distinct_bindings_for_one_selected_plan_member():
     read_id = "sales_summary"
     planner = _ToolNamePlannerPort(
         responses={
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="total sales revenue",
                 answer_subject="sales",
                 answer_expression_family="scalar_value",
@@ -3014,13 +2982,15 @@ def test_lookup_plan_selection_uses_backend_projected_candidates():
             del provider, max_thinking_tokens, system_prompt, output_mode
             self.prompts.append(prompt)
             tool_name = tool_specs[0].name if tool_specs else ""
-            if tool_name == "submit_answer_request_contract":
-                arguments = _question_contract_response(
-                    subject="total sales",
-                    answer_subject="sales",
-                    answer_expression_family="scalar_value",
-                    parts=("total sales",),
-                    demand_text="sales",
+            if tool_name == "submit_question_contract_outcome":
+                arguments = _question_contract_decision(
+                    _question_contract_response(
+                        subject="total sales",
+                        answer_subject="sales",
+                        answer_expression_family="scalar_value",
+                        parts=("total sales",),
+                        demand_text="sales",
+                    )
                 )
             elif tool_name == "submit_query_enrichment":
                 arguments = _query_enrichment_payload_from_prompt(prompt)
@@ -3042,20 +3012,20 @@ def test_lookup_plan_selection_uses_backend_projected_candidates():
                         "bindings_for_fact_1": {
                             "plan_shape": "direct_field_value",
                             "primary": {
-                                        "binding_target_id": binding_target_id,
-                                        "answer_population": {
-                                            "population_binding_id": "pop.source_1.candidate_population",
-                                            "intent_text": "total sales",
-                                            "match_basis_explanation": "total sales defines the source population",
-                                        },
-                                        "fulfillment_decisions": {
-                                            "answer_1": {
-                                                "match_basis_explanation": "answer_1 is fulfilled by source_1.root.total_sales because that evidence is the requested scalar value.",
-                                                "fulfillment_choice_id": "source_1.root.total_sales",
-                                            }
-                                        },
-                                        "param_decisions": {},
-                            }
+                                "binding_target_id": binding_target_id,
+                                "answer_population": {
+                                    "population_binding_id": "pop.source_1.candidate_population",
+                                    "intent_text": "total sales",
+                                    "match_basis_explanation": "total sales defines the source population",
+                                },
+                                "fulfillment_decisions": {
+                                    "answer_1": {
+                                        "match_basis_explanation": "answer_1 is fulfilled by source_1.root.total_sales because that evidence is the requested scalar value.",
+                                        "fulfillment_choice_id": "source_1.root.total_sales",
+                                    }
+                                },
+                                "param_decisions": {},
+                            },
                         },
                     }
                 }
@@ -3251,9 +3221,9 @@ def test_lookup_model_turns_send_business_system_prompt_and_question_frame():
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="amount",
                         relation_id="answer_rows",
                         field_id="amount",
@@ -3264,7 +3234,7 @@ def test_lookup_model_turns_send_business_system_prompt_and_question_frame():
                 FactFulfillment(
                     requested_fact_id="rf_amount",
                     answer_output_id="amount",
-                    render_output_id="amount",
+                    result_output_id="amount",
                 ),
             ),
         )
@@ -3387,14 +3357,14 @@ def test_lookup_cutover_returns_rendered_machine_truth_without_model_synthesis()
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="location",
                         relation_id="answer_rows",
                         field_id="location",
                     ),
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="metric_total",
                         relation_id="answer_rows",
                         field_id="metric_total",
@@ -3463,7 +3433,9 @@ def test_lookup_cutover_no_data_is_tied_to_fulfilled_requested_fact():
                 description="open ticket",
                 answer_subject=RequestedFactAnswerSubject(subject_text="tickets"),
                 required_for="open ticket",
-                answer_outputs=(RequestedFactAnswerOutput(id="ticket_id"),),
+                answer_outputs=(
+                    RequestedFactAnswerOutput(id="ticket_id", role="ANSWER_VALUE"),
+                ),
             ),
         )
     )
@@ -3473,7 +3445,7 @@ def test_lookup_cutover_no_data_is_tied_to_fulfilled_requested_fact():
                 FactFulfillment(
                     requested_fact_id="rf_open_ticket",
                     answer_output_id="ticket_id",
-                    render_output_id="ticket_id",
+                    result_output_id="ticket_id",
                 ),
             ),
             relations=(
@@ -3501,9 +3473,9 @@ def test_lookup_cutover_no_data_is_tied_to_fulfilled_requested_fact():
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="ticket_id",
                         relation_id="answer_rows",
                         field_id="ticket_id",
@@ -3597,12 +3569,10 @@ def _required_identity_detail_read(
                 source=ParamSource.PATH,
                 type="string",
                 required=True,
-                identity=IdentityMetadata(
-                    entity_ref=entity_ref,
-                    identity_field=f"{entity_ref}_id",
-                    primary_key=True,
-                    stable=True,
-                    display_fields=(f"{endpoint_name}.field.{entity_ref}_id",),
+                entity_target=EntityKeyComponentTarget(
+                    entity_kind=entity_ref,
+                    key_id="primary_key",
+                    component_id=f"{entity_ref}_id",
                 ),
             ),
         ),
@@ -3613,13 +3583,19 @@ def _required_identity_detail_read(
                 path=f"{entity_ref}_id",
                 row_path_id="root",
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref=entity_ref,
-                    identity_field=f"{entity_ref}_id",
-                    primary_key=True,
-                    stable=True,
-                    display_fields=(f"{endpoint_name}.field.{entity_ref}_id",),
+            ),
+        ),
+        candidate_keys=(
+            CandidateKey(
+                id="primary_key",
+                entity_kind=entity_ref,
+                components=(
+                    CandidateKeyComponent(
+                        id=f"{entity_ref}_id",
+                        field_ref=f"{endpoint_name}.field.{entity_ref}_id",
+                    ),
                 ),
+                primary=True,
             ),
         ),
     )
@@ -3645,19 +3621,26 @@ def _staff_identity_list_read() -> EndpointRead:
                 path="data.staff_id",
                 row_path_id="data",
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref="staff",
-                    identity_field="staff_id",
-                    primary_key=True,
-                    stable=True,
-                    display_fields=("staff.field.full_name",),
-                ),
             ),
             CatalogField(
                 ref="staff.field.full_name",
                 path="data.full_name",
                 row_path_id="data",
                 type="string",
+            ),
+        ),
+        candidate_keys=(
+            CandidateKey(
+                id="staff_key",
+                entity_kind="staff",
+                components=(
+                    CandidateKeyComponent(
+                        id="staff_id",
+                        field_ref="staff.field.staff_id",
+                    ),
+                ),
+                primary=True,
+                context_field_refs=("staff.field.full_name",),
             ),
         ),
     )
@@ -3703,13 +3686,6 @@ def _identity_list_read(
                     path=f"data.{identity_ref}_id",
                     row_path_id="data",
                     type="string",
-                    identity=IdentityMetadata(
-                        entity_ref=identity_ref,
-                        identity_field=f"{identity_ref}_id",
-                        primary_key=True,
-                        stable=True,
-                        display_fields=(f"{endpoint_name}.field.name",),
-                    ),
                 )
                 for identity_ref in identity_refs
             ),
@@ -3719,6 +3695,35 @@ def _identity_list_read(
                 row_path_id="data",
                 type="string",
             ),
+        ),
+        candidate_keys=(
+            CandidateKey(
+                id="primary_key",
+                entity_kind=entity_ref,
+                components=(
+                    CandidateKeyComponent(
+                        id=f"{entity_ref}_id",
+                        field_ref=f"{endpoint_name}.field.{entity_ref}_id",
+                    ),
+                ),
+                primary=True,
+                context_field_refs=(f"{endpoint_name}.field.name",),
+            ),
+        ),
+        entity_references=tuple(
+            EntityReference(
+                id=f"{identity_ref}_reference",
+                target_entity_kind=identity_ref,
+                target_key_id="primary_key",
+                components=(
+                    EntityReferenceComponent(
+                        target_component_id=f"{identity_ref}_id",
+                        local_field_ref=f"{endpoint_name}.field.{identity_ref}_id",
+                    ),
+                ),
+                context_field_refs=(f"{endpoint_name}.field.name",),
+            )
+            for identity_ref in extra_identity_refs
         ),
     )
 

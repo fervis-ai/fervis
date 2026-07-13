@@ -102,10 +102,12 @@ def _function_variants(candidates: object) -> list[dict[str, object]]:
 
 
 def _answer_output_ids_schema(choice: dict[str, object]) -> dict[str, object]:
+    raw_candidates = choice.get("metric_candidates")
+    candidates = raw_candidates if isinstance(raw_candidates, (list, tuple)) else ()
     answer_output_ids = tuple(
         dict.fromkeys(
             str(metric.get("answer_output_id") or "")
-            for metric in choice.get("metric_candidates") or ()
+            for metric in candidates
             if isinstance(metric, dict) and str(metric.get("answer_output_id") or "")
         )
     )
@@ -141,7 +143,9 @@ def _generic_function_schema() -> dict[str, object]:
 
 
 def _without_pattern(schema: dict[str, object]) -> dict[str, object]:
+    required = schema.get("required")
+    required_items = required if isinstance(required, (list, tuple)) else ()
     return {
         **schema,
-        "required": [item for item in schema.get("required", ()) if item != "pattern"],
+        "required": [item for item in required_items if item != "pattern"],
     }

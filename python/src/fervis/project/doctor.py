@@ -80,6 +80,7 @@ def inspect_fervis_project(
         return DoctorReport(checks)
 
     checks.extend(_config_success_checks(project))
+    checks.extend(_host_context_checks(loaded))
     checks.extend(_model_checks(loaded))
     checks.extend(_framework_checks(project, loaded))
     checks.extend(_catalog_checks(project, loaded))
@@ -121,6 +122,42 @@ def _config_success_checks(project: ProjectInspection) -> list[DoctorCheck]:
             message="Runtime route prefix is structurally valid.",
         ),
     ]
+
+
+def _host_context_checks(loaded: LoadedFervisConfig) -> tuple[DoctorCheck, ...]:
+    host = loaded.config.host
+    organization_check = (
+        DoctorCheck(
+            id="host.organization_name",
+            status="passed",
+            message="Host organization is named.",
+        )
+        if host.organization_name.strip()
+        else DoctorCheck(
+            id="host.organization_name",
+            status="failed",
+            message="host.organization_name must identify the host organization.",
+            fix=edit_config_action(),
+        )
+    )
+    about_api_check = (
+        DoctorCheck(
+            id="host.about_api",
+            status="passed",
+            message="Host API domain and factual-question scope are described.",
+        )
+        if host.about_api.strip()
+        else DoctorCheck(
+            id="host.about_api",
+            status="failed",
+            message=(
+                "host.about_api must describe the API domain and the factual "
+                "questions it supports."
+            ),
+            fix=edit_config_action(),
+        )
+    )
+    return organization_check, about_api_check
 
 
 def _model_checks(loaded: LoadedFervisConfig) -> list[DoctorCheck]:

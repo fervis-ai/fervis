@@ -74,6 +74,7 @@ input:
         value_kind: number
         value_json:
           value: 2
+        role: ANSWER_VALUE
     catalog_endpoints:
       - catalog_endpoint_id: 44444444-4444-4444-8444-444444444444
         run_id: run_2

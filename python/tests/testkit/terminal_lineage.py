@@ -40,6 +40,9 @@ def make_terminal_answer_writer(recorder: LineageRecorderPort) -> TerminalAnswer
         result_data: dict[str, object],
     ) -> None:
         run_id = request.run_id
+        attempt = request.active_attempt or 1
+        step_prefix = f"{run_id}:attempt:{attempt}"
+        sequence_offset = (attempt - 1) * 10_000
         recorder.record_program_invocation(
             ProgramInvocationBundleWrite(
                 program=AnswerProgramWrite(
@@ -58,30 +61,30 @@ def make_terminal_answer_writer(recorder: LineageRecorderPort) -> TerminalAnswer
         )
         for step in (
             RunStepWrite(
-                step_id=f"{run_id}:contract",
+                step_id=f"{step_prefix}:contract",
                 run_id=run_id,
-                sequence=1,
+                sequence=sequence_offset + 1,
                 step_key=RunStepKey.QUESTION_CONTRACT,
                 kind=RunStepKind.MODEL_TURN,
             ),
             RunStepWrite(
-                step_id=f"{run_id}:compile",
+                step_id=f"{step_prefix}:compile",
                 run_id=run_id,
-                sequence=2,
+                sequence=sequence_offset + 2,
                 step_key=RunStepKey.COMPILE,
                 kind=RunStepKind.DETERMINISTIC,
             ),
             RunStepWrite(
-                step_id=f"{run_id}:execute",
+                step_id=f"{step_prefix}:execute",
                 run_id=run_id,
-                sequence=3,
+                sequence=sequence_offset + 3,
                 step_key=RunStepKey.EXECUTE,
                 kind=RunStepKind.DETERMINISTIC,
             ),
             RunStepWrite(
-                step_id=f"{run_id}:render",
+                step_id=f"{step_prefix}:render",
                 run_id=run_id,
-                sequence=4,
+                sequence=sequence_offset + 4,
                 step_key=RunStepKey.RENDER,
                 kind=RunStepKind.DETERMINISTIC,
             ),
@@ -98,7 +101,7 @@ def make_terminal_answer_writer(recorder: LineageRecorderPort) -> TerminalAnswer
                     RequestedFactWrite(
                         requested_fact_id=f"{run_id}:fact",
                         run_id=run_id,
-                        produced_by_step_id=f"{run_id}:contract",
+                        produced_by_step_id=f"{step_prefix}:contract",
                         fact_key="fact_1",
                         answer_expression_family="scalar_aggregate",
                     ),
@@ -108,7 +111,7 @@ def make_terminal_answer_writer(recorder: LineageRecorderPort) -> TerminalAnswer
                         fact_result_id=f"{run_id}:fact-result",
                         run_id=run_id,
                         requested_fact_id=f"{run_id}:fact",
-                        produced_by_step_id=f"{run_id}:execute",
+                        produced_by_step_id=f"{step_prefix}:execute",
                         result_kind=FactResultKind.ANSWERED,
                     ),
                 ),
@@ -117,8 +120,8 @@ def make_terminal_answer_writer(recorder: LineageRecorderPort) -> TerminalAnswer
                         proof_graph_id=f"{run_id}:proof",
                         run_id=run_id,
                         fact_result_id=f"{run_id}:fact-result",
-                        compile_step_id=f"{run_id}:compile",
-                        execute_step_id=f"{run_id}:execute",
+                        compile_step_id=f"{step_prefix}:compile",
+                        execute_step_id=f"{step_prefix}:execute",
                         payload_schema="fervis.execution_proof_graph",
                         payload_schema_rev=1,
                         payload_json={
@@ -167,7 +170,7 @@ def make_terminal_answer_writer(recorder: LineageRecorderPort) -> TerminalAnswer
                         run_id=run_id,
                         answer_id=f"{run_id}:answer",
                         presentation_kind=PresentationKind.TEXT,
-                        render_step_id=f"{run_id}:render",
+                        render_step_id=f"{step_prefix}:render",
                         client_key=PresentationClientKey.DEFAULT,
                         rendered_value=answer,
                     ),

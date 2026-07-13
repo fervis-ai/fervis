@@ -15,17 +15,29 @@ from fervis.lookup.question_contract import (
 )
 from fervis.lookup.plan_selection.family_specs import PlanSelectionShapeSpec
 from fervis.lookup.plan_selection.model import (
+    OperationEvidence,
     SourceStrategy,
     SourceStrategyMember,
 )
 from fervis.lookup.plan_selection.support_options import (
+    PlanSelectionSupportOption,
     plan_selection_fulfillment_support_sets,
     plan_selection_support_options,
+)
+from fervis.lookup.source_binding.candidates.contracts import (
+    EvidenceItem,
+    FulfillmentSupportSet,
+    evidence_field_ids,
+    evidence_row_path_id,
+)
+from fervis.lookup.source_binding.candidates.model import (
+    SourceCandidate,
+    SourceCandidateRegistry,
 )
 
 
 def source_strategies_by_fact(
-    payload: dict[str, Any],
+    source_catalog: SourceCandidateRegistry,
     *,
     requested_facts: tuple[RequestedFact, ...],
     relation_catalog: RelationCatalog,
@@ -34,15 +46,11 @@ def source_strategies_by_fact(
         tuple[PlanSelectionShapeSpec, ...],
     ],
 ) -> dict[str, tuple[SourceStrategy, ...]]:
-    candidates_by_fact = _source_candidates_by_fact(
-        payload,
-        requested_fact_ids=tuple(fact.id for fact in requested_facts),
-    )
     output: dict[str, tuple[SourceStrategy, ...]] = {}
     for fact in requested_facts:
         output[fact.id] = _source_strategies_for_fact(
             fact=fact,
-            candidates=candidates_by_fact.get(fact.id, ()),
+            candidates=source_catalog.candidates_for(fact.id),
             relation_catalog=relation_catalog,
             shape_specs_for_family=shape_specs_for_family,
         )
@@ -94,6 +102,10 @@ def source_alignment_candidate_payload(member: SourceStrategyMember) -> dict[str
         response_rows = member.source_interface.get("response_rows")
         if response_rows:
             output["response_rows"] = response_rows
+    if member.applied_filters:
+        output["applied_filters"] = [
+            applied_filter.to_payload() for applied_filter in member.applied_filters
+        ]
     return output
 
 
@@ -125,7 +137,9 @@ def _source_member_payload(member: SourceStrategyMember) -> dict[str, Any]:
     if member.field_ids:
         output["field_ids"] = list(member.field_ids)
     if member.operation_evidence:
-        output["operation_evidence"] = list(member.operation_evidence)
+        output["operation_evidence"] = [
+            _operation_evidence_payload(item) for item in member.operation_evidence
+        ]
     if member.source_interface:
         input_params = member.source_interface.get("input_params")
         if input_params:
@@ -137,8 +151,8 @@ def _source_member_payload(member: SourceStrategyMember) -> dict[str, Any]:
 
 
 def _source_interface(
-    candidate: dict[str, Any],
-    support_sets: tuple[dict[str, Any], ...],
+    candidate: SourceCandidate,
+    support_sets: tuple[FulfillmentSupportSet, ...],
     *,
     relation_catalog: RelationCatalog,
 ) -> dict[str, object]:
@@ -146,95 +160,36 @@ def _source_interface(
     answer_output_ids = _support_set_answer_output_ids(support_sets)
     if answer_output_ids:
         summary["answer_output_ids"] = list(answer_output_ids)
-    if candidate.get("kind") in {"new_api_read", "same_scope_api_read"}:
+    if candidate.kind in {"new_api_read", "same_scope_api_read"}:
         read_shape = ApiReadResponseShapeProjector(
-            relation_catalog.read(str(candidate["read_id"]))
+            relation_catalog.read(candidate.read_id)
         )
         input_params = read_shape.input_params()
         if input_params:
             summary["input_params"] = input_params
         summary["response_rows"] = read_shape.response_rows(
-            row_path_ids=_candidate_row_path_ids(candidate),
+            row_path_ids=candidate.result_row_path_ids,
         )
     return summary
 
 
 def _support_set_answer_output_ids(
-    support_sets: tuple[dict[str, Any], ...],
+    support_sets: tuple[FulfillmentSupportSet, ...],
 ) -> tuple[str, ...]:
     return tuple(
         dict.fromkeys(
             answer_output_id
             for support_set in support_sets
-            for answer_output_id in (str(support_set.get("answer_output_id") or ""),)
+            for answer_output_id in (support_set.answer_output_id,)
             if answer_output_id
         )
     )
 
 
-def _source_candidates_by_fact(
-    payload: dict[str, Any],
-    *,
-    requested_fact_ids: tuple[str, ...],
-) -> dict[str, tuple[dict[str, Any], ...]]:
-    output: dict[str, list[dict[str, Any]]] = {}
-    for fact_sources in payload.get("requested_fact_sources") or ():
-        if not isinstance(fact_sources, dict):
-            continue
-        requested_fact_id = str(fact_sources.get("requested_fact_id") or "")
-        if not requested_fact_id:
-            continue
-        for context in fact_sources.get("source_contexts") or ():
-            if not isinstance(context, dict):
-                continue
-            for candidate in context.get("source_options") or ():
-                if isinstance(candidate, dict):
-                    _add_source_candidate(
-                        output,
-                        requested_fact_id=requested_fact_id,
-                        candidate=candidate,
-                    )
-    for key in (
-        "memory_source_candidates",
-        "utility_source_candidates",
-        "value_source_candidates",
-    ):
-        for candidate in payload.get(key) or ():
-            if not isinstance(candidate, dict):
-                continue
-            applies_to = (
-                candidate.get("applies_to_requested_facts") or requested_fact_ids
-            )
-            for requested_fact_id in applies_to:
-                _add_source_candidate(
-                    output,
-                    requested_fact_id=str(requested_fact_id),
-                    candidate=candidate,
-                )
-    return {key: tuple(value) for key, value in output.items()}
-
-
-def _add_source_candidate(
-    output: dict[str, list[dict[str, Any]]],
-    *,
-    requested_fact_id: str,
-    candidate: dict[str, Any],
-) -> None:
-    source_candidate_id = str(candidate.get("source_candidate_id") or "")
-    if not requested_fact_id or not source_candidate_id:
-        return
-    existing = output.setdefault(requested_fact_id, [])
-    if not any(
-        str(item.get("source_candidate_id") or "") == source_candidate_id
-        for item in existing
-    ):
-        existing.append(candidate)
-
-
 def _source_strategies_for_fact(
     *,
     fact: RequestedFact,
-    candidates: tuple[dict[str, Any], ...],
+    candidates: tuple[SourceCandidate, ...],
     relation_catalog: RelationCatalog,
     shape_specs_for_family: Callable[
         [RequestedFactAnswerExpressionFamily],
@@ -263,7 +218,7 @@ def _source_strategies_for_fact(
         for combo in product(*member_options):
             if not shape_spec.supports_member_combo(
                 source_candidate_ids=tuple(
-                    str(candidate.get("source_candidate_id") or "")
+                    candidate.id
                     for _, candidate, _ in combo
                 )
             ):
@@ -277,6 +232,7 @@ def _source_strategies_for_fact(
             if not _members_cover_required_answer_outputs(
                 members,
                 required_answer_output_ids=answer_output_ids,
+                shape_spec=shape_spec,
             ):
                 continue
             key = (
@@ -321,13 +277,17 @@ def _plan_shape_specs_for_fact(
 
 
 def _member_requirement_options(
-    candidates: tuple[dict[str, Any], ...],
+    candidates: tuple[SourceCandidate, ...],
     *,
     requirement_id: str,
     shape_spec: PlanSelectionShapeSpec,
     required_answer_output_ids: tuple[str, ...],
-) -> tuple[tuple[str, dict[str, Any], tuple[dict[str, Any], ...]], ...]:
-    output: list[tuple[str, dict[str, Any], tuple[dict[str, Any], ...]]] = []
+) -> tuple[
+    tuple[str, SourceCandidate, tuple[FulfillmentSupportSet, ...]], ...
+]:
+    output: list[
+        tuple[str, SourceCandidate, tuple[FulfillmentSupportSet, ...]]
+    ] = []
     for candidate in candidates:
         support_set_groups = _selected_support_set_groups_for_requirement(
             candidate,
@@ -343,23 +303,31 @@ def _member_requirement_options(
 
 
 def _selected_support_set_groups_for_requirement(
-    candidate: dict[str, Any],
+    candidate: SourceCandidate,
     *,
     requirement_id: str,
     shape_spec: PlanSelectionShapeSpec,
     required_answer_output_ids: tuple[str, ...],
-) -> tuple[tuple[dict[str, Any], ...], ...]:
+) -> tuple[tuple[FulfillmentSupportSet, ...], ...]:
+    if shape_spec.support_set_grouper is not None:
+        support_sets = _answer_output_fulfillment_support_sets(
+            candidate,
+            required_answer_output_ids=required_answer_output_ids,
+        )
+        return shape_spec.support_set_groups_for_requirement(
+            support_sets,
+            requirement_id=requirement_id,
+            required_answer_output_ids=required_answer_output_ids,
+            source_candidate_id=candidate.id,
+        )
     support_options = plan_selection_support_options(candidate)
     validation_roles = shape_spec.validation_roles_for_requirement(requirement_id)
     requirement_has_validation_roles = validation_roles is not None
-    validation_role_is_supported = (
-        any(
-            set(option.get("support_roles") or ()) & validation_roles
-            for option in support_options
+    validation_role_is_supported = True
+    if validation_roles is not None:
+        validation_role_is_supported = any(
+            option.support_roles & validation_roles for option in support_options
         )
-        if requirement_has_validation_roles
-        else True
-    )
     if requirement_has_validation_roles and not validation_role_is_supported:
         return ()
     requirement_has_no_validation_roles = validation_roles is None
@@ -381,27 +349,16 @@ def _selected_support_set_groups_for_requirement(
             candidate,
             required_answer_output_ids=required_answer_output_ids,
         )
-        if shape_spec.support_set_grouper is not None:
-            return shape_spec.support_set_groups_for_requirement(
-                support_sets,
-                requirement_id=requirement_id,
-                required_answer_output_ids=required_answer_output_ids,
-                source_candidate_id=str(candidate.get("source_candidate_id") or ""),
-            )
         if support_sets:
             return (support_sets,)
         intrinsic_support_is_allowed = (
             shape_spec.allows_intrinsic_support_for_requirement(requirement_id)
         )
         candidate_has_intrinsic_source = _candidate_has_intrinsic_source(candidate)
-        intrinsic_support_option_exists = _has_intrinsic_support_option(
-            support_options
-        )
-        intrinsic_support_matches_requirement = (
-            _intrinsic_support_matches_requirement(
-                support_options,
-                requirement_id=requirement_id,
-            )
+        intrinsic_support_option_exists = _has_intrinsic_support_option(support_options)
+        intrinsic_support_matches_requirement = _intrinsic_support_matches_requirement(
+            support_options,
+            requirement_id=requirement_id,
         )
         if (
             intrinsic_support_is_allowed
@@ -414,10 +371,9 @@ def _selected_support_set_groups_for_requirement(
     if not binding_roles:
         return ((),)
     selected_ids = {
-        str(option.get("binding_support_set_id") or option.get("support_set_id") or "")
+        option.binding_support_set_id or option.support_set_id
         for option in support_options
-        if set(option.get("support_roles") or ())
-        and set(option.get("support_roles") or ()) <= binding_roles
+        if option.support_roles and option.support_roles <= binding_roles
     }
     support_sets = tuple(
         support_set
@@ -425,8 +381,8 @@ def _selected_support_set_groups_for_requirement(
         if _support_set_binding_id(support_set) in selected_ids
     )
     no_binding_support_sets_selected = not support_sets
-    intrinsic_support_is_allowed = (
-        shape_spec.allows_intrinsic_support_for_requirement(requirement_id)
+    intrinsic_support_is_allowed = shape_spec.allows_intrinsic_support_for_requirement(
+        requirement_id
     )
     intrinsic_support_option_exists = _has_intrinsic_support_option(
         support_options,
@@ -447,12 +403,12 @@ def _selected_support_set_groups_for_requirement(
         support_sets,
         requirement_id=requirement_id,
         required_answer_output_ids=required_answer_output_ids,
-        source_candidate_id=str(candidate.get("source_candidate_id") or ""),
+        source_candidate_id=candidate.id,
     )
 
 
 def _has_intrinsic_support_option(
-    support_options: tuple[dict[str, object], ...],
+    support_options: tuple[PlanSelectionSupportOption, ...],
     *,
     binding_roles: frozenset[str] | None = None,
 ) -> bool:
@@ -466,12 +422,12 @@ def _has_intrinsic_support_option(
 
 
 def _support_option_is_intrinsic(
-    option: dict[str, object],
+    option: PlanSelectionSupportOption,
     *,
     binding_roles: frozenset[str] | None,
 ) -> bool:
-    option_has_no_binding_support_set = not option.get("binding_support_set_id")
-    support_roles = set(option.get("support_roles") or ())
+    option_has_no_binding_support_set = not option.binding_support_set_id
+    support_roles = option.support_roles
     option_has_support_roles = bool(support_roles)
     option_roles_match_binding_roles = (
         binding_roles is None or support_roles <= binding_roles
@@ -484,38 +440,35 @@ def _support_option_is_intrinsic(
 
 
 def _intrinsic_support_matches_requirement(
-    support_options: tuple[dict[str, object], ...],
+    support_options: tuple[PlanSelectionSupportOption, ...],
     *,
     requirement_id: str,
 ) -> bool:
     if requirement_id in {"value_1", "value_2"}:
         return True
-    return not any(
-        "VALUE_SOURCE" in set(option.get("support_roles") or ())
-        for option in support_options
-    )
+    return not any("VALUE_SOURCE" in option.support_roles for option in support_options)
 
 
-def _candidate_has_intrinsic_source(candidate: dict[str, Any]) -> bool:
-    if str(candidate.get("value_id") or ""):
+def _candidate_has_intrinsic_source(candidate: SourceCandidate) -> bool:
+    if candidate.value_id:
         return True
-    if str(candidate.get("read_id") or "") or str(
-        candidate.get("memory_relation_id") or ""
-    ):
+    if candidate.read_id or candidate.memory_relation_id:
         return bool(_candidate_field_ids(candidate, support_sets=()))
     return False
 
 
 def _source_strategy_members(
-    combo: tuple[tuple[str, dict[str, Any], tuple[dict[str, Any], ...]], ...],
+    combo: tuple[
+        tuple[str, SourceCandidate, tuple[FulfillmentSupportSet, ...]], ...
+    ],
     *,
     relation_catalog: RelationCatalog,
 ) -> tuple[SourceStrategyMember, ...]:
-    support_sets_by_candidate: dict[str, list[dict[str, Any]]] = {}
+    support_sets_by_candidate: dict[str, list[FulfillmentSupportSet]] = {}
     requirement_ids_by_candidate: dict[str, list[str]] = {}
-    candidates_by_id: dict[str, dict[str, Any]] = {}
+    candidates_by_id: dict[str, SourceCandidate] = {}
     for requirement_id, candidate, support_sets in combo:
-        source_candidate_id = str(candidate.get("source_candidate_id") or "")
+        source_candidate_id = candidate.id
         if not source_candidate_id:
             continue
         candidates_by_id[source_candidate_id] = candidate
@@ -535,7 +488,7 @@ def _source_strategy_members(
             if support_set_has_binding_id and not support_set_already_selected:
                 support_sets_by_candidate[source_candidate_id].append(support_set)
     output: list[SourceStrategyMember] = []
-    for source_candidate_id, support_sets in support_sets_by_candidate.items():
+    for source_candidate_id, selected_support_sets in support_sets_by_candidate.items():
         candidate = candidates_by_id[source_candidate_id]
         output.append(
             SourceStrategyMember(
@@ -545,23 +498,27 @@ def _source_strategy_members(
                 ),
                 fulfillment_support_set_ids=tuple(
                     _support_set_binding_id(support_set)
-                    for support_set in support_sets
+                    for support_set in selected_support_sets
                     if _support_set_binding_id(support_set)
                 ),
-                kind=str(candidate.get("kind") or ""),
-                read_id=str(candidate.get("read_id") or ""),
-                value_id=str(candidate.get("value_id") or ""),
-                memory_relation_id=str(candidate.get("memory_relation_id") or ""),
-                source_relation_id=str(candidate.get("source_relation_id") or ""),
-                calendar_id=str(candidate.get("calendar_id") or ""),
+                kind=candidate.kind,
+                read_id=candidate.read_id,
+                value_id=candidate.value_id,
+                memory_relation_id=candidate.memory_relation_id,
+                source_relation_id=candidate.source_relation_id,
+                calendar_id=candidate.calendar_id,
                 field_ids=_candidate_field_ids(
                     candidate,
-                    support_sets=tuple(support_sets),
+                    support_sets=tuple(selected_support_sets),
                 ),
-                operation_evidence=_operation_evidence(tuple(support_sets)),
+                answer_output_ids=_support_set_answer_output_ids(
+                    tuple(selected_support_sets)
+                ),
+                operation_evidence=_operation_evidence(tuple(selected_support_sets)),
+                applied_filters=candidate.applied_filters,
                 source_interface=_source_interface(
                     candidate,
-                    tuple(support_sets),
+                    tuple(selected_support_sets),
                     relation_catalog=relation_catalog,
                 ),
             )
@@ -570,156 +527,130 @@ def _source_strategy_members(
 
 
 def _operation_evidence(
-    support_sets: tuple[dict[str, Any], ...],
-) -> tuple[dict[str, Any], ...]:
-    output: list[dict[str, Any]] = []
+    support_sets: tuple[FulfillmentSupportSet, ...],
+) -> tuple[OperationEvidence, ...]:
+    output: list[OperationEvidence] = []
     seen: set[tuple[str, str]] = set()
     for support_set in support_sets:
-        for slot in support_set.get("fulfillment_slots") or ():
-            if not isinstance(slot, dict):
-                continue
-            for kind, key in (
-                ("group_key", "group_key_evidence"),
-                ("metric", "metric_measure_evidence"),
-                ("row_count", "row_count_basis_evidence"),
+        for slot in support_set.fulfillment_slots:
+            for default_kind, items in (
+                ("entity", slot.entity_evidence),
+                ("metric", slot.metric_measure_evidence),
+                ("value", slot.value_evidence),
+                ("row_count", slot.row_count_basis_evidence),
             ):
-                for item in slot.get(key) or ():
-                    if not isinstance(item, dict):
+                for evidence in items:
+                    evidence_id = evidence.evidence_id
+                    field_ids = _evidence_field_ids(evidence)
+                    kind = evidence.type if default_kind == "entity" else default_kind
+                    if not evidence_id or not field_ids:
                         continue
-                    evidence_id = str(item.get("evidence_id") or "")
-                    field_id = str(item.get("field_id") or "")
-                    if not evidence_id or not field_id:
-                        continue
-                    dedupe_key = (kind, evidence_id)
-                    if dedupe_key in seen:
-                        continue
-                    seen.add(dedupe_key)
-                    output.append(
-                        _operation_evidence_item(
-                            item,
-                            kind=kind,
-                            evidence_id=evidence_id,
-                            field_id=field_id,
+                    for field_id in field_ids:
+                        dedupe_key = (kind, f"{evidence_id}:{field_id}")
+                        if dedupe_key in seen:
+                            continue
+                        seen.add(dedupe_key)
+                        output.append(
+                            _operation_evidence_item(
+                                evidence,
+                                kind=kind,
+                                evidence_id=evidence_id,
+                                field_id=field_id,
+                            )
                         )
-                    )
     return tuple(output)
 
 
 def _operation_evidence_item(
-    item: dict[str, Any],
+    evidence: EvidenceItem,
     *,
     kind: str,
     evidence_id: str,
     field_id: str,
-) -> dict[str, Any]:
-    output = {
-        "kind": kind,
-        "evidence_id": evidence_id,
-        "field_id": field_id,
-    }
-    for key in ("row_path_id", "type"):
-        value = str(item.get(key) or "")
-        if value:
-            output[key] = value
-    return output
-
-
-def _candidate_row_path_ids(candidate: dict[str, Any]) -> tuple[str, ...]:
-    return tuple(
-        dict.fromkeys(
-            row_path_id
-            for grain in candidate.get("result_grains") or ()
-            if isinstance(grain, dict)
-            for row_path_id in (str(grain.get("row_path_id") or ""),)
-            if row_path_id
-        )
+) -> OperationEvidence:
+    row_path_id = evidence_row_path_id(evidence)
+    return OperationEvidence(
+        kind=kind,
+        evidence_id=evidence_id,
+        field_id=field_id,
+        row_path_id=row_path_id,
+        evidence_type=evidence.type,
     )
 
 
+def _operation_evidence_payload(item: OperationEvidence) -> dict[str, str]:
+    output = {
+        "kind": item.kind,
+        "evidence_id": item.evidence_id,
+        "field_id": item.field_id,
+    }
+    if item.row_path_id:
+        output["row_path_id"] = item.row_path_id
+    if item.evidence_type:
+        output["type"] = item.evidence_type
+    return output
+
+
 def _candidate_field_ids(
-    candidate: dict[str, Any],
+    candidate: SourceCandidate,
     *,
-    support_sets: tuple[dict[str, Any], ...],
+    support_sets: tuple[FulfillmentSupportSet, ...],
 ) -> tuple[str, ...]:
     output: list[str] = []
     for field_id in _support_set_field_ids(support_sets):
         _append_unique(output, field_id)
-    for key in ("available_field_ids", "field_ids"):
-        for field_id in candidate.get(key) or ():
-            _append_unique(output, str(field_id or ""))
-    for field in candidate.get("fields") or ():
-        if isinstance(field, dict):
-            _append_unique(
-                output,
-                str(field.get("field_id") or field.get("id") or ""),
-            )
-    binding_surface = candidate.get("binding_surface")
-    if isinstance(binding_surface, dict):
-        for field in binding_surface.get("fields") or ():
-            if isinstance(field, dict):
-                _append_unique(
-                    output,
-                    str(field.get("field_id") or field.get("id") or ""),
-                )
-        for field in binding_surface.get("evidence_items") or ():
-            if isinstance(field, dict):
-                _append_unique(output, str(field.get("field_id") or ""))
-    for support_set in _raw_fulfillment_support_sets(candidate):
-        for slot in support_set.get("fulfillment_slots") or ():
-            if not isinstance(slot, dict):
-                continue
-            for evidence_key in (
-                "metric_measure_evidence",
-                "scope_evidence",
-                "group_key_evidence",
-            ):
-                for item in slot.get(evidence_key) or ():
-                    if isinstance(item, dict):
-                        _append_unique(output, str(item.get("field_id") or ""))
+    for field_id in candidate.applied_filter_field_ids:
+        _append_unique(output, field_id)
     return tuple(output)
 
 
-def _support_set_binding_id(support_set: dict[str, Any]) -> str:
-    return str(
-        support_set.get("fulfillment_support_set_id")
-        or support_set.get("fulfillment_choice_id")
-        or ""
-    )
+def _support_set_binding_id(support_set: FulfillmentSupportSet) -> str:
+    return support_set.fulfillment_support_set_id or support_set.fulfillment_choice_id
 
 
 def _support_set_field_ids(
-    support_sets: tuple[dict[str, Any], ...],
+    support_sets: tuple[FulfillmentSupportSet, ...],
 ) -> tuple[str, ...]:
     output: list[str] = []
     for support_set in support_sets:
-        for slot in support_set.get("fulfillment_slots") or ():
-            if not isinstance(slot, dict):
-                continue
-            for evidence_key in (
-                "metric_measure_evidence",
-                "scope_evidence",
-                "group_key_evidence",
+        for slot in support_set.fulfillment_slots:
+            for evidence in (
+                *slot.metric_measure_evidence,
+                *slot.value_evidence,
+                *slot.entity_evidence,
             ):
-                for item in slot.get(evidence_key) or ():
-                    if isinstance(item, dict):
-                        _append_unique(output, str(item.get("field_id") or ""))
+                for field_id in _evidence_field_ids(evidence):
+                    _append_unique(output, field_id)
     return tuple(output)
+
+
+def _evidence_field_ids(item: EvidenceItem) -> tuple[str, ...]:
+    return evidence_field_ids(item)
 
 
 def _members_cover_required_answer_outputs(
     members: tuple[SourceStrategyMember, ...],
     *,
     required_answer_output_ids: tuple[str, ...],
+    shape_spec: PlanSelectionShapeSpec,
 ) -> bool:
+    fulfillment_members = tuple(
+        member
+        for member in members
+        if any(
+            shape_spec.requires_complete_answer_fulfillment_for_requirement(
+                requirement_id
+            )
+            for requirement_id in member.requirement_ids
+        )
+    )
+    if not fulfillment_members:
+        return True
     covered = tuple(
         str(answer_output_id)
-        for member in members
-        if isinstance(member.source_interface, dict)
-        for answer_output_id in member.source_interface.get("answer_output_ids") or ()
-        if str(answer_output_id)
+        for member in fulfillment_members
+        for answer_output_id in member.answer_output_ids
     )
-    if not covered:
-        return True
     return set(required_answer_output_ids) <= set(covered)
 
 
@@ -744,23 +675,23 @@ def _append_unique(output: list[str], value: str) -> None:
 
 
 def _raw_fulfillment_support_sets(
-    candidate: dict[str, Any],
-) -> tuple[dict[str, Any], ...]:
+    candidate: SourceCandidate,
+) -> tuple[FulfillmentSupportSet, ...]:
     return tuple(
         item
         for item in plan_selection_fulfillment_support_sets(candidate)
-        if isinstance(item, dict) and _support_set_binding_id(item)
+        if _support_set_binding_id(item)
     )
 
 
 def _answer_output_fulfillment_support_sets(
-    candidate: dict[str, Any],
+    candidate: SourceCandidate,
     *,
     required_answer_output_ids: tuple[str, ...],
-) -> tuple[dict[str, Any], ...]:
+) -> tuple[FulfillmentSupportSet, ...]:
     required = set(required_answer_output_ids)
     return tuple(
         support_set
         for support_set in _raw_fulfillment_support_sets(candidate)
-        if str(support_set.get("answer_output_id") or "") in required
+        if support_set.answer_output_id in required
     )

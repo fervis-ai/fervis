@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Mapping, TypedDict
 
 from fervis.lookup.fact_planning.aggregate_choice_parts import (
     AGGREGATE_FUNCTIONS,
     COUNT_FUNCTION,
     aggregate_function_candidates,
-    selected_choice,
     xml_attr,
     xml_text,
 )
 from fervis.lookup.fact_planning.executable_support import (
-    compiled_count_basis_payload,
+    parse_count_basis,
     count_basis_matches_evidence_item,
     count_basis_meaning,
     count_metric_payload_for_evidence_item,
@@ -32,9 +31,17 @@ from fervis.lookup.fact_planning.source_binding_basis import (
     attach_metric_fit_basis,
     metric_fit_bases_by_evidence_id,
 )
+from fervis.lookup.fact_planning.provider_contract import (
+    GroupedAggregateAnswerOutput,
+    RankedAggregateAnswerOutput,
+)
+from fervis.lookup.fact_planning.compiled_patterns import CompiledMetric
 from fervis.lookup.source_binding import (
     BoundSource,
+    SourceField,
     SourceFulfillment,
+    entity_evidence_entity_kind,
+    entity_evidence_key_id,
 )
 
 
@@ -45,17 +52,81 @@ GROUPED_RANKED_PLAN_SHAPES = frozenset({"aggregate_by_group", "ranked_aggregate"
 class GroupedRankedAnswerOutput:
     answer_output_id: str
     role: str
-    field_id: str
-    evidence_id: str = ""
+    field_ids: tuple[str, ...]
+    evidence_ids: tuple[str, ...] = ()
+    key_id: str = ""
+    entity_kind: str = ""
+    entity_components: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def field_id(self) -> str:
+        return self.field_ids[0] if len(self.field_ids) == 1 else ""
+
+    @property
+    def evidence_id(self) -> str:
+        return self.evidence_ids[0] if len(self.evidence_ids) == 1 else ""
 
 
 @dataclass(frozen=True)
 class GroupedRankedSelection:
     source_binding_id: str
     fulfills_answer_output_ids: tuple[str, ...]
-    group_field_id: str
-    metric: dict[str, object]
+    group_field_ids: tuple[str, ...]
+    group_entity_key_id: str
+    group_entity_kind: str
+    group_entity_components: tuple[tuple[str, str], ...]
+    metric: CompiledMetric
     answer_outputs: tuple[GroupedRankedAnswerOutput, ...]
+
+
+@dataclass(frozen=True)
+class _GroupEvidence:
+    evidence_ids: tuple[str, ...]
+    key_id: str = ""
+    entity_kind: str = ""
+    components: tuple[tuple[str, str], ...] = ()
+
+
+class _GroupComponentPayload(TypedDict):
+    component_id: str
+    field_id: str
+
+
+class _GroupCandidatePayload(TypedDict):
+    id: str
+    field_ids: list[str]
+    types: list[str]
+    evidence_id: str
+    field_evidence_ids: list[str]
+    key_id: str
+    entity_kind: str
+    components: list[_GroupComponentPayload]
+
+
+@dataclass(frozen=True)
+class _GroupCandidate:
+    field_ids: tuple[str, ...]
+    types: tuple[str, ...]
+    evidence_id: str
+    field_evidence_ids: tuple[str, ...]
+    key_id: str = ""
+    entity_kind: str = ""
+    components: tuple[tuple[str, str], ...] = ()
+
+    def payload(self, *, candidate_id: str) -> _GroupCandidatePayload:
+        return _GroupCandidatePayload(
+            id=candidate_id,
+            field_ids=list(self.field_ids),
+            types=list(self.types),
+            evidence_id=self.evidence_id,
+            field_evidence_ids=list(self.field_evidence_ids),
+            key_id=self.key_id,
+            entity_kind=self.entity_kind,
+            components=[
+                _GroupComponentPayload(component_id=component_id, field_id=field_id)
+                for component_id, field_id in self.components
+            ],
+        )
 
 
 def grouped_ranked_choice_payload(
@@ -129,13 +200,13 @@ def grouped_ranked_choices_by_requested_fact_id(
 
 
 def selected_grouped_ranked_operation(
-    payload: dict[str, Any],
+    answer: GroupedAggregateAnswerOutput | RankedAggregateAnswerOutput,
     *,
     bound_sources: dict[str, BoundSource],
 ) -> GroupedRankedSelection:
-    requested_fact_id = _text(payload.get("requested_fact_id"))
-    plan_shape = _text(payload.get("pattern"))
-    source_binding_id = _text(payload.get("source_binding_id"))
+    requested_fact_id = answer.requested_fact_id
+    plan_shape = answer.pattern
+    source_binding_id = answer.source_binding_id
     source = bound_sources.get(source_binding_id)
     if source is None:
         raise ValueError("fact plan references unknown relation source binding")
@@ -146,19 +217,19 @@ def selected_grouped_ranked_operation(
     )
     if choice is None:
         raise ValueError("fact plan references unavailable grouped/ranked choices")
-    group = _dict(choice.get("group"))
+    group = _parse_group_candidate(_dict(choice.get("group")))
     metric = _selected_candidate(
-        payload.get("metric"),
+        answer.metric.id,
         choice.get("metric_candidates"),
         label="metric",
     )
     function = _selected_candidate(
-        payload.get("function"),
+        answer.function.id,
         choice.get("function_candidates"),
         label="function",
     )
-    _validate_metric_selection(payload.get("metric"), metric)
-    _validate_function_selection(payload.get("function"), function)
+    _validate_metric_selection(answer, metric)
+    _validate_function_selection(answer, function)
     if _text(function.get("value")) not in tuple(metric.get("allowed_functions") or ()):
         raise ValueError("function selection is not allowed for selected metric")
     answer_outputs = _answer_outputs_for_selection(
@@ -175,7 +246,10 @@ def selected_grouped_ranked_operation(
         fulfills_answer_output_ids=tuple(
             dict.fromkeys(item.answer_output_id for item in answer_outputs)
         ),
-        group_field_id=_text(group.get("field_id")),
+        group_field_ids=group.field_ids,
+        group_entity_key_id=group.key_id,
+        group_entity_kind=group.entity_kind,
+        group_entity_components=group.components,
         metric=_compiled_metric(
             metric,
             function,
@@ -198,7 +272,7 @@ def _choice_payload_for_source(
     )
     if not fulfillments:
         return None
-    group = _backend_owned_group(
+    group_candidate = _backend_owned_group(
         source,
         fulfillments=fulfillments,
         plan_shape=plan_shape,
@@ -208,8 +282,9 @@ def _choice_payload_for_source(
         fulfillments=fulfillments,
         plan_shape=plan_shape,
     )
-    if group is None or not metrics:
+    if group_candidate is None or not metrics:
         return None
+    group = group_candidate.payload(candidate_id="group_1")
     functions = _function_candidates(metrics)
     return {
         "requested_fact_id": requested_fact_id,
@@ -241,35 +316,77 @@ def _group_candidates(
     *,
     fulfillments: tuple[SourceFulfillment, ...],
     plan_shape: str,
-) -> tuple[dict[str, Any], ...]:
-    evidence_ids = tuple(
+) -> tuple[_GroupCandidate, ...]:
+    fields_by_id = {field.field_id: field for field in source.available_fields}
+    entity_evidence = tuple(
         dict.fromkeys(
-            evidence_id
+            fulfillment.entity_evidence
             for fulfillment in fulfillments
-            for evidence_id in fulfillment.group_key_evidence_ids
+            if fulfillment.entity_evidence is not None
         )
     )
-    compatible = tuple(
-        (evidence_id, field_id)
-        for evidence_id in evidence_ids
-        for field_id in (
+    output: list[_GroupCandidate] = []
+    for evidence in entity_evidence:
+        resolved_field_ids = tuple(
             _field_id_for_evidence_id(
+                source,
+                component.field_evidence_id,
+                plan_shape=plan_shape,
+            )
+            for component in evidence.components
+        )
+        declared_field_ids = tuple(
+            component.field_id for component in evidence.components
+        )
+        if resolved_field_ids != declared_field_ids:
+            continue
+        output.append(
+            _GroupCandidate(
+                field_ids=declared_field_ids,
+                types=_source_field_types(
+                    declared_field_ids,
+                    fields_by_id=fields_by_id,
+                ),
+                evidence_id=evidence.evidence_id,
+                field_evidence_ids=tuple(
+                    component.field_evidence_id for component in evidence.components
+                ),
+                key_id=entity_evidence_key_id(evidence),
+                entity_kind=entity_evidence_entity_kind(evidence),
+                components=tuple(
+                    (component.component_id, component.field_id)
+                    for component in evidence.components
+                ),
+            )
+        )
+    for fulfillment in fulfillments:
+        for evidence_id in fulfillment.value_evidence_ids:
+            field_id = _field_id_for_evidence_id(
                 source,
                 evidence_id,
                 plan_shape=plan_shape,
-            ),
-        )
-        if field_id
-    )
-    fields_by_id = {field.field_id: field for field in source.available_fields}
+            )
+            if not field_id:
+                continue
+            output.append(
+                _GroupCandidate(
+                    field_ids=(field_id,),
+                    types=_source_field_types((field_id,), fields_by_id=fields_by_id),
+                    evidence_id=evidence_id,
+                    field_evidence_ids=(evidence_id,),
+                )
+            )
+    return _unique_group_candidates(output)
+
+
+def _source_field_types(
+    field_ids: tuple[str, ...],
+    *,
+    fields_by_id: Mapping[str, SourceField],
+) -> tuple[str, ...]:
     return tuple(
-        {
-            "id": f"group_{index}",
-            "field_id": field_id,
-            "type": str(getattr(fields_by_id.get(field_id), "type", "") or ""),
-            "evidence_id": evidence_id,
-        }
-        for index, (evidence_id, field_id) in enumerate(compatible, start=1)
+        fields_by_id[field_id].type if field_id in fields_by_id else ""
+        for field_id in field_ids
     )
 
 
@@ -278,7 +395,7 @@ def _backend_owned_group(
     *,
     fulfillments: tuple[SourceFulfillment, ...],
     plan_shape: str,
-) -> dict[str, Any] | None:
+) -> _GroupCandidate | None:
     groups = _group_candidates(
         source,
         fulfillments=fulfillments,
@@ -354,7 +471,6 @@ def _count_record_metric_payloads(
     plan_shape: str,
 ) -> tuple[dict[str, Any], ...]:
     evidence_by_id = {item.evidence_id: item for item in source.evidence_items}
-    fields_by_id = {field.field_id: field for field in source.available_fields}
     metrics: list[dict[str, Any]] = []
     for fulfillment in fulfillments:
         for evidence_id in fulfillment.row_count_basis_evidence_ids:
@@ -368,7 +484,6 @@ def _count_record_metric_payloads(
                 continue
             metric = count_metric_payload_for_evidence_item(
                 item,
-                field=fields_by_id.get(str(item.field_id or "")),
             )
             if metric is None:
                 continue
@@ -393,28 +508,26 @@ def _compiled_metric(
     function: Mapping[str, object],
     *,
     answer_output_id: str,
-) -> dict[str, object]:
+) -> CompiledMetric:
     if metric.get("kind") == "count_records":
-        count_basis = compiled_count_basis_payload(_dict(metric.get("count_basis")))
-        return {
-            "field_id": "",
-            "record_id_field_id": count_basis["record_id_field_id"],
-            "row_population_basis": count_basis["row_population_basis"],
-            "label": "count",
-            "output_field_id": "count",
-            "function": AggregationFunction.COUNT,
-            "answer_output_id": answer_output_id,
-        }
+        count_basis = parse_count_basis(_dict(metric.get("count_basis")))
+        return CompiledMetric(
+            field_id="",
+            row_population_basis=count_basis.row_population,
+            label="count",
+            output_field_id="count",
+            function=AggregationFunction.COUNT,
+            answer_output_id=answer_output_id,
+        )
     field_id = _text(metric.get("field_id"))
-    return {
-        "field_id": field_id,
-        "record_id_field_id": "",
-        "row_population_basis": {},
-        "label": field_id,
-        "output_field_id": field_id,
-        "function": AggregationFunction(_text(function.get("value"))),
-        "answer_output_id": answer_output_id,
-    }
+    return CompiledMetric(
+        field_id=field_id,
+        row_population_basis=None,
+        label=field_id,
+        output_field_id=field_id,
+        function=AggregationFunction(_text(function.get("value"))),
+        answer_output_id=answer_output_id,
+    )
 
 
 def _metric_answer_output_id(
@@ -422,7 +535,7 @@ def _metric_answer_output_id(
     answer_outputs: tuple[GroupedRankedAnswerOutput, ...],
 ) -> str:
     expected_role = (
-        "ROW_POPULATION"
+        "ROW_COUNT"
         if _text(metric.get("kind")) == "count_records"
         else "MEASURED_VALUE"
     )
@@ -442,11 +555,11 @@ def _answer_outputs_for_selection(
     source: BoundSource,
     *,
     requested_fact_id: str,
-    group_candidate: Mapping[str, Any],
+    group_candidate: _GroupCandidate,
     metric_candidate: Mapping[str, Any],
     plan_shape: str,
 ) -> tuple[GroupedRankedAnswerOutput, ...]:
-    group_field_id = _text(group_candidate.get("field_id"))
+    group_field_ids = group_candidate.field_ids
     metric_field_id = _text(metric_candidate.get("field_id"))
     count_basis = _dict_or_empty(metric_candidate.get("count_basis"))
     output: list[GroupedRankedAnswerOutput] = []
@@ -455,19 +568,22 @@ def _answer_outputs_for_selection(
         for item in source.fulfillments
         if item.requested_fact_id == requested_fact_id
     ):
-        group_evidence_id = _first_matching_group_evidence_id(
+        group_evidence = _matching_group_evidence(
             source,
             fulfillment,
-            group_field_id=group_field_id,
+            group_field_ids=group_field_ids,
             plan_shape=plan_shape,
         )
-        if group_evidence_id:
+        if group_evidence is not None:
             output.append(
                 GroupedRankedAnswerOutput(
                     answer_output_id=fulfillment.answer_output_id,
                     role="GROUP_KEY",
-                    field_id=group_field_id,
-                    evidence_id=group_evidence_id,
+                    field_ids=group_field_ids,
+                    evidence_ids=group_evidence.evidence_ids,
+                    key_id=group_evidence.key_id,
+                    entity_kind=group_evidence.entity_kind,
+                    entity_components=group_evidence.components,
                 )
             )
             continue
@@ -482,8 +598,8 @@ def _answer_outputs_for_selection(
                 GroupedRankedAnswerOutput(
                     answer_output_id=fulfillment.answer_output_id,
                     role="MEASURED_VALUE",
-                    field_id=metric_field_id,
-                    evidence_id=metric_evidence_id,
+                    field_ids=(metric_field_id,),
+                    evidence_ids=(metric_evidence_id,),
                 )
             )
             continue
@@ -497,28 +613,90 @@ def _answer_outputs_for_selection(
             output.append(
                 GroupedRankedAnswerOutput(
                     answer_output_id=fulfillment.answer_output_id,
-                    role="ROW_POPULATION",
-                    field_id="count",
-                    evidence_id=count_evidence_id,
+                    role="ROW_COUNT",
+                    field_ids=("count",),
+                    evidence_ids=(count_evidence_id,),
                 )
             )
     return tuple(output)
 
 
-def _first_matching_group_evidence_id(
+def _matching_group_evidence(
     source: BoundSource,
     fulfillment: SourceFulfillment,
     *,
-    group_field_id: str,
+    group_field_ids: tuple[str, ...],
     plan_shape: str,
-) -> str:
-    for evidence_id in fulfillment.group_key_evidence_ids:
-        if (
-            _field_id_for_evidence_id(source, evidence_id, plan_shape=plan_shape)
-            == group_field_id
-        ):
-            return evidence_id
-    return ""
+) -> _GroupEvidence | None:
+    entity_evidence = _matching_entity_group_evidence(
+        fulfillment,
+        group_field_ids=group_field_ids,
+    )
+    scalar_evidence = None
+    if entity_evidence is None:
+        scalar_evidence = _matching_scalar_group_evidence(
+            source,
+            fulfillment,
+            group_field_ids=group_field_ids,
+            plan_shape=plan_shape,
+        )
+    return entity_evidence or scalar_evidence
+
+
+def _matching_entity_group_evidence(
+    fulfillment: SourceFulfillment,
+    *,
+    group_field_ids: tuple[str, ...],
+) -> _GroupEvidence | None:
+    match = None
+    entity_evidence = fulfillment.entity_evidence
+    if entity_evidence is not None:
+        field_ids = tuple(
+            component.field_id for component in entity_evidence.components
+        )
+        if field_ids == group_field_ids:
+            match = _GroupEvidence(
+                evidence_ids=tuple(
+                    component.field_evidence_id
+                    for component in entity_evidence.components
+                ),
+                key_id=entity_evidence_key_id(entity_evidence),
+                entity_kind=entity_evidence_entity_kind(entity_evidence),
+                components=tuple(
+                    (component.component_id, component.field_id)
+                    for component in entity_evidence.components
+                ),
+            )
+    return match
+
+
+def _matching_scalar_group_evidence(
+    source: BoundSource,
+    fulfillment: SourceFulfillment,
+    *,
+    group_field_ids: tuple[str, ...],
+    plan_shape: str,
+) -> _GroupEvidence | None:
+    match = None
+    if len(group_field_ids) == 1:
+        matching_evidence_id = next(
+            (
+                evidence_id
+                for evidence_id in fulfillment.value_evidence_ids
+                if (
+                    _field_id_for_evidence_id(
+                        source,
+                        evidence_id,
+                        plan_shape=plan_shape,
+                    )
+                    == group_field_ids[0]
+                )
+            ),
+            "",
+        )
+        if matching_evidence_id:
+            match = _GroupEvidence(evidence_ids=(matching_evidence_id,))
+    return match
 
 
 def _first_matching_metric_evidence_id(
@@ -587,7 +765,7 @@ def _choice_xml_lines(choice: Mapping[str, Any], *, indent: str) -> list[str]:
     ]
     group = _dict(choice.get("group"))
     lines.append(
-        f'{indent}    <group field="{_xml(_text(group.get("field_id")))}" type="{_xml(_text(group.get("type")))}" source="source_binding" />'
+        f'{indent}    <group fields="{_xml(" ".join(_texts(group.get("field_ids"))))}" key_id="{_xml(_text(group.get("key_id")))}" entity_kind="{_xml(_text(group.get("entity_kind")))}" source="source_binding" />'
     )
     lines.append(f"{indent}    <metric_candidates>")
     for item in choice.get("metric_candidates") or ():
@@ -619,32 +797,34 @@ def _choice_xml_lines(choice: Mapping[str, Any], *, indent: str) -> list[str]:
 
 
 def _selected_candidate(
-    raw_selection: Any,
+    selected_id: str,
     raw_candidates: Any,
     *,
     label: str,
 ) -> dict[str, Any]:
-    return selected_choice(raw_selection, raw_candidates, label=label)
+    for candidate in raw_candidates or ():
+        if _text(candidate.get("id")) == selected_id:
+            return candidate
+    raise ValueError(f"unknown {label} selection")
 
 
 def _validate_metric_selection(
-    raw_selection: Any, candidate: Mapping[str, Any]
+    answer: GroupedAggregateAnswerOutput | RankedAggregateAnswerOutput,
+    candidate: Mapping[str, Any],
 ) -> None:
-    selection = _dict(raw_selection)
-    if _text(selection.get("kind")) != _text(candidate.get("kind")):
+    if answer.metric.kind != _text(candidate.get("kind")):
         raise ValueError("metric selection mismatches candidate")
     if _text(candidate.get("kind")) == "aggregate_field" and _text(
-        selection.get("field_id")
+        answer.metric.field_id
     ) != _text(candidate.get("field_id")):
         raise ValueError("metric selection mismatches candidate")
 
 
 def _validate_function_selection(
-    raw_selection: Any,
+    answer: GroupedAggregateAnswerOutput | RankedAggregateAnswerOutput,
     candidate: Mapping[str, Any],
 ) -> None:
-    selection = _dict(raw_selection)
-    if _text(selection.get("value")) != _text(candidate.get("value")):
+    if answer.function.value != _text(candidate.get("value")):
         raise ValueError("function selection mismatches candidate")
 
 
@@ -660,6 +840,63 @@ def _dict_or_empty(value: Any) -> dict[str, Any]:
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _texts(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("expected list")
+    values = tuple(_text(item) for item in value)
+    if not values or any(not item for item in values):
+        raise ValueError("expected non-empty strings")
+    return values
+
+
+def _component_pairs(value: Any) -> tuple[tuple[str, str], ...]:
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("expected component list")
+    return tuple(
+        (_text(item.get("component_id")), _text(item.get("field_id")))
+        for item in value
+        if isinstance(item, dict)
+    )
+
+
+def _parse_group_candidate(payload: dict[str, Any]) -> _GroupCandidate:
+    return _GroupCandidate(
+        field_ids=_texts(payload.get("field_ids")),
+        types=_texts(payload.get("types")),
+        evidence_id=_text(payload.get("evidence_id")),
+        field_evidence_ids=_texts(payload.get("field_evidence_ids")),
+        key_id=_text(payload.get("key_id")),
+        entity_kind=_text(payload.get("entity_kind")),
+        components=_component_pairs(payload.get("components")),
+    )
+
+
+def _unique_group_candidates(
+    candidates: list[_GroupCandidate],
+) -> tuple[_GroupCandidate, ...]:
+    output: list[_GroupCandidate] = []
+    seen: set[
+        tuple[
+            tuple[str, ...],
+            str,
+            str,
+            tuple[tuple[str, str], ...],
+        ]
+    ] = set()
+    for candidate in candidates:
+        signature = (
+            candidate.field_ids,
+            candidate.key_id,
+            candidate.entity_kind,
+            candidate.components,
+        )
+        if signature in seen:
+            continue
+        seen.add(signature)
+        output.append(candidate)
+    return tuple(output)
 
 
 def _xml(value: str) -> str:

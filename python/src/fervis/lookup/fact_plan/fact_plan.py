@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 
 from fervis.lookup.answer_program.model import AnswerProgram
 from fervis.lookup.answer_program.values import BindingSet

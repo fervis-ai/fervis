@@ -16,6 +16,17 @@ input:
       - row_path_id: data
         row_source_id: rs_source_1_data
         cardinality: many
+        candidate_keys:
+          - key_id: compensation_primary
+            entity_kind: shift_compensation
+            components:
+              - {component_id: compensation_id, field_id: shift_compensation_id}
+        entity_references:
+          - reference_id: staff_reference
+            target_entity_kind: staff
+            target_key_id: staff_primary
+            components:
+              - {component_id: staff_id, field_id: staff_id}
         evidence_items:
           - evidence_id: source_1.data.shift_compensation_id
             field_id: shift_compensation_id
@@ -60,7 +71,7 @@ input:
         roles: [output, predicate]
 expect:
   result_contains:
-    group_key_fields:
+    entity_fields:
       staff_id: true
     metric_fields:
       calculated_pay: true

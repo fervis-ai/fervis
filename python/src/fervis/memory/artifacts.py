@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 from typing import Any
 
 from fervis.memory.addresses import FactAddress
@@ -12,7 +12,6 @@ from fervis.memory._serialization import without_empty
 
 class FactOutcome(StrEnum):
     ANSWERED = "answered"
-    NEEDS_CLARIFICATION = "needs_clarification"
     IMPOSSIBLE = "impossible"
     NO_DATA = "no_data"
     UNDEFINED = "undefined"

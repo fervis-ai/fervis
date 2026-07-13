@@ -22,6 +22,9 @@ uv --directory "$PYTHON_DIR" sync --extra dev
 echo "==> Ruff"
 uv --directory "$PYTHON_DIR" run ruff check src
 
+echo "==> Mypy"
+uv --directory "$PYTHON_DIR" run mypy src
+
 echo "==> Fervis tests"
 uv --directory "$PYTHON_DIR" run pytest
 
@@ -32,3 +35,6 @@ fi
 
 echo "==> Desktop app tests"
 npm --prefix "$DESKTOP_DIR" test
+
+echo "==> Desktop app build"
+npm --prefix "$DESKTOP_DIR" run build

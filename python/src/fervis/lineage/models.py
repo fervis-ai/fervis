@@ -138,11 +138,6 @@ class QuestionRun(models.Model):
         on_delete=models.PROTECT,
         related_name="derived_runs",
     )
-    trigger_clarification_response_id = models.CharField(
-        max_length=128,
-        blank=True,
-        default="",
-    )
     adapter_ref = models.CharField(max_length=128)
     runtime_version = models.CharField(max_length=128)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -768,17 +763,8 @@ class ClarificationRequest(models.Model):
         on_delete=models.PROTECT,
         related_name="clarification_requests",
     )
-    fact_result = models.ForeignKey(
-        FactResult,
-        null=True,
-        blank=True,
-        on_delete=models.PROTECT,
-        related_name="clarification_requests",
-    )
     step = models.ForeignKey(
         RunStep,
-        null=True,
-        blank=True,
         on_delete=models.PROTECT,
         related_name="clarification_requests",
     )

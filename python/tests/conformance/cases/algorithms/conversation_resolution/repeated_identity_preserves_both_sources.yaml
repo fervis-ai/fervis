@@ -27,10 +27,10 @@ input:
           values:
             - value_id: employee
               resolved_text: Nadia Wanjiku
+              frame_parameter: {kind: none}
               sources:
                 - {kind: current_span, text: Nadia Wanjiku, occurrence: 1}
                 - {kind: context_anchor, source_id: prior_answer, memory_id: nadia_identity, source_text: Nadia Wanjiku}
-      frame_call: {kind: none}
 expect:
   result_contains:
     used_source_card_ids: [identity_card]

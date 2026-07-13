@@ -86,8 +86,12 @@ describe("Ledger app rendering", () => {
   it("renders choice and text clarification states", async () => {
     renderDemoApp();
 
-    fireEvent.click(await screen.findByRole("button", { name: /run_clarify/ }));
-    expect(screen.getByText("Which matching store should I use?")).toBeInTheDocument();
+    fireEvent.click(
+      await screen.findByText("How many sales happened at the matching store?")
+    );
+    expect(
+      await screen.findByText("Which matching store should I use?")
+    ).toBeInTheDocument();
     expect(screen.getAllByText("Reference: ABC Mall")[0]).toBeInTheDocument();
     expect(screen.getByText("Matched entity: Location")).toBeInTheDocument();
     expect(
@@ -111,11 +115,22 @@ describe("Ledger app rendering", () => {
       await screen.findByText("18 in-person sales happened this month.")
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /run_clarify/ }));
-
+    fireEvent.click(
+      await screen.findByText("How many sales happened at the matching store?")
+    );
     expect(await screen.findByText("Which matching store should I use?")).toBeInTheDocument();
     expect(
       screen.queryByText("18 in-person sales happened this month.")
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByText("How many in-person sales happened this month?")
+    );
+    expect(
+      await screen.findByText("18 in-person sales happened this month.")
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Which matching store should I use?")
     ).not.toBeInTheDocument();
   });
 

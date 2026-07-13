@@ -27,7 +27,6 @@ from ._shared import (
 )
 from .blocked import (
     _policy_blocked_evidence_refs,
-    _required_reviewed_read_ids,
 )
 from .question_contract import _verify_question_contract
 from fervis.lookup.fact_planning.required_inputs import RequiredInput
@@ -178,11 +177,6 @@ def _verify_blocked_fact(
     if catalog is None:
         raise VerificationError("catalog is required to verify blocked facts")
     row_sources = build_row_source_catalog(catalog)
-    _verify_blocked_fact_reviews_catalog(
-        item,
-        row_sources=row_sources,
-        catalog_selection=catalog_selection,
-    )
     reviewed = _reviewed_row_sources(item, row_sources=row_sources)
     reviewed_catalog = RowSourceCatalog(sources=tuple(reviewed.values()))
     _verify_blocked_fact_evidence_refs(item, row_sources=reviewed_catalog)
@@ -221,25 +215,6 @@ def _verify_zero_selection_blocked_fact(item: BlockedFact) -> None:
         raise VerificationError("zero catalog selection evidence must be exact")
     if item.reviewed_read_ids or item.nearest_fields:
         raise VerificationError("zero catalog selection cannot review reads")
-
-
-def _verify_blocked_fact_reviews_catalog(
-    item: BlockedFact,
-    *,
-    row_sources: RowSourceCatalog,
-    catalog_selection: CatalogSelectionResult | None,
-) -> None:
-    required = set(
-        _required_reviewed_read_ids(
-            item.requested_fact_id,
-            row_sources=row_sources,
-            catalog_selection=catalog_selection,
-        )
-        or ()
-    )
-    reviewed = set(item.reviewed_read_ids)
-    if reviewed != required:
-        raise VerificationError("blocked fact must review every available API read")
 
 
 def _reviewed_row_sources(

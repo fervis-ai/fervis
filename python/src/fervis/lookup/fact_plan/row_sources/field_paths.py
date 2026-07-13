@@ -14,7 +14,6 @@ from fervis.lookup.relation_catalog.model import (
     RelationCatalog,
     RowPath,
 )
-from fervis.lookup.relation_catalog import catalog_field_is_count_anchor
 from fervis.lookup.relation_catalog.row_paths import infer_field_row_path_id
 from fervis.lookup.answer_program.relations import FieldBindingRole
 
@@ -127,7 +126,7 @@ def _read_description(read: EndpointRead) -> str:
 def _field_label(field: CatalogField, *, row_path: str, field_id: str) -> str:
     if field.path:
         return _relative_field_path(field.path, row_path) or field.path
-    return _display_label(field_id)
+    return field_id
 
 
 def _relative_field_path(field_path: str, row_path: str) -> str:
@@ -141,9 +140,13 @@ def _relative_field_path(field_path: str, row_path: str) -> str:
     return field_path
 
 
-def _allowed_roles(field: CatalogField) -> tuple[FieldBindingRole, ...]:
+def _allowed_roles(
+    field: CatalogField,
+    *,
+    identity_field_refs: frozenset[str],
+) -> tuple[FieldBindingRole, ...]:
     roles = [FieldBindingRole.OUTPUT, FieldBindingRole.PREDICATE]
-    if catalog_field_is_count_anchor(field):
+    if field.ref in identity_field_refs:
         roles.insert(0, FieldBindingRole.IDENTITY)
     return tuple(roles)
 
@@ -194,10 +197,6 @@ def _catalog_facts(catalog: RelationCatalog) -> tuple[tuple[str, Any], ...]:
 def _symbol(value: str) -> str:
     symbol = re.sub(r"[^A-Za-z0-9]+", "_", str(value)).strip("_").lower()
     return symbol or "value"
-
-
-def _display_label(value: str) -> str:
-    return str(value).replace("_", " ")
 
 
 def _opaque_id(prefix: str, *parts: str) -> str:

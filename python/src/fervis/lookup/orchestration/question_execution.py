@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, TypeAlias, TypeVar, assert_never
+from typing import Callable, TypeAlias, TypeVar
+from typing_extensions import assert_never
 
 from fervis.lookup.answer_program.persistence import PriorProgramInvocationReader
 from fervis.lookup.conversation_resolution.callable_frames import (
@@ -26,9 +27,7 @@ class ContinuePriorRequestExecution:
     frame: CallableFrameProgram
 
 
-QuestionExecution: TypeAlias = (
-    CompileQuestionExecution | ContinuePriorRequestExecution
-)
+QuestionExecution: TypeAlias = CompileQuestionExecution | ContinuePriorRequestExecution
 _Result = TypeVar("_Result")
 
 

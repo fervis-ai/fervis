@@ -9,12 +9,11 @@ from fervis.lookup.fact_planning.aggregate_choice_parts import (
     AGGREGATE_FUNCTIONS,
     COUNT_FUNCTION,
     aggregate_function_candidates,
-    selected_choice,
     xml_attr,
     xml_text,
 )
 from fervis.lookup.fact_planning.executable_support import (
-    compiled_count_basis_payload,
+    parse_count_basis,
     count_metric_payload_for_evidence_item,
     unique_count_metric_payloads,
 )
@@ -29,6 +28,8 @@ from fervis.lookup.fact_planning.source_binding_basis import (
     metric_fit_bases_by_evidence_id,
 )
 from fervis.lookup.source_binding import BoundSource, SourceFulfillment
+from fervis.lookup.fact_planning.provider_contract import AggregateScalarAnswerOutput
+from fervis.lookup.fact_planning.compiled_patterns import CompiledMetric
 
 
 def scalar_aggregate_choices_for_source(
@@ -119,33 +120,31 @@ def scalar_aggregate_choices_prompt(
 
 def selected_scalar_aggregate_metric(
     *,
-    payload: dict[str, Any],
+    answer: AggregateScalarAnswerOutput,
     bound_sources: dict[str, BoundSource],
-) -> dict[str, Any]:
-    if "metric_selection" in payload:
-        raise ValueError("aggregate_scalar uses metric and function selections")
-    source = bound_sources.get(str(payload.get("source_binding_id") or "").strip())
+) -> CompiledMetric:
+    source = bound_sources.get(answer.source_binding_id.strip())
     if source is None:
         raise ValueError("fact plan references unknown relation source binding")
     choice = scalar_aggregate_choices_for_source(
         source,
-        requested_fact_id=str(payload.get("requested_fact_id") or "").strip(),
-        plan_shape=str(payload.get("pattern") or "").strip(),
+        requested_fact_id=answer.requested_fact_id.strip(),
+        plan_shape=answer.pattern.strip(),
     )
     if choice is None:
         raise ValueError("aggregate_scalar has no legal metric choices")
     metric = _selected_candidate(
-        payload.get("metric"),
+        answer.metric.id,
         choice.get("metric_candidates"),
         label="metric",
     )
     function = _selected_candidate(
-        payload.get("function"),
+        answer.function.id,
         choice.get("function_candidates"),
         label="function",
     )
-    _validate_metric_selection(payload.get("metric"), metric)
-    _validate_function_selection(payload.get("function"), function)
+    _validate_metric_selection(answer, metric)
+    _validate_function_selection(answer, function)
     if str(function.get("value") or "") not in tuple(
         metric.get("allowed_functions") or ()
     ):
@@ -213,7 +212,6 @@ def _count_metric_payloads(
         for item in explicit_count_basis_items:
             metric = count_metric_payload_for_evidence_item(
                 item,
-                field=fields_by_id.get(str(item.field_id or "")),
             )
             if metric is not None:
                 output.append(
@@ -228,37 +226,36 @@ def _count_metric_payloads(
 
 def metric_for_selection(
     *,
-    payload: dict[str, Any],
+    answer: AggregateScalarAnswerOutput,
     bound_sources: dict[str, BoundSource],
-) -> dict[str, Any]:
+) -> CompiledMetric:
     return selected_scalar_aggregate_metric(
-        payload=payload,
+        answer=answer,
         bound_sources=bound_sources,
     )
 
 
-def _compiled_metric(metric: dict[str, Any]) -> dict[str, Any]:
+def _compiled_metric(metric: dict[str, Any]) -> CompiledMetric:
     if metric["kind"] == "count_records":
-        count_basis = compiled_count_basis_payload(_metric_count_basis(metric))
-        return {
-            "field_id": "",
-            "record_id_field_id": count_basis["record_id_field_id"],
-            "row_population_basis": count_basis["row_population_basis"],
-            "label": "count",
-            "output_field_id": "count",
-            "function": AggregationFunction.COUNT,
-            "answer_output_id": metric["answer_output_id"],
-        }
+        count_basis = parse_count_basis(_metric_count_basis(metric))
+        return CompiledMetric(
+            field_id="",
+            row_population_basis=count_basis.row_population,
+            label="count",
+            output_field_id="count",
+            function=AggregationFunction.COUNT,
+            answer_output_id=metric["answer_output_id"],
+        )
     field_id = metric["field_id"]
     function = AggregationFunction(metric["function"])
-    return {
-        "field_id": field_id,
-        "record_id_field_id": "",
-        "label": field_id,
-        "output_field_id": field_id,
-        "function": function,
-        "answer_output_id": metric["answer_output_id"],
-    }
+    return CompiledMetric(
+        field_id=field_id,
+        row_population_basis=None,
+        label=field_id,
+        output_field_id=field_id,
+        function=function,
+        answer_output_id=metric["answer_output_id"],
+    )
 
 
 def _metric_count_basis(metric: dict[str, Any]) -> dict[str, Any]:
@@ -407,14 +404,14 @@ def _choice_xml_lines(choice: dict[str, Any], *, indent: str) -> list[str]:
     lines.append(f"{indent}    </metric_candidates>")
     lines.append(f"{indent}    <function_candidates>")
     for function in choice.get("function_candidates") or ():
-        attrs = " ".join(
+        function_attrs = " ".join(
             (
                 f'id="{xml_attr(function.get("id"))}"',
                 f'value="{xml_attr(function.get("value"))}"',
                 f'meaning="{xml_attr(function.get("meaning"))}"',
             )
         )
-        lines.append(f"{indent}      <function {attrs} />")
+        lines.append(f"{indent}      <function {function_attrs} />")
     lines.append(f"{indent}    </function_candidates>")
     lines.append(f"{indent}  </operation>")
     lines.append(f"{indent}</source_binding>")
@@ -422,29 +419,34 @@ def _choice_xml_lines(choice: dict[str, Any], *, indent: str) -> list[str]:
 
 
 def _selected_candidate(
-    selection: Any,
+    selected_id: str,
     candidates: Any,
     *,
     label: str,
 ) -> dict[str, Any]:
-    return selected_choice(selection, candidates, label=label)
+    for candidate in candidates or ():
+        if str(candidate.get("id") or "") == selected_id:
+            return candidate
+    raise ValueError(f"unknown {label} selection")
 
 
-def _validate_metric_selection(selection: Any, metric: dict[str, Any]) -> None:
-    if not isinstance(selection, dict):
-        raise ValueError("metric selection is required")
-    if str(selection.get("kind") or "") != str(metric.get("kind") or ""):
+def _validate_metric_selection(
+    answer: AggregateScalarAnswerOutput,
+    metric: dict[str, Any],
+) -> None:
+    if answer.metric.kind != str(metric.get("kind") or ""):
         raise ValueError("metric selection kind does not match selected id")
-    if metric.get("field_id") and str(selection.get("field_id") or "") != str(
+    if metric.get("field_id") and (answer.metric.field_id or "") != str(
         metric.get("field_id") or ""
     ):
         raise ValueError("metric selection field does not match selected id")
 
 
-def _validate_function_selection(selection: Any, function: dict[str, Any]) -> None:
-    if not isinstance(selection, dict):
-        raise ValueError("function selection is required")
-    if str(selection.get("value") or "") != str(function.get("value") or ""):
+def _validate_function_selection(
+    answer: AggregateScalarAnswerOutput,
+    function: dict[str, Any],
+) -> None:
+    if answer.function.value != str(function.get("value") or ""):
         raise ValueError("function selection value does not match selected id")
 
 

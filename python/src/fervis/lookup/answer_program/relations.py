@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 
 from fervis.lookup.answer_program.values import ParameterRef, ValueExpression
 
@@ -63,10 +63,13 @@ class EndpointParamBinding:
 class RelationSourceAppliedFilter:
     predicate_field_ids: tuple[str, ...]
     value_expr: ValueExpression
+    operator: str = "equals"
 
     def __post_init__(self) -> None:
         if not self.predicate_field_ids:
             raise ValueError("relation source applied filter requires predicate fields")
+        if not self.operator:
+            raise ValueError("relation source applied filter requires operator")
 
 
 @dataclass(frozen=True)
@@ -121,6 +124,7 @@ class RelationSource:
     row_filters: tuple[RelationSourceRowFilter, ...] = ()
     population_choices: tuple[RelationSourcePopulationChoice, ...] = ()
     proof_refs: tuple[str, ...] = ()
+
 
 @dataclass(frozen=True)
 class RelationField:

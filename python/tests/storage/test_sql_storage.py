@@ -37,9 +37,9 @@ from fervis.lineage.recorder_core import LineageRecorder
 from fervis.lineage.recorder import (
     AnswerProgramWrite,
     ClarificationRequestWrite,
+    ClarificationResponseWrite,
     ExecutionProofGraphWrite,
     FactResultWrite,
-    FactualTerminalRunResultWrite,
     ModelCallAuditWrite,
     ModelCallWrite,
     MemoryArtifactWrite,
@@ -60,7 +60,7 @@ from fervis.lineage.enums import (
 )
 from fervis.questions import (
     AskRequest,
-    ContinueQuestionRequest,
+    ClarificationResponseRequest,
     ExecutionMode,
     QuestionPrincipal,
     RerunQuestionRequest,
@@ -84,7 +84,6 @@ from fervis.lookup.answer_program.persistence import (
     program_revision_bundle,
 )
 from fervis.lookup.answer_program.values import FactValue
-from fervis.lineage.enums import RunTriggerKind
 from fervis.run_work.events import CollectingQuestionRunEventSink
 from fervis.run_work.queued_execution import LocalQueuedRunFollower
 from fervis.run_work.worker import RunWorkBatchProcessor, RunWorkServiceWorker
@@ -93,6 +92,8 @@ from fervis.questions.ports import (
     LookupExecutionRequest,
     LookupExecutionResult,
     QuestionLookupPort,
+    ResolveQuestionRunSpec,
+    RunSubmission,
 )
 from fervis.storage.sql.bundle import sql_storage_bundle
 from fervis.storage.sql.question_run_ports import SQLQuestionLineagePort
@@ -114,7 +115,14 @@ API_DIR = Path(__file__).resolve().parents[3]
 
 _CANONICAL_ANSWER_RESULT = {
     "kind": "answer",
-    "outputs": [{"key": "answer_1", "valueKind": "number", "value": "42"}],
+    "outputs": [
+        {
+            "key": "answer_1",
+            "valueKind": "number",
+            "value": {"value": 42},
+            "displayValue": "42",
+        }
+    ],
 }
 
 
@@ -241,22 +249,24 @@ def test_sql_content_addressed_program_is_shared_by_independent_runs(
 def test_sql_rerun_persists_child_invocation_and_queue_atomically(
     tmp_path: Path,
 ) -> None:
-    root, bundle, _principal_value, base, rerun = _sql_answered_base_and_rerun(
-        tmp_path
-    )
+    root, bundle, _principal_value, base, rerun = _sql_answered_base_and_rerun(tmp_path)
 
     with bundle.engine.connect() as connection:
-        row = connection.execute(
-            sa.text(
-                "SELECT r.kind, r.trigger_kind, r.base_run_id, "
-                "i.patch_id, w.spec_kind "
-                "FROM fervis_question_run r "
-                "JOIN fervis_program_invocation i ON i.run_id = r.run_id "
-                "JOIN fervis_run_work_item w ON w.run_id = r.run_id "
-                "WHERE r.run_id = :run_id"
-            ),
-            {"run_id": rerun.run_id},
-        ).mappings().one()
+        row = (
+            connection.execute(
+                sa.text(
+                    "SELECT r.kind, r.trigger_kind, r.base_run_id, "
+                    "i.patch_id, w.spec_kind "
+                    "FROM fervis_question_run r "
+                    "JOIN fervis_program_invocation i ON i.run_id = r.run_id "
+                    "JOIN fervis_run_work_item w ON w.run_id = r.run_id "
+                    "WHERE r.run_id = :run_id"
+                ),
+                {"run_id": rerun.run_id},
+            )
+            .mappings()
+            .one()
+        )
 
     assert rerun.status == "QUEUED"
     assert dict(row) == {
@@ -284,16 +294,20 @@ def test_sql_capability_rerun_persists_one_revision_and_child_invocation(
     )
 
     with bundle.engine.connect() as connection:
-        row = connection.execute(
-            sa.text(
-                "SELECT i.patch_id, i.program_id, i.revision_id, "
-                "r.base_program_id, r.revised_program_id, r.capability_id "
-                "FROM fervis_program_invocation i "
-                "JOIN fervis_program_revision r ON r.revision_id = i.revision_id "
-                "WHERE i.run_id = :run_id"
-            ),
-            {"run_id": rerun.run_id},
-        ).mappings().one()
+        row = (
+            connection.execute(
+                sa.text(
+                    "SELECT i.patch_id, i.program_id, i.revision_id, "
+                    "r.base_program_id, r.revised_program_id, r.capability_id "
+                    "FROM fervis_program_invocation i "
+                    "JOIN fervis_program_revision r ON r.revision_id = i.revision_id "
+                    "WHERE i.run_id = :run_id"
+                ),
+                {"run_id": rerun.run_id},
+            )
+            .mappings()
+            .one()
+        )
 
     assert rerun.status == "QUEUED"
     assert row["patch_id"] is None
@@ -374,9 +388,11 @@ def test_sql_program_revision_persistence_is_atomic(tmp_path: Path) -> None:
 
     recorder.record_program_revision(write)
     with bundle.engine.connect() as connection:
-        row = connection.execute(
-            sa.select(metadata.tables["fervis_program_revision"])
-        ).mappings().one()
+        row = (
+            connection.execute(sa.select(metadata.tables["fervis_program_revision"]))
+            .mappings()
+            .one()
+        )
     assert row["revision_id"] == revision.revision_id
     assert row["base_program_id"] == revision.base_program_id
     assert row["revised_program_id"] == revision.revised_program_id
@@ -479,9 +495,7 @@ def test_sql_rerun_submission_rolls_back_every_child_record_on_failure(
             _capability_rerun_request(base, principal=principal)
         )
 
-    assert {
-        table: _count_rows(root, table) for table in before
-    } == before
+    assert {table: _count_rows(root, table) for table in before} == before
 
 
 def _sql_answered_base_and_rerun(tmp_path: Path):
@@ -686,6 +700,41 @@ def test_sql_storage_round_trips_read_context_ref_into_lookup_request(
     )
 
     assert lookup.requests[0].read_context_ref == read_context_ref
+
+
+def test_sql_run_work_fails_closed_without_host_prompt_context(
+    tmp_path: Path,
+) -> None:
+    root = _migrated_fastapi_project(tmp_path)
+    bundle = _storage_bundle(root)
+    submitted = bundle.questions.ask(
+        AskRequest(
+            question="How many orders came in today?",
+            principal=_principal("u1", "user_7"),
+            execution_mode=ExecutionMode.QUEUED,
+            conversation_id="c_missing_host_context",
+        )
+    )
+    [item] = SQLWorkItemQueue(bundle.engine).claim_run_work_items(
+        worker_id="worker-1",
+        batch_size=1,
+        lease_seconds=60,
+    )
+
+    result = bundle.run_work.process_queued_run(
+        QueuedRunRequest(
+            run_id=submitted.run_id,
+            worker_id="worker-1",
+            active_attempt=item.active_attempt,
+        )
+    )
+
+    assert result.status == "FAILED"
+    assert result.error == (
+        "Fervis lookup cannot start: host.organization_name and host.about_api "
+        "are required. Configure the organization, API domain, and supported "
+        "factual-question scope in config/fervis.json."
+    )
 
 
 def test_sql_storage_round_trips_delegated_credential_into_lookup_request(
@@ -968,6 +1017,55 @@ def test_sql_storage_idempotency_lookup_is_scoped_to_read_context(
     assert other_result.conversation_id != owner_result.conversation_id
 
 
+def test_sql_queue_recovers_generated_conversation_idempotency_insert_race(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _migrated_fastapi_project(tmp_path)
+    queue = SQLWorkItemQueue(_storage_bundle(root).engine)
+    principal = _principal("owner", "owner")
+
+    def submission(*, conversation_id: str, run_id: str) -> RunSubmission:
+        return RunSubmission(
+            conversation_id=conversation_id,
+            tenant_id=principal.tenant_id,
+            question_id=f"question-{run_id}",
+            run_id=run_id,
+            principal=principal,
+            spec=ResolveQuestionRunSpec(
+                question="How many orders came in today?",
+                provider="anthropic",
+                model_key="HAIKU",
+            ),
+            execution_mode=ExecutionMode.QUEUED,
+            idempotency_key="generated-conversation-key",
+            idempotency_scope="new_conversation",
+        )
+
+    first = queue.enqueue_run_work_item(
+        submission=submission(conversation_id="conversation-1", run_id="run-1")
+    )
+    find_idempotent = queue._find_idempotent
+    lookup_count = 0
+
+    def miss_preinsert_lookup_once(connection, pending):
+        nonlocal lookup_count
+        lookup_count += 1
+        if lookup_count == 1:
+            return None
+        return find_idempotent(connection, pending)
+
+    monkeypatch.setattr(queue, "_find_idempotent", miss_preinsert_lookup_once)
+    second = queue.enqueue_run_work_item(
+        submission=submission(conversation_id="conversation-2", run_id="run-2")
+    )
+
+    assert first.created is True
+    assert second.created is False
+    assert second.item.run_id == "run-1"
+    assert _count_rows(root, "fervis_run_work_item") == 1
+
+
 def test_sql_storage_clarification_continuation_authorizes_trigger_run(
     tmp_path: Path,
 ) -> None:
@@ -1003,6 +1101,12 @@ def test_sql_storage_clarification_continuation_authorizes_trigger_run(
                 "id": "owner-clarification",
                 "need": "target_reference",
                 "reason": "multiple_matching_entities",
+                "owner": "grounding",
+                "continuation": {
+                    "kind": "grounding",
+                    "knownInputId": "store",
+                    "acceptsFreeText": True,
+                },
                 "requestedFactId": "question_contract",
                 "question": "Which matching store should I use?",
                 "subjects": [
@@ -1034,17 +1138,16 @@ def test_sql_storage_clarification_continuation_authorizes_trigger_run(
 
     with pytest.raises(
         PermissionError,
-        match="continuation run is not an authorized terminal run",
+        match="clarification does not belong to a resumable run",
     ):
-        bundle.questions.continue_question(
-            ContinueQuestionRequest(
+        bundle.questions.respond_to_clarification(
+            ClarificationResponseRequest(
                 question_id=other_result.question_id,
-                question="ABC Mall",
+                run_id=owner_result.run_id,
+                clarification_id="owner-clarification",
+                response_text="ABC Mall",
                 principal=_principal("other", "other"),
-                trigger_kind=RunTriggerKind.CLARIFICATION_RESPONSE,
                 execution_mode=ExecutionMode.QUEUED,
-                base_run_id=owner_result.run_id,
-                trigger_clarification_response_id="owner-clarification",
             )
         )
 
@@ -1290,6 +1393,42 @@ def test_sql_storage_worker_execute_returns_lookup_payload(tmp_path: Path) -> No
     assert terminal.answer == "42 orders"
 
 
+def test_sql_storage_worker_returns_persisted_clarification_identity(
+    tmp_path: Path,
+) -> None:
+    root = _migrated_fastapi_project(tmp_path)
+    bundle = _storage_bundle(root)
+    lookup = _ClarifyingLookup(
+        recorder=LineageRecorder(SQLLineageRecorderStore(bundle.engine))
+    )
+    bundle = _storage_bundle(root, lookup=lookup)
+    submitted = bundle.questions.ask(
+        AskRequest(
+            question="How many orders came from that store?",
+            principal=QuestionPrincipal(principal_id="u1", tenant_id="t1"),
+            execution_mode=ExecutionMode.QUEUED,
+            conversation_id="c1",
+        )
+    )
+    [item] = SQLWorkItemQueue(bundle.engine).claim_run_work_items(
+        worker_id="worker-1",
+        batch_size=1,
+        lease_seconds=60,
+    )
+
+    waiting = bundle.run_work.process_queued_run(
+        QueuedRunRequest(
+            run_id=submitted.run_id,
+            worker_id="worker-1",
+            active_attempt=item.active_attempt,
+        )
+    )
+
+    assert waiting.status == "WAITING_FOR_CLARIFICATION", waiting.error
+    [clarification] = waiting.result_data["details"]["clarifications"]
+    assert clarification["id"] == f"{submitted.run_id}:clarification"
+
+
 def test_sql_storage_worker_load_reconciles_existing_terminal_lineage(
     tmp_path: Path,
 ) -> None:
@@ -1391,9 +1530,7 @@ def test_sql_storage_expired_run_at_max_attempts_fails_queue_and_lineage(
     assert claimed == []
     assert _work_item_status(root, result.run_id) == "FAILED"
     assert _count_rows(root, "fervis_run_result") == 1
-    assert _runtime_error_message(root, result.run_id) == (
-        "run_max_attempts_exceeded"
-    )
+    assert _runtime_error_message(root, result.run_id) == ("run_max_attempts_exceeded")
 
 
 def test_sql_storage_claim_predicate_rejects_stale_candidate_snapshot(
@@ -1531,7 +1668,7 @@ def test_sql_storage_terminal_result_reads_active_transaction(
     assert _count_rows(root, "fervis_run_result") == 0
 
 
-def test_sql_storage_terminal_result_projects_clarification_payload(
+def test_sql_storage_waiting_run_projects_clarification_payload(
     tmp_path: Path,
 ) -> None:
     root = _migrated_fastapi_project(tmp_path)
@@ -1553,6 +1690,12 @@ def test_sql_storage_terminal_result_projects_clarification_payload(
                 "requestedFactId": "fact_1",
                 "need": "target_reference",
                 "reason": "unresolved_reference",
+                "owner": "grounding",
+                "continuation": {
+                    "kind": "grounding",
+                    "knownInputId": "q1_store",
+                    "acceptsFreeText": True,
+                },
                 "question": "Which store should I use?",
                 "subjects": [
                     {
@@ -1563,9 +1706,7 @@ def test_sql_storage_terminal_result_projects_clarification_payload(
                         "options": [],
                     }
                 ],
-                "evidence": [
-                    {"kind": "known_input", "id": "known_input:q1_store"}
-                ],
+                "evidence": [{"kind": "known_input", "id": "known_input:q1_store"}],
             }
         ]
     }
@@ -1580,54 +1721,60 @@ def test_sql_storage_terminal_result_projects_clarification_payload(
             kind=RunStepKind.DETERMINISTIC,
         )
     )
-    recorder.record_factual_terminal_result(
-        FactualTerminalRunResultWrite(
-            result=RunResultWrite(
-                run_result_id=f"{run_id}:result",
-                run_id=run_id,
-                result_kind=RunResultKind.FACTUAL_TERMINAL,
-            ),
-            requested_facts=(
-                RequestedFactWrite(
-                    requested_fact_id=f"{run_id}:fact",
-                    run_id=run_id,
-                    produced_by_step_id=f"{run_id}:render",
-                    fact_key="fact_1",
-                    answer_expression_family="scalar_aggregate",
-                ),
-            ),
-            fact_results=(
-                FactResultWrite(
-                    fact_result_id=f"{run_id}:fact-result",
-                    run_id=run_id,
-                    requested_fact_id=f"{run_id}:fact",
-                    produced_by_step_id=f"{run_id}:render",
-                    result_kind=FactResultKind.NEEDS_CLARIFICATION,
-                    evidence_refs_json=["known_input:q1_store"],
-                    payload_schema="fervis.fact_terminal",
-                    payload_schema_rev=1,
-                    payload_json={"clarificationIds": [clarification_id]},
-                ),
-            ),
-            clarifications=(
-                ClarificationRequestWrite(
-                    clarification_id=clarification_id,
-                    run_id=run_id,
-                    fact_result_id=f"{run_id}:fact-result",
-                    payload_json=clarification_details["clarifications"][0],
-                ),
-            ),
+    recorder.record_clarification_request(
+        ClarificationRequestWrite(
+            clarification_id=clarification_id,
+            run_id=run_id,
+            step_id=f"{run_id}:render",
+            payload_json=clarification_details["clarifications"][0],
         )
+    )
+    queue = SQLWorkItemQueue(bundle.engine)
+    claimed = queue.claim_run_work_item(
+        run_id=run_id,
+        worker_id="worker_1",
+        lease_seconds=30,
+    )
+    assert claimed is not None
+    queue.wait_for_clarification(
+        run_id=run_id,
+        worker_id="worker_1",
+        active_attempt=claimed.active_attempt,
+    )
+
+    waiting = bundle.questions.get_question_run(
+        result.question_id,
+        run_id,
+        principal=QuestionPrincipal(principal_id="u1", tenant_id="t1"),
+    )
+
+    assert waiting is not None
+    assert waiting["status"] == "WAITING_FOR_CLARIFICATION"
+    assert waiting["resultData"] == {
+        "kind": "needs_clarification",
+        "details": clarification_details,
+    }
+
+    recorder.record_clarification_response(
+        ClarificationResponseWrite(
+            response_id=f"{run_id}:response",
+            run_id=run_id,
+            clarification_id=clarification_id,
+            evidence_ref=f"clarification_response:{run_id}:response",
+            response_text="ABC Mall",
+        )
+    )
+    record_runtime_error_result(
+        engine=bundle.engine,
+        run_id=run_id,
+        error_code="test_terminal_error",
     )
 
     terminal = terminal_result_for_run(bundle.engine, run_id)
 
     assert terminal is not None
-    assert terminal.status == "NEEDS_CLARIFICATION"
-    assert terminal.result_data == {
-        "kind": "needs_clarification",
-        "details": clarification_details,
-    }
+    assert terminal.status == "FAILED"
+    assert set(terminal.result_data) == {"run_result_id"}
 
 
 def test_fervis_runtime_ask_queued_uses_sqlite_storage_and_explain_reads_it(
@@ -2026,6 +2173,7 @@ def test_fervis_doctor_adds_storage_writability_checks_after_migrate(
     tmp_path: Path,
 ) -> None:
     root = _migrated_fastapi_project(tmp_path)
+    _configure_host_context(root)
     _configure_fastapi_auth(root)
 
     doctor = _run_fervis(root, "doctor", "--probe-read-context-key", "user_7")
@@ -2132,6 +2280,68 @@ class _CompletedLookup(QuestionLookupPort):
         )
 
 
+class _ClarifyingLookup(QuestionLookupPort):
+    def __init__(self, *, recorder: LineageRecorder) -> None:
+        self.recorder = recorder
+
+    def run_lookup(
+        self,
+        request: LookupExecutionRequest,
+        *,
+        progress_sink=None,
+    ) -> LookupExecutionResult:
+        del progress_sink
+        step_id = f"{request.run_id}:grounding"
+        clarification_id = f"{request.run_id}:clarification"
+        self.recorder.record_step(
+            RunStepWrite(
+                step_id=step_id,
+                run_id=request.run_id,
+                sequence=1,
+                step_key=RunStepKey.GROUNDING,
+                kind=RunStepKind.DETERMINISTIC,
+            )
+        )
+        payload = {
+            "id": clarification_id,
+            "requestedFactId": "fact_1",
+            "need": "target_reference",
+            "reason": "unresolved_reference",
+            "owner": "grounding",
+            "continuation": {
+                "kind": "grounding",
+                "knownInputId": "qi_1",
+                "acceptsFreeText": True,
+            },
+            "question": "Which store should I use?",
+            "subjects": [
+                {
+                    "kind": "question_input",
+                    "id": "qi_1",
+                    "label": "store",
+                    "sourceText": "that store",
+                    "options": [],
+                }
+            ],
+            "evidence": [{"kind": "known_input", "id": "known_input:qi_1"}],
+        }
+        self.recorder.record_clarification_request(
+            ClarificationRequestWrite(
+                clarification_id=clarification_id,
+                run_id=request.run_id,
+                step_id=step_id,
+                payload_json=payload,
+            )
+        )
+        return LookupExecutionResult(
+            status="NEEDS_CLARIFICATION",
+            result_data={
+                "kind": "needs_clarification",
+                "details": {"clarifications": [{**payload, "id": "draft-id"}]},
+            },
+        )
+
+
 def _storage_bundle(root: Path, lookup: QuestionLookupPort | None = None):
     loaded = load_fervis_project_config(discover_project(root))
     return sql_storage_bundle(
@@ -2187,6 +2397,19 @@ def _configure_fastapi_auth(root: Path) -> None:
         project=discover_project(root),
         stdout=StringIO(),
     )
+
+
+def _configure_host_context(root: Path) -> None:
+    schema = _read_project_schema(root)
+    schema["host"] = {
+        "organization_name": "Example",
+        "about_api": (
+            "The Example API helps operators work with business and operational "
+            "records."
+        ),
+        "timezone": "UTC",
+    }
+    _write_project_schema(root, schema)
 
 
 def _write_fastapi_auth_helpers(root: Path) -> None:
@@ -2269,9 +2492,7 @@ def _write_order_count_fastapi_app(root: Path) -> None:
         "timezone": "UTC",
     }
     schema["models"] = {
-        "providers": [
-            {"name": "openai", "allowed_model_keys": ["gpt-5.4-mini"]}
-        ],
+        "providers": [{"name": "openai", "allowed_model_keys": ["gpt-5.4-mini"]}],
     }
     schema["environments"][schema["default_environment"]]["models"] = {
         "default": {"provider": "openai", "model_key": "gpt-5.4-mini"}

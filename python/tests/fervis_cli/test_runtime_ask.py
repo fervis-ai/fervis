@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ._support import *  # noqa: F401,F403
 
+
 def test_fervis_runtime_ask_calls_question_run_service() -> None:
     ports = _ports(
         questions=_QuestionService(
@@ -670,9 +671,7 @@ def test_fervis_runtime_ask_rejects_budget_over_shared_limit() -> None:
 
     events = _jsonl_events(stdout.getvalue())
     assert exit_code == 2
-    assert events[0]["error"]["message"] == (
-        "max_budget_usd must be at most 10.0"
-    )
+    assert events[0]["error"]["message"] == ("max_budget_usd must be at most 10.0")
 
 
 def test_fervis_runtime_ask_uses_injected_request_limits() -> None:
@@ -699,9 +698,7 @@ def test_fervis_runtime_ask_uses_injected_request_limits() -> None:
 
     events = _jsonl_events(stdout.getvalue())
     assert exit_code == 2
-    assert events[0]["error"]["message"] == (
-        "max_budget_usd must be at most 0.25"
-    )
+    assert events[0]["error"]["message"] == ("max_budget_usd must be at most 0.25")
 
 
 def test_fervis_runtime_ask_service_failure_uses_agent_result() -> None:
@@ -837,7 +834,7 @@ def test_fervis_runtime_ask_streams_actionable_clarification() -> None:
         ports=_ports(
             questions=_QuestionService(
                 AskResult(
-                    status="NEEDS_CLARIFICATION",
+                    status="WAITING_FOR_CLARIFICATION",
                     conversation_id="conv_123",
                     question_id="q_1",
                     run_id="r_1",
@@ -870,7 +867,7 @@ def test_fervis_runtime_ask_streams_actionable_clarification() -> None:
             "status": "RUNNING",
         },
         {
-            "event": "run.needs_clarification",
+            "event": "run.waiting_for_clarification",
             "clarifications": [
                 {
                     "id": "clar_1",
@@ -887,14 +884,14 @@ def test_fervis_runtime_ask_streams_actionable_clarification() -> None:
                 provide_clarification_action(
                     "conv_123",
                     question_id="q_1",
-                    base_run_id="r_1",
+                    run_id="r_1",
                     clarification_id="clar_1",
                     tenant_id="tenant_1",
                     principal_id="user_1",
                 )
             ],
             "run_id": "r_1",
-            "status": "NEEDS_CLARIFICATION",
+            "status": "WAITING_FOR_CLARIFICATION",
         },
     ]
 
@@ -917,7 +914,7 @@ def test_fervis_runtime_ask_clarification_does_not_depend_on_explain_lineage() -
         ports=_ports(
             questions=_QuestionService(
                 AskResult(
-                    status="NEEDS_CLARIFICATION",
+                    status="WAITING_FOR_CLARIFICATION",
                     conversation_id="conv_123",
                     question_id="q_1",
                     run_id="r_1",
@@ -951,7 +948,7 @@ def test_fervis_runtime_ask_clarification_does_not_depend_on_explain_lineage() -
             "status": "RUNNING",
         },
         {
-            "event": "run.needs_clarification",
+            "event": "run.waiting_for_clarification",
             "clarifications": [
                 {
                     "id": "clar_1",
@@ -968,14 +965,14 @@ def test_fervis_runtime_ask_clarification_does_not_depend_on_explain_lineage() -
                 provide_clarification_action(
                     "conv_123",
                     question_id="q_1",
-                    base_run_id="r_1",
+                    run_id="r_1",
                     clarification_id="clar_1",
                     tenant_id="tenant_1",
                     principal_id="user_1",
                 )
             ],
             "run_id": "r_1",
-            "status": "NEEDS_CLARIFICATION",
+            "status": "WAITING_FOR_CLARIFICATION",
         },
     ]
 
@@ -1001,7 +998,7 @@ def test_fervis_runtime_ask_streams_clarification_response_followup() -> None:
         ),
         accepted_trigger={
             "kind": "clarification_response",
-            "base_run_id": "r_1",
+            "run_id": "r_1",
             "clarification_id": "clar_1",
         },
     )
@@ -1019,7 +1016,7 @@ def test_fervis_runtime_ask_streams_clarification_response_followup() -> None:
             "conv_123",
             "--question-id",
             "q_1",
-            "--base-run-id",
+            "--run-id",
             "r_1",
             "--clarification-id",
             "clar_1",
@@ -1036,9 +1033,8 @@ def test_fervis_runtime_ask_streams_clarification_response_followup() -> None:
     assert len(questions.continue_requests) == 1
     continued = questions.continue_requests[0]
     assert continued.question_id == "q_1"
-    assert continued.trigger_kind is RunTriggerKind.CLARIFICATION_RESPONSE
-    assert continued.base_run_id == "r_1"
-    assert continued.trigger_clarification_response_id == "clar_1"
+    assert continued.run_id == "r_1"
+    assert continued.clarification_id == "clar_1"
     assert _jsonl_events(stdout.getvalue()) == [
         {
             "event": "run.accepted",
@@ -1048,7 +1044,7 @@ def test_fervis_runtime_ask_streams_clarification_response_followup() -> None:
             "status": "RUNNING",
             "trigger": {
                 "kind": "clarification_response",
-                "base_run_id": "r_1",
+                "run_id": "r_1",
                 "clarification_id": "clar_1",
             },
         },

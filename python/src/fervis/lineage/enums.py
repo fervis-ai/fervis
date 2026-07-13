@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 
 
 def choices(enum_type: type[StrEnum]) -> tuple[tuple[str, str], ...]:
@@ -14,7 +14,6 @@ class ConversationOriginKind(StrEnum):
 
 class RunTriggerKind(StrEnum):
     INITIAL = "initial"
-    CLARIFICATION_RESPONSE = "clarification_response"
     RETRY = "retry"
     RERUN = "rerun"
 
@@ -38,7 +37,6 @@ class RunResultKind(StrEnum):
 
 class FactResultKind(StrEnum):
     ANSWERED = "answered"
-    NEEDS_CLARIFICATION = "needs_clarification"
     IMPOSSIBLE = "impossible"
     NO_DATA = "no_data"
     UNDEFINED = "undefined"

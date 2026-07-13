@@ -1,0 +1,50 @@
+id: candidate_key_projection_preserves_declared_key
+description: A declared candidate key projects to the framework-neutral relation catalog.
+migrates:
+  - api/tests/fervis/host_api/test_relation_catalog_projection.py::test_endpoint_contracts_project_to_framework_neutral_relation_catalog
+kind: adapter
+adapter: host_api.endpoint_contract_projection
+input:
+  contracts:
+    - endpoint_name: list_records
+      url_name: records
+      method: GET
+      path_template: /records/
+      view_class: tests.RecordView
+      resource_names: [record]
+      pagination:
+        kind: offset
+        position_query_param: after
+        page_size_query_param: batch
+        results_path: data
+        page_size: 25
+        max_page_size: 100
+        continuation_path: pagination.has_more
+      response_fields:
+        - name: data
+          type: array
+          path: data
+        - name: id
+          type: uuid
+          path: data.id
+        - name: owner_id
+          type: uuid
+          path: data.owner_id
+      candidate_keys:
+        - key_id: primary_key
+          entity_kind: record
+          primary: true
+          components:
+            - component_id: id
+              field_path: data.id
+expect:
+  result_contains:
+    reads:
+      list_records:
+        candidate_keys:
+          - key_id: primary_key
+            entity_kind: record
+            primary: true
+            components:
+              - component_id: id
+                field_ref: field.data.id

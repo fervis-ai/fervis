@@ -32,7 +32,5 @@ def _fervis_access_check():
     if isinstance(value, str):
         value = import_string(value)
     if not callable(value):
-        raise MissingAuthenticationError(
-            "FERVIS_ACCESS_CHECK must be callable."
-        )
+        raise MissingAuthenticationError("FERVIS_ACCESS_CHECK must be callable.")
     return value

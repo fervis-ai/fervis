@@ -47,6 +47,7 @@ expect:
       answer_outputs:
       - id: answer_1
         description: sales total
+        role: MEASURED_VALUE
       answer_request:
         answer_fact: sales at ABC Mall
         answer_expression:
@@ -68,3 +69,4 @@ expect:
             owned_question_input_refs: []
         answer_outputs:
         - description: sales total
+          role: MEASURED_VALUE

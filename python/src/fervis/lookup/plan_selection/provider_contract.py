@@ -1,16 +1,23 @@
-"""Provider-output DTOs for plan selection."""
+"""Typed provider-output contracts for plan selection."""
 
-from __future__ import annotations
+from dataclasses import dataclass
 
-from fervis.lookup.provider_contract import provider_output_type
+from fervis.lookup.provider_contract import ProviderObject, ProviderOutput
 
 
-PlanSelectionOutput = provider_output_type("PlanSelectionOutput", ("outcome",))
-SourceAlignmentReviewsOutput = provider_output_type(
-    "SourceAlignmentReviewsOutput",
-    ("kind", "reviews_by_requested_fact"),
-)
-SourceAlignmentReviewOutput = provider_output_type(
-    "SourceAlignmentReviewOutput",
-    ("source_candidate_id", "basis", "source_alignment"),
-)
+@dataclass(frozen=True)
+class SourceAlignmentReviewOutput(ProviderOutput):
+    source_candidate_id: str
+    basis: str
+    source_alignment: str
+
+
+@dataclass(frozen=True)
+class SourceAlignmentReviewsOutput(ProviderOutput):
+    kind: str
+    reviews_by_requested_fact: dict[str, ProviderObject]
+
+
+@dataclass(frozen=True)
+class PlanSelectionOutput(ProviderOutput):
+    outcome: SourceAlignmentReviewsOutput

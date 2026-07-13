@@ -12,11 +12,11 @@ from typing import Any
 
 from django.urls import URLPattern, URLResolver, get_resolver
 from rest_framework.filters import OrderingFilter
-from rest_framework.mixins import ListModelMixin
 from rest_framework.permissions import AllowAny
 
 from fervis.host_api.contracts import (
     CatalogEndpointContract,
+    CandidateKeyContract,
     EndpointContract,
     FrameworkKind,
     ParameterContract,
@@ -35,10 +35,13 @@ from fervis.project.source_scope import DjangoSourceScope
 
 from .schema_introspection import (
     conditional_response_roots_from_serializer,
+    inspect_response_serializer,
+    optional_full_response_projection_param_names,
+    path_param_candidate_key_authority,
+    path_param_entity_target,
     query_params_from_serializer,
-    response_fields_from_serializer,
-    response_schema_from_serializer,
 )
+from .pagination import pagination_contract
 
 
 def clear_endpoint_contract_cache() -> None:
@@ -160,12 +163,8 @@ def _build_contract(
 ) -> EndpointContract:
     query_serializer_class = getattr(view_class, "query_serializer_class", None)
     response_serializer_class = _get_response_serializer_class(view_class)
+    response_model = _view_queryset_model(view_class)
     query_params = query_params_from_serializer(query_serializer_class)
-    primary_key_fields = _primary_key_fields_for_endpoint(
-        view_class=view_class,
-        query_serializer_class=query_serializer_class,
-        response_serializer_class=response_serializer_class,
-    )
     resource_names = _resource_names_for_endpoint(
         path=path,
         url_name=url_name,
@@ -173,16 +172,26 @@ def _build_contract(
         query_serializer_class=query_serializer_class,
         response_serializer_class=response_serializer_class,
     )
-    response_fields = response_fields_from_serializer(
+    response_inspection = inspect_response_serializer(
         response_serializer_class,
-        model_context=_view_queryset_model(view_class),
+        model_context=response_model,
+    )
+    response_model = response_model or response_inspection.relation_model
+    response_fields = response_inspection.response_fields
+    candidate_keys = response_inspection.candidate_keys
+    optional_projection_params = optional_full_response_projection_param_names(
+        response_serializer_class,
+        query_params=query_params,
+    )
+    query_params = tuple(
+        param for param in query_params if param.name not in optional_projection_params
     )
     query_params = _with_framework_param_semantics(
         query_params,
         response_fields=response_fields,
         view_class=view_class,
     )
-    response_schema = response_schema_from_serializer(response_serializer_class)
+    response_schema = response_inspection.response_schema
     conditional_roots = conditional_response_roots_from_serializer(
         response_serializer_class
     )
@@ -204,6 +213,7 @@ def _build_contract(
         conditional_roots=conditional_roots,
         query_params=query_params,
     )
+    path_param_names = tuple(_path_param_names(path))
     path_params = tuple(
         ParameterContract(
             name=name,
@@ -211,13 +221,30 @@ def _build_contract(
             required=True,
             description=f"Path parameter {name}",
             source="path",
+            entity_target=path_param_entity_target(
+                response_model,
+                param_name=name,
+            ),
         )
-        for name in _path_param_names(path)
+        for name in path_param_names
+    )
+    path_param_authorities = tuple(
+        authority
+        for name in path_param_names
+        for authority in (
+            path_param_candidate_key_authority(response_model, param_name=name),
+        )
+        if authority is not None
+    )
+    candidate_key_authorities = tuple(
+        dict.fromkeys(
+            (*response_inspection.candidate_key_authorities, *path_param_authorities)
+        )
     )
 
     permission_classes = tuple(getattr(view_class, "permission_classes", ()) or ())
     public_access = any(item is AllowAny for item in permission_classes)
-    paginated = _is_paginated_list_view(view_class)
+    pagination = pagination_contract(view_class)
 
     endpoint_name = _endpoint_name(path, url_name)
     capabilities = _capabilities_for_endpoint(
@@ -228,7 +255,7 @@ def _build_contract(
         path_params=path_params,
         query_params=query_params,
         response_fields=response_fields,
-        primary_key_fields=primary_key_fields,
+        candidate_keys=candidate_keys,
     )
 
     return EndpointContract(
@@ -248,7 +275,7 @@ def _build_contract(
         staff_access=bool(getattr(view_class, "staff_access", False)),
         admin_access=True,
         public_access=public_access,
-        paginated=paginated,
+        pagination=pagination,
         query_schema_source=(
             f"{query_serializer_class.__module__}.{query_serializer_class.__name__}"
             if query_serializer_class is not None
@@ -261,7 +288,9 @@ def _build_contract(
         ),
         tags=_tags_for(path=path, view_class=view_class),
         resource_names=resource_names,
-        primary_key_fields=primary_key_fields,
+        candidate_keys=candidate_keys,
+        candidate_key_authorities=candidate_key_authorities,
+        entity_references=response_inspection.entity_references,
         catalog_endpoint=_catalog_endpoint_contract(
             url_name=url_name,
             view_class=view_class,
@@ -378,6 +407,8 @@ def _response_shape_param_names_from_framework(
 def _ordering_filter_param_names(view_class: type) -> tuple[str, ...]:
     names: list[str] = []
     for backend_class in tuple(getattr(view_class, "filter_backends", ()) or ()):
+        if not isinstance(backend_class, type):
+            continue
         if not _is_ordering_filter_backend(backend_class):
             continue
         ordering_param = str(getattr(backend_class, "ordering_param", "") or "")
@@ -393,7 +424,7 @@ def _ordering_filter_param_names(view_class: type) -> tuple[str, ...]:
     return tuple(dict.fromkeys(names))
 
 
-def _is_ordering_filter_backend(backend_class: object) -> bool:
+def _is_ordering_filter_backend(backend_class: type) -> bool:
     try:
         return issubclass(backend_class, OrderingFilter)
     except TypeError:
@@ -482,14 +513,14 @@ def _capabilities_for_endpoint(
     response_serializer_class: type | None,
     path_params: tuple[ParameterContract, ...],
     query_params: tuple[ParameterContract, ...],
-    response_fields: tuple[Any, ...],
-    primary_key_fields: tuple[str, ...],
+    response_fields: tuple[ResponseFieldContract, ...],
+    candidate_keys: tuple[CandidateKeyContract, ...],
 ) -> EndpointCapabilities:
     return capabilities_from_schema(
         path_params=path_params,
         query_params=query_params,
         response_fields=response_fields,
-        primary_key_fields=primary_key_fields,
+        candidate_keys=candidate_keys,
     )
 
 
@@ -557,7 +588,6 @@ def _with_conditional_requirements(
                 description=field.description,
                 choices=field.choices,
                 requires={"queryParam": query_param, "value": True},
-                identity=field.identity,
             )
         )
     return tuple(updated)
@@ -681,15 +711,7 @@ def _strip_action_suffix(words: tuple[str, ...]) -> tuple[str, ...]:
 
 def _split_identifier_words(value: str) -> tuple[str, ...]:
     raw = _camel_words(str(value or "").replace("-", "_")).split()
-    return tuple(_singular_resource_word(word) for word in raw if word)
-
-
-def _singular_resource_word(word: str) -> str:
-    if len(word) > 3 and word.endswith("ies"):
-        return f"{word[:-3]}y"
-    if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
-        return word[:-1]
-    return word
+    return tuple(word for word in raw if word)
 
 
 def _declared_resource_names(owner: type | None) -> set[str]:
@@ -698,27 +720,6 @@ def _declared_resource_names(owner: type | None) -> set[str]:
         for item in getattr(owner, "fervis_resource_names", ()) or ()
         if str(item).strip()
     }
-
-
-def _primary_key_fields_for_endpoint(
-    *,
-    view_class: type,
-    query_serializer_class: type | None,
-    response_serializer_class: type | None,
-) -> tuple[str, ...]:
-    fields: set[str] = set()
-    for model in (
-        _view_queryset_model(view_class),
-        _serializer_model(query_serializer_class),
-        _serializer_model(response_serializer_class),
-    ):
-        if model is None:
-            continue
-        pk = getattr(getattr(model, "_meta", None), "pk", None)
-        pk_name = str(getattr(pk, "name", "") or "").strip()
-        if pk_name:
-            fields.add(pk_name)
-    return tuple(sorted(fields))
 
 
 def _view_queryset_model(view_class: type) -> type | None:
@@ -737,15 +738,6 @@ def _view_queryset_model(view_class: type) -> type | None:
     except Exception:
         return None
     return getattr(queryset, "model", None)
-
-
-def _is_paginated_list_view(view_class: type) -> bool:
-    try:
-        if not issubclass(view_class, ListModelMixin):
-            return False
-    except TypeError:
-        return False
-    return hasattr(view_class, "paginate_queryset")
 
 
 def _serializer_model(serializer_class: type | None) -> type | None:

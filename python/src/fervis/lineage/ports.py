@@ -33,12 +33,6 @@ from fervis.lineage.recorder import (
 )
 
 
-class CatalogEndpointRecorderPort(Protocol):
-    def record_catalog_endpoint(
-        self, catalog_endpoint: CatalogEndpointWrite
-    ) -> CatalogEndpointWrite: ...
-
-
 class SourceReadRecorderPort(Protocol):
     def record_catalog_endpoint(
         self, catalog_endpoint: CatalogEndpointWrite

@@ -204,10 +204,9 @@ def _selected_plan_ids(
             if plan.requested_fact_id == requested_fact_id
             and _plan_matches(plan, role_selection=role_selection)
         )
-        selected_plan = _single_compatible_plan(matches)
-        if selected_plan is None:
+        if not matches:
             return frozenset()
-        selected.append(selected_plan.plan_selection_id)
+        selected.extend(plan.plan_selection_id for plan in matches)
     return frozenset(selected)
 
 
@@ -240,13 +239,74 @@ def _member_matches(
     role_selection: SourceBindingRoleSelection,
 ) -> bool:
     bound_target_ids = frozenset(role_selection.source_ids_by_target)
-    return all(
+    member_targets = role_selection.targets_for_plan_member(
+        plan_selection_id=plan_selection_id,
+        source_candidate_id=member.source_candidate_id,
+    )
+    targets_match = all(
         target.binding_target_id in bound_target_ids
+        for target in member_targets
+    )
+    if not targets_match:
+        return False
+    requires_answer_fulfillment = any(
+        target.required_answer_output_ids for target in member_targets
+    )
+    if not requires_answer_fulfillment:
+        return True
+    if member.fulfillment_support_set_ids:
+        selected_support_set_ids = _member_selected_support_set_ids(
+            plan_selection_id=plan_selection_id,
+            member=member,
+            role_selection=role_selection,
+        )
+        return bool(selected_support_set_ids) and selected_support_set_ids <= set(
+            member.fulfillment_support_set_ids
+        )
+    expected_evidence_ids = {
+        item.evidence_id
+        for item in member.operation_evidence
+        if item.evidence_id
+    }
+    if not expected_evidence_ids:
+        return True
+    bound_evidence_ids = {
+        evidence_id
         for target in role_selection.targets_for_plan_member(
             plan_selection_id=plan_selection_id,
             source_candidate_id=member.source_candidate_id,
         )
+        for source_id in role_selection.source_ids_by_target.get(
+            target.binding_target_id,
+            (),
+        )
+        for source in (role_selection.sources_by_id[source_id],)
+        for fulfillment in source.fulfillments
+        for evidence_id in fulfillment.all_evidence_ids()
+    }
+    return expected_evidence_ids <= bound_evidence_ids
+
+
+def _member_selected_support_set_ids(
+    *,
+    plan_selection_id: str,
+    member: SourceStrategyMember,
+    role_selection: SourceBindingRoleSelection,
+) -> set[str]:
+    selected: set[str] = set()
+    targets = role_selection.targets_for_plan_member(
+        plan_selection_id=plan_selection_id,
+        source_candidate_id=member.source_candidate_id,
     )
+    for target in targets:
+        source_ids = role_selection.source_ids_by_target.get(
+            target.binding_target_id,
+            (),
+        )
+        for source_id in source_ids:
+            source = role_selection.sources_by_id[source_id]
+            selected.update(_bound_source_fulfillment_support_set_ids(source))
+    return selected
 
 
 def _single_compatible_plan(
@@ -415,7 +475,15 @@ def _list_rows_bound_fulfillment_field_ids(
                     continue
                 for evidence_id in (
                     *fulfillment.metric_measure_evidence_ids,
-                    *fulfillment.group_key_evidence_ids,
+                    *fulfillment.value_evidence_ids,
+                    *(
+                        tuple(
+                            component.field_evidence_id
+                            for component in fulfillment.entity_evidence.components
+                        )
+                        if fulfillment.entity_evidence is not None
+                        else ()
+                    ),
                 ):
                     field_id = field_id_by_evidence_id.get(evidence_id, "")
                     if field_id and field_id not in selected:

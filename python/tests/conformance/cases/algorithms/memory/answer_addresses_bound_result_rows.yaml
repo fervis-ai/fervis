@@ -82,7 +82,7 @@ expect:
           truncated: true
           projectedRowCount: 50
           rowCount: 75
-          pagination: unknown
+          pagination: truncated
           scopeFingerprint: ""
           setKind: unknown
-          status: unknown
+          status: incomplete

@@ -3,11 +3,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
 
-from fervis.lookup.relation_catalog import (
-    source_field_has_primary_stable_identity,
-)
+from typing import Mapping, Protocol, TypeAlias
+
+CountBasisPayload: TypeAlias = dict[str, str]
+CountMetricValue: TypeAlias = str | tuple[str, ...] | CountBasisPayload
+CountMetricPayload: TypeAlias = dict[str, CountMetricValue]
+
+
+class CountEvidence(Protocol):
+    @property
+    def field_id(self) -> str: ...
+
+    @property
+    def type(self) -> str: ...
+
+    @property
+    def row_cardinality(self) -> str: ...
+
+    @property
+    def row_source_id(self) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -27,97 +42,57 @@ class RowPopulationBasis:
 
 @dataclass(frozen=True)
 class CountBasis:
-    record_id_field_id: str = ""
-    row_population: RowPopulationBasis | None = None
-
-    def __post_init__(self) -> None:
-        if bool(self.record_id_field_id) == bool(self.row_population):
-            raise ValueError("count basis requires exactly one basis")
+    row_population: RowPopulationBasis
 
 
-def count_basis_payload(count_basis: CountBasis) -> dict[str, str]:
-    if count_basis.row_population is not None:
-        basis = count_basis.row_population
-        return {
-            "kind": "row_population",
-            "row_source_id": basis.row_source_id,
-            "row_path_id": basis.row_path_id,
-            "row_cardinality": basis.row_cardinality,
-        }
+def count_basis_payload(count_basis: CountBasis) -> CountBasisPayload:
+    basis = count_basis.row_population
     return {
-        "kind": "field",
-        "record_id_field_id": count_basis.record_id_field_id,
+        "kind": "row_population",
+        "row_source_id": basis.row_source_id,
+        "row_path_id": basis.row_path_id,
+        "row_cardinality": basis.row_cardinality,
     }
 
 
-def count_basis_metric_key(count_basis: Mapping[str, Any]) -> str:
-    if count_basis.get("kind") == "field":
-        return str(count_basis["record_id_field_id"])
-    if count_basis.get("kind") == "row_population":
-        row_path_id = str(count_basis.get("row_path_id") or "")
-        return f"{row_path_id}_rows" if row_path_id else "rows"
-    raise ValueError("unsupported count basis")
-
-
-def compiled_count_basis_payload(count_basis: Mapping[str, Any]) -> dict[str, Any]:
+def parse_count_basis(count_basis: Mapping[str, str]) -> CountBasis:
     kind = str(count_basis.get("kind") or "")
-    if kind == "field":
-        record_id_field_id = str(count_basis.get("record_id_field_id") or "")
-        if not record_id_field_id:
-            raise ValueError("field count basis requires record id field")
-        return {
-            "record_id_field_id": record_id_field_id,
-            "row_population_basis": {},
-        }
     if kind == "row_population":
         row_source_id = str(count_basis.get("row_source_id") or "")
         row_path_id = str(count_basis.get("row_path_id") or "")
         row_cardinality = str(count_basis.get("row_cardinality") or "")
         if not row_source_id or not row_path_id or row_cardinality != "many":
             raise ValueError("row population count basis requires many row source")
-        return {
-            "record_id_field_id": "",
-            "row_population_basis": {
-                "row_source_id": row_source_id,
-                "row_path_id": row_path_id,
-                "row_cardinality": row_cardinality,
-            },
-        }
+        return CountBasis(
+            row_population=RowPopulationBasis(
+                row_source_id=row_source_id,
+                row_path_id=row_path_id,
+                row_cardinality=row_cardinality,
+            )
+        )
     raise ValueError("unsupported count basis")
 
 
 def count_basis_for_evidence_item(
-    item: Any,
-    *,
-    field: Any | None,
+    item: CountEvidence,
 ) -> CountBasis | None:
     """Return the executable count basis represented by one evidence item."""
 
-    field_id = str(getattr(item, "field_id", "") or "")
-    if not field_id:
-        return None
-    if source_field_has_primary_stable_identity(field):
-        return CountBasis(record_id_field_id=field_id)
-    if (
-        str(getattr(item, "type", "") or "") == "row_population"
-        and str(getattr(item, "row_cardinality", "") or "") == "many"
-    ):
+    if item.type == "row_population" and item.row_cardinality == "many":
         return CountBasis(
             row_population=RowPopulationBasis(
-                row_source_id=str(getattr(item, "row_source_id", "") or ""),
-                row_path_id=field_id,
-                row_cardinality=str(getattr(item, "row_cardinality", "") or ""),
+                row_source_id=item.row_source_id,
+                row_path_id=item.field_id,
+                row_cardinality=item.row_cardinality,
             )
         )
     return None
 
 
 def count_metric_payload_for_evidence_item(
-    item: Any,
-    *,
-    field: Any | None,
-) -> dict[str, Any] | None:
-    count_basis = count_basis_for_evidence_item(item, field=field)
+    item: CountEvidence,
+) -> CountMetricPayload | None:
+    count_basis = count_basis_for_evidence_item(item)
     if count_basis is None:
         return None
     return {
@@ -127,9 +102,9 @@ def count_metric_payload_for_evidence_item(
 
 
 def unique_count_metric_payloads(
-    metrics: list[dict[str, Any]],
-) -> tuple[dict[str, Any], ...]:
-    output: list[dict[str, Any]] = []
+    metrics: list[CountMetricPayload],
+) -> tuple[CountMetricPayload, ...]:
+    output: list[CountMetricPayload] = []
     seen: set[tuple[str, str, str]] = set()
     for metric in metrics:
         basis = metric.get("count_basis")
@@ -144,46 +119,32 @@ def unique_count_metric_payloads(
 
 
 def count_basis_matches_evidence_item(
-    count_basis: Mapping[str, Any],
-    item: Any,
+    count_basis: Mapping[str, str],
+    item: CountEvidence,
 ) -> bool:
     kind = str(count_basis.get("kind") or "")
-    if kind == "field":
-        return str(getattr(item, "field_id", "") or "") == str(
-            count_basis.get("record_id_field_id") or ""
-        )
     if kind == "row_population":
         return (
-            str(getattr(item, "type", "") or "") == "row_population"
-            and str(getattr(item, "field_id", "") or "")
-            == str(count_basis.get("row_path_id") or "")
-            and str(getattr(item, "row_source_id", "") or "")
-            == str(count_basis.get("row_source_id") or "")
+            item.type == "row_population"
+            and item.field_id == count_basis.get("row_path_id", "")
+            and item.row_source_id == count_basis.get("row_source_id", "")
         )
     return False
 
 
-def count_basis_excluded_field_id(count_basis: Mapping[str, Any]) -> str:
-    if count_basis.get("kind") == "field":
-        return str(count_basis.get("record_id_field_id") or "")
-    return ""
-
-
-def count_basis_meaning(count_basis: Mapping[str, Any]) -> str:
-    if count_basis.get("kind") == "field":
-        return f"count({count_basis.get('record_id_field_id')})"
+def count_basis_meaning(count_basis: Mapping[str, str]) -> str:
     if count_basis.get("kind") == "row_population":
         return f"count_rows({count_basis.get('row_path_id')})"
     raise ValueError("unsupported count basis")
 
 
-def _count_basis_dedupe_key(count_basis: Mapping[str, Any]) -> tuple[str, str, str]:
+def _count_basis_dedupe_key(
+    count_basis: Mapping[str, str],
+) -> tuple[str, str, str]:
     return (
         str(count_basis.get("kind") or ""),
         str(
-            count_basis.get("record_id_field_id")
-            or count_basis.get("row_source_id")
-            or ""
+            count_basis.get("row_source_id") or ""
         ),
         str(count_basis.get("row_path_id") or ""),
     )

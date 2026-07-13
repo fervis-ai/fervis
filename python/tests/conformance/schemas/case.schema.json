@@ -229,6 +229,7 @@
         "answer_program.instantiate",
         "answer_program.invoke",
         "answer_program.patch",
+        "answer_program.rank_limit",
         "business_time.resolve",
         "conversation_memory.card_projection",
         "conversation_memory.expand_activated",

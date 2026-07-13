@@ -1,9 +1,10 @@
 """Model-turn purpose constants."""
 
 from __future__ import annotations
+from fervis.types.enums import StrEnum
 
 
-class ModelTurnPurpose:
+class ModelTurnPurpose(StrEnum):
     CONVERSATION_RESOLUTION = "conversation_resolution"
     QUESTION_CONTRACT = "question_contract"
     QUERY_ENRICHMENT = "query_enrichment"

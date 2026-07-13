@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from fervis.lookup.source_binding.compiler_ir import (
@@ -25,7 +26,7 @@ from fervis.lookup.source_binding.parser.model import (
     ParsedRoleBinding,
     ParsedSourceBindingPlan,
 )
-from fervis.lookup.source_binding.parser.params import normalize_param_decisions
+from fervis.lookup.source_binding.parser.types import NormalizedParamDecision
 from fervis.lookup.source_binding.parser.plan_builder import build_source_binding_plan
 from fervis.lookup.source_binding.parser_common import _dict, _text
 from fervis.lookup.source_binding.plan_targets import (
@@ -33,11 +34,20 @@ from fervis.lookup.source_binding.plan_targets import (
     SourceBindingTargetIndex,
     source_binding_fact_field_id,
 )
+
+
 from fervis.lookup.source_binding.review_scope import SourceBindingReviewScope
 from fervis.lookup.source_binding.terminal_parser import (
     _plan_clarification,
     _plan_impossible,
 )
+
+
+@dataclass(frozen=True)
+class _NormalizedBindingDecisions:
+    param_decisions: dict[str, NormalizedParamDecision]
+    population_choices: tuple[DraftRelationSourcePopulationChoice, ...]
+    discharged_membership_test_ids: tuple[str, ...]
 
 
 __all__ = [
@@ -198,7 +208,7 @@ def _normalize_role_binding(
         requirement_id=requirement_id,
     )
     candidate = _require_source_candidate(target, candidates=candidates)
-    param_decisions, population_choices = _normalize_binding_decisions(
+    decisions = _normalize_binding_decisions(
         parsed_invocation,
         target=target,
         candidate=candidate,
@@ -206,25 +216,19 @@ def _normalize_role_binding(
         review_scope=review_scope,
         closed_key_bindings=closed_key_bindings,
     )
-    invocation = provider_output.SourceInvocationOutput(
-        binding_target_id=parsed_invocation.binding_target_id,
-        answer_population=parsed_invocation.answer_population,
-        fulfillment_decisions=parsed_invocation.fulfillment_decisions,
-        param_decisions=param_decisions,
-        row_predicate_reviews=parsed_invocation.row_predicate_reviews,
-        finite_choice_param_reviews=parsed_invocation.finite_choice_param_reviews,
-    )
     effective_param_ids = _effective_param_ids(
         candidate,
-        param_decisions=param_decisions,
+        param_decisions=decisions.param_decisions,
         target=target,
         closed_key_bindings=closed_key_bindings,
     )
     return ParsedRoleBinding(
         target=target,
-        invocation=invocation,
+        invocation=parsed_invocation,
+        param_decisions=decisions.param_decisions,
         effective_param_ids=effective_param_ids,
-        population_choices=population_choices,
+        population_choices=decisions.population_choices,
+        discharged_membership_test_ids=decisions.discharged_membership_test_ids,
     )
 
 
@@ -266,14 +270,15 @@ def _normalize_binding_decisions(
     request: SourceBindingRequest,
     review_scope: SourceBindingReviewScope,
     closed_key_bindings: ClosedKeyParamBindingIndex,
-) -> tuple[
-    dict[str, Any],
-    tuple[DraftRelationSourcePopulationChoice, ...],
-]:
-    authored_decisions = normalize_param_decisions(
-        invocation.param_decisions,
-        parse_provider_output=True,
-    )
+) -> _NormalizedBindingDecisions:
+    authored_decisions = {
+        param_id: NormalizedParamDecision(
+            population_intent=decision.population_intent,
+            match_basis_explanation=decision.match_basis_explanation,
+            param_decision_id=decision.param_decision_id or None,
+        )
+        for param_id, decision in invocation.param_decisions.items()
+    }
     visible_decisions = closed_key_bindings.model_visible_param_map(
         target.binding_target_id,
         authored_decisions,
@@ -285,19 +290,21 @@ def _normalize_binding_decisions(
         binding_target_id=target.binding_target_id,
         request=request,
         review_scope=review_scope,
-        answer_population=provider_output.AnswerPopulationOutput.parse(
-            invocation.answer_population
-        ),
+        answer_population=invocation.answer_population,
         raw_param_decision_ids=tuple(visible_decisions),
     )
     decisions = {**visible_decisions, **derived.param_decisions}
-    return decisions, derived.population_choices
+    return _NormalizedBindingDecisions(
+        param_decisions=decisions,
+        population_choices=derived.population_choices,
+        discharged_membership_test_ids=(derived.discharged_membership_test_ids),
+    )
 
 
 def _effective_param_ids(
     candidate: SourceCandidate,
     *,
-    param_decisions: dict[str, Any],
+    param_decisions: dict[str, NormalizedParamDecision],
     target: SourceBindingTarget,
     closed_key_bindings: ClosedKeyParamBindingIndex,
 ) -> tuple[str, ...]:

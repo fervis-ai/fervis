@@ -6,30 +6,34 @@ from dataclasses import replace
 from decimal import Decimal
 from typing import Any
 
-from fervis.lookup.clarification import render_clarification_question
 from fervis.lookup.outcomes.model import (
     AnswerResult,
     FactResult,
     Impossible,
-    NeedsClarification,
     NoData,
     Undefined,
 )
 from fervis.lookup.outcomes.terminal_details import (
     empty_relation_payload,
-    needs_clarification_payload,
     undefined_operation_payload,
 )
 from fervis.lookup.answer_program.values import (
     FactValue,
     ValueKind,
 )
+from fervis.lookup.answer_program.result_projection import (
+    EntityKeyValue,
+    ProjectedResultRow,
+    RelationResultOutput,
+)
 from fervis.lookup.answer_program.values import (
     IdentityValuePayload,
     TimeValuePayload,
 )
-from fervis.memory.addresses import EvidenceRef, FactAddress
+from fervis.memory.addresses import EvidenceRef, FactAddress, FactAddressValue
 from fervis.memory.artifacts import FactOutcome
+from fervis.lookup.canonical_data import RuntimeValue
+from fervis.lookup.plan_execution.relations import RelationRows
 
 MAX_FACT_RELATION_ROWS = 50
 
@@ -44,10 +48,13 @@ def fact_result_answer_addresses(
     if not isinstance(outcome, AnswerResult):
         return ()
     addresses: list[FactAddress] = []
-    render_fields = _render_fields_by_relation(outcome)
-    render_answer_output_ids = _render_answer_output_ids_by_relation_field(outcome)
+    result_fields = _result_fields_by_relation(outcome)
+    outputs_by_relation = _relation_outputs_by_relation(outcome)
+    projected_rows_by_key = {
+        (row.relation_id, row.row_index): row for row in outcome.projected_rows
+    }
     for relation in outcome.relations:
-        allowed_fields = render_fields.get(relation.id)
+        allowed_fields = result_fields.get(relation.id)
         if allowed_fields is None:
             continue
         projected_rows = relation.rows[:MAX_FACT_RELATION_ROWS]
@@ -64,6 +71,9 @@ def fact_result_answer_addresses(
             )
         )
         proof = relation.completeness
+        truncated = len(projected_rows) < len(relation.rows)
+        memory_status = "incomplete" if truncated else proof.status.value
+        memory_pagination = "truncated" if truncated else proof.pagination.value
         evidence = EvidenceRef(step_ids=proof.proof_refs)
         addresses.append(
             FactAddress.relation(
@@ -71,26 +81,21 @@ def fact_result_answer_addresses(
                 source={
                     "kind": "operation_output",
                     "relationId": relation.id,
-                    **(
-                        {"identityType": relation.identity_type}
-                        if relation.identity_type
-                        else {}
-                    ),
                 },
                 grain_keys=relation.grain_keys,
                 field_coverage={field: f"{relation.id}.{field}" for field in fields},
                 completeness={
-                    "status": proof.status.value,
+                    "status": memory_status,
                     "rowCount": proof.row_count or len(relation.rows),
                     "setKind": proof.set_kind.value,
-                    "pagination": proof.pagination.value,
+                    "pagination": memory_pagination,
                     "scopeFingerprint": proof.scope_fingerprint,
                     **(
                         {
                             "truncated": True,
                             "projectedRowCount": len(projected_rows),
                         }
-                        if len(projected_rows) < len(relation.rows)
+                        if truncated
                         else {}
                     ),
                 },
@@ -98,22 +103,19 @@ def fact_result_answer_addresses(
                 evidence=evidence,
             )
         )
-        for row_address, row in zip(row_addresses, projected_rows):
-            scalar_values = {
-                str(key): {
-                    "type": _relation_field_type(relation, str(key), value),
-                    "value": str(value),
-                    **_relation_field_answer_output_payload(
-                        relation,
-                        str(key),
-                        render_answer_output_ids=render_answer_output_ids,
-                    ),
-                }
-                for key, value in row.items()
-                if key in allowed_fields
-                and not isinstance(value, (dict, list))
-                and value not in ("", None)
-            }
+        for row_index, (row_address, row) in enumerate(
+            zip(row_addresses, projected_rows)
+        ):
+            projected_row = _projected_row(
+                projected_rows_by_key,
+                relation_id=relation.id,
+                row_index=row_index,
+            )
+            answer_values = _memory_answer_values(
+                projected_row,
+                relation=relation,
+                outputs=outputs_by_relation.get(relation.id, ()),
+            )
             identity = {
                 key: str(row[key])
                 for key in relation.grain_keys
@@ -126,7 +128,7 @@ def fact_result_answer_addresses(
                     address=row_address,
                     relation=f"relation.{relation.id}",
                     grain={key: identity[key] for key in identity},
-                    values=scalar_values,
+                    values=answer_values,
                     identity=identity,
                     evidence=evidence,
                 )
@@ -134,16 +136,16 @@ def fact_result_answer_addresses(
     for key, value in (outcome.scalars or {}).items():
         if isinstance(value, (dict, list)) or value in ("", None):
             continue
-        answer_output_ids = _scalar_answer_output_ids(outcome, scalar_id=str(key))
+        scalar_output_ids = _scalar_answer_output_ids(outcome, scalar_id=str(key))
         addresses.append(
             FactAddress.value(
                 address=f"value.{key}",
-                value={"type": _value_type(value), "value": str(value)},
+                value={"type": _value_type(value), "value": value},
                 derivation={
                     "source": "operation_output",
                     **(
-                        {"answer_output_ids": list(answer_output_ids)}
-                        if answer_output_ids
+                        {"answer_output_ids": list(scalar_output_ids)}
+                        if scalar_output_ids
                         else {}
                     ),
                 },
@@ -167,10 +169,11 @@ def fact_value_memory_addresses(
             addresses.append(
                 FactAddress.entity(
                     address=f"entity.{value.id}",
-                    resource=value.payload.identity_type,
+                    resource=value.payload.entity_kind,
+                    key_id=value.payload.key_id,
                     reference_text=reference_text,
                     identity={
-                        value.payload.identity_field: value.payload.value,
+                        value.payload.key_component_id: value.payload.value,
                     },
                     evidence=EvidenceRef(step_ids=value.proof_refs),
                 )
@@ -196,47 +199,79 @@ def fact_value_memory_addresses(
     return tuple(addresses)
 
 
-def fact_value_identity_addresses(
-    values: tuple[FactValue, ...],
-) -> tuple[FactAddress, ...]:
-    return tuple(
-        address
-        for address in fact_value_memory_addresses(values)
-        if address.kind.value == "entity"
-    )
-
-
-def _render_fields_by_relation(
+def _result_fields_by_relation(
     outcome: AnswerResult,
 ) -> dict[str, frozenset[str]]:
-    render_spec = outcome.render_spec
-    if render_spec is None:
-        return {}
     fields: dict[str, set[str]] = {}
-    for relation_output in render_spec.relation_outputs:
-        fields.setdefault(relation_output.relation_id, set()).add(
-            relation_output.field_id
+    for relation_output in outcome.result_projection.relation_outputs:
+        fields.setdefault(relation_output.relation_id, set()).update(
+            tuple(
+                component.field_id
+                for component in relation_output.entity_key.components
+            )
+            if relation_output.entity_key is not None
+            else (relation_output.field_id,)
         )
     return {
         relation_id: frozenset(field_refs) for relation_id, field_refs in fields.items()
     }
 
 
-def _render_answer_output_ids_by_relation_field(
+def _relation_outputs_by_relation(
     outcome: AnswerResult,
-) -> dict[tuple[str, str], tuple[str, ...]]:
-    render_spec = outcome.render_spec
-    if render_spec is None:
-        return {}
-    output: dict[tuple[str, str], list[str]] = {}
-    for relation_output in render_spec.relation_outputs:
-        if relation_output.role and relation_output.role != "answer_value":
+) -> dict[str, tuple[RelationResultOutput, ...]]:
+    output: dict[str, list[RelationResultOutput]] = {}
+    for relation_output in outcome.result_projection.relation_outputs:
+        output.setdefault(relation_output.relation_id, []).append(relation_output)
+    return {relation_id: tuple(outputs) for relation_id, outputs in output.items()}
+
+
+def _projected_row(
+    rows_by_key: dict[tuple[str, int], ProjectedResultRow],
+    *,
+    relation_id: str,
+    row_index: int,
+) -> ProjectedResultRow:
+    row = rows_by_key.get((relation_id, row_index))
+    if row is None:
+        raise ValueError("projected result row is unavailable")
+    return row
+
+
+def _memory_answer_values(
+    row: ProjectedResultRow,
+    *,
+    relation: RelationRows,
+    outputs: tuple[RelationResultOutput, ...],
+) -> dict[str, FactAddressValue]:
+    values: dict[str, FactAddressValue] = {}
+    for output in outputs:
+        if output.role and output.role != "answer_value":
             continue
-        output.setdefault(
-            (relation_output.relation_id, relation_output.field_id),
-            [],
-        ).append(relation_output.id)
-    return {key: tuple(dict.fromkeys(value)) for key, value in output.items() if value}
+        value = row.values[output.id]
+        if isinstance(value, EntityKeyValue):
+            values[output.id] = FactAddressValue(
+                type="entity_key",
+                value=value,
+                answer_output_ids=(output.id,),
+            )
+            continue
+        if isinstance(value, (dict, list)) or value in ("", None):
+            continue
+        field_id = output.field_id
+        existing = values.get(field_id)
+        if existing is not None:
+            values[field_id] = replace(
+                existing,
+                answer_output_ids=(*existing.answer_output_ids, output.id),
+            )
+            continue
+        values[field_id] = FactAddressValue(
+            type=_relation_field_type(relation, field_id, value),
+            value=value,
+            answer_output_ids=(output.id,),
+        )
+    return values
 
 
 def _scalar_answer_output_ids(
@@ -244,13 +279,10 @@ def _scalar_answer_output_ids(
     *,
     scalar_id: str,
 ) -> tuple[str, ...]:
-    render_spec = outcome.render_spec
-    if render_spec is None:
-        return ()
     return tuple(
         dict.fromkeys(
             str(item.id)
-            for item in render_spec.scalar_outputs
+            for item in outcome.result_projection.scalar_outputs
             if str(item.scalar_id) == scalar_id and str(item.id)
         )
     )
@@ -286,26 +318,6 @@ def fact_result_outcome_address(
             proof={"operation": undefined_operation_payload(operation)},
             evidence=EvidenceRef(step_ids=_undefined_proof_refs(outcome)),
         )
-    if isinstance(outcome, NeedsClarification):
-        if requested_fact_id:
-            clarifications = tuple(
-                item
-                for item in outcome.clarifications
-                if item.requested_fact_id == requested_fact_id
-            )
-            if not clarifications:
-                return None
-            outcome = replace(outcome, clarifications=clarifications)
-        return FactAddress.outcome(
-            address="outcome.needs_clarification",
-            terminal=FactOutcome.NEEDS_CLARIFICATION.value,
-            clarification_questions=tuple(
-                render_clarification_question(item)
-                for item in outcome.clarifications
-            ),
-            proof=needs_clarification_payload(outcome),
-            evidence=EvidenceRef(step_ids=_clarification_proof_refs(outcome)),
-        )
     if isinstance(outcome, Impossible):
         if requested_fact_id:
             blocked_requirements = tuple(
@@ -325,7 +337,7 @@ def fact_result_outcome_address(
     return None
 
 
-def _value_type(value: object) -> str:
+def _value_type(value: RuntimeValue) -> str:
     if isinstance(value, bool):
         return "boolean"
     if isinstance(value, int | float | Decimal):
@@ -333,42 +345,16 @@ def _value_type(value: object) -> str:
     return "string"
 
 
-def _relation_field_type(relation: object, field_id: str, value: object) -> str:
-    field_types = getattr(relation, "field_types", None) or {}
-    declared = str(field_types.get(field_id) or "").strip()
+def _relation_field_type(
+    relation: RelationRows,
+    field_id: str,
+    value: RuntimeValue,
+) -> str:
+    field_types = relation.field_types
+    declared = str(field_types.get(field_id) if field_types is not None else "").strip()
     if declared:
         return declared
     return _value_type(value)
-
-
-def _relation_field_answer_output_payload(
-    relation: object,
-    field_id: str,
-    *,
-    render_answer_output_ids: dict[tuple[str, str], tuple[str, ...]],
-) -> dict[str, object]:
-    explicit_output_ids = tuple(
-        str(item)
-        for item in (
-            (getattr(relation, "field_answer_output_ids", None) or {}).get(field_id)
-            or ()
-        )
-        if str(item).strip()
-    )
-    output_ids = explicit_output_ids or render_answer_output_ids.get(
-        (str(getattr(relation, "id", "") or ""), field_id),
-        (),
-    )
-    if not output_ids:
-        return {}
-    return {"answer_output_ids": list(output_ids)}
-
-
-def _clarification_proof_refs(outcome: NeedsClarification) -> tuple[str, ...]:
-    refs = [*outcome.proof_refs]
-    for item in outcome.clarifications:
-        refs.extend(evidence.id for evidence in item.evidence)
-    return tuple(dict.fromkeys(refs))
 
 
 def _impossible_proof_refs(outcome: Impossible) -> tuple[str, ...]:

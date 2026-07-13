@@ -1,0 +1,36 @@
+id: resolver_prefers_unqualified_collection
+description: Resolver selection prefers an unqualified entity collection over a qualified subpopulation exposing the same entity field.
+kind: algorithm
+algorithm: catalog_selection.resolver_select
+input:
+  catalog:
+    reads:
+      - id: basic_examples
+        endpoint_name: list_basic_examples
+        resource_names: [flows, basic examples, basic example flows]
+        fields:
+          - {ref: flow.id, type: uuid}
+          - {ref: flow.tags, type: array}
+        candidate_keys:
+          - id: primary_key
+            entity_kind: flow
+            primary: true
+            components: [{id: id, field_ref: flow.id}]
+      - id: flows
+        endpoint_name: list_flows
+        resource_names: [flows, flows api]
+        fields:
+          - {ref: flow.id, type: uuid}
+          - {ref: flow.tags, type: array}
+        candidate_keys:
+          - id: primary_key
+            entity_kind: flow
+            primary: true
+            components: [{id: id, field_ref: flow.id}]
+  entity_targets:
+    - target_id: input_1
+      catalog_search_terms: [flow]
+  max_reads_per_target: 1
+expect:
+  result_contains:
+    selected_read_ids: [flows]

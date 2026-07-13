@@ -33,7 +33,11 @@ input:
             path: data.record_id
             row_path_id: data
             type: uuid
-            identity: {entity_ref: record, identity_field: record_id, primary_key: true, stable: true}
+        candidate_keys:
+          - id: primary_key
+            entity_kind: record
+            primary: true
+            components: [{id: record_id, field_ref: field.record_id}]
   fact_plan:
     outcome:
       kind: fact_plan
@@ -52,7 +56,6 @@ input:
               kind: row_population
               row_path_id: data
               row_cardinality: many
-            record_id_field_id: record_id
             label: in_person_records_count_this_month
   responses:
     records_read:

@@ -10,8 +10,12 @@ from .model import (
     CALENDAR_START_PARAM_REF,
     RowSource,
     RowSourceBlockedFact,
+    RowSourceCandidateKey,
     RowSourceCatalog,
+    RowSourceEntityReference,
+    RowSourceEntityReferenceComponent,
     RowSourceField,
+    RowSourceKeyComponent,
     RowSourceKind,
     RowSourceParam,
     RowSourceParamSemantics,
@@ -37,7 +41,6 @@ def __getattr__(name: str):
         "required_input_evidence_ref",
         "row_source_description_evidence_ref",
         "row_source_evidence_ref",
-        "row_source_evidence_refs",
         "row_source_field_evidence_ref",
         "row_source_param_evidence_ref",
     }:
@@ -66,6 +69,7 @@ def __getattr__(name: str):
         return getattr(source_groups, name)
     raise AttributeError(name)
 
+
 __all__ = (
     "CALENDAR_DATE_FIELD_ID",
     "CALENDAR_END_PARAM_ID",
@@ -76,8 +80,12 @@ __all__ = (
     "CALENDAR_START_PARAM_REF",
     "RowSource",
     "RowSourceBlockedFact",
+    "RowSourceCandidateKey",
     "RowSourceCatalog",
+    "RowSourceEntityReference",
+    "RowSourceEntityReferenceComponent",
     "RowSourceField",
+    "RowSourceKeyComponent",
     "RowSourceKind",
     "RowSourceParam",
     "RowSourceParamSemantics",
@@ -95,7 +103,6 @@ __all__ = (
     "required_input_evidence_ref",
     "row_source_description_evidence_ref",
     "row_source_evidence_ref",
-    "row_source_evidence_refs",
     "row_source_field_evidence_ref",
     "row_source_for_relation",
     "row_source_ids_for_read_ids",

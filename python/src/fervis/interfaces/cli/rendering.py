@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import fields, is_dataclass
 from decimal import Decimal
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 
 from fervis.interfaces.cli.contracts import (
     FervisCommandKind,
@@ -31,6 +31,7 @@ from fervis.observability.query import (
 )
 from fervis.observability.render import UsageRenderDetail, render_usage_report
 from fervis.observability.usage import RuntimeUsageReport
+from fervis.observability.prompt_viewer.render_prompts import PromptViewerResult
 
 
 def render_fervis_result(result: FervisCommandResult) -> str:
@@ -46,17 +47,20 @@ def render_fervis_result(result: FervisCommandResult) -> str:
             sort_keys=True,
         )
     if result.kind is FervisCommandKind.EXPLAIN:
+        payload = result.payload
+        if not isinstance(payload, ExplainView):
+            raise ValueError("explain command requires an ExplainView payload")
         options = result.render_options
         if options.inputs_only:
             return render_input_lineage(
                 input_lineage_view(
-                    result.payload.lineage,
+                    payload.lineage,
                     answer_output=options.answer_output,
                 ),
                 detail=options.detail,
             )
         return render_lineage(
-            result.payload.timeline,
+            payload.timeline,
             answer_output=options.answer_output,
             fact_filter=options.fact_filter,
             step=options.step,
@@ -64,14 +68,25 @@ def render_fervis_result(result: FervisCommandResult) -> str:
             detail=options.detail,
         )
     if result.kind is FervisCommandKind.USAGE:
+        payload = result.payload
+        if not isinstance(payload, RuntimeUsageReport):
+            raise ValueError("usage command requires a RuntimeUsageReport payload")
         return render_usage_report(
-            result.payload,
+            payload,
             detail=UsageRenderDetail(result.render_options.detail.value),
         )
     if result.kind is FervisCommandKind.INSPECT_PROMPTS:
-        return f"Wrote {result.payload.run_count} run(s) to {result.payload.index_path}"
+        payload = result.payload
+        if not isinstance(payload, PromptViewerResult):
+            raise ValueError("inspect prompts requires a PromptViewerResult payload")
+        return f"Wrote {payload.run_count} run(s) to {payload.index_path}"
     if result.kind is FervisCommandKind.INSPECT_ARTIFACT:
-        return render_artifact_content(result.payload)
+        payload = result.payload
+        if not isinstance(payload, ObservabilityArtifactContent):
+            raise ValueError(
+                "inspect artifact requires an ObservabilityArtifactContent payload"
+            )
+        return render_artifact_content(payload)
     raise ValueError(f"unsupported command result kind: {result.kind}")
 
 
@@ -124,7 +139,7 @@ def artifact_content_json(artifact: ObservabilityArtifactContent) -> dict[str, o
     }
 
 
-def prompt_viewer_result_json(result) -> dict[str, object]:
+def prompt_viewer_result_json(result: PromptViewerResult) -> dict[str, object]:
     return {
         "run_count": result.run_count,
         "index_path": str(result.index_path),

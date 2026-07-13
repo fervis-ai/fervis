@@ -21,17 +21,15 @@ input:
     - id: candidate_subjects
       output_relation: candidate_subjects
       spec:
-        kind: project_to_identity
+        kind: project_to_key
         input_relation: raw_candidates
-        identity_fields: [entity_id]
-        fields:
-          - {source: display}
+        key_fields: [entity_id]
     - id: observed_subjects
       output_relation: observed_subjects
       spec:
-        kind: project_to_identity
+        kind: project_to_key
         input_relation: raw_observations
-        identity_fields: [observed_id]
+        key_fields: [observed_id]
     - id: missing
       output_relation: missing_subjects
       spec:
@@ -46,16 +44,16 @@ input:
           required_identity_fields: [observed_id]
         join_keys: [{left: entity_id, right: observed_id}]
         output_fields:
-          - {source: display}
+          - {source: entity_id}
 expect:
   result_contains:
     candidate_subjects:
       rows:
-        - {entity_id: a, display: Alpha}
-        - {entity_id: b, display: Beta}
+        - {entity_id: a}
+        - {entity_id: b}
     observed_subjects:
       rows:
         - {observed_id: a}
     missing_subjects:
       rows:
-        - {entity_id: b, display: Beta}
+        - {entity_id: b}

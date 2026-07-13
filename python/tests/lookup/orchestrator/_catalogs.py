@@ -12,12 +12,6 @@ def _variant_read(read_id: str, *, include_name: bool) -> EndpointRead:
             path="data.variant_id",
             row_path_id="data",
             type="string",
-            identity=IdentityMetadata(
-                entity_ref="variant",
-                identity_field="variant_id",
-                primary_key=True,
-                display_fields=("field.variant_name",),
-            ),
         )
     ]
     if include_name:
@@ -38,6 +32,20 @@ def _variant_read(read_id: str, *, include_name: bool) -> EndpointRead:
             RowPath(id="data", path="data", cardinality=RowCardinality.MANY),
         ),
         fields=tuple(fields),
+        candidate_keys=(
+            CandidateKey(
+                id="primary_key",
+                entity_kind="variant",
+                components=(
+                    CandidateKeyComponent(
+                        id="variant_id",
+                        field_ref="field.variant_id",
+                    ),
+                ),
+                primary=True,
+                context_field_refs=("field.variant_name",) if include_name else (),
+            ),
+        ),
         pagination=PaginationMetadata(
             mode=PaginationMode.NONE,
             completeness_policy=CompletenessPolicy.COMPLETE,
@@ -135,13 +143,6 @@ def _metric_catalog() -> RelationCatalog:
                     path="data.location_id",
                     row_path_id="data",
                     type="uuid",
-                    identity=IdentityMetadata(
-                        entity_ref="location",
-                        identity_field="location_id",
-                        primary_key=True,
-                        stable=True,
-                        display_fields=("field.location_name",),
-                    ),
                 ),
                 CatalogField(
                     ref="field.location_name",
@@ -154,6 +155,20 @@ def _metric_catalog() -> RelationCatalog:
                     path="data.metric_total",
                     row_path_id="data",
                     type="number",
+                ),
+            ),
+            candidate_keys=(
+                CandidateKey(
+                    id="location_key",
+                    entity_kind="location",
+                    components=(
+                        CandidateKeyComponent(
+                            id="location_id",
+                            field_ref="field.location_id",
+                        ),
+                    ),
+                    primary=True,
+                    context_field_refs=("field.location_name",),
                 ),
             ),
             pagination=PaginationMetadata(
@@ -194,11 +209,6 @@ def _sales_and_store_catalog() -> RelationCatalog:
                     path="data.sale_id",
                     row_path_id="data",
                     type="string",
-                    identity=IdentityMetadata(
-                        entity_ref="sale",
-                        primary_key=True,
-                        stable=True,
-                    ),
                 ),
                 CatalogField(
                     ref="field.data.location_id",
@@ -211,6 +221,19 @@ def _sales_and_store_catalog() -> RelationCatalog:
                     path="data.amount",
                     row_path_id="data",
                     type="number",
+                ),
+            ),
+            candidate_keys=(
+                CandidateKey(
+                    id="primary_key",
+                    entity_kind="sale",
+                    components=(
+                        CandidateKeyComponent(
+                            id="sale_id",
+                            field_ref="field.data.sale_id",
+                        ),
+                    ),
+                    primary=True,
                 ),
             ),
             pagination=PaginationMetadata(
@@ -232,17 +255,26 @@ def _sales_and_store_catalog() -> RelationCatalog:
                     path="data.store_id",
                     row_path_id="data",
                     type="string",
-                    identity=IdentityMetadata(
-                        entity_ref="store",
-                        primary_key=True,
-                        stable=True,
-                    ),
                 ),
                 CatalogField(
                     ref="field.data.name",
                     path="data.name",
                     row_path_id="data",
                     type="string",
+                ),
+            ),
+            candidate_keys=(
+                CandidateKey(
+                    id="primary_key",
+                    entity_kind="store",
+                    components=(
+                        CandidateKeyComponent(
+                            id="store_id",
+                            field_ref="field.data.store_id",
+                        ),
+                    ),
+                    primary=True,
+                    context_field_refs=("field.data.name",),
                 ),
             ),
             pagination=PaginationMetadata(

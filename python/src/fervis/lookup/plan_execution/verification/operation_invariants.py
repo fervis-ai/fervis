@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing_extensions import assert_never
+
 from fervis.lookup.plan_execution.errors import VerificationError
 from fervis.lookup.answer_program.values import (
     ConstantRef,
@@ -22,12 +24,13 @@ from fervis.lookup.answer_program.operations import (
     Predicate,
     PredicateOperator,
     ProjectSpec,
-    ProjectToIdentitySpec,
+    ProjectToKeySpec,
     RankSpec,
     RelationRole,
     RelationRoleRef,
     RoleExpandSpec,
     SortDirection,
+    SortKey,
     TiePolicy,
     UnionSpec,
     UniversalConditionSpec,
@@ -68,18 +71,11 @@ def verify_operation(operation: Operation) -> None:
             tuple(field.output or field.source for field in spec.fields),
             "project",
         )
-    elif isinstance(spec, ProjectToIdentitySpec):
-        _require_input(spec.input_relation, "project_to_identity")
-        if not spec.identity_fields:
-            raise VerificationError("project_to_identity requires identity fields")
-        _require_unique_fields(spec.identity_fields, "project_to_identity")
-        _require_unique_fields(
-            (
-                *spec.identity_fields,
-                *(field.output or field.source for field in spec.fields),
-            ),
-            "project_to_identity",
-        )
+    elif isinstance(spec, ProjectToKeySpec):
+        _require_input(spec.input_relation, "project_to_key")
+        if not spec.key_fields:
+            raise VerificationError("project_to_key requires key fields")
+        _require_unique_fields(spec.key_fields, "project_to_key")
     elif isinstance(spec, JoinSpec):
         _require_binary_join(spec.left, spec.right, spec.join_keys, "join")
     elif isinstance(spec, UnionSpec):
@@ -129,7 +125,7 @@ def verify_operation(operation: Operation) -> None:
     elif isinstance(spec, ComputeSpec):
         _require_compute(spec)
     else:
-        raise VerificationError(f"unsupported operation {operation.id}")
+        assert_never(spec)
 
 
 def _require_input(input_relation: str, label: str) -> None:
@@ -234,11 +230,8 @@ def _require_predicate(predicate: Predicate, label: str) -> None:
         raise VerificationError(f"{label} does not accept a right-hand side")
 
 
-
-
 def _require_aggregations(spec: AggregateSpec) -> None:
     output_fields = [*spec.group_by]
-    output_fields.extend(field.output or field.source for field in spec.carry_fields)
     for aggregation in spec.aggregations:
         if aggregation.function not in set(AggregationFunction):
             raise VerificationError("aggregate requires supported function")
@@ -253,8 +246,8 @@ def _require_aggregations(spec: AggregateSpec) -> None:
     _require_unique_fields(tuple(output_fields), "aggregate")
 
 
-def _require_sort_keys(sort_keys: object, label: str) -> None:
-    for sort_key in sort_keys or ():
+def _require_sort_keys(sort_keys: tuple[SortKey, ...], label: str) -> None:
+    for sort_key in sort_keys:
         if not sort_key.field:
             raise VerificationError(f"{label} requires sort field")
         if sort_key.direction not in set(SortDirection):

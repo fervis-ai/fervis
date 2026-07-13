@@ -49,6 +49,13 @@ from fervis.lookup.answer_program.values import (
     LiteralType,
     ValueFilterOperator,
 )
+from fervis.lookup.question_contract import (
+    KnownInputSource,
+    LiteralInputRole,
+    RequestedFact,
+    RequestedFactAnswerOutput,
+    RequestedFactLiteralInput,
+)
 
 
 def _constant_ref(value: FactValue, *, constant_id: str) -> ConstantRef:
@@ -185,7 +192,10 @@ def test_executed_memory_relation_adds_current_run_contribution() -> None:
             origin=ContributionOrigin.CONTEXTUAL,
             label="memory_artifact_1.relation.rows",
             node_refs=("relation:memory_artifact_1.relation.rows",),
-            proof_refs=("memory:memory_artifact_1.relation.rows", "prior_step:relation"),
+            proof_refs=(
+                "memory:memory_artifact_1.relation.rows",
+                "prior_step:relation",
+            ),
         ),
     )
 
@@ -194,13 +204,37 @@ def test_compile_merges_equivalent_applied_and_concrete_row_filters() -> None:
     catalog = _sales_catalog()
     staff_value = FactValue.identity(
         id="value_staff",
-        identity_type="staff",
-        identity_field="staff_id",
+        entity_kind="staff",
+        key_id="primary_key",
+        key_component_id="staff_id",
         value="staff_1",
+        display_value="Nadia Wanjiku",
         proof_refs=("known_input:qi_staff",),
     )
     compiled = _materialize_execution(
         answer=AnswerProgram(
+            fact_template=(
+                RequestedFact(
+                    id="fact_1",
+                    description="sales by Nadia",
+                    answer_outputs=(
+                        RequestedFactAnswerOutput(
+                            id="answer_1",
+                            role="ANSWER_VALUE",
+                        ),
+                    ),
+                    known_inputs=(
+                        RequestedFactLiteralInput(
+                            id="qi_staff",
+                            source=KnownInputSource.QUESTION_CONTEXT,
+                            role=LiteralInputRole.REFERENCE_VALUE,
+                            text="Nadia",
+                            resolved_value_text="Nadia",
+                        ),
+                    ),
+                    input_refs=("qi_staff",),
+                ),
+            ),
             relations=(
                 Relation(
                     id="sales",
@@ -262,6 +296,12 @@ def test_compile_merges_equivalent_applied_and_concrete_row_filters() -> None:
             operator=ValueFilterOperator.EQUALS.value,
         ),
     )
+    explicit_labels = tuple(
+        contribution.label
+        for contribution in compiled.proof_graph.contributions
+        if contribution.origin is ContributionOrigin.EXPLICIT
+    )
+    assert explicit_labels == ("Nadia",)
 
 
 def test_compile_rejects_conflicting_same_field_row_filters() -> None:

@@ -1,0 +1,62 @@
+id: compatible_candidate_key_types_share_authority
+description: The same declared candidate key remains one authority when one read has a concrete scalar type and another read has an unresolved scalar type.
+kind: algorithm
+algorithm: relation_catalog.row_source_projection
+input:
+  catalog:
+    reads:
+      - id: staff_summary
+        endpoint_name: list_staff_summary
+        resource_names: [staff]
+        row_paths:
+          - {id: data, path: data, cardinality: many}
+        fields:
+          - {ref: summary.staff_id, path: data.staff_id, row_path_id: data, type: any}
+        candidate_keys:
+          - id: primary_key
+            entity_kind: staff
+            components:
+              - {id: staff_id, field_ref: summary.staff_id}
+            primary: true
+      - id: staff_detail
+        endpoint_name: get_staff_detail
+        resource_names: [staff]
+        fields:
+          - {ref: detail.staff_id, path: staff_id, type: uuid}
+        candidate_keys:
+          - id: primary_key
+            entity_kind: staff
+            components:
+              - {id: staff_id, field_ref: detail.staff_id}
+            primary: true
+      - id: compensation
+        endpoint_name: list_compensation
+        resource_names: [shift_compensation]
+        row_paths:
+          - {id: data, path: data, cardinality: many}
+        fields:
+          - {ref: compensation.id, path: data.compensation_id, row_path_id: data, type: uuid}
+          - {ref: compensation.staff_id, path: data.staff_id, row_path_id: data, type: uuid}
+        candidate_keys:
+          - id: primary_key
+            entity_kind: shift_compensation
+            components:
+              - {id: compensation_id, field_ref: compensation.id}
+            primary: true
+        entity_references:
+          - id: staff_reference
+            target_entity_kind: staff
+            target_key_id: primary_key
+            components:
+              - {target_component_id: staff_id, local_field_ref: compensation.staff_id}
+expect:
+  result_contains:
+    read_id: compensation
+    row_path_id: data
+    entity_references:
+      - id: staff_reference
+        target_entity_kind: staff
+        target_key_id: primary_key
+        components:
+          - {target_component_id: staff_id, local_field_id: staff_id}
+        context_field_ids: []

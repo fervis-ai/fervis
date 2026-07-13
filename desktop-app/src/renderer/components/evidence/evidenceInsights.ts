@@ -45,7 +45,7 @@ export function answerEvidenceInsights(
     insights.push(
       ...run.resultData.outputs.slice(0, 3).map((output) => ({
         label: titleWords(output.key),
-        value: output.value,
+        value: output.displayValue,
         detail: formatStepKey(output.valueKind)
       }))
     );

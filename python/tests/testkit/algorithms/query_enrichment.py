@@ -23,7 +23,9 @@ from tests.testkit.question_contract import requested_fact_from_payload
 def run_query_enrichment_parse_case(payload: dict[str, Any]) -> list[str]:
     request = _request_from_input(payload["input"])
     try:
-        result = parse_query_enrichment(dict(payload["input"]["payload"]), request=request)
+        result = parse_query_enrichment(
+            dict(payload["input"]["payload"]), request=request
+        )
     except ValueError as exc:
         if expects_rejection(payload["expect"]):
             return status_mismatches(
@@ -105,12 +107,16 @@ def run_query_enrichment_schema_case(payload: dict[str, Any]) -> list[str]:
 
 def run_query_enrichment_prompt_case(payload: dict[str, Any]) -> list[str]:
     request = _request_from_input(payload["input"])
-    prompt = QueryEnrichmentTurnPrompt(request).to_model_payload(
-        build_turn_prompt_context(
-            current_question=request.question,
-            conversation_context=request.conversation_context,
+    prompt = (
+        QueryEnrichmentTurnPrompt(request)
+        .to_model_payload(
+            build_turn_prompt_context(
+                current_question=request.question,
+                conversation_context=request.conversation_context,
+            )
         )
-    ).prompt_text
+        .prompt_text
+    )
     prompt_object = QueryEnrichmentTurnPrompt(request)
     actual = {
         "prompt_text": prompt,

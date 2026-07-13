@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 from types import SimpleNamespace
 from typing import Any
@@ -15,7 +15,6 @@ from fervis.model_io.backbone.dto import (
 from fervis.model_io.backbone.tool_codec import decode_json_object_argument
 from fervis.lookup.question_contract import (
     build_answer_request_contract_schema,
-    build_missing_input_clarification_schema,
     build_question_contract_decisions_schema,
     parse_question_contract,
     QuestionContractTurnPrompt,
@@ -41,10 +40,10 @@ from fervis.model_io.providers.chat_runtime import chat_json_system_prompt
 from fervis.model_io.providers.chat_runtime import chat_tool_system_prompt
 from fervis.model_io.providers.chat_runtime import provider_error_payload
 from fervis.model_io.providers.chat_runtime import _provider_error_context
-from fervis.model_io.providers.chat_runtime import provider_hard_timeout_seconds
-from fervis.model_io.providers.chat_runtime import run_provider_worker_with_timeout
+from fervis.model_io.providers.chat_runtime import run_provider_worker
 from fervis.model_io.providers.chat_runtime import provider_sdk_status
 from fervis.model_io.providers.chat_runtime import provider_timeout_seconds
+from fervis.model_io.providers.chat_runtime import provider_max_output_tokens
 from fervis.model_io.providers.chat_runtime import ProviderExecutionError
 from fervis.model_io.pricing import ModelPricing
 from fervis.model_io.providers.anthropic_adapter import (
@@ -105,18 +104,10 @@ def _selected_fact_plan_schema() -> dict[str, object]:
 def _question_contract_tool_specs() -> tuple[ToolSpec, ...]:
     return (
         ToolSpec(
-            name="submit_answer_request_contract",
-            description="Submit complete catalog-blind answer request contracts.",
+            name="submit_question_contract_outcome",
+            description="Submit the catalog-blind question-contract outcome.",
             strict=True,
-            input_schema=build_answer_request_contract_schema(),
-        ),
-        ToolSpec(
-            name="submit_missing_input_clarification",
-            description=(
-                "Submit a missing-input clarification request for the question-contract turn."
-            ),
-            strict=True,
-            input_schema=build_missing_input_clarification_schema(),
+            input_schema=build_question_contract_decisions_schema(),
         ),
     )
 
@@ -134,26 +125,31 @@ def _openai_test_config() -> ChatProviderConfig:
 
 def test_question_contract_schema_is_decisions_only():
     schema = _question_contract_schema()
+    outcome_schema = schema["properties"]["outcome"]
     branches = {
-        branch["properties"]["kind"]["enum"][0]: branch for branch in schema["oneOf"]
+        branch["properties"]["kind"]["enum"][0]: branch
+        for branch in outcome_schema["oneOf"]
     }
     answer_contract_schema = branches["question_contract"]
-    clarification_schema = branches["needs_clarification"]
+    missing_fact_schema = branches["missing_requested_fact"]
+    unresolved_schema = branches["unresolved_prior_turn_references"]
     answer_request_schema = answer_contract_schema["properties"]["answer_requests"][
         "items"
     ]
 
     assert {
-        "has_one_of": "oneOf" in schema,
+        "has_one_of": "oneOf" in outcome_schema,
+        "root_required": schema["required"],
         "answer_required": answer_contract_schema["required"],
         "answer_kind_enum": answer_contract_schema["properties"]["kind"]["enum"],
-        "clarification_required": clarification_schema["required"],
-        "clarification_kind_enum": clarification_schema["properties"]["kind"]["enum"],
+        "missing_fact_required": missing_fact_schema["required"],
+        "unresolved_required": unresolved_schema["required"],
         "has_prior_answer_references": (
             "prior_answer_references" in answer_request_schema["properties"]
         ),
     } == {
         "has_one_of": True,
+        "root_required": ["decision_basis", "outcome"],
         "answer_required": [
             "kind",
             "answer_requests_count",
@@ -162,8 +158,12 @@ def test_question_contract_schema_is_decisions_only():
             "question_input_inventory_check",
         ],
         "answer_kind_enum": ["question_contract"],
-        "clarification_required": ["kind", "missing"],
-        "clarification_kind_enum": ["needs_clarification"],
+        "missing_fact_required": [
+            "kind",
+            "source_text",
+            "why_question_is_incomplete",
+        ],
+        "unresolved_required": ["kind", "references"],
         "has_prior_answer_references": False,
     }
 
@@ -205,14 +205,14 @@ def test_provider_native_question_contract_fixture_matches_current_schema():
     from jsonschema import validate
 
     payload = provider_native_test_arguments(
-        tool_name="submit_answer_request_contract",
+        tool_name="submit_question_contract_outcome",
         prompt="",
         tool_specs=(),
     )
 
     validate(instance=payload, schema=build_question_contract_decisions_schema())
     parse_question_contract(
-        tool_name="submit_answer_request_contract",
+        tool_name="submit_question_contract_outcome",
         payload=payload,
         question_context="What is the test adapter answer?",
     )
@@ -237,7 +237,11 @@ def test_question_contract_turn_schema_rejects_unavailable_conversation_resoluti
     )
     schema = prompt.tool_contract().tool_specs[0].input_schema
     payload = _question_contract_with_time_value_input()
-    payload["question_inputs"][0] = {
+    outcome = payload["outcome"]
+    assert isinstance(outcome, dict)
+    question_inputs = outcome["question_inputs"]
+    assert isinstance(question_inputs, list)
+    question_inputs[0] = {
         "input_ref": "today_time_1",
         "source": "conversation_resolution",
         "reference_text": "today",
@@ -255,11 +259,13 @@ def test_question_contract_turn_schema_rejects_unavailable_conversation_resoluti
 
 def test_question_contract_parser_fails_on_model_authored_requested_facts():
     payload = provider_native_test_arguments(
-        tool_name="submit_answer_request_contract",
+        tool_name="submit_question_contract_outcome",
         prompt="",
         tool_specs=(),
     )
-    payload["requested_facts"] = [
+    outcome = payload["outcome"]
+    assert isinstance(outcome, dict)
+    outcome["requested_facts"] = [
         {
             "id": "model_authored_fact",
             "description": "model-authored facts must not own the contract",
@@ -268,18 +274,21 @@ def test_question_contract_parser_fails_on_model_authored_requested_facts():
 
     with pytest.raises(ValueError, match="unparsed fields: requested_facts"):
         parse_question_contract(
-            tool_name="submit_answer_request_contract",
+            tool_name="submit_question_contract_outcome",
             payload=payload,
             question_context="What is the test adapter answer?",
         )
 
     with pytest.raises(ValueError, match="answer_requests"):
         parse_question_contract(
-            tool_name="submit_answer_request_contract",
+            tool_name="submit_question_contract_outcome",
             payload={
-                "kind": "question_contract",
-                "answer_requests_count": 1,
-                "question_inputs": [],
+                "decision_basis": "The requested fact is stated.",
+                "outcome": {
+                    "kind": "question_contract",
+                    "answer_requests_count": 1,
+                    "question_inputs": [],
+                },
             },
             question_context="How much sales did we make?",
         )
@@ -288,9 +297,12 @@ def test_question_contract_parser_fails_on_model_authored_requested_facts():
         parse_question_contract(
             tool_name="submit_requested_facts",
             payload={
-                "kind": "question_contract",
-                "answer_requests_count": 1,
-                "answer_requests": [],
+                "decision_basis": "The requested fact is stated.",
+                "outcome": {
+                    "kind": "question_contract",
+                    "answer_requests_count": 1,
+                    "answer_requests": [],
+                },
             },
             question_context="How much sales did we make?",
         )
@@ -298,54 +310,58 @@ def test_question_contract_parser_fails_on_model_authored_requested_facts():
 
 def _question_contract_with_time_value_input() -> dict[str, object]:
     return {
-        "kind": "question_contract",
-        "answer_requests_count": 1,
-        "question_inputs": [
-            {
-                "kind": "literal_text",
-                "input_ref": "time_1",
-                "source": "question_context",
-                "value_source_text": "today",
-                "resolved_value_text": "today",
-                "role": "time_value",
-                "inventory_check": {
-                    "why_this_is_an_input": "today constrains the sales count"
-                },
-            }
-        ],
-        "answer_requests": [
-            {
-                "answer_fact": "sales today",
-                "answer_expression": {"family": "scalar_aggregate"},
-                "answer_subject": {
-                    "subject_text": "sales",
-                    "instance_interpretation": {
-                        "kind": "NORMAL_BUSINESS_INSTANCE",
+        "decision_basis": "The requested fact and time value are explicit.",
+        "outcome": {
+            "kind": "question_contract",
+            "answer_requests_count": 1,
+            "question_inputs": [
+                {
+                    "kind": "literal_text",
+                    "input_ref": "time_1",
+                    "source": "question_context",
+                    "value_source_text": "today",
+                    "operand_text": "today",
+                    "role": "time_value",
+                    "inventory_check": {
+                        "why_this_is_an_input": "today constrains the sales count"
                     },
                 },
-                "answer_population": {
-                    "population_label": "sales today",
-                    "counted_unit": "sale",
-                    "membership_tests": [
+            ],
+            "answer_requests": [
+                {
+                    "answer_fact": "sales today",
+                    "answer_expression": {"family": "scalar_aggregate"},
+                    "answer_subject": {
+                        "subject_text": "sales",
+                        "instance_interpretation": {
+                            "kind": "NORMAL_BUSINESS_INSTANCE",
+                        },
+                    },
+                    "answer_population": {
+                        "population_label": "sales today",
+                        "counted_unit": "sale",
+                        "membership_tests": [
+                            {
+                                "test_id": "test_1",
+                                "kind": "SUBJECT_IDENTITY",
+                                "polarity": "MUST_PASS",
+                                "test_question": "Is this a sale?",
+                                "owned_question_input_refs": [],
+                            }
+                        ],
+                    },
+                    "answer_outputs": [
                         {
-                            "test_id": "test_1",
-                            "kind": "SUBJECT_IDENTITY",
-                            "polarity": "MUST_PASS",
-                            "test_question": "Is this a sale?",
-                            "owned_question_input_refs": [],
+                            "description": "sales count",
+                            "role": "ANSWER_VALUE",
                         }
                     ],
-                },
-                "answer_outputs": [
-                    {
-                        "description": "sales count",
-                    }
-                ],
-                "used_question_inputs": ["time_1"],
-            }
-        ],
-        "question_input_inventory_check": {
-            "all_input_like_phrases_declared": True,
+                    "used_question_inputs": ["time_1"],
+                }
+            ],
+            "question_input_inventory_check": {
+                "all_input_like_phrases_declared": True,
+            },
         },
     }
 
@@ -368,6 +384,7 @@ def test_question_contract_schema_rejects_answer_text():
                         "answer_outputs": [
                             {
                                 "description": "sales",
+                                "role": "ANSWER_VALUE",
                             }
                         ],
                         "used_question_inputs": [],
@@ -817,34 +834,6 @@ def test_anthropic_client_does_not_discover_environment_proxies_in_worker(monkey
     captured["http_client"].close()
 
 
-def test_anthropic_runtime_hard_timeout_fails_before_gunicorn_abort(
-    fervis_foundation_reset,
-    monkeypatch,
-):
-    def blocking_worker(payload, result_queue):
-        import time
-
-        time.sleep(2)
-
-    monkeypatch.setattr(anthropic_loop, "_anthropic_request_worker", blocking_worker)
-
-    class Runtime(AnthropicLoopRuntime):
-        def _sdk_status(self) -> str:
-            return "enabled"
-
-    monkeypatch.setenv("FERVIS_PROVIDER_HARD_TIMEOUT_SECONDS", "1")
-
-    with pytest.raises(api_errors.Unavailable):
-        Runtime(config=_anthropic_test_config()).run(
-            ProviderRunRequest(
-                provider="anthropic",
-                prompt="slow",
-                max_thinking_tokens=64,
-                system_prompt="system",
-            )
-        )
-
-
 def test_anthropic_runtime_preserves_child_error_context(
     fervis_foundation_reset,
     monkeypatch,
@@ -885,18 +874,14 @@ def test_provider_runtime_maps_timeout_to_llm_timeout_error(
     fervis_foundation_reset,
     monkeypatch,
 ):
-    def blocking_worker(payload, result_queue):
-        import time
+    def timeout_worker(payload, result_queue):
+        raise TimeoutError("provider request timed out")
 
-        time.sleep(2)
-
-    monkeypatch.setattr(anthropic_loop, "_anthropic_request_worker", blocking_worker)
+    monkeypatch.setattr(anthropic_loop, "_anthropic_request_worker", timeout_worker)
 
     class Runtime(AnthropicLoopRuntime):
         def _sdk_status(self) -> str:
             return "enabled"
-
-    monkeypatch.setenv("FERVIS_PROVIDER_HARD_TIMEOUT_SECONDS", "1")
 
     with pytest.raises(api_errors.Unavailable) as exc:
         Runtime(config=_anthropic_test_config()).run(
@@ -1073,10 +1058,9 @@ def test_provider_worker_uncaught_exception_returns_provider_error():
         raise RuntimeError("worker failed")
 
     with pytest.raises(ProviderExecutionError) as exc_info:
-        run_provider_worker_with_timeout(
+        run_provider_worker(
             worker,
             payload={},
-            timeout_reason="timed out",
         )
 
     assert exc_info.value.error_class == "RuntimeError"
@@ -1088,10 +1072,9 @@ def test_provider_worker_no_result_reports_worker_completion():
         return None
 
     with pytest.raises(ProviderExecutionError) as exc_info:
-        run_provider_worker_with_timeout(
+        run_provider_worker(
             worker,
             payload={},
-            timeout_reason="timed out",
         )
 
     assert exc_info.value.error_class == "ProviderNoResultError"
@@ -1147,10 +1130,17 @@ def test_runtime_system_prompt_is_prefixed_to_tool_system_prompt():
 
 def test_provider_timeout_defaults_allow_strict_tool_latency(monkeypatch):
     monkeypatch.delenv("FERVIS_PROVIDER_TIMEOUT_SECONDS", raising=False)
-    monkeypatch.delenv("FERVIS_PROVIDER_HARD_TIMEOUT_SECONDS", raising=False)
 
     assert provider_timeout_seconds() == 120
-    assert provider_hard_timeout_seconds() == 150
+
+
+def test_provider_runtime_rejects_invalid_numeric_environment(monkeypatch):
+    monkeypatch.setenv("FERVIS_PROVIDER_MAX_OUTPUT_TOKENS", "many")
+
+    with pytest.raises(ProviderExecutionError) as exc_info:
+        provider_max_output_tokens()
+
+    assert exc_info.value.error_class == "ProviderConfigurationError"
 
 
 def test_anthropic_tool_call_uses_provider_native_system_prompt():
@@ -1257,27 +1247,17 @@ def test_anthropic_adapter_sends_question_contract_tool_contracts():
 
     assert {
         "tool_names": [tool["name"] for tool in tools],
-        "has_one_of": ["oneOf" in tool["input_schema"] for tool in tools],
-        "required": [tool["input_schema"]["required"] for tool in tools],
+        "has_outcome_union": [
+            "anyOf" in tool["input_schema"]["properties"]["outcome"] for tool in tools
+        ],
         "tool_choice_type": message_kwargs["tool_choice"]["type"],
+        "tool_choice_name": message_kwargs["tool_choice"].get("name"),
         "disable_parallel": message_kwargs["tool_choice"]["disable_parallel_tool_use"],
     } == {
-        "tool_names": [
-            "submit_answer_request_contract",
-            "submit_missing_input_clarification",
-        ],
-        "has_one_of": [False, False],
-        "required": [
-            [
-                "kind",
-                "answer_requests_count",
-                "question_inputs",
-                "answer_requests",
-                "question_input_inventory_check",
-            ],
-            ["kind", "missing"],
-        ],
-        "tool_choice_type": "any",
+        "tool_names": ["submit_question_contract_outcome"],
+        "has_outcome_union": [True],
+        "tool_choice_type": "tool",
+        "tool_choice_name": "submit_question_contract_outcome",
         "disable_parallel": True,
     }
 
@@ -1473,10 +1453,10 @@ def test_anthropic_adapter_preserves_branch_required_fields_in_nested_unions():
                     "oneOf": [
                         {
                             "type": "object",
-                            "required": ["kind", "record_id_field_id"],
+                            "required": ["kind", "count_basis"],
                             "properties": {
                                 "kind": {"enum": ["count_records"]},
-                                "record_id_field_id": {"type": "string"},
+                                "count_basis": {"type": "string"},
                             },
                             "additionalProperties": False,
                         },
@@ -1499,7 +1479,7 @@ def test_anthropic_adapter_preserves_branch_required_fields_in_nested_unions():
 
     metric_variants = schema["properties"]["metric"]["anyOf"]
 
-    assert metric_variants[0]["required"] == ["kind", "record_id_field_id"]
+    assert metric_variants[0]["required"] == ["kind", "count_basis"]
     assert metric_variants[1]["required"] == ["kind", "function", "field_id"]
 
 
@@ -1640,9 +1620,7 @@ def test_openai_adapter_keeps_canonical_source_binding_grammar():
 
 def test_openai_accepts_source_binding_schema_nesting_depth():
     spec = source_binding_tool_spec()
-    projected_schema = openai_compatible_loop._openai_strict_schema(
-        spec.input_schema
-    )
+    projected_schema = openai_compatible_loop._openai_strict_schema(spec.input_schema)
 
     assert _maximum_container_nesting(projected_schema) <= 10
 
@@ -2207,15 +2185,45 @@ def test_openai_compatible_adapter_sends_question_contract_tools_as_root_object_
             if any(keyword in schema for schema in schemas)
         ],
     } == {
-        "tool_names": [
-            "submit_answer_request_contract",
-            "submit_missing_input_clarification",
-        ],
-        "tool_choice": "required",
+        "tool_names": ["submit_question_contract_outcome"],
+        "tool_choice": {
+            "type": "function",
+            "function": {"name": "submit_question_contract_outcome"},
+        },
         "parallel_tool_calls": False,
-        "strict": [True, True],
+        "strict": [True],
         "all_object": True,
         "forbidden_keywords_present": [],
+    }
+
+
+def test_openai_compatible_adapter_names_the_only_available_tool() -> None:
+    runtime = OpenAICompatibleLoopRuntime(
+        config=ChatProviderConfig(
+            provider_name="openai",
+            model_name="gpt-5.4-mini",
+            api_key_env_var="OPENAI_API_KEY",
+            sdk_name="openai-compatible-chat-completions",
+            default_base_url="https://api.openai.com/v1",
+        )
+    )
+    payload = runtime.request_payload(
+        ProviderRunRequest(
+            provider="openai",
+            prompt="{}",
+            max_thinking_tokens=64,
+            system_prompt="system",
+            output_mode=ProviderOutputMode.TOOL_CALL,
+            tool_specs=_question_contract_tool_specs(),
+        )
+    )
+    single_tool_payload = replace(payload, tool_specs=payload.tool_specs[:1])
+
+    completion_kwargs = openai_compatible_loop._completion_kwargs(single_tool_payload)
+
+    assert completion_kwargs["tool_choice"] == {
+        "type": "function",
+        "function": {"name": "submit_question_contract_outcome"},
     }
 
 
@@ -2255,12 +2263,12 @@ def test_opencode_zen_uses_openai_compatible_tool_call_contract():
         "model": "deepseek-v4-pro",
         "has_format": False,
         "has_tools": True,
-        "tool_choice": "required",
+        "tool_choice": {
+            "type": "function",
+            "function": {"name": "submit_question_contract_outcome"},
+        },
         "parallel_tool_calls": False,
-        "tool_names": [
-            "submit_answer_request_contract",
-            "submit_missing_input_clarification",
-        ],
+        "tool_names": ["submit_question_contract_outcome"],
     }
 
 

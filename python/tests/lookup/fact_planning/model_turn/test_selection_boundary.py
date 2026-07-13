@@ -1,5 +1,6 @@
 from ._helpers import *  # noqa: F403
 
+
 def test_pattern_fact_plan_prompt_uses_selected_shape_boundary():
     prompt = _pattern_fact_plan_prompt(
         FactPlanRequest(
@@ -12,6 +13,7 @@ def test_pattern_fact_plan_prompt_uses_selected_shape_boundary():
     assert "Selected plan shapes:" in prompt
     assert "List And Field Patterns" in prompt
 
+
 def test_pattern_fact_plan_uses_selected_candidate_member_fields():
     request = FactPlanRequest(
         question="Where did Alice work?",
@@ -21,8 +23,8 @@ def test_pattern_fact_plan_uses_selected_candidate_member_fields():
                     id="fact_1",
                     description="Alice work location",
                     answer_outputs=(
-                        RequestedFactAnswerOutput(id="answer_1"),
-                        RequestedFactAnswerOutput(id="answer_2"),
+                        RequestedFactAnswerOutput(id="answer_1", role="ANSWER_VALUE"),
+                        RequestedFactAnswerOutput(id="answer_2", role="ANSWER_VALUE"),
                     ),
                 ),
             )
@@ -81,7 +83,7 @@ def test_pattern_fact_plan_uses_selected_candidate_member_fields():
                         requested_fact_id="fact_1",
                         answer_output_id="answer_1",
                         match_basis_explanation="location_name fulfills work location.",
-                        group_key_evidence_ids=("source_1.data.location_name",),
+                        value_evidence_ids=("source_1.data.location_name",),
                     ),
                     SourceFulfillment(
                         requested_fact_id="fact_1",
@@ -140,11 +142,11 @@ def test_pattern_fact_plan_uses_selected_candidate_member_fields():
         "outcome": {
             "kind": "fact_plan",
             "answers": [
-                    {
-                        "requested_fact_id": "fact_1",
-                        "source_binding_id": "sb_1",
-                        "answer_output_ids": ["answer_1", "answer_2"],
-                        "output_fields": [
+                {
+                    "requested_fact_id": "fact_1",
+                    "source_binding_id": "sb_1",
+                    "answer_output_ids": ["answer_1", "answer_2"],
+                    "output_fields": [
                         {"field_id": "location_name"},
                         {"field_id": "amount"},
                     ],
@@ -180,6 +182,7 @@ def test_pattern_fact_plan_uses_selected_candidate_member_fields():
         field.field_id for field in result.plan.outcome.relations[0].fields
     ) == ("location_name", "amount")
 
+
 def test_pattern_fact_prompt_excludes_raw_memory_inputs():
     request = FactPlanRequest(
         question="Which store had the highest sales today?",
@@ -197,6 +200,7 @@ def test_pattern_fact_prompt_excludes_raw_memory_inputs():
     assert "Memory inputs:" not in prompt
     assert "prior.value" not in prompt
     assert "prior.outcome" not in prompt
+
 
 def test_fact_plan_prompt_uses_bound_source_lineage_not_rehydrated_candidate_fields():
     request = FactPlanRequest(
@@ -277,6 +281,7 @@ def test_fact_plan_prompt_uses_bound_source_lineage_not_rehydrated_candidate_fie
     assert [field["field_id"] for field in source["fields"]] == ["amount"]
     assert "internal_notes" not in json.dumps(source)
 
+
 def test_fact_plan_prompt_projects_read_scoped_fields_as_read_handles():
     prompt = _fact_plan_prompt(
         FactPlanRequest(
@@ -333,7 +338,6 @@ def test_fact_plan_prompt_projects_read_scoped_fields_as_read_handles():
     assert customer_source["fields"] == [
         {
             "field_id": "field_customer_name",
-            "label": "field customer name",
             "roles": ["output", "predicate"],
             "row_cardinality": "one",
             "type": "string",
@@ -342,12 +346,12 @@ def test_fact_plan_prompt_projects_read_scoped_fields_as_read_handles():
     assert staff_source["fields"] == [
         {
             "field_id": "field_staff_name",
-            "label": "field staff name",
             "roles": ["output", "predicate"],
             "row_cardinality": "one",
             "type": "string",
         }
     ]
+
 
 def test_fact_plan_prompt_does_not_expose_raw_unselected_read_ids():
     request = FactPlanRequest(
@@ -402,6 +406,7 @@ def test_fact_plan_prompt_does_not_expose_raw_unselected_read_ids():
     assert api_row_source_id("selected_read", "root") not in prompt
     assert "sensitive_unselected_read" not in prompt
 
+
 def test_shape_compatible_payload_keeps_fields_that_source_binding_proved():
     source = {
         "fields": [
@@ -421,8 +426,7 @@ def test_shape_compatible_payload_keeps_fields_that_source_binding_proved():
         "fulfills": [
             {
                 "answer_output_id": "answer_1",
-                "group_key_evidence_ids": ["source_1_evidence_1"],
-                "scope_evidence_ids": [],
+                "value_evidence_ids": ["source_1_evidence_1"],
             }
         ],
     }
@@ -434,14 +438,15 @@ def test_shape_compatible_payload_keeps_fields_that_source_binding_proved():
         "price_list_item_id",
     ]
 
-def test_shape_compatible_payload_keeps_group_key_fields():
+
+def test_shape_compatible_payload_keeps_candidate_key_fields():
     source = {
         "fields": [
             {
-                "evidence_id": "source_1.location_name",
-                "field_id": "location_name",
+                "evidence_id": "source_1.location_id",
+                "field_id": "location_id",
                 "row_cardinality": "one",
-                "type": "string",
+                "type": "uuid",
             },
             {
                 "evidence_id": "source_1.calculated_pay",
@@ -453,10 +458,17 @@ def test_shape_compatible_payload_keeps_group_key_fields():
         "fulfills": [
             {
                 "answer_output_id": "answer_1",
-                "group_key_evidence_ids": ["source_1.calculated_pay"],
                 "metric_measure_evidence_ids": ["source_1.calculated_pay"],
-                "scope_evidence_ids": [],
-                "group_key_evidence_ids": ["source_1.location_name"],
+                "entity_evidence": {
+                    "type": "candidate_key",
+                    "components": [
+                        {
+                            "component_id": "location_id",
+                            "field_evidence_id": "source_1.location_id",
+                            "field_id": "location_id",
+                        }
+                    ],
+                },
             }
         ],
     }
@@ -464,9 +476,10 @@ def test_shape_compatible_payload_keeps_group_key_fields():
     result = _shape_compatible_bound_source(source, plan_shape="ranked_aggregate")
 
     assert [field["field_id"] for field in result["fields"]] == [
-        "location_name",
+        "location_id",
         "calculated_pay",
     ]
+
 
 def test_pattern_schema_uses_shape_compatible_bound_source_fields():
     request = FactPlanRequest(
@@ -553,7 +566,12 @@ def test_pattern_schema_uses_shape_compatible_bound_source_fields():
                             requested_fact_id="rf_answer",
                             answer_output_id="answer",
                             match_basis_explanation="child rows provide the ranked amount.",
-                            group_key_evidence_ids=("source_1.items.location_id",),
+                            entity_evidence=candidate_key_evidence(
+                                "location_id",
+                                entity_kind="location",
+                                key_id="location_key",
+                                field_evidence_ids=("source_1.items.location_id",),
+                            ),
                             metric_measure_evidence_ids=("source_1.items.amount",),
                         ),
                     ),
@@ -576,5 +594,8 @@ def test_pattern_schema_uses_shape_compatible_bound_source_fields():
     assert '"label"' not in schema_text
     assert '"location_id"' not in schema_text
     assert '"amount"' in schema_text
-    assert '<group field="location_id" type="uuid" source="source_binding" />' in prompt_text
+    assert (
+        '<group fields="location_id" key_id="location_key" entity_kind="location" source="source_binding" />'
+        in prompt_text
+    )
     assert '<metric id="metric_1" kind="aggregate_field" field="amount"' in prompt_text

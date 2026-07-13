@@ -41,7 +41,7 @@ input:
         owned_question_input_refs: [this_month]
     answer_outputs:
     - description: sales count
-      role: ROW_POPULATION
+      role: ROW_COUNT
     used_question_inputs: [this_month]
 expect:
   result_contains:
@@ -57,7 +57,7 @@ expect:
             domain: SOURCE_RESULT_VALUES
         answer_outputs:
         - description: sales count
-          role: ROW_POPULATION
+          role: ROW_COUNT
   result_exact_fields:
     requested_fact_input_handoff:
     - id: fact_1

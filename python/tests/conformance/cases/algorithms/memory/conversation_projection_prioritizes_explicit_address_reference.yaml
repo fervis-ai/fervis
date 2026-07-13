@@ -15,6 +15,7 @@ input:
           - address: entity.staff.7
             kind: entity
             resource: staff
+            keyId: primary_key
             referenceText: Staff 7
             identity: {staff_id: staff-7}
       - artifactId: run_8
@@ -23,6 +24,7 @@ input:
           - address: entity.staff.8
             kind: entity
             resource: staff
+            keyId: primary_key
             referenceText: Staff 8
             identity: {staff_id: staff-8}
 expect:
@@ -34,5 +36,6 @@ expect:
             address: entity.staff.8
             kind: entity
             resource: staff
+            keyId: primary_key
             referenceText: Staff 8
             identity: {staff_id: staff-8}

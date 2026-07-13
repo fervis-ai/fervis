@@ -38,4 +38,3 @@ class ReceiveTransferAPIView(APIView):
             StockTransferSerializer(transfer).data,
             status=status.HTTP_200_OK,
         )
-

@@ -10,20 +10,27 @@ from tests.lookup.prompt_sections import prompt_section_payload
 
 
 def test_lookup_cutover_executes_rank_limit_value_use_as_proof_link():
+    known_inputs = (
+        _known_result_limit_input(
+            "result_limit",
+            "top 2",
+            value_text="2",
+        ),
+    )
     question_contract = QuestionContract(
         requested_facts=(
             RequestedFact(
                 id="rf_top_totals",
                 description="top metric totals",
                 answer_subject=RequestedFactAnswerSubject(subject_text="metric totals"),
-                answer_outputs=(RequestedFactAnswerOutput(id="location_name"),),
-                known_inputs=(
-                    _known_result_limit_input(
-                        "result_limit",
-                        "top 2",
-                        value_text="2",
-                    ),
+                answer_expression=_requested_fact_answer_expression(
+                    RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+                    known_inputs=known_inputs,
                 ),
+                answer_outputs=(
+                    RequestedFactAnswerOutput(id="location_name", role="ANSWER_VALUE"),
+                ),
+                known_inputs=known_inputs,
             ),
         )
     )
@@ -107,7 +114,7 @@ def test_lookup_cutover_executes_rank_limit_value_use_as_proof_link():
 def test_lookup_cutover_list_rows_projected_identity_field_becomes_memory_identity_set():
     planner = _ToolNamePlannerPort(
         responses={
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="sale ids",
                 answer_subject="sale IDs",
                 answer_expression_family="list_rows",
@@ -168,7 +175,6 @@ def test_lookup_cutover_list_rows_projected_identity_field_becomes_memory_identi
 
     assert result.status == "COMPLETED", result
     assert relation_address["grainKeys"] == ["sale_id"]
-    assert relation_address["source"]["identityType"] == "sale"
     assert [item["identity"] for item in row_addresses] == [
         {"sale_id": "sale_1"},
         {"sale_id": "sale_2"},
@@ -178,7 +184,7 @@ def test_lookup_cutover_list_rows_projected_identity_field_becomes_memory_identi
 def test_lookup_cutover_grounded_named_entity_is_stored_as_memory_identity():
     planner = _ToolNamePlannerPort(
         responses={
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="sales at ABC Mall",
                 answer_expression_family="list_rows",
                 parts=("sales",),
@@ -255,9 +261,12 @@ def test_lookup_cutover_grounded_named_entity_is_stored_as_memory_identity():
     ]
     assert entity_addresses == [
         {
-            "address": "entity.grounded_fact_1_entity_1_location_location_id_loc_1",
+            "address": (
+                "entity.grounded_fact_1_entity_1_location_primary_key_location_id_loc_1"
+            ),
             "kind": "entity",
             "resource": "location",
+            "keyId": "primary_key",
             "referenceText": "ABC Mall",
             "identity": {"location_id": "loc_1"},
             "evidence": {"stepIds": ["known_input:fact_1_entity_1"]},
@@ -325,6 +334,7 @@ def test_lookup_orchestrator_repeated_named_target_does_not_reuse_inactive_memor
             FactAddress.entity(
                 address="entity.location.abc",
                 resource="location",
+                key_id="primary_key",
                 reference_text="ABC Mall",
                 identity={"location_id": "loc_1"},
             ),
@@ -335,7 +345,7 @@ def test_lookup_orchestrator_repeated_named_target_does_not_reuse_inactive_memor
             CONVERSATION_RESOLUTION_TOOL_NAME: (
                 lambda prompt: _conversation_resolution_payload_from_prompt(prompt)
             ),
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="sales at ABC Mall",
                 answer_expression_family="list_rows",
                 parts=("sales",),
@@ -468,7 +478,7 @@ class _StandaloneIdentitySetPlannerPort:
                     "costUsd": 0,
                 },
             }
-        if tool_name != "submit_answer_request_contract":
+        if tool_name != "submit_question_contract_outcome":
             del provider, max_thinking_tokens, output_mode
             self.calls += 1
             self.prompts.append(prompt)
@@ -504,10 +514,12 @@ class _StandaloneIdentitySetPlannerPort:
             "answer": json.dumps(
                 {
                     "tool": tool_name,
-                    "arguments": _question_contract_response(
-                        subject="sales",
-                        parts=("sales",),
-                        demand_text="sales",
+                    "arguments": _question_contract_decision(
+                        _question_contract_response(
+                            subject="sales",
+                            parts=("sales",),
+                            demand_text="sales",
+                        )
                     ),
                 },
                 default=str,
@@ -562,9 +574,9 @@ def test_lookup_cutover_coalesces_identical_api_reads_for_multiple_row_relations
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="name",
                         relation_id="answer_rows",
                         field_id="name",
@@ -678,7 +690,7 @@ def test_lookup_cutover_preserves_scalar_memory_proofs_for_undefined_compute():
                 address="row.context.1",
                 relation="relation.context",
                 grain={"row_id": "context"},
-                values={"label": {"type": "string", "value": "prior totals"}},
+                values={"label": FactAddressValue(type="string", value="prior totals")},
             ),
         ),
     )
@@ -785,10 +797,10 @@ def test_lookup_cutover_computes_across_single_cell_prior_answer_relations():
                 address="row.answer_1_rows.1",
                 relation="relation.answer_1_rows",
                 values={
-                    "revenue_on_2025_11_01": {
-                        "type": "number",
-                        "value": "4000.00",
-                    }
+                    "revenue_on_2025_11_01": FactAddressValue(
+                        type="number",
+                        value="4000.00",
+                    )
                 },
                 evidence=EvidenceRef(step_ids=("prior_day_1",)),
             ),
@@ -810,10 +822,10 @@ def test_lookup_cutover_computes_across_single_cell_prior_answer_relations():
                 address="row.answer_2_rows.1",
                 relation="relation.answer_2_rows",
                 values={
-                    "revenue_on_2025_11_02": {
-                        "type": "number",
-                        "value": "5000.00",
-                    }
+                    "revenue_on_2025_11_02": FactAddressValue(
+                        type="number",
+                        value="5000.00",
+                    )
                 },
                 evidence=EvidenceRef(step_ids=("prior_day_2",)),
             ),
@@ -827,7 +839,9 @@ def test_lookup_cutover_computes_across_single_cell_prior_answer_relations():
                 id="rf_answer",
                 description="total across the two prior daily revenue answers",
                 answer_subject=RequestedFactAnswerSubject(subject_text="total"),
-                answer_outputs=(RequestedFactAnswerOutput(id="total"),),
+                answer_outputs=(
+                    RequestedFactAnswerOutput(id="total", role="ANSWER_VALUE"),
+                ),
             ),
         )
     )
@@ -930,14 +944,14 @@ def test_lookup_cutover_computes_increase_across_multi_row_prior_answer_relation
                 relation="relation.answer_1_rows",
                 grain={"sold_at": "2025-11-01T09:00:00Z"},
                 values={
-                    "sold_at": {
-                        "type": "datetime",
-                        "value": "2025-11-01T09:00:00Z",
-                    },
-                    "total_made": {
-                        "type": "number",
-                        "value": "4000.00",
-                    },
+                    "sold_at": FactAddressValue(
+                        type="datetime",
+                        value="2025-11-01T09:00:00Z",
+                    ),
+                    "total_made": FactAddressValue(
+                        type="number",
+                        value="4000.00",
+                    ),
                 },
                 evidence=EvidenceRef(step_ids=("prior_day_1",)),
             ),
@@ -946,14 +960,14 @@ def test_lookup_cutover_computes_increase_across_multi_row_prior_answer_relation
                 relation="relation.answer_1_rows",
                 grain={"sold_at": "2025-11-02T09:00:00Z"},
                 values={
-                    "sold_at": {
-                        "type": "datetime",
-                        "value": "2025-11-02T09:00:00Z",
-                    },
-                    "total_made": {
-                        "type": "number",
-                        "value": "5000.00",
-                    },
+                    "sold_at": FactAddressValue(
+                        type="datetime",
+                        value="2025-11-02T09:00:00Z",
+                    ),
+                    "total_made": FactAddressValue(
+                        type="number",
+                        value="5000.00",
+                    ),
                 },
                 evidence=EvidenceRef(step_ids=("prior_day_2",)),
             ),
@@ -969,6 +983,7 @@ def test_lookup_cutover_computes_increase_across_multi_row_prior_answer_relation
                 answer_outputs=(
                     RequestedFactAnswerOutput(
                         id="increase",
+                        role="ANSWER_VALUE",
                     ),
                 ),
             ),
@@ -1070,7 +1085,7 @@ def test_lookup_cutover_executes_memory_relation_field_bindings():
                 address="row.items.1",
                 relation="relation.items",
                 grain={"sku": "SKU-1"},
-                values={"quantity": {"type": "number", "value": 7}},
+                values={"quantity": FactAddressValue(type="number", value=7)},
             ),
         ),
     )
@@ -1081,8 +1096,8 @@ def test_lookup_cutover_executes_memory_relation_field_bindings():
                 description="quantities for prior referenced items",
                 answer_subject=RequestedFactAnswerSubject(subject_text="quantities"),
                 answer_outputs=(
-                    RequestedFactAnswerOutput(id="sku"),
-                    RequestedFactAnswerOutput(id="quantity"),
+                    RequestedFactAnswerOutput(id="sku", role="ANSWER_VALUE"),
+                    RequestedFactAnswerOutput(id="quantity", role="ANSWER_VALUE"),
                 ),
             ),
         )
@@ -1188,8 +1203,11 @@ def test_lookup_cutover_can_fetch_same_prior_scope_for_additional_fields():
                 relation="relation.answer_1_rows",
                 grain={"staff_name": "Amina", "product_name": "Lipstick"},
                 values={
-                    "staff_name": {"type": "string", "value": "Amina"},
-                    "product_name": {"type": "string", "value": "Lipstick"},
+                    "staff_name": FactAddressValue(type="string", value="Amina"),
+                    "product_name": FactAddressValue(
+                        type="string",
+                        value="Lipstick",
+                    ),
                 },
                 evidence=EvidenceRef(step_ids=("read:sales_read",)),
             ),
@@ -1459,7 +1477,6 @@ def test_lookup_cutover_executes_set_difference_without_python_or_old_phases():
                                     "read_id": "candidate_read",
                                 },
                                 "identity_fields": ["variant_id"],
-                                "output_fields": [{"field_id": "variant_name"}],
                             },
                             "observed": {
                                 "source": {
@@ -1493,7 +1510,16 @@ def test_lookup_cutover_executes_set_difference_without_python_or_old_phases():
     )
 
     assert result.status == "COMPLETED"
-    assert result.answer == "Variant Two"
+    assert result.rendered_fact is not None
+    assert result.rendered_fact.rows == (
+        {
+            "answer_1": {
+                "entityKind": "variant",
+                "keyId": "primary_key",
+                "components": {"variant_id": "variant_2"},
+            }
+        },
+    )
 
 
 def test_lookup_cutover_resolves_generated_calendar_dates_from_time_values():
@@ -1502,6 +1528,7 @@ def test_lookup_cutover_resolves_generated_calendar_dates_from_time_values():
         description="days in the last 3 days",
         subject_text="days",
         binding_target_ids=("day",),
+        answer_expression_family=RequestedFactAnswerExpressionFamily.LIST_ROWS,
         known_inputs=(_known_time_input("month", "last 3 days"),),
     )
     ports = LookupRuntimePorts(
@@ -1624,12 +1651,14 @@ class _SameScopeReadPlannerPort:
             }
         else:
             tool_name = tool_specs[0].name if tool_specs else ""
-        if tool_name == "submit_answer_request_contract":
-            arguments = _question_contract_response(
-                subject="shade names too",
-                answer_expression_family="list_rows",
-                parts=("shade names",),
-                demand_text="shade",
+        if tool_name == "submit_question_contract_outcome":
+            arguments = _question_contract_decision(
+                _question_contract_response(
+                    subject="shade names too",
+                    answer_expression_family="list_rows",
+                    parts=("shade names",),
+                    demand_text="shade",
+                )
             )
         elif tool_name == "submit_query_enrichment":
             arguments = _query_enrichment_payload(("sale",))
@@ -1724,12 +1753,14 @@ class _SameScopeReadOutputPlannerPort:
                 actual_text="the shade names too",
                 source_kind="row_set",
             )
-        elif tool_name == "submit_answer_request_contract":
-            arguments = _question_contract_response(
-                subject="shade names too",
-                answer_expression_family="list_rows",
-                parts=("shade names",),
-                demand_text="shade",
+        elif tool_name == "submit_question_contract_outcome":
+            arguments = _question_contract_decision(
+                _question_contract_response(
+                    subject="shade names too",
+                    answer_expression_family="list_rows",
+                    parts=("shade names",),
+                    demand_text="shade",
+                )
             )
         elif tool_name == "submit_query_enrichment":
             arguments = _query_enrichment_payload(("shade",))
@@ -1858,20 +1889,22 @@ class _IdentitySetPlannerPort:
             }
         else:
             tool_name = tool_specs[0].name if tool_specs else ""
-        if tool_name == "submit_answer_request_contract":
-            arguments = _question_contract_response(
-                subject="sales for those stores",
-                answer_expression_family="list_rows",
-                parts=("sales",),
-                demand_text="sales",
-                question_inputs=(
-                    {
-                        "kind": "row_set_reference",
-                        "reference_text": "those stores",
-                        "source": "conversation_resolution",
-                        "resolved_input_ref": "cr_input_1",
-                    },
-                ),
+        if tool_name == "submit_question_contract_outcome":
+            arguments = _question_contract_decision(
+                _question_contract_response(
+                    subject="sales for those stores",
+                    answer_expression_family="list_rows",
+                    parts=("sales",),
+                    demand_text="sales",
+                    question_inputs=(
+                        {
+                            "kind": "row_set_reference",
+                            "reference_text": "those stores",
+                            "source": "conversation_resolution",
+                            "resolved_input_ref": "cr_input_1",
+                        },
+                    ),
+                )
             )
         elif tool_name == "submit_query_enrichment":
             arguments = _query_enrichment_payload(("sale",))
@@ -2011,20 +2044,22 @@ class _SaleDetailIdentitySetPlannerPort:
             }
         else:
             tool_name = tool_specs[0].name if tool_specs else ""
-        if tool_name == "submit_answer_request_contract":
-            arguments = _question_contract_response(
-                subject="those sales",
-                answer_expression_family="list_rows",
-                parts=("product names",),
-                demand_text="product",
-                question_inputs=(
-                    {
-                        "kind": "row_set_reference",
-                        "reference_text": "those sales",
-                        "source": "conversation_resolution",
-                        "resolved_input_ref": "cr_input_1",
-                    },
-                ),
+        if tool_name == "submit_question_contract_outcome":
+            arguments = _question_contract_decision(
+                _question_contract_response(
+                    subject="those sales",
+                    answer_expression_family="list_rows",
+                    parts=("product names",),
+                    demand_text="product",
+                    question_inputs=(
+                        {
+                            "kind": "row_set_reference",
+                            "reference_text": "those sales",
+                            "source": "conversation_resolution",
+                            "resolved_input_ref": "cr_input_1",
+                        },
+                    ),
+                )
             )
         elif tool_name == "submit_query_enrichment":
             arguments = _query_enrichment_payload(("sale",))
@@ -2157,12 +2192,14 @@ class _MissingFulfillmentPlannerPort:
                 actual_text="the shade names too",
                 source_kind="row_set",
             )
-        elif tool_name == "submit_answer_request_contract":
-            arguments = _question_contract_response(
-                subject="shade names too",
-                answer_expression_family="list_rows",
-                parts=("shade names",),
-                demand_text="shade",
+        elif tool_name == "submit_question_contract_outcome":
+            arguments = _question_contract_decision(
+                _question_contract_response(
+                    subject="shade names too",
+                    answer_expression_family="list_rows",
+                    parts=("shade names",),
+                    demand_text="shade",
+                )
             )
         elif tool_name == "submit_query_enrichment":
             arguments = _query_enrichment_payload(("shade",))
@@ -2262,11 +2299,13 @@ class _UnavailableSourceFieldPlannerPort:
                 actual_text="the shade names too",
                 source_kind="row_set",
             )
-        elif tool_name == "submit_answer_request_contract":
-            arguments = _question_contract_response(
-                subject="shade names too",
-                answer_expression_family="list_rows",
-                parts=("shade names",),
+        elif tool_name == "submit_question_contract_outcome":
+            arguments = _question_contract_decision(
+                _question_contract_response(
+                    subject="shade names too",
+                    answer_expression_family="list_rows",
+                    parts=("shade names",),
+                )
             )
         elif tool_name == "submit_query_enrichment":
             arguments = _query_enrichment_payload(("shade",))
@@ -2393,8 +2432,11 @@ def _same_scope_prior_sales_artifact() -> FactArtifact:
                 relation="relation.answer_1_rows",
                 grain={"staff_name": "Amina", "product_name": "Lipstick"},
                 values={
-                    "staff_name": {"type": "string", "value": "Amina"},
-                    "product_name": {"type": "string", "value": "Lipstick"},
+                    "staff_name": FactAddressValue(type="string", value="Amina"),
+                    "product_name": FactAddressValue(
+                        type="string",
+                        value="Lipstick",
+                    ),
                 },
                 evidence=EvidenceRef(step_ids=("read:sales_read",)),
             ),
@@ -2624,6 +2666,52 @@ def _prompt_json_section(prompt: str, *, label: str) -> dict[str, Any]:
     return prompt_section_payload(prompt, label)
 
 
+def _primary_key(
+    entity_kind: str,
+    component_id: str,
+    field_ref: str,
+    *,
+    context_field_refs: tuple[str, ...] = (),
+) -> tuple[CandidateKey, ...]:
+    return (
+        CandidateKey(
+            id="primary_key",
+            entity_kind=entity_kind,
+            components=(CandidateKeyComponent(id=component_id, field_ref=field_ref),),
+            primary=True,
+            context_field_refs=context_field_refs,
+        ),
+    )
+
+
+def _entity_target(entity_kind: str, component_id: str) -> EntityKeyComponentTarget:
+    return EntityKeyComponentTarget(
+        entity_kind=entity_kind,
+        key_id="primary_key",
+        component_id=component_id,
+    )
+
+
+def _entity_reference(
+    entity_kind: str,
+    component_id: str,
+    field_ref: str,
+) -> tuple[EntityReference, ...]:
+    return (
+        EntityReference(
+            id=f"{entity_kind}_reference",
+            target_entity_kind=entity_kind,
+            target_key_id="primary_key",
+            components=(
+                EntityReferenceComponent(
+                    target_component_id=component_id,
+                    local_field_ref=field_ref,
+                ),
+            ),
+        ),
+    )
+
+
 def _identity_set_sales_catalog() -> RelationCatalog:
     return _catalog(
         EndpointRead(
@@ -2636,11 +2724,7 @@ def _identity_set_sales_catalog() -> RelationCatalog:
                     name="store_id",
                     source=ParamSource.QUERY,
                     type="uuid",
-                    identity=IdentityMetadata(
-                        entity_ref="store",
-                        identity_field="store_id",
-                        primary_key=True,
-                    ),
+                    entity_target=_entity_target("store", "store_id"),
                 ),
             ),
             row_paths=(
@@ -2652,29 +2736,40 @@ def _identity_set_sales_catalog() -> RelationCatalog:
                     path="results.sale_id",
                     row_path_id="results",
                     type="uuid",
-                    identity=IdentityMetadata(
-                        entity_ref="sale",
-                        identity_field="sale_id",
-                        primary_key=True,
-                    ),
                 ),
                 CatalogField(
                     ref="sales.field.store_id",
                     path="results.store_id",
                     row_path_id="results",
                     type="uuid",
-                    identity=IdentityMetadata(
-                        entity_ref="store",
-                        identity_field="store_id",
-                        primary_key=True,
-                    ),
                 ),
+            ),
+            candidate_keys=_primary_key("sale", "sale_id", "sales.field.sale_id"),
+            entity_references=_entity_reference(
+                "store", "store_id", "sales.field.store_id"
             ),
             pagination=PaginationMetadata(
                 mode=PaginationMode.NONE,
                 completeness_policy=CompletenessPolicy.COMPLETE,
             ),
-        )
+        ),
+        EndpointRead(
+            id="stores",
+            endpoint_name="list_store_list",
+            resource_names=("store",),
+            row_paths=(
+                RowPath(id="results", path="results", cardinality=RowCardinality.MANY),
+            ),
+            fields=(
+                CatalogField(
+                    ref="stores.field.store_id",
+                    path="results.store_id",
+                    row_path_id="results",
+                    type="uuid",
+                ),
+            ),
+            candidate_keys=_primary_key("store", "store_id", "stores.field.store_id"),
+        ),
     )
 
 
@@ -2701,12 +2796,6 @@ def _location_sales_catalog() -> RelationCatalog:
                     path="data.location_id",
                     row_path_id="data",
                     type="uuid",
-                    identity=IdentityMetadata(
-                        entity_ref="location",
-                        identity_field="location_id",
-                        primary_key=True,
-                        display_fields=("locations.field.name",),
-                    ),
                 ),
                 CatalogField(
                     ref="locations.field.name",
@@ -2714,6 +2803,12 @@ def _location_sales_catalog() -> RelationCatalog:
                     row_path_id="data",
                     type="string",
                 ),
+            ),
+            candidate_keys=_primary_key(
+                "location",
+                "location_id",
+                "locations.field.location_id",
+                context_field_refs=("locations.field.name",),
             ),
             pagination=PaginationMetadata(
                 mode=PaginationMode.NONE,
@@ -2730,10 +2825,7 @@ def _location_sales_catalog() -> RelationCatalog:
                     name="location_id",
                     source=ParamSource.QUERY,
                     type="uuid",
-                    identity=IdentityMetadata(
-                        entity_ref="location",
-                        identity_field="location_id",
-                    ),
+                    entity_target=_entity_target("location", "location_id"),
                 ),
             ),
             row_paths=(
@@ -2745,22 +2837,17 @@ def _location_sales_catalog() -> RelationCatalog:
                     path="data.sale_id",
                     row_path_id="data",
                     type="uuid",
-                    identity=IdentityMetadata(
-                        entity_ref="sale",
-                        identity_field="sale_id",
-                        primary_key=True,
-                    ),
                 ),
                 CatalogField(
                     ref="sales.field.location_id",
                     path="data.location_id",
                     row_path_id="data",
                     type="uuid",
-                    identity=IdentityMetadata(
-                        entity_ref="location",
-                        identity_field="location_id",
-                    ),
                 ),
+            ),
+            candidate_keys=_primary_key("sale", "sale_id", "sales.field.sale_id"),
+            entity_references=_entity_reference(
+                "location", "location_id", "sales.field.location_id"
             ),
             pagination=PaginationMetadata(
                 mode=PaginationMode.NONE,
@@ -2819,13 +2906,9 @@ def _sale_detail_catalog() -> RelationCatalog:
                     path="results.sale_id",
                     row_path_id="results",
                     type="uuid",
-                    identity=IdentityMetadata(
-                        entity_ref="sale",
-                        identity_field="sale_id",
-                        primary_key=True,
-                    ),
                 ),
             ),
+            candidate_keys=_primary_key("sale", "sale_id", "sale_list.field.sale_id"),
             pagination=PaginationMetadata(
                 mode=PaginationMode.NONE,
                 completeness_policy=CompletenessPolicy.COMPLETE,
@@ -2842,11 +2925,7 @@ def _sale_detail_catalog() -> RelationCatalog:
                     source=ParamSource.PATH,
                     type="uuid",
                     required=True,
-                    identity=IdentityMetadata(
-                        entity_ref="sale",
-                        identity_field="sale_id",
-                        primary_key=True,
-                    ),
+                    entity_target=_entity_target("sale", "sale_id"),
                 ),
             ),
             row_paths=(
@@ -2859,11 +2938,6 @@ def _sale_detail_catalog() -> RelationCatalog:
                     path="sale_id",
                     row_path_id="root",
                     type="uuid",
-                    identity=IdentityMetadata(
-                        entity_ref="sale",
-                        identity_field="sale_id",
-                        primary_key=True,
-                    ),
                 ),
                 CatalogField(
                     ref="sale_detail.field.product_name",
@@ -2872,6 +2946,7 @@ def _sale_detail_catalog() -> RelationCatalog:
                     type="string",
                 ),
             ),
+            candidate_keys=_primary_key("sale", "sale_id", "sale_detail.field.sale_id"),
             pagination=PaginationMetadata(
                 mode=PaginationMode.NONE,
                 completeness_policy=CompletenessPolicy.COMPLETE,

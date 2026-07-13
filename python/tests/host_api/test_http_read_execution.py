@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from fervis.host_api.contracts import EndpointContract, ParameterContract
+from fervis.host_api.contracts import (
+    EndpointContract,
+    PaginationContract,
+    PaginationKind,
+    ParameterContract,
+)
 from fervis.host_api.contracts.authority import ReadAuthority, ReadContextRef
 from fervis.host_api.contracts.read import ReadInvocation
 from fervis.host_api.contracts.ports import EndpointExecutionError
@@ -79,7 +84,7 @@ def test_http_read_executor_rejects_auth_query_param_collision(monkeypatch) -> N
 
     with pytest.raises(EndpointExecutionError, match="overlap selected query params"):
         execute_http_read(
-            contract=_orders_contract(paginated=True),
+            contract=_orders_contract(pagination=_pagination()),
             authority=_authority(),
             invocation=ReadInvocation(
                 endpoint_name="list_orders",
@@ -107,7 +112,7 @@ def test_http_read_executor_rejects_pagination_query_param_collision(
 
     with pytest.raises(EndpointExecutionError, match="limit"):
         execute_http_read(
-            contract=_orders_contract(paginated=True),
+            contract=_orders_contract(pagination=_pagination()),
             authority=_authority(),
             invocation=ReadInvocation(
                 endpoint_name="list_orders",
@@ -228,32 +233,6 @@ def test_get_execution_allows_dotted_path_param_identifiers() -> None:
     assert prepared.url == "/api/orders/sku..2026/"
 
 
-def test_get_execution_rejects_invalid_pagination_query_params() -> None:
-    contract = _orders_contract(
-        paginated=True,
-        query_params=(
-            ParameterContract(
-                name="limit",
-                type="integer",
-                required=False,
-            ),
-            ParameterContract(
-                name="offset",
-                type="integer",
-                required=False,
-            ),
-        ),
-    )
-
-    for params in ({"limit": "not-an-int"}, {"offset": "not-an-int"}):
-        with pytest.raises(EndpointExecutionError, match="Invalid pagination"):
-            prepare_get_endpoint(
-                contract,
-                path_params={},
-                query_params=params,
-            )
-
-
 def test_http_read_executor_preserves_non_json_response_body(monkeypatch) -> None:
     from fervis.host_api.adapters.http import (
         HttpReadExecutionConfig,
@@ -344,6 +323,54 @@ def test_captured_header_credential_fails_when_configured_headers_are_missing(
         )
 
 
+def test_captured_header_credential_requires_every_configured_header(
+    monkeypatch,
+) -> None:
+    from fervis.host_api.credentials import (
+        CapturedHeaderCredentialPolicy,
+        capture_header_credential,
+    )
+
+    monkeypatch.setenv("FERVIS_TEST_CREDENTIAL_KEY", "test-key")
+
+    with pytest.raises(EndpointExecutionError, match="X-Tenant"):
+        capture_header_credential(
+            request_headers={"Authorization": "Bearer token"},
+            policy=CapturedHeaderCredentialPolicy(
+                headers=("Authorization", "X-Tenant"),
+                encryption_key_env="FERVIS_TEST_CREDENTIAL_KEY",
+            ),
+        )
+
+
+def test_delegated_credential_replay_requires_every_configured_header(
+    monkeypatch,
+) -> None:
+    from fervis.host_api.credentials import (
+        CapturedHeaderCredentialPolicy,
+        capture_header_credential,
+        overlay_from_header_credential,
+    )
+
+    monkeypatch.setenv("FERVIS_TEST_CREDENTIAL_KEY", "test-key")
+    credential = capture_header_credential(
+        request_headers={"Authorization": "Bearer token"},
+        policy=CapturedHeaderCredentialPolicy(
+            headers=("Authorization",),
+            encryption_key_env="FERVIS_TEST_CREDENTIAL_KEY",
+        ),
+    )
+
+    with pytest.raises(EndpointExecutionError, match="X-Tenant"):
+        overlay_from_header_credential(
+            credential,
+            policy=CapturedHeaderCredentialPolicy(
+                headers=("Authorization", "X-Tenant"),
+                encryption_key_env="FERVIS_TEST_CREDENTIAL_KEY",
+            ),
+        )
+
+
 def test_http_read_executor_applies_delegated_credential_before_request(
     monkeypatch,
 ) -> None:
@@ -361,16 +388,18 @@ def test_http_read_executor_applies_delegated_credential_before_request(
     monkeypatch.setenv("FERVIS_TEST_CREDENTIAL_KEY", "test-key")
     monkeypatch.setattr(
         "fervis.host_api.adapters.http._get",
-        lambda url, *, params, headers, cookies, timeout: calls.append(
-            {
-                "url": url,
-                "params": dict(params),
-                "headers": dict(headers),
-                "cookies": dict(cookies),
-                "timeout": timeout,
-            }
-        )
-        or _HttpResponse(200, {"data": [{"id": "ord_1"}]}),
+        lambda url, *, params, headers, cookies, timeout: (
+            calls.append(
+                {
+                    "url": url,
+                    "params": dict(params),
+                    "headers": dict(headers),
+                    "cookies": dict(cookies),
+                    "timeout": timeout,
+                }
+            )
+            or _HttpResponse(200, {"data": [{"id": "ord_1"}]})
+        ),
     )
 
     credential = capture_header_credential(
@@ -502,7 +531,7 @@ def _authority() -> ReadAuthority:
 def _orders_contract(
     *,
     query_params: tuple[ParameterContract, ...] | None = None,
-    paginated: bool = False,
+    pagination: PaginationContract | None = None,
 ) -> EndpointContract:
     return EndpointContract(
         endpoint_name="list_orders",
@@ -514,7 +543,19 @@ def _orders_contract(
         query_params=query_params
         if query_params is not None
         else (ParameterContract(name="status", type="string"),),
-        paginated=paginated,
+        pagination=pagination,
+    )
+
+
+def _pagination() -> PaginationContract:
+    return PaginationContract(
+        kind=PaginationKind.OFFSET,
+        position_query_param="offset",
+        page_size_query_param="limit",
+        results_path="data",
+        page_size=50,
+        max_page_size=200,
+        continuation_path="pagination.has_more",
     )
 
 

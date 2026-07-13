@@ -9,12 +9,12 @@ from typing import Any, Mapping
 from fervis.lookup.answer_program.model import FactFulfillment
 from fervis.lookup.answer_program.operations import (
     Operation,
-    SortDirection,
     UnionSpec,
 )
 from fervis.lookup.source_binding.compiler_ir import (
     DraftRelationSource,
     DraftRelationSourceAppliedFilter,
+    SourceAppliedFilter,
     DraftRelationSourcePopulationChoice,
     DraftRelationSourceRowFilter,
 )
@@ -24,13 +24,13 @@ from fervis.lookup.answer_program.relations import (
     Relation,
     RelationField,
 )
-from fervis.lookup.answer_program.render_spec import (
-    RenderRelationOutput,
+from fervis.lookup.answer_program.result_projection import (
+    RelationResultOutput,
 )
 from fervis.lookup.fact_planning.fulfillment_evidence import (
     evidence_is_compatible_with_plan_shape,
     field_id_for_fulfillment_evidence,
-    group_key_evidence_ids,
+    entity_field_evidence_ids,
     required_fulfillment_evidence_ids,
     source_cardinality_by_evidence_id,
     source_field_id_by_evidence_id,
@@ -38,7 +38,12 @@ from fervis.lookup.fact_planning.fulfillment_evidence import (
 )
 from fervis.lookup.source_binding import BoundSource
 
-from .render_ids import _safe_field_id
+from .result_ids import _safe_field_id
+from fervis.lookup.fact_planning.compiled_patterns import (
+    CompiledMetric,
+    CompiledPattern,
+    PatternAddress,
+)
 
 
 RelationBuilder = Callable[
@@ -49,68 +54,64 @@ RelationBuilder = Callable[
 
 def _compiled_pattern(
     *,
-    payload: dict[str, Any],
+    address: PatternAddress,
     relation_id: str,
     relation_fields: tuple[RelationField, ...],
     operations: tuple[Operation, ...],
-    relation_outputs: tuple[RenderRelationOutput, ...],
-    fulfillment_render_ids: tuple[str, ...],
+    relation_outputs: tuple[RelationResultOutput, ...],
+    fulfillment_result_ids: tuple[str, ...],
     bound_sources: dict[str, BoundSource],
     relation_builder: RelationBuilder,
     required_answer_evidence_ids_by_output: Mapping[str, tuple[str, ...]] | None = None,
-    selected_metric: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    requested_fact_id = _text(payload.get("requested_fact_id"))
-    explicit_answer_output_ids = _required_strings(
-        payload.get("answer_output_ids"), "answer_output_ids"
-    )
+    selected_metric: CompiledMetric | None = None,
+) -> CompiledPattern:
     _validate_no_implicit_answer_output_coverage(
-        payload=payload,
+        address=address,
         relation_fields=relation_fields,
-        explicit_answer_output_ids=explicit_answer_output_ids,
+        explicit_answer_output_ids=address.answer_output_ids,
         bound_sources=bound_sources,
     )
-    _validate_fulfillment_render_ids(
-        answer_output_ids=explicit_answer_output_ids,
-        fulfillment_render_ids=fulfillment_render_ids,
+    _validate_fulfillment_result_ids(
+        answer_output_ids=address.answer_output_ids,
+        fulfillment_result_ids=fulfillment_result_ids,
     )
     fulfillment = tuple(
         FactFulfillment(
-            requested_fact_id=requested_fact_id,
+            requested_fact_id=address.requested_fact_id,
             answer_output_id=answer_output_id,
-            render_output_id=fulfillment_render_ids[index],
+            result_output_id=fulfillment_result_ids[index],
         )
-        for index, answer_output_id in enumerate(explicit_answer_output_ids)
+        for index, answer_output_id in enumerate(address.answer_output_ids)
     )
     relation_inputs = _relations_for_bound_source(
         relation_id=relation_id,
-        payload=payload,
+        address=address,
         relation_fields=relation_fields,
         bound_sources=bound_sources,
         relation_builder=relation_builder,
         required_answer_evidence_ids_by_output=(required_answer_evidence_ids_by_output),
         selected_metric=selected_metric,
     )
-    return {
-        "fulfillment": fulfillment,
-        "relations": relation_inputs["relations"],
-        "operations": (*relation_inputs["operations"], *operations),
-        "relation_outputs": relation_outputs,
-        "scalar_outputs": (),
-    }
+    return CompiledPattern(
+        fulfillment=fulfillment,
+        relations=relation_inputs["relations"],
+        operations=(*relation_inputs["operations"], *operations),
+        relation_outputs=relation_outputs,
+        scalar_outputs=(),
+    )
 
 
 def _validate_no_implicit_answer_output_coverage(
     *,
-    payload: dict[str, Any],
+    address: PatternAddress,
     relation_fields: tuple[RelationField, ...],
     explicit_answer_output_ids: tuple[str, ...],
     bound_sources: dict[str, BoundSource],
 ) -> None:
-    bound = bound_sources.get(_text(payload.get("source_binding_id")))
+    bound = bound_sources.get(address.source_binding_id)
     if bound is None:
         return
-    requested_fact_id = _text(payload.get("requested_fact_id"))
+    requested_fact_id = address.requested_fact_id
     selected_field_ids = {field.field_id for field in relation_fields}
     selected_field_ids.update(_bound_param_field_ids(bound))
     field_id_by_evidence_id = source_field_id_by_evidence_id(bound)
@@ -136,26 +137,26 @@ def _validate_no_implicit_answer_output_coverage(
             raise ValueError("fact plan implicitly covers unlisted answer output")
 
 
-def _validate_fulfillment_render_ids(
+def _validate_fulfillment_result_ids(
     *,
     answer_output_ids: tuple[str, ...],
-    fulfillment_render_ids: tuple[str, ...],
+    fulfillment_result_ids: tuple[str, ...],
 ) -> None:
-    if len(fulfillment_render_ids) < len(answer_output_ids):
-        raise ValueError("fact plan missing render output for answer output")
+    if len(fulfillment_result_ids) < len(answer_output_ids):
+        raise ValueError("fact plan missing result output for answer output")
 
 
 def _relations_for_bound_source(
     *,
     relation_id: str,
-    payload: dict[str, Any],
+    address: PatternAddress,
     relation_fields: tuple[RelationField, ...],
     bound_sources: dict[str, BoundSource],
     relation_builder: RelationBuilder,
     required_answer_evidence_ids_by_output: Mapping[str, tuple[str, ...]] | None = None,
-    selected_metric: Mapping[str, Any] | None = None,
+    selected_metric: CompiledMetric | None = None,
 ) -> dict[str, Any]:
-    bound = _bound_source(payload, bound_sources=bound_sources)
+    bound = _bound_source(address.source_binding_id, bound_sources=bound_sources)
     invocations = bound.source_invocations or (
         (bound.source,) if bound.source is not None else ()
     )
@@ -164,7 +165,7 @@ def _relations_for_bound_source(
             "relations": (
                 _relation_for_bound(
                     relation_id=relation_id,
-                    payload=payload,
+                    address=address,
                     bound=bound,
                     relation_fields=relation_fields,
                     required_answer_evidence_ids_by_output=(
@@ -179,7 +180,7 @@ def _relations_for_bound_source(
     relations = tuple(
         _relation_for_bound(
             relation_id=f"{relation_id}_invocation_{index}",
-            payload=payload,
+            address=address,
             bound=_bound_source_with_source(bound, source=source),
             relation_fields=relation_fields,
             required_answer_evidence_ids_by_output=(
@@ -213,17 +214,17 @@ def _relations_for_bound_source(
 def _relation_for_bound_source(
     *,
     relation_id: str,
-    payload: dict[str, Any],
+    address: PatternAddress,
     relation_fields: tuple[RelationField, ...],
     bound_sources: dict[str, BoundSource],
     relation_builder: RelationBuilder,
     required_answer_evidence_ids_by_output: Mapping[str, tuple[str, ...]] | None = None,
-    selected_metric: Mapping[str, Any] | None = None,
+    selected_metric: CompiledMetric | None = None,
 ) -> Relation:
-    bound = _bound_source(payload, bound_sources=bound_sources)
+    bound = _bound_source(address.source_binding_id, bound_sources=bound_sources)
     return _relation_for_bound(
         relation_id=relation_id,
-        payload=payload,
+        address=address,
         bound=bound,
         relation_fields=relation_fields,
         required_answer_evidence_ids_by_output=required_answer_evidence_ids_by_output,
@@ -252,12 +253,12 @@ def _bound_source_with_source(bound: BoundSource, *, source: Any) -> BoundSource
 def _relation_for_bound(
     *,
     relation_id: str,
-    payload: dict[str, Any],
+    address: PatternAddress,
     bound: BoundSource,
     relation_fields: tuple[RelationField, ...],
     relation_builder: RelationBuilder,
     required_answer_evidence_ids_by_output: Mapping[str, tuple[str, ...]] | None = None,
-    selected_metric: Mapping[str, Any] | None = None,
+    selected_metric: CompiledMetric | None = None,
 ) -> Relation:
     if bound.source is None:
         raise ValueError("fact plan references unknown relation source binding")
@@ -275,7 +276,7 @@ def _relation_for_bound(
         row_filters=row_filters,
     )
     _validate_relation_fields_for_bound(
-        payload=payload,
+        address=address,
         bound=bound,
         relation_fields=relation_fields,
         required_answer_evidence_ids_by_output=required_answer_evidence_ids_by_output,
@@ -296,9 +297,14 @@ def _source_with_filters(
 
 
 def _relation_source_filters(
-    applied_filters: tuple[dict[str, Any], ...],
+    applied_filters: tuple[SourceAppliedFilter, ...],
 ) -> tuple[DraftRelationSourceAppliedFilter, ...]:
-    return DraftRelationSourceAppliedFilter.from_payloads(applied_filters)
+    return tuple(
+        relation_filter
+        for applied_filter in applied_filters
+        for relation_filter in (applied_filter.relation_filter(),)
+        if relation_filter is not None
+    )
 
 
 def _relation_fields_with_source_requirements(
@@ -356,17 +362,17 @@ def _relation_fields_with_source_requirements(
 
 def _validate_relation_fields_for_bound(
     *,
-    payload: dict[str, Any],
+    address: PatternAddress,
     bound: BoundSource,
     relation_fields: tuple[RelationField, ...],
     required_answer_evidence_ids_by_output: Mapping[str, tuple[str, ...]] | None = None,
-    selected_metric: Mapping[str, Any] | None = None,
+    selected_metric: CompiledMetric | None = None,
 ) -> None:
     if bound.source is None:
         raise ValueError("fact plan references unknown relation source binding")
     _validate_committed_source_fields(bound, relation_fields=relation_fields)
     _validate_required_fulfillment_evidence(
-        payload=payload,
+        address=address,
         bound=bound,
         relation_fields=relation_fields,
         required_answer_evidence_ids_by_output=required_answer_evidence_ids_by_output,
@@ -375,11 +381,10 @@ def _validate_relation_fields_for_bound(
 
 
 def _bound_source(
-    payload: dict[str, Any],
+    source_binding_id: str,
     *,
     bound_sources: dict[str, BoundSource],
 ) -> BoundSource:
-    source_binding_id = _text(payload.get("source_binding_id"))
     bound = bound_sources.get(source_binding_id)
     if bound is None:
         raise ValueError("fact plan references unknown relation source binding")
@@ -402,11 +407,11 @@ def _validate_committed_source_fields(
 
 def _validate_required_fulfillment_evidence(
     *,
-    payload: dict[str, Any],
+    address: PatternAddress,
     bound: BoundSource,
     relation_fields: tuple[RelationField, ...],
     required_answer_evidence_ids_by_output: Mapping[str, tuple[str, ...]] | None = None,
-    selected_metric: Mapping[str, Any] | None = None,
+    selected_metric: CompiledMetric | None = None,
 ) -> None:
     selected_field_ids = {field.field_id for field in relation_fields}
     selected_field_ids.update(_bound_param_field_ids(bound))
@@ -417,7 +422,7 @@ def _validate_required_fulfillment_evidence(
             required_answer_evidence_ids_by_output,
         )
         if required_answer_evidence_ids_by_output is not None
-        else _answer_value_field_ids_by_answer_output(payload=payload, bound=bound)
+        else _answer_value_field_ids_by_answer_output(address=address, bound=bound)
     )
     for answer_output_id, field_ids in required_fields.items():
         if answer_output_id == count_answer_output_id:
@@ -449,18 +454,14 @@ def _field_ids_by_answer_output_from_selected_evidence(
     }
 
 
-def _count_records_answer_output_id(selected_metric: Mapping[str, Any] | None) -> str:
+def _count_records_answer_output_id(selected_metric: CompiledMetric | None) -> str:
     if selected_metric is None:
         return ""
-    if _text(selected_metric.get("field_id")):
+    if selected_metric.field_id:
         return ""
-    has_count_basis = bool(_text(selected_metric.get("record_id_field_id"))) or isinstance(
-        selected_metric.get("row_population_basis"),
-        Mapping,
-    )
-    if not has_count_basis:
+    if selected_metric.row_population_basis is None:
         return ""
-    return _text(selected_metric.get("answer_output_id"))
+    return selected_metric.answer_output_id
 
 
 def _bound_param_field_ids(bound: BoundSource) -> set[str]:
@@ -471,13 +472,13 @@ def _bound_param_field_ids(bound: BoundSource) -> set[str]:
 
 def _required_answer_value_field_ids(
     *,
-    payload: dict[str, Any],
+    address: PatternAddress,
     bound: BoundSource,
 ) -> set[str]:
     return {
         field_id
         for field_ids in _answer_value_field_ids_by_answer_output(
-            payload=payload,
+            address=address,
             bound=bound,
         ).values()
         for field_id in field_ids
@@ -486,29 +487,29 @@ def _required_answer_value_field_ids(
 
 def _answer_value_field_ids_by_answer_output(
     *,
-    payload: dict[str, Any],
+    address: PatternAddress,
     bound: BoundSource,
 ) -> dict[str, tuple[str, ...]]:
     return _field_ids_by_answer_output(
-        payload=payload,
+        address=address,
         bound=bound,
         evidence_ids_by_fulfillment=_required_evidence_ids_for_plan,
     )
 
 
-def _render_value_field_ids_by_answer_output(
+def _result_value_field_ids_by_answer_output(
     *,
-    payload: dict[str, Any],
+    address: PatternAddress,
     bound: BoundSource,
 ) -> dict[str, tuple[str, ...]]:
     output: dict[str, tuple[str, ...]] = {}
     for field_ids_by_answer_output in (
         _field_ids_by_answer_output(
-            payload=payload,
+            address=address,
             bound=bound,
-            evidence_ids_by_fulfillment=_group_key_evidence_ids_for_plan,
+            evidence_ids_by_fulfillment=_entity_field_evidence_ids_for_plan,
         ),
-        _answer_value_field_ids_by_answer_output(payload=payload, bound=bound),
+        _answer_value_field_ids_by_answer_output(address=address, bound=bound),
     ):
         for answer_output_id, field_ids in field_ids_by_answer_output.items():
             output.setdefault(answer_output_id, field_ids)
@@ -517,33 +518,28 @@ def _render_value_field_ids_by_answer_output(
 
 def _field_ids_by_answer_output(
     *,
-    payload: dict[str, Any],
+    address: PatternAddress,
     bound: BoundSource,
     evidence_ids_by_fulfillment: Any,
 ) -> dict[str, tuple[str, ...]]:
-    requested_fact_id = _text(payload.get("requested_fact_id"))
-    if not requested_fact_id or "answer_output_ids" not in payload:
+    requested_fact_id = address.requested_fact_id
+    if not requested_fact_id or not address.answer_output_ids:
         return {}
-    answer_output_ids = set(
-        _required_strings(payload.get("answer_output_ids"), "answer_output_ids")
-    )
+    answer_output_ids = set(address.answer_output_ids)
     field_id_by_evidence_id = source_field_id_by_evidence_id(bound)
     cardinality_by_evidence_id = source_cardinality_by_evidence_id(bound)
     available_field_ids = set(bound.available_field_ids)
-    plan_shape = _text(payload.get("pattern"))
+    plan_shape = address.plan_shape
     output: dict[str, tuple[str, ...]] = {}
     for fulfillment in bound.fulfillments:
         if fulfillment.requested_fact_id != requested_fact_id:
             continue
         if fulfillment.answer_output_id not in answer_output_ids:
             continue
-        scope_evidence_ids = set(fulfillment.scope_evidence_ids)
         for evidence_id in evidence_ids_by_fulfillment(
             fulfillment,
             plan_shape=plan_shape,
         ):
-            if evidence_id in scope_evidence_ids:
-                continue
             if not evidence_is_compatible_with_plan_shape(
                 cardinality_by_evidence_id.get(evidence_id, ""),
                 plan_shape=plan_shape,
@@ -571,53 +567,32 @@ def _required_evidence_ids_for_plan(
     return required_fulfillment_evidence_ids(fulfillment, plan_shape=plan_shape)
 
 
-def _group_key_evidence_ids_for_plan(
+def _entity_field_evidence_ids_for_plan(
     fulfillment: Any,
     *,
     plan_shape: str,
 ) -> tuple[str, ...]:
     if plan_shape not in {"aggregate_by_group", "ranked_aggregate"}:
         return ()
-    return group_key_evidence_ids(fulfillment)
+    return entity_field_evidence_ids(fulfillment)
 
 
 def _validate_metric_source_compatibility(
     *,
-    payload: dict[str, Any],
-    metric: dict[str, Any],
+    address: PatternAddress,
+    metric: CompiledMetric,
     bound_sources: dict[str, BoundSource],
 ) -> None:
-    record_id_field_id = metric["record_id_field_id"]
-    if not record_id_field_id:
+    if metric.row_population_basis is None:
         return
-    bound = _bound_source(payload, bound_sources=bound_sources)
+    bound = _bound_source(address.source_binding_id, bound_sources=bound_sources)
     numeric_answer_field_ids = {
         field_id
-        for field_id in _required_answer_value_field_ids(payload=payload, bound=bound)
+        for field_id in _required_answer_value_field_ids(address=address, bound=bound)
         if _source_field_is_numeric(bound, field_id)
     }
     if numeric_answer_field_ids:
         raise ValueError("count_records metric cannot replace numeric answer evidence")
-    source_field = next(
-        (
-            field
-            for field in bound.available_fields
-            if field.field_id == record_id_field_id
-        ),
-        None,
-    )
-    if source_field is None:
-        return
-    if source_field.type.lower() in {
-        "integer",
-        "number",
-        "decimal",
-        "float",
-        "double",
-    }:
-        raise ValueError(
-            "count_records metric requires a non-numeric row identity field"
-        )
 
 
 def _source_field_is_numeric(bound: BoundSource, field_id: str) -> bool:
@@ -626,10 +601,6 @@ def _source_field_is_numeric(bound: BoundSource, field_id: str) -> bool:
         and field.type.lower() in {"integer", "number", "decimal", "float", "double"}
         for field in bound.available_fields
     )
-
-
-def _field_specs(value: Any) -> tuple[dict[str, str], ...]:
-    return tuple(_field_spec(item) for item in _dicts(value))
 
 
 def _field_spec(payload: dict[str, Any]) -> dict[str, str]:
@@ -643,38 +614,6 @@ def _field_spec(payload: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def _rank_spec(payload: dict[str, Any]) -> dict[str, Any]:
-    limit = payload.get("limit")
-    limit_is_boolean = isinstance(limit, bool)
-    limit_is_integer = isinstance(limit, int) and not limit_is_boolean
-    limit_is_not_integer = not limit_is_integer
-    limit_is_not_positive = limit_is_integer and limit < 1
-    if limit_is_boolean or limit_is_not_integer or limit_is_not_positive:
-        raise ValueError("rank.limit must be a positive integer")
-    limit_value_id = _text(payload.get("limit_value_id"))
-    return {
-        "limit": limit,
-        "limit_value_id": limit_value_id,
-        "sort": _enum(SortDirection, payload.get("sort"), "rank.sort"),
-    }
-
-
-def _scalar_output_spec(payload: dict[str, Any]) -> dict[str, str]:
-    scalar_id = _safe_field_id(_text(payload.get("scalar_id")) or "value")
-    label = _text(payload.get("label")) or scalar_id
-    return {
-        "scalar_id": scalar_id,
-        "label": label,
-        "output_id": _safe_field_id(label or scalar_id),
-    }
-
-
-def _relation_operand(payload: dict[str, Any]) -> dict[str, Any]:
-    if not _text(payload.get("source_binding_id")):
-        raise ValueError("relation operand requires source_binding_id")
-    return dict(payload)
-
-
 def _identity_relation_fields(field_ids: tuple[str, ...]) -> tuple[RelationField, ...]:
     return tuple(
         RelationField(
@@ -682,27 +621,6 @@ def _identity_relation_fields(field_ids: tuple[str, ...]) -> tuple[RelationField
             roles=(FieldBindingRole.IDENTITY, FieldBindingRole.OUTPUT),
         )
         for field_id in field_ids
-    )
-
-
-def _join_key_specs(value: Any) -> tuple[dict[str, str], ...]:
-    return tuple(
-        {
-            "left_field_id": _text(item.get("left_field_id")),
-            "right_field_id": _text(item.get("right_field_id")),
-        }
-        for item in _required_dicts(value, "join_keys")
-    )
-
-
-def _joined_output_fields(value: Any) -> tuple[dict[str, str], ...]:
-    return tuple(
-        _field_spec(
-            {
-                "field_id": item.get("field_id"),
-            }
-        )
-        for item in _required_dicts(value, "output_fields")
     )
 
 

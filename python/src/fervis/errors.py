@@ -7,9 +7,12 @@ runtime code should not import host application error modules.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypeVar
 
 from . import error_codes as codes
+
+
+_APIErrorT = TypeVar("_APIErrorT", bound="APIError")
 
 
 class APIError(Exception):
@@ -353,7 +356,7 @@ class Unavailable(APIError):
 
 
 def build_error(
-    exception_cls: type[APIError],
+    exception_cls: type[_APIErrorT],
     code: str,
     message: str,
     *,
@@ -361,7 +364,7 @@ def build_error(
     developer_message: str | None = None,
     details: list[dict[str, Any]] | None = None,
     retry_after: int | None = None,
-) -> APIError:
+) -> _APIErrorT:
     return exception_cls(
         code=code,
         message=message,

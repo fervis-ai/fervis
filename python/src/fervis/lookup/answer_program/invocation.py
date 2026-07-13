@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import TYPE_CHECKING, Any
@@ -10,7 +11,14 @@ from fervis.lookup.relation_catalog import (
     CatalogEndpointMetadata,
     RelationCatalog,
 )
-from fervis.lookup.canonical_data import canonical_runtime_json
+from fervis.lookup.canonical_data import (
+    RuntimeValue,
+    canonical_runtime_json,
+)
+from fervis.lookup.plan_execution.declared_values import (
+    declared_equal,
+    parse_declared_value,
+)
 from fervis.lookup.plan_execution.errors import (
     RelationEngineError,
     VerificationError,
@@ -96,7 +104,7 @@ class AnswerExecution:
     program: AnswerProgram | None = None
     program_id: str = ""
     invocation_id: str = ""
-    proof_node_refs_by_render_output_id: dict[str, tuple[str, ...]] = field(
+    proof_node_refs_by_result_output_id: dict[str, tuple[str, ...]] = field(
         default_factory=dict
     )
     relations: tuple[RelationRows, ...] = ()
@@ -224,8 +232,8 @@ def execute_verified_program(
             issue=classified,
             program=answer,
             program_id=answer_program_id(answer),
-            proof_node_refs_by_render_output_id=(
-                execution.proof_node_refs_by_render_output_id
+            proof_node_refs_by_result_output_id=(
+                execution.proof_node_refs_by_result_output_id
             ),
             relations=engine_output.relations,
             proof_refs=_proof_refs(engine_output.relations),
@@ -239,8 +247,8 @@ def execute_verified_program(
         fact_result=classified,
         program=answer,
         program_id=answer_program_id(answer),
-        proof_node_refs_by_render_output_id=(
-            execution.proof_node_refs_by_render_output_id
+        proof_node_refs_by_result_output_id=(
+            execution.proof_node_refs_by_result_output_id
         ),
         relations=engine_output.relations,
         proof_refs=_proof_refs(engine_output.relations),
@@ -250,6 +258,8 @@ def execute_verified_program(
         effective_requested_facts=execution.effective_requested_facts,
         row_context=row_context,
     )
+
+
 def _relation_rows(
     relation: Relation,
     *,
@@ -292,7 +302,14 @@ def _relation_rows(
         kept = tuple(
             (row, context)
             for row, context in _rows_with_context(rows)
-            if all(_row_filter_matches(row, relation, item) for item in row_filters)
+            if all(
+                _row_filter_matches(
+                    row,
+                    field_types=rows.relation.field_types or {},
+                    row_filter=item,
+                )
+                for item in row_filters
+            )
         )
         kept_rows = tuple(row for row, _context in kept)
         rows = _RelationExecutionRows(
@@ -391,9 +408,7 @@ def _source_relation_rows(
                         generated,
                         evidence=RelationEvidence(
                             source_refs=(row_source.id,),
-                            authority_refs=(
-                                (authority_ref,) if authority_ref else ()
-                            ),
+                            authority_refs=((authority_ref,) if authority_ref else ()),
                             snapshot_hash=relation_snapshot_hash(generated.rows),
                             proof_refs=generated.completeness.proof_refs,
                         ),
@@ -440,7 +455,6 @@ def _source_relation_rows(
                 grain_keys=relation.grain_keys,
                 field_types=_row_source_field_types(row_source),
                 field_answer_output_ids=_row_source_field_answer_output_ids(row_source),
-                identity_type=_relation_identity_type(relation, row_source=row_source),
                 evidence=RelationEvidence(
                     source_refs=(row_source.id,),
                     read_refs=(read.id,),
@@ -638,12 +652,10 @@ def _fanout_api_result(
         truncated = truncated or bool(api_read.result.get("truncated") is True)
         rows.extend(api_read.rows)
     result = {
-                "responseStatus": 200,
-                "responseBody": _fanout_response_body(
-                    row_source=row_source, rows=tuple(rows)
-                ),
-                "truncated": truncated,
-            }
+        "responseStatus": 200,
+        "responseBody": _fanout_response_body(row_source=row_source, rows=tuple(rows)),
+        "truncated": truncated,
+    }
     return (
         _ApiReadResult(
             result=result,
@@ -833,47 +845,35 @@ def _dedupe_refs(refs: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(ref for ref in refs if ref))
 
 
-def _relation_identity_type(relation: Relation, *, row_source: RowSource) -> str:
-    identity_types: set[str] = set()
-    for relation_field in relation.fields:
-        if relation_field.field_id not in set(relation.grain_keys):
-            continue
-        row_source_field = row_source.field(relation_field.field_id)
-        identity = row_source_field.identity
-        if identity is not None and identity.entity_ref:
-            identity_types.add(identity.entity_ref)
-    if len(identity_types) == 1:
-        return next(iter(identity_types))
-    return ""
-
-
 def _bound_row(
     raw: dict[str, Any],
     *,
     relation: Relation,
     catalog: RelationCatalog,
     row_source: RowSource,
-) -> dict[str, object]:
+) -> dict[str, RuntimeValue]:
     read = catalog.read(row_source.read_id)
     fields_by_ref = {field.ref: field for field in read.fields}
-    output: dict[str, object] = {}
+    output: dict[str, RuntimeValue] = {}
     for relation_field in relation.fields:
         row_source_field = row_source.field(relation_field.field_id)
         catalog_field = fields_by_ref.get(row_source_field.field_ref)
         if catalog_field is None:
             raise ValueError(f"unknown relation field {relation_field.field_id}")
-        output[relation_field.field_id] = required_response_path_value(
+        raw_value = required_response_path_value(
             raw,
             row_source_field.response_path
             or relative_response_path(catalog_field.path, row_source.row_path),
         )
+        output[relation_field.field_id] = parse_declared_value(
+            raw_value,
+            row_source_field.type.value,
+        )
     return output
 
 
-def _bound_memory_row(
-    row: dict[str, object], *, relation: Relation
-) -> dict[str, object]:
-    output: dict[str, object] = {}
+def _bound_memory_row(row: Row, *, relation: Relation) -> dict[str, RuntimeValue]:
+    output: dict[str, RuntimeValue] = {}
     for relation_field in relation.fields:
         if relation_field.field_id in row:
             output[relation_field.field_id] = row[relation_field.field_id]
@@ -883,17 +883,26 @@ def _bound_memory_row(
 
 
 def _row_filter_matches(
-    row: dict[str, object],
-    relation: Relation,
+    row: Row,
+    *,
+    field_types: Mapping[str, str],
     row_filter: ResolvedRowFilter,
 ) -> bool:
     value = row.get(row_filter.field_id)
+    field_type = field_types.get(row_filter.field_id)
     if row_filter.operator == ValueFilterOperator.EQUALS:
-        return str(value) == str(row_filter.value)
+        return declared_equal(value, field_type, row_filter.value, None)
     if row_filter.operator == ValueFilterOperator.IN:
-        return str(value).lower() in {
-            str(item).lower() for item in row_filter.value or ()
-        }
+        return any(
+            declared_equal(value, field_type, item, None)
+            for item in row_filter.value or ()
+        )
+    if row_filter.operator == ValueFilterOperator.CONTAINS:
+        if not isinstance(value, list | tuple):
+            return False
+        return any(
+            declared_equal(item, None, row_filter.value, None) for item in value
+        )
     raise ValueError(f"unsupported row filter operator: {row_filter.operator.value}")
 
 

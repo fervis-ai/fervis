@@ -20,7 +20,11 @@ def test_fervis_catalog_returns_configured_fastapi_endpoint_contracts(
             "schema_version": "v0.1",
             "framework": "fastapi",
             "default_environment": "local",
-            "host": {"organization_name": "Acme", "about_api": "Acme operations API.", "timezone": "UTC"},
+            "host": {
+                "organization_name": "Acme",
+                "about_api": "Acme operations API.",
+                "timezone": "UTC",
+            },
             "routes": {"prefix": "/fervis/"},
             "models": {
                 "providers": [
@@ -127,7 +131,11 @@ def test_fervis_catalog_returns_configured_flask_route_only_endpoints(
             "schema_version": "v0.1",
             "framework": "flask",
             "default_environment": "local",
-            "host": {"organization_name": "Acme", "about_api": "Acme operations API.", "timezone": "UTC"},
+            "host": {
+                "organization_name": "Acme",
+                "about_api": "Acme operations API.",
+                "timezone": "UTC",
+            },
             "routes": {"prefix": "/fervis/"},
             "models": {
                 "providers": [
@@ -265,7 +273,11 @@ def test_fervis_catalog_reports_missing_flask_dependency_action(
             "schema_version": "v0.1",
             "framework": "flask",
             "default_environment": "local",
-            "host": {"organization_name": "Acme", "about_api": "Acme operations API.", "timezone": "UTC"},
+            "host": {
+                "organization_name": "Acme",
+                "about_api": "Acme operations API.",
+                "timezone": "UTC",
+            },
             "routes": {"prefix": "/fervis/"},
             "models": {
                 "providers": [
@@ -340,7 +352,11 @@ def test_fervis_catalog_reports_missing_flask_submodule_dependency_action(
             "schema_version": "v0.1",
             "framework": "flask",
             "default_environment": "local",
-            "host": {"organization_name": "Acme", "about_api": "Acme operations API.", "timezone": "UTC"},
+            "host": {
+                "organization_name": "Acme",
+                "about_api": "Acme operations API.",
+                "timezone": "UTC",
+            },
             "routes": {"prefix": "/fervis/"},
             "models": {
                 "providers": [
@@ -375,9 +391,7 @@ def test_fervis_catalog_reports_missing_flask_submodule_dependency_action(
         },
     )
     (root / "app.py").write_text(
-        "import werkzeug.contrib\n\n"
-        "from flask import Flask\n\n"
-        "app = Flask(__name__)\n",
+        "import werkzeug.contrib\n\nfrom flask import Flask\n\napp = Flask(__name__)\n",
         encoding="utf-8",
     )
     stdout = StringIO()
@@ -414,7 +428,11 @@ def test_fervis_catalog_reports_incompatible_flask_dependency_action(
             "schema_version": "v0.1",
             "framework": "flask",
             "default_environment": "local",
-            "host": {"organization_name": "Acme", "about_api": "Acme operations API.", "timezone": "UTC"},
+            "host": {
+                "organization_name": "Acme",
+                "about_api": "Acme operations API.",
+                "timezone": "UTC",
+            },
             "routes": {"prefix": "/fervis/"},
             "models": {
                 "providers": [
@@ -490,53 +508,30 @@ def _fastapi_project(tmp_path: Path) -> Path:
     (app_dir / "__init__.py").write_text("", encoding="utf-8")
     (app_dir / "main.py").write_text(
         """
-class App:
-    def openapi(self):
-        return {
-            "paths": {
-                "/api/orders/": {
-                    "get": {
-                        "operationId": "list_orders",
-                        "parameters": [
-                            {
-                                "name": "status",
-                                "in": "query",
-                                "required": False,
-                                "schema": {"type": "string"},
-                            }
-                        ],
-                        "responses": {
-                            "200": {
-                                "content": {
-                                    "application/json": {
-                                        "schema": {
-                                            "type": "array",
-                                            "items": {
-                                                "type": "object",
-                                                "properties": {
-                                                    "id": {"type": "string"},
-                                                    "status": {"type": "string"},
-                                                    "total": {"type": "number"},
-                                                },
-                                            },
-                                        }
-                                    }
-                                }
-                            }
-                        },
-                    }
-                },
-                "/internal/orders/": {
-                    "get": {
-                        "operationId": "internal_orders",
-                        "responses": {"200": {"description": "ok"}},
-                    }
-                },
-            }
-        }
+from decimal import Decimal
+from typing import Optional
+
+from fastapi import FastAPI, Query
+from pydantic import BaseModel
+
+
+class Order(BaseModel):
+    id: str
+    status: str
+    total: Decimal
 
 def create_app():
-    return App()
+    app = FastAPI()
+
+    @app.get("/api/orders/", response_model=list[Order], operation_id="list_orders")
+    def list_orders(status: Optional[str] = Query(default=None)):
+        return []
+
+    @app.get("/internal/orders/", operation_id="internal_orders")
+    def internal_orders():
+        return []
+
+    return app
 """,
         encoding="utf-8",
     )

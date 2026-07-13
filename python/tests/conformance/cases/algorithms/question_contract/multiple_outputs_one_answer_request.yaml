@@ -9,8 +9,11 @@ input:
   answer_fact: salespeople who had sales at Westlands Beauty Hub on December 3, 2025
   answer_outputs:
   - description: salespeople
+    role: ANSWER_VALUE
   - description: products they sold
+    role: ANSWER_VALUE
   - description: total sales per person
+    role: ANSWER_VALUE
   question_inputs:
   - input_ref: store
     source: question_context
@@ -37,8 +40,11 @@ expect:
     requested_facts:
     - answer_outputs:
       - description: salespeople
+        role: ANSWER_VALUE
       - description: products they sold
+        role: ANSWER_VALUE
       - description: total sales per person
+        role: ANSWER_VALUE
   result_exact_fields:
     question_inputs:
     - id: store

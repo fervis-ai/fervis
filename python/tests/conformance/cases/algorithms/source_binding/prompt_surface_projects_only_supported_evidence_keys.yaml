@@ -17,13 +17,19 @@ expect:
           - {field_id: label, path: root.label, type: string}
     prompt_slot_keys:
       - answer_output_id
+      - entity_evidence
       - fulfillment_slot_id
-      - group_key_evidence
-    prompt_slot_group_key_evidence:
-      - {evidence_id: visible_name, field_id: name}
+    prompt_slot_entity_evidence:
+      - evidence_id: location_key
+        key_id: location_key
+        entity_kind: location
+        components: [{component_id: location_id, field_id: name}]
     parser_slot_keys:
       - answer_output_id
+      - entity_evidence
       - fulfillment_slot_id
-      - group_key_evidence
-    parser_slot_group_key_evidence:
-      - {evidence_id: visible_name, field_id: name}
+    parser_slot_entity_evidence:
+      - evidence_id: location_key
+        key_id: location_key
+        entity_kind: location
+        components: [{component_id: location_id, field_id: name}]

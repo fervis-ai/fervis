@@ -15,11 +15,9 @@ input:
       - field_id: sale_id
         type: uuid
         row_cardinality: many
-        identity: {entity_ref: sale, identity_field: sale_id, primary_key: true, stable: true}
       - field_id: staff_id
         type: uuid
         row_cardinality: many
-        identity: {entity_ref: staff, identity_field: staff_id, primary_key: false, stable: true}
       - field_id: staff_name
         type: string
         row_cardinality: many
@@ -45,8 +43,13 @@ input:
       - {evidence_id: source_1.data.amount, field_id: amount, row_cardinality: many}
     fulfillments:
       - answer_output_id: answer_1
-        group_key_evidence_ids:
-          - source_1.data.staff_id
+        entity_evidence:
+          type: entity_reference
+          reference_id: staff_reference
+          target_key_id: staff_primary
+          target_entity_kind: staff
+          components:
+            - {component_id: staff_id, field_evidence_id: source_1.data.staff_id, field_id: staff_id}
         metric_measure_evidence_ids:
           - source_1.data.amount
 expect:

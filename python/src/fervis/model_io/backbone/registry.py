@@ -33,9 +33,9 @@ class ProviderRegistration:
     hitl_runtime: HitlRuntime
     hooks_runtime: HooksRuntime
     trace_runtime: TraceRuntime
-    budget_tool_specs: Callable[
-        [tuple[ToolSpec, ...]], tuple[Any, ...]
-    ] = _identity_tool_specs
+    budget_tool_specs: Callable[[tuple[ToolSpec, ...]], tuple[Any, ...]] = (
+        _identity_tool_specs
+    )
 
 
 _REGISTRY: dict[str, ProviderRegistration] = {}

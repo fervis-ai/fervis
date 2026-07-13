@@ -21,11 +21,12 @@ input:
       description: which population item has the highest metric
       answer_outputs:
         - id: answer_1
+          role: ANSWER_VALUE
   resource_name_matches:
     - requested_fact_id: fact_1
       answer_output_resource_lineage:
         - answer_output_id: answer_1
-          support_role: ROW_POPULATION
+          support_role: ROW_COUNT
           source_text: population rows with metric context
           matching_resource_names: [population, crowd a, crowd b, metric record]
         - answer_output_id: answer_1

@@ -11,7 +11,9 @@ input:
     fact_description: location metric totals
     subject_text: location metric totals
     answer_expression_family: list_rows
-    answer_outputs: [location, metric_total]
+    answer_outputs:
+      - {description: location, role: ANSWER_VALUE}
+      - {description: metric_total, role: ANSWER_VALUE}
     resource_terms: [metric]
   catalog:
     reads:

@@ -11,8 +11,7 @@ input:
   response_fields:
     - name: external_id
       path: external_id
-      identity: {}
-  primary_key_fields: []
+  candidate_keys: []
 expect:
   result_contains:
     has:

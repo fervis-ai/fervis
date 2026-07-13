@@ -23,7 +23,9 @@ def materialize_requested_facts(
     population_choices: tuple[ResolvedPopulationChoice, ...],
 ) -> tuple[RequestedFact, ...]:
     constraints_by_fact = {
-        fact.id: {constraint.id: constraint for constraint in fact.population_constraints}
+        fact.id: {
+            constraint.id: constraint for constraint in fact.population_constraints
+        }
         for fact in facts
     }
     for choice in population_choices:

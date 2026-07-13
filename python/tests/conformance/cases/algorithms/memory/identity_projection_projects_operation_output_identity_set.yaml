@@ -1,5 +1,5 @@
 id: identity_projection_projects_operation_output_identity_set
-description: Complete operation-output relations project complete canonical identity sets.
+description: Complete operation-output relations project complete typed entity-key sets.
 migrates:
   - api/tests/fervis/memory/test_identity_values.py::test_memory_projection_projects_complete_operation_output_identity_set
 kind: algorithm
@@ -12,7 +12,7 @@ input:
         addresses:
           - address: relation.answer_rows
             kind: relation
-            source: {kind: operation_output, identityType: sale}
+            source: {kind: operation_output}
             grainKeys: [sale_id]
             completeness: {status: complete, pagination: not_paginated, rowCount: 2}
             rowAddresses: [row.answer_rows.1, row.answer_rows.2]
@@ -20,18 +20,32 @@ input:
             kind: row
             relation: relation.answer_rows
             identity: {sale_id: sale-1}
+            values:
+              answer_1:
+                type: entity_key
+                value: {entityKind: sale, keyId: primary_key, components: {sale_id: sale-1}}
           - address: row.answer_rows.2
             kind: row
             relation: relation.answer_rows
             identity: {sale_id: sale-2}
+            values:
+              answer_1:
+                type: entity_key
+                value: {entityKind: sale, keyId: primary_key, components: {sale_id: sale-2}}
 expect:
   result_contains:
     identity_sets:
-      - id: mem.turn_1.relation.answer_rows.identity_set.sale_id
+      - id: mem.turn_1.relation.answer_rows.entity_key_set.answer_1
         kind: identity_set
-        identity_type: sale
-        identity_field: sale_id
-        values: [sale-1, sale-2]
+        entity_kind: sale
+        key_id: primary_key
+        keys:
+          - entity_kind: sale
+            key_id: primary_key
+            components: {sale_id: sale-1}
+          - entity_kind: sale
+            key_id: primary_key
+            components: {sale_id: sale-2}
         count: 2
         display_label: 2 sale identities from prior answer
         display_label_author: backend
@@ -40,4 +54,3 @@ expect:
           status: complete
           pagination: not_paginated
           row_count: 2
-

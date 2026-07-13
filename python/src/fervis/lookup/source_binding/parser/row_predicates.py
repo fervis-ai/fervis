@@ -9,10 +9,18 @@ from fervis.lookup.source_binding.compiler_ir import (
 )
 from fervis.lookup.answer_program.relations import PopulationChoiceControllerKind
 from fervis.lookup.source_binding import provider_contract as provider_output
+from fervis.lookup.source_binding.candidates.model import SourceCandidate
 from fervis.lookup.source_binding.model import SourceBindingRequest
-from fervis.lookup.source_binding.parser.membership_effects import answer_population_tests_by_id, choice_is_included, population_choice_proof_refs, population_tests_allow_choice, relation_review_scope_decisions
+from fervis.lookup.source_binding.parser.membership_effects import (
+    answer_population_tests_by_id,
+    choice_is_included,
+    discharged_membership_test_ids,
+    population_choice_proof_refs,
+    population_tests_allow_choice,
+    relation_review_scope_decisions,
+)
 from fervis.lookup.source_binding.parser.types import RowPredicateParse
-from fervis.lookup.source_binding.parser_common import _dict, _required_dicts, _text
+from fervis.lookup.source_binding.parser_common import _text
 from fervis.lookup.source_binding.review_scope import SourceBindingReviewScope
 from fervis.lookup.source_binding.review_surface import source_binding_review_surface
 
@@ -23,15 +31,14 @@ __all__ = [
 
 
 def parse_row_predicate_filters(
-    raw_reviews: Any,
+    reviews: dict[str, provider_output.RowPredicateReviewOutput],
     *,
-    candidate: Any,
+    candidate: SourceCandidate,
     request: SourceBindingRequest,
     requested_fact_id: str,
     binding_target_id: str,
     review_scope: SourceBindingReviewScope,
 ) -> RowPredicateParse:
-    reviews = _dict(raw_reviews, "row_predicate_reviews")
     candidate_predicates_by_id = source_binding_review_surface(candidate).row_predicates
     scoped_test_ids_by_predicate = {
         predicate_id: test_ids
@@ -53,6 +60,7 @@ def parse_row_predicate_filters(
     if missing_predicate_ids:
         raise ValueError("source binding missing row predicate review")
     population_choices: list[DraftRelationSourcePopulationChoice] = []
+    discharged_test_ids: list[str] = []
     for predicate_id, raw in reviews.items():
         predicate = predicates_by_id.get(predicate_id)
         if predicate is None:
@@ -67,12 +75,13 @@ def parse_row_predicate_filters(
             scoped_test_ids=scoped_test_ids_by_predicate[predicate_id],
         )
         allowed_values = predicate.allowed_values
-        values = _row_predicate_include_values(
+        values, discharged = _row_predicate_include_values(
             raw,
             allowed_values=allowed_values,
             tests_by_id=tests_by_id,
             path=f"row_predicate_reviews.{predicate_id}",
         )
+        discharged_test_ids.extend(discharged)
         excluded_values = tuple(
             value for value in allowed_values if value not in values
         )
@@ -102,20 +111,21 @@ def parse_row_predicate_filters(
         )
     return RowPredicateParse(
         population_choices=tuple(population_choices),
+        discharged_membership_test_ids=tuple(dict.fromkeys(discharged_test_ids)),
     )
 
 
 def _row_predicate_include_values(
-    raw_review: Any,
+    review: provider_output.RowPredicateReviewOutput,
     *,
     allowed_values: tuple[str, ...],
     tests_by_id: dict[str, Any],
     path: str,
-) -> tuple[str, ...]:
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
     if not allowed_values:
         raise ValueError("row predicate requires allowed values")
     reviewed_effects = _reviewed_row_predicate_effects(
-        raw_review,
+        review,
         allowed_values=allowed_values,
         tests_by_id=tests_by_id,
         path=f"{path}.choice_reviews",
@@ -129,7 +139,7 @@ def _row_predicate_include_values(
         reviewed_effects,
         test_ids=active_test_ids,
     ):
-        return allowed_values
+        return allowed_values, ()
     values = tuple(
         value
         for value, test_effects in reviewed_effects
@@ -142,7 +152,12 @@ def _row_predicate_include_values(
     )
     if not values:
         raise ValueError("row predicate review must include at least one value")
-    return values
+    discharged = discharged_membership_test_ids(
+        reviewed_effects,
+        included_values=values,
+        tests_by_id=tests_by_id,
+    )
+    return values, discharged
 
 
 def _row_predicate_filter_test_ids(
@@ -183,18 +198,15 @@ def _has_decisive_row_predicate_effect(
 
 
 def _reviewed_row_predicate_effects(
-    raw_review: Any,
+    review: provider_output.RowPredicateReviewOutput,
     *,
     allowed_values: tuple[str, ...],
     tests_by_id: dict[str, Any],
     path: str,
 ) -> list[tuple[str, dict[str, str]]]:
-    review = provider_output.RowPredicateReviewOutput.parse(raw_review)
-    raw_choices = _required_dicts(review.choice_reviews, path)
     seen: set[str] = set()
     output: list[tuple[str, dict[str, str]]] = []
-    for raw_value in raw_choices:
-        raw = provider_output.RowPredicateChoiceReviewOutput.parse(raw_value)
+    for raw in review.choice_reviews:
         value = _text(raw.choice_option_id)
         if value not in allowed_values:
             raise ValueError("row predicate review references unknown value")
@@ -219,17 +231,16 @@ def _reviewed_row_predicate_effects(
 
 
 def _row_predicate_population_test_effects(
-    raw_results: Any,
+    results: dict[str, provider_output.RowPredicatePopulationTestResultOutput],
     *,
     tests_by_id: dict[str, Any],
     path: str,
 ) -> dict[str, str]:
-    results = _dict(raw_results, path)
     if set(results) != set(tests_by_id):
         raise ValueError("row predicate reviews must answer membership tests")
     effects: dict[str, str] = {}
     for test_id, test in tests_by_id.items():
-        raw = provider_output.RowPredicatePopulationTestResultOutput.parse(results.get(test_id))
+        raw = results[test_id]
         if _text(raw.test_id) != test_id:
             raise ValueError("row predicate population test id must match result key")
         if not _text(raw.test_question).strip():

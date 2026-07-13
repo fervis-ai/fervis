@@ -16,4 +16,3 @@ urlpatterns = [
         name="receive-transfer",
     ),
 ]
-

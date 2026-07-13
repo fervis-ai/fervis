@@ -5,7 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from enum import StrEnum
+from types import ModuleType
+from fervis.types.enums import StrEnum
 from typing import Any
 
 from fervis.model_io.backbone.dto import (
@@ -29,10 +30,11 @@ from fervis.model_io.providers.chat_runtime import (
     strip_json_fence,
 )
 
+openai_sdk: ModuleType | None
 try:  # pragma: no cover - optional dependency for runtime environments
-    from openai import OpenAI
+    import openai as openai_sdk
 except Exception:  # pragma: no cover - optional dependency not installed in tests
-    OpenAI = None
+    openai_sdk = None
 
 
 class OpenAIChatRole(StrEnum):
@@ -67,7 +69,7 @@ class OpenAICompatibleRequestPayload:
 
 class OpenAICompatibleLoopRuntime(ConfiguredChatLoopRuntime):
     def sdk_available(self) -> bool:
-        return OpenAI is not None
+        return openai_sdk is not None
 
     def worker(self):
         return _openai_compatible_request_worker
@@ -98,7 +100,7 @@ def _openai_compatible_request_worker(
     payload: OpenAICompatibleRequestPayload, result_queue
 ) -> None:
     try:
-        assert OpenAI is not None
+        assert openai_sdk is not None
         client = _client(payload)
         response = client.chat.completions.create(**_completion_kwargs(payload))
         choice = response.choices[0]
@@ -124,8 +126,8 @@ def _openai_compatible_request_worker(
 
 
 def _client(payload: OpenAICompatibleRequestPayload):
-    assert OpenAI is not None
-    return OpenAI(
+    assert openai_sdk is not None
+    return openai_sdk.OpenAI(
         api_key=payload.api_key,
         base_url=payload.base_url,
         timeout=payload.timeout,
@@ -162,9 +164,17 @@ def _base_completion_kwargs(payload: OpenAICompatibleRequestPayload) -> dict[str
 
 
 def _tool_call_kwargs(payload: OpenAICompatibleRequestPayload) -> dict[str, Any]:
+    tool_choice: object = OpenAIToolChoice.REQUIRED.value
+    if len(payload.tool_specs) == 1:
+        function = payload.tool_specs[0].get("function")
+        if isinstance(function, dict) and isinstance(function.get("name"), str):
+            tool_choice = {
+                "type": "function",
+                "function": {"name": function["name"]},
+            }
     return {
         "tools": payload.tool_specs,
-        "tool_choice": OpenAIToolChoice.REQUIRED.value,
+        "tool_choice": tool_choice,
         "parallel_tool_calls": False,
     }
 

@@ -27,14 +27,15 @@ input:
           values:
             - value_id: location
               resolved_text: Mombasa
+              frame_parameter: {kind: none}
               sources:
                 - {kind: current_span, text: Mombasa, occurrence: 1}
             - value_id: day
               resolved_text: Monday
+              frame_parameter: {kind: none}
               sources:
                 - {kind: current_span, text: that day, occurrence: 1}
                 - {kind: context_anchor, source_id: prior_question, memory_id: prior_monday, source_text: Monday}
-      frame_call: {kind: none}
 expect:
   result_contains:
     contextualized_question: How many sales did we make in Mombasa on Monday?

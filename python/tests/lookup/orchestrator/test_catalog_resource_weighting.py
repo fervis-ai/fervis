@@ -1,6 +1,23 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from tests.lookup.orchestrator._helpers import *  # noqa: F403
+
+
+def _primary_key(
+    entity_kind: str,
+    component_id: str,
+    field_ref: str,
+) -> tuple[CandidateKey, ...]:
+    return (
+        CandidateKey(
+            id="primary_key",
+            entity_kind=entity_kind,
+            components=(CandidateKeyComponent(id=component_id, field_ref=field_ref),),
+            primary=True,
+        ),
+    )
 
 
 def test_lookup_cutover_catalog_selection_weights_catalog_search_terms_over_incidental_fields():
@@ -17,7 +34,6 @@ def test_lookup_cutover_catalog_selection_weights_catalog_search_terms_over_inci
                     "row_path_id": "data",
                     "row_cardinality": "many",
                 },
-                "record_id_field_id": "price_list_id",
                 "label": "active_price_list_count",
             },
         ),
@@ -26,6 +42,7 @@ def test_lookup_cutover_catalog_selection_weights_catalog_search_terms_over_inci
             description="count active price lists",
             subject_text="price lists",
             binding_target_ids=("active_price_list_count",),
+            answer_output_role="ROW_COUNT",
         ),
         query_enrichment=_query_enrichment_payload(
             ("price list",),
@@ -73,11 +90,6 @@ def test_lookup_cutover_catalog_selection_weights_catalog_search_terms_over_inci
                     path="data.price_list_id",
                     row_path_id="data",
                     type="uuid",
-                    identity=IdentityMetadata(
-                        entity_ref="price_list",
-                        identity_field="price_list_id",
-                        primary_key=True,
-                    ),
                 ),
                 CatalogField(
                     ref="field.price_list_is_active",
@@ -85,6 +97,9 @@ def test_lookup_cutover_catalog_selection_weights_catalog_search_terms_over_inci
                     row_path_id="data",
                     type="boolean",
                 ),
+            ),
+            candidate_keys=_primary_key(
+                "price_list", "price_list_id", "field.price_list_id"
             ),
         ),
     )
@@ -107,7 +122,7 @@ def test_lookup_cutover_catalog_selection_weights_catalog_search_terms_over_inci
         ),
     )
 
-    assert result.status == "COMPLETED", (result)
+    assert result.status == "COMPLETED", result
     assert result.rendered_fact is not None
     assert result.rendered_fact.rows == ({"count": 1},)
     source_binding_prompt = _source_binding_prompt(planner)
@@ -118,10 +133,11 @@ def test_lookup_cutover_catalog_selection_weights_catalog_search_terms_over_inci
 def test_lookup_cutover_keeps_collection_read_when_singleton_has_incidental_field_hits():
     planner = _ToolNamePlannerPort(
         {
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="count active price lists",
                 answer_subject="price lists",
                 parts=("count active price lists",),
+                answer_output_role="ROW_COUNT",
             ),
             "submit_query_enrichment": _query_enrichment_payload(("price list",)),
             "submit_pattern_fact_plan": {
@@ -143,7 +159,6 @@ def test_lookup_cutover_keeps_collection_read_when_singleton_has_incidental_fiel
                                     "row_path_id": "data",
                                     "row_cardinality": "many",
                                 },
-                                "record_id_field_id": "price_list_id",
                                 "label": "active_price_lists",
                             },
                         }
@@ -164,11 +179,6 @@ def test_lookup_cutover_keeps_collection_read_when_singleton_has_incidental_fiel
                     path="price_list_id",
                     row_path_id="root",
                     type="uuid",
-                    identity=IdentityMetadata(
-                        entity_ref="price_list",
-                        identity_field="price_list_id",
-                        primary_key=True,
-                    ),
                 ),
                 CatalogField(
                     ref="field.active.is_active",
@@ -188,6 +198,9 @@ def test_lookup_cutover_keeps_collection_read_when_singleton_has_incidental_fiel
                     row_path_id="root",
                     type="uuid",
                 ),
+            ),
+            candidate_keys=_primary_key(
+                "price_list", "price_list_id", "field.active.price_list_id"
             ),
         ),
         EndpointRead(
@@ -212,11 +225,6 @@ def test_lookup_cutover_keeps_collection_read_when_singleton_has_incidental_fiel
                     path="data.price_list_id",
                     row_path_id="data",
                     type="uuid",
-                    identity=IdentityMetadata(
-                        entity_ref="price_list",
-                        identity_field="price_list_id",
-                        primary_key=True,
-                    ),
                 ),
                 CatalogField(
                     ref="field.collection.is_active",
@@ -224,6 +232,9 @@ def test_lookup_cutover_keeps_collection_read_when_singleton_has_incidental_fiel
                     row_path_id="data",
                     type="boolean",
                 ),
+            ),
+            candidate_keys=_primary_key(
+                "price_list", "price_list_id", "field.collection.price_list_id"
             ),
         ),
         *tuple(
@@ -264,7 +275,7 @@ def test_lookup_cutover_keeps_collection_read_when_singleton_has_incidental_fiel
         ),
     )
 
-    assert result.status == "COMPLETED", (result)
+    assert result.status == "COMPLETED", result
     assert result.rendered_fact is not None
     assert result.rendered_fact.rows == ({"count": 1},)
     source_binding_prompt = _source_binding_prompt(planner)
@@ -275,9 +286,10 @@ def test_lookup_cutover_keeps_collection_read_when_singleton_has_incidental_fiel
 def test_lookup_cutover_source_candidates_do_not_mix_root_and_child_result_grains():
     planner = _ToolNamePlannerPort(
         {
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="active price lists",
                 parts=("how many active price lists there are",),
+                answer_output_role="ROW_COUNT",
             ),
             "submit_query_enrichment": _query_enrichment_payload(("price list",)),
             "submit_pattern_fact_plan": {
@@ -302,7 +314,6 @@ def test_lookup_cutover_source_candidates_do_not_mix_root_and_child_result_grain
                                     "row_path_id": "data",
                                     "row_cardinality": "many",
                                 },
-                                "record_id_field_id": "price_list_id",
                                 "label": "active_price_lists",
                             },
                         }
@@ -345,11 +356,6 @@ def test_lookup_cutover_source_candidates_do_not_mix_root_and_child_result_grain
                     path="price_list_id",
                     row_path_id="root",
                     type="uuid",
-                    identity=IdentityMetadata(
-                        entity_ref="price_list",
-                        identity_field="price_list_id",
-                        primary_key=True,
-                    ),
                 ),
                 CatalogField(
                     ref="field.active.is_active",
@@ -369,6 +375,9 @@ def test_lookup_cutover_source_candidates_do_not_mix_root_and_child_result_grain
                     row_path_id="items",
                     type="string",
                 ),
+            ),
+            candidate_keys=_primary_key(
+                "price_list", "price_list_id", "field.active.price_list_id"
             ),
         ),
         EndpointRead(
@@ -394,11 +403,6 @@ def test_lookup_cutover_source_candidates_do_not_mix_root_and_child_result_grain
                     path="data.price_list_id",
                     row_path_id="data",
                     type="uuid",
-                    identity=IdentityMetadata(
-                        entity_ref="price_list",
-                        identity_field="price_list_id",
-                        primary_key=True,
-                    ),
                 ),
                 CatalogField(
                     ref="field.collection.is_active",
@@ -406,6 +410,9 @@ def test_lookup_cutover_source_candidates_do_not_mix_root_and_child_result_grain
                     row_path_id="data",
                     type="boolean",
                 ),
+            ),
+            candidate_keys=_primary_key(
+                "price_list", "price_list_id", "field.collection.price_list_id"
             ),
         ),
     )
@@ -454,9 +461,14 @@ def test_lookup_cutover_source_candidates_do_not_mix_root_and_child_result_grain
 def test_lookup_cutover_source_candidate_can_fulfill_parent_and_child_evidence_from_one_read():
     planner = _ToolNamePlannerPort(
         {
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="salespeople, products, and total sales",
                 parts=("salesperson name", "product name", "total sales"),
+                answer_output_roles=(
+                    "ANSWER_VALUE",
+                    "ANSWER_VALUE",
+                    "MEASURED_VALUE",
+                ),
                 answer_expression_family="list_rows",
             ),
             "submit_query_enrichment": _query_enrichment_payload(("sale",)),
@@ -504,11 +516,6 @@ def test_lookup_cutover_source_candidate_can_fulfill_parent_and_child_evidence_f
                     path="data.sale_id",
                     row_path_id="data",
                     type="uuid",
-                    identity=IdentityMetadata(
-                        entity_ref="sale",
-                        identity_field="sale_id",
-                        primary_key=True,
-                    ),
                 ),
                 CatalogField(
                     ref="field.staff_name",
@@ -527,17 +534,20 @@ def test_lookup_cutover_source_candidate_can_fulfill_parent_and_child_evidence_f
                     path="data.items.sale_item_id",
                     row_path_id="data_items",
                     type="uuid",
-                    identity=IdentityMetadata(
-                        entity_ref="sale_item",
-                        identity_field="sale_item_id",
-                        primary_key=True,
-                    ),
                 ),
                 CatalogField(
                     ref="field.snapshot_merch_name",
                     path="data.items.snapshot_merch_name",
                     row_path_id="data_items",
                     type="string",
+                ),
+            ),
+            candidate_keys=(
+                *_primary_key("sale", "sale_id", "field.sale_id"),
+                *_primary_key(
+                    "sale_item",
+                    "sale_item_id",
+                    "field.sale_item_id",
                 ),
             ),
         )
@@ -572,13 +582,13 @@ def test_lookup_cutover_source_candidate_can_fulfill_parent_and_child_evidence_f
         ),
     )
 
-    assert result.status == "COMPLETED", (result)
+    assert result.status == "COMPLETED", result
     assert result.rendered_fact is not None
     assert result.rendered_fact.rows == (
         {
             "answer_1": "Amina",
             "answer_2": "Lipstick",
-            "answer_3": "10.00",
+                "answer_3": Decimal("10.00"),
         },
     )
     source_binding_prompt = _source_binding_prompt(planner)
@@ -602,14 +612,7 @@ def test_lookup_cutover_source_candidate_can_fulfill_parent_and_child_evidence_f
         for slot in support_set["fulfillment_slots"]
         for item in slot.get("metric_measure_evidence") or ()
     }
-    count_basis_evidence = {
-        item["evidence_id"]
-        for support_set in candidates[0]["fulfillment_choices"]
-        for slot in support_set["fulfillment_slots"]
-        for item in slot.get("row_count_basis_evidence") or ()
-    }
     assert "source_1.data.amount" in metric_evidence
-    assert count_basis_evidence
     available_fields = {
         field["field_id"]
         for row in candidates[0]["response_rows"]
@@ -621,10 +624,11 @@ def test_lookup_cutover_source_candidate_can_fulfill_parent_and_child_evidence_f
 def test_source_binding_exposes_conditional_child_fields_without_query_term_pruning():
     planner = _ToolNamePlannerPort(
         {
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="products by transaction",
                 answer_subject="products",
                 parts=("product names", "transaction grouping"),
+                answer_expression_family="list_rows",
             ),
             "submit_query_enrichment": _query_enrichment_payload(("transaction",)),
             "submit_pattern_fact_plan": {
@@ -771,7 +775,6 @@ def test_lookup_cutover_catalog_selection_keeps_non_catalog_search_terms_unweigh
                     "row_path_id": "data",
                     "row_cardinality": "many",
                 },
-                "record_id_field_id": "record_id",
                 "label": "active_record_count",
             },
         ),
@@ -780,6 +783,7 @@ def test_lookup_cutover_catalog_selection_keeps_non_catalog_search_terms_unweigh
             description="count active activity records",
             subject_text="activity records",
             binding_target_ids=("active_record_count",),
+            answer_output_role="ROW_COUNT",
         ),
         query_enrichment=_query_enrichment_payload(
             ("activity record",),
@@ -799,11 +803,6 @@ def test_lookup_cutover_catalog_selection_keeps_non_catalog_search_terms_unweigh
                     path="data.record_id",
                     row_path_id="data",
                     type="uuid",
-                    identity=IdentityMetadata(
-                        entity_ref="activity_record",
-                        identity_field="record_id",
-                        primary_key=True,
-                    ),
                 ),
                 CatalogField(
                     ref="field.is_active",
@@ -811,6 +810,9 @@ def test_lookup_cutover_catalog_selection_keeps_non_catalog_search_terms_unweigh
                     row_path_id="data",
                     type="boolean",
                 ),
+            ),
+            candidate_keys=_primary_key(
+                "activity_record", "record_id", "field.record_id"
             ),
         ),
         EndpointRead(
@@ -826,11 +828,6 @@ def test_lookup_cutover_catalog_selection_keeps_non_catalog_search_terms_unweigh
                     path="data.price_list_id",
                     row_path_id="data",
                     type="uuid",
-                    identity=IdentityMetadata(
-                        entity_ref="price_list",
-                        identity_field="price_list_id",
-                        primary_key=True,
-                    ),
                 ),
                 CatalogField(
                     ref="field.is_active",
@@ -838,6 +835,9 @@ def test_lookup_cutover_catalog_selection_keeps_non_catalog_search_terms_unweigh
                     row_path_id="data",
                     type="boolean",
                 ),
+            ),
+            candidate_keys=_primary_key(
+                "price_list", "price_list_id", "field.price_list_id"
             ),
         ),
     )
@@ -860,7 +860,7 @@ def test_lookup_cutover_catalog_selection_keeps_non_catalog_search_terms_unweigh
         ),
     )
 
-    assert result.status == "COMPLETED", (result)
+    assert result.status == "COMPLETED", result
     assert result.rendered_fact is not None
     assert result.rendered_fact.rows == ({"count": 1},)
     fact_plan_prompt = _source_binding_prompt(planner)

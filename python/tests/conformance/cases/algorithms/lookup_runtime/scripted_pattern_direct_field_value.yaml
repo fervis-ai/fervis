@@ -53,7 +53,7 @@ expect:
     rendered_rows:
       - answer_1: Location Alpha
     tool_names:
-      - submit_answer_request_contract
+      - submit_question_contract_outcome
       - submit_query_enrichment
       - submit_read_eligibility
       - submit_source_alignment_reviews

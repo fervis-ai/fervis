@@ -146,4 +146,6 @@ def _candidate_spec_values(
     *,
     key: str,
 ) -> tuple[str, ...]:
-    return tuple(str(value) for value in candidate_spec.get(key) or () if str(value))
+    raw_values = candidate_spec.get(key)
+    values = raw_values if isinstance(raw_values, (list, tuple)) else ()
+    return tuple(str(value) for value in values if str(value))

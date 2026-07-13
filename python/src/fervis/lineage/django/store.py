@@ -20,7 +20,7 @@ class DjangoLineageRecorderStore:
     def get_or_insert_row(self, row: LineageRow) -> LineageRow:
         model = _model_for(row.key)
         try:
-            record, _ = model.objects.get_or_create(
+            record, _ = model._default_manager.get_or_create(
                 **row.identity,
                 defaults=row.defaults,
             )
@@ -29,7 +29,7 @@ class DjangoLineageRecorderStore:
         return _stored_row(row, record)
 
     def insert_row(self, row: LineageRow) -> None:
-        _model_for(row.key).objects.create(**row.values)
+        _model_for(row.key)._default_manager.create(**row.values)
 
     def find_row(
         self,
@@ -39,7 +39,7 @@ class DjangoLineageRecorderStore:
         fields: tuple[str, ...],
     ) -> LineageRow | None:
         try:
-            record = _model_for(key).objects.get(**lookup)
+            record = _model_for(key)._default_manager.get(**lookup)
         except ObjectDoesNotExist:
             return None
         return _stored_row_for_lookup(
@@ -53,12 +53,12 @@ class DjangoLineageRecorderStore:
     ) -> django_models.Model:
         model = _model_for(row.key)
         try:
-            return model.objects.get(**row.identity)
+            return model._default_manager.get(**row.identity)
         except ObjectDoesNotExist:
             pass
         if row.conflict_lookup:
             try:
-                return model.objects.get(**row.conflict_lookup)
+                return model._default_manager.get(**row.conflict_lookup)
             except ObjectDoesNotExist:
                 pass
         raise original_error

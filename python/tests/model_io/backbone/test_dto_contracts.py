@@ -12,9 +12,7 @@ def test_provider_dtos_expose_no_sdk_specific_types(fervis_foundation_reset):
     modules = [type(item).__module__.lower() for item in _provider_dtos()]
 
     assert [
-        module
-        for module in modules
-        if "agents" in module or "langchain" in module
+        module for module in modules if "agents" in module or "langchain" in module
     ] == []
 
 

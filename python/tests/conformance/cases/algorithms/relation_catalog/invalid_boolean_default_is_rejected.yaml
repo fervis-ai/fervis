@@ -17,3 +17,4 @@ input:
 expect:
   result_contains:
     status: rejected
+    code: invalid_relation_catalog

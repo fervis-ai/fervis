@@ -44,6 +44,7 @@ input:
         owned_question_input_refs: []
     answer_outputs:
     - description: total sales amount
+      role: ANSWER_VALUE
     used_question_inputs:
     - staff
     - period
@@ -65,6 +66,7 @@ input:
         owned_question_input_refs: []
     answer_outputs:
     - description: store
+      role: ANSWER_VALUE
     used_question_inputs:
     - staff
     - period

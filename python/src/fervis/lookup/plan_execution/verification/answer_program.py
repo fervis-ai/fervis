@@ -29,10 +29,10 @@ from .operations import (
     _verify_operation_references,
 )
 from .question_contract import _verify_question_contract
-from .render import (
-    _render_output_fact_refs,
-    _verify_render_output_targets,
-    _verify_render_references,
+from .result_projection import (
+    _result_output_fact_refs,
+    _verify_result_output_targets,
+    _verify_result_references,
 )
 from .sources import (
     _allowed_read_ids,
@@ -72,8 +72,6 @@ def _verify_answer_program_structure(
     _verify_question_contract(question_contract)
     if not answer.operations:
         raise VerificationError("answer plan requires at least one operation")
-    if answer.render_spec is None:
-        raise VerificationError("answer plan requires render spec")
     try:
         verify_capability_declarations(answer)
     except AnswerProgramContractError as exc:
@@ -103,12 +101,12 @@ def _verify_answer_program_structure(
     )
     if catalog is not None:
         _verify_required_source_params(
-        answer,
-        row_sources=row_sources,
+            answer,
+            row_sources=row_sources,
         )
     _verify_compute_scalar_availability(answer)
     _verify_answer_uses_evidence_input(answer)
-    _verify_render_output_targets(answer, require_output=False)
+    _verify_result_output_targets(answer, require_output=False)
     return _StructuredAnswerProgram(
         program=answer,
         bindings=bindings,
@@ -147,7 +145,7 @@ def _verify_answer_program_execution(
         answer,
         relation_contracts=relation_contracts,
     )
-    _verify_render_references(answer, relation_contracts=relation_contracts)
+    _verify_result_references(answer, relation_contracts=relation_contracts)
     _verify_fact_fulfillment(
         answer,
         question_contract=question_contract,
@@ -172,14 +170,10 @@ def _verify_fact_fulfillment(
     }
     fulfilled_outputs: set[tuple[str, str]] = set()
     fulfillments: set[tuple[str, str, str]] = set()
-    render_output_ids = {
-        render_output.id
-        for render_output in (
-            *answer.render_spec.relation_outputs,
-            *answer.render_spec.scalar_outputs,
-        )
-    }
-    render_output_fact_refs = _render_output_fact_refs(
+    result_output_ids = {
+        output.id for output in answer.result_projection.relation_outputs
+    } | {output.id for output in answer.result_projection.scalar_outputs}
+    result_output_fact_refs = _result_output_fact_refs(
         answer,
         relation_contracts=relation_contracts,
         operation_inputs=operation_inputs,
@@ -193,17 +187,17 @@ def _verify_fact_fulfillment(
         fulfillment_key = (
             fact.id,
             item.answer_output_id,
-            item.render_output_id,
+            item.result_output_id,
         )
         if fulfillment_key in fulfillments:
             raise VerificationError("duplicate fulfillment for answer output")
-        if item.render_output_id not in render_output_ids:
-            raise VerificationError("fulfillment render output is not rendered")
-        if not render_output_fact_refs.get(item.render_output_id):
-            raise VerificationError("fulfillment render output requires evidence proof")
+        if item.result_output_id not in result_output_ids:
+            raise VerificationError("fulfillment result output is not projected")
+        if not result_output_fact_refs.get(item.result_output_id):
+            raise VerificationError("fulfillment result output requires evidence proof")
         _verify_fulfillment_input_refs(
             fact,
-            proof_refs=render_output_fact_refs[item.render_output_id],
+            proof_refs=result_output_fact_refs[item.result_output_id],
         )
         fulfillments.add(fulfillment_key)
         fulfilled_outputs.add((fact.id, item.answer_output_id))
@@ -223,4 +217,4 @@ def _verify_fulfillment_input_refs(
 ) -> None:
     for input_ref in fact.input_refs:
         if f"known_input:{input_ref}" not in proof_refs:
-            raise VerificationError("fulfillment render output missing input proof")
+            raise VerificationError("fulfillment result output missing input proof")

@@ -9,7 +9,6 @@ from fervis.lookup.grounding.model import (
     KnownTimeResolutionTask,
     ResolverOutputFieldCard,
     ResolverQueryParamCard,
-    resolver_fit_question_for_option,
 )
 from fervis.lookup.grounding.schema import build_grounding_schema
 from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
@@ -37,7 +36,7 @@ class GroundingTurnPrompt(TurnPromptBase):
         self,
         builder: TurnPromptBuilder,
     ) -> tuple[PromptSection, ...]:
-        return (
+        sections = [
             builder.json_section(
                 "Known inputs to ground:", self.known_inputs_payload()
             ),
@@ -51,7 +50,22 @@ class GroundingTurnPrompt(TurnPromptBase):
             self.resolver_selection_section(builder),
             self.copying_and_validity_section(builder),
             self.output_section(builder),
-        )
+        ]
+        source = self.request.clarification_source
+        if source is not None:
+            sections.insert(
+                0,
+                builder.json_section(
+                    "Attributed clarification response:",
+                    {
+                        "response_id": source.response_id,
+                        "clarification_id": source.clarification_id,
+                        "exact_user_text": source.exact_user_text,
+                        "known_input_id": self.request.clarification_known_input_id,
+                    },
+                ),
+            )
+        return tuple(sections)
 
     def grounding_objective_section(
         self,
@@ -62,9 +76,9 @@ class GroundingTurnPrompt(TurnPromptBase):
             (
                 "Resolve known question inputs before source binding and planning.",
                 "For time inputs, author a typed time intent from the shown question span.",
-                "For named reference inputs, review every resolver option and mark whether it can resolve the lookup text into its returned API identity.",
+                "For each reference input, select the one binding option that best resolves it.",
                 "Do not decide how the identity will be used by the final answer source.",
-                "Do not force one selected resolver. The backend executes compatible resolver routes and later phases decide source use.",
+                "The selected route will validate or ground the input through a source read.",
                 "known_input_text is the original question span; lookup_text and time_expression are the resolved values to search, match, or compile.",
             ),
         )
@@ -99,20 +113,29 @@ class GroundingTurnPrompt(TurnPromptBase):
         return builder.instruction_block(
             "Resolver Selection",
             (
-                "Review every resolver option for this known input.",
-                "Mark CAN_RESOLVE_LOOKUP_TEXT when the resolver can search or match the lookup text and return the shown canonical API identity.",
-                "Mark CANNOT_RESOLVE_LOOKUP_TEXT when the resolver cannot search or match the lookup text into the shown canonical API identity.",
-                "Do not reject a resolver because you are unsure how the final answer source will use the identity.",
+                "Select exactly one binding option for this known input, or none when no shown option fits.",
+                "A related owner, container, area, location, or source is not the same entity unless the question uses it with that meaning.",
+                "Select identity_validation when the endpoint's declared path key fits field_label_text and value_meaning_hint and lookup_text contains a value of that key's declared type.",
+                "lookup_text itself need not consist only of that value.",
+                "For identity_validation, input_value is the exact value span converted to the declared type, without its field label or surrounding grammar.",
+                "Select reference_grounding when the endpoint can search or match the descriptive text.",
+                "For reference_grounding with result_kind=canonical_identity, copy lookup_text verbatim as input_value.",
+                "For reference_grounding with result_kind=matched_value, select matched_field_ref and set input_value to that field's concrete value expressed by lookup_text; remove subject words and grammar that state how it constrains the subject.",
+                "A matched input_value must be possible content of matched_field_ref, not a phrase describing the subject or its relationship to that field.",
+                "For reference_grounding, use canonical_identity when lookup_text names the entity returned by the selected route.",
+                "Use matched_value when lookup_text supplies a scalar value of one returned field rather than naming the returned entity.",
+                "A canonical identity may still constrain another population; that use does not make it a scalar matched value.",
+                "Identity validation always uses result_kind=canonical_identity.",
+                "Do not reject a resolver because you are unsure how the final answer source will use the grounded result.",
                 "Use question_context.question when interpreting value_meaning_hint.",
                 "Use question_context.requested_facts only as local context for what the lookup text refers to; do not decide final source use from it.",
-                "Use the known input's value_meaning_hint and each option's read_id, resource_names, returned_identity, lookup_surface, query_params, and selected_output_fields to decide whether the resolver can resolve the lookup text.",
+                "Use the known input's value_meaning_hint and each option's description, resource_names, returned_identity, lookup_surface, query_params, and selected_output_fields to decide whether the resolver can resolve the lookup text.",
+                "Use field_label_text as the catalog-blind attribute approximation supplied by question interpretation; consider it together with value_meaning_hint, but do not treat it as an authoritative catalog field name.",
                 "lookup_surface.param_ref means the resolver can search its own resource directly using the lookup text.",
-                "lookup_surface.field_refs without param_ref lists the returned fields that resolver execution can compare against lookup_text.",
-                "The backend records the exact matched field after resolver execution; do not output matched field refs.",
+                "lookup_surface.field_refs lists returned fields that can exactly match the lookup text.",
                 "query_params shows endpoint filters available on the resolver resource.",
                 "selected_output_fields shows identity, display, and choice fields from the resolver response that are useful for distinguishing what object the resolver returns.",
-                "Treat value_meaning_hint as the business meaning to ground, not as a required exact match to returned_identity.identity_type.",
-                "For every option, answer the resolver_fit_question shown in the option payload.",
+                "Use value_meaning_hint and field_label_text to choose among the options; neither is an authoritative catalog identifier.",
             ),
         )
 
@@ -123,12 +146,12 @@ class GroundingTurnPrompt(TurnPromptBase):
         return builder.instruction_block(
             "Copying And Validity",
             (
-                "For each task, copy known_input_id and the option_reviews object.",
                 "Return known_time_resolutions as an object keyed by known_input_id; include every time input key exactly once.",
-                "Return known_input_binding_reviews as an object keyed by known_input_id.",
-                "option_reviews is an object keyed by binding_option_id; include every binding option key from the same task exactly once.",
-                "For each option review, copy each resolver_fit_question verbatim from the option payload.",
-                "Do not rewrite, normalize, abbreviate, or invent identifiers.",
+                "Return known_input_bindings as an object keyed by known_input_id; include every reference input key exactly once.",
+                "Copy the selected binding_option_id as selected_option_id, choose its result_kind, and write input_value according to that option's declared purpose.",
+                "When no option fits, use selected_option_id=none, result_kind=none, and input_value as an empty string.",
+                "Briefly state why the selected option fits in selection_basis.",
+                "Do not rewrite, normalize, abbreviate, or invent identity keys.",
             ),
         )
 
@@ -167,6 +190,7 @@ class GroundingTurnPrompt(TurnPromptBase):
                     "known_input_text": task.known_input_text,
                     "lookup_text": task.lookup_text,
                     "known_input_kind": task.known_input_kind,
+                    "field_label_text": task.field_label_text,
                     "value_meaning_hint": task.known_input_description,
                     "question_context": self._question_context_payload(task),
                 }
@@ -239,7 +263,7 @@ class GroundingTurnPrompt(TurnPromptBase):
                 {
                     "known_input_id": task.known_input_id,
                     "binding_options": [
-                        self._binding_option_payload(option, task=task)
+                        self._binding_option_payload(option)
                         for option in task.options
                     ],
                 }
@@ -250,15 +274,10 @@ class GroundingTurnPrompt(TurnPromptBase):
     def _binding_option_payload(
         self,
         option: InputBindingOption,
-        *,
-        task: KnownInputBindingTask,
     ) -> dict[str, object]:
         payload: dict[str, object] = {
             "binding_option_id": option.id,
-            "resolver_fit_question": resolver_fit_question_for_option(
-                task=task,
-                option=option,
-            ),
+            "purpose": option.purpose.value,
         }
         route = option.route
         if route is None:
@@ -267,15 +286,20 @@ class GroundingTurnPrompt(TurnPromptBase):
             {
                 "read_id": route.resolver_read_id,
                 "endpoint_name": route.resolver_endpoint_name,
+                "description": route.resolver_description,
                 "resource_names": list(route.resolver_resource_names),
                 "returned_identity": {
-                    "identity_type": route.identity_type,
-                    "identity_field": route.identity_field,
+                    "entity_kind": route.entity_kind,
+                    "key_id": route.key_id,
+                    "key_component_id": route.key_component_id,
                     "field_ref": route.return_field_ref,
                 },
                 "lookup_surface": {
                     **(
-                        {"param_ref": route.lookup_param_ref}
+                        {
+                            "param_ref": route.lookup_param_ref,
+                            "param_type": route.lookup_param_type,
+                        }
                         if route.lookup_param_ref
                         else {}
                     ),
@@ -293,7 +317,7 @@ class GroundingTurnPrompt(TurnPromptBase):
         return payload
 
     def _route_param_payload(self, param: ResolverQueryParamCard) -> dict[str, object]:
-        payload = {
+        payload: dict[str, object] = {
             "param_ref": param.param_ref,
             "name": param.name,
             "type": param.type,
@@ -310,13 +334,4 @@ class GroundingTurnPrompt(TurnPromptBase):
         }
         if field.choices:
             payload["choices"] = list(field.choices)
-        if field.identity is not None:
-            identity_payload: dict[str, object] = {
-                "entity_ref": field.identity.entity_ref,
-            }
-            if field.identity.identity_field:
-                identity_payload["identity_field"] = field.identity.identity_field
-            if field.identity.primary_key:
-                identity_payload["primary_key"] = True
-            payload["identity"] = identity_payload
         return payload

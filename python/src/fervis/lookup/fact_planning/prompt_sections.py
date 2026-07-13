@@ -41,7 +41,7 @@ def fact_plan_instruction_sections(
             answer_identity_lines,
         )
     )
-    source_selection_lines = []
+    source_selection_lines: list[str] = []
     if plan_shapes_use_source_binding_id(plan_shapes):
         source_selection_lines.extend(
             (
@@ -81,15 +81,11 @@ def fact_plan_instruction_sections(
         sections.append(
             builder.instruction_block(
                 "List And Field Patterns",
-                (
-                    "For list_rows, output_fields are the raw fields to show.",
-                    "For grouped_rows, group_fields define each group and output_fields are the raw fields to show inside each group.",
-                    "For direct_field_value, output_field is the single direct field value to return from the bound source.",
-                ),
+                _list_field_pattern_lines(plan_shapes),
             )
         )
     if plan_shapes & _METRIC_PLAN_SHAPES:
-        metric_lines = []
+        metric_lines: list[str] = []
         if "aggregate_scalar" in plan_shapes:
             metric_lines.extend(
                 (
@@ -148,7 +144,7 @@ def fact_plan_instruction_sections(
                     "candidate is the source containing possible rows.",
                     "observed is the source containing rows already seen or present.",
                     "candidate.identity_fields and observed.identity_fields are the fields used to compare rows.",
-                    "candidate.output_fields are the fields to show for missing rows.",
+                    "The selected candidate-key fulfillment determines the canonical result; do not choose display fields.",
                 ),
             )
         )
@@ -185,13 +181,38 @@ def fact_plan_instruction_sections(
     return tuple(sections)
 
 
-_LIST_FIELD_PLAN_SHAPES = frozenset({"list_rows", "grouped_rows", "direct_field_value"})
+def _list_field_pattern_lines(plan_shapes: frozenset[str]) -> tuple[str, ...]:
+    lines_by_shape = {
+        "list_rows": ("For list_rows, output_fields are the raw fields to show.",),
+        "ranked_rows": (
+            "For ranked_rows, output_fields are the requested raw fields, order_field is the source field that establishes the requested order, and rank.sort states whether earlier/smaller or later/larger values come first.",
+            "For ranked_rows, include rank.limit_value_id only when Operation input values contains the exact explicit result-limit value.",
+        ),
+        "grouped_rows": (
+            "For grouped_rows, group_fields define each group and output_fields are the raw fields to show inside each group.",
+        ),
+        "direct_field_value": (
+            "For direct_field_value, output_field is the single direct field value to return from the bound source.",
+        ),
+    }
+    return tuple(
+        line
+        for shape, lines in lines_by_shape.items()
+        if shape in plan_shapes
+        for line in lines
+    )
+
+
+_LIST_FIELD_PLAN_SHAPES = frozenset(
+    {"list_rows", "ranked_rows", "grouped_rows", "direct_field_value"}
+)
 _METRIC_PLAN_SHAPES = frozenset(
     {"aggregate_scalar", "aggregate_by_group", "ranked_aggregate"}
 )
 _SOURCE_BINDING_ID_PLAN_SHAPES = frozenset(
     {
         "list_rows",
+        "ranked_rows",
         "grouped_rows",
         "direct_field_value",
         "aggregate_scalar",
@@ -202,6 +223,7 @@ _SOURCE_BINDING_ID_PLAN_SHAPES = frozenset(
 _FIELD_SELECTION_PLAN_SHAPES = frozenset(
     {
         "list_rows",
+        "ranked_rows",
         "grouped_rows",
         "direct_field_value",
         "set_difference",

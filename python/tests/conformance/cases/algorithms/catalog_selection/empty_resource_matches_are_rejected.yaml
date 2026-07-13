@@ -15,6 +15,7 @@ input:
       description: sales total
       answer_outputs:
         - id: answer_1
+          role: ANSWER_VALUE
   resource_name_matches:
     - requested_fact_id: fact_1
       answer_output_resource_lineage: []

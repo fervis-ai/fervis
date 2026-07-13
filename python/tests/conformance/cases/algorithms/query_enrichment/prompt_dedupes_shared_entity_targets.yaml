@@ -13,6 +13,7 @@ input:
       description: sales amount for Jane Doe
       answer_outputs:
       - id: answer_1
+        role: ANSWER_VALUE
       known_inputs:
       - id: staff
         kind: literal_text
@@ -25,6 +26,7 @@ input:
       description: store for Jane Doe sales
       answer_outputs:
       - id: answer_1
+        role: ANSWER_VALUE
       known_inputs:
       - id: staff
         kind: literal_text

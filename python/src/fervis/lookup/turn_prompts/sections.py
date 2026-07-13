@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 from typing import Mapping, Sequence
 
 from fervis.lookup.turn_prompts.rendering import PromptRenderer

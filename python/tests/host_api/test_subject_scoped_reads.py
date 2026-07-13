@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -99,7 +100,7 @@ def test_django_adapter_captures_request_user_as_read_context_ref() -> None:
 def test_django_adapter_executes_read_with_resolved_subject(monkeypatch) -> None:
     import fervis.host_api.adapters.django.adapter as django_adapter_module
 
-    calls = []
+    calls: list[dict[str, object]] = []
     resolved_user = object()
 
     monkeypatch.setattr(
@@ -110,7 +111,7 @@ def test_django_adapter_executes_read_with_resolved_subject(monkeypatch) -> None
     monkeypatch.setattr(
         django_adapter_module,
         "execute_get_endpoint",
-        lambda **kwargs: calls.append(kwargs) or _execution_result(),
+        lambda **kwargs: _record_execution(calls, kwargs),
     )
 
     adapter = django_adapter_module.DjangoHostApiAdapter(sources=())
@@ -141,7 +142,7 @@ def test_django_adapter_executes_read_with_resolved_subject(monkeypatch) -> None
 def test_django_adapter_http_mode_uses_shared_http_executor(monkeypatch) -> None:
     import fervis.host_api.adapters.django.adapter as django_adapter_module
 
-    calls = []
+    calls: list[dict[str, object]] = []
     contract = _fastapi_contract()
     monkeypatch.setattr(
         django_adapter_module,
@@ -151,7 +152,7 @@ def test_django_adapter_http_mode_uses_shared_http_executor(monkeypatch) -> None
     monkeypatch.setattr(
         django_adapter_module,
         "execute_http_read",
-        lambda **kwargs: calls.append(kwargs) or _execution_result(),
+        lambda **kwargs: _record_execution(calls, kwargs),
     )
     monkeypatch.setattr(
         django_adapter_module,
@@ -231,6 +232,54 @@ def test_fastapi_adapter_executes_read_with_configured_principal_dependency(
 
     assert result.response_status == 200
     assert result.response_body == {"owner_id": "user_7"}
+
+
+def test_concurrent_fastapi_reads_keep_each_principal_isolated(
+    tmp_path,
+) -> None:
+    from fervis.host_api.adapters.fastapi.adapter import FastAPIHostApiAdapter
+    from fervis.project.integration import FastAPIAppSource
+
+    _write_fastapi_subject_app(tmp_path)
+    adapter = FastAPIHostApiAdapter(
+        sources=(
+            FastAPIAppSource(
+                name="default",
+                import_paths=["app.main:app"],
+                path_prefixes=["/api/"],
+            ),
+        ),
+        project_root=tmp_path,
+        auth_schema={
+            "schema_version": "v0.1",
+            "framework": "fastapi",
+            "security": {"mode": "principal_reauthorization"},
+            "transport": {"mode": "in_process"},
+            "principal": {
+                "source": "fastapi_dependency",
+                "dependency": "app.deps:get_current_user",
+                "id_attr": "id",
+                "resolver": "app.users:get_user_by_id",
+            },
+        },
+    )
+
+    def read_as(principal_id: str) -> str:
+        result = adapter.execute_read(
+            authority=_authority(
+                scheme="fastapi_principal",
+                key=principal_id,
+            ),
+            invocation=ReadInvocation(
+                endpoint_name="get_current_account_api_account__get"
+            ),
+        )
+        return str(result.response_body["owner_id"])
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        observed_principals = tuple(executor.map(read_as, ("user_a", "user_b")))
+
+    assert observed_principals == ("user_a", "user_b")
 
 
 def test_fastapi_adapter_executes_read_with_submitted_tenant_authority(
@@ -546,7 +595,7 @@ def test_flask_adapter_http_mode_uses_shared_http_executor(
 ) -> None:
     import fervis.host_api.adapters.flask.adapter as flask_adapter_module
 
-    calls = []
+    calls: list[dict[str, object]] = []
     contract = _fastapi_contract()
     monkeypatch.setattr(
         flask_adapter_module.FlaskHostApiAdapter,
@@ -556,7 +605,7 @@ def test_flask_adapter_http_mode_uses_shared_http_executor(
     monkeypatch.setattr(
         flask_adapter_module,
         "execute_http_read",
-        lambda **kwargs: calls.append(kwargs) or _execution_result(),
+        lambda **kwargs: _record_execution(calls, kwargs),
     )
     monkeypatch.setattr(
         flask_adapter_module,
@@ -592,30 +641,34 @@ def test_fastapi_adapter_http_mode_uses_shared_http_executor(
     monkeypatch, tmp_path
 ) -> None:
     import fervis.host_api.adapters.fastapi.adapter as fastapi_adapter_module
-    import fervis.host_api.adapters.fastapi.catalog as fastapi_catalog_module
+    from fastapi import FastAPI
+    from fervis.project.integration import FastAPIAppSource
 
-    calls = []
+    calls: list[dict[str, object]] = []
     contract = _fastapi_contract()
     monkeypatch.setattr(
-        fastapi_catalog_module,
-        "get_fastapi_endpoint_contracts",
-        lambda **kwargs: (contract,),
+        fastapi_adapter_module,
+        "load_fastapi_app",
+        lambda import_path: FastAPI(),
+    )
+    monkeypatch.setattr(
+        fastapi_adapter_module.catalog,
+        "endpoint_contracts_from_fastapi_app",
+        lambda *args, **kwargs: (contract,),
     )
     monkeypatch.setattr(
         fastapi_adapter_module,
         "execute_http_read",
-        lambda **kwargs: calls.append(kwargs) or _execution_result(),
+        lambda **kwargs: _record_execution(calls, kwargs),
     )
-    monkeypatch.setattr(
-        fastapi_adapter_module,
-        "execute_get_endpoint",
-        lambda **kwargs: (_ for _ in ()).throw(
-            AssertionError("in-process FastAPI execution should not run")
-        ),
-    )
-
     adapter = fastapi_adapter_module.FastAPIHostApiAdapter(
-        sources=(),
+        sources=(
+            FastAPIAppSource(
+                name="default",
+                import_paths=["app.main:app"],
+                path_prefixes=["/api/"],
+            ),
+        ),
         project_root=tmp_path,
         auth_schema=_http_auth_schema(),
     )
@@ -646,6 +699,11 @@ def _execution_result():
         response_status=200,
         response_body={"id": "ord_1"},
     )
+
+
+def _record_execution(calls, kwargs):
+    calls.append(kwargs)
+    return _execution_result()
 
 
 def _http_auth_schema() -> dict[str, object]:
@@ -734,6 +792,10 @@ class _ContractOnlyHostApiAdapter:
     def capture_read_context(self, request):
         del request
         return ReadContextRef(scheme="delegated_capability", key="user_1")
+
+    def capture_delegated_credential(self, request):
+        del request
+        return None
 
     def execute_read(self, *, authority, invocation):
         raise AssertionError((authority, invocation))

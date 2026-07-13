@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
-
 from fervis.project import ProjectInspection
 
 
@@ -18,7 +16,7 @@ class CommandEnvelope:
     exit_code: int
     project: dict[str, object]
     payload_schema: str
-    payload: dict[str, Any]
+    payload: dict[str, object]
     next_actions: list[dict[str, object]] = field(default_factory=list)
 
     def to_payload(self) -> dict[str, object]:
@@ -41,7 +39,7 @@ def command_envelope(
     exit_code: int,
     project: ProjectInspection,
     payload_schema: str,
-    payload: dict[str, Any],
+    payload: dict[str, object],
     next_actions: list[dict[str, object]] | None = None,
 ) -> CommandEnvelope:
     return CommandEnvelope(

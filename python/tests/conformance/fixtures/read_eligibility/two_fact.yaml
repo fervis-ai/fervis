@@ -6,11 +6,13 @@ requested_facts:
     answer_subject: sales
     answer_outputs:
       - id: answer_1
+        role: ANSWER_VALUE
   - id: fact_payments
     description: total payments
     answer_subject: payments
     answer_outputs:
       - id: answer_2
+        role: ANSWER_VALUE
 catalog:
   reads:
     - id: list_sales_summary

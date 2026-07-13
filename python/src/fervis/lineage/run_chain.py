@@ -6,8 +6,11 @@ from typing import Callable, Protocol, TypeVar
 
 
 class RunChainNode(Protocol):
-    run_id: str
-    base_run_id: str | None
+    @property
+    def run_id(self) -> str: ...
+
+    @property
+    def base_run_id(self) -> str | None: ...
 
 
 RunNodeT = TypeVar("RunNodeT", bound=RunChainNode)

@@ -6,7 +6,11 @@ from fervis.interfaces.django.composition import reset_runtime_for_tests
 from fervis.interfaces.django.worker import process_run_batch
 from fervis.model_io.backbone.factory import build_test_provider_backbone
 
-TERMINAL_STATUSES = {"COMPLETED", "FAILED", "NEEDS_CLARIFICATION"}
+POLLING_STOP_STATUSES = {
+    "COMPLETED",
+    "FAILED",
+    "WAITING_FOR_CLARIFICATION",
+}
 FERVIS_SCOPES = "fervis:write fervis:read"
 
 
@@ -59,7 +63,7 @@ def run_worker_until_terminal(api_client, response, *, timeout_seconds=30.0):
     latest_response = response
     while time.monotonic() < deadline:
         body = latest_response.json()
-        if body.get("status") in TERMINAL_STATUSES:
+        if body.get("status") in POLLING_STOP_STATUSES:
             latest_response.status_code = 202
             return latest_response
         process_run_batch(

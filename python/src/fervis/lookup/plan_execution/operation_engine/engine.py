@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing_extensions import assert_never
+
 from fervis.lookup.plan_execution.operation_runtime import (
     RelationEngineError,
     RelationEngineInput,
@@ -12,6 +14,7 @@ from fervis.lookup.plan_execution.operation_runtime import (
     ResolvedRankSpec,
 )
 from fervis.lookup.plan_execution.relations import RelationRows
+from fervis.lookup.canonical_data import RuntimeValue
 from fervis.lookup.outcomes.errors import (
     IncompleteEvidenceError,
     UndefinedOperationError,
@@ -24,7 +27,7 @@ from fervis.lookup.answer_program.operations import (
     FilterSpec,
     JoinSpec,
     ProjectSpec,
-    ProjectToIdentitySpec,
+    ProjectToKeySpec,
     RoleExpandSpec,
     UnionSpec,
     UniversalConditionSpec,
@@ -38,7 +41,7 @@ from .relation_operations import (
     _filter,
     _join,
     _project,
-    _project_to_identity,
+    _project_to_key,
     _role_expand,
     _union,
     _universal_condition,
@@ -61,9 +64,10 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
             raise RelationEngineError(f"duplicate relation {relation.id}")
         relation = _with_role_set_kind(relation, role_set_kind_refs.get(relation.id))
         relations[relation.id] = relation
-    scalars: dict[str, object] = {}
+    scalars: dict[str, RuntimeValue] = {}
     scalar_proofs: dict[str, tuple[str, ...]] = {}
-    computed_outputs: dict[str, tuple[str, object]] = {}
+    scalar_types: dict[str, str] = {}
+    computed_outputs: dict[str, tuple[str, RuntimeValue]] = {}
     for scalar_input in engine_input.scalar_inputs:
         if not isinstance(scalar_input, ScalarInput):
             raise RelationEngineError("scalar input must be ScalarInput")
@@ -71,6 +75,7 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
             raise RelationEngineError(f"duplicate scalar {scalar_input.id}")
         scalars[scalar_input.id] = scalar_input.value
         scalar_proofs[scalar_input.id] = scalar_input.proof_refs
+        scalar_types[scalar_input.id] = scalar_input.value_type
     for operation in engine_input.operations:
         if not isinstance(operation, ExecutableOperation):
             raise RelationEngineError("operation must be ExecutableOperation")
@@ -80,6 +85,7 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
                 relations,
                 scalars,
                 scalar_proofs,
+                scalar_types,
                 computed_outputs,
                 operation_proof_refs=operation_proof_refs,
             )
@@ -88,6 +94,7 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
                 relations=tuple(relations.values()),
                 scalars=scalars,
                 scalar_proofs=scalar_proofs,
+                scalar_types=scalar_types,
                 issue=exc.issue(),
             )
         except UndefinedOperationError as exc:
@@ -103,6 +110,7 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
                 relations=tuple(relations.values()),
                 scalars=scalars,
                 scalar_proofs=scalar_proofs,
+                scalar_types=scalar_types,
                 undefined=Undefined(
                     operation=exc.operation_ref(operation.id, proof_refs=proof_refs),
                     proof_refs=proof_refs,
@@ -127,24 +135,27 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
                     *operation_proof_refs.get(operation.id, ()),
                 ),
             )
+            scalar_types[output_scalar] = "decimal"
         else:
             raise RelationEngineError(f"{operation.id} produced invalid result")
     return RelationEngineOutput(
         relations=tuple(relations.values()),
         scalars=scalars,
         scalar_proofs=scalar_proofs,
+        scalar_types=scalar_types,
     )
 
 
 def _execute_operation(
     operation: ExecutableOperation,
     relations: dict[str, RelationRows],
-    scalars: dict[str, object],
+    scalars: dict[str, RuntimeValue],
     scalar_proofs: dict[str, tuple[str, ...]],
-    computed_outputs: dict[str, tuple[str, object]],
+    scalar_types: dict[str, str],
+    computed_outputs: dict[str, tuple[str, RuntimeValue]],
     *,
     operation_proof_refs: dict[str, tuple[str, ...]],
-) -> RelationRows | object:
+) -> RelationRows | RuntimeValue:
     spec = operation.spec
     if isinstance(spec, FilterSpec):
         return _filter(
@@ -153,12 +164,13 @@ def _execute_operation(
             relations,
             scalars,
             scalar_proofs,
+            scalar_types,
             operation_refs=operation_proof_refs.get(operation.id, ()),
         )
     if isinstance(spec, ProjectSpec):
         return _project(operation, spec, relations)
-    if isinstance(spec, ProjectToIdentitySpec):
-        return _project_to_identity(operation, spec, relations)
+    if isinstance(spec, ProjectToKeySpec):
+        return _project_to_key(operation, spec, relations)
     if isinstance(spec, JoinSpec):
         return _join(operation, spec, relations)
     if isinstance(spec, UnionSpec):
@@ -176,6 +188,7 @@ def _execute_operation(
             relations,
             scalars,
             scalar_proofs,
+            scalar_types,
             operation_refs=operation_proof_refs.get(operation.id, ()),
         )
     if isinstance(spec, AggregateSpec):
@@ -194,4 +207,4 @@ def _execute_operation(
         )
     if isinstance(spec, ResolvedComputeSpec):
         return _compute(spec, computed_outputs)
-    raise RelationEngineError(f"unsupported operation {operation.id}")
+    assert_never(spec)

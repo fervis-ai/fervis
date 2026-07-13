@@ -71,7 +71,7 @@ def _get_page(
     client = _client_for(user)
     for name, value in cookies.items():
         client.cookies[name] = value
-    response = client.get(url, query_params, **_django_header_kwargs(headers))
+    response = client.get(url, query_params, headers=headers)
     body = response.data if hasattr(response, "data") else {}
     return response.status_code, _json_safe(body)
 
@@ -80,14 +80,6 @@ def _client_for(user: Any) -> APIClient:
     client = APIClient()
     client.force_authenticate(user=user)
     return client
-
-
-def _django_header_kwargs(headers: dict[str, str]) -> dict[str, str]:
-    return {
-        "HTTP_" + name.upper().replace("-", "_"): value
-        for name, value in headers.items()
-        if name.lower() not in {"content-type", "content-length"}
-    }
 
 
 def _json_safe(value: Any) -> Any:

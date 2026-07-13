@@ -30,6 +30,9 @@ fervis doctor
 
 If `doctor` blocks, follow every reported `next_actions` item, then rerun `fervis doctor` until it passes.
 
+Fervis inspects the live FastAPI routes and their declared response models. It
+does not require a generated OpenAPI document.
+
 If the host API uses a FastAPI dependency for the current user:
 
 ```bash

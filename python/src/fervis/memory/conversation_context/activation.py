@@ -52,8 +52,7 @@ def _selected_memory_activations(
     memory_ids: tuple[str, ...],
 ) -> tuple[ConversationMemoryActivation, ...]:
     activations_by_memory_id = {
-        activation.memory_id: activation
-        for activation in memory_projection.activations
+        activation.memory_id: activation for activation in memory_projection.activations
     }
     if len(activations_by_memory_id) != len(memory_projection.activations):
         raise ValueError("memory projection contains duplicate memory ids")
@@ -194,18 +193,19 @@ def _entity_identity_payload(
         for field, value in address.identity.items()
         if str(field).strip() and str(value).strip()
     }
-    if len(canonical_values) != 1:
-        raise ValueError("entity identity memory requires one canonical identity")
-    identity_field, canonical_id = next(iter(canonical_values.items()))
-    identity_type = str(address.resource or "").strip()
-    if not identity_type:
-        raise ValueError("entity identity memory requires identity type")
+    if not canonical_values:
+        raise ValueError("entity identity memory requires key components")
+    entity_kind = str(address.resource or "").strip()
+    key_id = str(address.key_id or "").strip()
+    if not entity_kind or not key_id:
+        raise ValueError("entity identity memory requires a candidate key")
     return {
         "kind": "entity_identity",
-        "identity_type": identity_type,
-        "identity_field": identity_field,
-        "canonical_id": canonical_id,
-        "canonical_values": canonical_values,
+        "entity_key": {
+            "entity_kind": entity_kind,
+            "key_id": key_id,
+            "components": canonical_values,
+        },
         "display_label": address.reference_text,
         "display_fact_refs": (address.address,),
         "proof_refs": _proof_refs(address),
@@ -246,20 +246,6 @@ def _time_scope_payload(
     }
 
 
-def _clarification_answer_payload(
-    *,
-    artifact: FactArtifact,
-    address: FactAddress,
-) -> dict[str, Any]:
-    return {
-        "kind": "clarification_answer",
-        "clarification_chain_id": artifact.artifact_id,
-        "clarification_question": " ".join(address.clarification_questions),
-        "question_being_clarified": artifact.source_question,
-        "activation_fact_refs": (address.address,),
-    }
-
-
 def _source_lineage(address: FactAddress) -> tuple[Any, ...]:
     return tuple(
         item
@@ -281,7 +267,4 @@ _CARD_PAYLOAD_BUILDERS = {
     ConversationMemoryActivationKind.ENTITY_IDENTITY: _entity_identity_payload,
     ConversationMemoryActivationKind.SCALAR_VALUE: _scalar_value_payload,
     ConversationMemoryActivationKind.TIME_SCOPE: _time_scope_payload,
-    ConversationMemoryActivationKind.CLARIFICATION_ANSWER: (
-        _clarification_answer_payload
-    ),
 }

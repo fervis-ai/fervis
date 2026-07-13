@@ -7,6 +7,10 @@ from fervis.lookup.clarification import (
     clarification_payload,
 )
 from fervis.lookup.plan_execution.operation_runtime import RelationEngineOutput
+from fervis.lookup.plan_execution.operation_runtime import (
+    ResolvedComputeSpec,
+    ResolvedRankSpec,
+)
 from fervis.lookup.plan_execution.operation_engine import execute_operations
 from fervis.lookup.outcomes.model import (
     EmptyRelationKind,
@@ -17,21 +21,23 @@ from fervis.lookup.outcomes.errors import ExecutionIssue
 from fervis.lookup.outcomes.answerability import classify_plan_impossible
 from fervis.lookup.outcomes.classification import (
     classify_answer_result,
-    classify_binding_candidates,
     classify_empty_relation,
 )
 from fervis.lookup.answer_program.model import AnswerProgram, FactFulfillment
+from fervis.lookup.answer_program.operations import Operation
 from fervis.lookup.fact_plan.fact_plan import (
     BlockedFact,
     BlockedFactBasis,
     BlockedFactField,
     PlanImpossible,
 )
-from fervis.lookup.answer_program.render_spec import (
-    RenderRelationOutput,
-    RenderSpec,
+from fervis.lookup.answer_program.result_projection import (
+    RelationResultOutput,
+    ResultProjection,
+    ResultProjectionError,
 )
 from fervis.lookup.answer_rendering import (
+    RenderedFact,
     render_fact_result,
     rendered_fact_payload,
     rendered_fact_text,
@@ -42,6 +48,7 @@ from tests.testkit.algorithms.relation_engine import (
 )
 from tests.testkit.assertions import (
     expects_rejection,
+    rejection_mismatches,
     status_mismatches,
     subset_mismatches,
 )
@@ -53,13 +60,13 @@ def run_outcomes_classify_case(payload: dict[str, Any]) -> list[str]:
     mode = str(input_payload.get("mode") or "answer")
     try:
         if mode == "engine":
-            result = execute_operations(engine_input_from_payload(input_payload))
-            rendered = None
-            actual = _engine_output_payload(result)
+            engine_output = execute_operations(engine_input_from_payload(input_payload))
+            actual = _engine_output_payload(engine_output)
             return subset_mismatches(
                 actual=actual,
                 expected_subset=payload["expect"]["result_contains"],
             )
+        result: FactResult | ExecutionIssue | None
         if mode == "answer":
             result = _classify_answer(input_payload)
         elif mode == "empty_relation":
@@ -68,17 +75,6 @@ def run_outcomes_classify_case(payload: dict[str, Any]) -> list[str]:
                 relation,
                 kind=EmptyRelationKind(
                     str(input_payload.get("empty_kind") or "answer_rows")
-                ),
-            )
-        elif mode == "binding_candidates":
-            relation = engine_input_from_payload(input_payload).relations[0]
-            result = classify_binding_candidates(
-                requested_fact_id=str(input_payload["requested_fact_id"]),
-                binding_target_id=str(input_payload["binding_target_id"]),
-                known_input_id=str(input_payload["known_input_id"]),
-                candidate_relation=relation,
-                display_fields=tuple(
-                    str(item) for item in input_payload.get("display_fields") or ()
                 ),
             )
         elif mode == "impossible":
@@ -97,11 +93,13 @@ def run_outcomes_classify_case(payload: dict[str, Any]) -> list[str]:
             )
         else:
             return [f"unsupported outcomes mode: {mode}"]
-        rendered = render_fact_result(result) if isinstance(result, FactResult) else None
-    except Exception as exc:
+        rendered = (
+            render_fact_result(result) if isinstance(result, FactResult) else None
+        )
+    except ResultProjectionError as exc:
         if expects_rejection(payload["expect"]):
-            return status_mismatches(
-                actual_status="rejected",
+            return rejection_mismatches(
+                actual_code="invalid_result_projection",
                 expected=payload["expect"],
             )
         return [f"unexpected error: {exc}"]
@@ -114,7 +112,7 @@ def run_outcomes_classify_case(payload: dict[str, Any]) -> list[str]:
     )
 
 
-def _classify_answer(payload: dict[str, Any]) -> Any:
+def _classify_answer(payload: dict[str, Any]) -> FactResult | ExecutionIssue:
     engine_input = engine_input_from_payload(payload)
     engine_output = (
         RelationEngineOutput(relations=engine_input.relations)
@@ -129,26 +127,27 @@ def _classify_answer(payload: dict[str, Any]) -> Any:
 
 
 def _answer_plan(payload: dict[str, Any]) -> AnswerProgram:
-    render_outputs = tuple(
-        RenderRelationOutput(
+    result_outputs = tuple(
+        RelationResultOutput(
             id=str(item["id"]),
             relation_id=str(item["relation_id"]),
             field_id=str(item["field_id"]),
             label=str(item.get("label") or ""),
+            role=str(item.get("role") or "answer_value"),
         )
-        for item in payload.get("render_outputs") or ()
+        for item in payload.get("result_outputs") or ()
     )
     return AnswerProgram(
         fulfillment=tuple(
             FactFulfillment(
                 requested_fact_id=str(item.get("requested_fact_id") or "rf_answer"),
                 answer_output_id=str(item.get("answer_output_id") or item["id"]),
-                render_output_id=str(item["id"]),
+                result_output_id=str(item["id"]),
             )
-            for item in payload.get("render_outputs") or ()
+            for item in payload.get("result_outputs") or ()
         ),
-        operations=engine_input_from_payload(payload).operations,
-        render_spec=RenderSpec(relation_outputs=render_outputs),
+        operations=_answer_operations(payload),
+        result_projection=ResultProjection(relation_outputs=result_outputs),
     )
 
 
@@ -158,7 +157,9 @@ def _plan_impossible(payload: dict[str, Any]) -> PlanImpossible:
             BlockedFact(
                 requested_fact_id=str(item["requested_fact_id"]),
                 basis=BlockedFactBasis(str(item["basis"])),
-                evidence_refs=tuple(str(ref) for ref in item.get("evidence_refs") or ()),
+                evidence_refs=tuple(
+                    str(ref) for ref in item.get("evidence_refs") or ()
+                ),
                 reviewed_read_ids=tuple(
                     str(ref) for ref in item.get("reviewed_read_ids") or ()
                 ),
@@ -182,7 +183,23 @@ def _question_contract(payload: dict[str, Any]) -> Any:
     return question_contract_from_payload({"requested_facts": requested_facts})
 
 
-def _result_payload(result: Any, rendered: Any) -> dict[str, Any]:
+def _answer_operations(payload: dict[str, Any]) -> tuple[Operation, ...]:
+    operations = engine_input_from_payload(payload).operations
+    return tuple(
+        Operation(
+            id=operation.id,
+            spec=operation.spec,
+            output_relation=operation.output_relation,
+        )
+        for operation in operations
+        if not isinstance(operation.spec, (ResolvedComputeSpec, ResolvedRankSpec))
+    )
+
+
+def _result_payload(
+    result: FactResult | ExecutionIssue | None,
+    rendered: RenderedFact | None,
+) -> dict[str, Any]:
     if result is None:
         return {"result": None}
     if isinstance(result, ExecutionIssue):

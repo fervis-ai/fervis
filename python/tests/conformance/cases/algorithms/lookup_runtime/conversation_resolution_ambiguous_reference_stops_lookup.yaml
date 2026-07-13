@@ -55,6 +55,6 @@ expect:
         subjects:
           - kind: interpretation
             options:
-              - id: How much was that? (1)
-              - id: How much was that? (2)
+              - id: interpretation_1
+              - id: interpretation_2
     tool_names: [submit_conversation_resolution]

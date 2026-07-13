@@ -347,7 +347,7 @@ def _add_goldset_parser(subparsers) -> None:
     run.add_argument("--model", dest="model_key")
     run.add_argument("--ledger-file")
     run.add_argument("--wait-seconds", type=float, default=60.0)
-    run.add_argument("--determinism-runs", type=int, default=1)
+    run.add_argument("--stable-runs", type=int, default=1)
     run.add_argument(
         "--enforce-structured-determinism",
         action=argparse.BooleanOptionalAction,
@@ -452,7 +452,7 @@ def _add_runtime_parser(subparsers) -> None:
     ask.add_argument("--principal-id", required=True)
     ask.add_argument("--conversation-id")
     ask.add_argument("--question-id")
-    ask.add_argument("--base-run-id")
+    ask.add_argument("--run-id")
     ask.add_argument("--clarification-id")
     ask.add_argument("--model", dest="model_key")
     ask.add_argument("--idempotency-key")

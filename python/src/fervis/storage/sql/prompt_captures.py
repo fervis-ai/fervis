@@ -20,7 +20,7 @@ from fervis.observability.prompt_captures import (
 )
 from fervis.project.persistence.schema import metadata
 
-from .rows import row_mappings
+from .rows import json_object, optional_int, required_int, row_mappings
 from .transaction import sql_connection
 
 
@@ -108,24 +108,34 @@ def _capture_row(
 ) -> ModelTurnPromptCapture:
     return ModelTurnPromptCapture(
         run_id=str(row["run_id"]),
-        sequence=int(row["sequence"]),
-        attempt=row["attempt"],
+        sequence=required_int(row["sequence"], field="sequence"),
+        attempt=optional_int(row["attempt"], field="attempt"),
         step_key=RunStepKey(row["step_key"]),
-        call_index=int(row["call_index"]),
+        call_index=required_int(row["call_index"], field="call_index"),
         provider=str(row["provider"]),
         model_key=str(row["model_key"]),
         status=ModelCallStatus(row["status"]),
         provider_request_id=str(row["provider_request_id"]),
         finish_reason=str(row["finish_reason"]),
-        duration_ms=row["duration_ms"],
-        prompt_chars=int(row["prompt_chars"]),
-        schema_chars=int(row["schema_chars"]),
-        tool_spec_chars=int(row["tool_spec_chars"]),
-        submitted_payload_chars=row["submitted_payload_chars"],
-        raw_output_chars=row["raw_output_chars"],
-        step_input_summary=dict(row["input_summary_json"] or {}),
-        step_output_summary=dict(row["output_summary_json"] or {}),
-        error_json=dict(row["error_json"] or {}),
+        duration_ms=optional_int(row["duration_ms"], field="duration_ms"),
+        prompt_chars=required_int(row["prompt_chars"], field="prompt_chars"),
+        schema_chars=required_int(row["schema_chars"], field="schema_chars"),
+        tool_spec_chars=required_int(
+            row["tool_spec_chars"], field="tool_spec_chars"
+        ),
+        submitted_payload_chars=optional_int(
+            row["submitted_payload_chars"], field="submitted_payload_chars"
+        ),
+        raw_output_chars=optional_int(
+            row["raw_output_chars"], field="raw_output_chars"
+        ),
+        step_input_summary=json_object(
+            row["input_summary_json"] or {}, field="input_summary_json"
+        ),
+        step_output_summary=json_object(
+            row["output_summary_json"] or {}, field="output_summary_json"
+        ),
+        error_json=json_object(row["error_json"] or {}, field="error_json"),
         artifacts=artifacts,
         usage_rows=usage_rows,
     )
@@ -142,6 +152,6 @@ def _artifact_row(row: dict[str, object]) -> PromptCaptureArtifact:
 def _usage_row(row: dict[str, object]) -> PromptCaptureUsage:
     return PromptCaptureUsage(
         usage_kind=ModelUsageKind(row["usage_kind"]),
-        quantity=int(row["quantity"]),
+        quantity=required_int(row["quantity"], field="quantity"),
         provider_usage_key=str(row["provider_usage_key"]),
     )

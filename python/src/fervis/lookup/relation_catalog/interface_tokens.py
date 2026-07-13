@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 from typing import Protocol
 
 from fervis.lookup.relation_catalog.model import RelationCatalog
 
 
 class CatalogParamLike(Protocol):
-    name: str
+    @property
+    def name(self) -> str: ...
 
 
 class CatalogFieldLike(Protocol):
-    path: str
+    @property
+    def path(self) -> str: ...
 
 
 class CatalogInterfaceSide(StrEnum):

@@ -14,6 +14,7 @@ from fervis.lineage.enums import (
 from fervis.lookup.relation_catalog import RelationCatalog
 from fervis.lookup.relation_catalog.selection import CatalogSelectionResult
 from fervis.lookup.plan_execution.errors import VerificationError
+from fervis.lookup.plan_execution.declared_values import exact_positive_integer
 from fervis.lookup.plan_execution.relations import (
     CompletenessSourceKind,
     RelationRows,
@@ -110,16 +111,6 @@ class ExecutionProofGraph:
     edges: tuple[ExecutionProofEdge, ...] = ()
     contributions: tuple[ExecutionProofContribution, ...] = ()
 
-    def refs_for_kind(self, kind: ProofNodeKind) -> tuple[str, ...]:
-        return _dedupe_refs(
-            tuple(
-                ref
-                for node in self.nodes
-                if node.kind == kind
-                for ref in node.proof_refs
-            )
-        )
-
     def with_executed_relations(
         self, relations: tuple[RelationRows, ...]
     ) -> "ExecutionProofGraph":
@@ -172,9 +163,9 @@ class _MaterializedExecution:
     operation_inputs: tuple[ResolvedOperationInput, ...] = ()
 
     @property
-    def proof_node_refs_by_render_output_id(self) -> dict[str, tuple[str, ...]]:
+    def proof_node_refs_by_result_output_id(self) -> dict[str, tuple[str, ...]]:
         return {
-            fulfillment.render_output_id: (_answer_output_node_id(fulfillment),)
+            fulfillment.result_output_id: (_answer_output_node_id(fulfillment),)
             for fulfillment in self.answer.fulfillment
         }
 
@@ -289,6 +280,8 @@ def instantiate_answer_program(
         effective_requested_facts=materialized.effective_requested_facts,
         operation_inputs=materialized.operation_inputs,
     )
+
+
 def _materialize_execution(
     *,
     answer: AnswerProgram,
@@ -369,19 +362,19 @@ def _instantiate_operations(
             )
             continue
         try:
-            resolved = resolve_value_expression(
+            resolved_limit = resolve_value_expression(
                 spec.limit,
                 bindings=bindings,
             )
         except AnswerProgramContractError as exc:
             raise VerificationError(f"{exc.code}: {exc}") from exc
         try:
-            numeric_limit = float(resolved.value)
+            limit = exact_positive_integer(resolved_limit.value)
         except (TypeError, ValueError) as exc:
+            message = str(exc)
+            if "positive integer" in message:
+                raise VerificationError("rank limit must be a positive integer") from exc
             raise VerificationError("rank limit must be numeric") from exc
-        if not numeric_limit.is_integer() or numeric_limit < 1:
-            raise VerificationError("rank requires positive integer limit")
-        limit = int(numeric_limit)
         operations.append(
             ExecutableOperation(
                 id=operation.id,
@@ -400,7 +393,7 @@ def _instantiate_operations(
                 operation_id=operation.id,
                 input_id="rank_limit",
                 value=limit,
-                proof_refs=resolved.proof_refs,
+                proof_refs=resolved_limit.proof_refs,
             )
         )
     return tuple(operations), _dedupe_operation_inputs(inputs)
@@ -543,7 +536,7 @@ def _execution_proof_graph(
     nodes: list[ExecutionProofNode] = []
     edges: list[ExecutionProofEdge] = []
     contributions: list[ExecutionProofContribution] = []
-    explicit_labels_by_ref = _explicit_labels_by_proof_ref(values)
+    explicit_labels_by_ref = _explicit_labels_by_proof_ref(answer.fact_template)
     relations = answer.relations
     for arg in instantiated_inputs.endpoint_args:
         node_id = f"endpoint_arg:{arg.relation_id}:{arg.param_ref}"
@@ -762,8 +755,8 @@ def _execution_proof_graph(
                 *(
                     scalar_output.scalar_id
                     for scalar_output in (
-                        answer.render_spec.scalar_outputs
-                        if answer.render_spec is not None
+                        answer.result_projection.scalar_outputs
+                        if answer.result_projection is not None
                         else ()
                     )
                 ),
@@ -799,23 +792,24 @@ def _answer_output_nodes(answer: AnswerProgram) -> tuple[ExecutionProofNode, ...
 
 
 def _answer_output_edges(answer: AnswerProgram) -> tuple[ExecutionProofEdge, ...]:
-    if answer.render_spec is None:
-        return ()
-    outputs_by_id = {
-        output.id: output
-        for output in (
-            *answer.render_spec.relation_outputs,
-            *answer.render_spec.scalar_outputs,
-        )
+    source_node_by_output_id = {
+        output.id: output.source_node_id
+        for output in answer.result_projection.relation_outputs
     }
+    source_node_by_output_id.update(
+        {
+            output.id: output.source_node_id
+            for output in answer.result_projection.scalar_outputs
+        }
+    )
     edges: list[ExecutionProofEdge] = []
     for fulfillment in answer.fulfillment:
-        output = outputs_by_id.get(fulfillment.render_output_id)
-        if output is None:
+        source_node_id = source_node_by_output_id.get(fulfillment.result_output_id)
+        if source_node_id is None:
             continue
         edges.append(
             ExecutionProofEdge(
-                source=output.source_node_id,
+                source=source_node_id,
                 target=_answer_output_node_id(fulfillment),
                 role=ProofEdgeRole.PRODUCES,
             )
@@ -825,9 +819,7 @@ def _answer_output_edges(answer: AnswerProgram) -> tuple[ExecutionProofEdge, ...
 
 def _answer_output_node_id(fulfillment: FactFulfillment) -> str:
     return (
-        "answer_output:"
-        f"{fulfillment.requested_fact_id}:"
-        f"{fulfillment.answer_output_id}"
+        f"answer_output:{fulfillment.requested_fact_id}:{fulfillment.answer_output_id}"
     )
 
 
@@ -838,13 +830,13 @@ def _operation_id_from_node(node_id: str) -> str:
     return parts[1]
 
 
-def _explicit_labels_by_proof_ref(values: tuple[FactValue, ...]) -> dict[str, str]:
+def _explicit_labels_by_proof_ref(
+    requested_facts: tuple[RequestedFact, ...],
+) -> dict[str, str]:
     output: dict[str, str] = {}
-    for value in values:
-        label = value.label or value.id
-        for proof_ref in value.proof_refs:
-            if proof_ref.startswith("known_input:") and label:
-                output[proof_ref] = label
+    for fact in requested_facts:
+        for known_input in fact.known_inputs:
+            output.setdefault(f"known_input:{known_input.id}", known_input.text)
     return output
 
 
