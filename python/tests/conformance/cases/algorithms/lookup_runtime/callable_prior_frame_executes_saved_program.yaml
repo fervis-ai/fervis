@@ -157,4 +157,4 @@ expect:
     - submit_query_enrichment
     - submit_grounding
     invocation_kind: continue_prior_request
-    base_invocation_id: pi_370d6c16f038d436dce8060e24914084cd3dc752c8a33ff168f857d795c947f2
+    base_invocation_id: pi_cdcb84ce278a6911ed9041ad28c83997db469c239add21c2cfa543d6b1ab09f8

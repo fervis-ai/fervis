@@ -387,11 +387,12 @@ def _run_conversation_resolution_phase(
 ) -> LookupResult | None:
     context_sources = state.memory_card_projection.context_sources
     context_frames = state.memory_card_projection.context_frames
-    response = state.request.clarification_response
-    conversation_response = (
-        response if isinstance(response, ConversationResolutionResponse) else None
+    conversation_responses = tuple(
+        response
+        for response in state.request.clarification_responses
+        if isinstance(response, ConversationResolutionResponse)
     )
-    if not context_sources and conversation_response is None:
+    if not context_sources and not conversation_responses:
         return None
     limit_failure = _limit_before_next_model_turn(state.ports, state.request.run_id)
     if limit_failure is not None:
@@ -409,16 +410,7 @@ def _run_conversation_resolution_phase(
                 host=state.request.host,
                 context_sources=context_sources,
                 context_frames=context_frames,
-                clarification_source=(
-                    conversation_response.source
-                    if conversation_response is not None
-                    else None
-                ),
-                selected_clarification_candidate=(
-                    conversation_response.candidate
-                    if conversation_response is not None
-                    else None
-                ),
+                clarification_responses=conversation_responses,
             ),
             model_port=state.ports.planner_model_port,
             provider=state.provider,
@@ -486,9 +478,10 @@ def _run_question_contract_phase(state: _LookupPipelineState) -> LookupResult | 
         message="normalizing requested fact",
     )
     try:
-        response = state.request.clarification_response
-        question_response = (
-            response if isinstance(response, QuestionContractResponse) else None
+        question_responses = tuple(
+            response
+            for response in state.request.clarification_responses
+            if isinstance(response, QuestionContractResponse)
         )
         state.question_turn = generate_question_contract(
             request=QuestionContractRequest(
@@ -501,19 +494,7 @@ def _run_question_contract_phase(state: _LookupPipelineState) -> LookupResult | 
                     else None
                 ),
                 host=state.request.host,
-                clarification_source=(
-                    question_response.source if question_response is not None else None
-                ),
-                clarification_missing_item_id=(
-                    question_response.missing_item_id
-                    if question_response is not None
-                    else ""
-                ),
-                clarification_expected_value_kind=(
-                    question_response.expected_value_kind
-                    if question_response is not None
-                    else ""
-                ),
+                clarification_responses=question_responses,
             ),
             model_port=state.ports.planner_model_port,
             provider=state.provider,
@@ -643,13 +624,13 @@ def _run_grounding_phase(
             host=state.request.host,
             selected_input_ids=selected_input_ids,
             expected_input_identities=expected_input_identities,
-            clarification_response=(
-                state.request.clarification_response
+            clarification_responses=tuple(
+                response
+                for response in state.request.clarification_responses
                 if isinstance(
-                    state.request.clarification_response,
+                    response,
                     (GroundingIdentityResponse, GroundingTextResponse),
                 )
-                else None
             ),
         )
     except GroundingGenerationError as exc:
@@ -1425,19 +1406,24 @@ def _source_binding_response_values(
     *,
     base: tuple[FactValue, ...],
 ) -> tuple[FactValue, ...]:
-    response = state.request.clarification_response
-    if not isinstance(response, SourceBindingCatalogInputResponse):
-        return base
-    return _dedupe_fact_values((*base, _catalog_response_value(response)))
+    responses = tuple(
+        response
+        for response in state.request.clarification_responses
+        if isinstance(response, SourceBindingCatalogInputResponse)
+    )
+    return _dedupe_fact_values(
+        (*base, *(_catalog_response_value(response) for response in responses))
+    )
 
 
 def _source_binding_response_uses(
     state: _LookupPipelineState,
 ) -> tuple[GroundedInputUse, ...]:
-    response = state.request.clarification_response
-    if not isinstance(response, SourceBindingCatalogInputResponse):
-        return ()
-    return (_catalog_response_use(response),)
+    return tuple(
+        _catalog_response_use(response)
+        for response in state.request.clarification_responses
+        if isinstance(response, SourceBindingCatalogInputResponse)
+    )
 
 
 def _fact_planning_response_values(
@@ -1445,25 +1431,30 @@ def _fact_planning_response_values(
     *,
     base: tuple[FactValue, ...],
 ) -> tuple[FactValue, ...]:
-    response = state.request.clarification_response
-    if not isinstance(
-        response,
-        (SourceBindingCatalogInputResponse, FactPlanningCatalogInputResponse),
-    ):
-        return base
-    return _dedupe_fact_values((*base, _catalog_response_value(response)))
+    responses = tuple(
+        response
+        for response in state.request.clarification_responses
+        if isinstance(
+            response,
+            (SourceBindingCatalogInputResponse, FactPlanningCatalogInputResponse),
+        )
+    )
+    return _dedupe_fact_values(
+        (*base, *(_catalog_response_value(response) for response in responses))
+    )
 
 
 def _fact_planning_response_uses(
     state: _LookupPipelineState,
 ) -> tuple[GroundedInputUse, ...]:
-    response = state.request.clarification_response
-    if not isinstance(
-        response,
-        (SourceBindingCatalogInputResponse, FactPlanningCatalogInputResponse),
-    ):
-        return ()
-    return (_catalog_response_use(response),)
+    return tuple(
+        _catalog_response_use(response)
+        for response in state.request.clarification_responses
+        if isinstance(
+            response,
+            (SourceBindingCatalogInputResponse, FactPlanningCatalogInputResponse),
+        )
+    )
 
 
 def _catalog_response_value(

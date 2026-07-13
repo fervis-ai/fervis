@@ -213,7 +213,7 @@ def _append_matching_identity_field_filters(
 
 
 def _unique_identity_values(values: Iterable[FactValue]) -> tuple[FactValue, ...]:
-    grouped: dict[tuple[str, str, str, str], list[FactValue]] = {}
+    grouped: dict[tuple[str, str, str, tuple[str, ...]], list[FactValue]] = {}
     for value in values:
         identity = _identity_payload(value)
         if identity is None:
@@ -226,7 +226,7 @@ def _unique_identity_values(values: Iterable[FactValue]) -> tuple[FactValue, ...
                 known_input_id,
                 identity.entity_kind,
                 identity.key_id,
-                identity.key_component_id,
+                _identity_component_ids(identity),
             ),
             [],
         ).append(value)
@@ -241,13 +241,14 @@ def _identity_field_ids(
     value_identity = _identity_payload(value)
     if value_identity is None:
         return ()
+    component_ids = frozenset(_identity_component_ids(value_identity))
     key_field_ids = (
         component.field_id
         for key in source.candidate_keys
         if key.entity_kind == value_identity.entity_kind
         and key.id == value_identity.key_id
         for component in key.components
-        if component.id == value_identity.key_component_id
+        if component.id in component_ids
     )
     reference_field_ids = (
         component.local_field_id
@@ -255,9 +256,16 @@ def _identity_field_ids(
         if reference.target_entity_kind == value_identity.entity_kind
         and reference.target_key_id == value_identity.key_id
         for component in reference.components
-        if component.target_component_id == value_identity.key_component_id
+        if component.target_component_id in component_ids
     )
     return tuple(dict.fromkeys((*key_field_ids, *reference_field_ids)))
+
+
+def _identity_component_ids(
+    identity: IdentityValuePayload | IdentitySetValuePayload,
+) -> tuple[str, ...]:
+    key = identity.key if isinstance(identity, IdentityValuePayload) else identity.keys[0]
+    return tuple(component.component_id for component in key.components)
 
 
 def _identity_payload(
@@ -294,7 +302,13 @@ def _row_set_filter_payload(
     ):
         payload["entity_kind"] = value.payload.entity_kind
         payload["key_id"] = value.payload.key_id
-        payload["key_component_id"] = value.payload.key_component_id
+        payload["key_components"] = [
+            {
+                "component_id": component.component_id,
+                "value": str(component.value),
+            }
+            for component in value.payload.key.components
+        ]
         payload["display_value"] = value.payload.display_value or value.label
         if value.payload.matched_field_ref:
             payload["matched_field_ref"] = value.payload.matched_field_ref

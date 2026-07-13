@@ -79,6 +79,9 @@ _CLARIFICATION_PAYLOAD: dict[str, object] = {
                     "label": "Nairobi",
                     "entityKind": "area",
                     "keyId": "area_id",
+                    "keyComponents": [
+                        {"componentId": "id", "value": "area_1"}
+                    ],
                     "matchedField": "id",
                     "matchedValue": "area_1",
                     "resolverReadId": "list_areas",

@@ -25,6 +25,12 @@ from fervis.lookup.clarification.model import (
     QuestionContractContinuation,
     SourceBindingCatalogInputContinuation,
 )
+from fervis.lookup.canonical_data import (
+    EntityKeyComponentValue,
+    EntityKeyValue,
+    runtime_value_from_payload,
+    runtime_value_to_payload,
+)
 from fervis.lookup.clarification.render import render_clarification_question
 
 
@@ -229,10 +235,16 @@ def _option_payload(option: ClarificationOption) -> dict[str, RuntimeValue]:
     }
     if option.value:
         payload["value"] = option.value
-    if option.entity_kind:
-        payload["entityKind"] = option.entity_kind
-    if option.key_id:
-        payload["keyId"] = option.key_id
+    if option.key is not None:
+        payload["entityKind"] = option.key.entity_kind
+        payload["keyId"] = option.key.key_id
+        payload["keyComponents"] = [
+            {
+                "componentId": component.component_id,
+                "value": runtime_value_to_payload(component.value),
+            }
+            for component in option.key.components
+        ]
     if option.matched_label:
         payload["matchedLabel"] = option.matched_label
     if option.matched_field:
@@ -251,13 +263,44 @@ def _option_from_payload(payload: Mapping[str, object]) -> ClarificationOption:
         id=_required_text(payload, "id"),
         label=_text(payload.get("label")),
         value=_text(payload.get("value")),
-        entity_kind=_text(payload.get("entityKind")),
-        key_id=_text(payload.get("keyId")),
+        key=_option_key_from_payload(payload),
         matched_label=_text(payload.get("matchedLabel")),
         matched_field=_text(payload.get("matchedField")),
         matched_value=_text(payload.get("matchedValue")),
         resolver_read_id=_text(payload.get("resolverReadId")),
         resolver_label=_text(payload.get("resolverLabel")),
+    )
+
+
+def _option_key_from_payload(
+    payload: Mapping[str, object],
+) -> EntityKeyValue | None:
+    identity_fields = (
+        payload.get("entityKind"),
+        payload.get("keyId"),
+        payload.get("keyComponents"),
+    )
+    if identity_fields == (None, None, None):
+        return None
+    entity_kind = _required_text(payload, "entityKind")
+    key_id = _required_text(payload, "keyId")
+    components = payload.get("keyComponents")
+    if not isinstance(components, list) or not components:
+        raise ValueError("clarification option keyComponents must be a non-empty array")
+    parsed_components: list[EntityKeyComponentValue] = []
+    for component in components:
+        if not isinstance(component, Mapping):
+            raise ValueError("clarification option key component must be an object")
+        parsed_components.append(
+            EntityKeyComponentValue(
+                component_id=_required_text(component, "componentId"),
+                value=runtime_value_from_payload(component.get("value")),
+            )
+        )
+    return EntityKeyValue(
+        entity_kind=entity_kind,
+        key_id=key_id,
+        components=tuple(parsed_components),
     )
 
 

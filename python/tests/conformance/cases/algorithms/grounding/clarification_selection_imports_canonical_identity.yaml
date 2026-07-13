@@ -55,6 +55,9 @@ input:
               label: Nairobi
               entityKind: area
               keyId: primary_key
+              keyComponents:
+                - componentId: area_id
+                  value: area_1
               matchedField: area_id
               matchedValue: area_1
               resolverReadId: list_areas

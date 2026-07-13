@@ -35,6 +35,7 @@ from fervis.lookup.plan_execution.relations import (
 )
 from fervis.lookup.memory.available_values import active_memory_operation_values
 from fervis.lookup.memory.projection import LookupMemory, MemoryValue
+from fervis.memory.identities import MemoryIdentitySet, MemoryIdentityValue
 from fervis.lookup.answer_program.model import AnswerProgram
 from fervis.lookup.answer_program.operations import (
     ComputeBinary,
@@ -49,6 +50,7 @@ from fervis.lookup.answer_program.values import (
     LiteralType,
     ValueFilterOperator,
 )
+from fervis.lookup.canonical_data import entity_key_value
 from fervis.lookup.question_contract import (
     KnownInputSource,
     LiteralInputRole,
@@ -111,6 +113,46 @@ def test_active_memory_scalar_input_keeps_memory_and_prior_proof_refs() -> None:
         "memory:memory_artifact_1.value.total",
         "prior_step:answer_output",
     )
+
+
+def test_active_memory_preserves_complete_composite_entity_keys() -> None:
+    first = entity_key_value(
+        "campaign",
+        "account_code",
+        {"account_id": "account_1", "code": "summer"},
+    )
+    second = entity_key_value(
+        "campaign",
+        "account_code",
+        {"account_id": "account_1", "code": "winter"},
+    )
+    memory = LookupMemory(
+        identity_values=(
+            MemoryIdentityValue(
+                id="campaign_summer",
+                value=first,
+                source={"artifact_id": "artifact_1", "address": "entity.campaign"},
+            ),
+        ),
+        identity_sets=(
+            MemoryIdentitySet(
+                id="campaigns",
+                keys=(first, second),
+                display_label="campaigns",
+                source_relation_id="relation.campaigns",
+            ),
+        ),
+    )
+
+    values = active_memory_operation_values(
+        memory=memory,
+        active_memory_ids=frozenset(
+            {"artifact_1.entity.campaign", "relation.campaigns"}
+        ),
+    )
+
+    assert values[0].payload.canonical_value() == first
+    assert values[1].payload.canonical_value() == [first, second]
 
 
 def test_repeated_compute_origin_has_one_operation_input_node() -> None:
@@ -204,10 +246,7 @@ def test_compile_merges_equivalent_applied_and_concrete_row_filters() -> None:
     catalog = _sales_catalog()
     staff_value = FactValue.identity(
         id="value_staff",
-        entity_kind="staff",
-        key_id="primary_key",
-        key_component_id="staff_id",
-        value="staff_1",
+        key=entity_key_value("staff", "primary_key", {"staff_id": "staff_1"}),
         display_value="Nadia Wanjiku",
         proof_refs=("known_input:qi_staff",),
     )

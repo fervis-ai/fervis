@@ -16,6 +16,7 @@ from fervis.lookup.clarification.response import (
     clarification_response_from_payload,
     clarification_response_payload,
 )
+from fervis.lookup.clarification.model import ClarificationOwnerResponse
 
 
 def execution_spec_kind(spec: RunExecutionSpec) -> RunExecutionSpecKind:
@@ -46,18 +47,11 @@ def _resolve_question_storage_dict(spec: ResolveQuestionRunSpec) -> dict[str, An
             None if spec.max_budget_usd is None else str(spec.max_budget_usd)
         ),
         "max_thinking_tokens": spec.max_thinking_tokens,
-        "clarification_response": _clarification_response_storage_dict(
-            spec.clarification_response
-        ),
+        "clarification_responses": [
+            clarification_response_payload(response)
+            for response in spec.clarification_responses
+        ],
     }
-
-
-def _clarification_response_storage_dict(
-    response,
-) -> dict[str, Any] | None:
-    if response is None:
-        return None
-    return clarification_response_payload(response)
 
 
 def _rerun_program_storage_dict(spec: RerunProgramSpec) -> dict[str, Any]:
@@ -87,14 +81,14 @@ def execution_spec_from_storage(
                 "runtime_context",
                 "max_budget_usd",
                 "max_thinking_tokens",
-                "clarification_response",
+                "clarification_responses",
             },
         )
         provider = values["provider"]
         context_run_id = values["context_run_id"]
         max_budget = values["max_budget_usd"]
         max_thinking = values["max_thinking_tokens"]
-        clarification_response = values["clarification_response"]
+        clarification_responses = values["clarification_responses"]
         return ResolveQuestionRunSpec(
             question=_required_text(values["question"], "question"),
             provider=None if provider is None else _text(provider, "provider"),
@@ -118,8 +112,8 @@ def execution_spec_from_storage(
                 if max_thinking is None
                 else _integer(max_thinking, "max_thinking_tokens")
             ),
-            clarification_response=_clarification_response_from_storage(
-                clarification_response
+            clarification_responses=_clarification_responses_from_storage(
+                clarification_responses
             ),
         )
     _require_exact_fields(values, {"invocation_id", "runtime_context"})
@@ -129,11 +123,17 @@ def execution_spec_from_storage(
     )
 
 
-def _clarification_response_from_storage(value: object):
-    if value is None:
-        return None
-    payload = _json_object(value, "clarification_response")
-    return clarification_response_from_payload(payload)
+def _clarification_responses_from_storage(
+    value: object,
+) -> tuple[ClarificationOwnerResponse, ...]:
+    if not isinstance(value, list):
+        raise ValueError("execution spec clarification_responses must be a list")
+    return tuple(
+        clarification_response_from_payload(
+            _json_object(item, "clarification_responses item")
+        )
+        for item in value
+    )
 
 
 def _require_exact_fields(values: Mapping[str, object], expected: set[str]) -> None:

@@ -31,6 +31,7 @@ from fervis.lookup.answer_program.values import (
     FactValue,
     TimeComponent,
 )
+from fervis.lookup.canonical_data import entity_key_value
 from fervis.lookup.question_contract import (
     AnswerPopulationMembershipTestKind,
     AnswerPopulationMembershipTestPolarity,
@@ -1472,10 +1473,9 @@ def _request_with_identity_field_filter() -> SourceBindingRequest:
         available_values=(
             FactValue.identity(
                 id="nairobi_area",
-                entity_kind="area",
-                key_id="primary_key",
-                key_component_id="area_id",
-                value="area_nairobi",
+                key=entity_key_value(
+                    "area", "primary_key", {"area_id": "area_nairobi"}
+                ),
                 display_value="London",
                 matched_field_ref="field.data.name",
                 matched_field_path="data.name",

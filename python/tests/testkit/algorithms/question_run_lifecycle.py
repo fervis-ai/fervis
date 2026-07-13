@@ -122,7 +122,7 @@ def _run_clarification_resume_case(payload: dict[str, Any]) -> list[str]:
             lookup.calls[-1].question if lookup.calls else None
         ),
         "resumed_has_clarification_response": bool(
-            lookup.calls and lookup.calls[-1].clarification_response is not None
+            lookup.calls and lookup.calls[-1].clarification_responses
         ),
         "resumed_clarification": _resumed_clarification_summary(lookup),
     }
@@ -133,9 +133,9 @@ def _run_clarification_resume_case(payload: dict[str, Any]) -> list[str]:
 
 
 def _resumed_clarification_summary(lookup: "_FakeLookup") -> dict[str, object] | None:
-    if not lookup.calls or lookup.calls[-1].clarification_response is None:
+    if not lookup.calls or not lookup.calls[-1].clarification_responses:
         return None
-    response = lookup.calls[-1].clarification_response
+    response = lookup.calls[-1].clarification_responses[-1]
     payload = clarification_response_payload(response)
     kind = str(payload["kind"])
     summary: dict[str, object] = {
@@ -706,7 +706,10 @@ class _InMemoryRuns:
             raise ValueError("clarification can resume only a question lookup")
         submission = replace(
             current.submission,
-            spec=replace(spec, clarification_response=response),
+            spec=replace(
+                spec,
+                clarification_responses=(*spec.clarification_responses, response),
+            ),
             execution_mode=resume.execution_mode,
         )
         queued = QueuedRun(

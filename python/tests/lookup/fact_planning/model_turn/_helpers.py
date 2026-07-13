@@ -37,6 +37,7 @@ from fervis.lookup.answer_program.values import (
     FactValue,
     TimeComponent,
 )
+from fervis.lookup.canonical_data import entity_key_value
 from fervis.lookup.fact_planning.request import (
     FactPlanRequest as _FactPlanRequest,
     PatternFactPlanTurnPrompt,

@@ -359,6 +359,9 @@ def test_django_observability_query_answer_scope_includes_clarification_lineage(
                                 "label": "Store 1",
                                 "entityKind": "store",
                                 "keyId": "primary_key",
+                                "keyComponents": [
+                                    {"componentId": "store_id", "value": "store_1"}
+                                ],
                                 "matchedField": "store_id",
                                 "matchedValue": "store_1",
                                 "resolverReadId": "list_stores",

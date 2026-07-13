@@ -1167,7 +1167,10 @@ def _selected_grounding_option(
         option
         for option in group["binding_options"]
         if option.get("read_id") == "list_staff_list"
-        and option.get("returned_identity", {}).get("key_component_id") == "staff_id"
+        and any(
+            component.get("component_id") == "staff_id"
+            for component in option.get("returned_identity", {}).get("components", ())
+        )
         and all(
             param.get("name") != "include_items"
             for param in option.get("query_params", ())

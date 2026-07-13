@@ -17,6 +17,7 @@ from fervis.lookup.relation_catalog.selection import (
 from fervis.lookup.grounding.model import (
     GroundingRequest,
     InputBindingOption,
+    InputBindingKeyComponent,
     InputBindingPurpose,
     InputBindingRoute,
     KnownInputBindingTask,
@@ -66,7 +67,7 @@ from fervis.lookup.plan_selection import (
 _APPROVED_CHARS = {
     "question contract": (364, 17840, 26925),
     "query enrichment": (364, 5185, 7408),
-    "grounding": (364, 6473, 8781),
+    "grounding": (364, 6487, 8797),
     "source binding": (364, 14698, 18234),
     "pattern fact planning": (364, 3497, 5311),
 }
@@ -199,11 +200,15 @@ def _turn_invocations():
                             lookup_param_type="string",
                             lookup_field_ids=("field.value",),
                             lookup_field_refs=("read_today.value",),
-                            return_field_id="field.id",
-                            return_field_ref="read_today.id",
                             entity_kind="calendar_value",
                             key_id="primary_key",
-                            key_component_id="id",
+                            key_components=(
+                                InputBindingKeyComponent(
+                                    component_id="id",
+                                    field_id="field.id",
+                                    field_ref="read_today.id",
+                                ),
+                            ),
                             context_field_ids=("field.value",),
                             display="value -> calendar value",
                         ),

@@ -108,10 +108,9 @@ def test_fact_plan_prompt_marks_grounded_optional_params_as_satisfied():
         available_values=(
             FactValue.identity(
                 id="azraah",
-                entity_kind="staff",
-                key_id="primary_key",
-                key_component_id="staff_id",
-                value="staff_1",
+                key=entity_key_value(
+                    "staff", "primary_key", {"staff_id": "staff_1"}
+                ),
                 display_value="Azraah Fatuma",
             ),
         ),
@@ -193,10 +192,9 @@ def test_fact_plan_prompt_projects_grounded_inputs_as_scoped_row_set():
             FactValue.identity(
                 id="azraah",
                 known_input_id="fact_1_input_1",
-                entity_kind="staff",
-                key_id="primary_key",
-                key_component_id="staff_id",
-                value="staff_1",
+                key=entity_key_value(
+                    "staff", "primary_key", {"staff_id": "staff_1"}
+                ),
                 display_value="Azraah Fatuma",
                 proof_refs=("known_input:fact_1_input_1",),
             ),
@@ -383,10 +381,9 @@ def test_fact_plan_prompt_projects_identity_value_to_matching_source_field_filte
             FactValue.identity(
                 id="nairobi_area",
                 known_input_id="input_1",
-                entity_kind="area",
-                key_id="primary_key",
-                key_component_id="area_id",
-                value="area_nairobi",
+                key=entity_key_value(
+                    "area", "primary_key", {"area_id": "area_nairobi"}
+                ),
                 display_value="London",
                 proof_refs=("known_input:input_1",),
             ),

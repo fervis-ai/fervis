@@ -41,6 +41,7 @@ from fervis.lookup.answer_program.values import (
     LiteralType,
     TimeComponent,
 )
+from fervis.lookup.canonical_data import entity_key_value
 from fervis.lookup.turn_prompts import build_turn_prompt_context
 from fervis.lookup.question_contract import (
     GroupKeyDomainKind,
@@ -2559,10 +2560,11 @@ def _scoped_review_owned_input_request(
                 FactValue.identity(
                     id="staff_identity_1",
                     known_input_id="staff_id_1",
-                    entity_kind="staff",
-                    key_id="primary_key",
-                    key_component_id="staff_id",
-                    value="51515151-0000-0000-0002-000000000001",
+                    key=entity_key_value(
+                        "staff",
+                        "primary_key",
+                        {"staff_id": "51515151-0000-0000-0002-000000000001"},
+                    ),
                     display_value="51515151-0000-0000-0002-000000000001",
                     proof_refs=("known_input:staff_id_1", "read:staff_lookup"),
                     applies_to_requested_fact_ids=("fact_1",),
@@ -3624,10 +3626,11 @@ def _identity_field_filter_request() -> SourceBindingRequest:
             FactValue.identity(
                 id="nairobi_area",
                 known_input_id="area_1",
-                entity_kind="area",
-                key_id="primary_key",
-                key_component_id="area_id",
-                value="area_nairobi",
+                key=entity_key_value(
+                    "area",
+                    "primary_key",
+                    {"area_id": "area_nairobi"},
+                ),
                 display_value="London",
                 matched_field_ref="field.data.name",
                 matched_field_path="data.name",

@@ -124,12 +124,12 @@ expect:
       subjects:
       - kind: question_input
         options:
-        - id: area:primary_key:area_id:area_nairobi_1
-        - id: area:primary_key:area_id:area_nairobi_2
+        - id: 'area:primary_key:{"area_id":"area_nairobi_1"}'
+        - id: 'area:primary_key:{"area_id":"area_nairobi_2"}'
       evidence:
       - kind: known_input
         id: known_input:input_1
       - kind: candidate
-        id: area:primary_key:area_id:area_nairobi_1
+        id: 'area:primary_key:{"area_id":"area_nairobi_1"}'
       - kind: candidate
-        id: area:primary_key:area_id:area_nairobi_2
+        id: 'area:primary_key:{"area_id":"area_nairobi_2"}'

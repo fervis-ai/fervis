@@ -77,31 +77,35 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                 indent=2,
             ),
         ]
-        source = self.request.clarification_source
-        if source is not None:
-            candidate = self.request.selected_clarification_candidate
+        responses = self.request.clarification_responses
+        if responses:
             sections.append(
                 builder.json_section(
-                    "Attributed clarification response:",
+                    "Attributed clarification responses:",
                     {
-                        "response_id": source.response_id,
-                        "clarification_id": source.clarification_id,
-                        "exact_user_text": source.exact_user_text,
-                        "selected_candidate": (
-                            None
-                            if candidate is None
-                            else {
-                                "id": candidate.id,
-                                "contextualized_question": candidate.contextualized_question,
-                                "source_evidence": [
-                                    {
-                                        "source_id": item.source_id,
-                                        "exact_source_texts": list(item.exact_source_texts),
+                        "responses": [
+                            {
+                                "response_id": response.source.response_id,
+                                "clarification_id": response.source.clarification_id,
+                                "exact_user_text": response.source.exact_user_text,
+                                "selected_candidate": (
+                                    None
+                                    if response.candidate is None
+                                    else {
+                                        "id": response.candidate.id,
+                                        "contextualized_question": response.candidate.contextualized_question,
+                                        "source_evidence": [
+                                            {
+                                                "source_id": item.source_id,
+                                                "exact_source_texts": list(item.exact_source_texts),
+                                            }
+                                            for item in response.candidate.source_evidence
+                                        ],
                                     }
-                                    for item in candidate.source_evidence
-                                ],
+                                ),
                             }
-                        ),
+                            for response in responses
+                        ]
                     },
                 )
             )

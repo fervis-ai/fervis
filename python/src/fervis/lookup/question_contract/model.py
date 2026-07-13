@@ -19,7 +19,7 @@ from fervis.lookup.question_inputs import (
     LiteralInputRole,
 )
 from fervis.lookup.turn_prompts.context import HostPromptContext
-from fervis.lookup.clarification.model import ClarificationResponseSource
+from fervis.lookup.clarification.model import QuestionContractResponse
 
 
 class KnownInputSource(StrEnum):
@@ -1103,9 +1103,7 @@ class QuestionContractRequest:
     conversation_context: dict[str, Any]
     conversation_resolution: CompiledConversationResolution | None = None
     host: HostPromptContext = field(default_factory=HostPromptContext)
-    clarification_source: ClarificationResponseSource | None = None
-    clarification_missing_item_id: str = ""
-    clarification_expected_value_kind: str = ""
+    clarification_responses: tuple[QuestionContractResponse, ...] = ()
 
 
 def _answer_request_contract_dict(

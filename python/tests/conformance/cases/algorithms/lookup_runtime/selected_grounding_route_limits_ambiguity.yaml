@@ -141,14 +141,14 @@ expect:
       subjects:
       - kind: question_input
         options:
-        - id: location:primary_key:location_id:loc_1
+        - id: 'location:primary_key:{"location_id":"loc_1"}'
           label: 'Location: London [location_id=loc_1]'
-        - id: location:primary_key:location_id:loc_2
+        - id: 'location:primary_key:{"location_id":"loc_2"}'
           label: 'Location: London [location_id=loc_2]'
       evidence:
       - kind: known_input
         id: known_input:input_1
       - kind: candidate
-        id: location:primary_key:location_id:loc_1
+        id: 'location:primary_key:{"location_id":"loc_1"}'
       - kind: candidate
-        id: location:primary_key:location_id:loc_2
+        id: 'location:primary_key:{"location_id":"loc_2"}'

@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from fervis.types.enums import StrEnum
 from typing import Any
+from dataclasses import dataclass, field
 
-from fervis.lookup.turn_prompts.context import HostPromptContext
-from fervis.lookup.clarification.model import ClarificationResponseSource
 from fervis.lookup.answer_program.values import (
     FactValue,
     TimeComponent,
     ValueComponent,
 )
+from fervis.lookup.canonical_data import EntityKeyValue
+from fervis.lookup.clarification.model import GroundingTextResponse
+from fervis.lookup.turn_prompts.context import HostPromptContext
+from fervis.types.enums import StrEnum
 
 
 class InputBindingPurpose(StrEnum):
@@ -29,11 +30,11 @@ class InputBindingResultKind(StrEnum):
 class ExpectedInputIdentity:
     entity_kind: str
     key_id: str
-    key_component_id: str
+    key_component_ids: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        if not self.entity_kind or not self.key_id or not self.key_component_id:
-            raise ValueError("expected input identity must name its candidate-key component")
+        if not self.entity_kind or not self.key_id or not self.key_component_ids:
+            raise ValueError("expected input identity must name its complete candidate key")
 
 
 class GroundingTerminalKind(StrEnum):
@@ -88,6 +89,17 @@ class ResolverOutputFieldCard:
 
 
 @dataclass(frozen=True)
+class InputBindingKeyComponent:
+    component_id: str
+    field_id: str
+    field_ref: str
+
+    def __post_init__(self) -> None:
+        if not self.component_id or not self.field_id or not self.field_ref:
+            raise ValueError("input binding key component is incomplete")
+
+
+@dataclass(frozen=True)
 class InputBindingRoute:
     known_input_id: str
     resolver_row_source_id: str
@@ -98,11 +110,9 @@ class InputBindingRoute:
     lookup_param_type: str
     lookup_field_ids: tuple[str, ...]
     lookup_field_refs: tuple[str, ...]
-    return_field_id: str
-    return_field_ref: str
     entity_kind: str
     key_id: str
-    key_component_id: str
+    key_components: tuple[InputBindingKeyComponent, ...]
     context_field_ids: tuple[str, ...]
     display: str
     resolver_description: str = ""
@@ -112,7 +122,10 @@ class InputBindingRoute:
 
     @property
     def identity_lookup_field_ids(self) -> tuple[str, ...]:
-        identity_field_ids = {self.return_field_id, *self.context_field_ids}
+        identity_field_ids = {
+            *(component.field_id for component in self.key_components),
+            *self.context_field_ids,
+        }
         return tuple(
             field_id
             for field_id in self.lookup_field_ids
@@ -196,8 +209,7 @@ class GroundingRequest:
     time_tasks: tuple[KnownTimeResolutionTask, ...] = ()
     conversation_context: dict[str, Any] = field(default_factory=dict)
     host: HostPromptContext = field(default_factory=HostPromptContext)
-    clarification_source: ClarificationResponseSource | None = None
-    clarification_known_input_id: str = ""
+    clarification_responses: tuple[GroundingTextResponse, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -221,8 +233,7 @@ class GroundedInputUse:
 class GroundingCandidate:
     id: str
     label: str = ""
-    entity_kind: str = ""
-    key_id: str = ""
+    key: EntityKeyValue | None = None
     matched_label: str = ""
     matched_field: str = ""
     matched_value: str = ""

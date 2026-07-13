@@ -14,8 +14,10 @@ from fervis.lookup.conversation_resolution.compilation import (
     CompiledConversationResolution,
     CompiledResolvedClause,
     CompiledResolvedValue,
+    ResolvedIdentityInput,
 )
 from fervis.lookup.question_inputs import LiteralInputRole
+from fervis.lookup.canonical_data import entity_key_value
 from fervis.lookup.conversation_resolution.schema import (
     build_conversation_resolution_tool_schemas,
 )
@@ -61,18 +63,28 @@ def run_conversation_resolution_compile_case(payload: dict[str, Any]) -> list[st
         ),
         "uses_prior_context": compiled.uses_prior_context,
         "canonical_identity_inputs": [
-            {
-                "input_ref": item.input_ref,
-                "entity_kind": item.canonical_identity.entity_kind,
-                "key_id": item.canonical_identity.key_id,
-                "key_component_id": item.canonical_identity.key_component_id,
-                "value": item.canonical_identity.value,
-                "authority_refs": list(item.canonical_identity.authority_refs),
-            }
+            _canonical_identity_payload(item)
             for item in compiled.identity_inputs()
         ],
     }
     return _mismatches(actual, payload["expect"])
+
+
+def _canonical_identity_payload(item: ResolvedIdentityInput) -> dict[str, object]:
+    identity = item.canonical_identity
+    payload: dict[str, object] = {
+        "input_ref": item.input_ref,
+        "entity_kind": identity.key.entity_kind,
+        "key_id": identity.key.key_id,
+        "authority_refs": list(identity.authority_refs),
+    }
+    if len(identity.key.components) == 1:
+        component = identity.key.components[0]
+        payload["key_component_id"] = component.component_id
+        payload["value"] = component.value
+    else:
+        payload["components"] = identity.key.component_values()
+    return payload
 
 
 def run_conversation_resolution_schema_case(payload: dict[str, Any]) -> list[str]:
@@ -268,12 +280,15 @@ def _compiled_input(payload: dict[str, Any]):
         canonical_identity_payload = payload.get("canonical_identity")
         canonical_identity = (
             ResolvedCanonicalIdentity(
-                entity_kind=str(canonical_identity_payload["entity_kind"]),
-                key_id=str(canonical_identity_payload["key_id"]),
-                key_component_id=str(
-                    canonical_identity_payload["key_component_id"]
+                key=entity_key_value(
+                    str(canonical_identity_payload["entity_kind"]),
+                    str(canonical_identity_payload["key_id"]),
+                    {
+                        str(canonical_identity_payload["key_component_id"]): str(
+                            canonical_identity_payload["value"]
+                        )
+                    },
                 ),
-                value=str(canonical_identity_payload["value"]),
                 authority_refs=tuple(
                     str(item)
                     for item in canonical_identity_payload["authority_refs"]

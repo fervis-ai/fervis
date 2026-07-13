@@ -548,7 +548,9 @@ def _operation_value_payload(value: FactValue) -> dict[str, object]:
             {
                 "entity_kind": value.payload.entity_kind,
                 "key_id": value.payload.key_id,
-                "key_component_id": value.payload.key_component_id,
+                "key_components": [
+                    component.component_id for component in value.payload.key.components
+                ],
                 "display_value": value.payload.display_value or value.label,
             }
         )
@@ -564,8 +566,11 @@ def _operation_value_payload(value: FactValue) -> dict[str, object]:
             {
                 "entity_kind": value.payload.entity_kind,
                 "key_id": value.payload.key_id,
-                "key_component_id": value.payload.key_component_id,
-                "count": len(value.payload.values),
+                "key_components": [
+                    component.component_id
+                    for component in value.payload.keys[0].components
+                ],
+                "count": len(value.payload.keys),
                 "display_value": value.payload.display_value or value.label,
             }
         )
@@ -608,7 +613,8 @@ def _value_matches_entity_target(
         return (
             value.payload.entity_kind == target.entity_kind
             and value.payload.key_id == target.key_id
-            and value.payload.key_component_id == target.component_id
+            and target.component_id
+            in {component.component_id for component in value.payload.key.components}
         )
     elif value.kind == ValueKind.IDENTITY_SET and isinstance(
         value.payload, IdentitySetValuePayload
@@ -616,7 +622,11 @@ def _value_matches_entity_target(
         return (
             value.payload.entity_kind == target.entity_kind
             and value.payload.key_id == target.key_id
-            and value.payload.key_component_id == target.component_id
+            and all(
+                target.component_id
+                in {component.component_id for component in key.components}
+                for key in value.payload.keys
+            )
         )
     else:
         return False

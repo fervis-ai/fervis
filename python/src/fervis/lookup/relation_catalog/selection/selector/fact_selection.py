@@ -497,10 +497,17 @@ def _has_matching_entity_value(
         if (
             payload.entity_kind == target.entity_kind
             and payload.key_id == target.key_id
-            and payload.key_component_id == target.component_id
+            and target.component_id in _identity_component_ids(payload)
         ):
             return True
     return False
+
+
+def _identity_component_ids(
+    payload: IdentityValuePayload | IdentitySetValuePayload,
+) -> frozenset[str]:
+    key = payload.key if isinstance(payload, IdentityValuePayload) else payload.keys[0]
+    return frozenset(component.component_id for component in key.components)
 
 
 @dataclass(frozen=True)

@@ -27,6 +27,7 @@ from fervis.lookup.answer_program.errors import AnswerProgramContractError
 from fervis.lookup.answer_program.values import BindingPatch, BindingSet
 from fervis.lookup.question_contract import model as question_contract_model
 from fervis.lookup import question_inputs
+from fervis.lookup import canonical_data
 
 
 def canonicalize_answer_program(program: AnswerProgram) -> AnswerProgram:
@@ -636,6 +637,8 @@ _CONTRACT_TYPES = (
     values.ValueExpressionOrigin,
     values.ValueFilterOperator,
     values.ValueKind,
+    canonical_data.EntityKeyComponentValue,
+    canonical_data.EntityKeyValue,
     question_contract_model.AnswerPopulationMembershipTestKind,
     question_contract_model.AnswerPopulationMembershipTestPolarity,
     question_contract_model.AnswerSubjectInstanceInterpretationKind,

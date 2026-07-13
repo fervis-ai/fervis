@@ -44,6 +44,7 @@ from fervis.lookup.grounding.model import (
     InputBindingPurpose,
     InputBindingResultKind,
     InputBindingRoute,
+    InputBindingKeyComponent,
     InputBindingSelection,
     KnownInputBindingTask,
     ResolverOutputFieldCard,
@@ -65,7 +66,13 @@ from fervis.lookup.answer_program.values import (
     NamedValuePayload,
     ValueFilterOperator,
 )
-from fervis.lookup.canonical_data import RuntimeScalar, RuntimeValue
+from fervis.lookup.canonical_data import (
+    EntityKeyComponentValue,
+    EntityKeyValue,
+    RuntimeScalar,
+    RuntimeValue,
+    canonical_runtime_json,
+)
 from fervis.lookup.question_contract import (
     QuestionContract,
     RequestedFact,
@@ -227,7 +234,6 @@ def _reference_binding_options(
     option_index = 1
     for resolver_source in resolvers:
         for resolver_return in _resolver_return_fields(resolver_source):
-            return_field = resolver_return.field
             for lookup_param, lookup_fields in _resolver_lookup_groups(
                 resolver_source,
                 resolver_return=resolver_return,
@@ -250,23 +256,28 @@ def _reference_binding_options(
                     lookup_field_refs=(
                         tuple(field.field_ref for field in lookup_fields)
                     ),
-                    return_field_id=return_field.id,
-                    return_field_ref=return_field.field_ref,
                     entity_kind=resolver_return.entity_kind,
                     key_id=resolver_return.key_id,
-                    key_component_id=resolver_return.component_id,
+                    key_components=tuple(
+                        InputBindingKeyComponent(
+                            component_id=component.id,
+                            field_id=component.field_id,
+                            field_ref=resolver_source.field(component.field_id).field_ref,
+                        )
+                        for component in resolver_return.key.components
+                    ),
                     context_field_ids=resolver_return.context_field_ids,
                     display=_binding_path(
                         resolver_source=resolver_source,
                         lookup_param=lookup_param,
                         lookup_fields=lookup_fields,
-                        return_field=return_field,
+                        return_fields=resolver_return.fields,
                     ),
                     query_params=_resolver_query_param_cards(resolver_source),
                     selected_output_fields=_resolver_selected_output_field_cards(
                         resolver_source,
                         lookup_fields=lookup_fields,
-                        return_field=return_field,
+                        return_fields=resolver_return.fields,
                     ),
                 )
                 if not _route_matches_expected_identity(
@@ -301,7 +312,8 @@ def _route_matches_expected_identity(
     return (
         route.entity_kind == expected.entity_kind
         and route.key_id == expected.key_id
-        and route.key_component_id == expected.key_component_id
+        and tuple(component.component_id for component in route.key_components)
+        == expected.key_component_ids
     )
 
 
@@ -432,26 +444,25 @@ def _resolve_reference_tasks(
 
 @dataclass(frozen=True)
 class _ResolverReturnField:
-    field: RowSourceField
+    key: RowSourceCandidateKey
+    fields: tuple[RowSourceField, ...]
     entity_kind: str
     key_id: str
-    component_id: str
     context_field_ids: tuple[str, ...]
 
 
 def _resolver_return_fields(source: RowSource) -> tuple[_ResolverReturnField, ...]:
     return tuple(
         _ResolverReturnField(
-            field=source.field(key.components[0].field_id),
+            key=key,
+            fields=tuple(source.field(component.field_id) for component in key.components),
             entity_kind=key.entity_kind,
             key_id=key.id,
-            component_id=key.components[0].id,
             context_field_ids=_resolver_identity_context_field_ids(source, key=key),
         )
         for key in source.candidate_keys
         if key.primary
         and key.stable
-        and len(key.components) == 1
     )
 
 
@@ -461,12 +472,12 @@ def _resolver_identity_context_field_ids(
     key: RowSourceCandidateKey,
 ) -> tuple[str, ...]:
     alternate_key_field_ids = (
-        candidate.components[0].field_id
+        component.field_id
         for candidate in source.candidate_keys
         if candidate.entity_kind == key.entity_kind
         and candidate.id != key.id
         and candidate.stable
-        and len(candidate.components) == 1
+        for component in candidate.components
     )
     return tuple(dict.fromkeys((*key.context_field_ids, *alternate_key_field_ids)))
 
@@ -506,7 +517,7 @@ def _identity_param_lookup_groups(
     resolver_return: _ResolverReturnField,
 ) -> tuple[tuple[RowSourceParam, tuple[RowSourceField, ...]], ...]:
     return tuple(
-        (param, (resolver_return.field,))
+        (param, resolver_return.fields)
         for param in source.params
         if _param_targets_resolver_key(param, resolver_return)
         and param.semantics != RowSourceParamSemantics.RESPONSE_SHAPE
@@ -519,10 +530,11 @@ def _param_targets_resolver_key(
 ) -> bool:
     target = param.entity_target
     return (
-        target is not None
+        len(resolver_return.key.components) == 1
+        and target is not None
         and target.entity_kind == resolver_return.entity_kind
         and target.key_id == resolver_return.key_id
-        and target.component_id == resolver_return.component_id
+        and target.component_id == resolver_return.key.components[0].id
     )
 
 
@@ -537,7 +549,7 @@ def _binding_path(
     resolver_source: RowSource,
     lookup_param: RowSourceParam | None,
     lookup_fields: tuple[RowSourceField, ...],
-    return_field: RowSourceField,
+    return_fields: tuple[RowSourceField, ...],
 ) -> str:
     lookup_label = (
         " / ".join(field.label for field in lookup_fields)
@@ -546,7 +558,7 @@ def _binding_path(
     )
     return (
         f"{resolver_source.label}.{lookup_label} -> "
-        f"{resolver_source.label}.{return_field.label}"
+        f"{resolver_source.label}.{' + '.join(field.label for field in return_fields)}"
     )
 
 
@@ -574,10 +586,10 @@ def _resolver_selected_output_field_cards(
     source: RowSource,
     *,
     lookup_fields: tuple[RowSourceField, ...],
-    return_field: RowSourceField,
+    return_fields: tuple[RowSourceField, ...],
 ) -> tuple[ResolverOutputFieldCard, ...]:
     selected_refs = {
-        return_field.field_ref,
+        *(field.field_ref for field in return_fields),
         *(field.field_ref for field in lookup_fields),
     }
     cards: list[ResolverOutputFieldCard] = []
@@ -691,8 +703,7 @@ def _grounded_value_key(value: FactValue) -> tuple[str, ...]:
             "identity",
             payload.entity_kind,
             payload.key_id,
-            payload.key_component_id,
-            str(payload.value),
+            canonical_runtime_json(payload.key.component_values()),
         )
     if isinstance(payload, NamedValuePayload):
         return ("named", payload.matched_field_ref, payload.text)
@@ -747,14 +758,20 @@ def _identity_candidate(value: FactValue) -> GroundingCandidate:
     resolver_endpoint_name = (
         value.source_refs[1] if len(value.source_refs) > 1 else resolver_read_id
     )
+    single_component = (
+        payload.key.components[0] if len(payload.key.components) == 1 else None
+    )
     return GroundingCandidate(
         id=_identity_candidate_ref(value),
         label=_identity_candidate_label(value),
-        entity_kind=payload.entity_kind,
-        key_id=payload.key_id,
-        matched_label=payload.display_value or value.label or payload.value,
-        matched_field=payload.key_component_id,
-        matched_value=payload.value,
+        key=payload.key,
+        matched_label=payload.display_value or value.label,
+        matched_field=(
+            single_component.component_id if single_component is not None else ""
+        ),
+        matched_value=(
+            str(single_component.value) if single_component is not None else ""
+        ),
         resolver_read_id=resolver_read_id,
         resolver_label=_title_words(resolver_read_id or resolver_endpoint_name),
     )
@@ -764,10 +781,7 @@ def _identity_candidate_ref(value: FactValue) -> str:
     payload = value.payload
     if not isinstance(payload, IdentityValuePayload):
         return value.id
-    return (
-        f"{payload.entity_kind}:{payload.key_id}:"
-        f"{payload.key_component_id}:{payload.value}"
-    )
+    return f"{payload.entity_kind}:{payload.key_id}:{canonical_runtime_json(payload.key.component_values())}"
 
 
 def _identity_candidate_label(value: FactValue) -> str:
@@ -775,8 +789,12 @@ def _identity_candidate_label(value: FactValue) -> str:
     if not isinstance(payload, IdentityValuePayload):
         return value.label or value.id
     identity_label = payload.entity_kind.replace("_", " ").title()
-    display = payload.display_value or value.label or str(payload.value)
-    return f"{identity_label}: {display} [{payload.key_component_id}={payload.value}]"
+    display = payload.display_value or value.label or str(payload.key.component_values())
+    components = ", ".join(
+        f"{component.component_id}={component.value}"
+        for component in payload.key.components
+    )
+    return f"{identity_label}: {display} [{components}]"
 
 
 def _title_words(value: str) -> str:
@@ -828,13 +846,17 @@ def _execute_reference_route(
                     proof_refs=(f"known_input:{task.known_input_id}",),
                     resolver_read_id=route.resolver_read_id,
                     resolver_endpoint_name=route.resolver_endpoint_name,
-                    resolver_field_id=route.return_field_id,
-                    identity_field=route.key_component_id,
+                    resolver_field_id=" ".join(
+                        component.field_id for component in route.key_components
+                    ),
+                    identity_field=" ".join(
+                        component.component_id for component in route.key_components
+                    ),
                 ),
             )
         )
     values_by_key: dict[tuple[str, ...], FactValue] = {}
-    uses_by_key: dict[tuple[str, ...], GroundedInputUse] = {}
+    uses_by_key: dict[tuple[str, ...], tuple[GroundedInputUse, ...]] = {}
     certifications_by_key: dict[tuple[str, ...], GroundedValueCertification] = {}
     for resolved in rows:
         fact_value = _fact_value_from_resolved_row(
@@ -869,8 +891,12 @@ def _execute_reference_route(
                     proof_refs=(f"known_input:{task.known_input_id}",),
                     resolver_read_id=route.resolver_read_id,
                     resolver_endpoint_name=route.resolver_endpoint_name,
-                    resolver_field_id=route.return_field_id,
-                    identity_field=route.key_component_id,
+                    resolver_field_id=" ".join(
+                        component.field_id for component in route.key_components
+                    ),
+                    identity_field=" ".join(
+                        component.component_id for component in route.key_components
+                    ),
                 ),
             )
         )
@@ -886,7 +912,7 @@ def _execute_reference_route(
         )
     return CanonicalInputLedger(
         values=tuple(values_by_key.values()),
-        uses=tuple(uses_by_key.values()),
+        uses=tuple(use for uses in uses_by_key.values() for use in uses),
         certifications=tuple(certifications_by_key.values()),
     )
 
@@ -910,10 +936,10 @@ def _grounded_input_use(
     task: KnownInputBindingTask,
     route: InputBindingRoute,
     value: FactValue,
-) -> GroundedInputUse:
-    field_id = route.return_field_id
+) -> tuple[GroundedInputUse, ...]:
+    field_ids = tuple(component.field_id for component in route.key_components)
     if isinstance(value.payload, NamedValuePayload):
-        field_id = next(
+        field_ids = tuple(
             (
                 candidate_id
                 for candidate_id, candidate_ref in zip(
@@ -923,15 +949,20 @@ def _grounded_input_use(
                 )
                 if candidate_ref == value.payload.matched_field_ref
             ),
-            "",
         )
-    return GroundedInputUse(
-        id=f"use_{_symbol(task.known_input_id)}_{_symbol(value.id)}",
-        value_id=value.id,
-        row_source_id=route.resolver_row_source_id,
-        param_id=field_id,
-        field_id=field_id,
-        entity_kind=route.entity_kind,
+    return tuple(
+        GroundedInputUse(
+            id=(
+                f"use_{_symbol(task.known_input_id)}_"
+                f"{_symbol(value.id)}_{_symbol(field_id)}"
+            ),
+            value_id=value.id,
+            row_source_id=route.resolver_row_source_id,
+            param_id=field_id,
+            field_id=field_id,
+            entity_kind=route.entity_kind,
+        )
+        for field_id in field_ids
     )
 
 
@@ -945,33 +976,23 @@ def _fact_value_from_resolved_row(
 ) -> FactValue | None:
     if result_kind is InputBindingResultKind.MATCHED_VALUE:
         return _named_value_from_resolved_match(task=task, route=route, resolved=resolved)
-    row = resolved.row
-    value = path_value(
-        row,
-        relative_response_path(
-            resolver_source.field(route.return_field_id).path,
-            resolver_source.row_path,
-        ),
-        missing=_MISSING,
+    key = _entity_key_from_resolved_row(
+        route=route,
+        resolver_source=resolver_source,
+        row=resolved.row,
     )
-    if value in (_MISSING, None, ""):
+    if key is None:
         return None
     value_id = _grounded_identity_value_id(
         known_input_id=task.known_input_id,
-        entity_kind=route.entity_kind,
-        key_id=route.key_id,
-        key_component_id=route.key_component_id,
-        value=str(value),
+        key=key,
     )
     return FactValue.identity(
         id=value_id,
         known_input_id=task.known_input_id,
-        entity_kind=route.entity_kind,
-        key_id=route.key_id,
-        key_component_id=route.key_component_id,
-        value=str(value),
+        key=key,
         display_value=_display_value(
-            row,
+            resolved.row,
             route=route,
             resolver_source=resolver_source,
         ),
@@ -980,6 +1001,37 @@ def _fact_value_from_resolved_row(
         proof_refs=(f"known_input:{task.known_input_id}",),
         source_refs=(route.resolver_read_id, route.resolver_endpoint_name),
         applies_to_requested_fact_ids=_task_requested_fact_ids(task),
+    )
+
+
+def _entity_key_from_resolved_row(
+    *,
+    route: InputBindingRoute,
+    resolver_source: RowSource,
+    row: Mapping[str, RuntimeValue],
+) -> EntityKeyValue | None:
+    components: list[EntityKeyComponentValue] = []
+    for component in route.key_components:
+        value = path_value(
+            row,
+            relative_response_path(
+                resolver_source.field(component.field_id).path,
+                resolver_source.row_path,
+            ),
+            missing=_MISSING,
+        )
+        if value in (_MISSING, None, ""):
+            return None
+        components.append(
+            EntityKeyComponentValue(
+                component_id=component.component_id,
+                value=value,
+            )
+        )
+    return EntityKeyValue(
+        entity_kind=route.entity_kind,
+        key_id=route.key_id,
+        components=tuple(components),
     )
 
 
@@ -1022,19 +1074,15 @@ def _named_value_from_resolved_match(
 def _grounded_identity_value_id(
     *,
     known_input_id: str,
-    entity_kind: str,
-    key_id: str,
-    key_component_id: str,
-    value: str,
+    key: EntityKeyValue,
 ) -> str:
     return _grounded_value_id(
         "_".join(
             (
                 _symbol(known_input_id),
-                _symbol(entity_kind),
-                _symbol(key_id),
-                _symbol(key_component_id),
-                _symbol(value),
+                _symbol(key.entity_kind),
+                _symbol(key.key_id),
+                _symbol(canonical_runtime_json(key.component_values())),
             )
         )
     )

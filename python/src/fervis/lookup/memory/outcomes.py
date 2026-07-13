@@ -173,7 +173,8 @@ def fact_value_memory_addresses(
                     key_id=value.payload.key_id,
                     reference_text=reference_text,
                     identity={
-                        value.payload.key_component_id: value.payload.value,
+                        component.component_id: str(component.value)
+                        for component in value.payload.key.components
                     },
                     evidence=EvidenceRef(step_ids=value.proof_refs),
                 )

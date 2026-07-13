@@ -1031,9 +1031,12 @@ def test_django_lineage_recorder_persists_clarification_primitives() -> None:
                         {
                             "id": "area:1",
                             "label": "London",
-                            "entityKind": "area",
-                            "keyId": "primary_key",
-                            "matchedField": "area_id",
+                                "entityKind": "area",
+                                "keyId": "primary_key",
+                                "keyComponents": [
+                                    {"componentId": "area_id", "value": "area:1"}
+                                ],
+                                "matchedField": "area_id",
                             "matchedValue": "area:1",
                             "resolverReadId": "list_areas",
                         }

@@ -24,6 +24,7 @@ expect:
           display_value: London
           entity_kind: area
           key_id: primary_key
-          key_component_id: area_id
+          key_components:
+            - {component_id: area_id, value: area-london}
           applies_via_field: data.area.area_id
           role: POPULATION_SCOPE

@@ -50,7 +50,7 @@ class LookupRequest:
     runtime_values: RuntimeValueContext | None = None
     host: HostPromptContext = field(default_factory=HostPromptContext)
     active_attempt: int | None = None
-    clarification_response: ClarificationOwnerResponse | None = None
+    clarification_responses: tuple[ClarificationOwnerResponse, ...] = ()
 
 
 @dataclass(frozen=True)

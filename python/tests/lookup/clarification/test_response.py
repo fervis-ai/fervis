@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 import pytest
 
 from fervis.lookup.clarification.model import (
@@ -32,6 +34,9 @@ def _subject(kind: str, id: str, options: tuple[str, ...] = (), *, canonical=Fal
                     {
                         "entityKind": "customer",
                         "keyId": "customer_id",
+                        "keyComponents": [
+                            {"componentId": "customer_id", "value": "1"}
+                        ],
                         "matchedField": "customer_id",
                         "matchedValue": "1",
                     }
@@ -184,6 +189,42 @@ def test_finite_option_cannot_be_selected_by_matching_raw_text() -> None:
             response_id="response_1",
             response_text="Customer One",
         )
+
+
+def test_grounding_clarification_preserves_typed_canonical_key_components() -> None:
+    customer_id = UUID("51515151-0000-0000-0002-000000000001")
+    subject = _subject(
+        "question_input",
+        "customer",
+        ("customer_1",),
+        canonical=True,
+    )
+    subject["options"][0]["keyComponents"][0]["value"] = {
+        "$uuid": str(customer_id)
+    }
+    clarification = _clarification(
+        "grounding",
+        {
+            "kind": "grounding",
+            "knownInputId": "customer",
+            "acceptsFreeText": False,
+        },
+        subject,
+    )
+
+    response = parse_clarification_response(
+        clarification,
+        response_id="response_1",
+        response_text="Customer One",
+        selected_option_id="customer_1",
+    )
+    restored = clarification_response_from_payload(
+        clarification_response_payload(response)
+    )
+
+    assert isinstance(restored, GroundingIdentityResponse)
+    assert restored.option.key is not None
+    assert restored.option.key.component_value("customer_id") == customer_id
 
 
 def test_catalog_response_rejects_value_outside_typed_target() -> None:

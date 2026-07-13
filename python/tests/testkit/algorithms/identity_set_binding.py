@@ -53,6 +53,7 @@ from fervis.lookup.answer_program import (
     ParameterValueType,
 )
 from fervis.lookup.answer_program.values import FactValue
+from fervis.lookup.canonical_data import entity_key_value
 
 from tests.testkit.assertions import subset_mismatches
 from tests.testkit.question_contract import question_contract_from_payload
@@ -206,10 +207,10 @@ def _plan(*, param_value: object) -> FactPlan:
     parameter_id = "question.store_ids"
     binding_value = FactValue.identity_set(
         id="store_ids",
-        entity_kind="store",
-        key_id="primary_key",
-        key_component_id="store_id",
-        values=identity_values,
+        keys=tuple(
+            entity_key_value("store", "primary_key", {"store_id": value})
+            for value in identity_values
+        ),
     )
     return FactPlan(
         bindings=BindingSet.from_bindings(

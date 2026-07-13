@@ -450,7 +450,7 @@ def _model_execution_spec(
         "provider": "anthropic",
         "model_key": "HAIKU",
         "context_run_id": None,
-        "clarification_response": None,
+        "clarification_responses": [],
         "conversation_context": {},
         "runtime_context": dict(runtime_context or {}),
         "max_budget_usd": "0.5",
@@ -986,7 +986,7 @@ def test_run_view_projects_needs_clarification_result_data_in_canonical_shape(
             "runtime_context": {},
             "max_budget_usd": None,
             "max_thinking_tokens": None,
-            "clarification_response": None,
+            "clarification_responses": [],
         },
         read_context_ref=conversation.read_context_ref,
     )

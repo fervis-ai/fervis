@@ -523,7 +523,8 @@ def _value_matches_entity_target(
         return (
             value.payload.entity_kind == target.entity_kind
             and value.payload.key_id == target.key_id
-            and value.payload.key_component_id == target.component_id
+            and target.component_id
+            in {component.component_id for component in value.payload.key.components}
         )
     if value.kind == ValueKind.IDENTITY_SET and isinstance(
         value.payload, IdentitySetValuePayload
@@ -531,7 +532,11 @@ def _value_matches_entity_target(
         return (
             value.payload.entity_kind == target.entity_kind
             and value.payload.key_id == target.key_id
-            and value.payload.key_component_id == target.component_id
+            and all(
+                target.component_id
+                in {component.component_id for component in key.components}
+                for key in value.payload.keys
+            )
         )
     return False
 

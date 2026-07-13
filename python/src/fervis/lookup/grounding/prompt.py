@@ -51,17 +51,22 @@ class GroundingTurnPrompt(TurnPromptBase):
             self.copying_and_validity_section(builder),
             self.output_section(builder),
         ]
-        source = self.request.clarification_source
-        if source is not None:
+        responses = self.request.clarification_responses
+        if responses:
             sections.insert(
                 0,
                 builder.json_section(
-                    "Attributed clarification response:",
+                    "Attributed clarification responses:",
                     {
-                        "response_id": source.response_id,
-                        "clarification_id": source.clarification_id,
-                        "exact_user_text": source.exact_user_text,
-                        "known_input_id": self.request.clarification_known_input_id,
+                        "responses": [
+                            {
+                                "response_id": response.source.response_id,
+                                "clarification_id": response.source.clarification_id,
+                                "exact_user_text": response.source.exact_user_text,
+                                "known_input_id": response.known_input_id,
+                            }
+                            for response in responses
+                        ]
                     },
                 ),
             )
@@ -291,8 +296,13 @@ class GroundingTurnPrompt(TurnPromptBase):
                 "returned_identity": {
                     "entity_kind": route.entity_kind,
                     "key_id": route.key_id,
-                    "key_component_id": route.key_component_id,
-                    "field_ref": route.return_field_ref,
+                    "components": [
+                        {
+                            "component_id": component.component_id,
+                            "field_ref": component.field_ref,
+                        }
+                        for component in route.key_components
+                    ],
                 },
                 "lookup_surface": {
                     **(

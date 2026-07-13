@@ -53,6 +53,77 @@ class EntityKeyValue:
             component.component_id: component.value for component in self.components
         }
 
+    def component_value(self, component_id: str) -> RuntimeValue:
+        matches = tuple(
+            component.value
+            for component in self.components
+            if component.component_id == component_id
+        )
+        if len(matches) != 1:
+            raise ValueError("entity key does not contain the requested component")
+        return matches[0]
+
+
+def entity_key_value(
+    entity_kind: str,
+    key_id: str,
+    components: Mapping[str, RuntimeValue],
+) -> EntityKeyValue:
+    return EntityKeyValue(
+        entity_kind=entity_kind,
+        key_id=key_id,
+        components=tuple(
+            EntityKeyComponentValue(component_id=component_id, value=value)
+            for component_id, value in components.items()
+        ),
+    )
+
+
+def entity_key_to_payload(key: EntityKeyValue) -> dict[str, object]:
+    return {
+        "entity_kind": key.entity_kind,
+        "key_id": key.key_id,
+        "components": [
+            {
+                "component_id": component.component_id,
+                "value": runtime_value_to_payload(component.value),
+            }
+            for component in key.components
+        ],
+    }
+
+
+def entity_key_from_payload(value: object) -> EntityKeyValue:
+    if not isinstance(value, Mapping):
+        raise ValueError("entity key payload must be an object")
+    entity_kind = value.get("entity_kind")
+    key_id = value.get("key_id")
+    components = value.get("components")
+    if not isinstance(entity_kind, str) or not entity_kind:
+        raise ValueError("entity key payload requires entity_kind")
+    if not isinstance(key_id, str) or not key_id:
+        raise ValueError("entity key payload requires key_id")
+    if not isinstance(components, list) or not components:
+        raise ValueError("entity key payload requires components")
+    parsed_components: list[EntityKeyComponentValue] = []
+    for component in components:
+        if not isinstance(component, Mapping):
+            raise ValueError("entity key component payload must be an object")
+        component_id = component.get("component_id")
+        if not isinstance(component_id, str) or not component_id:
+            raise ValueError("entity key component payload requires component_id")
+        parsed_components.append(
+            EntityKeyComponentValue(
+                component_id=component_id,
+                value=runtime_value_from_payload(component.get("value")),
+            )
+        )
+    return EntityKeyValue(
+        entity_kind=entity_kind,
+        key_id=key_id,
+        components=tuple(parsed_components),
+    )
+
 
 ResultValue: TypeAlias = RuntimeValue | EntityKeyValue
 

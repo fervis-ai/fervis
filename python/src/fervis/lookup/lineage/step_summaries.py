@@ -310,10 +310,15 @@ def _grounding_result_semantic_item(
             kind="identity_set",
             value=(
                 payload.display_value
-                or f"{len(payload.values)} {payload.entity_kind} identities"
+                or f"{len(payload.keys)} {payload.entity_kind} identities"
             ),
             label=value.label,
-            detail=(f"{payload.key_id}.{payload.key_component_id}"),
+            detail=(
+                f"{payload.key_id}."
+                + "+".join(
+                    component.component_id for component in payload.keys[0].components
+                )
+            ),
         )
     if not isinstance(payload, IdentityValuePayload):
         return None
@@ -330,9 +335,14 @@ def _grounding_result_semantic_item(
             "resolver_label": _title_words(resolver_read_id or resolver_endpoint_name),
             "entity_kind": payload.entity_kind,
             "key_id": payload.key_id,
-            "key_component_id": payload.key_component_id,
-            "matched_value": payload.value,
-            "matched_label": payload.display_value or value.label or payload.value,
+            "key_components": [
+                {
+                    "component_id": component.component_id,
+                    "value": str(component.value),
+                }
+                for component in payload.key.components
+            ],
+            "matched_label": payload.display_value or value.label,
         },
     )
 

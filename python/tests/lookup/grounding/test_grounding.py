@@ -24,6 +24,7 @@ from fervis.lookup.conversation_resolution import (
     ResolvedLiteralQuestionInput,
 )
 from fervis.lookup.conversation_resolution.compilation import CompiledResolvedClause
+from fervis.lookup.canonical_data import entity_key_value
 from fervis.memory.addresses import FactAddress
 from fervis.memory.artifacts import (
     build_fact_artifact,
@@ -704,10 +705,11 @@ def test_grounding_imports_resolved_canonical_identity_without_resolver():
             role=LiteralInputRole.REFERENCE_VALUE,
             value_meaning_hint="staff member",
             canonical_identity=ResolvedCanonicalIdentity(
-                entity_kind="staff",
-                key_id="primary_key",
-                key_component_id="staff_id",
-                value="51515151-0000-0000-0002-000000000001",
+                key=entity_key_value(
+                    "staff",
+                    "primary_key",
+                    {"staff_id": "51515151-0000-0000-0002-000000000001"},
+                ),
                 authority_refs=("prior_source_read:staff:list:row_1",),
                 lineage_refs=("memory:turn_1.entity.staff.alice",),
             ),
@@ -717,8 +719,8 @@ def test_grounding_imports_resolved_canonical_identity_without_resolver():
     assert not output.ledger.issues
     value = output.ledger.values[0]
     assert value.payload.entity_kind == "staff"
-    assert value.payload.key_component_id == "staff_id"
-    assert value.payload.value == "51515151-0000-0000-0002-000000000001"
+    assert value.payload.only_component().component_id == "staff_id"
+    assert value.payload.only_component().value == "51515151-0000-0000-0002-000000000001"
     assert value.proof_refs == (
         "known_input:input_staff",
         "resolved_question_input:cr_input_1",
@@ -782,10 +784,11 @@ def test_grounding_imports_canonical_handoff_without_active_memory_check():
             role=LiteralInputRole.REFERENCE_VALUE,
             value_meaning_hint="staff member",
             canonical_identity=ResolvedCanonicalIdentity(
-                entity_kind="staff",
-                key_id="primary_key",
-                key_component_id="staff_id",
-                value="51515151-0000-0000-0002-000000000001",
+                key=entity_key_value(
+                    "staff",
+                    "primary_key",
+                    {"staff_id": "51515151-0000-0000-0002-000000000001"},
+                ),
                 authority_refs=("prior_source_read:staff:list:row_1",),
                 lineage_refs=("memory:turn_1.entity.staff.alice",),
             ),
@@ -793,7 +796,7 @@ def test_grounding_imports_canonical_handoff_without_active_memory_check():
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == (
+    assert output.ledger.values[0].payload.only_component().value == (
         "51515151-0000-0000-0002-000000000001"
     )
     assert output.ledger.certifications[0].lineage_refs == (
@@ -872,10 +875,9 @@ def test_grounding_certifies_separate_current_input_when_prior_lineage_mentions_
             role=LiteralInputRole.REFERENCE_VALUE,
             value_meaning_hint="staff member",
             canonical_identity=ResolvedCanonicalIdentity(
-                entity_kind="staff",
-                key_id="primary_key",
-                key_component_id="staff_id",
-                value="staff_alice",
+                key=entity_key_value(
+                    "staff", "primary_key", {"staff_id": "staff_alice"}
+                ),
                 authority_refs=("prior_source_read:staff:list:row_1",),
                 lineage_refs=("known_input:old_id",),
             ),
@@ -884,14 +886,14 @@ def test_grounding_certifies_separate_current_input_when_prior_lineage_mentions_
 
     assert not output.ledger.issues
     values_by_id = {value.id: value for value in output.ledger.values}
-    assert values_by_id["grounded_input_staff"].payload.value == "staff_alice"
+    assert values_by_id["grounded_input_staff"].payload.only_component().value == "staff_alice"
     jane_values = [
         value
         for value in output.ledger.values
         if value.proof_refs == ("known_input:old_id",)
     ]
     assert len(jane_values) == 1
-    assert jane_values[0].payload.value == "staff_jane"
+    assert jane_values[0].payload.only_component().value == "staff_jane"
     assert data_access.calls == [
         ("list_staff_list", {"list_staff_list.query.name": "Jane Doe"}),
     ]
@@ -934,8 +936,8 @@ def test_reference_grounding_selected_route_determines_entity_kind():
     value = output.ledger.values[0]
     assert isinstance(value.payload, IdentityValuePayload)
     assert value.payload.entity_kind == "location"
-    assert value.payload.key_component_id == "location_id"
-    assert value.payload.value == "loc_bbs"
+    assert value.payload.only_component().component_id == "location_id"
+    assert value.payload.only_component().value == "loc_bbs"
     assert data_access.calls == [
         ("list_location_list", {"list_location_list.query.name": "ABC Mall"}),
     ]
@@ -982,8 +984,8 @@ def test_reference_grounding_ambiguous_when_compatible_routes_find_multiple_iden
     assert issue.kind == GroundingTerminalKind.AMBIGUOUS_REFERENCE
     assert issue.known_input_id == "input_location"
     assert issue.candidates == (
-        "location:primary_key:location_id:loc_bbs",
-        "location:primary_key:location_id:loc_other",
+        'location:primary_key:{"location_id":"loc_bbs"}',
+        'location:primary_key:{"location_id":"loc_other"}',
     )
     assert data_access.calls == [
         (
@@ -1032,8 +1034,8 @@ def test_reference_grounding_city_target_carries_identity_candidates_without_cla
     identities = {
         (
             value.payload.entity_kind,
-            value.payload.key_component_id,
-            value.payload.value,
+            value.payload.only_component().component_id,
+            value.payload.only_component().value,
         )
         for value in output.ledger.values
         if isinstance(value.payload, IdentityValuePayload)
@@ -1057,8 +1059,9 @@ def test_reference_grounding_city_target_carries_identity_candidates_without_cla
     assert area_option["returned_identity"] == {
         "entity_kind": "area",
         "key_id": "primary_key",
-        "key_component_id": "area_id",
-        "field_ref": "field.data.area_id",
+        "components": [
+            {"component_id": "area_id", "field_ref": "field.data.area_id"}
+        ],
     }
     location_option = next(
         option for option in options if option.get("read_id") == "list_location_list"
@@ -1195,12 +1198,67 @@ def test_reference_grounding_extracts_canonical_identity_from_exact_lookup_match
     value = output.ledger.values[0]
     assert isinstance(value.payload, IdentityValuePayload)
     assert value.payload.entity_kind == "location"
-    assert value.payload.key_component_id == "location_id"
-    assert value.payload.value == "loc_1"
+    assert value.payload.only_component().component_id == "location_id"
+    assert value.payload.only_component().value == "loc_1"
     assert value.payload.matched_field_ref == "field.data.name"
     assert value.payload.matched_field_path == "data.name"
     assert len(output.ledger.uses) == 1
     assert output.ledger.uses[0].field_id == "location_id"
+
+
+def test_reference_grounding_returns_the_complete_composite_candidate_key():
+    read = replace(
+        _location_read(),
+        candidate_keys=(
+            CandidateKey(
+                id="tenant_location_key",
+                entity_kind="location",
+                components=(
+                    CandidateKeyComponent(
+                        id="location_id",
+                        field_ref="field.data.location_id",
+                    ),
+                    CandidateKeyComponent(
+                        id="name",
+                        field_ref="field.data.name",
+                    ),
+                ),
+                primary=True,
+                stable=True,
+            ),
+        ),
+    )
+    output = ground_question_inputs(
+        question="What were sales at ABC Mall?",
+        question_contract=_question_contract("ABC Mall"),
+        full_catalog=RelationCatalog(reads=(read,)),
+        resolver_catalog=RelationCatalog(reads=(read,)),
+        data_access_port=_DataAccess(
+            _endpoint_result(
+                {"data": [{"location_id": "loc_1", "name": "ABC Mall"}]}
+            )
+        ),
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-05-09",
+            timezone="Africa/London",
+        ),
+        model_port=_GroundingModel(
+            known_input_id="input_location",
+            binding_option_id="bind_input_location_1",
+        ),
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+    )
+
+    value = output.ledger.values[0]
+    assert isinstance(value.payload, IdentityValuePayload)
+    assert value.payload.key == entity_key_value(
+        "location",
+        "tenant_location_key",
+        {"location_id": "loc_1", "name": "ABC Mall"},
+    )
+    assert {use.field_id for use in output.ledger.uses} == {"location_id", "name"}
 
 
 def test_reference_grounding_uses_exact_lookup_value_to_establish_identity():
@@ -1239,7 +1297,7 @@ def test_reference_grounding_uses_exact_lookup_value_to_establish_identity():
     assert not output.ledger.issues
     value = output.ledger.values[0]
     assert isinstance(value.payload, IdentityValuePayload)
-    assert value.payload.value == "loc_1"
+    assert value.payload.only_component().value == "loc_1"
     assert value.payload.matched_field_ref == "field.data.name"
 
 
@@ -1298,7 +1356,7 @@ def test_reference_grounding_deduplicates_same_row_lookup_field_matches() -> Non
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "loc_1"
+    assert output.ledger.values[0].payload.only_component().value == "loc_1"
 
 
 def test_reference_grounding_matches_one_value_in_a_collection_field():
@@ -1442,7 +1500,7 @@ def test_reference_grounding_preserves_question_input_fact_applicability():
     assert not output.ledger.issues
     value = output.ledger.values[0]
     assert isinstance(value.payload, IdentityValuePayload)
-    assert value.payload.value == "staff_1"
+    assert value.payload.only_component().value == "staff_1"
     assert value.applies_to_requested_fact_ids == ("fact_1", "fact_2")
     task = _json_payload_from_prompt_section(model.prompt, "Known inputs to ground:")[
         "known_input_binding_tasks"
@@ -1502,7 +1560,7 @@ def test_reference_grounding_uses_case_and_spacing_normalized_exact_match():
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "loc_1"
+    assert output.ledger.values[0].payload.only_component().value == "loc_1"
 
 
 def test_reference_grounding_resolver_route_owns_allowed_lookup_fields():
@@ -1539,7 +1597,7 @@ def test_reference_grounding_resolver_route_owns_allowed_lookup_fields():
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "staff_1"
+    assert output.ledger.values[0].payload.only_component().value == "staff_1"
     assert len(output.ledger.uses) == 1
     assert output.ledger.uses[0].field_id == "staff_id"
 
@@ -1632,8 +1690,8 @@ def test_reference_grounding_validates_field_labeled_identity_value(
         assert not output.ledger.issues
         value = output.ledger.values[0]
         assert value.payload.entity_kind == "staff"
-        assert value.payload.key_component_id == "staff_id"
-        assert value.payload.value == staff_id
+        assert value.payload.only_component().component_id == "staff_id"
+        assert value.payload.only_component().value == staff_id
     else:
         assert not output.ledger.values
         assert (
@@ -1693,8 +1751,8 @@ def test_reference_grounding_exact_qualifier_does_not_override_ambiguous_evidenc
     assert not output.ledger.values
     assert output.ledger.issues[0].kind == GroundingTerminalKind.AMBIGUOUS_REFERENCE
     assert output.ledger.issues[0].candidates == (
-        "staff:primary_key:staff_id:51515151-0000-0000-0002-000000000001",
-        "staff:primary_key:staff_id:staff_other",
+        'staff:primary_key:{"staff_id":"51515151-0000-0000-0002-000000000001"}',
+        'staff:primary_key:{"staff_id":"staff_other"}',
     )
     assert data_access.calls == [
         ("list_staff_list", {"list_staff_list.query.name": staff_id}),
@@ -1744,8 +1802,8 @@ def test_reference_grounding_verifies_natural_id_qualifier_against_identity_fiel
     assert not output.ledger.issues
     value = output.ledger.values[0]
     assert value.payload.entity_kind == "staff"
-    assert value.payload.key_component_id == "staff_id"
-    assert value.payload.value == staff_id
+    assert value.payload.only_component().component_id == "staff_id"
+    assert value.payload.only_component().value == staff_id
     assert data_access.calls == [
         ("list_staff_list", {"list_staff_list.query.name": staff_id}),
     ]
@@ -1789,8 +1847,8 @@ def test_reference_grounding_proves_field_labeled_id_through_required_detail_rea
     assert not output.ledger.issues
     value = output.ledger.values[0]
     assert value.payload.entity_kind == "staff"
-    assert value.payload.key_component_id == "staff_id"
-    assert value.payload.value == staff_id
+    assert value.payload.only_component().component_id == "staff_id"
+    assert value.payload.only_component().value == staff_id
     assert output.ledger.certifications[0].method == (
         GroundedValueCertificationMethod.IDENTITY_VALIDATION_READ
     )
@@ -1974,7 +2032,7 @@ def test_reference_grounding_natural_id_qualifier_can_use_identity_param_route()
 
     assert output.turn is not None
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == staff_id
+    assert output.ledger.values[0].payload.only_component().value == staff_id
     assert data_access.calls == [
         ("get_staff_detail", {"get_staff_detail.path.staff_id": staff_id})
     ]
@@ -2016,7 +2074,7 @@ def test_identity_validation_extracts_the_declared_path_value_from_reference_tex
     )
 
     assert not output.ledger.issues, data_access.calls
-    assert output.ledger.values[0].payload.value == "2"
+    assert output.ledger.values[0].payload.only_component().value == "2"
     assert data_access.calls == [
         ("get_staff_detail", {"get_staff_detail.path.staff_id": 2})
     ]
@@ -2094,7 +2152,7 @@ def test_reference_grounding_direct_identity_route_uses_catalog_key_contract():
 
     assert output.turn is not None
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == staff_id
+    assert output.ledger.values[0].payload.only_component().value == staff_id
     assert data_access.calls == [
         ("get_staff_detail", {"get_staff_detail.path.staff_id": staff_id})
     ]
@@ -2255,7 +2313,7 @@ def test_reference_grounding_uses_explicit_identity_display_fields_not_name_heur
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "book_1"
+    assert output.ledger.values[0].payload.only_component().value == "book_1"
 
 
 def test_reference_grounding_uses_declared_key_context_fields_for_resolver_route():
@@ -2352,7 +2410,7 @@ def test_reference_grounding_uses_declared_key_context_fields_for_resolver_route
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "staff_1"
+    assert output.ledger.values[0].payload.only_component().value == "staff_1"
     assert output.ledger.values[0].payload.entity_kind == "staff"
 
 
@@ -2442,8 +2500,8 @@ def test_reference_grounding_uses_alternate_candidate_key_to_select_primary_iden
     value = output.ledger.values[0]
     assert isinstance(value.payload, IdentityValuePayload)
     assert value.payload.entity_kind == "area"
-    assert value.payload.key_component_id == "area_id"
-    assert value.payload.value == "area_nairobi"
+    assert value.payload.only_component().component_id == "area_id"
+    assert value.payload.only_component().value == "area_nairobi"
     assert data_access.calls == [
         ("list_areas", {"list_areas.query.name": "Nairobi"})
     ]
@@ -2527,7 +2585,7 @@ def test_reference_grounding_uses_text_evidence_from_the_identity_row():
     value = output.ledger.values[0]
     assert isinstance(value.payload, IdentityValuePayload)
     assert value.payload.entity_kind == "location"
-    assert value.payload.value == "location_acacia"
+    assert value.payload.only_component().value == "location_acacia"
     assert data_access.calls == [("list_locations", {})]
     option = next(
         option
@@ -2631,7 +2689,7 @@ def test_reference_grounding_excludes_control_params_from_lookup_templates():
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "staff_1"
+    assert output.ledger.values[0].payload.only_component().value == "staff_1"
     assert data_access.calls == [
         ("list_staff", {"list_staff.query.name": "Alice"}),
     ]
@@ -2665,7 +2723,7 @@ def test_reference_grounding_executes_selected_route_after_model_selection():
 
     assert output.turn is not None
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "loc_1"
+    assert output.ledger.values[0].payload.only_component().value == "loc_1"
     assert data_access.calls == [
         ("list_location_list", {"list_location_list.query.name": "ABC Mall"}),
     ]
@@ -2783,7 +2841,7 @@ def test_reference_grounding_resolves_store_target_from_location_rows_without_lo
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "loc_1"
+    assert output.ledger.values[0].payload.only_component().value == "loc_1"
     assert output.ledger.values[0].payload.entity_kind == "location"
     assert data_access.calls == [
         ("list_location_list", {}),
@@ -2819,7 +2877,7 @@ def test_reference_grounding_skips_resolver_when_declared_row_path_is_unavailabl
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "loc_1"
+    assert output.ledger.values[0].payload.only_component().value == "loc_1"
     assert data_access.calls == [
         ("list_location_list", {"list_location_list.query.name": "ABC Mall"}),
     ]
@@ -2867,7 +2925,7 @@ def test_reference_grounding_uses_live_resolver_for_active_memory_without_cr_han
 
     assert output.turn is not None
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "loc_live_catalog"
+    assert output.ledger.values[0].payload.only_component().value == "loc_live_catalog"
     assert output.ledger.certifications[0].method == (
         GroundedValueCertificationMethod.RESOLVER_SOURCE_READ
     )
@@ -2938,7 +2996,7 @@ def test_reference_grounding_does_not_import_selected_active_memory_without_cr_h
 
     assert output.turn is not None
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "loc_live_catalog"
+    assert output.ledger.values[0].payload.only_component().value == "loc_live_catalog"
     assert output.ledger.certifications[0].method == (
         GroundedValueCertificationMethod.RESOLVER_SOURCE_READ
     )
@@ -2988,7 +3046,7 @@ def test_reference_grounding_uses_live_resolver_when_memory_identity_is_not_acti
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "loc_live_catalog"
+    assert output.ledger.values[0].payload.only_component().value == "loc_live_catalog"
     assert data_access.calls == [
         ("list_location_list", {"list_location_list.query.name": "ABC Mall"})
     ]
@@ -3078,7 +3136,7 @@ def test_reference_grounding_does_not_reuse_memory_identity_for_unmatched_target
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "loc_2"
+    assert output.ledger.values[0].payload.only_component().value == "loc_2"
     assert data_access.calls == [
         ("list_location_list", {"list_location_list.query.name": "Nextgen Mall"})
     ]
@@ -3182,7 +3240,7 @@ def test_reference_grounding_uses_live_resolver_for_repeated_concrete_name_witho
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "different-staff"
+    assert output.ledger.values[0].payload.only_component().value == "different-staff"
     assert output.ledger.values[0].payload.entity_kind == "staff"
     assert data_access.calls == [
         ("list_staff_list", {"list_staff_list.query.name": "Jane Doe"})
@@ -3404,7 +3462,7 @@ def test_reference_grounding_uses_literal_resolved_value_text():
 
     assert not output.ledger.issues
     value = output.ledger.values[0]
-    assert value.payload.value == "staff_1"
+    assert value.payload.only_component().value == "staff_1"
     assert [
         certification.to_payload() for certification in output.ledger.certifications
     ] == [
