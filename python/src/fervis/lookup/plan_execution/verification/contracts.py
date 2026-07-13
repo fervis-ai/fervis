@@ -11,7 +11,12 @@ from ._shared import (
     row_source_evidence_ref,
     row_source_field_evidence_ref,
 )
-from .contract_types import ProofLineage, RelationContract
+from .contract_types import (
+    ProofLineage,
+    RelationContract,
+    RelationEntityKey,
+    RelationEntityKeyComponent,
+)
 from .execution_proof import ExecutionProofContext
 from .operation_contracts import _operation_relation_contract
 from .sources import _row_source_for_relation
@@ -87,8 +92,60 @@ def _base_relation_contract(
         grain_keys=relation.grain_keys,
         field_proofs=field_proofs,
         field_types=field_types,
+        entity_keys=_relation_entity_keys(relation, row_sources=row_sources),
         population_proof=population_proof,
     )
+
+
+def _relation_entity_keys(
+    relation: Relation,
+    *,
+    row_sources: RowSourceCatalog,
+) -> tuple[RelationEntityKey, ...]:
+    if relation.source.kind not in {
+        SourceKind.API_READ,
+        SourceKind.GENERATED_CALENDAR,
+        SourceKind.MEMORY_READ,
+    }:
+        return ()
+    row_source = _row_source_for_relation(relation, row_sources=row_sources)
+    relation_field_ids = {field.field_id for field in relation.fields}
+    keys = [
+        RelationEntityKey(
+            entity_kind=key.entity_kind,
+            key_id=key.id,
+            components=tuple(
+                RelationEntityKeyComponent(
+                    component_id=component.id,
+                    field_id=component.field_id,
+                )
+                for component in key.components
+            ),
+        )
+        for key in row_source.candidate_keys
+        if all(
+            component.field_id in relation_field_ids for component in key.components
+        )
+    ]
+    keys.extend(
+        RelationEntityKey(
+            entity_kind=reference.target_entity_kind,
+            key_id=reference.target_key_id,
+            components=tuple(
+                RelationEntityKeyComponent(
+                    component_id=component.target_component_id,
+                    field_id=component.local_field_id,
+                )
+                for component in reference.components
+            ),
+        )
+        for reference in row_source.entity_references
+        if all(
+            component.local_field_id in relation_field_ids
+            for component in reference.components
+        )
+    )
+    return tuple(dict.fromkeys(keys))
 
 
 def _relation_source_population_proof(

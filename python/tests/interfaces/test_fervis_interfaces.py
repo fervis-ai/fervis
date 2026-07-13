@@ -818,6 +818,49 @@ def test_fervis_fastapi_router_exposes_question_lifecycle_routes() -> None:
     }
 
 
+def test_fastapi_integration_closes_question_interface_with_host_lifespan() -> None:
+    from contextlib import asynccontextmanager
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from fervis import FervisConfig, HostConfig, ModelConfig, RuntimeRoutes
+    from fervis.fastapi import FastAPIIntegration
+
+    events: list[str] = []
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        del app
+        events.append("host_started")
+        yield
+        events.append("host_stopped")
+
+    class CloseableQuestionInterface(_FakeQuestionInterface):
+        def close(self) -> None:
+            events.append("fervis_closed")
+
+    app = FastAPI(lifespan=lifespan)
+    integration = FastAPIIntegration(
+        config=FervisConfig(
+            host=HostConfig(timezone="UTC"),
+            routes=RuntimeRoutes(prefix="/fervis/"),
+            model=ModelConfig(
+                default_provider="openai",
+                default_model_key="gpt-5.4-mini",
+            ),
+            sources=[],
+        )
+    )
+    integration.mount(app, question_interface=CloseableQuestionInterface())
+
+    with TestClient(app) as client:
+        response = client.get("/fervis/")
+        assert response.status_code == 200
+        assert events == ["host_started"]
+
+    assert events == ["host_started", "fervis_closed", "host_stopped"]
+
+
 def test_fervis_fastapi_router_requires_question_interface() -> None:
     from fervis.fastapi import fervis_fastapi_router
 

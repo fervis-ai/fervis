@@ -10,7 +10,6 @@ from fervis.host_api.contracts import (
     CatalogEndpointContract,
     CandidateKeyContract,
     EndpointContract,
-    EntityKeyComponentTargetContract,
     EntityReferenceContract,
     PaginationContract,
     ParameterContract,
@@ -148,40 +147,10 @@ def _parameters(
             description=parameter.description,
             choices=tuple(str(value) for value in parameter.schema.get("enum") or ()),
             source=source,
-            entity_target=_parameter_entity_target(
-                parameter.name,
-                source=source,
-                candidate_keys=operation.candidate_keys,
-            ),
         )
         for parameter in operation.parameters
         if parameter.location == source
     )
-
-
-def _parameter_entity_target(
-    parameter_name: str,
-    *,
-    source: str,
-    candidate_keys: tuple[CandidateKeyContract, ...],
-) -> EntityKeyComponentTargetContract | None:
-    if source != "path":
-        return None
-    matches = tuple(
-        (key, component)
-        for key in candidate_keys
-        for component in key.components
-        if component.component_id == parameter_name
-    )
-    if len(matches) != 1:
-        return None
-    key, component = matches[0]
-    return EntityKeyComponentTargetContract(
-        entity_kind=key.entity_kind,
-        key_id=key.key_id,
-        component_id=component.component_id,
-    )
-
 
 def _response_fields(schema: dict[str, Any]) -> tuple[ResponseFieldContract, ...]:
     fields: list[ResponseFieldContract] = []

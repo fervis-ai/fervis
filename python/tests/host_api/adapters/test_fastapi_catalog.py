@@ -192,7 +192,7 @@ def test_fastapi_catalog_does_not_guess_separate_response_and_orm_model_mapping(
     assert contract.path_params[0].entity_target is None
 
 
-def test_fastapi_catalog_maps_response_and_table_models_with_declared_shared_base(
+def test_fastapi_catalog_does_not_infer_table_identity_from_a_sibling_model(
     tmp_path: Path,
 ) -> None:
     metadata = MetaData()
@@ -240,12 +240,10 @@ def test_fastapi_catalog_maps_response_and_table_models_with_declared_shared_bas
         sys.modules.pop(module.__name__, None)
 
     [contract] = contracts
-    assert tuple(key.key_id for key in contract.candidate_keys) == ("primary_key",)
-    assert contract.candidate_keys[0].entity_kind == "fastapi_shared_base_flow"
-    assert contract.candidate_keys[0].components[0].field_path == "id"
+    assert contract.candidate_keys == ()
 
 
-def test_fastapi_detail_path_can_validate_returned_single_component_key(
+def test_fastapi_detail_path_does_not_infer_entity_target_from_response_shape(
     tmp_path: Path,
 ) -> None:
     metadata = MetaData()
@@ -285,13 +283,7 @@ def test_fastapi_detail_path_can_validate_returned_single_component_key(
     finally:
         sys.modules.pop(module.__name__, None)
 
-    target = contracts[0].path_params[0].entity_target
-    assert target is not None
-    assert (
-        target.entity_kind,
-        target.key_id,
-        target.component_id,
-    ) == ("item", "primary_key", "id")
+    assert contracts[0].path_params[0].entity_target is None
 
 
 def test_fastapi_catalog_does_not_map_unrelated_same_shape_model(

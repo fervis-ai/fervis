@@ -116,18 +116,24 @@ def source_fulfills_keys_for_candidate(
     candidate: dict[str, Any],
     *,
     key_ids_by_answer_output: dict[str, str],
+    row_path_ids_by_answer_output: dict[str, str] | None = None,
 ) -> dict[str, dict[str, Any]]:
     choices = (
         _candidate_binding_surface(candidate).get("fulfillment_support_sets") or ()
     )
     output: dict[str, dict[str, Any]] = {}
+    row_path_ids = row_path_ids_by_answer_output or {}
     for answer_output_id, key_id in key_ids_by_answer_output.items():
         matching_choice_ids = [
             str(choice.get("fulfillment_choice_id") or "")
             for choice in choices
             if isinstance(choice, dict)
             and str(choice.get("answer_output_id") or "") == answer_output_id
-            and _choice_targets_entity_key(choice, key_id=key_id)
+            and _choice_targets_entity_key(
+                choice,
+                key_id=key_id,
+                row_path_id=row_path_ids.get(answer_output_id, ""),
+            )
         ]
         if len(matching_choice_ids) != 1:
             raise AssertionError(
@@ -143,10 +149,18 @@ def source_fulfills_keys_for_candidate(
     return output
 
 
-def _choice_targets_entity_key(choice: dict[str, Any], *, key_id: str) -> bool:
+def _choice_targets_entity_key(
+    choice: dict[str, Any],
+    *,
+    key_id: str,
+    row_path_id: str,
+) -> bool:
     return any(
-        str(item.get("key_id") or item.get("target_key_id") or "") == key_id
-        or str(item.get("entity_key") or "").endswith(f".{key_id}")
+        (
+            str(item.get("key_id") or item.get("target_key_id") or "") == key_id
+            or str(item.get("entity_key") or "").endswith(f".{key_id}")
+        )
+        and (not row_path_id or str(item.get("row_path_id") or "") == row_path_id)
         for slot in choice.get("fulfillment_slots") or ()
         if isinstance(slot, dict)
         for item in slot.get("entity_evidence") or ()

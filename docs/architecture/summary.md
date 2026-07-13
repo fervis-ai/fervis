@@ -125,7 +125,8 @@ Only run `fervis runtime ask` after doctor passes.
 `host_api/` exposes framework-neutral contracts:
 
 - `EndpointContract` describes method, path template, params, capabilities,
-  response shape, and relation metadata.
+  response shape, and relation metadata, including declared candidate keys and
+  entity references.
 - `CatalogEndpointContract` records framework endpoint identity observed during
   introspection.
 - `ReadContextRef` is the persisted non-secret host-owned handle used to
@@ -163,6 +164,12 @@ Fervis currently has first-class Python adapters for:
 Django/DRF and FastAPI primarily use runtime framework artifacts to describe
 routes and execute reads. Static source inspection is only for safe init/mount
 edits, not catalog truth.
+
+Framework introspection may expose identity only when framework or model
+metadata establishes the complete candidate key or foreign-key relationship.
+A path parameter's name, type, or position is not identity authority, and a
+response model must not inherit identity from an unrelated model merely because
+they share a base class.
 
 Flask has less native introspection. Fervis supports Flask runtime route
 discovery plus contract surfaces such as OpenAPI/Swagger, Marshmallow-backed
@@ -289,6 +296,12 @@ read. Invocation then performs fresh authorized reads, deterministic relation
 operations, fact materialization, rendering, and proof construction. The first
 answer, a callable-frame continuation, and a deterministic rerun all use this
 same path.
+
+An entity-valued result carries its declared entity kind, candidate-key ID, and
+complete key components. Verification preserves that exact authority through
+relation operations and rejects result projections that rename the entity kind,
+key, or components. Human-facing display fields are not substitutes for this
+computational identity.
 
 A deterministic rerun uses no model calls. It may reuse the same bindings, apply
 a typed binding patch, or apply a capability declared by the program. It still
@@ -480,7 +493,7 @@ adapters, persistence, CLI wiring, provider boundaries, and migration behavior.
 Answer-program compilation, canonicalization, patching, instantiation,
 invocation, question lifecycle, and projection are language-neutral boundaries
 and belong in conformance cases. Live goldsets prove model-assisted composition
-against real host APIs; repeated full-case runs are entropy tests for model
+against real host APIs; repeated full-case runs are stability tests for model
 stability, not deterministic `QuestionRun` reruns.
 
 Prompt-rule tests should check required sections, schema fields, IDs, and

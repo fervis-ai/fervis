@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import closing
+
 import json
 from dataclasses import dataclass, field
 from typing import Any
@@ -73,10 +75,12 @@ def _configured_contracts(
     loaded: LoadedFervisConfig,
 ) -> tuple[EndpointContract, ...]:
     with host_project_runtime(project):
-        return host_api_context_from_config(
+        context = host_api_context_from_config(
             project=project,
             loaded_config=loaded,
-        ).describe_sources()
+        )
+        with closing(context):
+            return context.describe_sources()
 
 
 def _catalog_payload(

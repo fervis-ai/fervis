@@ -183,10 +183,13 @@ def test_django_adapter_http_mode_uses_shared_http_executor(monkeypatch) -> None
     ]
 
 
-def test_fastapi_adapter_fails_closed_for_non_anonymous_subject(tmp_path) -> None:
+def test_fastapi_adapter_fails_closed_for_non_anonymous_subject(
+    tmp_path, request
+) -> None:
     from fervis.host_api.adapters.fastapi.adapter import FastAPIHostApiAdapter
 
     adapter = FastAPIHostApiAdapter(sources=(), project_root=tmp_path)
+    request.addfinalizer(adapter.close)
 
     with pytest.raises(ValueError, match="principal reauthorization"):
         adapter.execute_read(
@@ -197,6 +200,7 @@ def test_fastapi_adapter_fails_closed_for_non_anonymous_subject(tmp_path) -> Non
 
 def test_fastapi_adapter_executes_read_with_configured_principal_dependency(
     tmp_path,
+    request,
 ) -> None:
     from fervis.host_api.adapters.fastapi.adapter import FastAPIHostApiAdapter
     from fervis.project.integration import FastAPIAppSource
@@ -224,6 +228,7 @@ def test_fastapi_adapter_executes_read_with_configured_principal_dependency(
             },
         },
     )
+    request.addfinalizer(adapter.close)
 
     result = adapter.execute_read(
         authority=_authority(scheme="fastapi_principal", key="user_7"),
@@ -236,6 +241,7 @@ def test_fastapi_adapter_executes_read_with_configured_principal_dependency(
 
 def test_concurrent_fastapi_reads_keep_each_principal_isolated(
     tmp_path,
+    request,
 ) -> None:
     from fervis.host_api.adapters.fastapi.adapter import FastAPIHostApiAdapter
     from fervis.project.integration import FastAPIAppSource
@@ -263,6 +269,7 @@ def test_concurrent_fastapi_reads_keep_each_principal_isolated(
             },
         },
     )
+    request.addfinalizer(adapter.close)
 
     def read_as(principal_id: str) -> str:
         result = adapter.execute_read(
@@ -284,6 +291,7 @@ def test_concurrent_fastapi_reads_keep_each_principal_isolated(
 
 def test_fastapi_adapter_executes_read_with_submitted_tenant_authority(
     tmp_path,
+    request,
 ) -> None:
     from fervis.host_api.adapters.fastapi.adapter import FastAPIHostApiAdapter
     from fervis.project.integration import FastAPIAppSource
@@ -311,6 +319,7 @@ def test_fastapi_adapter_executes_read_with_submitted_tenant_authority(
             },
         },
     )
+    request.addfinalizer(adapter.close)
 
     result = adapter.execute_read(
         authority=ReadAuthority(
@@ -329,6 +338,7 @@ def test_fastapi_adapter_executes_read_with_submitted_tenant_authority(
 
 def test_fastapi_adapter_uses_authority_tenant_not_read_context_tenant_key(
     tmp_path,
+    request,
 ) -> None:
     from fervis.host_api.adapters.fastapi.adapter import FastAPIHostApiAdapter
     from fervis.project.integration import FastAPIAppSource
@@ -356,6 +366,7 @@ def test_fastapi_adapter_uses_authority_tenant_not_read_context_tenant_key(
             },
         },
     )
+    request.addfinalizer(adapter.close)
 
     result = adapter.execute_read(
         authority=ReadAuthority(
@@ -373,7 +384,9 @@ def test_fastapi_adapter_uses_authority_tenant_not_read_context_tenant_key(
     assert result.response_body == {"owner_id": "user_7", "tenant_id": "tenant_b"}
 
 
-def test_fastapi_adapter_rejects_unresolved_dependency_principal(tmp_path) -> None:
+def test_fastapi_adapter_rejects_unresolved_dependency_principal(
+    tmp_path, request
+) -> None:
     from fervis.host_api.adapters.fastapi.adapter import FastAPIHostApiAdapter
     from fervis.project.integration import FastAPIAppSource
 
@@ -409,6 +422,7 @@ def test_fastapi_adapter_rejects_unresolved_dependency_principal(tmp_path) -> No
             },
         },
     )
+    request.addfinalizer(adapter.close)
 
     with pytest.raises(ValueError, match="could not resolve principal"):
         adapter.execute_read(
@@ -638,7 +652,7 @@ def test_flask_adapter_http_mode_uses_shared_http_executor(
 
 
 def test_fastapi_adapter_http_mode_uses_shared_http_executor(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, request
 ) -> None:
     import fervis.host_api.adapters.fastapi.adapter as fastapi_adapter_module
     from fastapi import FastAPI
@@ -672,6 +686,7 @@ def test_fastapi_adapter_http_mode_uses_shared_http_executor(
         project_root=tmp_path,
         auth_schema=_http_auth_schema(),
     )
+    request.addfinalizer(adapter.close)
 
     result = adapter.execute_read(
         authority=_authority(scheme="fastapi_principal", key="user_1"),

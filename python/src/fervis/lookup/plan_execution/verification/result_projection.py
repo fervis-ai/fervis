@@ -7,7 +7,12 @@ from ._shared import (
     Operation,
     VerificationError,
 )
-from .contract_types import ProofLineage, RelationContract
+from .contract_types import (
+    ProofLineage,
+    RelationContract,
+    RelationEntityKey,
+    RelationEntityKeyComponent,
+)
 from .operations import _operation_input_refs
 from .scalars import _operation_scalar_inputs
 from fervis.lookup.plan_execution.operation_runtime import ResolvedOperationInput
@@ -84,6 +89,8 @@ def _verify_result_references(
             raise VerificationError(
                 f"result output {relation_output.id} references unknown output field"
             )
+        if relation_output.entity_key is not None:
+            _verify_declared_entity_key(relation_output, contract=contract)
         if relation_output.entity_key is None and any(
             FieldBindingRole.IDENTITY in contract.fields[field_id]
             and FieldBindingRole.OUTPUT not in contract.fields[field_id]
@@ -102,6 +109,30 @@ def _verify_result_references(
             raise VerificationError(
                 f"result output {relation_output.id} requires factual output field"
             )
+
+
+def _verify_declared_entity_key(
+    output: RelationResultOutput,
+    *,
+    contract: RelationContract,
+) -> None:
+    projection = output.entity_key
+    assert projection is not None
+    projected_key = RelationEntityKey(
+        entity_kind=projection.entity_kind,
+        key_id=projection.key_id,
+        components=tuple(
+            RelationEntityKeyComponent(
+                component_id=component.component_id,
+                field_id=component.field_id,
+            )
+            for component in projection.components
+        ),
+    )
+    if projected_key not in contract.entity_keys:
+        raise VerificationError(
+            f"result output {output.id} requires declared entity key"
+        )
 
 
 def _verify_result_output_targets(

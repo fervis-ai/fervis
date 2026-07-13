@@ -22,12 +22,15 @@ from ._shared import (
 from .contract_types import (
     ProofLineage,
     RelationContract,
+    _combined_entity_keys,
+    _common_entity_keys,
     _contract,
     _copy_contract,
     _field_proof,
     _field_roles,
     _join_contract_grain,
     _project_contract_grain,
+    _project_entity_keys,
     _union_field_proof,
     _union_field_roles,
 )
@@ -100,6 +103,7 @@ def _with_population_scope_refs(
             for field, proof in contract.field_proofs.items()
         },
         field_types=dict(contract.field_types),
+        entity_keys=contract.entity_keys,
         population_proof=contract.population_proof.with_population_scope(refs),
     )
 
@@ -127,6 +131,7 @@ def _with_dependency_proof(
             for field, field_proof in contract.field_proofs.items()
         },
         field_types=dict(contract.field_types),
+        entity_keys=contract.entity_keys,
         population_proof=contract.population_proof.merge(proof),
     )
 
@@ -178,6 +183,9 @@ def _project_contract(
         output = field.output or field.source
         fields[output] = _field_roles(source, field.source, "project")
         field_proofs[output] = _field_proof(source, field.source, "project")
+    projections = {
+        field.source: field.output or field.source for field in spec.fields
+    }
     return RelationContract(
         fields=fields,
         grain_keys=_project_contract_grain(source, spec.fields),
@@ -186,6 +194,7 @@ def _project_contract(
             field.output or field.source: source.field_types.get(field.source, "")
             for field in spec.fields
         },
+        entity_keys=_project_entity_keys(source, projections),
         population_proof=source.population_proof,
     )
 
@@ -200,6 +209,7 @@ def _project_to_key_contract(
     for key_field in spec.key_fields:
         fields[key_field] = _field_roles(source, key_field, "project_to_key")
         field_proofs[key_field] = _field_proof(source, key_field, "project_to_key")
+    projections = {field: field for field in spec.key_fields}
     return RelationContract(
         fields=fields,
         grain_keys=spec.key_fields,
@@ -207,6 +217,7 @@ def _project_to_key_contract(
         field_types={
             field: source.field_types.get(field, "") for field in spec.key_fields
         },
+        entity_keys=_project_entity_keys(source, projections),
         population_proof=source.population_proof,
     )
 
@@ -245,6 +256,7 @@ def _join_contract(
         grain_keys=_join_contract_grain(left.grain_keys, right.grain_keys),
         field_proofs=field_proofs,
         field_types=_merge_contract_field_types(left, right),
+        entity_keys=_combined_entity_keys(left, right),
         population_proof=left.population_proof.merge(
             right.population_proof,
             dependency_proof,
@@ -283,6 +295,7 @@ def _union_contract(
         field: _union_field_type(contracts, spec.inputs, field)
         for field in spec.output_fields
     }
+    input_contracts = tuple(_contract(contracts, item) for item in spec.inputs)
     return RelationContract(
         fields={
             field: _union_field_roles(contracts, spec.inputs, field)
@@ -294,6 +307,7 @@ def _union_contract(
             for field in spec.output_fields
         },
         field_types=field_types,
+        entity_keys=_common_entity_keys(input_contracts),
         population_proof=population_proof,
     )
 
@@ -339,6 +353,10 @@ def _role_expand_contract(
         grain_keys=grain_keys,
         field_proofs=field_proofs,
         field_types=field_types,
+        entity_keys=_project_entity_keys(
+            source,
+            {field: field for field in spec.carry_fields if field in fields},
+        ),
         population_proof=source.population_proof,
     )
 
@@ -372,6 +390,7 @@ def _cross_join_contract(
         grain_keys=(*left.grain_keys, *right.grain_keys),
         field_proofs=field_proofs,
         field_types=_merge_contract_field_types(left, right),
+        entity_keys=_combined_entity_keys(left, right),
         population_proof=left.population_proof.merge(right.population_proof),
     )
 
@@ -405,11 +424,18 @@ def _anti_join_contract(
             .merge(dependency_proof)
         )
         field_types[output] = candidate.field_types.get(field.source, "")
+    projections = {
+        **{
+            field: field for field in spec.candidate.required_identity_fields
+        },
+        **{field.source: field.output or field.source for field in spec.output_fields},
+    }
     return RelationContract(
         fields=fields,
         grain_keys=spec.candidate.required_identity_fields,
         field_proofs=field_proofs,
         field_types=field_types,
+        entity_keys=_project_entity_keys(candidate, projections),
         population_proof=candidate.population_proof.merge(
             observed.population_proof,
             dependency_proof,
@@ -454,11 +480,19 @@ def _universal_condition_contract(
             .merge(dependency_proof)
         )
         field_types[output] = candidate.field_types.get(field.source, "")
+    projections = {
+        **{
+            field: field
+            for field in spec.candidate_subject.required_identity_fields
+        },
+        **{field.source: field.output or field.source for field in spec.output_fields},
+    }
     return RelationContract(
         fields=fields,
         grain_keys=spec.candidate_subject.required_identity_fields,
         field_proofs=field_proofs,
         field_types=field_types,
+        entity_keys=_project_entity_keys(candidate, projections),
         population_proof=candidate.population_proof.merge(
             required_dimension.population_proof,
             observation.population_proof,
@@ -540,6 +574,10 @@ def _aggregate_contract(
         grain_keys=spec.group_by,
         field_proofs=field_proofs,
         field_types=field_types,
+        entity_keys=_project_entity_keys(
+            source,
+            {field: field for field in spec.group_by},
+        ),
         population_proof=source.population_proof,
     )
 

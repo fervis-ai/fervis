@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from types import SimpleNamespace
+from uuid import UUID
 
 import pytest
 
@@ -215,10 +216,24 @@ def test_answered_lineage_records_memory_artifact_from_fact_addresses() -> None:
                 ],
             },
         ),
+        (
+            (UUID("93939393-0000-0000-0003-000000000003"),),
+            AnswerValueKind.ENTITY,
+            {
+                "kind": "entity",
+                "entity_kind": "staff",
+                "key_id": "primary_key",
+                "components": {
+                    "id": {
+                        "$uuid": "93939393-0000-0000-0003-000000000003"
+                    }
+                },
+            },
+        ),
     ),
 )
 def test_answered_lineage_records_entity_output_from_execution_relation(
-    staff_ids: tuple[str, ...],
+    staff_ids: tuple[str | UUID, ...],
     expected_kind: AnswerValueKind,
     expected_value: dict[str, object],
 ) -> None:
@@ -259,7 +274,7 @@ def test_answered_lineage_records_entity_output_from_execution_relation(
             kind=OutcomeKind.ANSWER,
             rows=tuple({"answer_1": staff_id} for staff_id in staff_ids),
         ),
-        answer="\n".join(staff_ids),
+        answer="\n".join(str(staff_id) for staff_id in staff_ids),
         question_contract=_question_contract({"fact_1": "answer_1"}),
         question_contract_step_id="step_contract",
         compile_step_id="step_compile",

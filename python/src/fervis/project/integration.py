@@ -7,7 +7,9 @@ business apps, patch frameworks, or initialize runtime services.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -186,12 +188,14 @@ class FastAPIIntegration:
         include_router = getattr(app, "include_router", None)
         if not callable(include_router):
             raise TypeError("FastAPIIntegration.mount() requires a FastAPI app.")
+        interface = self._question_interface(question_interface)
         prefix = self.routes.prefix.rstrip("/")
         include_router(
-            self.router(question_interface=question_interface),
+            self.router(question_interface=interface),
             prefix=prefix,
             include_in_schema=False,
         )
+        _close_question_interface_with_fastapi_app(app, interface)
         return app
 
     def _principal_dependency(self) -> Callable[..., object] | None:
@@ -212,6 +216,26 @@ class FastAPIIntegration:
                 "FastAPIIntegration requires a question_interface for mounted routes."
             )
         return self.question_interface_factory()
+
+
+def _close_question_interface_with_fastapi_app(
+    app: object,
+    question_interface: QuestionInterface,
+) -> None:
+    router = getattr(app, "router", None)
+    host_lifespan = getattr(router, "lifespan_context", None)
+    if router is None or not callable(host_lifespan):
+        raise TypeError("FastAPIIntegration.mount() requires an application lifespan.")
+
+    @asynccontextmanager
+    async def lifespan_with_fervis(host_app: object):
+        async with host_lifespan(host_app) as lifespan_state:
+            try:
+                yield lifespan_state
+            finally:
+                await asyncio.to_thread(question_interface.close)
+
+    router.lifespan_context = lifespan_with_fervis
 
 
 @dataclass(frozen=True)

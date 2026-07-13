@@ -4181,7 +4181,19 @@ def test_project_cannot_partially_change_relation_grain_for_coverage_role():
         verify_fact_plan(plan)
 
 
-def test_project_to_key_outputs_only_key_fields():
+@pytest.mark.parametrize(
+    ("entity_kind", "key_id", "component_id"),
+    (
+        ("other_entity", "primary_key", "entity_id"),
+        ("entity", "undeclared_key", "entity_id"),
+        ("entity", "primary_key", "other_component"),
+    ),
+)
+def test_project_to_key_rejects_undeclared_entity_key(
+    entity_kind: str,
+    key_id: str,
+    component_id: str,
+) -> None:
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(
@@ -4216,11 +4228,11 @@ def test_project_to_key_outputs_only_key_fields():
                         id="answer",
                         relation_id="entity_rows",
                         entity_key=EntityKeyProjection(
-                            entity_kind="entity",
-                            key_id="entity_key",
+                            entity_kind=entity_kind,
+                            key_id=key_id,
                             components=(
                                 EntityKeyProjectionComponent(
-                                    component_id="entity_id",
+                                    component_id=component_id,
                                     field_id="entity_id",
                                 ),
                             ),
@@ -4231,7 +4243,8 @@ def test_project_to_key_outputs_only_key_fields():
         )
     )
 
-    verify_fact_plan(plan)
+    with pytest.raises(VerificationError, match="declared entity key"):
+        verify_fact_plan(plan)
 
 
 def test_aggregate_outputs_only_group_key_and_measure():
@@ -4281,7 +4294,7 @@ def test_aggregate_outputs_only_group_key_and_measure():
                         relation_id="totals",
                         entity_key=EntityKeyProjection(
                             entity_kind="entity",
-                            key_id="entity_key",
+                            key_id="primary_key",
                             components=(
                                 EntityKeyProjectionComponent(
                                     component_id="entity_id",
