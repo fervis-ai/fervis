@@ -27,11 +27,10 @@ from fervis.lookup.answer_program.operations import (
     FilterSpec,
     JoinKey,
     JoinSpec,
-    Operation,
     Predicate,
     ProjectField,
     ProjectSpec,
-    ProjectToIdentitySpec,
+    ProjectToKeySpec,
     RelationRole,
     RelationRoleRef,
     RoleExpandSpec,
@@ -47,6 +46,12 @@ from fervis.lookup.plan_execution.operation_runtime import (
 from fervis.lookup.outcomes.errors import UndefinedOperationError
 from fervis.lookup.outcomes.operation_semantics import (
     empty_aggregation_undefined_reason,
+)
+from fervis.lookup.canonical_data import RuntimeValue
+from fervis.lookup.plan_execution.declared_values import (
+    declared_equal,
+    declared_number,
+    declared_order_key,
 )
 
 
@@ -106,10 +111,10 @@ def _project_output(
     fields: tuple[ProjectField, ...],
     *,
     grain_keys: tuple[str, ...] = (),
-) -> dict[str, object]:
-    output: dict[str, object] = {}
-    for field in grain_keys:
-        _assign_or_match(output, field, _field(row, field))
+) -> dict[str, RuntimeValue]:
+    output: dict[str, RuntimeValue] = {}
+    for grain_field in grain_keys:
+        _assign_or_match(output, grain_field, _field(row, grain_field))
     for field in fields:
         _assign_or_match(
             output, field.output or field.source, _field(row, field.source)
@@ -118,13 +123,13 @@ def _project_output(
 
 
 def _operation_relation(
-    operation: Operation,
-    rows: list[dict[str, object]] | tuple[dict[str, object], ...],
+    operation: ExecutableOperation,
+    rows: list[dict[str, RuntimeValue]] | tuple[dict[str, RuntimeValue], ...],
     *,
     grain_keys: tuple[str, ...],
     inputs: tuple[RelationRows, ...],
     scalar_refs: tuple[str, ...] = (),
-    identity_type: str = "",
+    field_types: dict[str, str] | None = None,
 ) -> RelationRows:
     _require_rows_have_fields(rows, grain_keys, "operation grain")
     complete = all(
@@ -136,15 +141,15 @@ def _operation_relation(
         id=_output_relation(operation),
         rows=tuple(rows),
         grain_keys=grain_keys,
-        field_types=_projected_field_types(
-            tuple(rows),
-            inputs=inputs,
+        field_types=(
+            dict(field_types)
+            if field_types is not None
+            else _projected_field_types(tuple(rows), inputs=inputs)
         ),
         field_answer_output_ids=_projected_field_answer_output_ids(
             tuple(rows),
             inputs=inputs,
         ),
-        identity_type=identity_type,
         evidence=RelationEvidence(
             source_refs=tuple(
                 dict.fromkeys(
@@ -191,20 +196,6 @@ def _operation_relation(
     )
 
 
-def _identity_type_for_grain(
-    grain_keys: tuple[str, ...],
-    inputs: tuple[RelationRows, ...],
-) -> str:
-    matching = {
-        relation.identity_type
-        for relation in inputs
-        if relation.identity_type and tuple(relation.grain_keys) == tuple(grain_keys)
-    }
-    if len(matching) == 1:
-        return next(iter(matching))
-    return ""
-
-
 def _project_grain(
     input_relation: RelationRows,
     fields: tuple[ProjectField, ...],
@@ -218,7 +209,7 @@ def _project_grain(
 
 
 def _operation_proof_refs(
-    operation: Operation,
+    operation: ExecutableOperation,
     inputs: tuple[RelationRows, ...],
     *,
     scalar_refs: tuple[str, ...] = (),
@@ -237,7 +228,7 @@ def _operation_proof_refs(
 
 
 def _input_scalar_proof_refs(
-    operation: Operation,
+    operation: ExecutableOperation,
     scalar_proofs: dict[str, tuple[str, ...]],
 ) -> tuple[str, ...]:
     scalar_ids = _operation_scalar_refs(operation)
@@ -249,7 +240,7 @@ def _input_scalar_proof_refs(
     return tuple(refs)
 
 
-def _operation_scalar_refs(operation: Operation) -> tuple[str, ...]:
+def _operation_scalar_refs(operation: ExecutableOperation) -> tuple[str, ...]:
     spec = operation.spec
     if isinstance(spec, ResolvedComputeSpec):
         return resolved_compute_references(spec.expression).output_refs
@@ -265,7 +256,7 @@ def _predicate_scalar_refs(predicate: Predicate) -> tuple[str, ...]:
 
 
 def _input_relations(
-    operation: Operation,
+    operation: ExecutableOperation,
     relations: dict[str, RelationRows],
 ) -> tuple[RelationRows, ...]:
     spec = operation.spec
@@ -274,7 +265,7 @@ def _input_relations(
         (
             FilterSpec,
             ProjectSpec,
-            ProjectToIdentitySpec,
+            ProjectToKeySpec,
             RoleExpandSpec,
             AggregateSpec,
             ResolvedRankSpec,
@@ -349,6 +340,8 @@ def _with_role_set_kind(
     set_kind = _expected_set_kind_for_ref(ref)
     if set_kind is None:
         return relation
+    if ref is None:
+        raise AssertionError("set kind requires relation role")
     existing = relation.completeness.set_kind
     if existing not in {RelationSetKind.UNKNOWN, set_kind}:
         raise RelationEngineError(
@@ -360,14 +353,13 @@ def _with_role_set_kind(
         grain_keys=relation.grain_keys,
         field_types=relation.field_types,
         field_answer_output_ids=relation.field_answer_output_ids,
-        identity_type=relation.identity_type,
         evidence=relation.evidence,
         completeness=replace(relation.completeness, set_kind=set_kind),
     )
 
 
 def _projected_field_types(
-    rows: tuple[dict[str, object], ...],
+    rows: tuple[dict[str, RuntimeValue], ...],
     *,
     inputs: tuple[RelationRows, ...],
 ) -> dict[str, str]:
@@ -383,7 +375,7 @@ def _projected_field_types(
 
 
 def _projected_field_answer_output_ids(
-    rows: tuple[dict[str, object], ...],
+    rows: tuple[dict[str, RuntimeValue], ...],
     *,
     inputs: tuple[RelationRows, ...],
 ) -> dict[str, tuple[str, ...]]:
@@ -450,7 +442,7 @@ def _require_fields_declared(
 
 
 def _require_rows_have_fields(
-    rows: list[dict[str, object]] | tuple[dict[str, object], ...],
+    rows: list[dict[str, RuntimeValue]] | tuple[dict[str, RuntimeValue], ...],
     fields: tuple[str, ...],
     label: str,
 ) -> None:
@@ -472,7 +464,11 @@ def _raise_undefined_empty_aggregation(
             )
 
 
-def _aggregate_value(aggregation: AggregationSpec, rows: list[Row]) -> object:
+def _aggregate_value(
+    aggregation: AggregationSpec,
+    rows: list[Row],
+    field_types: dict[str, str],
+) -> RuntimeValue:
     function = aggregation.function
     if function == AggregationFunction.COUNT:
         return len(rows)
@@ -485,45 +481,95 @@ def _aggregate_value(aggregation: AggregationSpec, rows: list[Row]) -> object:
                 input_refs=(aggregation.input_field,),
             )
     if function in {AggregationFunction.SUM, AggregationFunction.AVG}:
-        numeric = [_number(value) for value in values]
-        total = sum(numeric, Decimal("0"))
+        numeric = [
+            declared_number(value, field_types.get(aggregation.input_field))
+            for value in values
+        ]
+        total = sum(numeric, start=declared_number(0, "decimal"))
         if function == AggregationFunction.SUM:
             return total
         return total / len(numeric)
     if function == AggregationFunction.MIN:
-        return min(values, key=_sort_value) if values else None
+        return (
+            min(
+                values,
+                key=lambda value: declared_order_key(
+                    value, field_types.get(aggregation.input_field)
+                ),
+            )
+            if values
+            else None
+        )
     if function == AggregationFunction.MAX:
-        return max(values, key=_sort_value) if values else None
+        return (
+            max(
+                values,
+                key=lambda value: declared_order_key(
+                    value, field_types.get(aggregation.input_field)
+                ),
+            )
+            if values
+            else None
+        )
     raise RelationEngineError(f"unsupported aggregation {function}")
 
 
-def _join_match(left: Row, right: Row, join_keys: Iterable[JoinKey]) -> bool:
-    return all(_field(left, key.left) == _field(right, key.right) for key in join_keys)
+def _join_match(
+    left: Row,
+    right: Row,
+    join_keys: Iterable[JoinKey],
+    left_types: dict[str, str],
+    right_types: dict[str, str],
+) -> bool:
+    return all(
+        declared_equal(
+            _field(left, key.left),
+            left_types.get(key.left),
+            _field(right, key.right),
+            right_types.get(key.right),
+        )
+        for key in join_keys
+    )
 
 
 def _merge_rows(
     left: Row,
     right: Row,
     join_keys: Iterable[JoinKey],
-) -> dict[str, object]:
+    left_types: dict[str, str] | None = None,
+    right_types: dict[str, str] | None = None,
+) -> dict[str, RuntimeValue]:
     del join_keys
     output = dict(left)
     for field, value in right.items():
         if field in output:
-            if output[field] == value:
+            if declared_equal(
+                output[field],
+                (left_types or {}).get(field),
+                value,
+                (right_types or {}).get(field),
+            ):
                 continue
             raise RelationEngineError(f"field conflict {field}")
         output[field] = value
     return output
 
 
-def _assign_field(row: dict[str, object], field: str, value: object) -> None:
+def _assign_field(
+    row: dict[str, RuntimeValue],
+    field: str,
+    value: RuntimeValue,
+) -> None:
     if field in row:
         raise RelationEngineError(f"field conflict {field}")
     row[field] = value
 
 
-def _assign_or_match(row: dict[str, object], field: str, value: object) -> None:
+def _assign_or_match(
+    row: dict[str, RuntimeValue],
+    field: str,
+    value: RuntimeValue,
+) -> None:
     existing = row.get(field)
     if field in row and existing != value:
         raise RelationEngineError(f"field conflict {field}")
@@ -536,67 +582,34 @@ def _relation(relations: dict[str, RelationRows], relation_id: str) -> RelationR
     return relations[relation_id]
 
 
-def _field(row: Row, field: str) -> object:
+def _field(row: Row, field: str) -> RuntimeValue:
     if field not in row:
         raise RelationEngineError(f"missing field {field}")
     return row[field]
 
 
-def _number(value: object) -> Decimal:
-    if isinstance(value, bool):
-        raise RelationEngineError("expected numeric value")
-    if isinstance(value, (int, float, Decimal, str)):
-        try:
-            return Decimal(str(value))
-        except Exception as exc:
-            raise RelationEngineError("expected numeric value") from exc
-    raise RelationEngineError("expected numeric value")
-
-
-def _optional_number(value: object) -> Decimal | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float, Decimal, str)):
-        try:
-            return Decimal(str(value))
-        except Exception:
-            return None
-    return None
-
-
-def _sort_value(value: object) -> tuple[int, object]:
-    if value is None:
-        return (0, "")
-    numeric = _optional_number(value)
-    if numeric is not None:
-        return (1, numeric)
-    return (2, str(value))
-
-
-def _ordered_predicate_values(left: object, right: object) -> tuple[object, object]:
-    left_number = _optional_number(left)
-    right_number = _optional_number(right)
-    if left_number is not None and right_number is not None:
-        return left_number, right_number
-    if left_number is not None or right_number is not None:
-        raise RelationEngineError("incompatible predicate values")
-    return left, right
-
-
-def _output_relation(operation: Operation) -> str:
+def _output_relation(operation: ExecutableOperation) -> str:
     if not operation.output_relation:
         raise RelationEngineError(f"operation {operation.id} requires output relation")
     return operation.output_relation
 
 
 class _Descending:
-    def __init__(self, value: object) -> None:
+    def __init__(self, value: tuple[int, Decimal | str]) -> None:
         self.value = value
 
     def __lt__(self, other: object) -> bool:
         if not isinstance(other, _Descending):
             return NotImplemented
-        return self.value > other.value
+        left_rank, left = self.value
+        right_rank, right = other.value
+        if left_rank != right_rank:
+            return left_rank > right_rank
+        if isinstance(left, Decimal) and isinstance(right, Decimal):
+            return left > right
+        if isinstance(left, str) and isinstance(right, str):
+            return left > right
+        raise RelationEngineError("ordering keys have incompatible runtime kinds")
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, _Descending) and self.value == other.value

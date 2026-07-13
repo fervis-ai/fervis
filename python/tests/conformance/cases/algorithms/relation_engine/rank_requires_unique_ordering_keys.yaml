@@ -12,6 +12,7 @@ input:
         - {item_id: b, amount: "100"}
         - {item_id: c, amount: "50"}
       grain_keys: [item_id]
+      field_types: {item_id: string, amount: decimal}
       completeness: {status: complete, source_kind: api_read, set_kind: unknown}
   operations:
     - id: ranked

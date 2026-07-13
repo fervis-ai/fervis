@@ -9,10 +9,14 @@ from jsonschema import validate
 from jsonschema.exceptions import ValidationError
 
 from fervis.lookup.relation_catalog import (
+    CandidateKey,
+    CandidateKeyComponent,
     CatalogField,
     CatalogParam,
     EndpointRead,
-    IdentityMetadata,
+    EntityKeyComponentTarget,
+    EntityReference,
+    EntityReferenceComponent,
     ParamSource,
     RelationCatalog,
     RowCardinality,
@@ -42,6 +46,8 @@ from fervis.lookup.question_contract import (
 from fervis.lookup.fact_plan.row_sources import api_row_source_id
 from fervis.lookup.answer_program.values import FactValue, TimeComponent
 from fervis.lookup.fact_planning.pattern_plan import compile_pattern_answer_program
+from fervis.lookup.fact_planning.provider_contract import parse_pattern_answer
+from fervis.lookup.provider_contract import ProviderObject
 from fervis.lookup.answer_program import compiler_input_context
 from fervis.lookup.grounding.model import GroundedInputUse
 from fervis.lookup.question_inputs import LiteralInputRole
@@ -64,7 +70,12 @@ from fervis.lookup.source_binding import (
     SourceBindingTurnPrompt,
 )
 from fervis.lookup.source_binding.candidates import SourceCandidate
+from fervis.lookup.source_binding.candidates.contracts import (
+    parse_evidence_item,
+    parse_fulfillment_support_set,
+)
 from fervis.lookup.source_binding.parser.fulfillment import parse_source_fulfillments
+from fervis.lookup.source_binding.provider_contract import FulfillmentDecisionOutput
 from fervis.lookup.source_binding.schema import build_source_binding_schema
 from fervis.lookup.plan_selection.family_specs import SourceMemberConstraint
 from fervis.lookup.source_binding.plan_targets import (
@@ -84,10 +95,11 @@ from fervis.lookup.operation_families.source_binding_registry import (
     source_binding_metric_evidence_ids_by_requested_fact,
 )
 from tests.lookup.source_binding_helpers import (
+    source_binding_request,
     source_binding_target_id_for_candidate,
     source_fulfills_by_row_population_for_candidate,
-    source_fulfills_for_candidate,
     source_fulfills_fields_for_candidate,
+    source_fulfills_keys_for_candidate,
 )
 
 
@@ -277,19 +289,19 @@ def test_source_binding_schema_requires_only_selectable_fulfillment_outputs():
                 "bindings_for_fact_1": {
                     "plan_shape": "test_shape",
                     "primary": {
-                                **_minimal_source_invocation(
-                                    "target.source_1",
-                                    "pop.source_1.candidate_population",
+                        **_minimal_source_invocation(
+                            "target.source_1",
+                            "pop.source_1.candidate_population",
+                        ),
+                        "fulfillment_decisions": {
+                            "answer_group": {
+                                "fulfillment_choice_id": (
+                                    "support.source_1.answer_group"
                                 ),
-                                "fulfillment_decisions": {
-                                    "answer_group": {
-                                        "fulfillment_choice_id": (
-                                            "support.source_1.answer_group"
-                                        ),
-                                        "match_basis_explanation": "The selected group key.",
-                                    },
-                                },
-                    }
+                                "match_basis_explanation": "The selected group key.",
+                            },
+                        },
+                    },
                 },
             },
         },
@@ -541,23 +553,6 @@ def test_closed_key_grouped_identity_param_is_backend_owned_without_grounding_us
 
 def test_closed_key_grouped_identity_param_can_use_group_key_field_id():
     request = _closed_key_grouped_staff_sales_request()
-    read = request.relation_catalog.reads[0]
-    request = replace(
-        request,
-        relation_catalog=RelationCatalog(
-            reads=(
-                replace(
-                    read,
-                    fields=tuple(
-                        replace(field, identity=None)
-                        if field.path == "data.staff_id"
-                        else field
-                        for field in read.fields
-                    ),
-                ),
-            ),
-        ),
-    )
     prompt = SourceBindingTurnPrompt(request)
     target = _only_binding_target(prompt)
     invocation_schema = _source_invocation_variants_by_target(
@@ -571,6 +566,27 @@ def test_closed_key_grouped_identity_param_can_use_group_key_field_id():
 
     assert "backend_owned_param_bindings" in str(target)
     assert "staff_id" not in param_properties
+
+
+def test_grounded_endpoint_params_are_backend_owned_not_model_authored():
+    request = _closed_key_grouped_staff_sales_today_request()
+    prompt = SourceBindingTurnPrompt(request)
+    target = _only_binding_target(prompt)
+    invocation_schema = _source_invocation_variants_by_target(
+        prompt.response_contract().provider_schema
+    )[target["binding_target_id"]]
+
+    param_properties = invocation_schema["properties"]["param_decisions"].get(
+        "properties",
+        {},
+    )
+    backend_bindings = target["backend_owned_param_bindings"]
+    backend_param_ids = {
+        binding["param_id"] for binding in backend_bindings if "param_id" in binding
+    }
+
+    assert {"staff_id", "start_date", "end_date"}.isdisjoint(param_properties)
+    assert backend_param_ids == {"staff_id", "start_date", "end_date"}
 
 
 def test_closed_key_grouped_identity_param_scopes_group_key_fulfillment_choices():
@@ -587,17 +603,17 @@ def test_closed_key_grouped_identity_param_scopes_group_key_fulfillment_choices(
     choice_ids = invocation_schema["properties"]["fulfillment_decisions"]["properties"][
         "answer_staff"
     ]["properties"]["fulfillment_choice_id"]["enum"]
-    staff_id_choice = source_fulfills_fields_for_candidate(
+    staff_id_choice = source_fulfills_keys_for_candidate(
         candidate,
-        field_ids_by_answer_output={"answer_staff": ("staff_id",)},
+        key_ids_by_answer_output={"answer_staff": "staff_key"},
     )["answer_staff"]["fulfillment_choice_id"]
 
-    assert choice_ids == ["source_1.data.staff_id"]
-    assert staff_id_choice == "source_1.data.staff_id"
+    assert choice_ids == ["source_1.data.reference.sale_staff"]
+    assert staff_id_choice == "source_1.data.reference.sale_staff"
     assert "source_1.data.staff_name" not in choice_ids
 
 
-def test_source_binding_prompt_marks_canonical_group_identity_choice():
+def test_source_binding_prompt_marks_canonical_group_entity_choice():
     request = _closed_key_grouped_staff_sales_request()
     prompt = SourceBindingTurnPrompt(request)
     prompt_text = prompt.to_model_invocation(
@@ -611,10 +627,12 @@ def test_source_binding_prompt_marks_canonical_group_identity_choice():
         prompt.source_invocation_candidate_payload()
     )
 
-    assert "prefer stable primary identity evidence" in prompt_text
-    assert "display labels are presentation context" in prompt_text
-    assert '<choice id="source_1.data.staff_id"' in candidate_prompt
-    assert 'identity="staff.staff_id primary_stable"' in candidate_prompt
+    assert (
+        "Entity outputs use a declared source candidate key or entity reference"
+        in prompt_text
+    )
+    assert "Context labels are not selectable computation evidence" in prompt_text
+    assert '<choice id="source_1.data.reference.sale_staff"' in candidate_prompt
     assert '<choice id="fulfillment_' not in candidate_prompt
 
 
@@ -768,46 +786,65 @@ def test_parse_source_binding_expands_backend_owned_closed_key_param_bindings():
 
 
 def test_parse_source_fulfillment_derives_required_row_count_without_selectable_choice():
-    candidate = SourceCandidate(
-        id="source_1",
-        requested_fact_id="fact_1",
-        kind="read",
-        payload={
-            "evidence_items": [
+    evidence_items = tuple(
+        parse_evidence_item(item)
+        for item in (
+            {
+                "evidence_id": "source_1.data.staff_id",
+                "field_id": "staff_id",
+                "type": "string",
+            },
+            {
+                "evidence_id": "source_1.data.key.staff_key",
+                "type": "candidate_key",
+                "key_id": "staff_key",
+                "entity_kind": "staff",
+                "components": [
+                    {
+                        "component_id": "staff_id",
+                        "field_evidence_id": "source_1.data.staff_id",
+                        "field_id": "staff_id",
+                    }
+                ],
+                "row_source_id": "read.sales.data",
+                "row_path_id": "data",
+            },
+            {
+                "evidence_id": "row_population.data",
+                "type": "row_population",
+                "row_source_id": "read.sales.data",
+                "row_path_id": "data",
+                "row_cardinality": "many",
+            },
+        )
+    )
+    support_set = parse_fulfillment_support_set(
+        {
+            "answer_output_id": "answer_staff",
+            "fulfillment_choice_id": "fulfillment_staff",
+            "fulfillment_support_set_id": "support_staff",
+            "fulfillment_slots": [
                 {
-                    "evidence_id": "source_1.data.staff_id",
-                    "field_id": "staff_id",
-                    "type": "string",
-                },
-                {
-                    "evidence_id": "row_population.data",
-                    "type": "row_population",
-                    "row_source_id": "read.sales.data",
-                },
-            ],
-            "fulfillment_support_sets": [
-                {
-                    "answer_output_id": "answer_staff",
-                    "fulfillment_choice_id": "fulfillment_staff",
-                    "fulfillment_support_set_id": "support_staff",
-                    "fulfillment_slots": [
-                        {
-                            "group_key_evidence": [
-                                {"evidence_id": "source_1.data.staff_id"}
-                            ],
-                        }
-                    ],
+                    "fulfillment_slot_id": "slot_staff",
+                    "entity_evidence": [evidence_items[1].payload()],
                 }
             ],
-        },
+        }
+    )
+    candidate = SourceCandidate(
+        id="source_1",
+        applies_to_requested_fact_ids=("fact_1",),
+        kind="read",
+        evidence_items=evidence_items,
+        fulfillment_support_sets=(support_set,),
     )
 
     fulfillments = parse_source_fulfillments(
         {
-            "answer_staff": {
-                "fulfillment_choice_id": "fulfillment_staff",
-                "match_basis_explanation": "Staff id is the grouped result key.",
-            }
+            "answer_staff": FulfillmentDecisionOutput(
+                fulfillment_choice_id="fulfillment_staff",
+                match_basis_explanation="Staff id is the grouped result key.",
+            )
         },
         requested_fact_id="fact_1",
         answer_output_ids={"answer_staff", "answer_count"},
@@ -862,31 +899,40 @@ def test_closed_key_source_binding_retains_input_proofs_through_grouped_count_pl
             ("known_input:staff_id_2",),
         ),
     )
+    assert _param_proofs_by_invocation(bound_source, "start_date") == (
+        ("2026-07-06", ("known_input:today",)),
+        ("2026-07-06", ("known_input:today",)),
+    )
+    assert _param_proofs_by_invocation(bound_source, "end_date") == (
+        ("2026-07-06", ("known_input:today",)),
+        ("2026-07-06", ("known_input:today",)),
+    )
     assert {
-        applied_filter["known_input_id"]
-        for applied_filter in bound_source.applied_filters
+        applied_filter.known_input_id for applied_filter in bound_source.applied_filters
     } == {"today"}
 
     answer_plan, answer_bindings = compile_pattern_answer_program(
-        {
-            "answers": [
-                {
-                    "requested_fact_id": "fact_1",
-                    "pattern": "aggregate_by_group",
-                    "source_binding_id": bound_source.id,
-                    "metric": {
-                        "selection_basis": "Count matching sales rows.",
-                        "id": "metric_1",
-                        "kind": "count_records",
-                    },
-                    "function": {
-                        "selection_basis": "A row count uses count.",
-                        "id": "function_count",
-                        "value": "count",
-                    },
-                }
-            ]
-        },
+        (
+            parse_pattern_answer(
+                ProviderObject(
+                    {
+                        "requested_fact_id": "fact_1",
+                        "pattern": "aggregate_by_group",
+                        "source_binding_id": bound_source.id,
+                        "metric": {
+                            "selection_basis": "Count matching sales rows.",
+                            "id": "metric_1",
+                            "kind": "count_records",
+                        },
+                        "function": {
+                            "selection_basis": "A row count uses count.",
+                            "id": "function_count",
+                            "value": "count",
+                        },
+                    }
+                )
+            ),
+        ),
         bound_sources=result.outcome.bound_sources,
         source_binding_ids_by_requested_fact_id={"fact_1": (bound_source.id,)},
         source_binding_ids_by_requirement_by_requested_fact_id={
@@ -1087,49 +1133,6 @@ def test_bound_plan_assembly_keeps_auxiliary_values_out_of_target_matching():
     assert "source_binding.aux_value" not in selected_source_binding_ids
 
 
-def test_parse_source_binding_rejects_compact_equivalent_plans_with_different_fields():
-    request = _set_difference_request()
-    plan = request.plan_selection.plan_selections[0]
-    ambiguous_request = replace(
-        request,
-        plan_selection=PlanSelectionSet(
-            plan_selections=(
-                replace(
-                    plan,
-                    source_members=(
-                        replace(plan.source_members[0], field_ids=("staff_name",)),
-                        plan.source_members[1],
-                    ),
-                ),
-                replace(
-                    plan,
-                    plan_selection_id="plan.fact_1.field_variant",
-                    source_strategy_id="source_strategy.fact_1.field_variant",
-                    source_members=(
-                        replace(plan.source_members[0], field_ids=("staff_id",)),
-                        plan.source_members[1],
-                    ),
-                ),
-            )
-        ),
-    )
-    prompt = SourceBindingTurnPrompt(ambiguous_request)
-    targets = _binding_targets(prompt)
-    with pytest.raises(ValueError, match="complete source binding role set"):
-        parse_source_binding(
-            {
-                "outcome": _source_binding_outcome(
-                    prompt,
-                    targets=(
-                        _target_for(targets, "source_1", "candidate_set"),
-                        _target_for(targets, "source_2", "observed_set"),
-                    ),
-                )
-            },
-            request=ambiguous_request,
-        )
-
-
 def test_source_binding_target_compatibility_does_not_carry_evidence_selection():
     compatibility_fields = {
         field.name for field in fields(SourceBindingTargetCompatibility)
@@ -1147,7 +1150,9 @@ def test_value_only_bypass_does_not_choose_non_equivalent_plan_by_tuple_order():
                 description="percentage increase",
                 answer_subject=RequestedFactAnswerSubject(subject_text="increase"),
                 answer_outputs=(
-                    RequestedFactAnswerOutput(id="answer_1", description="increase"),
+                    RequestedFactAnswerOutput(
+                        id="answer_1", description="increase", role="ANSWER_VALUE"
+                    ),
                 ),
                 answer_expression=RequestedFactAnswerExpression(
                     family=RequestedFactAnswerExpressionFamily.COMPUTED_SCALAR,
@@ -1254,7 +1259,11 @@ def _set_difference_request() -> SourceBindingRequest:
         id="fact_1",
         description="Staff who have not made a sale this month.",
         answer_subject=RequestedFactAnswerSubject(subject_text="staff"),
-        answer_outputs=(RequestedFactAnswerOutput(id="answer_1", description="staff"),),
+        answer_outputs=(
+            RequestedFactAnswerOutput(
+                id="answer_1", description="staff", role="ANSWER_VALUE"
+            ),
+        ),
         answer_expression=RequestedFactAnswerExpression(
             family=RequestedFactAnswerExpressionFamily.SET_DIFFERENCE,
         ),
@@ -1312,7 +1321,7 @@ def _set_difference_request() -> SourceBindingRequest:
     )
     staff_candidate_id = scopes_by_read["staff"].source_candidate_id
     sales_candidate_id = scopes_by_read["sales"].source_candidate_id
-    return SourceBindingRequest(
+    return source_binding_request(
         question="Which staff have not made a sale this month?",
         question_contract=QuestionContract(requested_facts=(fact,)),
         requested_facts=(fact,),
@@ -1391,7 +1400,7 @@ def _closed_key_grouped_staff_sales_request() -> SourceBindingRequest:
             RequestedFactAnswerOutput(
                 id="answer_count",
                 description="sales count",
-                role="ROW_POPULATION",
+                role="ROW_COUNT",
             ),
         ),
         answer_expression=RequestedFactAnswerExpression(
@@ -1411,8 +1420,9 @@ def _closed_key_grouped_staff_sales_request() -> SourceBindingRequest:
         FactValue.identity(
             id="staff_identity_1",
             known_input_id="staff_id_1",
-            identity_type="staff",
-            identity_field="staff_id",
+            entity_kind="staff",
+            key_id="staff_key",
+            key_component_id="staff_id",
             value="51515151-0000-0000-0002-000000000001",
             display_value="51515151-0000-0000-0002-000000000001",
             proof_refs=("known_input:staff_id_1",),
@@ -1421,15 +1431,16 @@ def _closed_key_grouped_staff_sales_request() -> SourceBindingRequest:
         FactValue.identity(
             id="staff_identity_2",
             known_input_id="staff_id_2",
-            identity_type="staff",
-            identity_field="staff_id",
+            entity_kind="staff",
+            key_id="staff_key",
+            key_component_id="staff_id",
             value="51515151-0000-0000-0002-000000000002",
             display_value="51515151-0000-0000-0002-000000000002",
             proof_refs=("known_input:staff_id_2",),
             applies_to_requested_fact_ids=("fact_1",),
         ),
     )
-    catalog = RelationCatalog(reads=(_staff_sales_read(),))
+    catalog = RelationCatalog(reads=(_staff_sales_read(), _staff_read()))
     catalog_selection = CatalogSelectionResult(
         relation_catalog=catalog,
         requested_fact_selections=(
@@ -1473,7 +1484,7 @@ def _closed_key_grouped_staff_sales_request() -> SourceBindingRequest:
             ),
         )
     )
-    return SourceBindingRequest(
+    return source_binding_request(
         question="How many sales did the specified staff members sell each today?",
         question_contract=question_contract,
         requested_facts=(fact,),
@@ -1546,7 +1557,7 @@ def _closed_key_grouped_staff_sales_today_request() -> SourceBindingRequest:
         applies_to_requested_fact_ids=("fact_1",),
     )
     available_values = (*base.available_values, today_value)
-    catalog = RelationCatalog(reads=(_staff_sales_today_read(),))
+    catalog = RelationCatalog(reads=(_staff_sales_today_read(), _staff_read()))
     catalog_selection = CatalogSelectionResult(
         relation_catalog=catalog,
         requested_fact_selections=(
@@ -1583,8 +1594,8 @@ def _closed_key_grouped_staff_sales_today_request() -> SourceBindingRequest:
             ),
         )
     )
-    return replace(
-        base,
+    return source_binding_request(
+        question=base.question,
         question_contract=question_contract,
         requested_facts=(fact,),
         relation_catalog=catalog,
@@ -1639,6 +1650,12 @@ def _closed_key_grouped_staff_sales_today_request() -> SourceBindingRequest:
             ),
         ),
         read_eligibility=read_eligibility,
+        same_scope_relation_catalog=base.same_scope_relation_catalog,
+        memory_inputs=base.memory_inputs,
+        active_memory_ids=base.active_memory_ids,
+        conversation_context=base.conversation_context,
+        conversation_resolution=base.conversation_resolution,
+        host=base.host,
     )
 
 
@@ -1757,11 +1774,10 @@ def _staff_sales_read() -> EndpointRead:
                 source=ParamSource.QUERY,
                 type="uuid",
                 required=True,
-                identity=IdentityMetadata(
-                    entity_ref="staff",
-                    identity_field="staff_id",
-                    primary_key=True,
-                    stable=True,
+                entity_target=EntityKeyComponentTarget(
+                    entity_kind="staff",
+                    key_id="staff_key",
+                    component_id="staff_id",
                 ),
             ),
         ),
@@ -1778,18 +1794,26 @@ def _staff_sales_read() -> EndpointRead:
                 path="data.staff_id",
                 row_path_id="data",
                 type="uuid",
-                identity=IdentityMetadata(
-                    entity_ref="staff",
-                    identity_field="staff_id",
-                    primary_key=True,
-                    stable=True,
-                ),
             ),
             CatalogField(
                 ref="sales.field.staff_name",
                 path="data.staff_name",
                 row_path_id="data",
                 type="string",
+            ),
+        ),
+        entity_references=(
+            EntityReference(
+                id="sale_staff",
+                target_entity_kind="staff",
+                target_key_id="staff_key",
+                components=(
+                    EntityReferenceComponent(
+                        target_component_id="staff_id",
+                        local_field_ref="sales.field.staff_id",
+                    ),
+                ),
+                context_field_refs=("sales.field.staff_name",),
             ),
         ),
     )
@@ -1825,6 +1849,17 @@ def _set_difference_plan(
     candidate_source_id: str,
     observed_source_id: str,
 ) -> SelectedSourceStrategy:
+    support_set_ids_by_candidate = {
+        "source_1": (
+            "support.source_1.answer_1.slot.source_1.answer_1.entity."
+            "source_1.data.key.staff_key"
+        ),
+        "source_2": (
+            "support.source_2.answer_1.slot.source_2.answer_1.entity."
+            "source_2.data.reference.sale_staff"
+        ),
+    }
+    candidate_support_set_id = support_set_ids_by_candidate[candidate_source_id]
     return SelectedSourceStrategy(
         plan_selection_id=plan_id,
         requested_fact_id="fact_1",
@@ -1835,9 +1870,7 @@ def _set_difference_plan(
             SourceStrategyMember(
                 source_candidate_id=candidate_source_id,
                 requirement_ids=("candidate_set",),
-                fulfillment_support_set_ids=(
-                    "support.source_1.answer_1.slot.source_1.answer_1.group.source_1.data.staff_name",
-                ),
+                fulfillment_support_set_ids=(candidate_support_set_id,),
             ),
             SourceStrategyMember(
                 source_candidate_id=observed_source_id,
@@ -1888,18 +1921,25 @@ def _staff_read() -> EndpointRead:
                 path="data.staff_id",
                 row_path_id="data",
                 type="uuid",
-                identity=IdentityMetadata(
-                    entity_ref="staff",
-                    identity_field="staff_id",
-                    primary_key=True,
-                    stable=True,
-                ),
             ),
             CatalogField(
                 ref="staff.field.staff_name",
                 path="data.staff_name",
                 row_path_id="data",
                 type="string",
+            ),
+        ),
+        candidate_keys=(
+            CandidateKey(
+                id="staff_key",
+                entity_kind="staff",
+                components=(
+                    CandidateKeyComponent(
+                        id="staff_id",
+                        field_ref="staff.field.staff_id",
+                    ),
+                ),
+                primary=True,
             ),
         ),
     )
@@ -1923,10 +1963,18 @@ def _sales_read() -> EndpointRead:
                 path="data.staff_id",
                 row_path_id="data",
                 type="uuid",
-                identity=IdentityMetadata(
-                    entity_ref="staff",
-                    identity_field="staff_id",
-                    stable=True,
+            ),
+        ),
+        entity_references=(
+            EntityReference(
+                id="sale_staff",
+                target_entity_kind="staff",
+                target_key_id="staff_key",
+                components=(
+                    EntityReferenceComponent(
+                        target_component_id="staff_id",
+                        local_field_ref="sales.field.staff_id",
+                    ),
                 ),
             ),
         ),
@@ -1985,7 +2033,10 @@ def _source_binding_outcome(
     for target in targets:
         candidate = candidates[str(target["source_candidate_id"])]
         fulfillment_decisions = (
-            source_fulfills_for_candidate(candidate, field_ids=("staff_name",))
+            source_fulfills_keys_for_candidate(
+                candidate,
+                key_ids_by_answer_output={"answer_1": "staff_key"},
+            )
             if target["requirement_id"] == "candidate_set"
             else {}
         )

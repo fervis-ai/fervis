@@ -31,6 +31,7 @@ from fervis.lookup.answer_program.values import (
 from fervis.lookup.question_contract import (
     QuestionContract,
     RequestedFactKnownInput,
+    RequestedFactLiteralInput,
 )
 
 from .values import _grounded_value_id
@@ -44,6 +45,8 @@ def _deterministic_known_inputs(
 ) -> CanonicalInputLedger:
     values: list[FactValue] = []
     for known, requested_fact_ids in _known_input_bindings(question_contract):
+        if not isinstance(known, RequestedFactLiteralInput):
+            continue
         if known.is_time_value:
             continue
         if known.is_result_limit:
@@ -77,7 +80,7 @@ def time_resolution_tasks(
             ),
         )
         for known, requested_fact_ids in _known_input_bindings(question_contract)
-        if known.is_time_value
+        if isinstance(known, RequestedFactLiteralInput) and known.is_time_value
     )
 
 
@@ -94,6 +97,7 @@ def resolve_time_resolutions(
     inputs_by_id = {
         known.id: (known, fact_ids)
         for known, fact_ids in _known_input_bindings(question_contract)
+        if isinstance(known, RequestedFactLiteralInput)
     }
     intents_by_id = {
         resolution.known_input_id: resolution for resolution in resolutions
@@ -142,7 +146,7 @@ def _calendar_param_uses(value: FactValue) -> tuple[GroundedInputUse, ...]:
 
 
 def _ground_time_value(
-    known: RequestedFactKnownInput,
+    known: RequestedFactLiteralInput,
     *,
     date_intent: dict[str, object],
     requested_fact_id: str,
@@ -186,7 +190,7 @@ def _ground_time_value(
 
 
 def _resolve_time(
-    known: RequestedFactKnownInput,
+    known: RequestedFactLiteralInput,
     *,
     date_intent: dict[str, object],
     runtime_values: RuntimeValueContext,
@@ -217,7 +221,7 @@ def _resolve_time(
         return {}
 
 
-def _time_expression(known: RequestedFactKnownInput) -> str:
+def _time_expression(known: RequestedFactLiteralInput) -> str:
     return known.resolved_value_text
 
 
@@ -249,7 +253,7 @@ def _time_granularity(resolved: dict[str, Any]) -> str:
 
 
 def _result_limit_value(
-    known: RequestedFactKnownInput,
+    known: RequestedFactLiteralInput,
     *,
     applies_to_requested_fact_ids: tuple[str, ...],
 ) -> FactValue:

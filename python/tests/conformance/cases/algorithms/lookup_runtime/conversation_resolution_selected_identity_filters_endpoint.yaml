@@ -18,6 +18,7 @@ input:
     - address: entity.staff.alice
       kind: entity
       resource: staff
+      keyId: primary_key
       referenceText: Alice Smith
       identity:
         staff_id: staff_alice
@@ -30,6 +31,7 @@ input:
     - address: entity.staff.jane
       kind: entity
       resource: staff
+      keyId: primary_key
       referenceText: Jane Doe
       identity:
         staff_id: staff_jane
@@ -46,10 +48,10 @@ input:
     subject_text: she
     answer_expression_family: scalar_aggregate
     answer_outputs:
-    - sales_amount
+    - {description: sales_amount, role: MEASURED_VALUE}
     resource_terms:
     - staff sales
-    support_role: ROW_POPULATION
+    support_role: MEASURED_VALUE
     entity_target_catalog_search_terms:
     - target_id: input_1
       catalog_search_terms:
@@ -79,10 +81,7 @@ input:
         name: staff_id
         source: query
         type: string
-        identity:
-          entity_ref: staff
-          identity_field: staff_id
-          primary_key: true
+        entity_target: {entity_kind: staff, key_id: primary_key, component_id: staff_id}
       - ref: staff_sales_read.query.business_date
         name: business_date
         source: query
@@ -96,14 +95,12 @@ input:
         path: data.staff_id
         row_path_id: data
         type: string
-        identity:
-          entity_ref: staff
-          identity_field: staff_id
-          primary_key: true
       - ref: field.amount
         path: data.amount
         row_path_id: data
         type: number
+      candidate_keys:
+      - {id: primary_key, entity_kind: staff, primary: true, components: [{id: staff_id, field_ref: field.staff_id}]}
   fact_plan:
     outcome:
       kind: fact_plan

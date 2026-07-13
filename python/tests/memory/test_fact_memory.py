@@ -1,11 +1,15 @@
+from decimal import Decimal
+import json
+
 import pytest
 
 from fervis.memory.addresses import (
     FactAddress,
     FactAddressKind,
+    FactAddressValue,
+    fact_address_from_payload,
 )
 from fervis.memory.artifacts import FactOutcome
-from fervis.memory.projection import fact_artifacts_from_context
 
 
 def test_fact_address_rejects_incomplete_public_variant():
@@ -33,17 +37,26 @@ def test_fact_address_rejects_non_terminal_outcome_address():
         )
 
 
-def test_fact_artifacts_from_context_accepts_requested_fact_without_addresses():
-    artifacts = fact_artifacts_from_context(
-        {
-            "factArtifacts": [
-                {
-                    "artifactId": "memory_requested_fact_1",
-                    "outcome": "needs_clarification",
-                }
-            ]
-        }
+def test_row_fact_address_round_trips_decimal_without_losing_type():
+    address = FactAddress.row(
+        address="row.sales.1",
+        relation="relation.sales",
+        values={"total": FactAddressValue(type="decimal", value=Decimal("10.50"))},
     )
 
-    assert len(artifacts) == 1
-    assert artifacts[0].addresses == ()
+    payload = json.loads(json.dumps(address.to_dict()))
+    restored = fact_address_from_payload(payload)
+
+    assert restored.values["total"].value == Decimal("10.50")
+
+
+def test_scalar_fact_address_round_trips_decimal_without_losing_type():
+    address = FactAddress.value(
+        address="value.total",
+        value={"type": "decimal", "value": Decimal("10.50")},
+    )
+
+    payload = json.loads(json.dumps(address.to_dict()))
+    restored = fact_address_from_payload(payload)
+
+    assert restored.scalar_value["value"] == Decimal("10.50")

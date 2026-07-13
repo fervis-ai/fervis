@@ -1,6 +1,6 @@
 import pytest
 
-from fervis.run_work.events import run_terminal_event
+from fervis.run_work.events import run_terminal_event, run_waiting_for_clarification_event
 
 
 def test_run_terminal_event_preserves_question_and_conversation_handles():
@@ -54,13 +54,12 @@ def test_run_terminal_event_preserves_question_and_conversation_handles():
     }
 
 
-def test_run_terminal_event_requires_actionable_clarifications():
+def test_run_waiting_event_requires_actionable_clarifications():
     with pytest.raises(
         ValueError,
-        match="NEEDS_CLARIFICATION terminal event requires clarifications",
+        match="clarification wait requires clarifications",
     ):
-        run_terminal_event(
-            status="NEEDS_CLARIFICATION",
+        run_waiting_for_clarification_event(
             run_id="run_1",
             question_id="question_1",
             conversation_id="conversation_1",
@@ -69,18 +68,16 @@ def test_run_terminal_event_requires_actionable_clarifications():
 
     with pytest.raises(
         ValueError,
-        match="NEEDS_CLARIFICATION terminal event requires clarification question",
+        match="clarification wait requires clarification question",
     ):
-        run_terminal_event(
-            status="NEEDS_CLARIFICATION",
+        run_waiting_for_clarification_event(
             run_id="run_1",
             question_id="question_1",
             conversation_id="conversation_1",
             result_data={"details": {"clarifications": [{"id": "clarification_1"}]}},
         )
 
-    assert run_terminal_event(
-        status="NEEDS_CLARIFICATION",
+    assert run_waiting_for_clarification_event(
         run_id="run_1",
         question_id="question_1",
         conversation_id="conversation_1",
@@ -96,11 +93,11 @@ def test_run_terminal_event_requires_actionable_clarifications():
             },
         },
     ) == {
-        "event": "run.needs_clarification",
+        "event": "run.waiting_for_clarification",
         "conversation_id": "conversation_1",
         "question_id": "question_1",
         "run_id": "run_1",
-        "status": "NEEDS_CLARIFICATION",
+        "status": "WAITING_FOR_CLARIFICATION",
         "clarifications": [
             {
                 "id": "clarification_1",

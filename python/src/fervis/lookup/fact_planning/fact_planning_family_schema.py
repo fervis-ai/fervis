@@ -23,6 +23,7 @@ class SourceBoundPatternSchemaContext:
     answer_output_ids_schema: dict[str, object] | None = None
     requested_fact_id_schema: dict[str, object] | None = None
     include_source_binding_id: bool = True
+    rank_limit_value_ids: tuple[str, ...] | None = None
 
 
 def source_bound_pattern_base(
@@ -67,9 +68,11 @@ def field_selection_schema(
 
 
 def optional_pattern_schema(schema: dict[str, object]) -> dict[str, object]:
+    required = schema.get("required")
+    required_items = required if isinstance(required, (list, tuple)) else ()
     return {
         **schema,
-        "required": [item for item in schema.get("required", ()) if item != "pattern"],
+        "required": [item for item in required_items if item != "pattern"],
     }
 
 

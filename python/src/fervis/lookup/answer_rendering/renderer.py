@@ -6,6 +6,12 @@ from decimal import Decimal
 from typing import Any, Mapping
 
 from fervis.lookup.answer_rendering.model import RenderedFact
+from fervis.lookup.answer_program.result_projection import (
+    EntityKeyValue,
+    RelationResultOutput,
+    ResultValue,
+    ScalarResultOutput,
+)
 from fervis.lookup.clarification import render_clarification_question
 from fervis.lookup.outcomes.model import (
     AnswerResult,
@@ -13,9 +19,14 @@ from fervis.lookup.outcomes.model import (
     Impossible,
     NeedsClarification,
     NoData,
+    ResultOutcome,
     Undefined,
 )
 from fervis.lookup.outcomes.terminal_details import fact_result_terminal_details
+from fervis.lookup.canonical_data import RuntimeValue
+
+
+_PUBLIC_RESULT_ROLES = frozenset({"answer_value", "ranking_metric"})
 
 
 def render_fact_result(result: FactResult) -> RenderedFact:
@@ -25,7 +36,7 @@ def render_fact_result(result: FactResult) -> RenderedFact:
             kind=outcome.kind,
             rows=_render_rows(outcome),
             row_labels=_render_row_labels(outcome),
-            scalars=outcome.scalars,
+            scalars=_render_scalars(outcome),
             proof_refs=outcome.proof_refs,
             render_outputs=_render_output_manifest(outcome),
         )
@@ -33,7 +44,7 @@ def render_fact_result(result: FactResult) -> RenderedFact:
         kind=outcome.kind,
         message=_terminal_message(outcome),
         details=_terminal_details(outcome),
-        proof_refs=getattr(outcome, "proof_refs", ()),
+        proof_refs=outcome.proof_refs,
     )
 
 
@@ -67,66 +78,57 @@ def rendered_fact_payload(rendered: RenderedFact) -> dict[str, Any]:
     return payload
 
 
-def _render_rows(outcome: AnswerResult) -> tuple[Mapping[str, object], ...]:
-    if outcome.render_spec is None or not outcome.render_spec.relation_outputs:
-        return ()
-    rows: list[dict[str, object]] = []
-    for relation_id, relation_outputs in _relation_outputs_by_relation(outcome).items():
-        relation = next(
-            (item for item in outcome.relations if item.id == relation_id),
-            None,
-        )
-        if relation is None:
-            raise ValueError("render relation is unavailable")
-        for row in relation.rows:
-            rendered: dict[str, object] = {}
-            for relation_output in relation_outputs:
-                if relation_output.field_id not in row:
-                    raise ValueError("render field is unavailable")
-                rendered[relation_output.id] = row[relation_output.field_id]
-            rows.append(rendered)
-    return tuple(rows)
+def _render_rows(outcome: AnswerResult) -> tuple[Mapping[str, RuntimeValue], ...]:
+    public_output_ids = {
+        output.id for output in _public_relation_outputs(outcome)
+    }
+    return tuple(
+        {
+            output_id: _render_value(value)
+            for output_id, value in projected_row.values.items()
+            if output_id in public_output_ids
+        }
+        for projected_row in outcome.projected_rows
+    )
 
 
-def _relation_outputs_by_relation(outcome: AnswerResult) -> dict[str, list[object]]:
-    outputs: dict[str, list[object]] = {}
-    if outcome.render_spec is None:
-        return outputs
-    for relation_output in outcome.render_spec.relation_outputs:
-        outputs.setdefault(relation_output.relation_id, []).append(relation_output)
-    return outputs
+def _render_scalars(outcome: AnswerResult) -> Mapping[str, RuntimeValue] | None:
+    if not outcome.scalars:
+        return None
+    rendered = {
+        output.id: outcome.scalars[output.scalar_id]
+        for output in _public_scalar_outputs(outcome)
+    }
+    return rendered or None
 
 
 def _render_row_labels(outcome: AnswerResult) -> Mapping[str, str] | None:
-    if outcome.render_spec is None:
-        return None
     labels = {
         relation_output.id: relation_output.label
-        for relation_output in outcome.render_spec.relation_outputs
+        for relation_output in _public_relation_outputs(outcome)
         if relation_output.label
     }
     return labels or None
 
 
-def _render_output_manifest(outcome: AnswerResult) -> tuple[Mapping[str, object], ...]:
-    if outcome.render_spec is None:
-        return ()
-    output: list[Mapping[str, object]] = []
-    for relation_output in outcome.render_spec.relation_outputs:
+def _render_output_manifest(
+    outcome: AnswerResult,
+) -> tuple[Mapping[str, RuntimeValue], ...]:
+    output: list[Mapping[str, RuntimeValue]] = []
+    for relation_output in _public_relation_outputs(outcome):
         role = _render_output_role(relation_output)
-        if not role:
-            continue
-        item: dict[str, object] = {
+        item: dict[str, RuntimeValue] = {
             "key": relation_output.id,
             "role": role,
         }
         if relation_output.label:
             item["label"] = relation_output.label
+        if relation_output.entity_key is not None:
+            item["entityKind"] = relation_output.entity_key.entity_kind
+            item["keyId"] = relation_output.entity_key.key_id
         output.append(item)
-    for scalar_output in outcome.render_spec.scalar_outputs:
+    for scalar_output in _public_scalar_outputs(outcome):
         role = _render_output_role(scalar_output)
-        if not role:
-            continue
         item = {
             "key": scalar_output.id,
             "role": role,
@@ -137,12 +139,42 @@ def _render_output_manifest(outcome: AnswerResult) -> tuple[Mapping[str, object]
     return tuple(output)
 
 
-def _render_output_role(output: object) -> str:
-    return str(getattr(output, "role", "") or "")
+def _public_relation_outputs(
+    outcome: AnswerResult,
+) -> tuple[RelationResultOutput, ...]:
+    return tuple(
+        output
+        for output in outcome.result_projection.relation_outputs
+        if output.role in _PUBLIC_RESULT_ROLES
+    )
+
+
+def _public_scalar_outputs(outcome: AnswerResult) -> tuple[ScalarResultOutput, ...]:
+    return tuple(
+        output
+        for output in outcome.result_projection.scalar_outputs
+        if output.role in _PUBLIC_RESULT_ROLES
+    )
+
+
+def _render_value(value: ResultValue) -> RuntimeValue:
+    if not isinstance(value, EntityKeyValue):
+        return value
+    return {
+        "entityKind": value.entity_kind,
+        "keyId": value.key_id,
+        "components": value.component_values(),
+    }
+
+
+def _render_output_role(
+    output: RelationResultOutput | ScalarResultOutput,
+) -> str:
+    return output.role
 
 
 def _render_row_text(
-    row: Mapping[str, object],
+    row: Mapping[str, RuntimeValue],
     *,
     labels: Mapping[str, str] | None,
 ) -> str:
@@ -163,7 +195,7 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
-def _terminal_message(outcome: object) -> str:
+def _terminal_message(outcome: ResultOutcome) -> str:
     if isinstance(outcome, NeedsClarification):
         return _clarification_message(outcome)
     if isinstance(outcome, Impossible):
@@ -176,9 +208,7 @@ def _terminal_message(outcome: object) -> str:
 
 
 def _clarification_message(outcome: NeedsClarification) -> str:
-    questions = [
-        render_clarification_question(item) for item in outcome.clarifications
-    ]
+    questions = [render_clarification_question(item) for item in outcome.clarifications]
     return "\n".join(questions) if questions else "Can you clarify the requested value?"
 
 
@@ -197,5 +227,5 @@ def _impossible_message(outcome: Impossible) -> str:
     )
 
 
-def _terminal_details(outcome: object) -> Mapping[str, object] | None:
+def _terminal_details(outcome: ResultOutcome) -> Mapping[str, RuntimeValue] | None:
     return fact_result_terminal_details(FactResult(outcome=outcome))

@@ -1,0 +1,61 @@
+id: identity_projection_preserves_composite_entity_keys
+description: Memory preserves each composite entity key as one typed value and one complete set member.
+kind: algorithm
+algorithm: memory.identity_projection
+input:
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_1
+        outcome: answered
+        addresses:
+          - address: relation.campaigns
+            kind: relation
+            source: {kind: operation_output}
+            grainKeys: [account_id, code]
+            completeness: {status: complete, pagination: not_paginated, rowCount: 2}
+            rowAddresses: [row.campaigns.1, row.campaigns.2]
+          - address: row.campaigns.1
+            kind: row
+            relation: relation.campaigns
+            identity: {account_id: account-a, code: summer}
+            values:
+              answer_1:
+                type: entity_key
+                value:
+                  entityKind: campaign
+                  keyId: campaign_code_per_account
+                  components: {account_id: account-a, code: summer}
+          - address: row.campaigns.2
+            kind: row
+            relation: relation.campaigns
+            identity: {account_id: account-b, code: winter}
+            values:
+              answer_1:
+                type: entity_key
+                value:
+                  entityKind: campaign
+                  keyId: campaign_code_per_account
+                  components: {account_id: account-b, code: winter}
+expect:
+  result_contains:
+    identity_values:
+      - id: mem.turn_1.row.campaigns.1.entity_key.answer_1
+        kind: identity
+        value:
+          entity_kind: campaign
+          key_id: campaign_code_per_account
+          components: {account_id: account-a, code: summer}
+    identity_sets:
+      - id: mem.turn_1.relation.campaigns.entity_key_set.answer_1
+        kind: identity_set
+        entity_kind: campaign
+        key_id: campaign_code_per_account
+        keys:
+          - entity_kind: campaign
+            key_id: campaign_code_per_account
+            components: {account_id: account-a, code: summer}
+          - entity_kind: campaign
+            key_id: campaign_code_per_account
+            components: {account_id: account-b, code: winter}
+        count: 2
+        source_relation_id: turn_1.relation.campaigns

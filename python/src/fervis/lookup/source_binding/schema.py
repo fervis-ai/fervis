@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from fervis.lookup.fact_plan.fact_plan import (
@@ -70,14 +71,14 @@ def _handle_schema() -> dict[str, object]:
 
 
 def _strict_object(
-    properties: dict[str, object],
+    properties: Mapping[str, object],
     *,
     required: tuple[str, ...],
 ) -> dict[str, object]:
     return {
         "type": "object",
         "additionalProperties": False,
-        "properties": properties,
+        "properties": dict(properties),
         "required": list(required),
     }
 
@@ -194,7 +195,9 @@ def _fact_binding_schemas(
     for family in scope.plan_families:
         families_by_fact.setdefault(family.requested_fact_id, []).append(family)
     return {
-        source_binding_fact_field_id(requested_fact_id): _requested_fact_variants_schema(
+        source_binding_fact_field_id(
+            requested_fact_id
+        ): _requested_fact_variants_schema(
             tuple(families),
             scope=scope,
         )

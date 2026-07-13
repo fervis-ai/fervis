@@ -30,7 +30,7 @@ def compile_read_request(
     query_params = _normalize_query_params(dict(invocation.query_params))
     _validate_path_params(contract, path_params)
     _validate_query_params(contract, query_params)
-    _validate_overlay(query_params, overlay)
+    _validate_overlay(contract, query_params, overlay)
     return CompiledReadRequest(
         url=_build_url(contract, path_params),
         query_params=query_params,
@@ -47,7 +47,7 @@ def _validate_pagination(
     policy = dict(page_policy or {})
     if (
         str(policy.get("mode") or "single_page") == "all_pages"
-        and not contract.paginated
+        and contract.pagination is None
     ):
         raise EndpointExecutionError(
             f"Endpoint {contract.endpoint_name} is not paginated."
@@ -107,10 +107,20 @@ def _validate_query_params(
 
 
 def _validate_overlay(
+    contract: EndpointContract,
     selected_query_params: Mapping[str, Any],
     overlay: ReadTransportOverlay,
 ) -> None:
-    protected = set(selected_query_params) | {"limit", "offset"}
+    pagination_params = (
+        set()
+        if contract.pagination is None
+        else {
+            contract.pagination.position_query_param,
+            contract.pagination.page_size_query_param,
+        }
+    )
+    pagination_params.discard("")
+    protected = set(selected_query_params) | pagination_params
     overlap = sorted(protected & set(overlay.query_params))
     if overlap:
         raise EndpointExecutionError(
@@ -137,22 +147,7 @@ def _build_url(contract: EndpointContract, path_params: Mapping[str, Any]) -> st
 
 
 def _normalize_query_params(query_params: dict[str, Any]) -> dict[str, Any]:
-    normalized = dict(query_params)
-    if "limit" in normalized:
-        try:
-            normalized["limit"] = max(1, min(int(normalized["limit"]), 200))
-        except (TypeError, ValueError):
-            raise EndpointExecutionError(
-                "Invalid pagination query param limit: expected integer."
-            ) from None
-    if "offset" in normalized:
-        try:
-            normalized["offset"] = max(0, int(normalized["offset"]))
-        except (TypeError, ValueError):
-            raise EndpointExecutionError(
-                "Invalid pagination query param offset: expected integer."
-            ) from None
-    return normalized
+    return dict(query_params)
 
 
 def _blank(value: Any) -> bool:

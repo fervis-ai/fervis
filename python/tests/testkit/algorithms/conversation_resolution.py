@@ -6,6 +6,7 @@ from fervis.lookup.conversation_resolution import (
     CONVERSATION_RESOLUTION_TOOL_NAME,
     compile_conversation_resolution,
     parse_conversation_resolution,
+    ResolvedCanonicalIdentity,
     ResolvedLiteralQuestionInput,
     ResolvedRowSetQuestionInput,
 )
@@ -59,6 +60,17 @@ def run_conversation_resolution_compile_case(payload: dict[str, Any]) -> list[st
             else {"kind": "none"}
         ),
         "uses_prior_context": compiled.uses_prior_context,
+        "canonical_identity_inputs": [
+            {
+                "input_ref": item.input_ref,
+                "entity_kind": item.canonical_identity.entity_kind,
+                "key_id": item.canonical_identity.key_id,
+                "key_component_id": item.canonical_identity.key_component_id,
+                "value": item.canonical_identity.value,
+                "authority_refs": list(item.canonical_identity.authority_refs),
+            }
+            for item in compiled.identity_inputs()
+        ],
     }
     return _mismatches(actual, payload["expect"])
 
@@ -80,7 +92,9 @@ def run_conversation_resolution_schema_case(payload: dict[str, Any]) -> list[str
     source_branches = clause["properties"]["values"]["items"]["properties"]["sources"][
         "items"
     ]["oneOf"]
-    call_branches = resolved["properties"]["frame_call"]["oneOf"]
+    parameter_branches = clause["properties"]["values"]["items"]["properties"][
+        "frame_parameter"
+    ]["oneOf"]
     ambiguity = outcome_branches[1]
     ambiguity_candidate = ambiguity["properties"]["candidate_interpretations"]["items"]
     ambiguity_candidate_fields = ambiguity_candidate["properties"]
@@ -103,8 +117,9 @@ def run_conversation_resolution_schema_case(payload: dict[str, Any]) -> list[str
         "source_kinds": [
             branch["properties"]["kind"]["enum"][0] for branch in source_branches
         ],
-        "frame_call_kinds": [
-            branch["properties"]["kind"]["enum"][0] for branch in call_branches
+        "frame_parameter_kinds": [
+            branch["properties"]["kind"]["enum"][0]
+            for branch in parameter_branches
         ],
         "ambiguity_candidate_fields": sorted(ambiguity_candidate_fields),
         "ambiguity_evidence_source_ids": evidence_source_ids,
@@ -250,6 +265,27 @@ def compiled_conversation_resolution_from_payload(
 
 def _compiled_input(payload: dict[str, Any]):
     if str(payload["kind"]) == "literal_text":
+        canonical_identity_payload = payload.get("canonical_identity")
+        canonical_identity = (
+            ResolvedCanonicalIdentity(
+                entity_kind=str(canonical_identity_payload["entity_kind"]),
+                key_id=str(canonical_identity_payload["key_id"]),
+                key_component_id=str(
+                    canonical_identity_payload["key_component_id"]
+                ),
+                value=str(canonical_identity_payload["value"]),
+                authority_refs=tuple(
+                    str(item)
+                    for item in canonical_identity_payload["authority_refs"]
+                ),
+                lineage_refs=tuple(
+                    str(item)
+                    for item in canonical_identity_payload["lineage_refs"]
+                ),
+            )
+            if isinstance(canonical_identity_payload, dict)
+            else None
+        )
         return ResolvedLiteralQuestionInput(
             input_ref=str(payload["input_ref"]),
             value_source_text=str(payload["value_source_text"]),
@@ -258,6 +294,7 @@ def _compiled_input(payload: dict[str, Any]):
             occurrence=int(payload.get("occurrence") or 1),
             field_label_text=str(payload.get("field_label_text") or ""),
             value_meaning_hint=str(payload.get("value_meaning_hint") or ""),
+            canonical_identity=canonical_identity,
         )
     return ResolvedRowSetQuestionInput(
         input_ref=str(payload["input_ref"]),

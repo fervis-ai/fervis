@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from fervis.lookup.source_binding.candidates import SourceCandidate
+from fervis.lookup.source_binding.candidates.model import (
+    CandidateParameter,
+    CandidateParamDecision,
+)
 from fervis.lookup.source_binding.candidates.params import (
     _candidate_with_param_decision_options,
     _candidate_with_param_population_contracts,
@@ -9,6 +13,7 @@ from fervis.lookup.source_binding.candidates.params import (
 )
 from fervis.lookup.source_binding.model import AnswerPopulation
 from fervis.lookup.source_binding.parser.params import parse_param_decision_binding_sets
+from fervis.lookup.source_binding.parser.types import NormalizedParamDecision
 
 
 def test_optional_static_boolean_param_exposes_omit_decision():
@@ -46,7 +51,9 @@ def test_optional_static_boolean_param_exposes_omit_decision():
     ]
 
     assert len(omit_options) == 1
-    assert omit_options[0]["param_decision_id"] == "param_decision.source_1.is_open.omit"
+    assert (
+        omit_options[0]["param_decision_id"] == "param_decision.source_1.is_open.omit"
+    )
     assert "true and false" in omit_options[0]["meaning"]
 
     candidate = _candidate_with_param_population_contracts(candidate)
@@ -128,31 +135,31 @@ def test_boolean_finite_choice_param_keeps_population_contract_review_surface():
 def test_omit_param_decision_compiles_to_no_endpoint_binding():
     candidate = SourceCandidate(
         id="source_1",
-        requested_fact_id="fact_1",
+        applies_to_requested_fact_ids=("fact_1",),
         kind="read",
         params=(
-            {
-                "param_id": "is_open",
-                "source": "query",
-                "type": "boolean",
-                "decision_options": [
-                    {
-                        "decision": "omit",
-                        "meaning": "Omitting is_open includes true and false.",
-                        "param_decision_id": "param_decision.source_1.is_open.omit",
-                    }
-                ],
-            },
+            CandidateParameter(
+                id="is_open",
+                type="boolean",
+                required=False,
+                choices=(),
+                decision_options=(
+                    CandidateParamDecision(
+                        id="param_decision.source_1.is_open.omit",
+                        decision="omit",
+                    ),
+                ),
+            ),
         ),
     )
 
     parsed = parse_param_decision_binding_sets(
         {
-            "is_open": {
-                "match_basis_explanation": "No open-status filter was requested.",
-                "param_decision_id": "param_decision.source_1.is_open.omit",
-                "population_intent": "All open-status values.",
-            }
+            "is_open": NormalizedParamDecision(
+                match_basis_explanation="No open-status filter was requested.",
+                param_decision_id="param_decision.source_1.is_open.omit",
+                population_intent="All open-status values.",
+            )
         },
         candidate=candidate,
         available_values=(),

@@ -68,10 +68,25 @@ def _base_relation_contract(
         ).with_population_scope(population_proof.population_scope_refs)
         for field in relation.fields
     }
+    field_types: dict[str, str] = {}
+    if relation.source.kind in {
+        SourceKind.API_READ,
+        SourceKind.GENERATED_CALENDAR,
+        SourceKind.MEMORY_READ,
+    }:
+        try:
+            row_source = _row_source_for_relation(relation, row_sources=row_sources)
+            field_types = {
+                field.field_id: row_source.field(field.field_id).type.value
+                for field in relation.fields
+            }
+        except KeyError:
+            field_types = {}
     return RelationContract(
         fields=fields,
         grain_keys=relation.grain_keys,
         field_proofs=field_proofs,
+        field_types=field_types,
         population_proof=population_proof,
     )
 

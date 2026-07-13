@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 from typing import Any
 
 
 def view_json(value: Any) -> Any:
-    if is_dataclass(value):
+    if is_dataclass(value) and not isinstance(value, type):
         return view_json(asdict(value))
     if isinstance(value, StrEnum):
         return value.value

@@ -11,32 +11,46 @@ input:
         endpoint_name: get_merch_shade_store_availability
         resource_names: [store]
         fields:
-          - {ref: shade_store_availability.field.store_id, type: uuid, identity: {entity_ref: store, identity_field: store_id, primary_key: true, stable: true}}
-          - {ref: shade_store_availability.field.location_id, type: uuid, identity: {entity_ref: location, identity_field: location_id, primary_key: true, stable: true}}
+          - {ref: shade_store_availability.field.availability_id, type: uuid}
+          - {ref: shade_store_availability.field.store_id, type: uuid}
+          - {ref: shade_store_availability.field.location_id, type: uuid}
+        candidate_keys:
+          - {id: primary_key, entity_kind: availability, primary: true, components: [{id: availability_id, field_ref: shade_store_availability.field.availability_id}]}
+        entity_references:
+          - {id: store_reference, target_entity_kind: store, target_key_id: primary_key, components: [{target_component_id: store_id, local_field_ref: shade_store_availability.field.store_id}]}
+          - {id: location_reference, target_entity_kind: location, target_key_id: primary_key, components: [{target_component_id: location_id, local_field_ref: shade_store_availability.field.location_id}]}
       - id: store_list
         endpoint_name: list_store_list
         resource_names: [store]
         fields:
-          - {ref: store_list.field.store_id, type: uuid, identity: {entity_ref: store, identity_field: store_id, primary_key: true, stable: true}}
+          - {ref: store_list.field.store_id, type: uuid}
+        candidate_keys:
+          - {id: primary_key, entity_kind: store, primary: true, components: [{id: store_id, field_ref: store_list.field.store_id}]}
       - id: deal_location_limits
         endpoint_name: get_deal_location_limits
         resource_names: [deal location limit]
         fields:
-          - {ref: deal_location_limits.field.deal_location_limit_id, type: uuid, identity: {entity_ref: deal_location_limit, identity_field: deal_location_limit_id, primary_key: true, stable: true}}
-          - {ref: deal_location_limits.field.deal_id, type: uuid, identity: {entity_ref: deal, identity_field: deal_id, primary_key: true, stable: true}}
-          - {ref: deal_location_limits.field.location_id, type: uuid, identity: {entity_ref: location, identity_field: location_id, primary_key: true, stable: true}}
+          - {ref: deal_location_limits.field.deal_location_limit_id, type: uuid}
+          - {ref: deal_location_limits.field.deal_id, type: uuid}
+          - {ref: deal_location_limits.field.location_id, type: uuid}
+        candidate_keys:
+          - {id: primary_key, entity_kind: deal_location_limit, primary: true, components: [{id: deal_location_limit_id, field_ref: deal_location_limits.field.deal_location_limit_id}]}
       - id: location_list
         endpoint_name: list_location_list
         resource_names: [location]
         fields:
-          - {ref: location_list.field.location_id, type: uuid, identity: {entity_ref: location, identity_field: location_id, primary_key: true, stable: true}}
+          - {ref: location_list.field.location_id, type: uuid}
+        candidate_keys:
+          - {id: primary_key, entity_kind: location, primary: true, components: [{id: location_id, field_ref: location_list.field.location_id}]}
       - id: location_deal_limits
         endpoint_name: get_location_deal_limits
         resource_names: [deal location limit]
         fields:
-          - {ref: location_deal_limits.field.deal_location_limit_id, type: uuid, identity: {entity_ref: deal_location_limit, identity_field: deal_location_limit_id, primary_key: true, stable: true}}
-          - {ref: location_deal_limits.field.deal_id, type: uuid, identity: {entity_ref: deal, identity_field: deal_id, primary_key: true, stable: true}}
-          - {ref: location_deal_limits.field.location_id, type: uuid, identity: {entity_ref: location, identity_field: location_id, primary_key: true, stable: true}}
+          - {ref: location_deal_limits.field.deal_location_limit_id, type: uuid}
+          - {ref: location_deal_limits.field.deal_id, type: uuid}
+          - {ref: location_deal_limits.field.location_id, type: uuid}
+        candidate_keys:
+          - {id: primary_key, entity_kind: deal_location_limit, primary: true, components: [{id: deal_location_limit_id, field_ref: location_deal_limits.field.deal_location_limit_id}]}
   entity_targets:
     - target_id: entity_1
       catalog_search_terms: [store, location]
@@ -45,4 +59,3 @@ expect:
   result_contains:
     selected_read_membership:
       location_list: true
-

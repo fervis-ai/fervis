@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 from typing import Any
 
 
@@ -76,8 +76,7 @@ def merge_step_semantic_json(
     output = dict(summary)
     if items:
         output[STEP_SEMANTIC_ITEMS] = [
-            item.to_json()
-            for item in (*step_semantic_items_from_json(summary), *items)
+            item.to_json() for item in (*step_semantic_items_from_json(summary), *items)
         ]
     return output
 

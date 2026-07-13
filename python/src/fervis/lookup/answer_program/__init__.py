@@ -31,6 +31,7 @@ from .capability_contracts import (
 )
 from .compiler_inputs import CompilerInputContext, compiler_input_context
 from .model import (
+    ANSWER_PROGRAM_SCHEMA_REVISION,
     AnswerProgram,
     FactFulfillment,
     FunctionSemanticVersion,
@@ -39,7 +40,6 @@ from .model import (
     SourceContractPin,
 )
 from .codec import (
-    ANSWER_PROGRAM_SCHEMA_REVISION,
     answer_program_id,
     binding_patch_id,
     canonical_answer_program_json,
@@ -52,6 +52,7 @@ from .codec import (
     decode_binding_set,
     decode_binding_patch,
 )
+
 __all__ = [
     "AnswerProgramContractError",
     "AnswerProgram",

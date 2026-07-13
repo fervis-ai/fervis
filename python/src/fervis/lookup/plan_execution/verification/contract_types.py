@@ -1,5 +1,7 @@
 """Relation contract primitives for fact-plan verification."""
 
+from dataclasses import field
+
 from ._shared import FieldBindingRole, ProjectField, VerificationError, dataclass
 
 
@@ -40,6 +42,7 @@ class RelationContract:
     fields: dict[str, frozenset[FieldBindingRole]]
     grain_keys: tuple[str, ...]
     field_proofs: dict[str, ProofLineage]
+    field_types: dict[str, str] = field(default_factory=dict)
     population_proof: ProofLineage = ProofLineage()
 
 
@@ -52,6 +55,7 @@ def _copy_contract(
         fields=dict(contract.fields),
         grain_keys=contract.grain_keys,
         field_proofs=dict(contract.field_proofs),
+        field_types=dict(contract.field_types),
         population_proof=contract.population_proof,
     )
 
@@ -62,10 +66,7 @@ def _project_contract_grain(
 ) -> tuple[str, ...]:
     if not source.grain_keys:
         return ()
-    projections = {
-        field.source: field.output or field.source
-        for field in fields
-    }
+    projections = {field.source: field.output or field.source for field in fields}
     if not all(field in projections for field in source.grain_keys):
         return ()
     return tuple(projections[field] for field in source.grain_keys)
@@ -98,13 +99,6 @@ def _field_proof(
     if field not in contract.fields:
         raise VerificationError(f"{label} references unknown field")
     return contract.field_proofs.get(field, ProofLineage())
-
-
-def _relation_proof(contract: RelationContract) -> ProofLineage:
-    proof = contract.population_proof
-    for field_proof in contract.field_proofs.values():
-        proof = proof.merge(field_proof)
-    return proof
 
 
 def _union_field_roles(

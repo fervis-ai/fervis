@@ -89,6 +89,9 @@ def generate_pattern_fact_plan(
                 values=request.available_values,
                 question_contract=request.question_contract,
             ),
+            selected_source_strategy_ids=tuple(
+                plan.source_strategy_id for plan in plan_selection.plan_selections
+            ),
         )
     except Exception as exc:
         raise FactPlanGenerationError(

@@ -20,6 +20,7 @@ input:
       description: answer
       answer_outputs:
         - id: metric_total
+          role: ANSWER_VALUE
   resource_name_matches:
     - requested_fact_id: rf_answer
       answer_output_resource_lineage:

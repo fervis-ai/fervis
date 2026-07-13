@@ -116,30 +116,30 @@ def test_source_binding_model_turn_summary_projects_decision_basis() -> None:
                     "bindings_for_fact_1": {
                         "plan_shape": "aggregate_scalar",
                         "metric": {
-                                    "binding_target_id": "target.source_5",
-                                    "answer_population": {
-                                        "match_basis_explanation": (
-                                            "Payroll summary rows match the requested "
-                                            "staff population."
-                                        )
-                                    },
-                                    "fulfillment_decisions": {
-                                        "answer_1": {
-                                            "fulfillment_choice_id": "choice_staff_name",
-                                            "match_basis_explanation": (
-                                                "staff_name identifies the returned staff."
-                                            ),
-                                        }
-                                    },
-                                    "param_decisions": {
-                                        "month": {
-                                            "param_decision_id": "param_month",
-                                            "match_basis_explanation": (
-                                                "The requested month must bind the month param."
-                                            ),
-                                        }
-                                    },
-                        }
+                            "binding_target_id": "target.source_5",
+                            "answer_population": {
+                                "match_basis_explanation": (
+                                    "Payroll summary rows match the requested "
+                                    "staff population."
+                                )
+                            },
+                            "fulfillment_decisions": {
+                                "answer_1": {
+                                    "fulfillment_choice_id": "choice_staff_name",
+                                    "match_basis_explanation": (
+                                        "staff_name identifies the returned staff."
+                                    ),
+                                }
+                            },
+                            "param_decisions": {
+                                "month": {
+                                    "param_decision_id": "param_month",
+                                    "match_basis_explanation": (
+                                        "The requested month must bind the month param."
+                                    ),
+                                }
+                            },
+                        },
                     },
                 },
             },
@@ -364,17 +364,14 @@ def test_enrichment_and_grounding_summaries_project_semantic_resolver_records() 
         {
             EventPayloadKey.PURPOSE: ModelTurnPurpose.GROUNDING,
             EventPayloadKey.PARSED_ARGUMENTS: {
-                "known_input_binding_reviews": {
+                "known_input_bindings": {
                     "fact_1_entity_1": {
-                        "option_reviews": {
-                            "bind_fact_1_entity_1_1": {
-                                "because": (
-                                    "The resolver can search location records "
-                                    "by the provided lookup text."
-                                ),
-                                "decision": "CAN_RESOLVE_LOOKUP_TEXT",
-                            }
-                        }
+                        "selected_option_id": "bind_fact_1_entity_1_1",
+                        "input_value": "ABC Mall",
+                        "selection_basis": (
+                            "The resolver can search location records "
+                            "by the provided lookup text."
+                        ),
                     }
                 }
             },
@@ -431,7 +428,9 @@ def test_grounding_summary_projects_time_interpretations_as_semantic_inputs() ->
                 RequestedFact(
                     id="fact_1",
                     description="sales at ABC Mall this month",
-                    answer_outputs=(RequestedFactAnswerOutput("answer_1"),),
+                    answer_outputs=(
+                        RequestedFactAnswerOutput("answer_1", role="ANSWER_VALUE"),
+                    ),
                     known_inputs=(
                         RequestedFactLiteralInput(
                             id="fact_1_time_1",
@@ -482,7 +481,9 @@ def test_grounding_summary_projects_literal_interpretations_as_semantic_inputs()
                 RequestedFact(
                     id="fact_1",
                     description="top 10 salespeople this month",
-                    answer_outputs=(RequestedFactAnswerOutput("answer_1"),),
+                    answer_outputs=(
+                        RequestedFactAnswerOutput("answer_1", role="ANSWER_VALUE"),
+                    ),
                     known_inputs=(
                         RequestedFactLiteralInput(
                             id="fact_1_limit_1",

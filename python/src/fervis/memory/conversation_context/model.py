@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 from typing import Any
 
-from fervis.memory.prior_requests import PriorRequestMemory
+from fervis.memory.prior_requests import PriorRequestMemory, PriorRequestSlotBinding
 
 VALID_CONTEXT_SOURCE_KINDS = frozenset(
     {
@@ -129,6 +129,7 @@ class ConversationFrameParameter:
     resolved_text: str
     field_label_text: str = ""
     value_meaning_hint: str = ""
+    binding: PriorRequestSlotBinding | None = None
 
     def __post_init__(self) -> None:
         if not self.parameter_id.strip() or not self.part_id.strip():
@@ -141,6 +142,8 @@ class ConversationFrameParameter:
             raise ValueError("frame parameter requires a bindable part kind")
         if not self.current_text.strip() or not self.resolved_text.strip():
             raise ValueError("frame parameter requires current and resolved values")
+        if self.binding is not None and self.binding.kind.value != self.kind.value:
+            raise ValueError("frame parameter binding kind does not match")
 
     def to_model_dict(self) -> dict[str, str]:
         payload = {
@@ -240,10 +243,7 @@ class ConversationContextFrame:
         return (
             self.answer_shape.expression_family,
             self.answer_shape.output_roles,
-            tuple(
-                (part.part_id, part.kind.value)
-                for part in self.parts
-            ),
+            tuple((part.part_id, part.kind.value) for part in self.parts),
             tuple(
                 (
                     parameter.parameter_id,
@@ -316,7 +316,6 @@ class ConversationMemoryActivationKind(StrEnum):
     ENTITY_IDENTITY = "entity_identity"
     SCALAR_VALUE = "scalar_value"
     TIME_SCOPE = "time_scope"
-    CLARIFICATION_ANSWER = "clarification_answer"
 
 
 @dataclass(frozen=True)

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fervis.lookup.grounding.time_resolution import validate_time_intent
+from fervis.lookup.grounding.provider_contract import FlatTimeIntentOutput
 
 TIME_INTENT_FIELDS = (
     "time_shape",
@@ -25,15 +26,31 @@ TIME_INTENT_FIELDS = (
 )
 
 
-def normalize_grounding_date_intent(raw: Any, *, path: str) -> dict[str, object]:
-    if not isinstance(raw, dict):
-        raise ValueError(f"{path} must be an object")
-    _reject_unexpected_keys(raw, {"expression", "intent"}, path)
-    _required_text(raw.get("expression"), path=f"{path}.expression")
-    intent = raw.get("intent")
-    if not isinstance(intent, dict):
-        raise ValueError(f"{path}.intent must be an object")
-    normalized = _canonical_time_intent_from_flat_fields(intent)
+def normalize_grounding_date_intent(
+    expression: str,
+    intent: FlatTimeIntentOutput,
+    *,
+    path: str,
+) -> dict[str, object]:
+    _required_text(expression, path=f"{path}.expression")
+    intent_fields = {
+        "year": intent.year,
+        "month": intent.month,
+        "day": intent.day,
+        "year_policy": intent.year_policy,
+        "relative_offset": intent.relative_offset,
+        "named_value": intent.named_value,
+        "end_year": intent.end_year,
+        "end_month": intent.end_month,
+        "end_day": intent.end_day,
+        "end_year_policy": intent.end_year_policy,
+        "count": intent.count,
+        "direction": intent.direction,
+        "time_shape": intent.time_shape,
+        "unit": intent.unit,
+        "mode": intent.mode,
+    }
+    normalized = _canonical_time_intent_from_flat_fields(intent_fields)
     validate_time_intent(normalized)
     return normalized
 

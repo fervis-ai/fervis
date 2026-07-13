@@ -8,7 +8,9 @@ from fervis.lookup.orchestration.pipeline import (
 )
 
 
-def test_known_input_step_id_uses_question_contract_when_grounding_turn_did_not_run() -> None:
+def test_known_input_step_id_uses_question_contract_when_grounding_turn_did_not_run() -> (
+    None
+):
     calls: list[tuple[str, int]] = []
 
     class Sink:

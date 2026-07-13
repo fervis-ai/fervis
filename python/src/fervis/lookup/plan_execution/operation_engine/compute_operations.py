@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import assert_never
+from typing_extensions import assert_never
 
 from fervis.lookup.answer_program.operations import ComputeBinaryOperator
 from fervis.lookup.outcomes.errors import UndefinedOperationError
@@ -18,13 +18,14 @@ from fervis.lookup.plan_execution.operation_runtime import (
     resolved_compute_references,
 )
 
-from .shared import _number
+from fervis.lookup.canonical_data import RuntimeValue
+from fervis.lookup.plan_execution.declared_values import declared_number
 
 
 def _compute(
     spec: ResolvedComputeSpec,
-    computed_outputs: dict[str, tuple[str, object]],
-) -> object:
+    computed_outputs: dict[str, tuple[str, RuntimeValue]],
+) -> RuntimeValue:
     try:
         return _eval_expression(spec.expression, computed_outputs)
     except UndefinedOperationError as exc:
@@ -38,11 +39,11 @@ def _compute(
 
 def _eval_expression(
     expression: ResolvedComputeExpression,
-    computed_outputs: dict[str, tuple[str, object]],
+    computed_outputs: dict[str, tuple[str, RuntimeValue]],
 ) -> Decimal:
     return fold_resolved_compute_expression(
         expression,
-        value=lambda item: _number(item.value),
+        value=lambda item: declared_number(item.value, "decimal"),
         output=lambda item: _output_value(item, computed_outputs),
         negation=lambda _expression, operand: -operand,
         binary=_binary_value,
@@ -51,12 +52,12 @@ def _eval_expression(
 
 def _output_value(
     expression: ResolvedComputeOutput,
-    computed_outputs: dict[str, tuple[str, object]],
+    computed_outputs: dict[str, tuple[str, RuntimeValue]],
 ) -> Decimal:
     produced = computed_outputs.get(expression.node_id)
     if produced is None or produced[0] != expression.output_id:
         raise RelationEngineError(f"unknown scalar input {expression.output_id}")
-    return _number(produced[1])
+    return declared_number(produced[1], "decimal")
 
 
 def _binary_value(

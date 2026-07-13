@@ -44,23 +44,28 @@ def config_result(
             exit_code=2 if result.is_blocked else 0,
         )
     if args.config_command == "set":
-        result = config_set(project, args.path, args.value, explicit_env=args.env)
+        edit_result = config_set(
+            project,
+            args.path,
+            args.value,
+            explicit_env=args.env,
+        )
         return project_command_result(
             kind=FervisCommandKind.CONFIG,
             command="config.set",
             project=project,
             payload_schema="fervis-config-edit-result.v0.1",
-            payload=result.to_payload(),
-            exit_code=2 if result.is_blocked else 0,
+            payload=edit_result.to_payload(),
+            exit_code=2 if edit_result.is_blocked else 0,
         )
     if args.config_command == "upgrade":
-        result = config_upgrade(project)
+        upgrade_result = config_upgrade(project)
         return project_command_result(
             kind=FervisCommandKind.CONFIG,
             command="config.upgrade",
             project=project,
             payload_schema="fervis-config-upgrade-result.v0.1",
-            payload=result.to_payload(),
-            exit_code=2 if result.is_blocked else 0,
+            payload=upgrade_result.to_payload(),
+            exit_code=2 if upgrade_result.is_blocked else 0,
         )
     raise ValueError(f"unsupported config command: {args.config_command}")

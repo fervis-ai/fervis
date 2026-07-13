@@ -290,7 +290,7 @@ def test_django_observability_query_answer_scope_includes_previous_runs() -> Non
     assert report.calls[0].artifacts == ()
 
 
-def test_django_observability_query_answer_scope_includes_clarification_trigger_run() -> (
+def test_django_observability_query_answer_scope_includes_clarification_lineage() -> (
     None
 ):
     recorder = DjangoLineageRecorder()
@@ -330,33 +330,21 @@ def test_django_observability_query_answer_scope_includes_clarification_trigger_
             ),
         )
     )
-    recorder.record_requested_fact(
-        RequestedFactWrite(
-            requested_fact_id="clarification_fact_1",
-            run_id="run_1",
-            produced_by_step_id="step_clarification_source_binding",
-            fact_key="fact_1",
-            answer_expression_family="scalar_aggregate",
-        )
-    )
-    recorder.record_fact_result(
-        FactResultWrite(
-            fact_result_id="clarification_fact_result_1",
-            run_id="run_1",
-            requested_fact_id="clarification_fact_1",
-            produced_by_step_id="step_clarification_source_binding",
-            result_kind=FactResultKind.NEEDS_CLARIFICATION,
-        )
-    )
     recorder.record_clarification_request(
         ClarificationRequestWrite(
             clarification_id="clarification_1",
             run_id="run_1",
-            fact_result_id="clarification_fact_result_1",
+            step_id="step_clarification_source_binding",
             payload_json={
                 "id": "clarification_1",
                 "need": "target_reference",
                 "reason": "multiple_matching_entities",
+                "owner": "grounding",
+                "continuation": {
+                        "kind": "grounding",
+                        "knownInputId": "store",
+                        "acceptsFreeText": False,
+                },
                 "requestedFactId": "clarification_fact_1",
                 "question": "Which matching store should I use?",
                 "subjects": [
@@ -365,7 +353,17 @@ def test_django_observability_query_answer_scope_includes_clarification_trigger_
                         "id": "store",
                         "label": "store",
                         "sourceText": "",
-                        "options": [{"id": "store_1", "label": "Store 1"}],
+                        "options": [
+                            {
+                                "id": "store_1",
+                                "label": "Store 1",
+                                "entityKind": "store",
+                                "keyId": "primary_key",
+                                "matchedField": "store_id",
+                                "matchedValue": "store_1",
+                                "resolverReadId": "list_stores",
+                            }
+                        ],
                     }
                 ],
                 "evidence": [],
@@ -381,52 +379,39 @@ def test_django_observability_query_answer_scope_includes_clarification_trigger_
             selected_option_id="store_1",
         )
     )
-    recorder.start_run(
-        QuestionRunWrite(
-            run_id="run_2",
-            question_id="question_1",
-            run_number=2,
-            kind=QuestionRunKind.MODEL_ASSISTED,
-            trigger_kind=RunTriggerKind.CLARIFICATION_RESPONSE,
-            base_run_id="run_1",
-            trigger_clarification_response_id="clarification_response_1",
-            adapter_ref="django_drf:test",
-            runtime_version="test",
-        )
-    )
     recorder.record_step(
         RunStepWrite(
-            step_id="step_run_2_contract",
-            run_id="run_2",
-            sequence=1,
+            step_id="step_run_1_contract",
+            run_id="run_1",
+            sequence=2,
             step_key=RunStepKey.QUESTION_CONTRACT,
             kind=RunStepKind.MODEL_TURN,
         )
     )
     recorder.record_step(
         RunStepWrite(
-            step_id="step_run_2_compile",
-            run_id="run_2",
-            sequence=2,
+            step_id="step_run_1_compile",
+            run_id="run_1",
+            sequence=3,
             step_key=RunStepKey.COMPILE,
             kind=RunStepKind.DETERMINISTIC,
         )
     )
     recorder.record_step(
         RunStepWrite(
-            step_id="step_run_2_execute",
-            run_id="run_2",
-            sequence=3,
+            step_id="step_run_1_execute",
+            run_id="run_1",
+            sequence=4,
             step_key=RunStepKey.EXECUTE,
             kind=RunStepKind.DETERMINISTIC,
         )
     )
-    _record_catalog_endpoint(recorder, run_id="run_2")
+    _record_catalog_endpoint(recorder, run_id="run_1")
     recorder.record_source_read(
         SourceReadWrite(
             source_read_id="source_read_1",
-            run_id="run_2",
-            step_id="step_run_2_execute",
+            run_id="run_1",
+            step_id="step_run_1_execute",
             catalog_endpoint_id="11111111-1111-4111-8111-111111111111",
             status=SourceReadStatus.SUCCEEDED,
             row_count=2,
@@ -434,19 +419,19 @@ def test_django_observability_query_answer_scope_includes_clarification_trigger_
             response_hash="sha256:stores",
         )
     )
-    _record_program_invocation(recorder, run_id="run_2")
+    _record_program_invocation(recorder, run_id="run_1")
     recorder.record_answered_result(
         AnsweredRunResultWrite(
             result=RunResultWrite(
                 run_result_id="result_1",
-                run_id="run_2",
+                run_id="run_1",
                 result_kind=RunResultKind.ANSWERED,
             ),
             requested_facts=(
                 RequestedFactWrite(
                     requested_fact_id="fact_1",
-                    run_id="run_2",
-                    produced_by_step_id="step_run_2_contract",
+                    run_id="run_1",
+                    produced_by_step_id="step_run_1_contract",
                     fact_key="fact_1",
                     answer_expression_family="scalar_aggregate",
                 ),
@@ -454,19 +439,19 @@ def test_django_observability_query_answer_scope_includes_clarification_trigger_
             fact_results=(
                 FactResultWrite(
                     fact_result_id="fact_result_1",
-                    run_id="run_2",
+                    run_id="run_1",
                     requested_fact_id="fact_1",
-                    produced_by_step_id="step_run_2_execute",
+                    produced_by_step_id="step_run_1_execute",
                     result_kind=FactResultKind.ANSWERED,
                 ),
             ),
             proof_graphs=(
                 ExecutionProofGraphWrite(
                     proof_graph_id="proof_1",
-                    run_id="run_2",
+                    run_id="run_1",
                     fact_result_id="fact_result_1",
-                    compile_step_id="step_run_2_compile",
-                    execute_step_id="step_run_2_execute",
+                    compile_step_id="step_run_1_compile",
+                    execute_step_id="step_run_1_execute",
                     payload_schema="fervis.execution_proof_graph",
                     payload_schema_rev=1,
                     payload_json=_answer_proof_graph_payload(),
@@ -474,13 +459,13 @@ def test_django_observability_query_answer_scope_includes_clarification_trigger_
             ),
             answer=AnswerWrite(
                 answer_id="answer_1",
-                run_id="run_2",
+                run_id="run_1",
                 run_result_id="result_1",
             ),
             outputs=(
                 AnswerOutputWrite(
                     answer_output_id="answer_output_1",
-                    run_id="run_2",
+                    run_id="run_1",
                     answer_id="answer_1",
                     fact_result_id="fact_result_1",
                     output_key="answer_1",
@@ -544,6 +529,8 @@ def _record_program_invocation(
             ),
         )
     )
+
+
 def _record_catalog_endpoint(recorder: LineageRecorderPort, *, run_id: str) -> None:
     recorder.record_catalog_endpoint(
         CatalogEndpointWrite(

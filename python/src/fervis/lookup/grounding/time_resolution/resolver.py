@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import calendar
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
-from typing import Any
+from datetime import date, datetime, timedelta, timezone as datetime_timezone
+from typing import Any, overload
 from zoneinfo import ZoneInfo
 
 from .contract import AnchorSource, Field, IntentField, IntentKind, Policy, Status, Unit
@@ -13,7 +13,7 @@ from .date_values import normalize_date_value, resolve_date_value
 from .expression_parser import intent_from_expression, local_relative_day_offset
 from .intent_validation import validate_time_intent
 
-DEFAULT_TIMEZONE = "UTC"
+DEFAULT_TIMEZONE = "timezone.utc"
 
 CALENDAR_UNITS = {Unit.DAY, Unit.WEEK, Unit.MONTH, Unit.QUARTER, Unit.YEAR}
 ANCHOR_PERIOD_UNITS = {
@@ -81,22 +81,46 @@ def _resolved_intent_from_inputs(
     *,
     intent: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
+    if isinstance(intent, dict) and IntentField.KIND in intent:
+        return _structured_intent_with_explicit_date_components(
+            intent,
+            parsed=intent_from_expression(expression),
+        )
     parsed = intent_from_expression(expression)
-    if not intent:
-        return parsed
-    if not isinstance(intent, dict):
-        return parsed
-    if intent.get(IntentField.KIND):
-        return intent
+    if parsed is not None:
+        return {
+            **parsed,
+            **(
+                {IntentField.ANCHOR_PERIOD: intent[IntentField.ANCHOR_PERIOD]}
+                if isinstance(intent, dict)
+                and IntentField.ANCHOR_PERIOD in intent
+                else {}
+            ),
+        }
+    return None
+
+
+def _structured_intent_with_explicit_date_components(
+    intent: dict[str, Any],
+    *,
+    parsed: dict[str, Any] | None,
+) -> dict[str, Any]:
     if parsed is None:
         return intent
+    if intent.get(IntentField.KIND) != IntentKind.POINT:
+        return intent
+    if parsed.get(IntentField.KIND) != IntentKind.POINT:
+        return intent
+    value = intent.get(IntentField.VALUE)
+    parsed_value = parsed.get(IntentField.VALUE)
+    if not isinstance(value, dict) or not isinstance(parsed_value, dict):
+        return intent
+    supplemented_value = {**parsed_value, **value}
+    if IntentField.YEAR in parsed_value and IntentField.YEAR not in value:
+        supplemented_value.pop(IntentField.YEAR_POLICY, None)
     return {
-        **parsed,
-        **(
-            {IntentField.ANCHOR_PERIOD: intent[IntentField.ANCHOR_PERIOD]}
-            if IntentField.ANCHOR_PERIOD in intent
-            else {}
-        ),
+        **intent,
+        IntentField.VALUE: supplemented_value,
     }
 
 
@@ -255,7 +279,7 @@ def _point_value(ctx: ResolverContext, intent: dict[str, Any]) -> date:
 
 
 def _normalized_point_intent(*, intent: dict[str, Any], value: date) -> dict[str, Any]:
-    payload = {
+    payload: dict[str, Any] = {
         IntentField.KIND: IntentKind.POINT,
         IntentField.PRECISION: _required_string(intent, IntentField.PRECISION),
     }
@@ -309,7 +333,10 @@ def _named_period_bounds(
     if unit == Unit.MONTH:
         resolved_year = year if year is not None else _most_recent_year(anchor, value)
         start, end = _month_bounds(resolved_year, value)
-        normalized_named = {IntentField.VALUE: value, "year": resolved_year}
+        normalized_named: dict[str, Any] = {
+            IntentField.VALUE: value,
+            "year": resolved_year,
+        }
         if year is None:
             normalized_named["year_policy"] = Policy.MOST_RECENT
         return start, end, normalized_named
@@ -502,7 +529,7 @@ def _today_in_timezone(timezone_name: str) -> date:
         tz = ZoneInfo(name)
     except Exception as exc:
         raise ValueError(f"Unsupported timezone: {name}") from exc
-    return datetime.now(UTC).astimezone(tz).date()
+    return datetime.now(datetime_timezone.utc).astimezone(tz).date()
 
 
 def _parse_iso_date(value: str) -> date:
@@ -520,6 +547,24 @@ def _required_int(intent: dict[str, Any], field: str) -> int:
     if field not in intent:
         raise ValueError(f"{field} is required.")
     return _strict_int(intent[field], field)
+
+
+@overload
+def _optional_int(
+    intent: dict[str, Any],
+    field: str,
+    *,
+    default: int,
+) -> int: ...
+
+
+@overload
+def _optional_int(
+    intent: dict[str, Any],
+    field: str,
+    *,
+    default: None,
+) -> int | None: ...
 
 
 def _optional_int(

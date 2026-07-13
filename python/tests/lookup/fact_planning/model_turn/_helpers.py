@@ -1,5 +1,7 @@
 # ruff: noqa: F401 -- imported names are the shared test module's public surface.
 
+from tests.lookup.source_binding_helpers import source_binding_request
+
 import json
 from dataclasses import replace
 
@@ -11,8 +13,12 @@ from fervis.lookup.relation_catalog import (
     CatalogFactAvailability,
     CatalogField,
     CatalogParam,
+    CandidateKey,
+    CandidateKeyComponent,
     EndpointRead,
-    IdentityMetadata,
+    EntityKeyComponentTarget,
+    EntityReference,
+    EntityReferenceComponent,
     ParamSource,
     RelationCatalog,
     RowCardinality,
@@ -50,11 +56,14 @@ from fervis.lookup.turn_prompts import build_turn_prompt_context
 from fervis.lookup.source_binding.compiler_ir import (
     DraftEndpointParamBinding,
     DraftRelationSource,
+    SourceAppliedFilter,
 )
 from fervis.lookup.answer_program.relations import SourceKind
 from fervis.lookup.fact_planning.pattern_plan import (
     compile_pattern_answer_program as _compile_pattern_answer_program,
 )
+from fervis.lookup.fact_planning.provider_contract import parse_pattern_answer
+from fervis.lookup.provider_contract import ProviderObject
 from fervis.lookup.question_contract import (
     QuestionContract,
     RequestedFact,
@@ -63,11 +72,14 @@ from fervis.lookup.question_contract import (
 from fervis.lookup.source_binding import (
     AnswerPopulation,
     BoundSource,
+    CandidateKeyEvidence,
+    EntityEvidenceComponent,
     SourceEvidenceItem,
     SourceField,
     SourceFulfillment,
 )
-from fervis.lookup.source_binding.candidates import source_candidates
+from fervis.lookup.source_binding.candidates import SourceCandidate, source_candidates
+from fervis.lookup.source_binding.candidates.contracts import FieldEvidence
 from fervis.lookup.source_binding.model import SourceBindingRequest
 from fervis.lookup.plan_selection import (
     SourceStrategyMember,
@@ -96,6 +108,7 @@ def FactPlanRequest(*args, **kwargs) -> _FactPlanRequest:
         bound_sources=bound_sources,
     )
 
+
 def _answer_population() -> AnswerPopulation:
     return AnswerPopulation(
         population_binding_id="pop.source_1.candidate_population",
@@ -103,11 +116,39 @@ def _answer_population() -> AnswerPopulation:
         match_basis_explanation="sales defines the source population",
     )
 
+
+def candidate_key_evidence(
+    *field_ids: str,
+    entity_kind: str = "entity",
+    key_id: str = "entity_key",
+    field_evidence_ids: tuple[str, ...] = (),
+) -> CandidateKeyEvidence:
+    evidence_ids = field_evidence_ids or field_ids
+    components = tuple(
+        EntityEvidenceComponent(
+            component_id=field_id,
+            field_evidence_id=field_evidence_id,
+            field_id=field_id,
+        )
+        for field_id, field_evidence_id in zip(field_ids, evidence_ids, strict=True)
+    )
+    return CandidateKeyEvidence(
+        evidence_id=f"key.{key_id}",
+        key_id=key_id,
+        entity_kind=entity_kind,
+        components=components,
+        row_source_id="row_source_test",
+        row_path_id="data",
+    )
+
+
 def _bound_source_fixture(source: BoundSource) -> BoundSource:
     return source
 
+
 def _fact_plan_prompt(request: _FactPlanRequest) -> str:
     return _pattern_fact_plan_prompt(request)
+
 
 def _pattern_fact_plan_prompt(
     request: _FactPlanRequest,
@@ -128,6 +169,7 @@ def _pattern_fact_plan_prompt(
         )
         .prompt_text
     )
+
 
 def _plan_selection_for_request(
     request: _FactPlanRequest,
@@ -183,6 +225,7 @@ def _plan_selection_for_request(
         )
     )
 
+
 def _bound_plan_member(
     request: _FactPlanRequest,
     *,
@@ -214,25 +257,23 @@ def _bound_plan_member(
         field_ids=tuple(field_ids),
     )
 
+
 def _fulfillment_field_ids(source: BoundSource) -> tuple[str, ...]:
     field_id_by_evidence_id = {
         item.evidence_id: item.field_id for item in source.evidence_items
     }
     output: list[str] = []
     for fulfillment in source.fulfillments:
-        for evidence_id in (
-            *fulfillment.metric_measure_evidence_ids,
-            *fulfillment.row_count_basis_evidence_ids,
-            *fulfillment.group_key_evidence_ids,
-        ):
+        for evidence_id in fulfillment.field_evidence_ids():
             field_id = field_id_by_evidence_id.get(evidence_id, "")
             if field_id and field_id not in output:
                 output.append(field_id)
     return tuple(output)
 
+
 def _default_bound_sources(request: _FactPlanRequest) -> tuple[BoundSource, ...]:
     candidates = source_candidates(
-        SourceBindingRequest(
+        source_binding_request(
             question=request.question,
             question_contract=request.question_contract,
             requested_facts=request.question_contract.requested_facts,
@@ -265,6 +306,7 @@ def _default_bound_sources(request: _FactPlanRequest) -> tuple[BoundSource, ...]
         if candidate.source is not None or candidate.value_id
     )
 
+
 def _selected_plan_for_request(request: _FactPlanRequest) -> PlanSelectionSet:
     fact_id = request.question_contract.requested_facts[0].id
     selection = request.catalog_selection or _all_read_catalog_selection(request)
@@ -286,6 +328,7 @@ def _selected_plan_for_request(request: _FactPlanRequest) -> PlanSelectionSet:
         )
     )
 
+
 def compile_pattern_answer_plan(
     payload: dict[str, object],
     *,
@@ -304,8 +347,12 @@ def compile_pattern_answer_plan(
     from fervis.lookup.answer_program import CompilerInputContext, ProgramInputs
     from fervis.lookup.answer_program import BindingSet
 
+    answers = tuple(
+        parse_pattern_answer(ProviderObject(answer))
+        for answer in payload.get("answers", ())
+    )
     program, _bindings = _compile_pattern_answer_program(
-        payload,
+        answers,
         bound_sources=bound_sources,
         source_binding_ids_by_requested_fact_id=(
             source_binding_ids_by_requested_fact_id
@@ -320,6 +367,11 @@ def compile_pattern_answer_plan(
     )
     return program
 
+
+def pattern_answer(payload: dict[str, object]):
+    return parse_pattern_answer(ProviderObject(payload))
+
+
 def _selected_source_ids_by_fact(
     bound_sources: tuple[BoundSource, ...],
 ) -> dict[str, tuple[str, ...]]:
@@ -327,6 +379,7 @@ def _selected_source_ids_by_fact(
     for source in bound_sources:
         output.setdefault(source.requested_fact_id, []).append(source.id)
     return {key: tuple(value) for key, value in output.items()}
+
 
 def _source_fulfillments(
     request: _FactPlanRequest,
@@ -337,7 +390,7 @@ def _source_fulfillments(
         SourceFulfillment(
             requested_fact_id=fact.id,
             answer_output_id=answer.id,
-            group_key_evidence_ids=evidence_ids,
+            value_evidence_ids=evidence_ids,
             match_basis_explanation=(
                 f"{answer.id} is fulfilled by source evidence because "
                 "the selected source contains the answer output evidence."
@@ -347,40 +400,40 @@ def _source_fulfillments(
         for answer in fact.answer_outputs
     )
 
-def _candidate_field_ids(candidate: object) -> tuple[str, ...]:
-    fields = getattr(candidate, "fields", ())
+
+def _candidate_field_ids(candidate: SourceCandidate) -> tuple[str, ...]:
     return tuple(
-        str(field.get("field_id") or field.get("id") or "")
-        for field in fields
-        if isinstance(field, dict)
-        and str(field.get("field_id") or field.get("id") or "")
+        item.field_id
+        for item in candidate.evidence_items
+        if isinstance(item, FieldEvidence) and item.field_id
     )
 
-def _candidate_source_fields(candidate: object) -> tuple[SourceField, ...]:
-    fields = getattr(candidate, "fields", ())
+
+def _candidate_source_fields(candidate: SourceCandidate) -> tuple[SourceField, ...]:
     return tuple(
         SourceField(
-            field_id=field_id,
-            type=str(field.get("type") or ""),
-            roles=tuple(str(role) for role in field.get("roles") or ()),
-            label=str(field.get("label") or ""),
-            row_cardinality=str(field.get("row_cardinality") or ""),
+            field_id=item.field_id,
+            type=item.type,
+            roles=item.roles,
+            label=item.label,
+            row_cardinality=item.row_cardinality,
         )
-        for field in fields
-        if isinstance(field, dict)
-        for field_id in (str(field.get("field_id") or field.get("id") or ""),)
-        if field_id
+        for item in candidate.evidence_items
+        if isinstance(item, FieldEvidence) and item.field_id
     )
 
-def _candidate_applied_filters(candidate: object) -> tuple[dict[str, object], ...]:
-    payload = getattr(candidate, "payload", None)
-    filters = payload.get("applied_filters") if isinstance(payload, dict) else ()
-    return tuple(dict(item) for item in filters or () if isinstance(item, dict))
+
+def _candidate_applied_filters(
+    candidate: SourceCandidate,
+) -> tuple[SourceAppliedFilter, ...]:
+    return candidate.applied_filters
+
 
 def _selected_read_ids(selection: object) -> frozenset[str]:
     if not isinstance(selection, CatalogSelectionResult):
         return frozenset()
     return frozenset(selection.selected_read_ids)
+
 
 def _api_bound_source_for_memory_boundary_test() -> BoundSource:
     return BoundSource(
@@ -403,10 +456,11 @@ def _api_bound_source_for_memory_boundary_test() -> BoundSource:
                 requested_fact_id="rf_answer",
                 answer_output_id="answer",
                 match_basis_explanation="value answers answer",
-                group_key_evidence_ids=("source_1_evidence_1",),
+                value_evidence_ids=("source_1_evidence_1",),
             ),
         ),
     )
+
 
 def _two_output_aggregate_bound_source() -> BoundSource:
     return _bound_source_fixture(
@@ -419,15 +473,15 @@ def _two_output_aggregate_bound_source() -> BoundSource:
                 read_id="list_metric_by_location",
             ),
             cardinality="many",
-            available_field_ids=("location_name", "metric_total"),
+            available_field_ids=("location_id", "metric_total"),
             available_fields=(
-                SourceField(field_id="location_name", type="string"),
+                SourceField(field_id="location_id", type="uuid"),
                 SourceField(field_id="metric_total", type="decimal"),
             ),
             evidence_items=(
                 SourceEvidenceItem(
-                    evidence_id="source_1.data.location_name",
-                    field_id="location_name",
+                    evidence_id="source_1.data.location_id",
+                    field_id="location_id",
                     row_cardinality="many",
                 ),
                 SourceEvidenceItem(
@@ -440,8 +494,13 @@ def _two_output_aggregate_bound_source() -> BoundSource:
                 SourceFulfillment(
                     requested_fact_id="rf_answer",
                     answer_output_id="answer_1",
-                    match_basis_explanation="location_name is the displayed group.",
-                    group_key_evidence_ids=("source_1.data.location_name",),
+                    match_basis_explanation="location_id identifies the grouped location.",
+                    entity_evidence=candidate_key_evidence(
+                        "location_id",
+                        entity_kind="location",
+                        key_id="location_key",
+                        field_evidence_ids=("source_1.data.location_id",),
+                    ),
                 ),
                 SourceFulfillment(
                     requested_fact_id="rf_answer",
@@ -452,6 +511,7 @@ def _two_output_aggregate_bound_source() -> BoundSource:
             ),
         )
     )
+
 
 def _two_output_aggregate_bound_source_pair() -> tuple[BoundSource, BoundSource]:
     first = _two_output_aggregate_bound_source()
@@ -464,6 +524,7 @@ def _two_output_aggregate_bound_source_pair() -> tuple[BoundSource, BoundSource]
         ),
     )
     return (first, second)
+
 
 def _ranked_group_key_with_display_bound_source() -> BoundSource:
     return _bound_source_fixture(
@@ -504,7 +565,12 @@ def _ranked_group_key_with_display_bound_source() -> BoundSource:
                     requested_fact_id="rf_answer",
                     answer_output_id="answer_1",
                     match_basis_explanation="location_id identifies the grouped location.",
-                    group_key_evidence_ids=("source_1.data.location_id",),
+                    entity_evidence=candidate_key_evidence(
+                        "location_id",
+                        entity_kind="location",
+                        key_id="location_key",
+                        field_evidence_ids=("source_1.data.location_id",),
+                    ),
                 ),
                 SourceFulfillment(
                     requested_fact_id="rf_answer",
@@ -516,6 +582,7 @@ def _ranked_group_key_with_display_bound_source() -> BoundSource:
         )
     )
 
+
 def _ranked_count_by_store_bound_source() -> BoundSource:
     return _bound_source_fixture(
         BoundSource(
@@ -525,6 +592,7 @@ def _ranked_count_by_store_bound_source() -> BoundSource:
             source=DraftRelationSource(
                 kind=SourceKind.API_READ,
                 read_id="list_order",
+                row_source_id="api:list_order:data",
             ),
             cardinality="many",
             available_field_ids=("store_id", "store_name", "order_id"),
@@ -535,12 +603,6 @@ def _ranked_count_by_store_bound_source() -> BoundSource:
                     field_id="order_id",
                     type="uuid",
                     roles=("identity",),
-                    identity=IdentityMetadata(
-                        entity_ref="order",
-                        identity_field="order_id",
-                        primary_key=True,
-                        stable=True,
-                    ),
                 ),
             ),
             evidence_items=(
@@ -555,9 +617,11 @@ def _ranked_count_by_store_bound_source() -> BoundSource:
                     row_cardinality="many",
                 ),
                 SourceEvidenceItem(
-                    evidence_id="source_1.data.order_id",
-                    field_id="order_id",
+                    evidence_id="row_population.source_1.data",
+                    field_id="data",
+                    type="row_population",
                     row_cardinality="many",
+                    row_source_id="api:list_order:data",
                 ),
             ),
             fulfillments=(
@@ -565,17 +629,25 @@ def _ranked_count_by_store_bound_source() -> BoundSource:
                     requested_fact_id="rf_answer",
                     answer_output_id="answer_1",
                     match_basis_explanation="store_id identifies the grouped store.",
-                    group_key_evidence_ids=("source_1.data.store_id",),
+                    entity_evidence=candidate_key_evidence(
+                        "store_id",
+                        entity_kind="store",
+                        key_id="store_key",
+                        field_evidence_ids=("source_1.data.store_id",),
+                    ),
                 ),
                 SourceFulfillment(
                     requested_fact_id="rf_answer",
                     answer_output_id="answer_2",
-                    match_basis_explanation="order_id provides the count basis.",
-                    row_count_basis_evidence_ids=("source_1.data.order_id",),
+                    match_basis_explanation="The order row population is countable.",
+                    row_count_basis_evidence_ids=(
+                        "row_population.source_1.data",
+                    ),
                 ),
             ),
         )
     )
+
 
 def _single_output_ranked_aggregate_bound_source() -> BoundSource:
     return _bound_source_fixture(
@@ -614,11 +686,17 @@ def _single_output_ranked_aggregate_bound_source() -> BoundSource:
                         "ranks locations but is not the location display value."
                     ),
                     metric_measure_evidence_ids=("source_1.data.metric_total",),
-                    group_key_evidence_ids=("source_1.data.location_id",),
+                    entity_evidence=candidate_key_evidence(
+                        "location_id",
+                        entity_kind="location",
+                        key_id="location_key",
+                        field_evidence_ids=("source_1.data.location_id",),
+                    ),
                 ),
             ),
         )
     )
+
 
 def _display_only_location_bound_source() -> BoundSource:
     return BoundSource(
@@ -652,11 +730,12 @@ def _display_only_location_bound_source() -> BoundSource:
                 requested_fact_id="rf_answer",
                 answer_output_id="answer_1",
                 match_basis_explanation="name is the location display value.",
-                group_key_evidence_ids=("source_1.data.name",),
+                value_evidence_ids=("source_1.data.name",),
                 row_count_basis_evidence_ids=("source_1.data.location_id",),
             ),
         ),
     )
+
 
 def _question_contract() -> QuestionContract:
     return QuestionContract(
@@ -664,10 +743,13 @@ def _question_contract() -> QuestionContract:
             RequestedFact(
                 id="rf_answer",
                 description="answer",
-                answer_outputs=(RequestedFactAnswerOutput(id="answer"),),
+                answer_outputs=(
+                    RequestedFactAnswerOutput(id="answer", role="ANSWER_VALUE"),
+                ),
             ),
         )
     )
+
 
 def _all_read_catalog_selection(request: _FactPlanRequest) -> CatalogSelectionResult:
     requested_fact_id = request.question_contract.requested_facts[0].id
@@ -687,6 +769,7 @@ def _all_read_catalog_selection(request: _FactPlanRequest) -> CatalogSelectionRe
             ),
         ),
     )
+
 
 def _request_with_executable_relation_and_required_detail() -> FactPlanRequest:
     relation_catalog = RelationCatalog(
@@ -741,6 +824,7 @@ def _request_with_executable_relation_and_required_detail() -> FactPlanRequest:
         ),
     )
 
+
 def _json_prompt_section(prompt: str, *, label: str, next_label: str) -> dict:
     start = prompt.index(f"{label}:\n") + len(f"{label}:\n")
     candidate_labels = (
@@ -782,11 +866,13 @@ def _text_prompt_section(prompt: str, *, label: str, next_label: str) -> str:
     end = min(ends)
     return prompt[start:end].strip()
 
+
 def _section_index(prompt: str, label: str, start: int) -> int:
     colon_index = prompt.find(f"\n\n{label}:", start)
     text_index = prompt.find(f"\n\n{label}\n", start)
     candidates = [index for index in (colon_index, text_index) if index >= 0]
     return min(candidates) if candidates else -1
+
 
 def _available_relations(payload: dict) -> list[dict]:
     relations: list[dict] = []
@@ -796,7 +882,9 @@ def _available_relations(payload: dict) -> list[dict]:
     relations.extend(payload.get("memory_relations") or ())
     return relations
 
+
 def _bound_sources(payload: dict) -> list[dict]:
     return list(payload.get("bound_sources") or ())
+
 
 __all__ = [name for name in globals() if not name.startswith("__")]

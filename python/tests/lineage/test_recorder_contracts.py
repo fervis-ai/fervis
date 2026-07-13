@@ -1,38 +1,23 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 
 from fervis.lineage.enums import (
     ArtifactKind,
     ConversationOriginKind,
     MemoryArtifactSourceKind,
-    QuestionRunKind,
-    RunTriggerKind,
     SourceReadStatus,
 )
 from fervis.lineage.recorder import (
+    ClarificationRequestWrite,
     ConversationWrite,
     MemoryArtifactWrite,
-    QuestionRunWrite,
     RunArtifactWrite,
     SourceReadWrite,
 )
-
-
-def test_recorder_contract_accepts_clarification_trigger_shape() -> None:
-    run = QuestionRunWrite(
-        run_id="run_2",
-        question_id="q_1",
-        run_number=2,
-        kind=QuestionRunKind.MODEL_ASSISTED,
-        trigger_kind=RunTriggerKind.CLARIFICATION_RESPONSE,
-        base_run_id="run_1",
-        trigger_clarification_response_id="response_1",
-        adapter_ref="django_drf:test",
-        runtime_version="test-runtime",
-    )
-
-    assert run.base_run_id == "run_1"
+from fervis.lineage.records import SOURCE_READ
 
 
 def test_recorder_contract_accepts_complete_conversation_fork_shape() -> None:
@@ -69,20 +54,6 @@ def test_recorder_contract_rejects_incomplete_conversation_fork_shape() -> None:
         )
 
 
-def test_recorder_contract_rejects_conflicting_run_trigger_shape() -> None:
-    with pytest.raises(ValueError, match="base_run_id is required"):
-        QuestionRunWrite(
-            run_id="run_2",
-            question_id="q_1",
-            run_number=2,
-            kind=QuestionRunKind.MODEL_ASSISTED,
-            trigger_kind=RunTriggerKind.CLARIFICATION_RESPONSE,
-            trigger_clarification_response_id="response_1",
-            adapter_ref="django_drf:test",
-            runtime_version="test-runtime",
-        )
-
-
 def test_recorder_contract_rejects_incomplete_successful_source_read() -> None:
     with pytest.raises(ValueError, match="response_hash is required"):
         SourceReadWrite(
@@ -95,6 +66,50 @@ def test_recorder_contract_rejects_incomplete_successful_source_read() -> None:
             completeness_json={"complete": True},
             response_hash="",
         )
+
+
+def test_recorder_contract_rejects_clarification_without_owner_spec() -> None:
+    with pytest.raises(ValueError, match="owner"):
+        ClarificationRequestWrite(
+            clarification_id="clarification_1",
+            run_id="run_1",
+            step_id="step_grounding",
+            payload_json={
+                "id": "clarification_1",
+                "need": "target_reference",
+                "reason": "unresolved_reference",
+                "requestedFactId": "fact_1",
+                "question": "Which customer?",
+                "subjects": [
+                    {
+                        "kind": "question_input",
+                        "id": "customer",
+                        "label": "customer",
+                        "sourceText": "customer",
+                        "options": [],
+                    }
+                ],
+                "evidence": [],
+            },
+        )
+
+
+def test_source_read_storage_preserves_decimal_argument_as_exact_json_text() -> None:
+    source_read = SourceReadWrite(
+        source_read_id="source_read_1",
+        run_id="run_1",
+        step_id="step_execute",
+        catalog_endpoint_id="11111111-1111-4111-8111-111111111111",
+        status=SourceReadStatus.SUCCEEDED,
+        row_count=1,
+        completeness_json={"complete": True},
+        response_hash="sha256:response",
+        args_json={"limit": Decimal("2")},
+    )
+
+    stored = SOURCE_READ.values(source_read)
+
+    assert stored["args_json"] == {"limit": "2"}
 
 
 def test_recorder_contract_rejects_model_artifact_without_model_call() -> None:
@@ -214,9 +229,7 @@ def test_recorder_contract_accepts_requested_fact_memory_without_addresses() -> 
             "outcome": "answered",
             "provenance": {
                 "question_contract": {
-                    "answer_requests": [
-                        {"id": "fact_1", "answer_fact": "store count"}
-                    ]
+                    "answer_requests": [{"id": "fact_1", "answer_fact": "store count"}]
                 }
             },
         },
@@ -280,7 +293,9 @@ def test_recorder_contract_accepts_known_input_memory_with_addresses() -> None:
 
 
 def test_recorder_contract_rejects_known_input_memory_without_addresses() -> None:
-    with pytest.raises(ValueError, match="known_input memory artifacts require addresses"):
+    with pytest.raises(
+        ValueError, match="known_input memory artifacts require addresses"
+    ):
         MemoryArtifactWrite(
             memory_artifact_id="memory_known_input_1",
             run_id="run_1",

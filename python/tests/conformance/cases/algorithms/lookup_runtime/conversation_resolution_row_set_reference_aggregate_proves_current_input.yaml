@@ -48,7 +48,8 @@ input:
     fact_description: total sales for the prior sales rows
     subject_text: sales
     answer_expression_family: scalar_aggregate
-    answer_outputs: [total sales amount]
+    answer_outputs:
+      - {description: total sales amount, role: MEASURED_VALUE}
     known_inputs:
       - kind: row_set_reference
         input_ref: cr_input_1

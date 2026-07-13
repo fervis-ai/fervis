@@ -22,11 +22,13 @@ input:
                 answer_outputs:
                   - id: answer_1
                     description: answer
+                    role: ANSWER_VALUE
                 used_question_inputs: []
         addresses:
           - address: entity.staff_1
             kind: entity
             resource: staff
+            keyId: primary_key
             referenceText: Staff One
             identity: {staff_key: staff-1}
       - artifactId: turn_duplicate
@@ -42,11 +44,13 @@ input:
                 answer_outputs:
                   - id: answer_1
                     description: answer
+                    role: ANSWER_VALUE
                 used_question_inputs: []
         addresses:
           - address: entity.staff_1
             kind: entity
             resource: staff
+            keyId: primary_key
             referenceText: Staff One
             identity: {staff_key: staff-1}
       - artifactId: turn_unrelated
@@ -54,6 +58,8 @@ input:
         sourceQuestion: How much money did we make yesterday?
         sourceAnswer: We made 100.
         provenance:
+          conversation_resolution_activation:
+            activated_memory_ids: [turn_selected.entity.staff_1]
           question_contract:
             question_inputs: []
             answer_requests:
@@ -62,28 +68,12 @@ input:
                 answer_outputs:
                   - id: answer_1
                     description: total sales amount
+                    role: ANSWER_VALUE
                 used_question_inputs: []
         addresses:
           - address: value.total
             kind: value
             value: {type: decimal, value: "100.00"}
-      - artifactId: turn_clarification_1
-        outcome: needs_clarification
-        provenance:
-          conversation_resolution_activation:
-            activated_memory_ids: [turn_selected.entity.staff_1]
-        addresses:
-          - address: outcome.clarification_1
-            kind: outcome
-            terminal: needs_clarification
-            clarificationQuestions: ["Which period?"]
-      - artifactId: turn_clarification_2
-        outcome: needs_clarification
-        addresses:
-          - address: outcome.clarification_2
-            kind: outcome
-            terminal: needs_clarification
-            clarificationQuestions: ["Which store?"]
 expect:
   result_contains:
     cards_by_memory_id:

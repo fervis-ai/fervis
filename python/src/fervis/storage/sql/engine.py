@@ -16,6 +16,7 @@ from fervis.project.integration import (
 from fervis.project.persistence.database_url import (
     DatabaseUrlPersistenceBackend,
 )
+from fervis.project.persistence.sql_backend import SqlPersistenceBackend
 from fervis.project.persistence.sqlite import SQLitePersistenceBackend
 
 
@@ -39,6 +40,7 @@ def resolve_sql_storage_target(
     loaded_config: LoadedFervisConfig,
 ) -> SQLStorageTarget:
     persistence = loaded_config.config.persistence
+    backend: SqlPersistenceBackend
     if isinstance(persistence, SQLitePersistence):
         backend = SQLitePersistenceBackend(
             project_root=project.root_path,

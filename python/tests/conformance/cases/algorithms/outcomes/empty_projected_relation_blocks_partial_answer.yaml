@@ -1,0 +1,21 @@
+id: empty_projected_relation_blocks_partial_answer
+description: An empty projected fact blocks a partial answer from another terminal relation.
+kind: algorithm
+algorithm: outcomes.classify
+input:
+  mode: answer
+  precomputed: true
+  relations:
+    - id: totals
+      rows: [{total: 12}]
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown, proof_refs: [read:totals]}
+    - id: labels
+      rows: []
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown, proof_refs: [read:labels]}
+  result_outputs:
+    - {id: total, relation_id: totals, field_id: total}
+    - {id: label, relation_id: labels, field_id: label}
+expect:
+  result_contains:
+    outcome_kind: no_data
+    empty_relation: {kind: answer_rows, relation_id: labels}

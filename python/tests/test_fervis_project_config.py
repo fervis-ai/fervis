@@ -167,7 +167,12 @@ def test_load_fervis_project_config_rejects_empty_source_details(
     root = _django_project(tmp_path)
     schema = _valid_django_schema()
     schema["sources"] = [
-        {"kind": "django_app", "name": "sales", "app_modules": [], "path_prefixes": ["/api/"]}
+        {
+            "kind": "django_app",
+            "name": "sales",
+            "app_modules": [],
+            "path_prefixes": ["/api/"],
+        }
     ]
     _write_schema_config(root, schema)
 
@@ -188,9 +193,7 @@ def test_load_fervis_project_config_rejects_undeclared_default_provider(
     assert isinstance(environments, dict)
     local = environments["local"]
     assert isinstance(local, dict)
-    local["models"] = {
-        "default": {"provider": "anthropic", "model_key": "claude"}
-    }
+    local["models"] = {"default": {"provider": "anthropic", "model_key": "claude"}}
     _write_schema_config(root, schema)
 
     problem = load_fervis_project_config(discover_project(root))
@@ -216,9 +219,7 @@ def _valid_django_schema() -> dict[str, object]:
         },
         "routes": {"prefix": "/fervis/"},
         "models": {
-            "providers": [
-                {"name": "openai", "allowed_model_keys": ["gpt-5.4-mini"]}
-            ],
+            "providers": [{"name": "openai", "allowed_model_keys": ["gpt-5.4-mini"]}],
         },
         "sources": [
             {

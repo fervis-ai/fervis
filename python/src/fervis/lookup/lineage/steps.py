@@ -17,7 +17,7 @@ from fervis.lineage.recorder import (
     SourceReadWrite,
 )
 from fervis.model_io.turn_artifacts import ModelTurnArtifact
-from fervis.lookup.orchestration.request import LookupRuntimePorts
+from fervis.lookup.orchestration.request import LineagePorts
 from fervis.lookup.lineage.errors import LineagePersistenceUnavailable
 from fervis.lookup.lineage.step_summaries import model_turn_output_summary
 from fervis.lookup.lineage.model_turns import model_turn_audit_write
@@ -258,7 +258,7 @@ class LineageRuntimeStepSink:
 
 
 def record_model_turn_step(
-    ports: LookupRuntimePorts,
+    ports: LineagePorts,
     *,
     purpose: str,
     turn: int,
@@ -281,7 +281,7 @@ def record_model_turn_step(
 
 
 def record_model_turn_audit(
-    ports: LookupRuntimePorts,
+    ports: LineagePorts,
     *,
     step: RunStepWrite | None,
     provider: str,
@@ -308,7 +308,7 @@ def record_model_turn_audit(
 
 
 def record_execution_step(
-    ports: LookupRuntimePorts,
+    ports: LineagePorts,
     *,
     program_id: str = "",
     invocation_id: str = "",
@@ -333,7 +333,7 @@ def record_execution_step(
 
 
 def record_step_source_context(
-    ports: LookupRuntimePorts,
+    ports: LineagePorts,
     *,
     step: RunStepWrite | None,
     catalog_endpoints: tuple[CatalogEndpointWrite, ...],
@@ -352,7 +352,7 @@ def record_step_source_context(
 
 
 def record_compile_step(
-    ports: LookupRuntimePorts,
+    ports: LineagePorts,
     *,
     program_id: str,
     invocation_id: str,
@@ -371,7 +371,7 @@ def record_compile_step(
 
 
 def record_program_contract_step(
-    ports: LookupRuntimePorts,
+    ports: LineagePorts,
     *,
     program_id: str,
     invocation_id: str,
@@ -387,14 +387,14 @@ def record_program_contract_step(
     )
 
 
-def compile_step_id(ports: LookupRuntimePorts) -> str | None:
+def compile_step_id(ports: LineagePorts) -> str | None:
     sink = _lineage_step_sink(ports)
     if sink is None:
         return None
     return sink.compile_step_id()
 
 
-def execution_step_id(ports: LookupRuntimePorts) -> str | None:
+def execution_step_id(ports: LineagePorts) -> str | None:
     sink = _lineage_step_sink(ports)
     if sink is None:
         return None
@@ -402,7 +402,7 @@ def execution_step_id(ports: LookupRuntimePorts) -> str | None:
 
 
 def model_turn_step_id(
-    ports: LookupRuntimePorts,
+    ports: LineagePorts,
     *,
     purpose: str,
     turn: int,
@@ -414,7 +414,7 @@ def model_turn_step_id(
 
 
 def record_render_step(
-    ports: LookupRuntimePorts,
+    ports: LineagePorts,
     *,
     kind: str,
     row_count: int,
@@ -438,7 +438,7 @@ def lineage_model_turn_output_summary(payload: dict[str, Any]) -> dict[str, Any]
     return model_turn_output_summary(payload)
 
 
-def _lineage_step_sink(ports: LookupRuntimePorts) -> Any | None:
+def _lineage_step_sink(ports: LineagePorts) -> LineageRuntimeStepSink | None:
     sink = ports.lineage_step_sink
     if sink is None and ports.lineage_required:
         raise LineagePersistenceUnavailable("lineage step sink is required")
@@ -447,8 +447,8 @@ def _lineage_step_sink(ports: LookupRuntimePorts) -> Any | None:
 
 def _model_turn_step_key(purpose: str) -> RunStepKey:
     try:
-        return _MODEL_TURN_STEP_KEYS[purpose]
-    except KeyError as exc:
+        return _MODEL_TURN_STEP_KEYS[ModelTurnPurpose(purpose)]
+    except (KeyError, ValueError) as exc:
         raise ValueError(
             f"unsupported model turn purpose for lineage: {purpose}"
         ) from exc

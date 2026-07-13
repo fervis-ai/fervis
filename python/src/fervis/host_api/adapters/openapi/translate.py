@@ -2,20 +2,24 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from dataclasses import dataclass
 
 from fervis.host_api.contracts import (
     CatalogEndpointContract,
+    CandidateKeyContract,
     EndpointContract,
+    EntityKeyComponentTargetContract,
+    EntityReferenceContract,
+    PaginationContract,
     ParameterContract,
     ResponseFieldContract,
 )
 
 from .document import normalized_get_operations
 from .model import OpenApiOperation
+from ..resource_names import endpoint_resource_names
 
 
 @dataclass(frozen=True)
@@ -31,6 +35,9 @@ class OpenApiEndpointEvidence:
     response_fields: tuple[ResponseFieldContract, ...]
     response_schema: dict[str, Any]
     response_cardinality: str
+    pagination: PaginationContract | None
+    candidate_keys: tuple[CandidateKeyContract, ...]
+    entity_references: tuple[EntityReferenceContract, ...]
 
 
 def endpoint_contracts_from_openapi(
@@ -71,12 +78,19 @@ def endpoint_evidence_from_openapi(
             path_template=operation.path_template,
             summary=operation.summary,
             tags=operation.tags,
-            resource_names=_resource_names(operation),
+            resource_names=endpoint_resource_names(
+                tags=operation.tags,
+                operation_id=operation.operation_id,
+                path_template=operation.path_template,
+            ),
             path_params=_parameters(operation, source="path"),
             query_params=_parameters(operation, source="query"),
             response_fields=_response_fields(operation.response_schema),
             response_schema=_schema_properties(operation.response_schema),
             response_cardinality=_response_cardinality(operation.response_schema),
+            pagination=operation.pagination,
+            candidate_keys=operation.candidate_keys,
+            entity_references=operation.entity_references,
         )
         for operation in normalized_get_operations(schema, path_prefixes=path_prefixes)
     )
@@ -104,9 +118,12 @@ def _endpoint_contract(
         response_schema=evidence.response_schema,
         response_schema_source="openapi",
         response_cardinality=evidence.response_cardinality,
+        pagination=evidence.pagination,
         query_schema_source="openapi",
         tags=evidence.tags,
         resource_names=evidence.resource_names or (source_name,),
+        candidate_keys=evidence.candidate_keys,
+        entity_references=evidence.entity_references,
         catalog_endpoint=CatalogEndpointContract(
             framework_kind=framework_kind,
             source_namespace_kind=source_namespace_kind,
@@ -131,21 +148,88 @@ def _parameters(
             description=parameter.description,
             choices=tuple(str(value) for value in parameter.schema.get("enum") or ()),
             source=source,
+            entity_target=_parameter_entity_target(
+                parameter.name,
+                source=source,
+                candidate_keys=operation.candidate_keys,
+            ),
         )
         for parameter in operation.parameters
         if parameter.location == source
     )
 
 
-def _response_fields(schema: dict[str, Any]) -> tuple[ResponseFieldContract, ...]:
-    return tuple(
-        ResponseFieldContract(
-            name=name,
-            path=name,
-            type=_schema_type(value if isinstance(value, dict) else {}),
-        )
-        for name, value in _schema_properties(schema).items()
+def _parameter_entity_target(
+    parameter_name: str,
+    *,
+    source: str,
+    candidate_keys: tuple[CandidateKeyContract, ...],
+) -> EntityKeyComponentTargetContract | None:
+    if source != "path":
+        return None
+    matches = tuple(
+        (key, component)
+        for key in candidate_keys
+        for component in key.components
+        if component.component_id == parameter_name
     )
+    if len(matches) != 1:
+        return None
+    key, component = matches[0]
+    return EntityKeyComponentTargetContract(
+        entity_kind=key.entity_kind,
+        key_id=key.key_id,
+        component_id=component.component_id,
+    )
+
+
+def _response_fields(schema: dict[str, Any]) -> tuple[ResponseFieldContract, ...]:
+    fields: list[ResponseFieldContract] = []
+    _collect_response_fields(_row_schema(schema), fields=fields, prefix="")
+    return tuple(fields)
+
+
+def _collect_response_fields(
+    schema: dict[str, Any],
+    *,
+    fields: list[ResponseFieldContract],
+    prefix: str,
+) -> None:
+    for name, raw_field_schema in _object_properties(schema).items():
+        field_schema = raw_field_schema if isinstance(raw_field_schema, dict) else {}
+        path = f"{prefix}.{name}" if prefix else name
+        field_type = _schema_type(field_schema)
+        fields.append(
+            ResponseFieldContract(
+                name=name,
+                path=path,
+                type=field_type,
+                description=str(field_schema.get("description") or ""),
+                choices=tuple(str(value) for value in field_schema.get("enum") or ()),
+            )
+        )
+        child_schema = _nested_object_schema(field_schema)
+        if child_schema:
+            _collect_response_fields(child_schema, fields=fields, prefix=path)
+
+
+def _row_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    if schema.get("type") != "array":
+        return schema
+    items = schema.get("items")
+    return items if isinstance(items, dict) else {}
+
+
+def _nested_object_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    if schema.get("type") == "array":
+        items = schema.get("items")
+        return items if isinstance(items, dict) else {}
+    return schema if _object_properties(schema) else {}
+
+
+def _object_properties(schema: dict[str, Any]) -> dict[str, Any]:
+    properties = schema.get("properties")
+    return properties if isinstance(properties, dict) else {}
 
 
 def _response_cardinality(schema: dict[str, Any]) -> str:
@@ -165,78 +249,3 @@ def _schema_type(schema: dict[str, Any]) -> str:
     if value == "number":
         return "decimal"
     return value
-
-
-def _resource_names(operation: OpenApiOperation) -> tuple[str, ...]:
-    names = [
-        *_phrases_from_tags(operation.tags),
-        _operation_resource_phrase(operation.operation_id),
-        _path_resource_phrase(operation.path_template),
-    ]
-    return tuple(dict.fromkeys(name for name in names if name))
-
-
-def _phrases_from_tags(tags: tuple[str, ...]) -> tuple[str, ...]:
-    return tuple(
-        phrase
-        for tag in tags
-        if (phrase := _words_to_phrase(_split_words(tag)))
-    )
-
-
-def _operation_resource_phrase(operation_id: str) -> str:
-    words = _split_words(operation_id)
-    while words and words[0] in {
-        "list",
-        "get",
-        "read",
-        "retrieve",
-        "search",
-        "find",
-        "fetch",
-    }:
-        words = words[1:]
-    return _words_to_phrase(words)
-
-
-def _path_resource_phrase(path_template: str) -> str:
-    segments = [
-        segment
-        for segment in str(path_template or "").strip("/").split("/")
-        if segment and not segment.startswith("{")
-    ]
-    return _words_to_phrase(_split_words(segments[-1] if segments else ""))
-
-
-def _split_words(value: str) -> tuple[str, ...]:
-    normalized = str(value or "").replace("-", "_").replace(" ", "_")
-    words: list[str] = []
-    for part in normalized.split("_"):
-        words.extend(
-            match.group(0).lower()
-            for match in re.finditer(
-                r"[A-Z]+(?=[A-Z][a-z]|$)|[A-Z]?[a-z]+|\d+",
-                part,
-            )
-        )
-    return tuple(words)
-
-
-def _words_to_phrase(words: tuple[str, ...]) -> str:
-    values = tuple(word for word in words if word)
-    if not values:
-        return ""
-    normalized = (*values[:-1], _singularize(values[-1]))
-    return " ".join(normalized)
-
-
-def _singularize(word: str) -> str:
-    if len(word) <= 3:
-        return word
-    if word.endswith("ies"):
-        return f"{word[:-3]}y"
-    if word.endswith("ses"):
-        return word[:-2]
-    if word.endswith("s") and not word.endswith("ss"):
-        return word[:-1]
-    return word

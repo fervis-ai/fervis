@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from html import escape
+from collections.abc import Mapping
 from typing import Any, Iterable
 
 from fervis.lookup.question_contract import RequestedFactAnswerOutput
@@ -483,6 +484,12 @@ def _source_alignment_candidate_xml_lines(
         "read": candidate.get("read_id"),
     }
     lines = [f"{indent}<source_candidate{_xml_attrs(attrs)}>"]
+    lines.extend(
+        _applied_filters_xml_lines(
+            candidate.get("applied_filters"),
+            indent=indent + "  ",
+        )
+    )
     read_id = candidate.get("read_id")
     if read_id:
         lines.append(f"{indent}  <api_read read={_xml_quote(read_id)}>")
@@ -638,7 +645,7 @@ def _source_member_xml_lines(member: dict[str, Any], *, indent: str) -> list[str
     )
     if member.get("population_bindings"):
         lines.append(f"{indent}  <population_bindings>")
-        for binding in member.get("population_bindings") or ():
+        for binding in _array(member.get("population_bindings")):
             if isinstance(binding, dict):
                 lines.append(f"{indent}    <population{_xml_attrs(binding)} />")
         lines.append(f"{indent}  </population_bindings>")
@@ -654,7 +661,7 @@ def _source_member_xml_lines(member: dict[str, Any], *, indent: str) -> list[str
 
 
 def _binding_params_xml_lines(params: object, *, indent: str) -> list[str]:
-    param_items = tuple(param for param in params or () if isinstance(param, dict))
+    param_items = tuple(param for param in _array(params) if isinstance(param, dict))
     if not param_items:
         return []
     lines = [f"{indent}<binding_params>"]
@@ -671,14 +678,16 @@ def _binding_params_xml_lines(params: object, *, indent: str) -> list[str]:
             if key in param
         }
         lines.append(f"{indent}  <param{_xml_attrs(attrs)}>")
-        choices = tuple(str(choice) for choice in param.get("choices") or ())
+        choices = tuple(str(choice) for choice in _array(param.get("choices")))
         if choices:
             lines.append(f"{indent}    <choices>")
             for choice in choices:
                 lines.append(f"{indent}      <choice value={_xml_quote(choice)} />")
             lines.append(f"{indent}    </choices>")
         binding_values = tuple(
-            item for item in param.get("binding_values") or () if isinstance(item, dict)
+            item
+            for item in _array(param.get("binding_values"))
+            if isinstance(item, dict)
         )
         if binding_values:
             lines.append(f"{indent}    <binding_values>")
@@ -693,7 +702,7 @@ def _binding_params_xml_lines(params: object, *, indent: str) -> list[str]:
             lines.append(f"{indent}    </binding_values>")
         decision_options = tuple(
             option
-            for option in param.get("decision_options") or ()
+            for option in _array(param.get("decision_options"))
             if isinstance(option, dict)
         )
         if decision_options:
@@ -711,7 +720,7 @@ def _binding_params_xml_lines(params: object, *, indent: str) -> list[str]:
         )
         profiles = tuple(
             item
-            for item in param.get("normal_instance_role_profiles") or ()
+            for item in _array(param.get("normal_instance_role_profiles"))
             if isinstance(item, dict)
         )
         if profiles:
@@ -731,7 +740,7 @@ def _binding_params_xml_lines(params: object, *, indent: str) -> list[str]:
                 )
                 excluded_roles = tuple(
                     item
-                    for item in profile.get("excluded_state_roles") or ()
+                    for item in _array(profile.get("excluded_state_roles"))
                     if isinstance(item, dict)
                 )
                 if excluded_roles:
@@ -753,7 +762,9 @@ def _binding_params_xml_lines(params: object, *, indent: str) -> list[str]:
 
 
 def _row_predicates_xml_lines(predicates: object, *, indent: str) -> list[str]:
-    predicate_items = tuple(item for item in predicates or () if isinstance(item, dict))
+    predicate_items = tuple(
+        item for item in _array(predicates) if isinstance(item, dict)
+    )
     if not predicate_items:
         return []
     lines = [f"{indent}<row_predicates>"]
@@ -768,7 +779,9 @@ def _row_predicates_xml_lines(predicates: object, *, indent: str) -> list[str]:
             "default": predicate.get("default"),
         }
         lines.append(f"{indent}  <predicate{_xml_attrs(attrs)}>")
-        values = tuple(str(value) for value in predicate.get("allowed_values") or ())
+        values = tuple(
+            str(value) for value in _array(predicate.get("allowed_values"))
+        )
         if values:
             lines.append(f"{indent}    <values>")
             for value in values:
@@ -807,7 +820,9 @@ def _population_contract_xml_lines(contract: object, *, indent: str) -> list[str
             "default_label": omission.get("default_label"),
         }
         lines.append(f"{indent}  <omission_behavior{_xml_attrs(omission_attrs)}>")
-        for consequence in omission.get("omission_consequence_by_requested_fact") or ():
+        for consequence in _array(
+            omission.get("omission_consequence_by_requested_fact")
+        ):
             if isinstance(consequence, dict):
                 lines.append(
                     f"{indent}    <requested_fact_effect{_xml_attrs(consequence)} />"
@@ -818,12 +833,16 @@ def _population_contract_xml_lines(contract: object, *, indent: str) -> list[str
 
 
 def _applied_filters_xml_lines(filters: object, *, indent: str) -> list[str]:
-    filter_items = tuple(item for item in filters or () if isinstance(item, dict))
+    filter_items = tuple(item for item in _array(filters) if isinstance(item, dict))
     if not filter_items:
         return []
     lines = [f"{indent}<applied_filters>"]
     for item in filter_items:
-        lines.append(f"{indent}  <filter{_xml_attrs(item)} />")
+        attrs = {
+            **item,
+            "field_ids": _space_separated(item.get("field_ids")),
+        }
+        lines.append(f"{indent}  <filter{_xml_attrs(attrs)} />")
     lines.append(f"{indent}</applied_filters>")
     return lines
 
@@ -833,7 +852,7 @@ def _applicable_known_inputs_xml_lines(
     *,
     indent: str,
 ) -> list[str]:
-    input_items = tuple(item for item in inputs or () if isinstance(item, dict))
+    input_items = tuple(item for item in _array(inputs) if isinstance(item, dict))
     if not input_items:
         return []
     lines = [f"{indent}<applicable_known_inputs>"]
@@ -844,7 +863,7 @@ def _applicable_known_inputs_xml_lines(
 
 
 def _population_roles_xml_lines(roles: object, *, indent: str) -> list[str]:
-    role_items = tuple(item for item in roles or () if isinstance(item, dict))
+    role_items = tuple(item for item in _array(roles) if isinstance(item, dict))
     if not role_items:
         return []
     lines = [f"{indent}<population_roles>"]
@@ -870,7 +889,9 @@ def _fulfillment_choices_xml_lines(
         model_visible_fulfillment_evidence,
     )
 
-    choice_items = tuple(choice for choice in choices or () if isinstance(choice, dict))
+    choice_items = tuple(
+        choice for choice in _array(choices) if isinstance(choice, dict)
+    )
     if not choice_items:
         return []
     lines = [f"{indent}<fulfillment_choices>"]
@@ -888,7 +909,7 @@ def _fulfillment_choices_xml_lines(
 
 
 def _input_params_xml_lines(params: object, *, indent: str) -> list[str]:
-    param_items = tuple(param for param in params or () if isinstance(param, dict))
+    param_items = tuple(param for param in _array(params) if isinstance(param, dict))
     if not param_items:
         return []
     lines = [f"{indent}<input_params>"]
@@ -917,7 +938,7 @@ def _flat_fields_xml_lines(
     tag: str = "field",
     container_tag: str = "fields",
 ) -> list[str]:
-    field_items = tuple(item for item in fields or () if isinstance(item, dict))
+    field_items = tuple(item for item in _array(fields) if isinstance(item, dict))
     if not field_items:
         return []
     lines = [f"{indent}<{container_tag}>"]
@@ -996,7 +1017,11 @@ def _rows_by_parent(
     return {key: tuple(value) for key, value in output.items()}
 
 
-def _xml_attrs(attrs: dict[str, object]) -> str:
+def _array(value: object) -> tuple[object, ...]:
+    return tuple(value) if isinstance(value, (list, tuple)) else ()
+
+
+def _xml_attrs(attrs: Mapping[str, object]) -> str:
     rendered = [
         f"{key}={_xml_quote(value)}"
         for key, value in attrs.items()

@@ -14,8 +14,8 @@ from fervis.lookup.answer_rendering import (
     rendered_fact_text,
 )
 from fervis.lookup.orchestration.request import (
+    LineagePorts,
     LookupRequest,
-    LookupRuntimePorts,
 )
 from fervis.lookup.orchestration.result import LookupResult
 from fervis.lookup.lineage.steps import record_render_step
@@ -30,7 +30,7 @@ from fervis.lookup.lineage.results import (
 def _synthesize_result(
     *,
     request: LookupRequest,
-    ports: LookupRuntimePorts,
+    ports: LineagePorts,
     fact_result: FactResult,
     status: str,
     usage: dict[str, Any],
@@ -43,7 +43,7 @@ def _synthesize_result(
     execute_step_id: str | None = None,
     proof_graph: Any = None,
     answer_plan: Any = None,
-    proof_node_refs_by_render_output_id: dict[str, tuple[str, ...]] | None = None,
+    proof_node_refs_by_result_output_id: dict[str, tuple[str, ...]] | None = None,
     conversation_resolution_activation: dict[str, Any] | None = None,
 ) -> LookupResult:
     rendered = render_fact_result(fact_result)
@@ -68,8 +68,8 @@ def _synthesize_result(
             render_step_id=render_step.step_id if render_step is not None else None,
             proof_graph=proof_graph,
             answer_plan=answer_plan,
-            proof_node_refs_by_render_output_id=(
-                proof_node_refs_by_render_output_id or {}
+            proof_node_refs_by_result_output_id=(
+                proof_node_refs_by_result_output_id or {}
             ),
             grounded_values=grounded_values,
             extra_fact_addresses=extra_fact_addresses,
@@ -109,7 +109,7 @@ def _synthesize_result(
 def _lineage_failure_result(
     *,
     request: LookupRequest,
-    ports: LookupRuntimePorts,
+    ports: LineagePorts,
     render_step_id: str | None,
     message: str,
     usage: dict[str, Any],
@@ -131,7 +131,7 @@ def _lineage_failure_result(
 def _rendered_lookup_result(
     *,
     request: LookupRequest,
-    ports: LookupRuntimePorts,
+    ports: LineagePorts,
     fact_result: FactResult,
     rendered: RenderedFact,
     status: str,

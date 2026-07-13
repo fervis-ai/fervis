@@ -29,11 +29,12 @@ input:
             path: data.variant_id
             row_path_id: data
             type: string
-            identity: {entity_ref: variant, identity_field: variant_id, primary_key: true, stable: true}
           - ref: field.candidate.variant_name
             path: data.variant_name
             row_path_id: data
             type: string
+        candidate_keys:
+          - {id: primary_key, entity_kind: variant, primary: true, components: [{id: variant_id, field_ref: field.candidate.variant_id}], context_field_refs: [field.candidate.variant_name]}
       - id: observed_read
         endpoint_name: observed_read
         resource_names: [variant]
@@ -46,7 +47,8 @@ input:
             path: data.variant_id
             row_path_id: data
             type: string
-            identity: {entity_ref: variant, identity_field: variant_id, primary_key: true, stable: true}
+        candidate_keys:
+          - {id: primary_key, entity_kind: variant, primary: true, components: [{id: variant_id, field_ref: field.observed.variant_id}]}
   fact_plan:
     outcome:
       kind: fact_plan
@@ -57,8 +59,6 @@ input:
           candidate:
             source: {kind: read, read_id: candidate_read}
             identity_fields: [variant_id]
-            output_fields:
-              - {field_id: variant_name}
           observed:
             source: {kind: read, read_id: observed_read}
             identity_fields: [variant_id]
@@ -73,4 +73,8 @@ input:
 expect:
   result_contains:
     status: COMPLETED
-    answer: Variant Two
+    rendered_rows:
+      - answer_1:
+          entityKind: variant
+          keyId: primary_key
+          components: {variant_id: variant_2}

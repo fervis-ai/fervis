@@ -27,6 +27,7 @@ input:
       owned_question_input_refs: []
   answer_outputs:
   - description: number of shifts
+    role: ANSWER_VALUE
   question_inputs:
   - input_ref: period
     source: question_context

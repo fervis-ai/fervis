@@ -179,7 +179,7 @@ interface request
 -> Question + immutable QuestionRun
 -> queued RunWork
 -> LookupService
--> terminalization
+-> answer, factual terminal, visible failure, or waiting for clarification
 -> interface projection
 ```
 
@@ -245,9 +245,9 @@ typed resolved meaning, never a freehand integrated rewrite.
 
 Lineage recording is interleaved throughout the run, not appended after the
 answer. Model turns, endpoint snapshots, source reads, compile steps, execution,
-facts, clarification, and terminal results record their canonical artifacts as
-they occur. Required lineage is fail-closed: a successful factual answer cannot
-outlive failure to persist its audit truth.
+facts, clarification requests and responses, and terminal results record their
+canonical artifacts as they occur. Required lineage is fail-closed: a successful
+factual answer cannot outlive failure to persist its audit truth.
 
 ## Model Turn Boundaries
 
@@ -314,6 +314,8 @@ Conversation
   -> Question
     -> QuestionRun
       -> RunStep
+        -> ClarificationRequest
+          -> ClarificationResponse
       -> ModelCall / ModelCallUsage / RunArtifact
       -> CatalogEndpoint / SourceRead
       -> ProgramInvocation (BindingSet / BindingPatch)
@@ -322,7 +324,6 @@ Conversation
       -> RequestedFact
         -> FactResult
           -> ExecutionProofGraph
-          -> ClarificationRequest
           -> AnswerOutput
       -> RunResult
         -> Answer
@@ -333,11 +334,12 @@ Conversation
 ```
 
 `QuestionRun` identity, execution kind, trigger, and ancestry are immutable once
-written. A clarification response and a deterministic rerun create new runs on
-the same `Question`; an ordinary conversational follow-up creates a new
+written. A clarification makes the current run wait; its typed response resumes
+another execution attempt inside that run. A deterministic rerun creates a new
+run on the same `Question`; an ordinary conversational follow-up creates a new
 `Question` in the same conversation. Retriable worker or provider execution
-attempts may remain within one run and are distinguished by attempt metadata;
-they do not rewrite question, run, or invocation identity.
+attempts remain within one run and are distinguished by attempt metadata; they
+do not rewrite question, run, or invocation identity.
 
 `QuestionRun.kind` answers whether the run began from natural language or a
 closed program invocation. It intentionally groups full compilation and
@@ -353,12 +355,20 @@ truth.
 
 ## Clarification And Memory
 
-Clarification is a continuation of the same question. The runtime records a
-`needs_clarification` fact result, structured clarification details, a
-`ClarificationRequest`, and then a new run when the user answers.
+Clarification is a waiting state inside the same question run, not a terminal fact
+result and not a child run. The producing step records a structured
+`ClarificationRequest`; run work enters `WAITING_FOR_CLARIFICATION` without writing a
+`RunResult`, `FactResult`, or answer. A typed `ClarificationResponse` belongs to
+that request and run, requeues the same run, and begins its next attempt. The run
+gets exactly one terminal result after it eventually answers, reaches another
+factual terminal, or fails visibly.
+
 Clarification question text, options, and client-facing display are projections
-of the structured clarification payload; lineage and storage must preserve the
-payload rather than reducing it to prose.
+of the structured clarification payload. Lineage preserves the payload rather
+than reducing it to prose. A selected option carries its canonical value and
+grounding authority into the resumed attempt; the response fragment is not
+treated as a fresh natural-language question or reconstructed through
+conversation memory.
 
 Memory is not a shortcut around proof. Successful prior requests project typed
 context sources and backend-owned canonical frames. A frame separates fixed

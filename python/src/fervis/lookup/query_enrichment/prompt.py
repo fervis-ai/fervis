@@ -12,6 +12,7 @@ from fervis.lookup.turn_prompts import (
 from fervis.lookup.question_contract.answer_output_support import (
     ANSWER_OUTPUT_SUPPORT_ROLE_VALUES,
 )
+from fervis.lookup.question_contract import RequestedFactLiteralInput
 from fervis.lookup.turn_prompts.projections import answer_output_prompt_payload
 from fervis.lookup.query_enrichment.model import (
     QueryEnrichmentRequest,
@@ -71,8 +72,7 @@ class QueryEnrichmentTurnPrompt(TurnPromptBase):
             ),
             builder.instruction_block(
                 "Conversation Resolution Annotations",
-                (
-                ),
+                (),
             ),
             builder.instruction_block(
                 "Answer Output Resource Lineage",
@@ -193,17 +193,19 @@ class QueryEnrichmentTurnPrompt(TurnPromptBase):
         targets: dict[str, dict[str, object]] = {}
         for fact in self.request.requested_facts:
             for known in fact.known_inputs:
-                if not known.is_reference_value:
-                    continue
-                targets.setdefault(
-                    known.id,
-                    {
-                        "target_id": known.id,
-                        "reference_text": known.text,
-                        "resolved_value_text": known.resolved_value_text,
-                        "value_meaning_hint": known.value_meaning_hint,
-                    },
-                )
+                match known:
+                    case RequestedFactLiteralInput() if known.is_reference_value:
+                        targets.setdefault(
+                            known.id,
+                            {
+                                "target_id": known.id,
+                                "reference_text": known.text,
+                                "resolved_value_text": known.resolved_value_text,
+                                "value_meaning_hint": known.value_meaning_hint,
+                            },
+                        )
+                    case _:
+                        continue
         return {"entity_targets": list(targets.values())}
 
     def api_catalog_vocabulary_payload(self) -> dict[str, object]:

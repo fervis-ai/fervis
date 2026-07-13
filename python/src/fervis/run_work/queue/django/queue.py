@@ -8,6 +8,7 @@ from django.db import IntegrityError, models, transaction
 from django.db.models import Count, Q
 from django.utils import timezone
 
+from fervis.host_api.contracts.authority import ReadContextRef
 from fervis.lineage.django.runtime_failures import (
     record_worker_runtime_error,
 )
@@ -35,8 +36,7 @@ class ActiveRunConflict(Exception):
 class StaleRunLease(RuntimeError):
     def __init__(self, *, run_id: str, worker_id: str, active_attempt: int) -> None:
         super().__init__(
-            f"stale Fervis run lease for {run_id}: "
-            f"{worker_id} attempt {active_attempt}"
+            f"stale Fervis run lease for {run_id}: {worker_id} attempt {active_attempt}"
         )
         self.run_id = run_id
         self.worker_id = worker_id
@@ -53,13 +53,6 @@ def reset_question_run_queue_for_tests() -> None:
     RunWorkItem.objects.all().delete()
 
 
-def work_item_snapshot_for_run(run_id: str) -> dict[str, Any] | None:
-    item = RunWorkItem.objects.filter(run_id=str(run_id)).first()
-    if item is None:
-        return None
-    return _work_item_snapshot(item)
-
-
 def get_work_item_for_run(run_id: str) -> RunWorkItem:
     return RunWorkItem.objects.get(run_id=str(run_id))
 
@@ -67,27 +60,35 @@ def get_work_item_for_run(run_id: str) -> RunWorkItem:
 def find_idempotent_work_item(
     *,
     tenant_id: str,
+    principal_id: str,
+    read_context_ref: ReadContextRef,
     conversation_id: str | None,
     idempotency_key: str | None,
+    idempotency_scope: str,
 ) -> RunWorkItem | None:
     if not idempotency_key:
         return None
     rows = RunWorkItem.objects.filter(
         tenant_id=tenant_id,
+        user_id=principal_id,
         idempotency_key=idempotency_key,
+        idempotency_scope=idempotency_scope,
     )
     if conversation_id is not None:
         rows = rows.filter(conversation_id=conversation_id)
-    return rows.order_by("created_at").first()
+    return next(
+        (
+            item
+            for item in rows.order_by("created_at")
+            if read_context_ref.matches_storage_dict(item.read_context_ref or {})
+        ),
+        None,
+    )
 
 
 def queue_counts() -> dict[str, int]:
     counts = {status.value: 0 for status in RunWorkStatus}
-    rows = (
-        RunWorkItem.objects.values("status")
-        .order_by()
-        .annotate(count=Count("id"))
-    )
+    rows = RunWorkItem.objects.values("status").order_by().annotate(count=Count("id"))
     for row in rows:
         counts[str(row["status"])] = int(row["count"])
     now = timezone.now()
@@ -120,8 +121,15 @@ def enqueue_run_work_item(
     if idempotency_key:
         existing = find_idempotent_work_item(
             tenant_id=tenant_id,
-            conversation_id=conversation_id,
+            principal_id=submission.principal.principal_id,
+            read_context_ref=submission.principal.read_context_ref,
+            conversation_id=(
+                None
+                if submission.idempotency_scope == "new_conversation"
+                else conversation_id
+            ),
             idempotency_key=idempotency_key,
+            idempotency_scope=submission.idempotency_scope,
         )
         if existing is not None:
             return EnqueuedRunWorkItem(item=existing, created=False)
@@ -146,9 +154,11 @@ def enqueue_run_work_item(
             now = timezone.now()
             lease_until = now + timedelta(seconds=INLINE_RUN_LEASE_SECONDS)
             execution_spec = execution_spec_to_storage_dict(submission.spec)
-            execution_spec["runtime_context"] = runtime_context_with_delegated_credential(
-                submission.spec.runtime_context,
-                submission.principal.delegated_credential,
+            execution_spec["runtime_context"] = (
+                runtime_context_with_delegated_credential(
+                    submission.spec.runtime_context,
+                    submission.principal.delegated_credential,
+                )
             )
             return EnqueuedRunWorkItem(
                 item=RunWorkItem.objects.create(
@@ -156,15 +166,15 @@ def enqueue_run_work_item(
                     conversation_id=conversation_id,
                     tenant_id=tenant_id,
                     user_id=submission.principal.principal_id,
-                    status=RunWorkStatus.RUNNING
-                    if inline
-                    else RunWorkStatus.QUEUED,
+                    status=RunWorkStatus.RUNNING if inline else RunWorkStatus.QUEUED,
                     spec_kind=execution_spec_kind(submission.spec).value,
                     execution_spec=execution_spec,
                     read_context_ref=(
                         submission.principal.read_context_ref.to_storage_dict()
                     ),
                     idempotency_key=idempotency_key or None,
+                    idempotency_authority_ref=(submission.idempotency_authority_ref),
+                    idempotency_scope=submission.idempotency_scope,
                     attempt_count=1 if inline else 0,
                     active_attempt=1 if inline else 0,
                     lease_owner="inline" if inline else None,
@@ -177,8 +187,15 @@ def enqueue_run_work_item(
         if idempotency_key:
             existing = find_idempotent_work_item(
                 tenant_id=tenant_id,
-                conversation_id=conversation_id,
+                principal_id=submission.principal.principal_id,
+                read_context_ref=submission.principal.read_context_ref,
+                conversation_id=(
+                    None
+                    if submission.idempotency_scope == "new_conversation"
+                    else conversation_id
+                ),
                 idempotency_key=idempotency_key,
+                idempotency_scope=submission.idempotency_scope,
             )
             if existing is not None:
                 return EnqueuedRunWorkItem(item=existing, created=False)
@@ -207,6 +224,7 @@ def _active_work_item(
         status__in=[
             RunWorkStatus.QUEUED,
             RunWorkStatus.RUNNING,
+            RunWorkStatus.WAITING_FOR_CLARIFICATION,
         ],
     )
     return rows.order_by("created_at").first()
@@ -219,6 +237,7 @@ def reconcile_active_work_items(*, tenant_id: str, conversation_id: str) -> None
         status__in=[
             RunWorkStatus.QUEUED,
             RunWorkStatus.RUNNING,
+            RunWorkStatus.WAITING_FOR_CLARIFICATION,
         ],
     )
     for item in active_items:
@@ -230,9 +249,7 @@ def reconcile_work_item_from_terminal_lineage(item: RunWorkItem) -> bool:
     if status is None:
         return False
     terminal_status = (
-        RunWorkStatus.COMPLETED
-        if status in {"COMPLETED", "NEEDS_CLARIFICATION"}
-        else RunWorkStatus.FAILED
+        RunWorkStatus.COMPLETED if status == "COMPLETED" else RunWorkStatus.FAILED
     )
     item.status = terminal_status
     item.completed_at = timezone.now()
@@ -292,8 +309,7 @@ def claim_run_work_items(
     return [
         item
         for item in claimed
-        if item.status == RunWorkStatus.RUNNING
-        and item.lease_owner == worker_id
+        if item.status == RunWorkStatus.RUNNING and item.lease_owner == worker_id
     ]
 
 
@@ -334,9 +350,7 @@ def mark_work_item_terminal(
     error: str = "",
 ) -> None:
     terminal_status = (
-        RunWorkStatus.COMPLETED
-        if status in {"COMPLETED", "NEEDS_CLARIFICATION"}
-        else RunWorkStatus.FAILED
+        RunWorkStatus.COMPLETED if status == "COMPLETED" else RunWorkStatus.FAILED
     )
     RunWorkItem.objects.filter(run_id=run_id).update(
         status=terminal_status,
@@ -354,7 +368,7 @@ def require_current_run_lease(
     active_attempt: int,
     lock: bool = False,
 ) -> RunWorkItem:
-    rows = RunWorkItem.objects
+    rows = RunWorkItem.objects.all()
     if lock:
         rows = rows.select_for_update()
     item = rows.get(run_id=run_id)
@@ -380,9 +394,7 @@ def mark_work_item_terminal_for_current_lease(
     error: str = "",
 ) -> None:
     terminal_status = (
-        RunWorkStatus.COMPLETED
-        if status in {"COMPLETED", "NEEDS_CLARIFICATION"}
-        else RunWorkStatus.FAILED
+        RunWorkStatus.COMPLETED if status == "COMPLETED" else RunWorkStatus.FAILED
     )
     updated = RunWorkItem.objects.filter(
         run_id=run_id,
@@ -412,19 +424,3 @@ def _claimable_filter(now):
         lease_expires_at__lt=now,
     )
     return queued_ready | expired_running
-
-
-def _work_item_snapshot(item: RunWorkItem) -> dict[str, Any]:
-    return {
-        "status": item.status,
-        "attemptCount": item.attempt_count,
-        "activeAttempt": item.active_attempt,
-        "leaseOwner": item.lease_owner,
-        "leaseExpiresAt": item.lease_expires_at.isoformat()
-        if item.lease_expires_at
-        else None,
-        "lastError": item.last_error,
-        "createdAt": item.created_at.isoformat() if item.created_at else None,
-        "startedAt": item.started_at.isoformat() if item.started_at else None,
-        "completedAt": item.completed_at.isoformat() if item.completed_at else None,
-    }

@@ -233,7 +233,7 @@ def test_lookup_cutover_uses_query_enrichment_resource_name_for_selection():
 def test_lookup_cutover_uses_query_enrichment_terms_for_catalog_selection():
     planner = _ToolNamePlannerPort(
         responses={
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="sales amount",
                 answer_subject="booked money",
                 parts=("sales amount",),
@@ -312,7 +312,7 @@ def test_lookup_cutover_uses_query_enrichment_terms_for_catalog_selection():
     )
 
     assert planner.tool_names == [
-        "submit_answer_request_contract",
+        "submit_question_contract_outcome",
         "submit_query_enrichment",
         "submit_read_eligibility",
         "submit_source_alignment_reviews",
@@ -342,6 +342,9 @@ def test_lookup_cutover_uses_query_enrichment_resource_for_catalog_selection():
             description="payment card full number",
             subject_text="payment card number",
             binding_target_ids=("full_number",),
+            answer_expression_family=(
+                RequestedFactAnswerExpressionFamily.LIST_ROWS
+            ),
         ),
         query_enrichment=_query_enrichment_payload(
             ("payment",),

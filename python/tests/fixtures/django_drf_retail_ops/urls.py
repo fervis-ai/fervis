@@ -12,4 +12,3 @@ urlpatterns = [
     ),
     path("reports/", include("tests.fixtures.django_drf_retail_ops.reports.urls")),
 ]
-

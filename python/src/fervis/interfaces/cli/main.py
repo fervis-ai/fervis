@@ -101,28 +101,28 @@ def _sql_runtime_main(args: tuple[str, ...], *, project) -> int:
                 RunWorkServiceWorker,
             )
 
-            bundle = sql_storage_bundle(project=project, loaded_config=loaded)
-            return run_fervis(
-                args,
-                ports=FervisCliPorts(
-                    lineage_query=bundle.lineage_query,
-                    observability_query=bundle.observability_query,
-                    prompt_capture_query=bundle.prompt_capture_query,
-                    questions=bundle.questions,
-                    project=project,
-                    question_run_follower=LocalQueuedRunFollower(
-                        run_work=bundle.run_work,
-                        work_queue=SQLWorkItemQueue(bundle.engine),
+            with sql_storage_bundle(project=project, loaded_config=loaded) as bundle:
+                return run_fervis(
+                    args,
+                    ports=FervisCliPorts(
+                        lineage_query=bundle.lineage_query,
+                        observability_query=bundle.observability_query,
+                        prompt_capture_query=bundle.prompt_capture_query,
+                        questions=bundle.questions,
+                        project=project,
+                        question_run_follower=LocalQueuedRunFollower(
+                            run_work=bundle.run_work,
+                            work_queue=SQLWorkItemQueue(bundle.engine),
+                        ),
+                        run_worker=RunWorkBatchProcessor(
+                            worker=RunWorkServiceWorker(bundle.run_work),
+                            work_queue=SQLWorkItemQueue(bundle.engine),
+                        ),
+                        model_policy=ConfiguredModelPolicy.from_config(
+                            loaded.config.model
+                        ),
                     ),
-                    run_worker=RunWorkBatchProcessor(
-                        worker=RunWorkServiceWorker(bundle.run_work),
-                        work_queue=SQLWorkItemQueue(bundle.engine),
-                    ),
-                    model_policy=ConfiguredModelPolicy.from_config(
-                        loaded.config.model
-                    ),
-                ),
-            )
+                )
     except RuntimeError as error:
         return run_blocked_command(args, project=project, reason=str(error))
 

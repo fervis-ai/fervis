@@ -44,16 +44,16 @@ def _same_scope_api_candidate_payloads(
 
     candidate_counts: dict[tuple[str, str], int] = {}
     for scope, _source in items:
-        key = (scope.memory_relation_id, scope.read_id)
-        candidate_counts[key] = candidate_counts.get(key, 0) + 1
+        count_key = (scope.memory_relation_id, scope.read_id)
+        candidate_counts[count_key] = candidate_counts.get(count_key, 0) + 1
 
     output: list[dict[str, Any]] = []
     grouped: dict[
         tuple[str, str, str], tuple[list[_SameScopeReadScope], RowSource]
     ] = {}
     for scope, source in items:
-        key = (scope.memory_relation_id, scope.read_id, source.id)
-        scopes, _source = grouped.setdefault(key, ([], source))
+        group_key = (scope.memory_relation_id, scope.read_id, source.id)
+        scopes, _source = grouped.setdefault(group_key, ([], source))
         scopes.append(scope)
     seen: set[str] = set()
     for (memory_relation_id, read_id, _source_id), (scopes, source) in grouped.items():

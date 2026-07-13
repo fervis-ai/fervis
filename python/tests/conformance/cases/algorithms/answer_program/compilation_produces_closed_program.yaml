@@ -11,14 +11,15 @@ input:
     - parameter_id: question.store_ids
       value:
         kind: identity_set
-        identity_type: store
-        identity_field: store_id
+        entity_kind: store
+        key_id: primary_key
+        key_component_id: store_id
         values: [store_1]
       provenance: {kind: question_input}
 expect:
   result_contains:
     status: compiled
-    program_id: ap_96075a44a602faa2c38e409e85f7c9d9f048d294d2b85b0c9e2f395ec08e7997
+    program_id: ap_5db3a7abbc7368ab9fc17a635c25908fa8026f72f49c7e92255773d75d79b463
     bindings:
       question.store_ids: [store_1]
     compatibility:
@@ -32,7 +33,7 @@ expect:
         - source.read_relation
       source_keys: [{kind: catalog_read, source_id: sales}]
     program:
-      schema_revision: 1
+      schema_revision: 2
       program:
         fields:
           relations:

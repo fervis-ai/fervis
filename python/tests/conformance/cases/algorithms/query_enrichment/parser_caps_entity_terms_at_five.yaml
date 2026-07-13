@@ -22,6 +22,7 @@ input:
       description: booked money total
       answer_outputs:
       - id: answer_1
+        role: ANSWER_VALUE
       known_inputs:
       - id: entity_1
         kind: literal_text

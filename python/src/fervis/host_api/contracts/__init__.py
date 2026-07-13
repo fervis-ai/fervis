@@ -2,7 +2,14 @@
 
 from .endpoint import (
     CatalogEndpointContract,
+    CandidateKeyContract,
+    CandidateKeyComponentContract,
+    CandidateKeyAuthorityComponentContract,
+    CandidateKeyAuthorityContract,
     EndpointContract,
+    EntityKeyComponentTargetContract,
+    EntityReferenceComponentContract,
+    EntityReferenceContract,
     FrameworkKind,
     ParameterContract,
     ResponseFieldContract,
@@ -16,6 +23,7 @@ from .authority import (
 )
 from .execution import CompiledReadRequest, ReadTransportOverlay
 from .read import ReadInvocation
+from .pagination import PaginationContract, PaginationKind
 from .response_conformance import (
     DeclaredResponseShape,
     ObservedResponseShape,
@@ -28,13 +36,22 @@ from fervis.host_api.contracts.credentials import DelegatedReadCredential
 
 __all__ = [
     "CatalogEndpointContract",
+    "CandidateKeyContract",
+    "CandidateKeyComponentContract",
+    "CandidateKeyAuthorityComponentContract",
+    "CandidateKeyAuthorityContract",
     "CompiledReadRequest",
     "DeclaredResponseShape",
     "DelegatedReadCredential",
     "EndpointContract",
+    "EntityKeyComponentTargetContract",
+    "EntityReferenceComponentContract",
+    "EntityReferenceContract",
     "FrameworkKind",
     "ObservedResponseShape",
     "ParameterContract",
+    "PaginationContract",
+    "PaginationKind",
     "ResponseFieldContract",
     "ResponseConformanceResult",
     "ReadAuthority",

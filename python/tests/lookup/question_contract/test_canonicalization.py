@@ -14,9 +14,17 @@ from fervis.lookup.question_contract import (
     RequestedFactAnswerOutput,
     RequestedFactKnownInput,
     RequestedFactLiteralInput,
+    ResultSelectionKind,
     build_answer_request_contract_schema,
     parse_question_contract,
 )
+
+
+def _decision_payload(outcome: dict[str, object]) -> dict[str, object]:
+    return {
+        "decision_basis": "The current wording identifies the requested fact.",
+        "outcome": outcome,
+    }
 
 
 def _single_input_payload(question_input: dict[str, object]) -> dict[str, object]:
@@ -51,7 +59,9 @@ def _single_input_payload(question_input: dict[str, object]) -> dict[str, object
                         }
                     ],
                 },
-                "answer_outputs": [{"description": "sales total"}],
+                "answer_outputs": [
+                    {"description": "sales total", "role": "ANSWER_VALUE"}
+                ],
                 "used_question_inputs": [input_ref],
             }
         ],
@@ -68,10 +78,11 @@ def _time_input(input_id: str, text: str) -> RequestedFactKnownInput:
     )
 
 
-def test_requested_fact_answer_output_serializes_description_only():
+def test_requested_fact_answer_output_serializes_its_computation_role():
     output = RequestedFactAnswerOutput(
         id="answer_1",
         description="the amount she made yesterday",
+        role="MEASURED_VALUE",
     )
     fact = RequestedFact(
         id="fact_1",
@@ -82,12 +93,55 @@ def test_requested_fact_answer_output_serializes_description_only():
     assert output.to_model_dict() == {
         "id": "answer_1",
         "description": "the amount she made yesterday",
+        "role": "MEASURED_VALUE",
     }
     assert fact.answer_request_model_dict()["answer_outputs"] == [
         {
             "description": "the amount she made yesterday",
+            "role": "MEASURED_VALUE",
         }
     ]
+
+
+def test_answer_output_schema_requires_a_computation_role():
+    schema = build_answer_request_contract_schema()
+    answer_output_schema = schema["properties"]["answer_requests"]["items"][
+        "properties"
+    ]["answer_outputs"]["items"]
+
+    assert answer_output_schema["required"] == ["description", "role"]
+
+
+def test_ranked_selection_remains_one_catalog_blind_answer_shape():
+    question = "Which salesperson made the most revenue today?"
+    payload = _single_input_payload(
+        {
+            "input_ref": "input_today",
+            "kind": "literal_text",
+            "source": "question_context",
+            "value_source_text": "today",
+            "operand_text": "today",
+            "role": "time_value",
+            "inventory_check": {
+                "why_this_is_an_input": "today constrains the requested result"
+            },
+        }
+    )
+    payload["answer_requests"][0]["answer_expression"] = {
+        "family": "ranked_selection"
+    }
+
+    parsed = parse_question_contract(
+        tool_name="submit_question_contract_outcome",
+        payload=_decision_payload(payload),
+        question_context=question,
+    )
+
+    expression = parsed.outcome.requested_facts[0].answer_expression
+
+    assert expression is not None
+    assert expression.family is RequestedFactAnswerExpressionFamily.RANKED_SELECTION
+    assert expression.selection_kind is ResultSelectionKind.LIMITED_RESULTS
 
 
 def test_grouped_aggregate_requires_expression_group_key():
@@ -102,10 +156,11 @@ def test_grouped_aggregate_requires_expression_group_key():
                 RequestedFactAnswerOutput(
                     id="answer_count",
                     description="sales count",
-                    role="ROW_POPULATION",
+                    role="ROW_COUNT",
                 ),
             ),
         )
+
 
 def test_grouped_aggregate_provider_schema_requires_expression_group_key():
     schema = build_answer_request_contract_schema()
@@ -137,7 +192,7 @@ def test_grouped_aggregate_serializes_group_key_on_answer_expression():
             RequestedFactAnswerOutput(
                 id="answer_count",
                 description="sales count",
-                role="ROW_POPULATION",
+                role="ROW_COUNT",
             ),
         ),
         input_refs=("qi_staff_1", "qi_staff_2"),
@@ -154,7 +209,7 @@ def test_grouped_aggregate_serializes_group_key_on_answer_expression():
     assert fact.answer_request_model_dict()["answer_outputs"] == [
         {
             "description": "sales count",
-            "role": "ROW_POPULATION",
+            "role": "ROW_COUNT",
         }
     ]
 
@@ -170,7 +225,7 @@ def test_parse_question_contract_accepts_group_key_on_grouped_expression():
                 "kind": "literal_text",
                 "input_ref": "qi_staff_1",
                 "value_source_text": "51515151-0000-0000-0002-000000000001",
-                "resolved_value_text": "51515151-0000-0000-0002-000000000001",
+                "operand_text": "51515151-0000-0000-0002-000000000001",
                 "field_label_text": "staff id",
                 "occurrence": 1,
                 "inventory_check": {
@@ -183,7 +238,7 @@ def test_parse_question_contract_accepts_group_key_on_grouped_expression():
                 "kind": "literal_text",
                 "input_ref": "qi_staff_2",
                 "value_source_text": "51515151-0000-0000-0002-000000000002",
-                "resolved_value_text": "51515151-0000-0000-0002-000000000002",
+                "operand_text": "51515151-0000-0000-0002-000000000002",
                 "field_label_text": "staff id",
                 "occurrence": 1,
                 "inventory_check": {
@@ -196,7 +251,7 @@ def test_parse_question_contract_accepts_group_key_on_grouped_expression():
                 "kind": "literal_text",
                 "input_ref": "qi_today",
                 "value_source_text": "today",
-                "resolved_value_text": "today",
+                "operand_text": "today",
                 "occurrence": 1,
                 "inventory_check": {
                     "why_this_is_an_input": "requested time constraint",
@@ -247,9 +302,7 @@ def test_parse_question_contract_accepts_group_key_on_grouped_expression():
                         },
                     ],
                 },
-                "answer_outputs": [
-                    {"description": "sales count", "role": "ROW_POPULATION"}
-                ],
+                "answer_outputs": [{"description": "sales count", "role": "ROW_COUNT"}],
                 "used_question_inputs": ["qi_staff_1", "qi_staff_2", "qi_today"],
             }
         ],
@@ -259,8 +312,8 @@ def test_parse_question_contract_accepts_group_key_on_grouped_expression():
     }
 
     result = parse_question_contract(
-        tool_name="submit_answer_request_contract",
-        payload=payload,
+        tool_name="submit_question_contract_outcome",
+        payload=_decision_payload(payload),
         question_context=(
             "How many sales did the staff members with ids: "
             "51515151-0000-0000-0002-000000000001 and "
@@ -275,7 +328,7 @@ def test_parse_question_contract_accepts_group_key_on_grouped_expression():
         "qi_staff_1",
         "qi_staff_2",
     )
-    assert tuple(output.role for output in fact.answer_outputs) == ("ROW_POPULATION",)
+    assert tuple(output.role for output in fact.answer_outputs) == ("ROW_COUNT",)
 
 
 def test_requested_fact_rejects_duplicate_row_population_outputs():
@@ -287,12 +340,12 @@ def test_requested_fact_rejects_duplicate_row_population_outputs():
                 RequestedFactAnswerOutput(
                     id="answer_1",
                     description="count for first staff member",
-                    role="ROW_POPULATION",
+                    role="ROW_COUNT",
                 ),
                 RequestedFactAnswerOutput(
                     id="answer_2",
                     description="count for second staff member",
-                    role="ROW_POPULATION",
+                    role="ROW_COUNT",
                 ),
             ),
         )
@@ -325,7 +378,9 @@ def test_question_contract_model_materializes_input_refs_as_fact_known_inputs():
                 answer_expression=RequestedFactAnswerExpression(
                     family=RequestedFactAnswerExpressionFamily.SCALAR_AGGREGATE,
                 ),
-                answer_outputs=(RequestedFactAnswerOutput(id="answer_1"),),
+                answer_outputs=(
+                    RequestedFactAnswerOutput(id="answer_1", role="ANSWER_VALUE"),
+                ),
                 input_refs=("period",),
             ),
         ),
@@ -344,7 +399,9 @@ def test_question_contract_serializes_fact_local_known_inputs_as_question_inputs
                 answer_expression=RequestedFactAnswerExpression(
                     family=RequestedFactAnswerExpressionFamily.SCALAR_AGGREGATE,
                 ),
-                answer_outputs=(RequestedFactAnswerOutput(id="answer_1"),),
+                answer_outputs=(
+                    RequestedFactAnswerOutput(id="answer_1", role="ANSWER_VALUE"),
+                ),
                 known_inputs=(period,),
             ),
         ),
@@ -372,6 +429,7 @@ def test_question_contract_serializes_fact_local_known_inputs_as_question_inputs
                     {
                         "id": "answer_1",
                         "description": "answer_1",
+                        "role": "ANSWER_VALUE",
                     }
                 ],
                 "used_question_inputs": ["period"],
@@ -386,7 +444,7 @@ def test_question_contract_parser_accepts_positive_used_question_inputs():
         "kind": "literal_text",
         "source": "question_context",
         "value_source_text": "51515151-0000-0000-0002-000000000001",
-        "resolved_value_text": "51515151-0000-0000-0002-000000000001",
+        "operand_text": "51515151-0000-0000-0002-000000000001",
         "field_label_text": "staff id",
         "role": "reference_value",
         "value_meaning_hint": "staff member",
@@ -399,7 +457,7 @@ def test_question_contract_parser_accepts_positive_used_question_inputs():
         "kind": "literal_text",
         "source": "question_context",
         "value_source_text": "51515151-0000-0000-0002-000000000002",
-        "resolved_value_text": "51515151-0000-0000-0002-000000000002",
+        "operand_text": "51515151-0000-0000-0002-000000000002",
         "field_label_text": "staff id",
         "role": "reference_value",
         "value_meaning_hint": "staff member",
@@ -412,7 +470,7 @@ def test_question_contract_parser_accepts_positive_used_question_inputs():
         "kind": "literal_text",
         "source": "question_context",
         "value_source_text": "today",
-        "resolved_value_text": "today",
+        "operand_text": "today",
         "role": "time_value",
         "inventory_check": {
             "why_this_is_an_input": "today constrains the requested sales"
@@ -432,8 +490,8 @@ def test_question_contract_parser_accepts_positive_used_question_inputs():
     payload["answer_requests"] = [first_request, second_request]
 
     parsed = parse_question_contract(
-        tool_name="submit_answer_request_contract",
-        payload=payload,
+        tool_name="submit_question_contract_outcome",
+        payload=_decision_payload(payload),
         question_context=(
             "How many sales did the staff members with ids: "
             "51515151-0000-0000-0002-000000000001 and "
@@ -486,7 +544,9 @@ def test_question_contract_parser_fails_closed_on_unparsed_fields():
                         }
                     ],
                 },
-                "answer_outputs": [{"description": "sales count"}],
+                "answer_outputs": [
+                    {"description": "sales count", "role": "ANSWER_VALUE"}
+                ],
                 "used_question_inputs": [],
                 "resolver_choice": "not part of the contract",
             }
@@ -495,8 +555,8 @@ def test_question_contract_parser_fails_closed_on_unparsed_fields():
 
     with pytest.raises(ValueError, match="unparsed"):
         parse_question_contract(
-            tool_name="submit_answer_request_contract",
-            payload=payload,
+            tool_name="submit_question_contract_outcome",
+            payload=_decision_payload(payload),
             question_context="How many sales today?",
         )
 
@@ -511,7 +571,7 @@ def test_conversation_resolution_resolved_text_requires_conversation_source():
                 "kind": "literal_text",
                 "source": "question_context",
                 "value_source_text": "Alice Smith",
-                "resolved_value_text": "Alice Smith",
+                "operand_text": "Alice Smith",
                 "role": "reference_value",
                 "inventory_check": {
                     "why_this_is_an_input": "Alice Smith is the resolved staff value"
@@ -544,7 +604,9 @@ def test_conversation_resolution_resolved_text_requires_conversation_source():
                         }
                     ],
                 },
-                "answer_outputs": [{"description": "sales total"}],
+                "answer_outputs": [
+                    {"description": "sales total", "role": "ANSWER_VALUE"}
+                ],
                 "used_question_inputs": ["input_staff"],
             }
         ],
@@ -552,8 +614,8 @@ def test_conversation_resolution_resolved_text_requires_conversation_source():
 
     with pytest.raises(ValueError, match="value_source_text"):
         parse_question_contract(
-            tool_name="submit_answer_request_contract",
-            payload=payload,
+            tool_name="submit_question_contract_outcome",
+            payload=_decision_payload(payload),
             question_context="What were her sales?",
             question_context_texts=("Alice Smith",),
         )
@@ -569,7 +631,7 @@ def test_result_limit_requires_canonical_digit_text_at_parse_boundary():
                 "kind": "literal_text",
                 "source": "question_context",
                 "value_source_text": "top five",
-                "resolved_value_text": "five",
+                "operand_text": "five",
                 "role": "result_limit",
                 "inventory_check": {
                     "why_this_is_an_input": "top five supplies the result limit"
@@ -602,7 +664,9 @@ def test_result_limit_requires_canonical_digit_text_at_parse_boundary():
                         }
                     ],
                 },
-                "answer_outputs": [{"description": "top sales"}],
+                "answer_outputs": [
+                    {"description": "top sales", "role": "ANSWER_VALUE"}
+                ],
                 "used_question_inputs": ["input_limit"],
             }
         ],
@@ -610,8 +674,8 @@ def test_result_limit_requires_canonical_digit_text_at_parse_boundary():
 
     with pytest.raises(ValueError, match="canonical positive integer digits"):
         parse_question_contract(
-            tool_name="submit_answer_request_contract",
-            payload=payload,
+            tool_name="submit_question_contract_outcome",
+            payload=_decision_payload(payload),
             question_context="Show top five sales.",
         )
 
@@ -635,7 +699,7 @@ def test_question_contract_parser_rejects_partial_uuid_segment_input_span():
             "kind": "literal_text",
             "source": "question_context",
             "value_source_text": "0002",
-            "resolved_value_text": "0002",
+            "operand_text": "0002",
             "role": "reference_value",
             "value_meaning_hint": "staff member",
             "inventory_check": {
@@ -646,8 +710,8 @@ def test_question_contract_parser_rejects_partial_uuid_segment_input_span():
 
     with pytest.raises(ValueError, match="value_source_text"):
         parse_question_contract(
-            tool_name="submit_answer_request_contract",
-            payload=payload,
+            tool_name="submit_question_contract_outcome",
+            payload=_decision_payload(payload),
             question_context=question,
         )
 
@@ -660,7 +724,7 @@ def test_question_contract_parser_rejects_partial_snake_case_input_span():
             "kind": "literal_text",
             "source": "question_context",
             "value_source_text": "id",
-            "resolved_value_text": "id",
+            "operand_text": "id",
             "role": "reference_value",
             "value_meaning_hint": "field fragment",
             "inventory_check": {
@@ -671,8 +735,8 @@ def test_question_contract_parser_rejects_partial_snake_case_input_span():
 
     with pytest.raises(ValueError, match="value_source_text"):
         parse_question_contract(
-            tool_name="submit_answer_request_contract",
-            payload=payload,
+            tool_name="submit_question_contract_outcome",
+            payload=_decision_payload(payload),
             question_context=question,
         )
 
@@ -688,7 +752,7 @@ def test_question_contract_parser_allows_field_label_hint_for_id_values():
         "kind": "literal_text",
         "source": "question_context",
         "value_source_text": "51515151-0000-0000-0002-000000000001",
-        "resolved_value_text": "51515151-0000-0000-0002-000000000001",
+        "operand_text": "51515151-0000-0000-0002-000000000001",
         "field_label_text": "staff member id",
         "role": "reference_value",
         "value_meaning_hint": "staff member",
@@ -701,7 +765,7 @@ def test_question_contract_parser_allows_field_label_hint_for_id_values():
         "kind": "literal_text",
         "source": "question_context",
         "value_source_text": "51515151-0000-0000-0002-000000000002",
-        "resolved_value_text": "51515151-0000-0000-0002-000000000002",
+        "operand_text": "51515151-0000-0000-0002-000000000002",
         "field_label_text": "staff member id",
         "role": "reference_value",
         "value_meaning_hint": "staff member",
@@ -717,8 +781,8 @@ def test_question_contract_parser_allows_field_label_hint_for_id_values():
     ]
 
     parsed = parse_question_contract(
-        tool_name="submit_answer_request_contract",
-        payload=payload,
+        tool_name="submit_question_contract_outcome",
+        payload=_decision_payload(payload),
         question_context=question,
     )
 
@@ -740,7 +804,7 @@ def test_question_contract_parser_allows_field_label_scoped_over_coordinated_val
         "kind": "literal_text",
         "source": "question_context",
         "value_source_text": "51515151-0000-0000-0002-000000000001",
-        "resolved_value_text": "51515151-0000-0000-0002-000000000001",
+        "operand_text": "51515151-0000-0000-0002-000000000001",
         "field_label_text": "staff_id",
         "role": "reference_value",
         "value_meaning_hint": "staff member",
@@ -753,7 +817,7 @@ def test_question_contract_parser_allows_field_label_scoped_over_coordinated_val
         "kind": "literal_text",
         "source": "question_context",
         "value_source_text": "51515151-0000-0000-0002-000000000002",
-        "resolved_value_text": "51515151-0000-0000-0002-000000000002",
+        "operand_text": "51515151-0000-0000-0002-000000000002",
         "field_label_text": "staff_id",
         "role": "reference_value",
         "value_meaning_hint": "staff member",
@@ -769,8 +833,8 @@ def test_question_contract_parser_allows_field_label_scoped_over_coordinated_val
     ]
 
     parsed = parse_question_contract(
-        tool_name="submit_answer_request_contract",
-        payload=payload,
+        tool_name="submit_question_contract_outcome",
+        payload=_decision_payload(payload),
         question_context=question,
     )
 
@@ -792,7 +856,7 @@ def test_question_contract_parser_allows_repeated_field_label_for_later_value():
         "kind": "literal_text",
         "source": "question_context",
         "value_source_text": "51515151-0000-0000-0002-000000000001",
-        "resolved_value_text": "51515151-0000-0000-0002-000000000001",
+        "operand_text": "51515151-0000-0000-0002-000000000001",
         "field_label_text": "staff_id",
         "role": "reference_value",
         "value_meaning_hint": "staff member",
@@ -805,7 +869,7 @@ def test_question_contract_parser_allows_repeated_field_label_for_later_value():
         "kind": "literal_text",
         "source": "question_context",
         "value_source_text": "51515151-0000-0000-0002-000000000002",
-        "resolved_value_text": "51515151-0000-0000-0002-000000000002",
+        "operand_text": "51515151-0000-0000-0002-000000000002",
         "field_label_text": "staff_id",
         "role": "reference_value",
         "value_meaning_hint": "staff member",
@@ -821,8 +885,8 @@ def test_question_contract_parser_allows_repeated_field_label_for_later_value():
     ]
 
     parsed = parse_question_contract(
-        tool_name="submit_answer_request_contract",
-        payload=payload,
+        tool_name="submit_question_contract_outcome",
+        payload=_decision_payload(payload),
         question_context=question,
     )
 
@@ -840,7 +904,7 @@ def test_question_contract_parser_rejects_answer_subject_literal_input():
             "kind": "literal_text",
             "source": "question_context",
             "value_source_text": "cash deposits",
-            "resolved_value_text": "cash deposits",
+            "operand_text": "cash deposits",
             "role": "reference_value",
             "value_meaning_hint": "cash deposits",
             "inventory_check": {
@@ -857,7 +921,7 @@ def test_question_contract_parser_rejects_answer_subject_literal_input():
 
     with pytest.raises(ValueError, match="answer subject"):
         parse_question_contract(
-            tool_name="submit_answer_request_contract",
-            payload=payload,
+            tool_name="submit_question_contract_outcome",
+            payload=_decision_payload(payload),
             question_context=question,
         )

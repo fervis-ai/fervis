@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any, assert_never
+from typing import Any
+from typing_extensions import assert_never
 
 from fervis.lookup.answer_program.compiler_inputs import CompilerInputContext
 from fervis.lookup.source_binding.compiler_ir import (
@@ -64,10 +65,7 @@ def parameterize_relation(
     bindings: dict[str, ParameterBinding],
 ) -> Relation:
     source_param_bindings = source.param_bindings
-    if (
-        source.kind == SourceKind.GENERATED_CALENDAR
-        and not source_param_bindings
-    ):
+    if source.kind == SourceKind.GENERATED_CALENDAR and not source_param_bindings:
         source_param_bindings = _calendar_param_bindings(input_context)
     population_choices = tuple(
         _parameterize_population_choice(
@@ -245,6 +243,7 @@ def _parameterize_applied_filter(
         return RelationSourceAppliedFilter(
             predicate_field_ids=source_filter.predicate_field_ids,
             value_expr=source_filter.value_expr,
+            operator=source_filter.operator,
         )
     value_id = source_filter.value_id or _value_id_for_known_input(
         source_filter.known_input_id,
@@ -255,6 +254,7 @@ def _parameterize_applied_filter(
     return RelationSourceAppliedFilter(
         predicate_field_ids=source_filter.predicate_field_ids,
         value_expr=input_context.expression_for_value(value_id),
+        operator=source_filter.operator,
     )
 
 
@@ -340,9 +340,7 @@ def _parameterize_population_choice(
         ),
         proof_refs=choice.proof_refs,
         allowed_values=allowed_values,
-        semantic_control_ref=(
-            f"{choice.controller_kind.value}:{choice.controller_id}"
-        ),
+        semantic_control_ref=(f"{choice.controller_kind.value}:{choice.controller_id}"),
         parameters=parameters,
         bindings=bindings,
     )
@@ -410,10 +408,9 @@ def _add_parameter(
             != declaration.semantic_control_ref
         ):
             raise ValueError(f"conflicting parameter semantic control {parameter_id}")
-    if (
-        existing_binding is not None
-        and canonical_fact_value(existing_binding.value) != canonical_fact_value(value)
-    ):
+    if existing_binding is not None and canonical_fact_value(
+        existing_binding.value
+    ) != canonical_fact_value(value):
         raise ValueError(f"conflicting parameter binding {parameter_id}")
     parameters.setdefault(parameter_id, declaration)
     bindings.setdefault(parameter_id, parameter_binding)

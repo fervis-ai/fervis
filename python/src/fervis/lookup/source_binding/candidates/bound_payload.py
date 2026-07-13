@@ -1,5 +1,14 @@
 """Bound-source prompt payload projection."""
 
+from typing_extensions import assert_never
+
+from fervis.lookup.source_binding.candidates.contracts import (
+    CandidateKeyEvidence,
+    EntityReferenceEvidence,
+    JsonObject,
+    JsonValue,
+)
+
 from ._shared import Any, BoundSource, SourceKind
 
 
@@ -61,13 +70,16 @@ def _bound_sources_prompt_payload(
                 }
             fields = _source_fields_with_evidence_ids(
                 bound,
-                fulfilled_evidence_ids=_bound_source_fulfilled_evidence_ids(bound),
+                fulfilled_evidence_ids=(
+                    _bound_source_fulfilled_field_evidence_ids(bound)
+                ),
             )
             if fields:
                 item["fields"] = fields
             if bound.applied_filters:
                 item["applied_filters"] = [
-                    dict(applied_filter) for applied_filter in bound.applied_filters
+                    applied_filter.to_payload()
+                    for applied_filter in bound.applied_filters
                 ]
         if bound.value_id:
             item["value_id"] = bound.value_id
@@ -102,12 +114,43 @@ def _fulfillment_prompt_payload(fulfillment: Any) -> dict[str, Any]:
         "answer_output_id": fulfillment.answer_output_id,
         "match_basis_explanation": fulfillment.match_basis_explanation,
         "metric_measure_evidence_ids": list(fulfillment.metric_measure_evidence_ids),
+        "value_evidence_ids": list(fulfillment.value_evidence_ids),
         "row_count_basis_evidence_ids": list(fulfillment.row_count_basis_evidence_ids),
-        "scope_evidence_ids": list(fulfillment.scope_evidence_ids),
     }
-    if fulfillment.group_key_evidence_ids:
-        output["group_key_evidence_ids"] = list(fulfillment.group_key_evidence_ids)
+    if fulfillment.entity_evidence is not None:
+        output["entity_evidence"] = _entity_evidence_payload(
+            fulfillment.entity_evidence
+        )
     return output
+
+
+def _entity_evidence_payload(
+    evidence: CandidateKeyEvidence | EntityReferenceEvidence,
+) -> JsonObject:
+    components: list[JsonValue] = [
+        {
+            "component_id": component.component_id,
+            "field_evidence_id": component.field_evidence_id,
+            "field_id": component.field_id,
+        }
+        for component in evidence.components
+    ]
+    if isinstance(evidence, CandidateKeyEvidence):
+        return {
+            "type": "candidate_key",
+            "key_id": evidence.key_id,
+            "entity_kind": evidence.entity_kind,
+            "components": components,
+        }
+    if isinstance(evidence, EntityReferenceEvidence):
+        return {
+            "type": "entity_reference",
+            "reference_id": evidence.reference_id,
+            "target_key_id": evidence.target_key_id,
+            "target_entity_kind": evidence.target_entity_kind,
+            "components": components,
+        }
+    assert_never(evidence)
 
 
 def _source_fields_with_evidence_ids(
@@ -219,10 +262,10 @@ def _bound_evidence_items(bound: BoundSource) -> tuple[dict[str, Any], ...]:
     )
 
 
-def _bound_source_fulfilled_evidence_ids(bound: BoundSource) -> set[str]:
+def _bound_source_fulfilled_field_evidence_ids(bound: BoundSource) -> set[str]:
     return {
         evidence_id
         for fulfillment in bound.fulfillments
-        for evidence_id in fulfillment.all_evidence_ids()
+        for evidence_id in fulfillment.field_evidence_ids()
         if evidence_id
     }

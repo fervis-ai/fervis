@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 
 
 class KnownInputKind(StrEnum):
@@ -22,26 +22,11 @@ _LITERAL_ROLE_PART_KINDS = {
     LiteralInputRole.RESULT_LIMIT: "limit",
 }
 
-_LITERAL_ROLES_BY_PART_KIND = {
-    part_kind: role for role, part_kind in _LITERAL_ROLE_PART_KINDS.items()
-}
-
-
 def literal_role_part_kind(role: str | LiteralInputRole) -> str:
     literal_role = _literal_role(role)
     if literal_role is None:
         return ""
     return _LITERAL_ROLE_PART_KINDS[literal_role]
-
-
-def literal_role_from_part_kind(part_kind: str) -> LiteralInputRole | None:
-    text = part_kind.strip()
-    if not text:
-        return None
-    role = _LITERAL_ROLES_BY_PART_KIND.get(text)
-    if role is not None:
-        return role
-    return _literal_role(text)
 
 
 def _literal_role(value: str | LiteralInputRole) -> LiteralInputRole | None:

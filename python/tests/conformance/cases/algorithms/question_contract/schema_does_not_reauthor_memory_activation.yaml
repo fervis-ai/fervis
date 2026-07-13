@@ -14,6 +14,4 @@ expect:
       - question_inputs
       - answer_requests
       - question_input_inventory_check
-    clarification_properties:
-      - kind
-      - missing
+    clarifications_have_answer_fields: false

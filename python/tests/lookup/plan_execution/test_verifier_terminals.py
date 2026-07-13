@@ -58,16 +58,16 @@ from fervis.lookup.question_contract import (
     RequestedFactAnswerOutput,
     RequestedFactLiteralInput,
 )
-from fervis.lookup.answer_program.render_spec import (
-    RenderRelationOutput,
-    RenderSpec,
+from fervis.lookup.answer_program.result_projection import (
+    RelationResultOutput,
+    ResultProjection,
 )
 
 
-def _render_spec() -> RenderSpec:
-    return RenderSpec(
+def _result_projection() -> ResultProjection:
+    return ResultProjection(
         relation_outputs=(
-            RenderRelationOutput(id="answer", relation_id="result", field_id="name"),
+            RelationResultOutput(id="answer", relation_id="result", field_id="name"),
         )
     )
 
@@ -91,7 +91,7 @@ def test_fact_plan_accepts_only_one_terminal_shape():
                 FactFulfillment(
                     requested_fact_id="rf_name",
                     answer_output_id="answer",
-                    render_output_id="answer",
+                    result_output_id="answer",
                 ),
             ),
             relations=(
@@ -110,36 +110,51 @@ def test_fact_plan_accepts_only_one_terminal_shape():
                 ),
             ),
             operations=(_operation(),),
-            render_spec=_render_spec(),
+            result_projection=_result_projection(),
         )
     )
     assert verify_fact_plan(plan, question_contract=question_contract) is plan
 
 
-def test_answer_plan_requires_operations_and_render_spec():
+def test_answer_plan_requires_operations_and_result_projection():
     fulfillment = (
         FactFulfillment(
             requested_fact_id="rf_name",
             answer_output_id="answer",
-            render_output_id="answer",
+            result_output_id="answer",
         ),
     )
     missing_operations = FactPlan(
         outcome=AnswerProgram(
             fulfillment=fulfillment,
-            render_spec=_render_spec(),
+            result_projection=_result_projection(),
         )
     )
     missing_render = FactPlan(
         outcome=AnswerProgram(
             fulfillment=fulfillment,
+            relations=(
+                Relation(
+                    id="rows",
+                    source=RelationSource(
+                        kind=SourceKind.API_READ,
+                        read_id="list_rows",
+                    ),
+                    fields=(
+                        RelationField(
+                            field_id="name",
+                            roles=(FieldBindingRole.OUTPUT,),
+                        ),
+                    ),
+                ),
+            ),
             operations=(_operation(),),
         )
     )
 
     with pytest.raises(VerificationError, match="at least one operation"):
         verify_fact_plan(missing_operations)
-    with pytest.raises(VerificationError, match="render spec"):
+    with pytest.raises(VerificationError, match="result projection"):
         verify_fact_plan(missing_render)
 
 
@@ -193,7 +208,9 @@ def test_requested_fact_output_and_known_input_ids_are_disjoint():
                 RequestedFact(
                     id="rf_name",
                     description="name",
-                    answer_outputs=(RequestedFactAnswerOutput(id="answer"),),
+                    answer_outputs=(
+                        RequestedFactAnswerOutput(id="answer", role="ANSWER_VALUE"),
+                    ),
                     known_inputs=(
                         RequestedFactLiteralInput(
                             id="answer",
@@ -465,6 +482,41 @@ def test_impossible_review_scope_uses_requested_fact_catalog_selection():
     assert "other_read" not in blocked.reviewed_read_ids
 
 
+def test_impossible_preserves_the_model_visible_review_scope_after_narrowing():
+    plan = FactPlan(
+        outcome=PlanImpossible(
+            blocked_facts=(
+                BlockedFact(
+                    requested_fact_id="rf_name",
+                    basis=BlockedFactBasis.CATALOG_ACCESS,
+                    evidence_refs=(read_evidence_ref("restricted_read"),),
+                    reviewed_read_ids=("restricted_read",),
+                ),
+            )
+        )
+    )
+    selection = CatalogSelectionResult(
+        relation_catalog=_blocked_catalog(),
+        requested_fact_selections=(
+            RequestedFactCatalogSelection(
+                requested_fact_id="rf_name",
+                query_terms=("name",),
+                rankings=(),
+                selected_read_ids=("restricted_read", "other_read"),
+            ),
+        ),
+        selected_read_ids=("restricted_read", "other_read"),
+    )
+
+    verified = verify_fact_plan(
+        plan,
+        catalog=_blocked_catalog(),
+        catalog_selection=selection,
+    )
+
+    assert verified.outcome.blocked_facts[0].reviewed_read_ids == ("restricted_read",)
+
+
 def test_impossible_verifies_selected_catalog_surface_with_unselected_diagnostics():
     plan = FactPlan(
         outcome=PlanImpossible(
@@ -626,7 +678,9 @@ def _question_contract() -> QuestionContract:
             RequestedFact(
                 id="rf_name",
                 description="name",
-                answer_outputs=(RequestedFactAnswerOutput(id="answer"),),
+                answer_outputs=(
+                    RequestedFactAnswerOutput(id="answer", role="ANSWER_VALUE"),
+                ),
             ),
         )
     )
@@ -642,7 +696,9 @@ def _question_contract_with_known_person() -> QuestionContract:
             RequestedFact(
                 id="rf_name",
                 description="name",
-                answer_outputs=(RequestedFactAnswerOutput(id="answer"),),
+                answer_outputs=(
+                    RequestedFactAnswerOutput(id="answer", role="ANSWER_VALUE"),
+                ),
                 known_inputs=(
                     RequestedFactLiteralInput(
                         id="person_name",

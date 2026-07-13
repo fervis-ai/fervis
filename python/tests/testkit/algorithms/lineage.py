@@ -91,7 +91,7 @@ def run_lineage_explain_case(payload: dict) -> list[str]:
                 payload["expect"],
                 line_key="alternate_lines",
             )
-    )
+        )
     return errors
 
 
@@ -143,7 +143,11 @@ def _compare_rendered(rendered: str, expect: dict, *, line_key: str) -> list[str
     if expected_excludes:
         errors.extend(
             subset_mismatches(
-                actual={"excludes": {text: text not in rendered for text in expected_excludes}},
+                actual={
+                    "excludes": {
+                        text: text not in rendered for text in expected_excludes
+                    }
+                },
                 expected_subset={"excludes": expected_excludes},
             )
         )
@@ -154,9 +158,7 @@ def _portable_lineage_view(view) -> dict:
     return {
         "questions": {
             question.question_id: {
-                "runs": {
-                    run.run_id: _portable_run_view(run) for run in question.runs
-                }
+                "runs": {run.run_id: _portable_run_view(run) for run in question.runs}
             }
             for question in view.questions
         },
@@ -254,9 +256,7 @@ class _FixtureLineageQuery(LineageQueryPort):
             source_read.catalog_endpoint_id for source_read in source_reads
         }
         program_invocations = tuple(
-            item
-            for item in self.rows.program_invocations
-            if item.run_id in run_id_set
+            item for item in self.rows.program_invocations if item.run_id in run_id_set
         )
         revision_ids = {
             item.revision_id
@@ -312,9 +312,7 @@ class _FixtureLineageQuery(LineageQueryPort):
                 item for item in self.rows.fact_results if item.run_id in run_id_set
             ),
             memory_artifacts=tuple(
-                item
-                for item in self.rows.memory_artifacts
-                if item.run_id in run_id_set
+                item for item in self.rows.memory_artifacts if item.run_id in run_id_set
             ),
             answers=tuple(
                 item for item in self.rows.answers if item.run_id in run_id_set
@@ -365,9 +363,6 @@ def _rows(payload: dict) -> LineageRows:
                 kind=QuestionRunKind(str(item["kind"])),
                 trigger_kind=RunTriggerKind(str(item["trigger_kind"])),
                 base_run_id=item.get("base_run_id"),
-                trigger_clarification_response_id=item.get(
-                    "trigger_clarification_response_id"
-                ),
             )
             for item in payload.get("runs", ())
         ),
@@ -383,8 +378,7 @@ def _rows(payload: dict) -> LineageRows:
             for item in payload.get("program_invocations", ())
         ),
         program_revisions=tuple(
-            _program_revision_row(item)
-            for item in payload.get("program_revisions", ())
+            _program_revision_row(item) for item in payload.get("program_revisions", ())
         ),
         steps=tuple(_step(item) for item in payload.get("steps", ())),
         run_results=tuple(
@@ -413,8 +407,7 @@ def _rows(payload: dict) -> LineageRows:
                 need=ClarificationNeed(str(item["need"])),
                 reason=ClarificationReason(str(item["reason"])),
                 payload_json=dict(item["payload_json"]),
-                fact_result_id=item.get("fact_result_id"),
-                step_id=item.get("step_id"),
+                step_id=str(item["step_id"]),
             )
             for item in payload.get("clarification_requests", ())
         ),
@@ -497,7 +490,9 @@ def _rows(payload: dict) -> LineageRows:
                 presentation_id=str(item["presentation_id"]),
                 run_id=str(item["run_id"]),
                 answer_id=str(item["answer_id"]),
-                client_key=PresentationClientKey(str(item.get("client_key") or "default")),
+                client_key=PresentationClientKey(
+                    str(item.get("client_key") or "default")
+                ),
                 locale=str(item.get("locale") or "default"),
                 presentation_kind=PresentationKind(str(item["presentation_kind"])),
                 render_step_id=str(item["render_step_id"]),
@@ -517,19 +512,15 @@ def _rows(payload: dict) -> LineageRows:
                 framework_kind=str(item["framework_kind"]),
                 source_namespace_kind=str(item["source_namespace_kind"]),
                 source_namespace_path_json=tuple(
-                    str(value)
-                    for value in item.get("source_namespace_path_json") or ()
+                    str(value) for value in item.get("source_namespace_path_json") or ()
                 ),
                 route_method=str(item["route_method"]),
                 route_path_template=str(item["route_path_template"]),
                 route_name=str(item.get("route_name") or ""),
-                api_schema_operation_id=str(
-                    item.get("api_schema_operation_id") or ""
-                ),
+                api_schema_operation_id=str(item.get("api_schema_operation_id") or ""),
                 handler_ref=str(item.get("handler_ref") or ""),
                 domain_resource_names_json=tuple(
-                    str(value)
-                    for value in item.get("domain_resource_names_json") or ()
+                    str(value) for value in item.get("domain_resource_names_json") or ()
                 ),
             )
             for item in payload.get("catalog_endpoints", ())

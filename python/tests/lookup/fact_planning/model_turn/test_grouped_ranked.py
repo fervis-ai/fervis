@@ -19,7 +19,13 @@ from fervis.lookup.answer_program import BindingSet
 from fervis.lookup.answer_program.operations import RankSpec
 
 
-def _ranked_payload(*, metric_id="metric_1", metric_field_id="metric_total", function_id="function_sum", function_value="sum"):
+def _ranked_payload(
+    *,
+    metric_id="metric_1",
+    metric_field_id="metric_total",
+    function_id="function_sum",
+    function_value="sum",
+):
     return {
         "answers": [
             {
@@ -74,35 +80,37 @@ def test_aggregate_by_group_fulfillment_maps_answer_outputs_by_selected_parts():
     )
 
     assert {
-        item.answer_output_id: item.render_output_id for item in plan.fulfillment
+        item.answer_output_id: item.result_output_id for item in plan.fulfillment
     } == {
-        "answer_1": "location_name",
-        "answer_2": "metric_total",
+        "answer_1": "answer_1",
+        "answer_2": "answer_2",
     }
 
 
 def test_grouped_ranked_group_is_backend_owned_not_model_selected():
     selection = selected_grouped_ranked_operation(
-        {
-            "requested_fact_id": "rf_answer",
-            "pattern": "aggregate_by_group",
-            "source_binding_id": "sb_1",
-            "metric": {
-                "selection_basis": "Metric total is the measured value.",
-                "id": "metric_1",
-                "kind": "aggregate_field",
-                "field_id": "metric_total",
-            },
-            "function": {
-                "selection_basis": "Total requires sum.",
-                "id": "function_sum",
-                "value": "sum",
-            },
-        },
+        pattern_answer(
+            {
+                "requested_fact_id": "rf_answer",
+                "pattern": "aggregate_by_group",
+                "source_binding_id": "sb_1",
+                "metric": {
+                    "selection_basis": "Metric total is the measured value.",
+                    "id": "metric_1",
+                    "kind": "aggregate_field",
+                    "field_id": "metric_total",
+                },
+                "function": {
+                    "selection_basis": "Total requires sum.",
+                    "id": "function_sum",
+                    "value": "sum",
+                },
+            }
+        ),
         bound_sources={"sb_1": _two_output_aggregate_bound_source()},
     )
 
-    assert selection.group_field_id == "location_name"
+    assert selection.group_field_ids == ("location_id",)
 
 
 def test_aggregate_by_group_fulfillment_maps_answer_outputs_by_evidence_not_order():
@@ -128,66 +136,70 @@ def test_aggregate_by_group_fulfillment_maps_answer_outputs_by_evidence_not_orde
                 }
             ]
         },
-        bound_sources=(replace(source, fulfillments=tuple(reversed(source.fulfillments))),),
+        bound_sources=(
+            replace(source, fulfillments=tuple(reversed(source.fulfillments))),
+        ),
     )
 
     assert {
-        item.answer_output_id: item.render_output_id for item in plan.fulfillment
+        item.answer_output_id: item.result_output_id for item in plan.fulfillment
     } == {
-        "answer_1": "location_name",
-        "answer_2": "metric_total",
+        "answer_1": "answer_1",
+        "answer_2": "answer_2",
     }
 
 
 def test_grouped_ranked_selection_roles_outputs_by_selected_evidence_kind():
     selection = selected_grouped_ranked_operation(
-        {
-            "requested_fact_id": "rf_answer",
-            "pattern": "aggregate_by_group",
-            "source_binding_id": "sb_1",
-            "metric": {
-                "selection_basis": "Orders are counted as records.",
-                "id": "metric_1",
-                "kind": "count_records",
-            },
-            "function": {
-                "selection_basis": "Count the matching rows.",
-                "id": "function_count",
-                "value": "count",
-            },
-        },
+        pattern_answer(
+            {
+                "requested_fact_id": "rf_answer",
+                "pattern": "aggregate_by_group",
+                "source_binding_id": "sb_1",
+                "metric": {
+                    "selection_basis": "Orders are counted as records.",
+                    "id": "metric_1",
+                    "kind": "count_records",
+                },
+                "function": {
+                    "selection_basis": "Count the matching rows.",
+                    "id": "function_count",
+                    "value": "count",
+                },
+            }
+        ),
         bound_sources={"sb_1": _ranked_count_by_store_bound_source()},
     )
 
-    assert {
-        item.answer_output_id: item.role for item in selection.answer_outputs
-    } == {
+    assert {item.answer_output_id: item.role for item in selection.answer_outputs} == {
         "answer_1": "GROUP_KEY",
-        "answer_2": "ROW_POPULATION",
+        "answer_2": "ROW_COUNT",
     }
 
 
 def test_grouped_ranked_count_metric_keeps_answer_output_identity():
     selection = selected_grouped_ranked_operation(
-        {
-            "requested_fact_id": "rf_answer",
-            "pattern": "aggregate_by_group",
-            "source_binding_id": "sb_1",
-            "metric": {
-                "selection_basis": "Orders are counted as records.",
-                "id": "metric_1",
-                "kind": "count_records",
-            },
-            "function": {
-                "selection_basis": "Count the matching rows.",
-                "id": "function_count",
-                "value": "count",
-            },
-        },
+        pattern_answer(
+            {
+                "requested_fact_id": "rf_answer",
+                "pattern": "aggregate_by_group",
+                "source_binding_id": "sb_1",
+                "metric": {
+                    "selection_basis": "Orders are counted as records.",
+                    "id": "metric_1",
+                    "kind": "count_records",
+                },
+                "function": {
+                    "selection_basis": "Count the matching rows.",
+                    "id": "function_count",
+                    "value": "count",
+                },
+            }
+        ),
         bound_sources={"sb_1": _ranked_count_by_store_bound_source()},
     )
 
-    assert selection.metric["answer_output_id"] == "answer_2"
+    assert selection.metric.answer_output_id == "answer_2"
 
 
 def test_aggregate_by_group_count_plan_keeps_count_output_through_validation():
@@ -215,35 +227,37 @@ def test_aggregate_by_group_count_plan_keeps_count_output_through_validation():
     )
 
     assert {
-        item.answer_output_id: item.render_output_id for item in plan.fulfillment
+        item.answer_output_id: item.result_output_id for item in plan.fulfillment
     } == {
-        "answer_1": "store_id",
-        "answer_2": "count",
+        "answer_1": "answer_1",
+        "answer_2": "answer_2",
     }
 
 
 def test_grouped_ranked_measured_metric_keeps_answer_output_identity():
     selection = selected_grouped_ranked_operation(
-        {
-            "requested_fact_id": "rf_answer",
-            "pattern": "aggregate_by_group",
-            "source_binding_id": "sb_1",
-            "metric": {
-                "selection_basis": "Metric total is the measured value.",
-                "id": "metric_1",
-                "kind": "aggregate_field",
-                "field_id": "metric_total",
-            },
-            "function": {
-                "selection_basis": "Total requires sum.",
-                "id": "function_sum",
-                "value": "sum",
-            },
-        },
+        pattern_answer(
+            {
+                "requested_fact_id": "rf_answer",
+                "pattern": "aggregate_by_group",
+                "source_binding_id": "sb_1",
+                "metric": {
+                    "selection_basis": "Metric total is the measured value.",
+                    "id": "metric_1",
+                    "kind": "aggregate_field",
+                    "field_id": "metric_total",
+                },
+                "function": {
+                    "selection_basis": "Total requires sum.",
+                    "id": "function_sum",
+                    "value": "sum",
+                },
+            }
+        ),
         bound_sources={"sb_1": _two_output_aggregate_bound_source()},
     )
 
-    assert selection.metric["answer_output_id"] == "answer_2"
+    assert selection.metric.answer_output_id == "answer_2"
 
 
 def test_pattern_compiler_rejects_unknown_pattern():
@@ -276,12 +290,11 @@ def test_pattern_compiler_rejects_multi_relation_source_outside_selected_plan():
                         "answer_output_ids": ["answer_1"],
                         "candidate": {
                             "source_binding_id": "sb_1",
-                            "identity_fields": ["location_name"],
-                            "output_fields": [{"field_id": "location_name"}],
+                            "identity_fields": ["location_id"],
                         },
                         "observed": {
                             "source_binding_id": "sb_2",
-                            "identity_fields": ["location_name"],
+                            "identity_fields": ["location_id"],
                         },
                     }
                 ]
@@ -305,12 +318,11 @@ def test_pattern_compiler_rejects_multi_relation_source_outside_selected_role():
                         "answer_output_ids": ["answer_1"],
                         "candidate": {
                             "source_binding_id": "sb_2",
-                            "identity_fields": ["location_name"],
-                            "output_fields": [{"field_id": "location_name"}],
+                            "identity_fields": ["location_id"],
                         },
                         "observed": {
                             "source_binding_id": "sb_1",
-                            "identity_fields": ["location_name"],
+                            "identity_fields": ["location_id"],
                         },
                     }
                 ]
@@ -333,10 +345,11 @@ def test_ranked_aggregate_metric_answer_output_is_rendered_as_answer_value():
     )
 
     fulfillment_by_output = {
-        item.answer_output_id: item.render_output_id for item in plan.fulfillment
+        item.answer_output_id: item.result_output_id for item in plan.fulfillment
     }
     render_by_id = {
-        item.id: item for item in plan.render_spec.relation_outputs  # type: ignore[union-attr]
+        item.id: item
+        for item in plan.result_projection.relation_outputs  # type: ignore[union-attr]
     }
 
     assert fulfillment_by_output["answer_1"] == "answer_1"
@@ -356,10 +369,12 @@ def test_ranked_aggregate_prompt_exposes_compact_linear_choice_surface():
                     answer_outputs=(
                         RequestedFactAnswerOutput(
                             id="answer_1",
+                            role="ANSWER_VALUE",
                             description="store name",
                         ),
                         RequestedFactAnswerOutput(
                             id="answer_2",
+                            role="ANSWER_VALUE",
                             description="sales amount",
                         ),
                     ),
@@ -388,11 +403,20 @@ def test_ranked_aggregate_prompt_exposes_compact_linear_choice_surface():
     )
 
     assert "Grouped/ranked operation choices:" in prompt
-    assert '<group field="location_name" type="string" source="source_binding" />' in prompt
+    assert (
+        '<group fields="location_id" key_id="location_key" entity_kind="location" source="source_binding" />'
+        in prompt
+    )
     assert "<group_candidates>" not in prompt
     assert "choose group" not in prompt
-    assert '<metric id="metric_1" kind="aggregate_field" field="metric_total" type="decimal" allowed_functions="sum min max avg" />' in prompt
-    assert '<function id="function_sum" value="sum" meaning="total across matching rows" />' in prompt
+    assert (
+        '<metric id="metric_1" kind="aggregate_field" field="metric_total" type="decimal" allowed_functions="sum min max avg" />'
+        in prompt
+    )
+    assert (
+        '<function id="function_sum" value="sum" meaning="total across matching rows" />'
+        in prompt
+    )
     assert prompt.count("<metric ") == 1
 
 
@@ -407,10 +431,12 @@ def test_ranked_aggregate_schema_does_not_request_model_group_selection():
                     answer_outputs=(
                         RequestedFactAnswerOutput(
                             id="answer_1",
+                            role="ANSWER_VALUE",
                             description="store name",
                         ),
                         RequestedFactAnswerOutput(
                             id="answer_2",
+                            role="ANSWER_VALUE",
                             description="sales amount",
                         ),
                     ),
@@ -449,20 +475,28 @@ def test_ranked_aggregate_choice_keeps_canonical_group_key_for_render_contract()
     )
 
     fulfillment_by_output = {
-        item.answer_output_id: item.render_output_id for item in plan.fulfillment
+        item.answer_output_id: item.result_output_id for item in plan.fulfillment
     }
     render_by_id = {
-        item.id: item for item in plan.render_spec.relation_outputs  # type: ignore[union-attr]
+        item.id: item
+        for item in plan.result_projection.relation_outputs  # type: ignore[union-attr]
     }
 
     assert fulfillment_by_output == {
         "answer_1": "answer_1",
         "answer_2": "answer_2",
     }
-    assert render_by_id["answer_1"].field_id == "location_id"
+    assert render_by_id["answer_1"].entity_key is not None
+    assert render_by_id["answer_1"].entity_key.entity_kind == "location"
+    assert render_by_id["answer_1"].entity_key.key_id == "location_key"
+    assert tuple(
+        component.field_id
+        for component in render_by_id["answer_1"].entity_key.components
+    ) == ("location_id",)
     assert render_by_id["answer_2"].field_id == "metric_total"
-    assert "location_name" not in {
-        item.field_id for item in plan.render_spec.relation_outputs  # type: ignore[union-attr]
+    assert "location_id" not in {
+        item.field_id
+        for item in plan.result_projection.relation_outputs  # type: ignore[union-attr]
     }
 
 
@@ -497,17 +531,24 @@ def test_ranked_aggregate_choice_compiles_count_metric():
     )
 
     fulfillment_by_output = {
-        item.answer_output_id: item.render_output_id for item in plan.fulfillment
+        item.answer_output_id: item.result_output_id for item in plan.fulfillment
     }
     render_by_id = {
-        item.id: item for item in plan.render_spec.relation_outputs  # type: ignore[union-attr]
+        item.id: item
+        for item in plan.result_projection.relation_outputs  # type: ignore[union-attr]
     }
 
     assert fulfillment_by_output == {
         "answer_1": "answer_1",
         "answer_2": "answer_2",
     }
-    assert render_by_id["answer_1"].field_id == "store_id"
+    assert render_by_id["answer_1"].entity_key is not None
+    assert render_by_id["answer_1"].entity_key.entity_kind == "store"
+    assert render_by_id["answer_1"].entity_key.key_id == "store_key"
+    assert tuple(
+        component.field_id
+        for component in render_by_id["answer_1"].entity_key.components
+    ) == ("store_id",)
     assert render_by_id["answer_2"].field_id == "count"
 
 
@@ -596,19 +637,25 @@ def test_ranked_aggregate_keeps_metric_render_artifact_role_scoped_for_single_ou
         bound_sources=(_single_output_ranked_aggregate_bound_source(),),
     )
 
-    relation_outputs = plan.render_spec.relation_outputs  # type: ignore[union-attr]
-    render_output_ids = tuple(item.id for item in relation_outputs)
+    relation_outputs = plan.result_projection.relation_outputs  # type: ignore[union-attr]
+    result_output_ids = tuple(item.id for item in relation_outputs)
     fulfillment_by_output = {
-        item.answer_output_id: item.render_output_id for item in plan.fulfillment
+        item.answer_output_id: item.result_output_id for item in plan.fulfillment
     }
     render_by_id = {item.id: item for item in relation_outputs}
     metric_outputs = tuple(
         item for item in relation_outputs if item.field_id == "metric_total"
     )
 
-    assert len(render_output_ids) == len(set(render_output_ids))
+    assert len(result_output_ids) == len(set(result_output_ids))
     assert fulfillment_by_output["answer_1"] == "answer_1"
-    assert render_by_id["answer_1"].field_id == "location_id"
+    assert render_by_id["answer_1"].entity_key is not None
+    assert render_by_id["answer_1"].entity_key.entity_kind == "location"
+    assert render_by_id["answer_1"].entity_key.key_id == "location_key"
+    assert tuple(
+        component.field_id
+        for component in render_by_id["answer_1"].entity_key.components
+    ) == ("location_id",)
     assert len(metric_outputs) == 1
     assert metric_outputs[0].id != "answer_1"
     assert metric_outputs[0].role == "ranking_metric"

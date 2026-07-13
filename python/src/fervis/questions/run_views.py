@@ -10,12 +10,14 @@ from fervis.lineage.enums import RunResultKind
 from fervis.lineage.views.explain import ExplainViewService
 from fervis.lineage.views.explanation import answer_explanation_view
 from fervis.lineage.views.json_payload import view_json
-from fervis.lineage.views.model import QuestionView, RunView
+from fervis.lineage.views.model import ClarificationRequestView, QuestionView, RunView
 from fervis.lineage.views.query import LineageQueryPort
 from fervis.observability.query import ObservabilityQueryPort
 from fervis.observability.usage import RuntimeUsageService, usage_payload_from_report
+from fervis.run_work.contracts import run_wall_clock_duration_ms
 
 from .projection import QuestionRunStatus
+from .clarification_state import pending_clarification_ids
 
 
 @dataclass(frozen=True)
@@ -194,9 +196,9 @@ def _status(run: RunView, work: RunWorkSnapshot) -> QuestionRunStatus:
     if run.result_kind == RunResultKind.RUNTIME_ERROR.value:
         return QuestionRunStatus.FAILED
     if run.result_kind == RunResultKind.FACTUAL_TERMINAL.value:
-        if run.clarification_requests:
-            return QuestionRunStatus.NEEDS_CLARIFICATION
-        return QuestionRunStatus.COMPLETED
+        if _pending_clarification_requests(run):
+            return QuestionRunStatus.WAITING_FOR_CLARIFICATION
+        return work.status
     return work.status
 
 
@@ -215,13 +217,13 @@ def _answer_text(run: RunView) -> str | None:
 
 
 def _result_data(run: RunView) -> dict[str, object] | None:
-    if run.clarification_requests:
+    pending_requests = _pending_clarification_requests(run)
+    if pending_requests:
         return {
             "kind": "needs_clarification",
             "details": {
                 "clarifications": [
-                    dict(request.payload_json)
-                    for request in run.clarification_requests
+                    dict(request.payload_json) for request in pending_requests
                 ]
             },
         }
@@ -229,12 +231,31 @@ def _result_data(run: RunView) -> dict[str, object] | None:
         {
             "key": output.output_key,
             "valueKind": output.value_kind,
-            "value": output.value,
+            "value": output.value_json,
+            "displayValue": output.value,
         }
         for answer in run.answers
         for output in answer.outputs
     ]
     return {"kind": "answer", "outputs": outputs} if outputs else None
+
+
+def _pending_clarification_requests(
+    run: RunView,
+) -> tuple[ClarificationRequestView, ...]:
+    pending_ids = frozenset(
+        pending_clarification_ids(
+            tuple(request.clarification_id for request in run.clarification_requests),
+            tuple(
+                response.clarification_id for response in run.clarification_responses
+            ),
+        )
+    )
+    return tuple(
+        request
+        for request in run.clarification_requests
+        if request.clarification_id in pending_ids
+    )
 
 
 def _run_error(run: RunView, work: RunWorkSnapshot) -> str | None:
@@ -245,9 +266,10 @@ def _run_error(run: RunView, work: RunWorkSnapshot) -> str | None:
 
 
 def _duration_ms(work: RunWorkSnapshot) -> int | None:
-    if work.started_at is None or work.completed_at is None:
-        return None
-    return max(0, int((work.completed_at - work.started_at).total_seconds() * 1000))
+    return run_wall_clock_duration_ms(
+        created_at=work.created_at,
+        completed_at=work.completed_at,
+    )
 
 
 def _worker_payload(work: RunWorkSnapshot) -> dict[str, object]:

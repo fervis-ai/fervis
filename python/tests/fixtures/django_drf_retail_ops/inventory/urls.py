@@ -11,4 +11,3 @@ router.register("locations", InventoryLocationViewSet, basename="locations")
 router.register("stock-records", StockRecordViewSet, basename="stock-records")
 
 urlpatterns = [path("", include(router.urls))]
-

@@ -1,0 +1,35 @@
+id: resolver_prefers_direct_resource_over_compound_projection
+description: Resolver selection prefers the direct entity resource over a compound projection that exposes the same identity.
+kind: algorithm
+algorithm: catalog_selection.resolver_select
+input:
+  catalog:
+    reads:
+      - id: telemetry_staff_sessions
+        endpoint_name: list_telemetry_staff_sessions
+        resource_names: [staff, staff session, telemetry staff session]
+        fields: [{ref: telemetry.field.staff_id, type: uuid}]
+        candidate_keys:
+          - id: primary_key
+            entity_kind: staff
+            primary: true
+            components: [{id: staff_id, field_ref: telemetry.field.staff_id}]
+      - id: staff_list
+        endpoint_name: list_staff_list
+        resource_names: [staff]
+        fields: [{ref: staff.field.id, type: uuid}]
+        candidate_keys:
+          - id: primary_key
+            entity_kind: staff
+            primary: true
+            components: [{id: staff_id, field_ref: staff.field.id}]
+  entity_targets:
+    - target_id: entity_1
+      catalog_search_terms: [staff]
+  max_reads_per_target: 1
+expect:
+  result_contains:
+    selected_read_ids: [staff_list]
+    entity_target_selections:
+      - target_id: entity_1
+        selected_read_ids: [staff_list]

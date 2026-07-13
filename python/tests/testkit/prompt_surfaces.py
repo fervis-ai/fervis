@@ -20,7 +20,7 @@ PROMPT_SURFACE_CONTRACTS = {
             "Resolved Clauses",
             "Retained Frame Shape",
             "Resolved Values",
-            "Callable Frames",
+            "Callable Parameters",
             "Outcome",
             "Output",
         ),
@@ -80,6 +80,7 @@ PROMPT_SURFACE_CONTRACTS = {
             "Decision Scope",
             "Question Boundary",
             "Clarification Boundary",
+            "Relational Ownership",
             "Answer Requests",
             "Answer Outputs",
             "Question Inputs Overview",
@@ -89,7 +90,7 @@ PROMPT_SURFACE_CONTRACTS = {
             "Retained Prior Shape",
             "Literal Reference Inputs",
             "Literal Time Inputs",
-            "Literal Limits",
+            "Result Limits",
             "Output",
         ),
     },
@@ -134,9 +135,7 @@ PROMPT_HYGIENE_RULES = {
     "operation_support_set_id": "fact planning uses compact choice aliases",
     "metric_option_id": "fact planning uses compact choice aliases",
     "row_predicates are optional": "row predicate reviews are mandatory when shown",
-    "optional response-row filters": (
-        "row predicate reviews are mandatory when shown"
-    ),
+    "optional response-row filters": ("row predicate reviews are mandatory when shown"),
     "shown in finite_choice_param_reviews": (
         "finite-choice population params are shown in binding_params with population_contract"
     ),

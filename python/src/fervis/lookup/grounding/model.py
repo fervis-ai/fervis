@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 from typing import Any
 
-from fervis.lookup.relation_catalog import IdentityMetadata
 from fervis.lookup.turn_prompts.context import HostPromptContext
+from fervis.lookup.clarification.model import ClarificationResponseSource
 from fervis.lookup.answer_program.values import (
     FactValue,
     TimeComponent,
@@ -15,9 +15,25 @@ from fervis.lookup.answer_program.values import (
 )
 
 
-class LookupTextResolutionDecision(StrEnum):
-    CAN_RESOLVE_LOOKUP_TEXT = "CAN_RESOLVE_LOOKUP_TEXT"
-    CANNOT_RESOLVE_LOOKUP_TEXT = "CANNOT_RESOLVE_LOOKUP_TEXT"
+class InputBindingPurpose(StrEnum):
+    IDENTITY_VALIDATION = "identity_validation"
+    REFERENCE_GROUNDING = "reference_grounding"
+
+
+class InputBindingResultKind(StrEnum):
+    CANONICAL_IDENTITY = "canonical_identity"
+    MATCHED_VALUE = "matched_value"
+
+
+@dataclass(frozen=True)
+class ExpectedInputIdentity:
+    entity_kind: str
+    key_id: str
+    key_component_id: str
+
+    def __post_init__(self) -> None:
+        if not self.entity_kind or not self.key_id or not self.key_component_id:
+            raise ValueError("expected input identity must name its candidate-key component")
 
 
 class GroundingTerminalKind(StrEnum):
@@ -29,8 +45,10 @@ class GroundingTerminalKind(StrEnum):
 
 
 class GroundedValueCertificationMethod(StrEnum):
+    IDENTITY_VALIDATION_READ = "identity_validation_read"
     RESOLVER_SOURCE_READ = "resolver_source_read"
     IMPORTED_PRIOR_IDENTITY = "imported_prior_identity"
+    CLARIFICATION_SELECTION = "clarification_selection"
 
 
 @dataclass(frozen=True)
@@ -67,7 +85,6 @@ class ResolverOutputFieldCard:
     field_path: str
     type: str
     choices: tuple[str, ...] = ()
-    identity: IdentityMetadata | None = None
 
 
 @dataclass(frozen=True)
@@ -78,17 +95,29 @@ class InputBindingRoute:
     resolver_endpoint_name: str
     lookup_param_id: str
     lookup_param_ref: str
+    lookup_param_type: str
     lookup_field_ids: tuple[str, ...]
     lookup_field_refs: tuple[str, ...]
     return_field_id: str
     return_field_ref: str
-    identity_type: str
-    identity_field: str
+    entity_kind: str
+    key_id: str
+    key_component_id: str
+    context_field_ids: tuple[str, ...]
     display: str
+    resolver_description: str = ""
     resolver_resource_names: tuple[str, ...] = ()
     query_params: tuple[ResolverQueryParamCard, ...] = ()
     selected_output_fields: tuple[ResolverOutputFieldCard, ...] = ()
 
+    @property
+    def identity_lookup_field_ids(self) -> tuple[str, ...]:
+        identity_field_ids = {self.return_field_id, *self.context_field_ids}
+        return tuple(
+            field_id
+            for field_id in self.lookup_field_ids
+            if field_id in identity_field_ids
+        )
 
 @dataclass(frozen=True)
 class GroundingRequestedFactCard:
@@ -104,6 +133,7 @@ class InputBindingOption:
     id: str
     known_input_id: str
     path: str
+    purpose: InputBindingPurpose
     route: InputBindingRoute | None = None
 
 
@@ -115,6 +145,7 @@ class KnownInputBindingTask:
     requested_fact_id: str
     options: tuple[InputBindingOption, ...]
     lookup_text: str
+    field_label_text: str = ""
     known_input_description: str = ""
     applies_to_requested_fact_ids: tuple[str, ...] = ()
     requested_facts: tuple[GroundingRequestedFactCard, ...] = ()
@@ -139,9 +170,17 @@ class KnownTimeResolutionTask:
 
 
 @dataclass(frozen=True)
-class InputBindingCompatibility:
+class ResolvedInputBinding:
+    option_id: str
+    input_value: str | int | float | bool
+    result_kind: InputBindingResultKind
+    matched_field_ref: str = ""
+
+
+@dataclass(frozen=True)
+class InputBindingSelection:
     known_input_id: str
-    binding_option_ids: tuple[str, ...]
+    binding: ResolvedInputBinding | None
 
 
 @dataclass(frozen=True)
@@ -157,42 +196,14 @@ class GroundingRequest:
     time_tasks: tuple[KnownTimeResolutionTask, ...] = ()
     conversation_context: dict[str, Any] = field(default_factory=dict)
     host: HostPromptContext = field(default_factory=HostPromptContext)
+    clarification_source: ClarificationResponseSource | None = None
+    clarification_known_input_id: str = ""
 
 
 @dataclass(frozen=True)
-class GroundingCompatibilityResult:
-    compatibilities: tuple[InputBindingCompatibility, ...]
+class GroundingSelectionResult:
+    selections: tuple[InputBindingSelection, ...]
     time_resolutions: tuple[TimeResolutionIntent, ...] = ()
-
-
-def resolver_fit_question_for_option(
-    *,
-    task: KnownInputBindingTask,
-    option: InputBindingOption,
-) -> str:
-    return (
-        f"Can this resolver search lookup text "
-        f"'{task.lookup_text}' and return canonical "
-        f"API identity '{_option_identity_type(option)}' for target meaning "
-        f"'{task.known_input_description}'?"
-    )
-
-
-def option_has_targetable_identity(option: InputBindingOption) -> bool:
-    return bool(_targetable_identity_type(option))
-
-
-def _targetable_identity_type(option: InputBindingOption) -> str:
-    if option.route is not None:
-        return option.route.identity_type
-    return ""
-
-
-def _option_identity_type(option: InputBindingOption) -> str:
-    targetable = _targetable_identity_type(option)
-    if targetable:
-        return targetable
-    return "no_returned_identity"
 
 
 @dataclass(frozen=True)
@@ -202,6 +213,7 @@ class GroundedInputUse:
     row_source_id: str
     param_id: str
     field_id: str = ""
+    entity_kind: str = ""
     value_component: ValueComponent | TimeComponent = ValueComponent.VALUE
 
 
@@ -210,6 +222,7 @@ class GroundingCandidate:
     id: str
     label: str = ""
     entity_kind: str = ""
+    key_id: str = ""
     matched_label: str = ""
     matched_field: str = ""
     matched_value: str = ""
@@ -244,7 +257,3 @@ class CanonicalInputLedger:
     uses: tuple[GroundedInputUse, ...] = ()
     issues: tuple[GroundingIssue, ...] = ()
     certifications: tuple[GroundedValueCertification, ...] = ()
-
-    @property
-    def ok(self) -> bool:
-        return not self.issues

@@ -94,7 +94,7 @@ def _catalog_payload(
         for source in sources
         if any(
             not bool(endpoint["eligible"])
-            for endpoint in source.get("endpoints", ())
+            for endpoint in _items(source.get("endpoints"))
             if isinstance(endpoint, dict)
         )
     ]
@@ -102,7 +102,9 @@ def _catalog_payload(
         "schema_version": CATALOG_RESULT_SCHEMA_VERSION,
         "status": "blocked" if blocked_sources else "passed",
         "source_count": len(sources),
-        "endpoint_count": sum(int(source["endpoint_count"]) for source in sources),
+        "endpoint_count": sum(
+            _required_int(source, "endpoint_count") for source in sources
+        ),
         "sources": sources,
         "blocked_sources": blocked_sources,
     }
@@ -134,13 +136,13 @@ def _blocked_catalog_payload(
 def _payload_next_actions(payload: dict[str, object]) -> list[dict[str, object]]:
     actions: list[dict[str, object]] = []
     seen: set[str] = set()
-    for source in payload.get("sources", ()):
+    for source in _items(payload.get("sources")):
         if not isinstance(source, dict):
             continue
-        for endpoint in source.get("endpoints", ()):
+        for endpoint in _items(source.get("endpoints")):
             if not isinstance(endpoint, dict):
                 continue
-            for action in endpoint.get("next_actions", ()):
+            for action in _items(endpoint.get("next_actions")):
                 if not isinstance(action, dict):
                     continue
                 key = json.dumps(action, sort_keys=True, separators=(",", ":"))
@@ -149,6 +151,19 @@ def _payload_next_actions(payload: dict[str, object]) -> list[dict[str, object]]
                 actions.append(action)
                 seen.add(key)
     return actions
+
+
+def _items(value: object) -> tuple[object, ...]:
+    if not isinstance(value, list | tuple):
+        return ()
+    return tuple(value)
+
+
+def _required_int(payload: dict[str, object], key: str) -> int:
+    value = payload.get(key)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"catalog payload {key} must be an integer")
+    return value
 
 
 def _source_payload(
@@ -238,11 +253,21 @@ def _endpoint_readiness(contract: EndpointContract) -> dict[str, object]:
             "next_actions": [],
         }
     reason = "response_schema_missing"
+    framework_kind = (
+        contract.catalog_endpoint.framework_kind
+        if contract.catalog_endpoint is not None
+        else ""
+    )
     return {
         "quality": "route_only",
         "eligible": False,
         "blocked_reason": reason,
-        "next_actions": [add_schema_metadata_action(contract.endpoint_name)],
+        "next_actions": [
+            add_schema_metadata_action(
+                contract.endpoint_name,
+                framework_kind=framework_kind,
+            )
+        ],
     }
 
 

@@ -35,6 +35,7 @@ input:
       description: count active price lists
       answer_outputs:
         - id: active_price_list_count
+          role: ANSWER_VALUE
   resource_name_matches:
     - requested_fact_id: fact_1
       answer_output_resource_lineage:

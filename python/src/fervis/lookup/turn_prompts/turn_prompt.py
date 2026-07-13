@@ -22,7 +22,6 @@ class TurnPromptBase(ABC):
     turn_name: str
     turn_task: str
     include_current_question: bool = True
-    include_active_clarification: bool = False
 
     def prompt_sections(
         self,

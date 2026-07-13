@@ -13,7 +13,7 @@ input:
   context_frames:
     - frame_id: request:1
       source_ids: [prior_question]
-      answer_shape: {expression_family: scalar_aggregate, output_roles: [ROW_POPULATION]}
+      answer_shape: {expression_family: scalar_aggregate, output_roles: [ROW_COUNT]}
       parts:
         - {part_id: subject, kind: answer_subject, text: sales}
         - {part_id: output:1, kind: answer_output, text: number of sales}
@@ -44,23 +44,20 @@ input:
         - current_clause_text: What about Pivot Mall?
           occurrence: 1
           resolved_text: How many sales did we make at Pivot Mall today?
-          retained_frame_parts: []
+          retained_frame_parts:
+            - {kind: frame_part, frame_id: request:1, part_id: subject}
+            - {kind: frame_part, frame_id: request:1, part_id: output:1}
           values:
             - value_id: pivot_mall
               resolved_text: Pivot Mall
+              frame_parameter: {kind: parameter, frame_id: request:1, parameter_id: question.location}
               sources:
                 - {kind: current_span, text: Pivot Mall, occurrence: 1}
-            - value_id: complete_question_meaning
-              resolved_text: How many sales did we make at Pivot Mall today?
+            - value_id: retained_time
+              resolved_text: today
+              frame_parameter: {kind: parameter, frame_id: request:1, parameter_id: question.time}
               sources:
-                - {kind: frame_part, frame_id: request:1, part_id: input:entity_identity:1}
                 - {kind: frame_part, frame_id: request:1, part_id: input:time_scope:1}
-      frame_call:
-        kind: call
-        frame_id: request:1
-        arguments:
-          - {kind: resolved_value, parameter_id: question.location, value_id: pivot_mall}
-          - {kind: carry, parameter_id: question.time}
 expect:
   result_contains:
     current_question_text: What about Pivot Mall?

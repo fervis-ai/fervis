@@ -59,11 +59,15 @@ def test_grounding_issues_for_one_input_produce_one_complete_clarification():
                 known_input_text="Central",
                 known_input_description="store",
                 candidate_options=(
-                    GroundingCandidate(
-                        id=candidate_id,
-                        label=candidate_id,
-                        resolver_read_id=resolver_read_id,
-                    ),
+                        GroundingCandidate(
+                            id=candidate_id,
+                            label=candidate_id,
+                            entity_kind="store",
+                            key_id="store_id",
+                            matched_field="store_id",
+                            matched_value=candidate_id,
+                            resolver_read_id=resolver_read_id,
+                        ),
                 ),
                 resolver_read_id=resolver_read_id,
                 resolver_endpoint_name=resolver_read_id,
@@ -78,9 +82,10 @@ def test_grounding_issues_for_one_input_produce_one_complete_clarification():
     assert isinstance(result.outcome, NeedsClarification)
     assert len(result.outcome.clarifications) == 1
     payload = clarification_payload(result.outcome.clarifications[0])
-    assert [
-        option["id"] for option in payload["subjects"][0]["options"]
-    ] == ["store_1", "location_1"]
+    assert [option["id"] for option in payload["subjects"][0]["options"]] == [
+        "store_1",
+        "location_1",
+    ]
     assert [
         item["readId"]
         for item in payload["evidence"]

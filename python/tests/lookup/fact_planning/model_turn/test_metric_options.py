@@ -1,5 +1,6 @@
 from ._helpers import *  # noqa: F403
 
+
 def test_pattern_prompt_projects_scalar_aggregate_choices_for_numeric_summary_evidence():
     request = FactPlanRequest(
         question="How many in-person sales happened this month?",
@@ -11,6 +12,7 @@ def test_pattern_prompt_projects_scalar_aggregate_choices_for_numeric_summary_ev
                     answer_outputs=(
                         RequestedFactAnswerOutput(
                             id="answer_1",
+                            role="ANSWER_VALUE",
                             description="count of in-person sales this month",
                         ),
                     ),
@@ -116,6 +118,7 @@ def test_pattern_prompt_projects_scalar_aggregate_choices_for_numeric_summary_ev
     assert '"metric"' in schema_text
     assert '"function"' in schema_text
 
+
 def test_pattern_prompt_projects_scalar_aggregate_choices_for_one_row_summary_evidence():
     request = FactPlanRequest(
         question="How much revenue did we make this week?",
@@ -127,6 +130,7 @@ def test_pattern_prompt_projects_scalar_aggregate_choices_for_one_row_summary_ev
                     answer_outputs=(
                         RequestedFactAnswerOutput(
                             id="answer_1",
+                            role="ANSWER_VALUE",
                             description="total revenue for the week",
                         ),
                     ),
@@ -166,9 +170,7 @@ def test_pattern_prompt_projects_scalar_aggregate_choices_for_one_row_summary_ev
                         match_basis_explanation=(
                             "The one-row summary total_amount is the total revenue."
                         ),
-                        metric_measure_evidence_ids=(
-                            "source_1.summary.total_amount",
-                        ),
+                        metric_measure_evidence_ids=("source_1.summary.total_amount",),
                     ),
                 ),
             ),
@@ -199,8 +201,11 @@ def test_pattern_prompt_projects_scalar_aggregate_choices_for_one_row_summary_ev
         next_label="Decision Scope",
     )
 
-    assert '<metric id="metric_1" kind="aggregate_field" field="total_amount"' in choices
+    assert (
+        '<metric id="metric_1" kind="aggregate_field" field="total_amount"' in choices
+    )
     assert 'allowed_functions="sum min max avg"' in choices
+
 
 def test_pattern_prompt_uses_metric_measure_evidence_not_generic_scope_for_metrics():
     request = FactPlanRequest(
@@ -213,6 +218,7 @@ def test_pattern_prompt_uses_metric_measure_evidence_not_generic_scope_for_metri
                     answer_outputs=(
                         RequestedFactAnswerOutput(
                             id="answer_1",
+                            role="ANSWER_VALUE",
                             description="staff member",
                         ),
                     ),
@@ -232,21 +238,21 @@ def test_pattern_prompt_uses_metric_measure_evidence_not_generic_scope_for_metri
                     ),
                     cardinality="many",
                     available_field_ids=(
-                        "staff_name",
+                        "staff_id",
                         "calculated_pay",
                         "amount_paid",
                         "payment_status",
                     ),
                     available_fields=(
-                        SourceField(field_id="staff_name", type="string"),
+                        SourceField(field_id="staff_id", type="uuid"),
                         SourceField(field_id="calculated_pay", type="decimal"),
                         SourceField(field_id="amount_paid", type="decimal"),
                         SourceField(field_id="payment_status", type="choice"),
                     ),
                     evidence_items=(
                         SourceEvidenceItem(
-                            evidence_id="source_1.data.staff_name",
-                            field_id="staff_name",
+                            evidence_id="source_1.data.staff_id",
+                            field_id="staff_id",
                             row_cardinality="many",
                         ),
                         SourceEvidenceItem(
@@ -270,16 +276,17 @@ def test_pattern_prompt_uses_metric_measure_evidence_not_generic_scope_for_metri
                             requested_fact_id="fact_1",
                             answer_output_id="answer_1",
                             match_basis_explanation=(
-                                "staff_name is the answer value and calculated_pay "
+                                "staff_id identifies the answer and calculated_pay "
                                 "is the measure for ranking."
                             ),
-                            group_key_evidence_ids=("source_1.data.staff_name",),
+                            entity_evidence=candidate_key_evidence(
+                                "staff_id",
+                                entity_kind="staff",
+                                key_id="staff_key",
+                                field_evidence_ids=("source_1.data.staff_id",),
+                            ),
                             metric_measure_evidence_ids=(
                                 "source_1.data.calculated_pay",
-                            ),
-                            scope_evidence_ids=(
-                                "source_1.data.amount_paid",
-                                "source_1.data.payment_status",
                             ),
                         ),
                     ),
@@ -309,6 +316,7 @@ def test_pattern_prompt_uses_metric_measure_evidence_not_generic_scope_for_metri
     assert 'field="calculated_pay"' in prompt
     assert 'field="amount_paid"' not in prompt
 
+
 def test_pattern_prompt_requires_metric_evidence_not_count_basis_for_aggregate_metric():
     request = FactPlanRequest(
         question="How much cash was deposited this month?",
@@ -320,6 +328,7 @@ def test_pattern_prompt_requires_metric_evidence_not_count_basis_for_aggregate_m
                     answer_outputs=(
                         RequestedFactAnswerOutput(
                             id="answer_1",
+                            role="ANSWER_VALUE",
                             description="total cash deposited",
                         ),
                     ),
@@ -417,6 +426,7 @@ def test_pattern_prompt_requires_metric_evidence_not_count_basis_for_aggregate_m
         ]
     }
 
+
 def test_pattern_prompt_requires_metric_evidence_even_when_answer_value_exists():
     request = FactPlanRequest(
         question="Which location had the highest total payroll spend this month?",
@@ -428,6 +438,7 @@ def test_pattern_prompt_requires_metric_evidence_even_when_answer_value_exists()
                     answer_outputs=(
                         RequestedFactAnswerOutput(
                             id="answer_1",
+                            role="ANSWER_VALUE",
                             description="location",
                         ),
                     ),
@@ -446,15 +457,15 @@ def test_pattern_prompt_requires_metric_evidence_even_when_answer_value_exists()
                         read_id="list_shift_compensation",
                     ),
                     cardinality="many",
-                    available_field_ids=("location_name", "calculated_pay"),
+                    available_field_ids=("location_id", "calculated_pay"),
                     available_fields=(
-                        SourceField(field_id="location_name", type="string"),
+                        SourceField(field_id="location_id", type="uuid"),
                         SourceField(field_id="calculated_pay", type="decimal"),
                     ),
                     evidence_items=(
                         SourceEvidenceItem(
-                            evidence_id="source_1.data.location_name",
-                            field_id="location_name",
+                            evidence_id="source_1.data.location_id",
+                            field_id="location_id",
                             row_cardinality="many",
                         ),
                         SourceEvidenceItem(
@@ -468,10 +479,15 @@ def test_pattern_prompt_requires_metric_evidence_even_when_answer_value_exists()
                             requested_fact_id="fact_1",
                             answer_output_id="answer_1",
                             match_basis_explanation=(
-                                "location_name is the answer value and calculated_pay "
+                                "location_id identifies the answer and calculated_pay "
                                 "is the measured quantity for ranking."
                             ),
-                            group_key_evidence_ids=("source_1.data.location_name",),
+                            entity_evidence=candidate_key_evidence(
+                                "location_id",
+                                entity_kind="location",
+                                key_id="location_key",
+                                field_evidence_ids=("source_1.data.location_id",),
+                            ),
                             metric_measure_evidence_ids=(
                                 "source_1.data.calculated_pay",
                             ),
@@ -500,11 +516,15 @@ def test_pattern_prompt_requires_metric_evidence_even_when_answer_value_exists()
     )
 
     assert "Grouped/ranked operation choices:" in prompt
-    assert '<group field="location_name" type="string" source="source_binding" />' in prompt
+    assert (
+        '<group fields="location_id" key_id="location_key" entity_kind="location" source="source_binding" />'
+        in prompt
+    )
     assert (
         '<metric id="metric_1" kind="aggregate_field" field="calculated_pay" '
         'type="decimal" allowed_functions="sum min max avg" />'
     ) in prompt
+
 
 def test_pattern_prompt_does_not_offer_identity_source_numeric_fields_as_metrics():
     request = FactPlanRequest(
@@ -517,10 +537,12 @@ def test_pattern_prompt_does_not_offer_identity_source_numeric_fields_as_metrics
                     answer_outputs=(
                         RequestedFactAnswerOutput(
                             id="answer_1",
+                            role="ANSWER_VALUE",
                             description="the staff member",
                         ),
                         RequestedFactAnswerOutput(
                             id="answer_2",
+                            role="ANSWER_VALUE",
                             description="the amount paid",
                         ),
                     ),
@@ -533,18 +555,19 @@ def test_pattern_prompt_does_not_offer_identity_source_numeric_fields_as_metrics
                 id="sb_1",
                 requested_fact_id="fact_1",
                 answer_population=_answer_population(),
-                source=DraftRelationSource(kind=SourceKind.API_READ, read_id="list_staff"),
+                source=DraftRelationSource(
+                    kind=SourceKind.API_READ, read_id="list_staff"
+                ),
                 cardinality="many",
-                available_field_ids=("staff_id", "full_name", "daily_base_pay"),
+                available_field_ids=("staff_id", "daily_base_pay"),
                 available_fields=(
                     SourceField(field_id="staff_id", type="uuid", roles=("identity",)),
-                    SourceField(field_id="full_name", type="string"),
                     SourceField(field_id="daily_base_pay", type="decimal"),
                 ),
                 evidence_items=(
                     SourceEvidenceItem(
-                        evidence_id="source_1.data.full_name",
-                        field_id="full_name",
+                        evidence_id="source_1.data.staff_id",
+                        field_id="staff_id",
                         row_cardinality="many",
                     ),
                 ),
@@ -552,8 +575,13 @@ def test_pattern_prompt_does_not_offer_identity_source_numeric_fields_as_metrics
                     SourceFulfillment(
                         requested_fact_id="fact_1",
                         answer_output_id="answer_1",
-                        match_basis_explanation="full_name identifies the staff member.",
-                        group_key_evidence_ids=("source_1.data.full_name",),
+                        match_basis_explanation="staff_id identifies the staff member.",
+                        entity_evidence=candidate_key_evidence(
+                            "staff_id",
+                            entity_kind="staff",
+                            key_id="staff_key",
+                            field_evidence_ids=("source_1.data.staff_id",),
+                        ),
                     ),
                 ),
             ),
@@ -567,18 +595,17 @@ def test_pattern_prompt_does_not_offer_identity_source_numeric_fields_as_metrics
                         read_id="list_shift_compensation",
                     ),
                     cardinality="many",
-                    available_field_ids=("staff_id", "staff_name", "amount_paid"),
+                    available_field_ids=("staff_id", "amount_paid"),
                     available_fields=(
                         SourceField(
                             field_id="staff_id", type="uuid", roles=("identity",)
                         ),
-                        SourceField(field_id="staff_name", type="string"),
                         SourceField(field_id="amount_paid", type="decimal"),
                     ),
                     evidence_items=(
                         SourceEvidenceItem(
-                            evidence_id="source_2.data.staff_name",
-                            field_id="staff_name",
+                            evidence_id="source_2.data.staff_id",
+                            field_id="staff_id",
                             row_cardinality="many",
                         ),
                         SourceEvidenceItem(
@@ -591,8 +618,13 @@ def test_pattern_prompt_does_not_offer_identity_source_numeric_fields_as_metrics
                         SourceFulfillment(
                             requested_fact_id="fact_1",
                             answer_output_id="answer_1",
-                            match_basis_explanation="staff_name identifies the staff member.",
-                            group_key_evidence_ids=("source_2.data.staff_name",),
+                            match_basis_explanation="staff_id identifies the staff member.",
+                            entity_evidence=candidate_key_evidence(
+                                "staff_id",
+                                entity_kind="staff",
+                                key_id="staff_key",
+                                field_evidence_ids=("source_2.data.staff_id",),
+                            ),
                         ),
                         SourceFulfillment(
                             requested_fact_id="fact_1",

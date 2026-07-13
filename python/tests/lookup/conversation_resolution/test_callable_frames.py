@@ -87,8 +87,9 @@ def test_callable_frame_reuses_shape_and_rebinds_only_changed_argument() -> None
     current_value = FactValue.identity(
         id="grounded_place",
         known_input_id="place",
-        identity_type="mall",
-        identity_field="id",
+        entity_kind="mall",
+        key_id="primary_key",
+        key_component_id="id",
         value="mall_2",
         display_value="Pivot Mall",
         proof_refs=("source_read:mall_2",),
@@ -140,7 +141,7 @@ def _base_program() -> tuple[AnswerProgram, BindingSet]:
                     RequestedFactAnswerOutput(
                         id="answer",
                         description="sales count",
-                        role="ROW_POPULATION",
+                        role="ROW_COUNT",
                     ),
                 ),
                 known_inputs=(known,),
@@ -158,8 +159,9 @@ def _base_program() -> tuple[AnswerProgram, BindingSet]:
     base_value = FactValue.identity(
         id="grounded_place",
         known_input_id="place",
-        identity_type="mall",
-        identity_field="id",
+        entity_kind="mall",
+        key_id="primary_key",
+        key_component_id="id",
         value="mall_1",
         display_value="Acacia Mall",
         proof_refs=("source_read:mall_1",),
@@ -187,7 +189,7 @@ def _memory_projection() -> ConversationMemoryCardProjection:
                 source_ids=("prior_question",),
                 answer_shape=ConversationAnswerShape(
                     expression_family="scalar_aggregate",
-                    output_roles=("ROW_POPULATION",),
+                    output_roles=("ROW_COUNT",),
                 ),
                 parts=(
                     ConversationFramePart(

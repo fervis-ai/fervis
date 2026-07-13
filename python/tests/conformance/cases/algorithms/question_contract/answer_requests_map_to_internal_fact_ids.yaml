@@ -15,6 +15,7 @@ expect:
       answer_outputs:
       - id: answer_1
         description: sales total
+        role: MEASURED_VALUE
   result_exact_fields:
     question_inputs: []
     requested_fact_input_handoff:

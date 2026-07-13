@@ -39,6 +39,7 @@ from fervis.lookup.orchestration.host_runtime import (
 if TYPE_CHECKING:
     from fervis.lookup.fact_planning.request import RuntimeValueContext
     from fervis.lookup.answer_program.persistence import PriorProgramInvocationReader
+    from fervis.lookup.clarification.model import ClarificationOwnerResponse
 
 
 class LookupService:
@@ -80,9 +81,11 @@ class LookupService:
         user_context: dict[str, Any] | None = None,
         active_attempt: int | None = None,
         progress_sink: LookupProgressSink | None = None,
+        clarification_response: ClarificationOwnerResponse | None = None,
     ) -> PlannerRunResult:
         from fervis.lookup.orchestration.pipeline import run_lookup_question
 
+        _require_model_prompt_host_context(self.host_api_context)
         limits = RunLimitTracker(
             run_id=run_id,
             tenant_id=tenant_id,
@@ -115,6 +118,9 @@ class LookupService:
                 result_data=dict(terminal.result_data or {}),
                 usage=dict(terminal.usage or {}),
             )
+        lineage_recorder = self.lineage_recorder
+        if lineage_recorder is None:
+            raise RuntimeError("Lineage recorder is required for lookup execution.")
         resolved_provider = self.provider_backbone.resolve_provider(
             requested_provider=provider,
             model_key=model_key,
@@ -143,6 +149,7 @@ class LookupService:
                 runtime_values=_runtime_values(self.host_api_context),
                 host=_host_prompt_context(self.host_api_context),
                 active_attempt=active_attempt,
+                clarification_response=clarification_response,
             ),
             LookupRuntimePorts(
                 relation_catalog_port=_ConfiguredRelationCatalogProvider(
@@ -158,12 +165,12 @@ class LookupService:
                 ),
                 program_invocation_binding=LineageProgramInvocationBinding(
                     run_id=run_id,
-                    recorder=self.lineage_recorder,
+                    recorder=lineage_recorder,
                 ),
                 prior_program_invocations=self.prior_program_invocations,
                 lineage_step_sink=_lineage_step_sink(
                     run_id=run_id,
-                    recorder=self.lineage_recorder,
+                    recorder=lineage_recorder,
                     active_attempt=active_attempt,
                 ),
                 lineage_required=True,
@@ -217,6 +224,28 @@ def _host_prompt_context(host_api_context: HostApiContext) -> HostPromptContext:
     return HostPromptContext(
         organization_name=host.organization_name,
         about_api=host.about_api,
+    )
+
+
+def _require_model_prompt_host_context(
+    host_api_context: HostApiContext,
+) -> None:
+    host = host_api_context.host_context
+    missing_fields = tuple(
+        field
+        for field, value in (
+            ("host.organization_name", host.organization_name),
+            ("host.about_api", host.about_api),
+        )
+        if not value.strip()
+    )
+    if not missing_fields:
+        return
+    missing = " and ".join(missing_fields)
+    raise RuntimeError(
+        f"Fervis lookup cannot start: {missing} are required. "
+        "Configure the organization, API domain, and supported factual-question "
+        "scope in config/fervis.json."
     )
 
 

@@ -1,0 +1,82 @@
+id: entity_reference_is_selectable_without_context_label
+description: Source binding offers a complete foreign entity reference as one computation choice while keeping its label only in response context.
+kind: algorithm
+algorithm: source_binding.prompt_surface
+input:
+  request:
+    mode: yaml_prompt_surface
+    question: Which salesperson was paid the most?
+    requested_fact:
+      id: fact_1
+      description: salesperson ranked by compensation
+      answer_subject: salesperson
+      answer_outputs: [answer_1]
+    relation_catalog:
+      reads:
+        - id: staff
+          endpoint_name: list_staff
+          resource_names: [staff]
+          row_paths:
+            - {id: data, path: data, cardinality: many}
+          fields:
+            - {ref: staff.id, path: data.staff_id, row_path_id: data, type: uuid}
+          candidate_keys:
+            - id: staff_primary
+              entity_kind: staff
+              components:
+                - {id: staff_id, field_ref: staff.id}
+              primary: true
+        - id: compensation
+          endpoint_name: list_compensation
+          resource_names: [shift_compensation]
+          row_paths:
+            - {id: data, path: data, cardinality: many}
+          fields:
+            - {ref: compensation.id, path: data.compensation_id, row_path_id: data, type: uuid}
+            - {ref: compensation.staff_id, path: data.staff_id, row_path_id: data, type: uuid}
+            - {ref: compensation.staff_name, path: data.staff_name, row_path_id: data, type: string}
+            - {ref: compensation.amount, path: data.amount, row_path_id: data, type: decimal}
+          candidate_keys:
+            - id: compensation_primary
+              entity_kind: shift_compensation
+              components:
+                - {id: compensation_id, field_ref: compensation.id}
+              primary: true
+          entity_references:
+            - id: staff_reference
+              target_entity_kind: staff
+              target_key_id: staff_primary
+              components:
+                - {target_component_id: staff_id, local_field_ref: compensation.staff_id}
+              context_field_refs: [compensation.staff_name]
+    selected_read_ids: [staff, compensation]
+    retained_read_ids: [compensation]
+    retained_row_path_ids_by_read_id:
+      compensation: [data]
+    selected_source_candidate_count: 2
+expect:
+  result_contains:
+    read_id: compensation
+    response_row_fields_by_path:
+      data: [compensation_id, staff_id, staff_name, amount]
+    selectable_entity_evidence:
+      - type: candidate_key
+        key_id: compensation_primary
+        entity_kind: shift_compensation
+        reference_id: ""
+        target_key_id: ""
+        target_entity_kind: ""
+        components:
+          - component_id: compensation_id
+            field_id: compensation_id
+            field_evidence_id: source_2.data.compensation_id
+      - type: entity_reference
+        key_id: ""
+        entity_kind: ""
+        reference_id: staff_reference
+        target_key_id: staff_primary
+        target_entity_kind: staff
+        components:
+          - component_id: staff_id
+            field_id: staff_id
+            field_evidence_id: source_2.data.staff_id

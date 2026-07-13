@@ -10,7 +10,7 @@ from fervis.lookup.question_contract.model import (
     validate_question_contract_against_question,
 )
 from fervis.lookup.question_contract.tools import (
-    ANSWER_REQUEST_CONTRACT_TOOL_NAME,
+    QUESTION_CONTRACT_TOOL_NAME,
 )
 from tests.lookup.orchestrator._helpers import *  # noqa: F403
 
@@ -20,7 +20,10 @@ def _question_contract_payload(
     subject: str = "sales",
     answer_subject: str | None = None,
     parts: tuple[str, ...] = ("sales",),
+    answer_expression_family: str = "scalar_aggregate",
+    answer_output_role: str = "MEASURED_VALUE",
 ) -> dict[str, object]:
+    answer_expression: dict[str, object] = {"family": answer_expression_family}
     return {
         "kind": "question_contract",
         "answer_requests_count": 1,
@@ -28,7 +31,7 @@ def _question_contract_payload(
         "answer_requests": [
             {
                 "answer_fact": subject,
-                "answer_expression": {"family": "scalar_aggregate"},
+                "answer_expression": answer_expression,
                 "answer_subject": _answer_subject_payload(answer_subject or subject),
                 "answer_population": default_answer_population(
                     description=subject,
@@ -37,13 +40,22 @@ def _question_contract_payload(
                         subject_text=answer_subject or subject
                     ).instance_interpretation,
                 ).to_question_contract_dict(),
-                "answer_outputs": [{"description": part} for part in parts],
+                "answer_outputs": [
+                    {"description": part, "role": answer_output_role} for part in parts
+                ],
                 "used_question_inputs": [],
             }
         ],
         "question_input_inventory_check": {
             "all_input_like_phrases_declared": True,
         },
+    }
+
+
+def _decision_payload(outcome: dict[str, object]) -> dict[str, object]:
+    return {
+        "decision_basis": "The current wording identifies the requested fact.",
+        "outcome": outcome,
     }
 
 
@@ -69,8 +81,8 @@ def test_question_contract_accepts_semantic_answer_subject_not_copied_from_quest
     assert isinstance(request_payload, dict)
 
     result = parse_question_contract(
-        tool_name=ANSWER_REQUEST_CONTRACT_TOOL_NAME,
-        payload=payload,
+        tool_name=QUESTION_CONTRACT_TOOL_NAME,
+        payload=_decision_payload(payload),
         question_context=question,
         question_context_texts=(question,),
     )
@@ -113,9 +125,9 @@ def test_lookup_question_contract_cannot_short_circuit_into_clarification():
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="store",
                         relation_id="answer_rows",
                         field_id="store",
@@ -167,7 +179,7 @@ def test_lookup_question_contract_cannot_short_circuit_into_clarification():
     assert result.status == "COMPLETED", result
     assert result.answer == "ABC Mall"
     assert planner.tool_names == [
-        "submit_answer_request_contract",
+        "submit_question_contract_outcome",
         "submit_query_enrichment",
         "submit_read_eligibility",
         "submit_source_alignment_reviews",
@@ -179,28 +191,30 @@ def test_lookup_question_contract_cannot_short_circuit_into_clarification():
 def test_lookup_carries_answer_subject_instance_interpretation_to_source_binding():
     planner = _ToolNamePlannerPort(
         responses={
-            "submit_answer_request_contract": {
+            "submit_question_contract_outcome": {
                 "kind": "question_contract",
                 "answer_requests_count": 1,
                 "question_inputs": [],
                 "answer_requests": [
-                        {
-                            "answer_fact": "in-person sales this month",
-                            "answer_expression": {"family": "scalar_aggregate"},
-                            "answer_subject": {
-                                "subject_text": "sales",
-                                "instance_interpretation": {
-                                    "kind": "NORMAL_BUSINESS_INSTANCE"
-                                },
+                    {
+                        "answer_fact": "in-person sales this month",
+                        "answer_expression": {"family": "scalar_aggregate"},
+                        "answer_subject": {
+                            "subject_text": "sales",
+                            "instance_interpretation": {
+                                "kind": "NORMAL_BUSINESS_INSTANCE"
                             },
-                            "answer_population": default_answer_population(
-                                description="in-person sales this month",
-                                subject_text="sales",
-                                instance_interpretation=RequestedFactAnswerSubject(
-                                    subject_text="sales"
-                                ).instance_interpretation,
-                            ).to_question_contract_dict(),
-                            "answer_outputs": [{"description": "amount"}],
+                        },
+                        "answer_population": default_answer_population(
+                            description="in-person sales this month",
+                            subject_text="sales",
+                            instance_interpretation=RequestedFactAnswerSubject(
+                                subject_text="sales"
+                            ).instance_interpretation,
+                        ).to_question_contract_dict(),
+                        "answer_outputs": [
+                            {"description": "amount", "role": "MEASURED_VALUE"}
+                        ],
                         "used_question_inputs": [],
                     }
                 ],
@@ -211,15 +225,15 @@ def test_lookup_carries_answer_subject_instance_interpretation_to_source_binding
             "submit_pattern_fact_plan": _pattern_fact_plan_payload(
                 requested_fact_id="fact_1",
                 answer_output_ids=("answer_1",),
-                    read_id="sales",
-                    pattern="aggregate_scalar",
-                    metric={
-                        "kind": "aggregate_field",
-                        "function": "sum",
-                        "field_id": "amount",
-                        "label": "total",
-                    },
-                ),
+                read_id="sales",
+                pattern="aggregate_scalar",
+                metric={
+                    "kind": "aggregate_field",
+                    "function": "sum",
+                    "field_id": "amount",
+                    "label": "total",
+                },
+            ),
         }
     )
     result = run_lookup_question(
@@ -286,11 +300,7 @@ class _ExactQuestionContractPlannerPort:
         tool_specs: tuple[object, ...] = (),
     ) -> dict[str, object]:
         del provider, prompt, max_thinking_tokens, system_prompt, output_mode
-        desired_tool_name = (
-            "submit_missing_input_clarification"
-            if self.payload.get("kind") == "needs_clarification"
-            else "submit_answer_request_contract"
-        )
+        desired_tool_name = "submit_question_contract_outcome"
         offered = {tool.name for tool in tool_specs}
         tool_name = desired_tool_name if desired_tool_name in offered else ""
         self.tool_names.append(tool_name)
@@ -300,7 +310,12 @@ class _ExactQuestionContractPlannerPort:
             "answer": json.dumps(
                 {
                     "tool": tool_name,
-                    "arguments": self.payload,
+                    "arguments": {
+                        "decision_basis": (
+                            "The current wording supports the selected outcome."
+                        ),
+                        "outcome": self.payload,
+                    },
                 },
                 default=str,
             ),
@@ -316,25 +331,19 @@ class _ExactQuestionContractPlannerPort:
 def test_lookup_question_contract_clarification_stops_after_question_contract_turn():
     planner = _ExactQuestionContractPlannerPort(
         payload={
-            "kind": "needs_clarification",
-            "missing": [
-                {
-                    "type": "answer_definition",
-                    "source_text": "check",
-                    "entity_type": "",
-                    "why_context_is_insufficient": (
-                        "The question does not say what business fact or metric "
-                        "should be checked."
-                    ),
-                }
-            ],
+            "kind": "missing_requested_fact",
+            "source_text": "check",
+            "why_question_is_incomplete": (
+                "The question does not say what business fact or metric "
+                "should be checked."
+            ),
         }
     )
 
     result = run_lookup_question(
         LookupRequest(
             question="Hey, can you check?",
-            run_id="run_question_contract_missing_answer_definition",
+            run_id="run_incomplete_factual_request",
             tenant_id="tenant_1",
             provider_preferences={"provider": "fake", "modelKey": "FAKE"},
         ),
@@ -347,7 +356,7 @@ def test_lookup_question_contract_clarification_stops_after_question_contract_tu
 
     assert result.status == "NEEDS_CLARIFICATION", result
     assert result.answer == "Which metric should I use?"
-    assert planner.tool_names == ["submit_missing_input_clarification"]
+    assert planner.tool_names == ["submit_question_contract_outcome"]
     details = result.rendered_fact.details  # type: ignore[union-attr]
     clarification = details["clarifications"][0]  # type: ignore[index]
     assert clarification["need"] == "answer_metric"
@@ -370,18 +379,16 @@ def test_lookup_question_contract_clarification_stops_after_question_contract_tu
     )
 
 
-def test_lookup_question_contract_can_terminally_request_missing_target_reference():
+def test_lookup_question_contract_preserves_unresolved_target_reference():
     planner = _ExactQuestionContractPlannerPort(
         payload={
-            "kind": "needs_clarification",
-            "missing": [
+            "kind": "unresolved_prior_turn_references",
+            "references": [
                 {
-                    "type": "target_reference",
                     "source_text": "her",
-                    "entity_type": "staff",
-                    "why_context_is_insufficient": (
-                        "No resolved staff reference is present in conversation "
-                        "resolution or active clarification context."
+                    "target_label": "staff member",
+                    "why_question_is_incomplete": (
+                        "The referenced staff member is not resolved."
                     ),
                 }
             ],
@@ -391,7 +398,7 @@ def test_lookup_question_contract_can_terminally_request_missing_target_referenc
     result = run_lookup_question(
         LookupRequest(
             question="What were her sales last week?",
-            run_id="run_question_contract_missing_target_reference",
+            run_id="run_unresolved_question_reference",
             tenant_id="tenant_1",
             provider_preferences={"provider": "fake", "modelKey": "FAKE"},
         ),
@@ -403,23 +410,12 @@ def test_lookup_question_contract_can_terminally_request_missing_target_referenc
     )
 
     assert result.status == "NEEDS_CLARIFICATION", result
-    assert result.answer == 'I could not find staff "her". Which staff should I use?'
-    assert planner.tool_names == ["submit_missing_input_clarification"]
     details = result.rendered_fact.details  # type: ignore[union-attr]
     clarification = details["clarifications"][0]  # type: ignore[index]
     assert clarification["need"] == "target_reference"
     assert clarification["reason"] == "unresolved_reference"
-    assert clarification["subjects"] == [
-        {
-            "kind": "question_input",
-            "id": "question_contract:her",
-            "label": "staff",
-            "sourceText": "her",
-            "options": [],
-        }
-    ]
-    assert {"kind": "known_input", "id": "known_input:question_contract:her"} in (
-        clarification["evidence"]
+    assert clarification["question"] == (
+        'I could not find staff member "her". Which staff member should I use?'
     )
 
 
@@ -434,8 +430,8 @@ def test_lookup_question_contract_rejects_false_inventory_check():
         ValueError, match="all_input_like_phrases_declared must be true"
     ):
         parse_question_contract(
-            tool_name=ANSWER_REQUEST_CONTRACT_TOOL_NAME,
-            payload=payload,
+            tool_name=QUESTION_CONTRACT_TOOL_NAME,
+            payload=_decision_payload(payload),
             question_context="How many sales happened this month?",
         )
 
@@ -457,322 +453,6 @@ def test_lookup_question_contract_rejects_false_inventory_check():
 
     assert result.status == "FAILED", result
     assert result.error == "planning_failed"
-
-
-def test_lookup_clarification_answer_prompt_frame_uses_memory_cards_not_global_prior_section():
-    planner = _ToolNamePlannerPort(
-        responses={
-            "submit_answer_request_contract": _question_contract_payload(),
-        }
-    )
-    prior_artifact = build_fact_artifact(
-        artifact_id="prior_clarification",
-        outcome=FactOutcome.NEEDS_CLARIFICATION,
-        addresses=(
-            FactAddress.outcome(
-                address="outcome.needs_clarification",
-                terminal=FactOutcome.NEEDS_CLARIFICATION.value,
-                clarification_questions=("Which store do you mean?",),
-                proof={"kind": "needs_clarification"},
-            ),
-        ),
-        source_question="The store I referred to, how much sales did we make yesterday?",
-    )
-
-    result = run_lookup_question(
-        LookupRequest(
-            question="ABC Mall",
-            conversation_context={"factArtifacts": [prior_artifact.to_dict()]},
-            run_id="run_active_clarification_prompt_frame",
-            provider_preferences={"provider": "fake", "modelKey": "FAKE"},
-        ),
-        LookupRuntimePorts(
-            relation_catalog_port=_CatalogPort(_catalog()),
-            data_access_port=_DataAccessPort({}),
-            planner_model_port=planner,
-        ),
-    )
-
-    assert result.status in {"FAILED", "NEEDS_CLARIFICATION", "COMPLETED"}
-    prompt = planner.prompts[0]
-    assert prompt.startswith("Current question:\nABC Mall")
-    assert "Active clarification prior question:" not in prompt
-    assert "The store I referred to, how much sales did we make yesterday?" in prompt
-    assert "ABC Mall" in prompt
-    assert "We are currently on the conversation resolution step." in prompt
-    assert "Context sources:" in prompt
-
-
-def test_lookup_multi_step_clarification_prompt_frame_uses_memory_cards_not_global_prior_section():
-    planner = _ToolNamePlannerPort(
-        responses={
-            "submit_answer_request_contract": _question_contract_payload(),
-        }
-    )
-    first_clarification = build_fact_artifact(
-        artifact_id="clarification_store",
-        outcome=FactOutcome.NEEDS_CLARIFICATION,
-        addresses=(
-            FactAddress.outcome(
-                address="outcome.needs_clarification",
-                terminal=FactOutcome.NEEDS_CLARIFICATION.value,
-                clarification_questions=("Which store do you mean?",),
-                proof={"kind": "needs_clarification"},
-            ),
-        ),
-        source_question="How much sales did we make?",
-    )
-    second_clarification = build_fact_artifact(
-        artifact_id="clarification_date",
-        outcome=FactOutcome.NEEDS_CLARIFICATION,
-        addresses=(
-            FactAddress.outcome(
-                address="outcome.needs_clarification",
-                terminal=FactOutcome.NEEDS_CLARIFICATION.value,
-                clarification_questions=("Which date do you mean?",),
-                proof={"kind": "needs_clarification"},
-            ),
-        ),
-        source_question="ABC Mall",
-    )
-
-    result = run_lookup_question(
-        LookupRequest(
-            question="yesterday",
-            conversation_context={
-                "factArtifacts": [
-                    second_clarification.to_dict(),
-                    first_clarification.to_dict(),
-                ]
-            },
-            run_id="run_multi_step_active_clarification_prompt_frame",
-            provider_preferences={"provider": "fake", "modelKey": "FAKE"},
-        ),
-        LookupRuntimePorts(
-            relation_catalog_port=_CatalogPort(_catalog()),
-            data_access_port=_DataAccessPort({}),
-            planner_model_port=planner,
-        ),
-    )
-
-    assert result.status in {"FAILED", "NEEDS_CLARIFICATION", "COMPLETED"}
-    prompt = planner.prompts[0]
-    assert prompt.startswith("Current question:\nyesterday")
-    assert "Active clarification prior question:" not in prompt
-    assert "How much sales did we make?" in prompt
-    assert "Context sources:" in prompt
-
-
-def test_lookup_active_clarification_accepts_known_inputs_from_prior_question():
-    question_contract = QuestionContract(
-        requested_facts=(
-            RequestedFact(
-                id="rf_sales",
-                description="sales amount for ABC Mall yesterday",
-                answer_subject=RequestedFactAnswerSubject(subject_text="sales"),
-                answer_outputs=(
-                    RequestedFactAnswerOutput(
-                        id="amount",
-                    ),
-                ),
-                known_inputs=(
-                    _known_reference_input(
-                        "store",
-                        "ABC Mall",
-                        value_meaning_hint="location",
-                    ),
-                    _known_time_input("date", "yesterday"),
-                ),
-            ),
-        )
-    )
-    plan = FactPlan(
-        outcome=_answer_plan(
-            fulfillment=(
-                FactFulfillment(
-                    requested_fact_id="rf_sales",
-                    answer_output_id="amount",
-                    render_output_id="amount",
-                ),
-            ),
-            relations=(
-                Relation(
-                    id="sales_rows",
-                    source=RelationSource(
-                        kind=SourceKind.API_READ,
-                        read_id="sales",
-                    ),
-                    fields=(
-                        RelationField(
-                            field_id="amount",
-                            roles=(FieldBindingRole.OUTPUT,),
-                        ),
-                    ),
-                ),
-            ),
-            operations=(
-                Operation(
-                    id="project_amount",
-                    spec=ProjectSpec(
-                        input_relation="sales_rows",
-                        fields=(ProjectField(source="amount"),),
-                    ),
-                    output_relation="answer_rows",
-                ),
-            ),
-            render_spec=RenderSpec(
-                relation_outputs=(
-                    RenderRelationOutput(
-                        id="amount",
-                        relation_id="answer_rows",
-                        field_id="amount",
-                    ),
-                )
-            ),
-        )
-    )
-    prior_artifact = build_fact_artifact(
-        artifact_id="prior_clarification",
-        outcome=FactOutcome.NEEDS_CLARIFICATION,
-        addresses=(
-            FactAddress.outcome(
-                address="outcome.needs_clarification",
-                terminal=FactOutcome.NEEDS_CLARIFICATION.value,
-                clarification_questions=("Which store do you mean?",),
-                proof={"kind": "needs_clarification"},
-            ),
-        ),
-        source_question="The store I referred to, how much sales did we make yesterday?",
-    )
-
-    def clarification_resolution(prompt: str) -> dict[str, object]:
-        source = _first_context_source(prompt)
-        return _conversation_resolution_clause_payload(
-            prompt=prompt,
-            current_question="ABC Mall",
-            contextualized_question="How much sales did we make at ABC Mall yesterday?",
-            actual_text="ABC Mall",
-            selected_sources=(source,),
-        )
-
-    ports = _ports(
-        plan=plan,
-        catalog=_catalog(
-            EndpointRead(
-                id="locations",
-                endpoint_name="list_location_list",
-                resource_names=("location",),
-                params=(
-                    CatalogParam(
-                        ref="list_location_list.query.name",
-                        name="name",
-                        source=ParamSource.QUERY,
-                        type="string",
-                    ),
-                ),
-                row_paths=(
-                    RowPath(id="data", path="data", cardinality=RowCardinality.MANY),
-                ),
-                fields=(
-                    CatalogField(
-                        ref="field.location_id",
-                        path="data.location_id",
-                        row_path_id="data",
-                        type="string",
-                        identity=IdentityMetadata(
-                            entity_ref="location",
-                            identity_field="location_id",
-                            primary_key=True,
-                            stable=True,
-                            display_fields=("field.location_name",),
-                        ),
-                    ),
-                    CatalogField(
-                        ref="field.location_name",
-                        path="data.name",
-                        row_path_id="data",
-                        type="string",
-                    ),
-                ),
-                pagination=PaginationMetadata(
-                    mode=PaginationMode.NONE,
-                    completeness_policy=CompletenessPolicy.COMPLETE,
-                ),
-            ),
-            EndpointRead(
-                id="sales",
-                endpoint_name="list_sale_list",
-                resource_names=("sales",),
-                params=(
-                    CatalogParam(
-                        ref="sales.query.location_id",
-                        name="location_id",
-                        source=ParamSource.QUERY,
-                        type="string",
-                        identity=IdentityMetadata(
-                            entity_ref="location",
-                            identity_field="location_id",
-                            primary_key=True,
-                        ),
-                    ),
-                    CatalogParam(
-                        ref="sales.query.start_date",
-                        name="start_date",
-                        source=ParamSource.QUERY,
-                        type="date",
-                    ),
-                    CatalogParam(
-                        ref="sales.query.end_date",
-                        name="end_date",
-                        source=ParamSource.QUERY,
-                        type="date",
-                    ),
-                ),
-                row_paths=(
-                    RowPath(id="data", path="data", cardinality=RowCardinality.MANY),
-                ),
-                fields=(
-                    CatalogField(
-                        ref="field.amount",
-                        path="data.amount",
-                        row_path_id="data",
-                        type="decimal",
-                    ),
-                ),
-                facts=(CatalogFact(ref="sales.amount", field_ref="field.amount"),),
-                pagination=PaginationMetadata(
-                    mode=PaginationMode.NONE,
-                    completeness_policy=CompletenessPolicy.COMPLETE,
-                ),
-            ),
-        ),
-        responses={
-            "list_location_list": {
-                "data": [{"location_id": "loc_bbs", "name": "ABC Mall"}]
-            },
-            "list_sale_list": {"data": [{"amount": "50000"}]},
-        },
-        question_contract=question_contract,
-        conversation_resolution=clarification_resolution,
-    )
-
-    result = run_lookup_question(
-        LookupRequest(
-            question="ABC Mall",
-            conversation_context={"factArtifacts": [prior_artifact.to_dict()]},
-            runtime_values=RuntimeValueContext(
-                runtime_date="2026-05-09",
-                timezone="Africa/London",
-            ),
-            run_id="run_active_clarification_prior_input",
-            tenant_id="tenant_1",
-            provider_preferences={"provider": "fake", "modelKey": "FAKE"},
-        ),
-        ports,
-    )
-
-    assert result.status == "COMPLETED", result
-    assert result.answer == "50000"
 
 
 def test_lookup_follow_up_memory_stays_out_of_question_contract_prompt():
@@ -802,6 +482,7 @@ def test_lookup_follow_up_memory_stays_out_of_question_contract_prompt():
                             {
                                 "id": "metric_total",
                                 "description": "total sales amount",
+                                "role": "ANSWER_VALUE",
                             }
                         ],
                         "used_question_inputs": [],
@@ -817,7 +498,7 @@ def test_lookup_follow_up_memory_stays_out_of_question_contract_prompt():
                 FactFulfillment(
                     requested_fact_id="rf_answer",
                     answer_output_id="metric_total",
-                    render_output_id="metric_total",
+                    result_output_id="metric_total",
                 ),
             ),
             relations=(
@@ -845,9 +526,9 @@ def test_lookup_follow_up_memory_stays_out_of_question_contract_prompt():
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="metric_total",
                         relation_id="answer_rows",
                         field_id="metric_total",
@@ -919,6 +600,7 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_with_typed_resolutio
                             {
                                 "id": "answer_1",
                                 "description": "total sales amount",
+                                "role": "ANSWER_VALUE",
                             }
                         ],
                         "used_question_inputs": [],
@@ -961,7 +643,7 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_with_typed_resolutio
                     actual_text="the day before",
                 )
             ),
-            "submit_answer_request_contract": {
+            "submit_question_contract_outcome": {
                 "kind": "question_contract",
                 "answer_requests_count": 1,
                 "question_inputs": [
@@ -1007,6 +689,7 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_with_typed_resolutio
                         "answer_outputs": [
                             {
                                 "description": "total sales amount",
+                                "role": "ANSWER_VALUE",
                             }
                         ],
                         "used_question_inputs": ["input_period"],
@@ -1051,9 +734,11 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_with_typed_resolutio
 def test_lookup_question_contract_is_catalog_blind_before_impossible_planning():
     planner = _ToolNamePlannerPort(
         responses={
-            "submit_answer_request_contract": _question_contract_payload(
+            "submit_question_contract_outcome": _question_contract_payload(
                 subject="full card numbers used in buyer payments",
                 parts=("full card numbers",),
+                answer_expression_family="list_rows",
+                answer_output_role="ANSWER_VALUE",
             ),
             "submit_pattern_fact_plan": {
                 "outcome": {
@@ -1082,6 +767,7 @@ def test_lookup_question_contract_is_catalog_blind_before_impossible_planning():
             ReadEligibilityRetentionSpec(
                 requested_fact_id="fact_1",
                 read_id="payments",
+                answer_value_fields=("card_txn_code_last_four",),
             ),
         ),
     )
@@ -1112,7 +798,6 @@ def test_lookup_question_contract_is_catalog_blind_before_impossible_planning():
                             CatalogFact(
                                 ref="payment.card.full_number",
                                 availability=CatalogFactAvailability.POLICY_BLOCKED,
-                                field_ref="field.card_txn_code_last_four",
                                 read_id="payments",
                                 proof_refs=("endpoint_docs:card_numbers_not_returned",),
                             ),
@@ -1139,7 +824,7 @@ def test_lookup_question_contract_is_catalog_blind_before_impossible_planning():
     )
 
     assert planner.tool_names == [
-        "submit_answer_request_contract",
+        "submit_question_contract_outcome",
         "submit_query_enrichment",
         "submit_read_eligibility",
         "submit_source_alignment_reviews",
@@ -1172,9 +857,11 @@ def test_lookup_question_contract_is_catalog_blind_before_impossible_planning():
 def test_lookup_source_binding_impossible_accepts_source_evidence_handles():
     planner = _ToolNamePlannerPort(
         responses={
-            "submit_answer_request_contract": _question_contract_payload(
+            "submit_question_contract_outcome": _question_contract_payload(
                 subject="full card numbers used in buyer payments",
                 parts=("full card numbers",),
+                answer_expression_family="list_rows",
+                answer_output_role="ANSWER_VALUE",
             ),
             "submit_source_binding": {
                 "outcome": {
@@ -1203,6 +890,7 @@ def test_lookup_source_binding_impossible_accepts_source_evidence_handles():
             ReadEligibilityRetentionSpec(
                 requested_fact_id="fact_1",
                 read_id="payments",
+                answer_value_fields=("card_txn_code_last_four",),
             ),
         ),
     )
@@ -1233,7 +921,6 @@ def test_lookup_source_binding_impossible_accepts_source_evidence_handles():
                             CatalogFact(
                                 ref="payment.card.full_number",
                                 availability=CatalogFactAvailability.POLICY_BLOCKED,
-                                field_ref="field.card_txn_code_last_four",
                                 read_id="payments",
                                 proof_refs=("endpoint_docs:card_numbers_not_returned",),
                             ),
@@ -1260,7 +947,7 @@ def test_lookup_source_binding_impossible_accepts_source_evidence_handles():
     )
 
     assert planner.tool_names == [
-        "submit_answer_request_contract",
+        "submit_question_contract_outcome",
         "submit_query_enrichment",
         "submit_read_eligibility",
         "submit_source_alignment_reviews",
@@ -1288,10 +975,12 @@ def test_lookup_source_binding_impossible_accepts_source_evidence_handles():
 def test_lookup_source_binding_impossible_proves_selected_candidate_surface():
     planner = _ToolNamePlannerPort(
         responses={
-            "submit_answer_request_contract": _question_contract_payload(
+            "submit_question_contract_outcome": _question_contract_payload(
                 subject="product sales report target values",
                 answer_subject="product sales reports",
                 parts=("target values",),
+                answer_expression_family="list_rows",
+                answer_output_role="ANSWER_VALUE",
             ),
             "submit_query_enrichment": _query_enrichment_payload(("product", "sales")),
             "submit_source_binding": {
@@ -1329,6 +1018,7 @@ def test_lookup_source_binding_impossible_proves_selected_candidate_surface():
                 requested_fact_id="fact_1",
                 read_id=f"product_sales_{index}",
                 row_path_ids=("data",),
+                answer_value_fields=("product_name",),
             )
             for index in range(1, 4)
         ),
@@ -1360,7 +1050,7 @@ def test_lookup_source_binding_impossible_proves_selected_candidate_surface():
     )
 
     assert planner.tool_names == [
-        "submit_answer_request_contract",
+        "submit_question_contract_outcome",
         "submit_query_enrichment",
         "submit_read_eligibility",
         "submit_source_alignment_reviews",
@@ -1392,9 +1082,11 @@ def test_lookup_source_binding_impossible_proves_selected_candidate_surface():
 def test_lookup_plan_shape_impossible_accepts_bound_source_evidence_handles():
     planner = _ToolNamePlannerPort(
         responses={
-            "submit_answer_request_contract": _question_contract_payload(
+            "submit_question_contract_outcome": _question_contract_payload(
                 subject="full card numbers used in buyer payments",
                 parts=("full card numbers",),
+                answer_expression_family="list_rows",
+                answer_output_role="ANSWER_VALUE",
             ),
             "submit_pattern_fact_plan": {
                 "outcome": {
@@ -1404,6 +1096,7 @@ def test_lookup_plan_shape_impossible_accepts_bound_source_evidence_handles():
                             "requested_fact_id": "fact_1",
                             "basis": "policy_access",
                             "evidence_refs": [
+                                "source_1.data.card_txn_code",
                                 "endpoint_docs:full_card_numbers_hidden",
                             ],
                             "reviewed_read_ids": ["payments"],
@@ -1423,6 +1116,7 @@ def test_lookup_plan_shape_impossible_accepts_bound_source_evidence_handles():
             ReadEligibilityRetentionSpec(
                 requested_fact_id="fact_1",
                 read_id="payments",
+                answer_value_fields=("card_txn_code",),
             ),
         ),
     )
@@ -1453,7 +1147,6 @@ def test_lookup_plan_shape_impossible_accepts_bound_source_evidence_handles():
                             CatalogFact(
                                 ref="payment.card.full_number",
                                 availability=CatalogFactAvailability.POLICY_BLOCKED,
-                                field_ref="field.card_txn_code",
                                 read_id="payments",
                                 proof_refs=("endpoint_docs:full_card_numbers_hidden",),
                             ),
@@ -1480,7 +1173,7 @@ def test_lookup_plan_shape_impossible_accepts_bound_source_evidence_handles():
     )
 
     assert planner.tool_names == [
-        "submit_answer_request_contract",
+        "submit_question_contract_outcome",
         "submit_query_enrichment",
         "submit_read_eligibility",
         "submit_source_alignment_reviews",
@@ -1536,7 +1229,6 @@ def _targetless_product_sales_read(index: int) -> EndpointRead:
             CatalogFact(
                 ref=f"product_sales_{index}.target_values",
                 availability=CatalogFactAvailability.POLICY_BLOCKED,
-                field_ref=f"field.product_name_{index}",
                 read_id=f"product_sales_{index}",
                 proof_refs=(f"policy:product_target_values_{index}",),
             ),

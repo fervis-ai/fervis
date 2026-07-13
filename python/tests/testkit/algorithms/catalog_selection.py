@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from fervis.lookup.relation_catalog.selection import (
-    ActiveMemoryCatalogSignal,
     AnswerOutputResourceLineage,
     CatalogSelectionRequest,
     EntityTargetCatalogSearchTerms,
@@ -31,18 +30,6 @@ def run_catalog_selection_case(payload: dict[str, Any]) -> list[str]:
                 _resource_name_matches(item)
                 for item in input_payload.get("resource_name_matches") or ()
             ),
-            active_memory_signals=tuple(
-                ActiveMemoryCatalogSignal(
-                    memory_id=str(item["memory_id"]),
-                    requested_fact_id=str(item["requested_fact_id"]),
-                    identity_type=str(item.get("identity_type") or ""),
-                    related_identity_types=tuple(
-                        item.get("related_identity_types") or ()
-                    ),
-                    field_names=tuple(item.get("field_names") or ()),
-                )
-                for item in input_payload.get("active_memory_signals") or ()
-            ),
             available_values=tuple(
                 fact_value_from_payload(item)
                 for item in input_payload.get("available_values") or ()
@@ -69,9 +56,7 @@ def run_catalog_selection_case(payload: dict[str, Any]) -> list[str]:
                 "selected_read_membership": {
                     read_id: True for read_id in item.selected_read_ids
                 },
-                "unselected_positive_read_ids": list(
-                    item.unselected_positive_read_ids
-                ),
+                "unselected_positive_read_ids": list(item.unselected_positive_read_ids),
                 "rankings": [
                     {
                         "read_id": ranking.read_id,
@@ -87,7 +72,9 @@ def run_catalog_selection_case(payload: dict[str, Any]) -> list[str]:
         ],
     }
     if "result_equals" in payload["expect"]:
-        return exact_mismatches(actual=actual, expected=payload["expect"]["result_equals"])
+        return exact_mismatches(
+            actual=actual, expected=payload["expect"]["result_equals"]
+        )
     return subset_mismatches(
         actual=actual,
         expected_subset=payload["expect"]["result_contains"],
@@ -127,7 +114,9 @@ def run_resolver_catalog_selection_case(payload: dict[str, Any]) -> list[str]:
         ],
     }
     if "result_equals" in payload["expect"]:
-        return exact_mismatches(actual=actual, expected=payload["expect"]["result_equals"])
+        return exact_mismatches(
+            actual=actual, expected=payload["expect"]["result_equals"]
+        )
     return subset_mismatches(
         actual=actual,
         expected_subset=payload["expect"]["result_contains"],
@@ -144,7 +133,9 @@ def _resource_name_matches(
                 answer_output_id=str(item["answer_output_id"]),
                 support_role=str(item["support_role"]),
                 source_text=str(item["source_text"]),
-                matching_resource_names=tuple(item.get("matching_resource_names") or ()),
+                matching_resource_names=tuple(
+                    item.get("matching_resource_names") or ()
+                ),
             )
             for item in payload.get("answer_output_resource_lineage") or ()
         ),

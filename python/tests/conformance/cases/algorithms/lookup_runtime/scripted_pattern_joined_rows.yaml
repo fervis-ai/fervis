@@ -11,7 +11,9 @@ input:
     fact_description: item quantities with names
     subject_text: item quantities with names
     answer_expression_family: list_rows
-    answer_outputs: [item_name, quantity]
+    answer_outputs:
+      - {description: item_name, role: ANSWER_VALUE}
+      - {description: quantity, role: ANSWER_VALUE}
     resource_terms: [item, product]
   catalog:
     reads:
@@ -25,6 +27,10 @@ input:
         fields:
           - {ref: field.items.item_id, path: data.item_id, row_path_id: data, type: string}
           - {ref: field.items.quantity, path: data.quantity, row_path_id: data, type: number}
+        candidate_keys:
+          - id: item_key
+            entity_kind: item
+            components: [{id: item_id, field_ref: field.items.item_id}]
       - id: products_read
         endpoint_name: products_read
         resource_names: [product]
@@ -35,6 +41,10 @@ input:
         fields:
           - {ref: field.products.item_id, path: data.item_id, row_path_id: data, type: string}
           - {ref: field.products.item_name, path: data.item_name, row_path_id: data, type: string}
+        candidate_keys:
+          - id: item_key
+            entity_kind: item
+            components: [{id: item_id, field_ref: field.products.item_id}]
   fact_plan:
     outcome:
       kind: fact_plan
@@ -69,4 +79,4 @@ expect:
     status: COMPLETED
     rendered_rows:
       - item_name: Item One
-        quantity: 3
+        quantity: "3"

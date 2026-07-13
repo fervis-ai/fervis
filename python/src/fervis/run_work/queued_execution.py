@@ -13,8 +13,11 @@ from .events import NullQuestionRunEventSink, QuestionRunEventSink
 
 
 class ClaimedRunWorkItem(Protocol):
-    run_id: str
-    active_attempt: int
+    @property
+    def run_id(self) -> str: ...
+
+    @property
+    def active_attempt(self) -> int: ...
 
 
 class QueuedRunWorkQueue(Protocol):

@@ -13,6 +13,7 @@ input:
           - address: entity.location.abc
             kind: entity
             resource: location
+            keyId: primary_key
             referenceText: ABC Mall
             identity: {location_id: loc-1}
   excludes_from:
@@ -23,7 +24,10 @@ input:
 expect:
   result_contains:
     identity_values:
-      - value: loc-1
+      - value:
+          entity_kind: location
+          key_id: primary_key
+          components: {location_id: loc-1}
     excludes_from:
       prompt_context:
         identity_values: true

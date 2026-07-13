@@ -14,6 +14,7 @@ from ._shared import (
     canonical_param_value,
     re,
 )
+from fervis.lookup.source_binding.candidates.contracts import EntityTarget, parse_entity_target
 
 
 def _candidate_with_param_decision_options(
@@ -402,9 +403,7 @@ def _param_omit_option(
 
 def _param_has_exhaustive_static_boolean_options(param: dict[str, Any]) -> bool:
     binding_values = tuple(
-        item
-        for item in param.get("binding_values") or ()
-        if isinstance(item, dict)
+        item for item in param.get("binding_values") or () if isinstance(item, dict)
     )
     values = {str(item.get("value") or "") for item in binding_values}
     sources = {str(item.get("source") or "") for item in binding_values}
@@ -456,8 +455,9 @@ def _param_binding_values(
             {"value": "true", "label": "true", "source": "static_choice"},
             {"value": "false", "label": "false", "source": "static_choice"},
         ]
-    identity = param.get("identity")
-    if isinstance(identity, dict):
+    entity_target = param.get("entity_target")
+    if isinstance(entity_target, dict):
+        target = parse_entity_target(entity_target)
         return [
             {
                 "value": value.id,
@@ -465,7 +465,7 @@ def _param_binding_values(
                 "source": "available_value",
             }
             for value in available_values
-            if _value_matches_identity_param(value, identity=identity)
+            if _value_matches_entity_target(value, target=target)
         ]
     if param_type in {"date", "datetime"}:
         return [
@@ -512,26 +512,28 @@ def _time_binding_values(
     return tuple(output)
 
 
-def _value_matches_identity_param(
+def _value_matches_entity_target(
     value: FactValue,
     *,
-    identity: dict[str, Any],
+    target: EntityTarget,
 ) -> bool:
     if value.kind == ValueKind.IDENTITY and isinstance(
         value.payload, IdentityValuePayload
     ):
-        payload = value.payload
-    elif value.kind == ValueKind.IDENTITY_SET and isinstance(
+        return (
+            value.payload.entity_kind == target.entity_kind
+            and value.payload.key_id == target.key_id
+            and value.payload.key_component_id == target.component_id
+        )
+    if value.kind == ValueKind.IDENTITY_SET and isinstance(
         value.payload, IdentitySetValuePayload
     ):
-        payload = value.payload
-    else:
-        return False
-    identity_field = str(identity.get("identity_field") or "")
-    entity_ref = str(identity.get("entity_ref") or "")
-    return bool(identity_field and payload.identity_field == identity_field) or bool(
-        entity_ref and payload.identity_type == entity_ref
-    )
+        return (
+            value.payload.entity_kind == target.entity_kind
+            and value.payload.key_id == target.key_id
+            and value.payload.key_component_id == target.component_id
+        )
+    return False
 
 
 def _value_matches_literal_param(value: FactValue, *, param_type: str) -> bool:

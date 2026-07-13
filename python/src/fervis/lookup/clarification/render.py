@@ -35,7 +35,9 @@ def _target_reference_question(clarification: Clarification) -> str:
         return f"Which matching {label} should I use?"
     if clarification.reason == ClarificationReason.UNRESOLVED_REFERENCE:
         if source_text:
-            return f'I could not find {label} "{source_text}". Which {label} should I use?'
+            return (
+                f'I could not find {label} "{source_text}". Which {label} should I use?'
+            )
         return f"Which {label} should I use?"
     if clarification.reason == ClarificationReason.UNSUPPORTED_REFERENCE:
         if source_text:

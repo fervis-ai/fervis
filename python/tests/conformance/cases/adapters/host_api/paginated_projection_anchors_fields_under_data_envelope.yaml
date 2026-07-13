@@ -12,8 +12,21 @@ input:
       path_template: /records/
       view_class: tests.RecordListView
       resource_names: [record]
-      paginated: true
-      primary_key_fields: [id]
+      pagination:
+        kind: offset
+        position_query_param: after
+        page_size_query_param: batch
+        results_path: data
+        page_size: 25
+        max_page_size: 100
+        continuation_path: pagination.has_more
+      candidate_keys:
+        - key_id: primary_key
+          entity_kind: record
+          primary: true
+          components:
+            - component_id: id
+              field_path: id
       response_fields:
         - name: id
           type: uuid
@@ -41,7 +54,12 @@ expect:
         fields:
           data.id:
             row_path_id: data
-            identity:
-              primary_key: true
           data.items.name:
             row_path_id: data_items
+        candidate_keys:
+          - key_id: primary_key
+            entity_kind: record
+            primary: true
+            components:
+              - component_id: id
+                field_ref: field.data.id

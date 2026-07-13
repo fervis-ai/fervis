@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from fervis.lookup.relation_catalog.selection import (
     AnswerOutputResourceLineage,
     EntityTargetCatalogSearchTerms,
@@ -23,31 +21,25 @@ from fervis.lookup.query_enrichment import provider_contract as provider_output
 
 
 def parse_query_enrichment(
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
     request: QueryEnrichmentRequest,
 ) -> QueryEnrichmentResult:
     parsed = provider_output.QueryEnrichmentOutput.parse(payload)
-    raw_items = parsed.requested_fact_resource_name_matches
-    if not isinstance(raw_items, list):
-        raise ValueError("requested_fact_resource_name_matches must be an array")
+    items = parsed.requested_fact_resource_name_matches
     requested_fact_ids = {fact.id for fact in request.requested_facts}
     endpoint_names = set(query_enrichment_endpoint_names(request))
     resource_names = set(query_enrichment_resource_names(request))
     output: list[RequestedFactResourceNameMatches] = []
     seen_facts: set[str] = set()
-    for raw in raw_items:
-        item = provider_output.RequestedFactResourceNameMatchesOutput.parse(raw)
+    for item in items:
         requested_fact_id = _text(item.requested_fact_id)
         if requested_fact_id not in requested_fact_ids:
             raise ValueError("query enrichment references unknown requested fact")
         if requested_fact_id in seen_facts:
             raise ValueError("duplicate resource name matches for requested fact")
-        raw_matches = item.answer_output_resource_lineage
-        if not isinstance(raw_matches, list):
-            raise ValueError("answer_output_resource_lineage must be an array")
         matches = _answer_output_resource_lineage(
-            raw_matches,
+            item.answer_output_resource_lineage,
             answer_output_ids={
                 output.id
                 for fact in request.requested_facts
@@ -78,15 +70,14 @@ def parse_query_enrichment(
 
 
 def _answer_output_resource_lineage(
-    raw_matches: list[Any],
+    items: tuple[provider_output.AnswerOutputResourceLineageOutput, ...],
     *,
     answer_output_ids: set[str],
     endpoint_names: set[str],
     resource_names: set[str],
 ) -> tuple[AnswerOutputResourceLineage, ...]:
     rows: dict[tuple[str, str, str], list[str]] = {}
-    for raw in raw_matches:
-        item = provider_output.AnswerOutputResourceLineageOutput.parse(raw)
+    for item in items:
         answer_output_id = _text(item.answer_output_id)
         if answer_output_id not in answer_output_ids:
             raise ValueError("query enrichment references unknown answer output")
@@ -94,11 +85,8 @@ def _answer_output_resource_lineage(
         if support_role not in ANSWER_OUTPUT_SUPPORT_ROLE_VALUES:
             raise ValueError("query enrichment references unknown support role")
         source_text = _text(item.source_text)
-        raw_terms = item.matching_resource_names
-        if not isinstance(raw_terms, list):
-            raise ValueError("matching_resource_names must be an array")
         terms = _matching_resource_names(
-            raw_terms,
+            item.matching_resource_names,
             endpoint_names=endpoint_names,
             resource_names=resource_names,
         )
@@ -121,12 +109,10 @@ def _answer_output_resource_lineage(
 
 
 def _entity_target_catalog_search_terms(
-    raw_items: object,
+    items: tuple[provider_output.EntityTargetCatalogSearchTermsOutput, ...],
     *,
     request: QueryEnrichmentRequest,
 ) -> tuple[EntityTargetCatalogSearchTerms, ...]:
-    if not isinstance(raw_items, list):
-        raise ValueError("entity_target_catalog_search_terms must be an array")
     entity_target_ids = {
         known.id
         for fact in request.requested_facts
@@ -137,18 +123,14 @@ def _entity_target_catalog_search_terms(
     resource_names = set(query_enrichment_resource_names(request))
     output: list[EntityTargetCatalogSearchTerms] = []
     seen_targets: set[str] = set()
-    for raw in raw_items:
-        item = provider_output.EntityTargetCatalogSearchTermsOutput.parse(raw)
+    for item in items:
         target_id = _text(item.target_id)
         if target_id not in entity_target_ids:
             raise ValueError("query enrichment references unknown entity target")
         if target_id in seen_targets:
             raise ValueError("duplicate entity target catalog search terms")
-        raw_terms = item.catalog_search_terms
-        if not isinstance(raw_terms, list):
-            raise ValueError("catalog_search_terms must be an array")
         terms = _entity_catalog_search_terms(
-            raw_terms,
+            item.catalog_search_terms,
             endpoint_names=endpoint_names,
             resource_names=resource_names,
             max_terms=QUERY_ENRICHMENT_MAX_CATALOG_SEARCH_TERMS,
@@ -167,20 +149,17 @@ def _entity_target_catalog_search_terms(
 
 
 def _entity_catalog_search_terms(
-    raw_terms: list[Any],
+    items: tuple[provider_output.CatalogSearchTermOutput, ...],
     *,
     endpoint_names: set[str],
     resource_names: set[str],
     max_terms: int,
 ) -> tuple[str, ...]:
-    if len(raw_terms) > max_terms:
+    if len(items) > max_terms:
         raise ValueError(f"catalog_search_terms must contain at most {max_terms} terms")
     terms: list[str] = []
     seen: set[str] = set()
-    for raw_term in raw_terms:
-        if not isinstance(raw_term, dict):
-            raise ValueError("entity catalog_search_terms items must be objects")
-        item = provider_output.CatalogSearchTermOutput.parse(raw_term)
+    for item in items:
         _text(item.basis)
         term = _text(item.term)
         if term in endpoint_names:
@@ -194,7 +173,7 @@ def _entity_catalog_search_terms(
 
 
 def _matching_resource_names(
-    raw_terms: list[Any],
+    raw_terms: tuple[str, ...],
     *,
     endpoint_names: set[str],
     resource_names: set[str],

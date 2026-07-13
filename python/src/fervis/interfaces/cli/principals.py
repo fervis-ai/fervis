@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from fervis.host_api.contracts.authority import ReadContextRef
+from fervis.host_api.contracts.authority import ReadContextRef, ReadContextScheme
 from fervis.project import ProjectInspection
 from fervis.questions import QuestionPrincipal
 
 
-_READ_CONTEXT_SCHEME_BY_FRAMEWORK = {
+_READ_CONTEXT_SCHEME_BY_FRAMEWORK: dict[str, ReadContextScheme] = {
     "django": "django_principal",
     "fastapi": "fastapi_principal",
     "flask": "flask_principal",

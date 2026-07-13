@@ -30,8 +30,10 @@ input:
     answer_outputs:
       - id: answer_1
         description: staff person who made the most sales
+        role: ANSWER_VALUE
       - id: answer_2
         description: sales total for that staff person
+        role: MEASURED_VALUE
   catalog:
     reads:
       - id: list_sale_list
@@ -54,6 +56,29 @@ input:
           - {ref: list_sale_list.field.sale_item_id, path: data.items.sale_item_id, row_path_id: data_items, type: uuid}
           - {ref: list_sale_list.field.quantity, path: data.items.quantity, row_path_id: data_items, type: integer}
           - {ref: list_sale_list.field.unit_sale_price, path: data.items.unit_sale_price, row_path_id: data_items, type: decimal}
+        entity_references:
+          - id: sale_staff
+            target_entity_kind: staff
+            target_key_id: staff_key
+            components:
+              - target_component_id: staff_id
+                local_field_ref: list_sale_list.field.staff_id
+            context_field_refs: [list_sale_list.field.staff_name]
+      - id: list_staff
+        endpoint_name: list_staff
+        resource_names: [staff]
+        row_paths:
+          - {id: data, path: data, cardinality: many}
+        fields:
+          - {ref: list_staff.field.staff_id, path: data.staff_id, row_path_id: data, type: uuid}
+        candidate_keys:
+          - id: staff_key
+            entity_kind: staff
+            components:
+              - id: staff_id
+                field_ref: list_staff.field.staff_id
+            primary: true
+            stable: true
 expect:
   result_contains:
     strategy_alternatives_by_read:
@@ -62,11 +87,11 @@ expect:
           requested_fact_id: fact_1
           read_id: list_sale_list
           plan_shape: ranked_aggregate
-          group_fields_by_field:
-            staff_id:
-              field: staff_id
+          entity_evidence_by_id:
+            staff_key:
+              entity_kind: staff
+              fields: [staff_id]
               row_path: data
-              type: uuid
           metric_fields_by_field:
             amount:
               field: amount

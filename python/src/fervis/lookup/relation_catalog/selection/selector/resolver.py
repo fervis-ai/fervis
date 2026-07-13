@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import re
 
 from fervis.lookup.relation_catalog import (
     EndpointRead,
     RelationCatalog,
-    identity_is_primary_stable,
-    read_has_primary_stable_identity,
+    primary_stable_key_entity_kinds,
+    read_has_primary_stable_key,
 )
 from fervis.lookup.relation_catalog.selection.model import (
     EntityTargetResolverSelection,
@@ -128,12 +127,13 @@ def _resolver_term_coverage_key(
     item: _ResolverReadRanking,
     *,
     term: str,
-) -> tuple[int, int, int, int, int, str]:
+) -> tuple[int, int, int, int, int, int, str]:
     resource_terms = set(_resolver_exact_resource_terms(item.read))
     identity_terms = set(_resolver_identity_terms(item.read))
     endpoint_terms = set(_resolver_endpoint_name_terms(item.read.endpoint_name))
     return (
         -(1 if term in resource_terms else 0),
+        len(resource_terms),
         -(1 if term in identity_terms else 0),
         -(1 if term in endpoint_terms else 0),
         -item.identity_score,
@@ -177,16 +177,16 @@ def _resolver_selection_with_term_coverage(
 
 
 def _has_stable_identity_field(read: EndpointRead) -> bool:
-    return read_has_primary_stable_identity(read)
+    return read_has_primary_stable_key(read)
 
 
 def _resolver_identity_terms(read: EndpointRead) -> tuple[str, ...]:
     values: list[str] = []
     values.extend(read.resource_names)
-    for field in read.fields:
-        if identity_is_primary_stable(field.identity):
-            values.append(field.identity.entity_ref)
-            values.append(field.identity.identity_field)
+    values.extend(primary_stable_key_entity_kinds(read))
+    for key in read.candidate_keys:
+        if key.primary and key.stable:
+            values.extend(component.id for component in key.components)
     return _ordered_terms(tuple(values), stopwords=_RESOLVER_ENDPOINT_STOPWORDS)
 
 
@@ -201,5 +201,8 @@ def _resolver_exact_resource_terms(read: EndpointRead) -> tuple[str, ...]:
 
 
 def _resource_name_key(value: object) -> str:
-    text = re.sub(r"[^a-zA-Z0-9]+", "_", str(value or "").strip().lower())
-    return re.sub(r"_+", "_", text).strip("_")
+    terms = _ordered_terms(
+        (value,),
+        stopwords=_RESOLVER_ENDPOINT_STOPWORDS,
+    )
+    return "_".join(terms)

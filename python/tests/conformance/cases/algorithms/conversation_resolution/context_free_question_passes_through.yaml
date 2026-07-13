@@ -17,7 +17,6 @@ input:
           resolved_text: How many stores do we have?
           retained_frame_parts: []
           values: []
-      frame_call: {kind: none}
 expect:
   result_contains:
     current_question_text: How many stores do we have?

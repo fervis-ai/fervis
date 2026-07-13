@@ -14,6 +14,7 @@ requested_facts:
     answer_outputs:
       - id: answer_1
         description: number of stores in London
+        role: ANSWER_VALUE
 catalog:
   reads:
     - id: list_location_list
@@ -41,14 +42,33 @@ catalog:
           path: data.area.area_id
           row_path_id: data
           type: string
-          identity:
-            entity_ref: area
-            identity_field: area_id
-            primary_key: true
-            stable: true
         - ref: field.location.data.area.name
           path: data.area.name
           row_path_id: data
           type: string
+      candidate_keys:
+        - id: primary_key
+          entity_kind: location
+          primary: true
+          components:
+            - {id: location_id, field_ref: field.location.data.location_id}
+      entity_references:
+        - id: area_reference
+          target_entity_kind: area
+          target_key_id: primary_key
+          components:
+            - {target_component_id: area_id, local_field_ref: field.location.data.area.area_id}
+          context_field_refs: [field.location.data.area.name]
+    - id: list_area_list
+      endpoint_name: list_area_list
+      resource_names: [area]
+      fields:
+        - {ref: field.area.data.area_id, path: data.area_id, type: string}
+      candidate_keys:
+        - id: primary_key
+          entity_kind: area
+          primary: true
+          components:
+            - {id: area_id, field_ref: field.area.data.area_id}
 selected_read_ids_by_fact:
   fact_1: [list_location_list]

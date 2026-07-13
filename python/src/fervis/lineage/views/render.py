@@ -89,7 +89,6 @@ def _append_run(
     detail: LineageRenderDetail,
 ) -> None:
     lines.append(f"  Run {run.run_id} (#{run.run_number}): {run.result_kind}")
-    _append_run_trigger(lines, run, indent=4)
     _append_program_derivation(lines, run, indent=4)
     _append_clarification_responses(lines, run.clarification_responses, indent=4)
     _append_activated_memory(lines, run.activated_memory_ids, indent=4)
@@ -306,16 +305,6 @@ def _payload_objects(value: object) -> tuple[dict[str, object], ...]:
     return tuple(dict(item) for item in value if isinstance(item, dict))
 
 
-def _append_run_trigger(lines: list[str], run, *, indent: int) -> None:
-    if not run.trigger_clarification_response_id:
-        return
-    source_run = run.base_run_id or "unknown run"
-    lines.append(
-        f"{' ' * indent}Triggered by clarification response "
-        f"{run.trigger_clarification_response_id} from run {source_run}"
-    )
-
-
 def _append_clarification_responses(
     lines: list[str], responses, *, indent: int
 ) -> None:
@@ -375,12 +364,12 @@ def _append_proof_summary(
     evidence = tuple(item for item in proof.endpoint_args if item.values)
     if evidence:
         lines.append(f"{prefix}Evidence used:")
-        for item in evidence:
-            lines.append(f"{prefix}  - applied {item.arg_name}")
+        for endpoint_arg in evidence:
+            lines.append(f"{prefix}  - applied {endpoint_arg.arg_name}")
     if proof.computation_summaries:
         lines.append(f"{prefix}Computation:")
-        for item in proof.computation_summaries:
-            lines.append(f"{prefix}  - {item}")
+        for computation in proof.computation_summaries:
+            lines.append(f"{prefix}  - {computation}")
 
 
 def _append_debug_proofs(

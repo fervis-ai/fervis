@@ -41,6 +41,9 @@ class LookupServiceQuestionLookupPort(QuestionLookupPort):
         *,
         progress_sink: LookupProgressSink | None = None,
     ) -> LookupExecutionResult:
+        max_thinking_tokens = request.max_thinking_tokens
+        if max_thinking_tokens is None:
+            raise ValueError("lookup execution requires max_thinking_tokens")
         resolved_provider = self.lookup_service.provider_backbone.resolve_provider(
             request.provider,
             model_key=request.model_key,
@@ -66,10 +69,11 @@ class LookupServiceQuestionLookupPort(QuestionLookupPort):
             model_key=request.model_key,
             conversation_context=self.conversation_context(request),
             max_budget_usd=request.max_budget_usd,
-            max_thinking_tokens=request.max_thinking_tokens,
+            max_thinking_tokens=max_thinking_tokens,
             user_context=self.runtime_context(request),
             active_attempt=request.active_attempt,
             progress_sink=progress_sink,
+            clarification_response=request.clarification_response,
         )
         self.lookup_service.provider_backbone.trace(
             event_type=f"run.{result.status.lower()}",

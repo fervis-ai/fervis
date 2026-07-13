@@ -94,7 +94,7 @@ def run_fervis(
                 ports=ports,
                 stdout=stdout,
             )
-        result = evaluate_fervis(argv, ports=ports)
+        result = evaluate_fervis(argv, ports=ports, stderr=stderr)
     except (LineageRootNotFound, ObservabilityRootNotFound, ValueError) as error:
         del stderr
         result = blocked_command_result(
@@ -340,18 +340,26 @@ def _write_command_result(result: FervisCommandResult, *, stdout: TextIO) -> int
     if rendered:
         stdout.write(rendered)
         stdout.write("\n")
+    if not isinstance(result.payload, CommandEnvelope):
+        raise ValueError("project command result requires a command envelope")
     return result.payload.exit_code
 
 
 def evaluate_fervis(
-    argv: tuple[str, ...], *, ports: FervisCliPorts
+    argv: tuple[str, ...],
+    *,
+    ports: FervisCliPorts,
+    stderr: TextIO = sys.stderr,
 ) -> FervisCommandResult:
     args = parser().parse_args(argv)
-    return execute_fervis(args, ports=ports)
+    return execute_fervis(args, ports=ports, stderr=stderr)
 
 
 def execute_fervis(
-    args: argparse.Namespace, *, ports: FervisCliPorts
+    args: argparse.Namespace,
+    *,
+    ports: FervisCliPorts,
+    stderr: TextIO = sys.stderr,
 ) -> FervisCommandResult:
     if args.command == FervisCommandKind.INIT:
         return init_result(args, project=ports.project)
@@ -370,7 +378,7 @@ def execute_fervis(
     if args.command == FervisCommandKind.EXPLAIN:
         return explain_result(args, ports=ports)
     if args.command == FervisCommandKind.GOLDSET:
-        return goldset_result(args, ports=ports)
+        return goldset_result(args, ports=ports, progress_stream=stderr)
     if args.command == "inspect" and args.inspect_command == "prompts":
         return inspect_prompts_result(args, ports=ports)
     if args.command == "inspect" and args.inspect_command == "artifact":

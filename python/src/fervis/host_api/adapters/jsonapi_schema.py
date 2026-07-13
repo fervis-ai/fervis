@@ -23,12 +23,13 @@ def enrich_contract_from_jsonapi_resource(
     fields = response_fields_from_marshmallow_schema(schema)
     if not fields:
         return contract
+    cardinality = _resource_cardinality(resource, contract=contract)
     return replace(
         contract,
-        response_fields=_jsonapi_response_fields(fields),
-        response_schema=_response_schema_payload(fields),
+        response_fields=_jsonapi_response_fields(fields, cardinality=cardinality),
+        response_schema=_response_schema_payload(fields, cardinality=cardinality),
         response_schema_source="jsonapi",
-        response_cardinality=_resource_cardinality(resource, contract=contract),
+        response_cardinality=cardinality,
     )
 
 
@@ -48,8 +49,14 @@ def _schema_instance(schema: object | None) -> object | None:
 
 def _jsonapi_response_fields(
     fields: tuple[ResponseFieldContract, ...],
+    *,
+    cardinality: str,
 ) -> tuple[ResponseFieldContract, ...]:
-    data_field = ResponseFieldContract(name="data", path="data", type="array")
+    data_field = ResponseFieldContract(
+        name="data",
+        path="data",
+        type="array" if cardinality == "many" else "object",
+    )
     attribute_fields = tuple(
         replace(
             field,
@@ -62,12 +69,18 @@ def _jsonapi_response_fields(
 
 def _response_schema_payload(
     fields: tuple[ResponseFieldContract, ...],
+    *,
+    cardinality: str,
 ) -> dict[str, Any]:
-    return {
+    attributes = {
         f"data.attributes.{field.path}" if field.path else "data.attributes": {
             "type": field.type
         }
         for field in fields
+    }
+    return {
+        "data": {"type": "array" if cardinality == "many" else "object"},
+        **attributes,
     }
 
 

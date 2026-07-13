@@ -11,7 +11,7 @@ input:
     - id: rows
       rows: [{name: Alpha}]
       completeness: {status: incomplete, source_kind: api_read, set_kind: unknown, proof_refs: [read:rows]}
-  render_outputs:
+  result_outputs:
     - {id: name, relation_id: rows, field_id: name}
 expect:
   result_contains:

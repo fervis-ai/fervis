@@ -10,9 +10,10 @@ from fervis.lookup.source_binding.compiler_ir import (
     RelationInputOrigin,
 )
 from fervis.lookup.fact_plan.row_sources import RowSource
-from fervis.lookup.answer_program.values import FactValue
+from fervis.lookup.answer_program.values import FactValue, IdentityValuePayload
 from fervis.lookup.fact_planning.value_components import value_component
 from fervis.lookup.grounding.model import GroundedInputUse
+from fervis.lookup.relation_catalog import EntityKeyComponentTarget
 
 
 @dataclass(frozen=True)
@@ -52,24 +53,20 @@ def grounded_param_bindings(
             continue
         component = use.value_component
         concrete_value = value_component(value, component)
-        existing = grounded.get(param_id)
-        if existing is not None and existing.value != concrete_value:
-            raise ValueError(f"conflicting grounded values for source param {param_id}")
-        grounded[param_id] = _GroundedParam(
+        _record_grounded_param(
+            grounded,
             param_id=param_id,
-            value_id=existing.value_id if existing is not None else value.id,
-            value=concrete_value,
-            value_component=(
-                existing.value_component
-                if existing is not None
-                else component.value
-            ),
-            proof_refs=tuple(
-                dict.fromkeys(
-                    (*(() if existing is None else existing.proof_refs), *value.proof_refs)
-                )
-            ),
+            value=value,
+            concrete_value=concrete_value,
+            value_component=component.value,
         )
+    _record_identity_param_bindings(
+        grounded,
+        available_values=available_values,
+        row_source=row_source,
+        requested_fact_id=requested_fact_id,
+        excluded_param_ids=excluded_param_ids,
+    )
     return tuple(
         DraftEndpointParamBinding(
             param_id=item.param_id,
@@ -80,6 +77,87 @@ def grounded_param_bindings(
             proof_refs=item.proof_refs,
         )
         for item in grounded.values()
+    )
+
+
+def _record_identity_param_bindings(
+    grounded: dict[str, _GroundedParam],
+    *,
+    available_values: tuple[FactValue, ...],
+    row_source: RowSource,
+    requested_fact_id: str,
+    excluded_param_ids: frozenset[str],
+) -> None:
+    for param in row_source.params:
+        target = param.entity_target
+        if target is None or param.id in excluded_param_ids:
+            continue
+        matching_values = tuple(
+            value
+            for value in available_values
+            if _value_applies(value, requested_fact_id)
+            and _identity_matches_target(value, target=target)
+        )
+        distinct_values = {
+            value.payload.value
+            for value in matching_values
+            if isinstance(value.payload, IdentityValuePayload)
+        }
+        if len(distinct_values) != 1:
+            continue
+        for value in matching_values:
+            payload = value.payload
+            if not isinstance(payload, IdentityValuePayload):
+                continue
+            _record_grounded_param(
+                grounded,
+                param_id=param.id,
+                value=value,
+                concrete_value=payload.value,
+                value_component="value",
+            )
+
+
+def _identity_matches_target(
+    value: FactValue,
+    *,
+    target: EntityKeyComponentTarget,
+) -> bool:
+    payload = value.payload
+    return (
+        isinstance(payload, IdentityValuePayload)
+        and payload.entity_kind == target.entity_kind
+        and payload.key_id == target.key_id
+        and payload.key_component_id == target.component_id
+    )
+
+
+def _record_grounded_param(
+    grounded: dict[str, _GroundedParam],
+    *,
+    param_id: str,
+    value: FactValue,
+    concrete_value: Any,
+    value_component: str,
+) -> None:
+    existing = grounded.get(param_id)
+    if existing is not None and existing.value != concrete_value:
+        raise ValueError(f"conflicting grounded values for source param {param_id}")
+    grounded[param_id] = _GroundedParam(
+        param_id=param_id,
+        value_id=existing.value_id if existing is not None else value.id,
+        value=concrete_value,
+        value_component=(
+            existing.value_component if existing is not None else value_component
+        ),
+        proof_refs=tuple(
+            dict.fromkeys(
+                (
+                    *(() if existing is None else existing.proof_refs),
+                    *value.proof_refs,
+                )
+            )
+        ),
     )
 
 

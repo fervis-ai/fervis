@@ -10,8 +10,22 @@ input:
     answer_expression_family: ranked_selection
   catalog:
     reads:
+      - id: list_staff_list
+        endpoint_name: list_staff_list
+        resource_names: [staff]
+        row_paths:
+          - {id: data, path: data, cardinality: many}
+        fields:
+          - {ref: staff.id, path: data.staff_id, row_path_id: data, type: uuid}
+        candidate_keys:
+          - id: staff_primary
+            entity_kind: staff
+            components:
+              - {id: staff_id, field_ref: staff.id}
+            primary: true
       - id: list_shift_compensation_list
         endpoint_name: list_shift_compensation_list
+        resource_names: [shift_compensation]
         row_paths:
           - id: data
             path: data
@@ -21,15 +35,25 @@ input:
             path: data.staff_id
             row_path_id: data
             type: uuid
-            identity:
-              entity_ref: staff
-              identity_field: staff_id
-              primary_key: true
-              stable: true
+          - ref: field.compensation_id
+            path: data.compensation_id
+            row_path_id: data
+            type: uuid
           - ref: field.calculated_pay
             path: data.calculated_pay
             row_path_id: data
             type: decimal
+        candidate_keys:
+          - id: compensation_primary
+            entity_kind: shift_compensation
+            components:
+              - {id: compensation_id, field_ref: field.compensation_id}
+        entity_references:
+          - id: staff_reference
+            target_entity_kind: staff
+            target_key_id: staff_primary
+            components:
+              - {target_component_id: staff_id, local_field_ref: field.staff_id}
   candidate:
     source_candidate_id: source_1
     kind: new_api_read
@@ -38,19 +62,27 @@ input:
       - row_path_id: data
         row_source_id: rs_source_1_data
         cardinality: many
+        candidate_keys:
+          - key_id: compensation_primary
+            entity_kind: shift_compensation
+            components:
+              - {component_id: compensation_id, field_id: compensation_id}
+        entity_references:
+          - reference_id: staff_reference
+            target_entity_kind: staff
+            target_key_id: staff_primary
+            components:
+              - {component_id: staff_id, field_id: staff_id}
         evidence_items:
+          - field_id: compensation_id
+            type: uuid
           - field_id: staff_id
             type: uuid
-            identity:
-              entity_ref: staff
-              identity_field: staff_id
-              primary_key: true
-              stable: true
           - field_id: calculated_pay
             type: decimal
 expect:
   result_contains:
-    group_key_fields:
+    entity_fields:
       staff_id: true
     metric_fields:
       calculated_pay: false

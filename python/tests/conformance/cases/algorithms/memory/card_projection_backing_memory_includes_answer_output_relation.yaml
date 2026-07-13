@@ -20,6 +20,7 @@ input:
                 answer_outputs:
                   - id: answer_output_1
                     description: total sales amount
+                    role: ANSWER_VALUE
                 used_question_inputs: []
         addresses:
           - address: relation.sales_rows

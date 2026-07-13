@@ -44,10 +44,9 @@ def test_anthropic_conversation_resolution_uses_canonical_single_tool():
     assert schema["type"] == "object"
     outcome_variants = schema["properties"]["outcome"]["anyOf"]
     assert "clauses" in outcome_variants[0]["properties"]
-    assert "frame_call" in outcome_variants[0]["properties"]
+    assert "frame_call" not in outcome_variants[0]["properties"]
     assert [
-        variant["properties"]["kind"]["enum"][0]
-        for variant in outcome_variants
+        variant["properties"]["kind"]["enum"][0] for variant in outcome_variants
     ] == ["resolved", "multiple_meanings", "missing_input"]
 
 

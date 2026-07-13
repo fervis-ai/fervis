@@ -21,6 +21,7 @@ input:
                 answer_outputs:
                   - id: answer_1
                     description: total sales amount
+                    role: ANSWER_VALUE
                 used_question_inputs: []
         addresses:
           - address: value.total_sales

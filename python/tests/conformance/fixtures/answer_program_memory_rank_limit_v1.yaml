@@ -1,4 +1,4 @@
-schema_revision: 1
+schema_revision: 2
 program:
   $type: AnswerProgram
   fields:
@@ -56,11 +56,15 @@ program:
                 tie_breakers: {$tuple: []}
                 kind: {$enum: OperationKind, value: rank}
             output_relation: ranked_sales
-    render_spec: null
+    result_projection:
+      $type: ResultProjection
+      fields:
+        relation_outputs: {$tuple: []}
+        scalar_outputs: {$tuple: []}
     compatibility:
       $type: ProgramCompatibility
       fields:
-        schema_revision: 1
+        schema_revision: 2
         compiler_version: ""
         function_semantics: {$tuple: []}
         source_contracts: {$tuple: []}

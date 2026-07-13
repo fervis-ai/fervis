@@ -59,7 +59,7 @@ input:
         run_id: run_2
         produced_by_step_id: step_fact_2
         fact_key: fact_1
-        description: unresolved follow-up scope
+        description: unsupported follow-up scope
         answer_expression_family: scalar_aggregate
     fact_results:
       - fact_result_id: fact_result_1
@@ -71,7 +71,7 @@ input:
         run_id: run_2
         requested_fact_id: fact_2
         produced_by_step_id: step_fact_2
-        result_kind: needs_clarification
+        result_kind: impossible
     answers:
       - answer_id: answer_1
         run_id: run_1
@@ -85,6 +85,7 @@ input:
         value_kind: number
         value_json:
           value: 2
+        role: ANSWER_VALUE
     source_reads: []
     proof_graphs: []
 expect:
@@ -94,6 +95,6 @@ expect:
       - "Question question_2: What about this month?"
       - "Run run_1 (#1): answered"
       - "Run run_2 (#1): factual_terminal"
-      - "Requested fact fact_2: unresolved follow-up scope"
+      - "Requested fact fact_2: unsupported follow-up scope"
     excludes:
       payload_json: true

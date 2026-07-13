@@ -2,21 +2,31 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 from fervis.host_api.contracts.response_envelope import TOTAL_COUNT_FIELD
 from fervis.host_api.contracts.endpoint import (
+    CandidateKeyAuthorityContract,
+    CandidateKeyContract,
     EndpointContract,
+    EntityReferenceContract,
+    ParameterContract,
+    ResponseFieldContract,
     make_catalog_endpoint_key,
 )
 from fervis.lookup.relation_catalog import (
+    CandidateKeyAuthority,
+    CandidateKeyAuthorityComponent,
+    CandidateKey,
+    CandidateKeyComponent,
     CatalogEndpointMetadata,
     CatalogField,
     CatalogParam,
+    CatalogValidationError,
     CompletenessPolicy,
     EndpointRead,
+    EntityKeyComponentTarget,
+    EntityReference,
+    EntityReferenceComponent,
     FieldRequirement,
-    IdentityMetadata,
     PaginationMetadata,
     PaginationMode,
     ParamSource,
@@ -24,7 +34,7 @@ from fervis.lookup.relation_catalog import (
     ResponseEnvelopeMetadata,
     RowCardinality,
     RowPath,
-    validate_relation_catalog,
+    parse_relation_catalog,
 )
 
 
@@ -35,9 +45,10 @@ def relation_catalog_from_endpoint_contracts(
     catalog = RelationCatalog(
         reads=tuple(
             _endpoint_read(item) for item in contracts if item.supports_lookup_read()
-        )
+        ),
+        candidate_key_authorities=_candidate_key_authorities(contracts),
     )
-    return validate_relation_catalog(_with_propagated_param_identities(catalog))
+    return parse_relation_catalog(catalog)
 
 
 def _validate_endpoint_contracts(contracts: tuple[EndpointContract, ...]) -> None:
@@ -49,7 +60,10 @@ def _validate_endpoint_contracts(contracts: tuple[EndpointContract, ...]) -> Non
 def _endpoint_read(contract: EndpointContract) -> EndpointRead:
     row_paths = _row_paths(contract)
     fields = tuple(
-        _catalog_field(contract, item, row_paths) for item in contract.response_fields
+        field
+        for item in contract.response_fields
+        for field in (_catalog_field(contract, item, row_paths),)
+        if field is not None
     )
     return EndpointRead(
         id=contract.endpoint_name,
@@ -63,11 +77,134 @@ def _endpoint_read(contract: EndpointContract) -> EndpointRead:
         ),
         row_paths=row_paths,
         fields=fields,
+        candidate_keys=_candidate_keys(contract, fields=fields),
+        entity_references=_entity_references(contract, fields=fields),
         response_envelope=_response_envelope(contract),
         pagination=_pagination(contract),
         access=_access(contract),
         catalog_endpoint=_catalog_endpoint_metadata(contract),
         source_metadata=_source_metadata(contract),
+    )
+
+
+def _candidate_keys(
+    contract: EndpointContract,
+    *,
+    fields: tuple[CatalogField, ...],
+) -> tuple[CandidateKey, ...]:
+    fields_by_path = {field.path: field.ref for field in fields}
+    keys = tuple(
+        _candidate_key(
+            key,
+            contract=contract,
+            fields_by_path=fields_by_path,
+        )
+        for key in contract.candidate_keys
+    )
+    return keys
+
+
+def _candidate_key_authorities(
+    contracts: tuple[EndpointContract, ...],
+) -> tuple[CandidateKeyAuthority, ...]:
+    authorities = tuple(
+        _candidate_key_authority(authority)
+        for contract in contracts
+        for authority in contract.candidate_key_authorities
+    )
+    return tuple(dict.fromkeys(authorities))
+
+
+def _candidate_key_authority(
+    authority: CandidateKeyAuthorityContract,
+) -> CandidateKeyAuthority:
+    components = tuple(
+        CandidateKeyAuthorityComponent(
+            id=component.component_id,
+            type=component.type,
+        )
+        for component in authority.components
+    )
+    return CandidateKeyAuthority(
+        id=authority.key_id,
+        entity_kind=authority.entity_kind,
+        components=components,
+        primary=authority.primary,
+        stable=authority.stable,
+    )
+
+
+def _candidate_key(
+    key: CandidateKeyContract,
+    *,
+    contract: EndpointContract,
+    fields_by_path: dict[str, str],
+) -> CandidateKey:
+    components = tuple(
+        CandidateKeyComponent(
+            id=component.component_id,
+            field_ref=fields_by_path[
+                _required_catalog_path(contract, component.field_path)
+            ],
+        )
+        for component in key.components
+    )
+    context_field_refs = tuple(
+        fields_by_path[_required_catalog_path(contract, path)]
+        for path in key.context_field_paths
+    )
+    return CandidateKey(
+        id=key.key_id,
+        entity_kind=key.entity_kind,
+        components=components,
+        primary=key.primary,
+        stable=key.stable,
+        context_field_refs=context_field_refs,
+    )
+
+
+def _entity_references(
+    contract: EndpointContract,
+    *,
+    fields: tuple[CatalogField, ...],
+) -> tuple[EntityReference, ...]:
+    fields_by_path = {field.path: field.ref for field in fields}
+    references = tuple(
+        _entity_reference(
+            reference,
+            contract=contract,
+            fields_by_path=fields_by_path,
+        )
+        for reference in contract.entity_references
+    )
+    return references
+
+
+def _entity_reference(
+    reference: EntityReferenceContract,
+    *,
+    contract: EndpointContract,
+    fields_by_path: dict[str, str],
+) -> EntityReference:
+    components = tuple(
+        EntityReferenceComponent(
+            target_component_id=component.target_component_id,
+            local_field_ref=fields_by_path[
+                _required_catalog_path(contract, component.local_field_path)
+            ],
+        )
+        for component in reference.components
+    )
+    context_field_refs = tuple(
+        fields_by_path[_required_catalog_path(contract, path)]
+        for path in reference.context_field_paths
+    )
+    return EntityReference(
+        id=reference.reference_id,
+        target_entity_kind=reference.target_entity_kind,
+        target_key_id=reference.target_key_id,
+        components=components,
+        context_field_refs=context_field_refs,
     )
 
 
@@ -95,75 +232,41 @@ def _catalog_endpoint_metadata(
     )
 
 
-def _catalog_param(endpoint_name: str, param: object) -> CatalogParam:
-    raw_source = str(getattr(param, "source", "") or "")
+def _catalog_param(endpoint_name: str, param: ParameterContract) -> CatalogParam:
+    raw_source = param.source
     if not raw_source:
-        raise ValueError(f"{endpoint_name}.{param.name} param source is required")
+        raise CatalogValidationError(
+            f"{endpoint_name}.{param.name} param source is required"
+        )
     source = ParamSource(raw_source)
     return CatalogParam(
         ref=f"{endpoint_name}.{source.value}.{param.name}",
         name=str(param.name),
         source=source,
         type=str(param.type),
-        description=str(getattr(param, "description", "") or ""),
+        description=param.description,
         required=bool(param.required),
-        choices=tuple(str(item) for item in getattr(param, "choices", ()) or ()),
+        choices=param.choices,
         choice_labels={
-            str(key): str(value)
-            for key, value in (getattr(param, "choice_labels", {}) or {}).items()
+            str(key): str(value) for key, value in param.choice_labels.items()
         },
-        default=getattr(param, "default", None),
-        identity=_param_identity_metadata(param),
-        semantics=str(getattr(param, "semantics", "") or ""),
+        default=param.default,
+        entity_target=_param_entity_target(param),
+        semantics=param.semantics,
     )
 
 
-def _param_identity_metadata(param: object) -> IdentityMetadata | None:
-    identity = getattr(param, "identity", {}) or {}
-    entity_ref = str(identity.get("entityRef") or "")
-    id_field = str(identity.get("idField") or "")
-    if not entity_ref or not id_field:
+def _param_entity_target(
+    param: ParameterContract,
+) -> EntityKeyComponentTarget | None:
+    target = param.entity_target
+    if target is None:
         return None
-    return IdentityMetadata(
-        entity_ref=entity_ref,
-        identity_field=id_field,
-        primary_key=True,
-        stable=True,
+    return EntityKeyComponentTarget(
+        entity_kind=str(target.entity_kind),
+        key_id=str(target.key_id),
+        component_id=str(target.component_id),
     )
-
-
-def _with_propagated_param_identities(catalog: RelationCatalog) -> RelationCatalog:
-    identities_by_field = _primary_identity_by_field(catalog)
-    if not identities_by_field:
-        return catalog
-    reads = []
-    for read in catalog.reads:
-        params = tuple(
-            (
-                param
-                if param.identity is not None
-                else replace(param, identity=identities_by_field.get(param.name))
-            )
-            for param in read.params
-        )
-        reads.append(replace(read, params=params))
-    return RelationCatalog(reads=tuple(reads), facts=catalog.facts)
-
-
-def _primary_identity_by_field(catalog: RelationCatalog) -> dict[str, IdentityMetadata]:
-    identities: dict[str, IdentityMetadata] = {}
-    for read in catalog.reads:
-        for field in read.fields:
-            identity = field.identity
-            if identity is None or not identity.primary_key or not identity.stable:
-                continue
-            if not field.path:
-                continue
-            if identity.identity_field:
-                identities.setdefault(identity.identity_field, identity)
-                continue
-            identities.setdefault(field.path.split(".")[-1], identity)
-    return identities
 
 
 def _row_paths(contract: EndpointContract) -> tuple[RowPath, ...]:
@@ -178,7 +281,7 @@ def _row_paths(contract: EndpointContract) -> tuple[RowPath, ...]:
             ),
         )
     }
-    if contract.paginated:
+    if contract.pagination is not None:
         paths["data"] = RowPath(
             id="data",
             path="data",
@@ -188,7 +291,7 @@ def _row_paths(contract: EndpointContract) -> tuple[RowPath, ...]:
         path = _catalog_path(contract, str(field.path or ""))
         if not path:
             continue
-        if field.type == "array":
+        if field.type == "array" and _field_has_descendants(contract, path):
             paths[path] = RowPath(
                 id=_row_path_id(path),
                 path=path,
@@ -215,13 +318,23 @@ def _row_paths(contract: EndpointContract) -> tuple[RowPath, ...]:
     return tuple(paths[key] for key in sorted(paths))
 
 
+def _field_has_descendants(contract: EndpointContract, field_path: str) -> bool:
+    descendant_prefix = f"{field_path}."
+    return any(
+        _catalog_path(contract, str(field.path or "")).startswith(descendant_prefix)
+        for field in contract.response_fields
+    )
+
+
 def _catalog_field(
     contract: EndpointContract,
-    field: object,
+    field: ResponseFieldContract,
     row_paths: tuple[RowPath, ...],
-) -> CatalogField:
+) -> CatalogField | None:
     raw_path = str(field.path or field.name or "")
     path = _catalog_path(contract, raw_path)
+    if not path:
+        return None
     row_path = _field_row_path(path, {item.path: item for item in row_paths})
     return CatalogField(
         ref=f"field.{path}",
@@ -230,7 +343,6 @@ def _catalog_field(
         type=str(field.type),
         nullable=False,
         choices=tuple(str(item) for item in getattr(field, "choices", ()) or ()),
-        identity=_identity_metadata(contract, field),
         requirements=_field_requirements(contract, field),
         metadata={
             "name": str(field.name or ""),
@@ -248,37 +360,9 @@ def _field_row_path(path: str, row_paths: dict[str, RowPath]) -> str:
     return ""
 
 
-def _identity_metadata(
-    contract: EndpointContract,
-    field: object,
-) -> IdentityMetadata | None:
-    raw_path = str(field.path or "")
-    path = _catalog_path(contract, raw_path)
-    identity = getattr(field, "identity", {}) or {}
-    entity_ref = str(identity.get("entityRef") or "")
-    if identity and entity_ref:
-        return IdentityMetadata(
-            entity_ref=entity_ref,
-            identity_field=str(identity.get("idField") or path),
-            primary_key=bool(identity.get("primaryKey")),
-            stable=True,
-            display_fields=tuple(
-                str(item) for item in identity.get("displayFields", ())
-            ),
-        )
-    if path in contract.primary_key_fields or raw_path in contract.primary_key_fields:
-        return IdentityMetadata(
-            entity_ref=path,
-            identity_field=path.split(".")[-1],
-            primary_key=True,
-            stable=True,
-        )
-    return None
-
-
 def _field_requirements(
     contract: EndpointContract,
-    field: object,
+    field: ResponseFieldContract,
 ) -> tuple[FieldRequirement, ...]:
     requires = getattr(field, "requires", {}) or {}
     query_param = str(requires.get("queryParam") or "")
@@ -294,16 +378,31 @@ def _field_requirements(
 
 def _response_envelope(contract: EndpointContract) -> ResponseEnvelopeMetadata:
     return ResponseEnvelopeMetadata(
-        results_path="data" if contract.paginated or _has_data_array(contract) else "",
-        count_path=TOTAL_COUNT_FIELD if contract.paginated else "",
+        results_path=(
+            "data"
+            if contract.pagination is not None or _has_data_array(contract)
+            else ""
+        ),
+        count_path=(
+            f"pagination.{TOTAL_COUNT_FIELD}"
+            if contract.pagination is not None
+            else ""
+        ),
     )
 
 
 def _pagination(contract: EndpointContract) -> PaginationMetadata:
-    if not contract.paginated:
+    if contract.pagination is None:
         return PaginationMetadata(mode=PaginationMode.NONE)
+    mode = (
+        PaginationMode.LIMIT_OFFSET
+        if contract.pagination.kind.value == "offset"
+        else PaginationMode.PAGE_NUMBER
+    )
     return PaginationMetadata(
-        mode=PaginationMode.PAGE_NUMBER,
+        mode=mode,
+        default_page_size=contract.pagination.page_size,
+        max_page_size=contract.pagination.max_page_size,
         completeness_policy=CompletenessPolicy.ALL_PAGES,
     )
 
@@ -329,11 +428,36 @@ def _has_data_array(contract: EndpointContract) -> bool:
 
 
 def _catalog_path(contract: EndpointContract, path: str) -> str:
-    if not contract.paginated or not path:
+    if contract.pagination is None or not path:
         return path
-    if path == "data" or path.startswith("data."):
-        return path
-    return f"data.{path}"
+    results_path = contract.pagination.results_path
+    if path == results_path:
+        return "data"
+    results_prefix = f"{results_path}."
+    if path.startswith(results_prefix):
+        return f"data.{path.removeprefix(results_prefix)}"
+    if contract.pagination.total_path and path == contract.pagination.total_path:
+        return f"pagination.{TOTAL_COUNT_FIELD}"
+    if not _declares_results_envelope(contract):
+        return f"data.{path}"
+    return ""
+
+
+def _declares_results_envelope(contract: EndpointContract) -> bool:
+    results_path = contract.pagination.results_path if contract.pagination else ""
+    return any(
+        str(field.path or field.name) == results_path and field.type == "array"
+        for field in contract.response_fields
+    )
+
+
+def _required_catalog_path(contract: EndpointContract, path: str) -> str:
+    canonical_path = _catalog_path(contract, path)
+    if not canonical_path:
+        raise ValueError(
+            "relation identity field is unavailable after response normalization"
+        )
+    return canonical_path
 
 
 def _row_path_id(path: str) -> str:

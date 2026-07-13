@@ -1,0 +1,48 @@
+id: paginated_projection_maps_declared_result_and_total_paths
+description: Paginated host fields map to the canonical response that execution actually returns.
+kind: adapter
+adapter: host_api.endpoint_contract_projection
+input:
+  contracts:
+    - endpoint_name: list_warehouses
+      url_name: warehouses
+      method: GET
+      path_template: /warehouses
+      view_class: tests.WarehouseView
+      resource_names: [warehouses]
+      pagination:
+        kind: page_number
+        position_query_param: page
+        page_size_query_param: per_page
+        results_path: warehouses
+        page_size: 50
+        max_page_size: 1000
+        total_path: total
+      response_fields:
+        - {name: warehouses, type: array, path: warehouses}
+        - {name: warehouse_id, type: integer, path: warehouses.warehouse_id}
+        - {name: warehouse_name, type: string, path: warehouses.warehouse_name}
+        - {name: total, type: integer, path: total}
+        - {name: page, type: integer, path: page}
+      candidate_keys:
+        - key_id: primary_key
+          entity_kind: warehouse
+          primary: true
+          components:
+            - {component_id: warehouse_id, field_path: warehouses.warehouse_id}
+expect:
+  result_contains:
+    reads:
+      list_warehouses:
+        row_paths:
+          - {id: data, path: data, cardinality: many}
+          - {id: root, path: "", cardinality: one}
+        fields:
+          data.warehouse_id: {row_path_id: data}
+          data.warehouse_name: {row_path_id: data}
+          pagination.count: {row_path_id: root}
+        candidate_keys:
+          - key_id: primary_key
+            entity_kind: warehouse
+            components:
+              - {component_id: warehouse_id, field_ref: field.data.warehouse_id}

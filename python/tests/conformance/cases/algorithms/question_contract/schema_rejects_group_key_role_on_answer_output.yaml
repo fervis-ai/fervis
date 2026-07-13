@@ -31,7 +31,7 @@ input:
   - description: specified staff member
     role: GROUP_KEY
   - description: sales count
-    role: ROW_POPULATION
+    role: ROW_COUNT
   used_input_refs: [staff_a, staff_b]
 expect:
   result_contains:

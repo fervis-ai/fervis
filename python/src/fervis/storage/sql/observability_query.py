@@ -23,7 +23,15 @@ from fervis.observability.query import (
 )
 from fervis.project.persistence.schema import metadata
 
-from .rows import row_mapping, row_mappings
+from .rows import (
+    json_object,
+    json_objects,
+    optional_int,
+    optional_text,
+    required_int,
+    row_mapping,
+    row_mappings,
+)
 from .transaction import sql_connection
 
 
@@ -219,24 +227,34 @@ def _model_call_row(
         run_id=str(row["run_id"]),
         step_id=str(row["step_id"]),
         step_key=RunStepKey(row["step_key"]),
-        step_sequence=int(row["sequence"]),
-        call_index=int(row["call_index"]),
+        step_sequence=required_int(row["sequence"], field="sequence"),
+        call_index=required_int(row["call_index"], field="call_index"),
         provider=str(row["provider"]),
         model_key=str(row["model_key"]),
         status=ModelCallStatus(row["status"]),
         provider_request_id=str(row["provider_request_id"]),
         finish_reason=str(row["finish_reason"]),
-        duration_ms=row["duration_ms"],
+        duration_ms=optional_int(row["duration_ms"], field="duration_ms"),
         reasoning_effort=str(row["reasoning_effort"]),
-        reasoning_budget_tokens=row["reasoning_budget_tokens"],
-        max_output_tokens=row["max_output_tokens"],
-        prompt_chars=int(row["prompt_chars"]),
-        schema_chars=int(row["schema_chars"]),
-        tool_spec_chars=int(row["tool_spec_chars"]),
-        submitted_payload_chars=row["submitted_payload_chars"],
-        raw_output_chars=row["raw_output_chars"],
-        model_subcalls=tuple(
-            dict(item) for item in row["model_subcalls_json"] if isinstance(item, dict)
+        reasoning_budget_tokens=optional_int(
+            row["reasoning_budget_tokens"], field="reasoning_budget_tokens"
+        ),
+        max_output_tokens=optional_int(
+            row["max_output_tokens"], field="max_output_tokens"
+        ),
+        prompt_chars=required_int(row["prompt_chars"], field="prompt_chars"),
+        schema_chars=required_int(row["schema_chars"], field="schema_chars"),
+        tool_spec_chars=required_int(
+            row["tool_spec_chars"], field="tool_spec_chars"
+        ),
+        submitted_payload_chars=optional_int(
+            row["submitted_payload_chars"], field="submitted_payload_chars"
+        ),
+        raw_output_chars=optional_int(
+            row["raw_output_chars"], field="raw_output_chars"
+        ),
+        model_subcalls=json_objects(
+            row["model_subcalls_json"], field="model_subcalls_json"
         ),
         usage_rows=usage_rows,
         artifacts=artifacts,
@@ -246,12 +264,14 @@ def _model_call_row(
 def _usage_row(row: dict[str, object]) -> ObservabilityUsage:
     return ObservabilityUsage(
         usage_kind=ModelUsageKind(row["usage_kind"]),
-        quantity=int(row["quantity"]),
+        quantity=required_int(row["quantity"], field="quantity"),
         unit=ModelUsageUnit(row["unit"]),
         provider_usage_key=str(row["provider_usage_key"]),
-        cost_micros=row["cost_micros"],
+        cost_micros=optional_int(row["cost_micros"], field="cost_micros"),
         currency=str(row["currency"]),
-        price_basis_json=dict(row["price_basis_json"] or {}),
+        price_basis_json=json_object(
+            row["price_basis_json"] or {}, field="price_basis_json"
+        ),
     )
 
 
@@ -261,9 +281,9 @@ def _artifact_row(row: dict[str, object]) -> ObservabilityArtifact:
         artifact_kind=ArtifactKind(row["artifact_kind"]),
         content_hash=str(row["content_hash"]),
         content_type=str(row["content_type"]),
-        size_bytes=int(row["size_bytes"]),
+        size_bytes=required_int(row["size_bytes"], field="size_bytes"),
         has_content=row["content"] is not None,
-        storage_ref=row["storage_ref"],
+        storage_ref=optional_text(row["storage_ref"], field="storage_ref"),
     )
 
 

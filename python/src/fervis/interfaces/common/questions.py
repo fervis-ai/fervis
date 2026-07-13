@@ -15,7 +15,7 @@ from fervis.questions import (
     AskRequest,
     AskRequestLimits,
     AskResult,
-    ContinueQuestionRequest,
+    ClarificationResponseRequest,
     ExecutionMode,
     QuestionPrincipal,
     RerunQuestionRequest,
@@ -27,7 +27,6 @@ from fervis.interfaces.common.binding_patches import (
 from fervis.questions.result_data import result_data_clarifications
 from fervis.run_work.events import QuestionRunEventSink
 
-CLARIFICATION_RESPONSE_TRIGGER = "clarification_response"
 RERUN_TRIGGER = "rerun"
 
 _CREATE_QUESTION_KEYS = frozenset(
@@ -43,15 +42,10 @@ _CREATE_QUESTION_KEYS = frozenset(
 )
 _CONTINUE_QUESTION_KEYS = frozenset(
     {
-        "question",
-        "triggerKind",
-        "baseRunId",
+        "responseText",
+        "runId",
         "clarificationId",
         "selectedOptionId",
-        "provider",
-        "modelKey",
-        "maxBudgetUsd",
-        "maxThinkingTokens",
     }
 )
 _RERUN_QUESTION_KEYS = frozenset(
@@ -76,7 +70,7 @@ class QuestionInterfaceResponse:
     payload: Any
 
 
-@dataclass(frozen=True)
+@dataclass
 class QuestionInterfaceValidationError(ValueError):
     field: str
     message: str
@@ -94,9 +88,9 @@ class QuestionLifecycle(Protocol):
         event_sink: QuestionRunEventSink | None = None,
     ) -> AskResult: ...
 
-    def continue_question(
+    def respond_to_clarification(
         self,
-        request: ContinueQuestionRequest,
+        request: ClarificationResponseRequest,
         *,
         event_sink: QuestionRunEventSink | None = None,
     ) -> AskResult: ...
@@ -275,9 +269,8 @@ class QuestionInterface:
                     question_id,
                     payload,
                     principal=principal,
-                    idempotency_key=idempotency_key,
                 )
-                result = self.questions.continue_question(
+                result = self.questions.respond_to_clarification(
                     continuation,
                     event_sink=event_sink,
                 )
@@ -375,31 +368,25 @@ class QuestionInterface:
         payload: dict[str, Any],
         *,
         principal: InterfacePrincipal,
-        idempotency_key: str | None,
-    ) -> ContinueQuestionRequest:
+    ) -> ClarificationResponseRequest:
         if not isinstance(payload, dict):
             raise QuestionInterfaceValidationError(
                 field="__all__",
                 message="Payload must be an object.",
-            )
+        )
         _reject_unknown_fields(payload, allowed=_CONTINUE_QUESTION_KEYS)
-        question = str(payload.get("question") or "").strip()
-        if not question:
+        response_text = str(payload.get("responseText") or "").strip()
+        selected_option_id = str(payload.get("selectedOptionId") or "").strip()
+        if not response_text and not selected_option_id:
             raise QuestionInterfaceValidationError(
-                field="question",
-                message="question is required.",
+                field="__all__",
+                message="responseText or selectedOptionId is required.",
             )
-        trigger_kind = str(payload.get("triggerKind") or CLARIFICATION_RESPONSE_TRIGGER)
-        if trigger_kind != CLARIFICATION_RESPONSE_TRIGGER:
+        run_id = str(payload.get("runId") or "").strip()
+        if not run_id:
             raise QuestionInterfaceValidationError(
-                field="triggerKind",
-                message="Only clarification_response continuations are supported.",
-            )
-        base_run_id = str(payload.get("baseRunId") or "").strip()
-        if not base_run_id:
-            raise QuestionInterfaceValidationError(
-                field="baseRunId",
-                message="baseRunId is required.",
+                field="runId",
+                message="runId is required.",
             )
         clarification_id = str(payload.get("clarificationId") or "").strip()
         if not clarification_id:
@@ -407,26 +394,14 @@ class QuestionInterface:
                 field="clarificationId",
                 message="clarificationId is required.",
             )
-        selected_option_id = str(payload.get("selectedOptionId") or "").strip() or None
-        model = self.model_policy.admit(
-            requested_provider=payload.get("provider"),
-            requested_model_key=_optional_string(payload, "modelKey"),
-        )
-        return ContinueQuestionRequest(
+        return ClarificationResponseRequest(
             question_id=str(question_id),
-            question=question,
+            run_id=run_id,
+            clarification_id=clarification_id,
+            response_text=response_text,
             principal=_question_principal(principal),
-            trigger_kind=CLARIFICATION_RESPONSE_TRIGGER,
             execution_mode=ExecutionMode.QUEUED,
-            provider=model.provider,
-            model_key=model.model_key,
-            idempotency_key=idempotency_key,
-            base_run_id=base_run_id,
-            trigger_clarification_response_id=clarification_id,
-            trigger_clarification_selected_option_id=selected_option_id,
-            max_budget_usd=_optional_float(payload, "maxBudgetUsd"),
-            max_thinking_tokens=_optional_int(payload, "maxThinkingTokens"),
-            limits=self.limits,
+            selected_option_id=selected_option_id,
         )
 
     def _rerun_request(
@@ -617,7 +592,7 @@ def _with_next_actions(
     principal: InterfacePrincipal,
 ) -> dict[str, Any]:
     del principal
-    if str(payload.get("status") or "") != "NEEDS_CLARIFICATION":
+    if str(payload.get("status") or "") != "WAITING_FOR_CLARIFICATION":
         return payload
     conversation_id = str(payload.get("conversationId") or "")
     if not conversation_id:
@@ -654,15 +629,14 @@ def _clarification_next_action(
         "kind": "provide_clarification",
         "questionId": question_id,
         "conversationId": conversation_id,
-        "baseRunId": run_id,
+        "runId": run_id,
         "clarificationId": clarification_id,
         "request": {
             "method": "POST",
             "path": f"/questions/{question_id}/runs/",
             "body": {
-                "question": "<clarification-answer>",
-                "triggerKind": CLARIFICATION_RESPONSE_TRIGGER,
-                "baseRunId": run_id,
+                "responseText": "<clarification-answer>",
+                "runId": run_id,
                 "clarificationId": clarification_id,
                 "selectedOptionId": "<selected-option-id>",
             },

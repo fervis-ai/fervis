@@ -18,6 +18,21 @@ def status_mismatches(
     )
 
 
+def rejection_mismatches(
+    *,
+    actual_code: str,
+    expected: dict[str, Any],
+) -> list[str]:
+    expected_result = expected.get("result_contains") or {}
+    expected_code = expected_result.get("code")
+    if not isinstance(expected_code, str) or not expected_code.strip():
+        return ["expect.result_contains.code: required for rejection"]
+    return subset_mismatches(
+        actual={"status": "rejected", "code": actual_code},
+        expected_subset=expected_result,
+    )
+
+
 def subset_mismatches(
     *,
     actual: dict[str, Any],
@@ -52,7 +67,9 @@ def subset_mismatches(
                 )
                 continue
             if not expected_value and actual_value:
-                errors.append(f"{item_path}: expected empty array, got {actual_value!r}")
+                errors.append(
+                    f"{item_path}: expected empty array, got {actual_value!r}"
+                )
                 continue
             if len(actual_value) < len(expected_value):
                 errors.append(

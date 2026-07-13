@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 from typing import TypeAlias
 
 from fervis.lookup.question_inputs import (
@@ -108,7 +108,8 @@ class PriorRequestSlot:
 
 @dataclass(frozen=True)
 class PriorEntityIdentityBinding:
-    identity_type: str
+    entity_kind: str
+    key_id: str
     display: str
     canonical_values: dict[str, str]
     source_lineage: tuple[str, ...]
@@ -118,7 +119,7 @@ class PriorEntityIdentityBinding:
     )
 
     def __post_init__(self) -> None:
-        if not self.identity_type or not self.canonical_values:
+        if not self.entity_kind or not self.key_id or not self.canonical_values:
             raise ValueError("entity slot binding requires canonical identity")
         _require_source_lineage(self.source_lineage)
 
@@ -127,7 +128,8 @@ class PriorEntityIdentityBinding:
             "value_kind": self.kind.value,
             "source_lineage": list(self.source_lineage),
             "display": self.display,
-            "identity_type": self.identity_type,
+            "entity_kind": self.entity_kind,
+            "key_id": self.key_id,
             "canonical_values": dict(self.canonical_values),
         }
 
@@ -256,11 +258,7 @@ class PriorRequestMemory:
 
     def binding(self, slot_id: str) -> PriorRequestSlotBinding | None:
         return next(
-            (
-                bound.binding
-                for bound in self.bound_slots
-                if bound.slot_id == slot_id
-            ),
+            (bound.binding for bound in self.bound_slots if bound.slot_id == slot_id),
             None,
         )
 
@@ -282,10 +280,7 @@ class PriorRequestMemory:
         return payload
 
     def slot_bindings_payload(self) -> dict[str, dict[str, object]]:
-        return {
-            bound.slot_id: bound.binding.to_payload()
-            for bound in self.bound_slots
-        }
+        return {bound.slot_id: bound.binding.to_payload() for bound in self.bound_slots}
 
     @property
     def source_lineage(self) -> tuple[str, ...]:
@@ -418,11 +413,7 @@ def _request_slots(
         if ref not in slots_by_id:
             raise ValueError(f"{path}.used_question_inputs references unknown input")
         refs.append(ref)
-    return tuple(
-        slot
-        for ref in refs
-        if (slot := slots_by_id[ref]) is not None
-    )
+    return tuple(slot for ref in refs if (slot := slots_by_id[ref]) is not None)
 
 
 def _request_outputs(
@@ -590,14 +581,10 @@ def _output_source_lineage_by_id(
             continue
         if address.source_relation not in relation_addresses:
             continue
-        for field_id, raw_value in address.values.items():
-            value = _mapping(
-                raw_value,
-                path=f"address {address.address}.values.{field_id}",
-            )
+        for value in address.values.values():
             _append_output_lineage(
                 output,
-                output_ids=_answer_output_ids(value),
+                output_ids=value.answer_output_ids,
                 memory_id=f"{artifact.artifact_id}.{address.source_relation}",
             )
     return {key: tuple(dict.fromkeys(values)) for key, values in output.items()}
@@ -647,7 +634,8 @@ def _prior_slot_bindings(
                     PriorRequestBoundSlot(
                         slot_id=slot_id,
                         binding=PriorEntityIdentityBinding(
-                            identity_type=address.resource,
+                            entity_kind=address.resource,
+                            key_id=address.key_id,
                             display=address.reference_text,
                             canonical_values=dict(address.identity),
                             source_lineage=(

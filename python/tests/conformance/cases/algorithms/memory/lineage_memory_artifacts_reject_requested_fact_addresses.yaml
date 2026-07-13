@@ -19,6 +19,7 @@ input:
           - address: entity.input_1
             kind: entity
             resource: area
+            keyId: primary_key
             identity:
               area_id: area_1
 expect:

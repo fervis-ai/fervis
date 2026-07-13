@@ -108,7 +108,7 @@ def initialize_fervis_project(
     skipped_existing: list[str] = []
     source: dict[str, object] | None = None
     if not absolute_path.exists() or (framework == "flask" and app_target):
-        source = framework_source_schema(
+        generated_source = framework_source_schema(
             project,
             framework,
             app_factory=app_factory,
@@ -116,13 +116,17 @@ def initialize_fervis_project(
             path_prefixes=path_prefixes,
             blueprints=blueprints,
         )
-        if isinstance(source, BlockedPatch):
+        if isinstance(generated_source, BlockedPatch):
             return InitResult(
                 project=project,
                 blocked_edits=[
-                    BlockedEdit(file=source.path, reason=source.reason),
+                    BlockedEdit(
+                        file=generated_source.path,
+                        reason=generated_source.reason,
+                    ),
                 ],
             )
+        source = generated_source
 
     if absolute_path.exists():
         if source is None:

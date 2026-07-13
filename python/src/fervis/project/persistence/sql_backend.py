@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import re
+from typing import TypeVar
 
 import sqlalchemy as sa
 from sqlalchemy import inspect
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.sql.type_api import TypeEngine
 
 from fervis.interfaces.agent.actions import run_migrate_action
 
@@ -46,14 +48,26 @@ class SqlPersistenceBackend:
         return "Persistence target is not available."
 
     def inspect(self) -> list[PersistenceCheck]:
+        target = self.target_check()
+        if not target.passed:
+            return [target]
         return [
-            self.target_check(),
+            target,
             self.connection_check(),
             self.migration_check(),
             self.tables_check(),
         ]
 
     def migrate(self) -> MigrationResult:
+        target = self.target_check()
+        if not target.passed:
+            return MigrationResult(
+                target=self.target,
+                status=MigrationStatus.BLOCKED,
+                current_revision=None,
+                target_revision=TARGET_REVISION,
+                error=target.message,
+            )
         try:
             engine = self.engine(create=True)
             if engine is None:
@@ -64,7 +78,7 @@ class SqlPersistenceBackend:
                     target_revision=TARGET_REVISION,
                     error=self.target_unavailable_message(),
                 )
-            with engine.begin() as connection:
+            with engine.connect() as connection:
                 pending_revisions = pending_public_revisions(connection)
                 if not pending_revisions:
                     schema_errors = _schema_differences(connection)
@@ -83,7 +97,7 @@ class SqlPersistenceBackend:
                         target_revision=TARGET_REVISION,
                         already_applied=True,
                     )
-                upgrade_to_head(connection)
+                _upgrade_with_constraints_restored(connection)
                 schema_errors = _schema_differences(connection)
                 if schema_errors:
                     return MigrationResult(
@@ -204,6 +218,25 @@ def _migrate_fix() -> dict[str, object]:
     return run_migrate_action()
 
 
+def _upgrade_with_constraints_restored(connection: Connection) -> None:
+    connection.commit()
+    sqlite = connection.dialect.name == "sqlite"
+    if sqlite:
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+    try:
+        upgrade_to_head(connection)
+        connection.commit()
+    finally:
+        if connection.in_transaction():
+            connection.rollback()
+        if sqlite:
+            connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+    if sqlite:
+        violations = connection.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+        if violations:
+            raise RuntimeError("persistence migration violated foreign-key integrity")
+
+
 def _schema_differences(engine_or_connection) -> list[str]:
     inspector = inspect(engine_or_connection)
     errors: list[str] = []
@@ -249,8 +282,12 @@ def _column_differences(
     errors: list[str] = []
     for column in table.columns:
         actual = actual_columns[column.name]
+        reflected_type = actual["type"]
+        if not isinstance(reflected_type, TypeEngine):
+            errors.append(f"{table.name}.{column.name}: reflected type is invalid")
+            continue
         actual_type = _normalize_type(
-            str(actual["type"].compile(dialect=engine.dialect))
+            str(reflected_type.compile(dialect=engine.dialect))
         )
         expected_type = _normalize_type(
             str(column.type.compile(dialect=engine.dialect))
@@ -415,11 +452,14 @@ def _check_constraint_differences(inspector, table: sa.Table) -> list[str]:
     return errors
 
 
+_DifferenceTuple = TypeVar("_DifferenceTuple", bound=tuple[object, ...])
+
+
 def _set_difference_errors(
     table_name: str,
     label: str,
-    actual: set[tuple[object, ...]],
-    expected: set[tuple[object, ...]],
+    actual: set[_DifferenceTuple],
+    expected: set[_DifferenceTuple],
 ) -> list[str]:
     errors: list[str] = []
     missing = sorted(expected - actual)

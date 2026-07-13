@@ -86,7 +86,10 @@ def test_lineage_spine_persists_source_read_without_response_body() -> None:
 
     assert loaded.artifact_id is None
     assert loaded.catalog_endpoint_id == "11111111-1111-4111-8111-111111111111"
-    assert loaded.catalog_endpoint.catalog_endpoint_key == "django_retail_ops_list_store_list:test"
+    assert (
+        loaded.catalog_endpoint.catalog_endpoint_key
+        == "django_retail_ops_list_store_list:test"
+    )
     assert loaded.catalog_endpoint.source_namespace_path_json == ["retail_ops"]
     assert loaded.args_json == {"is_open": True}
     assert loaded.row_count == 2
@@ -165,24 +168,6 @@ def test_model_usage_and_artifacts_are_scoped_to_a_model_call() -> None:
     assert [item.artifact_kind for item in loaded.artifacts.all()] == [
         ArtifactKind.PROMPT.value
     ]
-
-
-def test_lineage_persistence_accepts_clarification_triggered_run() -> None:
-    previous_run = _create_run(run_id="run_test_1", conversation_id="cv_test_1")
-    clarification_run = QuestionRun.objects.create(
-        run_id="run_test_2",
-        question=previous_run.question,
-        run_number=2,
-        kind=QuestionRunKind.MODEL_ASSISTED.value,
-        trigger_kind=RunTriggerKind.CLARIFICATION_RESPONSE.value,
-        base_run=previous_run,
-        trigger_clarification_response_id="response_1",
-        adapter_ref="django_drf:test",
-        runtime_version="test-runtime",
-    )
-
-    assert clarification_run.base_run_id == "run_test_1"
-    assert clarification_run.trigger_clarification_response_id == "response_1"
 
 
 def test_lineage_persistence_rejects_blank_external_artifact_reference() -> None:

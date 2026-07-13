@@ -118,6 +118,7 @@ input:
             - address: entity.answer_1
               kind: entity
               resource: staff
+              keyId: primary_key
               identity:
                 staff_id: staff_9393
       - memory_artifact_id: memory_known_input_1
@@ -148,10 +149,14 @@ input:
         output_key: answer_1
         value_kind: entity
         value_json:
-          entity_type: staff
-          entity_id: staff_9393
+          kind: entity
+          entity_kind: staff
+          key_id: primary_key
+          components:
+            staff_id: staff_9393
         proof_node_refs_json:
           - answer_output:fact_1:answer_1
+        role: ANSWER_VALUE
     answer_presentations:
       - presentation_id: presentation_1
         run_id: run_1
@@ -251,7 +256,7 @@ expect:
       - "Requested fact fact_1: staff member who earned the most compensation this month"
       - "outcome=answered"
       - "outcome=answered; addresses=entity:entity.answer_1"
-      - "Answer output answer_1: entity staff:staff_9393"
+      - "Answer output answer_1: entity staff:staff_id=staff_9393"
       - "Source read: retail_ops/list_shift_compensation_list rows=3"
       - "Args: month=2026-06"
       - "Step 2: source_binding"

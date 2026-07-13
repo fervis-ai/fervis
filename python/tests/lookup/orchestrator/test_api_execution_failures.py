@@ -70,9 +70,9 @@ def test_lookup_cutover_execution_issue_event_carries_failure_context():
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="total",
                         relation_id="answer_rows",
                         field_id="total",
@@ -148,9 +148,9 @@ def test_lookup_cutover_rejects_non_empty_incomplete_final_relation():
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="metric_total",
                         relation_id="answer_rows",
                         field_id="metric_total",
@@ -225,9 +225,9 @@ def test_lookup_cutover_rejects_missing_required_endpoint_param_before_execution
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="metric_total",
                         relation_id="answer_rows",
                         field_id="metric_total",
@@ -316,14 +316,14 @@ def test_lookup_cutover_rejects_unknown_api_read_before_execution():
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="location",
                         relation_id="answer_rows",
                         field_id="location",
                     ),
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="metric_total",
                         relation_id="answer_rows",
                         field_id="metric_total",

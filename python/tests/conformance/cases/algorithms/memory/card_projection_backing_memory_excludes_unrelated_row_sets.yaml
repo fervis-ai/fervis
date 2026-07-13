@@ -20,12 +20,14 @@ input:
                 answer_outputs:
                   - id: answer_output_1
                     description: sales total
+                    role: ANSWER_VALUE
                 used_question_inputs: []
               - id: fact_inventory
                 answer_fact: inventory counts
                 answer_outputs:
                   - id: answer_output_2
                     description: inventory count
+                    role: ANSWER_VALUE
                 used_question_inputs: []
         addresses:
           - address: relation.sales_rows

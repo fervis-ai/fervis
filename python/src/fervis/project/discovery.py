@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import ast
 import json
 from pathlib import Path
-import tomllib
+import tomli
 
 from .config_io import PROJECT_CONFIG_PATH
 
@@ -220,8 +220,8 @@ def _pyproject_declares_fastapi(pyproject: Path) -> bool:
 
 def _pyproject_declares(pyproject: Path, *, dependency_name: str) -> bool:
     try:
-        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError):
+        data = tomli.loads(pyproject.read_text(encoding="utf-8"))
+    except (OSError, tomli.TOMLDecodeError):
         return False
     dependencies = list(data.get("project", {}).get("dependencies") or [])
     optional_dependencies = data.get("project", {}).get("optional-dependencies") or {}

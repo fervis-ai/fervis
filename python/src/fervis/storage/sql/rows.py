@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from types import SimpleNamespace
+from collections.abc import Mapping
 from typing import Any
 
 import sqlalchemy as sa
@@ -19,12 +19,44 @@ def row_mapping(row: Any) -> dict[str, Any]:
     return dict(row._mapping)
 
 
-def row_object(row: Any) -> SimpleNamespace:
-    return SimpleNamespace(**row_mapping(row))
-
-
 def row_mappings(rows: Any) -> tuple[dict[str, Any], ...]:
     return tuple(row_mapping(row) for row in rows)
+
+
+def required_int(value: object, *, field: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise TypeError(f"SQL row {field} must be an integer")
+    return value
+
+
+def optional_int(value: object, *, field: str) -> int | None:
+    if value is None:
+        return None
+    return required_int(value, field=field)
+
+
+def optional_text(value: object, *, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError(f"SQL row {field} must be text")
+    return value
+
+
+def json_object(value: object, *, field: str) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        raise TypeError(f"SQL row {field} must be a JSON object")
+    return {str(key): item for key, item in value.items()}
+
+
+def json_objects(value: object, *, field: str) -> tuple[dict[str, object], ...]:
+    if not isinstance(value, list | tuple):
+        raise TypeError(f"SQL row {field} must be a JSON array")
+    return tuple(
+        {str(key): nested for key, nested in item.items()}
+        for item in value
+        if isinstance(item, Mapping)
+    )
 
 
 def select_one(connection, table: sa.Table, lookup: dict[str, Any]):

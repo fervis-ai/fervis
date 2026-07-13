@@ -8,7 +8,7 @@ from fervis.lookup.answer_program.operations import (
     FilterSpec,
     Operation,
     ProjectSpec,
-    ProjectToIdentitySpec,
+    ProjectToKeySpec,
     RankSpec,
     UniversalConditionSpec,
 )
@@ -81,6 +81,6 @@ def _empty_relation_kind_for_relation(
 
 
 def _empty_preserving_input_relation(spec: object) -> str:
-    if isinstance(spec, (FilterSpec, ProjectSpec, ProjectToIdentitySpec, RankSpec)):
+    if isinstance(spec, (FilterSpec, ProjectSpec, ProjectToKeySpec, RankSpec)):
         return spec.input_relation
     return ""

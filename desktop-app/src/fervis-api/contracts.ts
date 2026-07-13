@@ -2,14 +2,13 @@ export type RunStatus =
   | "QUEUED"
   | "RUNNING"
   | "COMPLETED"
-  | "NEEDS_CLARIFICATION"
+  | "WAITING_FOR_CLARIFICATION"
   | "FAILED";
 
 export type RunKind = "model_assisted" | "deterministic";
 
 export type RunTriggerKind =
   | "initial"
-  | "clarification_response"
   | "retry"
   | "rerun";
 
@@ -66,9 +65,8 @@ export interface AskQuestionRequest {
 }
 
 export interface ClarificationResponseRequest {
-  readonly question: string;
-  readonly triggerKind: "clarification_response";
-  readonly baseRunId: string;
+  readonly responseText: string;
+  readonly runId: string;
   readonly clarificationId: string;
   readonly selectedOptionId?: string;
 }
@@ -152,7 +150,7 @@ export type RunIdentity =
     }
   | {
       readonly kind: "model_assisted";
-      readonly triggerKind: "clarification_response" | "retry";
+      readonly triggerKind: "retry";
       readonly baseRunId: string;
       readonly programId: string | null;
       readonly invocationId: string | null;
@@ -181,8 +179,11 @@ export interface AnswerResultData {
 export interface AnswerOutput {
   readonly key: string;
   readonly valueKind: AnswerValueKind;
-  readonly value: string;
+  readonly value: CanonicalAnswerValue;
+  readonly displayValue: string;
 }
+
+export type CanonicalAnswerValue = Readonly<Record<string, unknown>>;
 
 export type AnswerValueKind =
   | "entity"
@@ -209,11 +210,63 @@ export interface ClarificationRequest {
   readonly id: string;
   readonly need: string;
   readonly reason: string;
+  readonly owner: ClarificationOwner;
+  readonly continuation: ClarificationContinuation;
   readonly question: string;
   readonly requestedFactId: string;
   readonly subjects: readonly ClarificationSubject[];
   readonly evidence: readonly ClarificationEvidence[];
 }
+
+export type ClarificationOwner =
+  | "conversation_resolution"
+  | "question_contract"
+  | "grounding"
+  | "source_binding"
+  | "fact_planning";
+
+export interface CatalogInputTarget {
+  readonly rowSourceId: string;
+  readonly paramId: string;
+  readonly paramRef: string;
+  readonly valueType: string;
+  readonly choices: readonly string[];
+}
+
+export type ClarificationContinuation =
+  | {
+      readonly kind: "conversation_resolution";
+      readonly candidates: readonly {
+        readonly id: string;
+        readonly contextualizedQuestion: string;
+        readonly sourceEvidence: readonly {
+          readonly sourceId: string;
+          readonly exactSourceTexts: readonly string[];
+        }[];
+      }[];
+      readonly acceptsFreeText: boolean;
+    }
+  | {
+      readonly kind: "question_contract";
+      readonly missingItemId: string;
+      readonly expectedValueKind: string;
+    }
+  | {
+      readonly kind: "grounding";
+      readonly knownInputId: string;
+      readonly acceptsFreeText: boolean;
+    }
+  | {
+      readonly kind: "source_binding_catalog_input";
+      readonly requestedFactId: string;
+      readonly target: CatalogInputTarget;
+    }
+  | {
+      readonly kind: "fact_planning_catalog_input";
+      readonly requestedFactId: string;
+      readonly planningRequirementId: string;
+      readonly target: CatalogInputTarget;
+    };
 
 export interface ClarificationSubject {
   readonly kind: string;

@@ -1,0 +1,62 @@
+id: entity_reference_reaches_row_source
+description: A source relation keeps its own candidate key separate from a local reference to another entity key.
+kind: algorithm
+algorithm: relation_catalog.row_source_projection
+input:
+  catalog:
+    reads:
+      - id: staff
+        endpoint_name: list_staff
+        resource_names: [staff]
+        row_paths:
+          - {id: data, path: data, cardinality: many}
+        fields:
+          - {ref: staff.id, path: data.staff_id, row_path_id: data, type: uuid}
+        candidate_keys:
+          - id: staff_primary
+            entity_kind: staff
+            components:
+              - {id: staff_id, field_ref: staff.id}
+            primary: true
+      - id: compensation
+        endpoint_name: list_compensation
+        resource_names: [shift_compensation]
+        row_paths:
+          - {id: data, path: data, cardinality: many}
+        fields:
+          - {ref: compensation.id, path: data.compensation_id, row_path_id: data, type: uuid}
+          - {ref: compensation.staff_id, path: data.staff_id, row_path_id: data, type: uuid}
+          - {ref: compensation.staff_name, path: data.staff_name, row_path_id: data, type: string}
+          - {ref: compensation.amount, path: data.amount, row_path_id: data, type: decimal}
+        candidate_keys:
+          - id: compensation_primary
+            entity_kind: shift_compensation
+            components:
+              - {id: compensation_id, field_ref: compensation.id}
+            primary: true
+        entity_references:
+          - id: staff_reference
+            target_entity_kind: staff
+            target_key_id: staff_primary
+            components:
+              - {target_component_id: staff_id, local_field_ref: compensation.staff_id}
+            context_field_refs: [compensation.staff_name]
+expect:
+  result_contains:
+    read_id: compensation
+    row_path_id: data
+    candidate_keys:
+      - id: compensation_primary
+        entity_kind: shift_compensation
+        components:
+          - {id: compensation_id, field_id: compensation_id}
+        primary: true
+        stable: true
+        context_field_ids: []
+    entity_references:
+      - id: staff_reference
+        target_entity_kind: staff
+        target_key_id: staff_primary
+        components:
+          - {target_component_id: staff_id, local_field_id: staff_id}
+        context_field_ids: [staff_name]

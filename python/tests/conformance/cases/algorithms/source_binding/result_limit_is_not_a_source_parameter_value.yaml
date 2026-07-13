@@ -1,0 +1,13 @@
+id: result_limit_is_not_a_source_parameter_value
+description: A ranked-result limit controls the plan and is unavailable to unrelated numeric source parameters.
+kind: algorithm
+algorithm: source_binding.prompt_surface
+input:
+  request:
+    mode: result_limit_source_params
+expect:
+  result_contains:
+    input_param_names: [page, location_id]
+    param_binding_value_ids_by_param:
+      page: []
+      location_id: []

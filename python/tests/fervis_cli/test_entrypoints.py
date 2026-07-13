@@ -1,6 +1,18 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from ._support import *  # noqa: F401,F403
+
+
+class _ClosableBundle(SimpleNamespace):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.closed = True
+        return None
+
 
 def test_cli_import_does_not_configure_django_settings() -> None:
     result = subprocess.run(
@@ -38,8 +50,7 @@ def test_sql_runtime_django_command_bootstraps_django_before_composition(
     (root / "config").mkdir()
     (root / "config" / "__init__.py").write_text("", encoding="utf-8")
     (root / "config" / "settings.py").write_text(
-        "SECRET_KEY = 'test'\n"
-        "INSTALLED_APPS = []\n",
+        "SECRET_KEY = 'test'\nINSTALLED_APPS = []\n",
         encoding="utf-8",
     )
     (root / "config" / "fervis.py").write_text(
@@ -163,7 +174,9 @@ def test_fervis_fastapi_runtime_command_requires_valid_config(
     assert "Fervis config was not found at config/fervis.json." in blocked[0][2]
 
 
-def test_fervis_flask_inspect_uses_sql_runtime_storage(monkeypatch, tmp_path: Path) -> None:
+def test_fervis_flask_inspect_uses_sql_runtime_storage(
+    monkeypatch, tmp_path: Path
+) -> None:
     root = tmp_path / "api"
     root.mkdir()
     (root / "pyproject.toml").write_text(
@@ -195,7 +208,7 @@ def test_fervis_flask_inspect_uses_sql_runtime_storage(monkeypatch, tmp_path: Pa
     def fake_sql_storage_bundle(*, project, loaded_config):
         del loaded_config
         assert project.framework == "flask"
-        return SimpleNamespace(
+        return _ClosableBundle(
             engine=object(),
             lineage_query=object(),
             observability_query=object(),
@@ -249,8 +262,7 @@ def test_goldset_uses_sql_runtime_composition(monkeypatch, tmp_path: Path) -> No
     (root / "config").mkdir()
     (root / "config" / "__init__.py").write_text("", encoding="utf-8")
     (root / "config" / "settings.py").write_text(
-        "SECRET_KEY = 'test'\n"
-        "INSTALLED_APPS = []\n",
+        "SECRET_KEY = 'test'\nINSTALLED_APPS = []\n",
         encoding="utf-8",
     )
     (root / "config" / "fervis.py").write_text(
@@ -258,6 +270,7 @@ def test_goldset_uses_sql_runtime_composition(monkeypatch, tmp_path: Path) -> No
         encoding="utf-8",
     )
     routed = []
+    bundles = []
 
     def fake_load_config(project):
         from fervis.project.integration import ModelConfig, ProviderConfig
@@ -279,7 +292,7 @@ def test_goldset_uses_sql_runtime_composition(monkeypatch, tmp_path: Path) -> No
 
     def fake_sql_storage_bundle(*, project, loaded_config):
         del project, loaded_config
-        return SimpleNamespace(
+        bundle = _ClosableBundle(
             lineage_query=object(),
             observability_query=object(),
             prompt_capture_query=object(),
@@ -287,6 +300,8 @@ def test_goldset_uses_sql_runtime_composition(monkeypatch, tmp_path: Path) -> No
             run_work=object(),
             engine=object(),
         )
+        bundles.append(bundle)
+        return bundle
 
     def record_run_fervis(args, *, ports, stdout=None, stderr=None):
         del stdout, stderr
@@ -313,6 +328,7 @@ def test_goldset_uses_sql_runtime_composition(monkeypatch, tmp_path: Path) -> No
 
     assert cli_main.main(args) == 0
     assert routed == [(args, True)]
+    assert bundles[0].closed is True
 
 
 def test_fervis_executable_validates_explicit_python_runtime() -> None:
@@ -326,7 +342,7 @@ def test_fervis_executable_validates_explicit_python_runtime() -> None:
     )
 
     assert result.returncode == 127
-    assert "FERVIS_PYTHON does not provide a Python 3.11+ runtime" in result.stderr
+    assert "FERVIS_PYTHON does not provide a Python 3.10+ runtime" in result.stderr
     assert "Traceback" not in result.stderr
 
 
@@ -363,6 +379,7 @@ def test_fervis_executable_fastapi_runtime_command_reaches_python_cli(
     )
     assert result.stderr == ""
 
+
 def test_fervis_executable_project_inspect_preserves_invocation_cwd(
     tmp_path: Path,
 ) -> None:
@@ -380,6 +397,7 @@ def test_fervis_executable_project_inspect_preserves_invocation_cwd(
     assert payload["command"] == "project.inspect"
     assert payload["status"] == "blocked"
     assert payload["payload"]["root_path"] == str(tmp_path)
+
 
 def test_fervis_python_module_project_inspect_preserves_invocation_cwd(
     tmp_path: Path,

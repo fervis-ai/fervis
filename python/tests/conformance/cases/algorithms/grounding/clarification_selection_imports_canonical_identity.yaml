@@ -1,0 +1,83 @@
+id: clarification_selection_imports_canonical_identity
+description: Grounding imports an offered canonical identity selected in a clarification response without re-grounding the response text.
+kind: algorithm
+algorithm: grounding.contract
+input:
+  question: How many sales happened in the selected area?
+  requested_fact:
+    id: fact_1
+    description: sales in selected area
+    answer_output_id: count
+  known_input:
+    id: area_input
+    source: question_context
+    text: selected area
+    resolved_value_text: selected area
+    value_meaning_hint: area
+    field_label_text: area
+    role: reference_value
+  resolved_question_input:
+    source_text: selected area
+    occurrence: 1
+    resolved_input_ref: unused
+    resolved_value_text: selected area
+    value_meaning_hint: area
+    role: reference_value
+    resolved_canonical_identity:
+      entity_kind: unused
+      key_id: unused
+      key_component_id: unused
+      value: unused
+      authority_refs: [unused]
+      lineage_refs: [unused]
+  clarification_response:
+    response_id: response_1
+    response_text: Nairobi
+    selected_option_id: area_nairobi
+    clarification:
+      id: clarification_1
+      need: target_reference
+      reason: multiple_matching_entities
+      owner: grounding
+      continuation:
+        kind: grounding
+        knownInputId: area_input
+        acceptsFreeText: false
+      requestedFactId: fact_1
+      question: Which matching area should I use?
+      subjects:
+        - kind: question_input
+          id: area_input
+          label: area
+          sourceText: selected area
+          options:
+            - id: area_nairobi
+              label: Nairobi
+              entityKind: area
+              keyId: primary_key
+              matchedField: area_id
+              matchedValue: area_1
+              resolverReadId: list_areas
+      evidence:
+        - kind: resolver_read
+          id: list_areas
+          readId: list_areas
+expect:
+  result_equals:
+    values:
+      - id: grounded_area_input
+        kind: identity
+        entity_kind: area
+        key_id: primary_key
+        key_component_id: area_id
+        value: area_1
+        display_value: Nairobi
+        proof_refs:
+          - clarification:clarification_1
+          - clarification_response:response_1
+        applies_to_requested_fact_ids: [fact_1]
+    certifications:
+      - value_id: grounded_area_input
+        method: clarification_selection
+        authority_refs: [list_areas]
+        lineage_refs: [clarification_response:response_1]

@@ -10,9 +10,16 @@ from fervis.lookup.clarification.model import (
     ClarificationEvidenceKind,
     ClarificationNeed,
     ClarificationOption,
+    ClarificationOwner,
     ClarificationReason,
     ClarificationSubject,
     ClarificationSubjectKind,
+    ConversationInterpretationCandidate,
+    ConversationResolutionContinuation,
+    FactPlanningCatalogInputContinuation,
+    GroundingContinuation,
+    QuestionContractContinuation,
+    SourceBindingCatalogInputContinuation,
 )
 
 
@@ -66,6 +73,10 @@ class MissingCatalogRequiredValue:
     requested_fact_id: str
     required_input_id: str
     label: str
+    continuation: (
+        SourceBindingCatalogInputContinuation
+        | FactPlanningCatalogInputContinuation
+    )
     evidence: tuple[ClarificationEvidence, ...] = ()
     proof_refs: tuple[str, ...] = ()
 
@@ -77,6 +88,10 @@ class MissingCatalogChoice:
     required_choice_input_id: str
     label: str
     options: tuple[ClarificationOption, ...]
+    continuation: (
+        SourceBindingCatalogInputContinuation
+        | FactPlanningCatalogInputContinuation
+    )
     evidence: tuple[ClarificationEvidence, ...] = ()
     proof_refs: tuple[str, ...] = ()
 
@@ -86,7 +101,8 @@ class AmbiguousQuestionInterpretation:
     clarification_id: str
     requested_fact_id: str
     source_text: str
-    options: tuple[ClarificationOption, ...] = ()
+    candidates: tuple[ConversationInterpretationCandidate, ...] = ()
+    accepts_free_text: bool = False
     evidence: tuple[ClarificationEvidence, ...] = ()
     proof_refs: tuple[str, ...] = ()
 
@@ -124,6 +140,11 @@ def clarify(cause: ClarificationCause) -> Clarification:
             requested_fact_id=cause.requested_fact_id,
             need=ClarificationNeed.ANSWER_METRIC,
             reason=ClarificationReason.MISSING_ANSWER_METRIC,
+            owner=ClarificationOwner.QUESTION_CONTRACT,
+            continuation=QuestionContractContinuation(
+                missing_item_id=cause.clarification_id,
+                expected_value_kind="answer_definition",
+            ),
             subjects=(
                 ClarificationSubject(
                     kind=ClarificationSubjectKind.METRIC_PHRASE,
@@ -140,6 +161,8 @@ def clarify(cause: ClarificationCause) -> Clarification:
             requested_fact_id=cause.requested_fact_id,
             need=ClarificationNeed.CATALOG_INPUT,
             reason=ClarificationReason.MISSING_REQUIRED_VALUE,
+            owner=_catalog_owner(cause.continuation),
+            continuation=cause.continuation,
             subjects=(
                 ClarificationSubject(
                     kind=ClarificationSubjectKind.CATALOG_INPUT,
@@ -155,6 +178,8 @@ def clarify(cause: ClarificationCause) -> Clarification:
             requested_fact_id=cause.requested_fact_id,
             need=ClarificationNeed.CATALOG_INPUT,
             reason=ClarificationReason.CATALOG_REQUIRES_CHOICE,
+            owner=_catalog_owner(cause.continuation),
+            continuation=cause.continuation,
             subjects=(
                 ClarificationSubject(
                     kind=ClarificationSubjectKind.CATALOG_CHOICE,
@@ -171,12 +196,23 @@ def clarify(cause: ClarificationCause) -> Clarification:
             requested_fact_id=cause.requested_fact_id,
             need=ClarificationNeed.QUESTION_INTERPRETATION,
             reason=ClarificationReason.AMBIGUOUS_INTERPRETATION,
+            owner=ClarificationOwner.CONVERSATION_RESOLUTION,
+            continuation=ConversationResolutionContinuation(
+                candidates=cause.candidates,
+                accepts_free_text=cause.accepts_free_text,
+            ),
             subjects=(
                 ClarificationSubject(
                     kind=ClarificationSubjectKind.INTERPRETATION,
                     id=cause.clarification_id,
                     source_text=cause.source_text,
-                    options=cause.options,
+                    options=tuple(
+                        ClarificationOption(
+                            id=candidate.id,
+                            label=candidate.contextualized_question,
+                        )
+                        for candidate in cause.candidates
+                    ),
                 ),
             ),
             evidence=_cause_evidence(cause.evidence, proof_refs=cause.proof_refs),
@@ -196,6 +232,11 @@ def _target_reference_clarification(
         requested_fact_id=cause.requested_fact_id,
         need=ClarificationNeed.TARGET_REFERENCE,
         reason=reason,
+        owner=ClarificationOwner.GROUNDING,
+        continuation=GroundingContinuation(
+            known_input_id=cause.known_input_id,
+            accepts_free_text=not bool(getattr(cause, "options", ())),
+        ),
         subjects=(
             ClarificationSubject(
                 kind=ClarificationSubjectKind.QUESTION_INPUT,
@@ -219,6 +260,17 @@ def _target_reference_clarification(
     )
 
 
+def _catalog_owner(
+    continuation: (
+        SourceBindingCatalogInputContinuation
+        | FactPlanningCatalogInputContinuation
+    ),
+) -> ClarificationOwner:
+    if isinstance(continuation, SourceBindingCatalogInputContinuation):
+        return ClarificationOwner.SOURCE_BINDING
+    return ClarificationOwner.FACT_PLANNING
+
+
 def _target_reference_candidate_evidence(
     cause: TargetReferenceNotFound
     | TargetReferenceAmbiguous
@@ -237,9 +289,7 @@ def _cause_evidence(
     *,
     proof_refs: tuple[str, ...],
 ) -> tuple[ClarificationEvidence, ...]:
-    return _dedupe_evidence(
-        (*evidence, *_proof_ref_evidence(proof_refs))
-    )
+    return _dedupe_evidence((*evidence, *_proof_ref_evidence(proof_refs)))
 
 
 def _proof_ref_evidence(

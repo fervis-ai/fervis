@@ -347,8 +347,6 @@ def _run_row(row: dict[str, Any]) -> RunRow:
         kind=QuestionRunKind(row["kind"]),
         trigger_kind=RunTriggerKind(row["trigger_kind"]),
         base_run_id=row["base_run_id"],
-        trigger_clarification_response_id=row["trigger_clarification_response_id"]
-        or None,
     )
 
 
@@ -440,8 +438,7 @@ def _clarification_request_row(row: dict[str, Any]) -> ClarificationRequestRow:
         need=ClarificationNeed(row["need"]),
         reason=ClarificationReason(row["reason"]),
         payload_json=_dict(row["payload_json"]),
-        fact_result_id=row["fact_result_id"],
-        step_id=row["step_id"],
+        step_id=str(row["step_id"]),
     )
 
 

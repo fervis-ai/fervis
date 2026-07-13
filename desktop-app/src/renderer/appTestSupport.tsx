@@ -58,13 +58,13 @@ export const initialQuestionState = {
 
 export const completedAfterClarificationState = {
   answer: completedRunFixture.answer,
-  conversationId: "conv_sales",
-  primaryRunId: completedRunFixture.runId,
-  latestRunId: completedRunFixture.runId,
+  conversationId: "conv_choice_clarification",
+  primaryRunId: "run_clarify",
+  latestRunId: "run_clarify",
   activeRunId: null,
   nextActions: completedRunFixture.nextActions,
-  question: "How many in-person sales happened this month?",
-  questionId: "q_sales",
+  question: "How many sales happened at the matching store?",
+  questionId: "q_choice_clarification",
   resultData: completedRunFixture.resultData,
   status: "COMPLETED"
 } satisfies QuestionStatePayload;
@@ -72,11 +72,11 @@ export const completedAfterClarificationState = {
 export const textClarificationAnswerState = {
   answer: "March 2026 sales were 14.",
   conversationId: "conv_clarification",
-  primaryRunId: "run_text_answer",
-  latestRunId: "run_text_answer",
+  primaryRunId: "run_clarify_text",
+  latestRunId: "run_clarify_text",
   activeRunId: null,
   nextActions: completedRunFixture.nextActions,
-  question: "March 2026",
+  question: "What were sales for BBS last month?",
   questionId: "q_clarification",
   resultData: completedRunFixture.resultData,
   status: "COMPLETED"
@@ -90,14 +90,50 @@ export function createInteractiveClient({
   readonly answerClarification?: FervisApiClient["answerClarification"];
 }): FervisApiClient {
   const demoClient = createDemoFervisClient();
+  let choiceClarificationAnswered = false;
   return {
     ...demoClient,
     getRun: demoClient.getRun,
     askQuestion,
-    answerClarification,
+    answerClarification: async (questionId, request) => {
+      const result = await answerClarification(questionId, request);
+      choiceClarificationAnswered = true;
+      return result;
+    },
+    listConversations: async () => {
+      const payload = await demoClient.listConversations();
+      if (!choiceClarificationAnswered) {
+        return payload;
+      }
+      return {
+        conversations: payload.conversations.map((conversation) =>
+          conversation.conversationId === "conv_choice_clarification"
+            ? {
+                ...conversation,
+                activeRunId: null,
+                primaryRunId: "run_clarify",
+                status: "COMPLETED"
+              }
+            : conversation
+        )
+      };
+    },
     listQuestionRuns: async (questionId) => {
       if (questionId === "q_followup" || questionId === "q_initial") {
         return { questionId, runs: [{ ...runningRunFixture, questionId }] };
+      }
+      if (questionId === "q_choice_clarification" && choiceClarificationAnswered) {
+        return {
+          questionId,
+          runs: [
+            {
+              ...completedRunFixture,
+              conversationId: "conv_choice_clarification",
+              questionId,
+              runId: "run_clarify"
+            }
+          ]
+        };
       }
       return demoClient.listQuestionRuns(questionId);
     }
@@ -146,11 +182,11 @@ export function createInteractiveTextClarificationClient(
           conversationId: "conv_clarification",
           primaryRunId: "run_clarify_text",
           latestRunId: "run_clarify_text",
-          activeRunId: null,
+          activeRunId: answered ? null : "run_clarify_text",
           firstQuestion: "What were sales for BBS last month?",
           latestQuestionId: "q_clarification",
           runCount: 1,
-          status: "NEEDS_CLARIFICATION",
+          status: answered ? "COMPLETED" : "WAITING_FOR_CLARIFICATION",
           updatedAt: "2026-06-27T10:17:00+00:00"
         }
       ]
@@ -159,28 +195,24 @@ export function createInteractiveTextClarificationClient(
       if (questionId === "q_clarification") {
         return {
           questionId,
-          runs: [
-            {
-              ...freeTextClarificationRunFixture,
-              conversationId: "conv_clarification",
-              questionId: "q_clarification",
-              runId: "run_clarify_text"
-            },
-            ...(answered
-              ? [
-                  {
-                    ...completedRunFixture,
-                    answer: "March 2026 sales were 14.",
-                    conversationId: "conv_clarification",
-                    questionId: "q_clarification",
-                    runId: "run_text_answer",
-                    runNumber: 2,
-                    triggerKind: "clarification_response",
-                    baseRunId: "run_clarify_text"
-                  } satisfies RunPayload
-                ]
-              : [])
-          ]
+          runs: answered
+            ? [
+                {
+                  ...completedRunFixture,
+                  answer: "March 2026 sales were 14.",
+                  conversationId: "conv_clarification",
+                  questionId: "q_clarification",
+                  runId: "run_clarify_text"
+                } satisfies RunPayload
+              ]
+            : [
+                {
+                  ...freeTextClarificationRunFixture,
+                  conversationId: "conv_clarification",
+                  questionId: "q_clarification",
+                  runId: "run_clarify_text"
+                }
+              ]
         };
       }
       return demoClient.listQuestionRuns(questionId);

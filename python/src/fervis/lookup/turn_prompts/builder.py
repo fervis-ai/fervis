@@ -56,10 +56,6 @@ class TurnPromptBuilder:
         sections: list[PromptSection] = []
         if turn.include_current_question:
             sections.append(self.current_question_section())
-            if turn.include_active_clarification:
-                active_clarification_section = self.active_clarification_section()
-                if active_clarification_section is not None:
-                    sections.append(active_clarification_section)
         sections.append(self.turn_description_section(turn))
         sections.extend(turn.prompt_sections(self))
         prompt_text = "\n\n".join(section.render(self.renderer) for section in sections)
@@ -77,23 +73,6 @@ class TurnPromptBuilder:
             title="Current question:",
             content=self.context.current_question.strip(),
             kind=PromptSectionKind.TEXT,
-        )
-
-    def active_clarification_section(self) -> PromptSection | None:
-        active = self.context.active_clarification
-        if active is None:
-            return None
-        return PromptSection(
-            title="Active clarification context:",
-            content={
-                "original_question": active.original_question,
-                "exchanges": [
-                    {"questions": list(exchange.questions), "answer": exchange.answer}
-                    for exchange in active.exchanges
-                ],
-            },
-            kind=PromptSectionKind.JSON,
-            json_indent=2,
         )
 
     def turn_description_section(self, turn: "TurnPromptBase") -> PromptSection:

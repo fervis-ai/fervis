@@ -57,7 +57,8 @@ def validate_project_schema(schema: Mapping[str, object]) -> None:
     _validate_host(require_mapping(schema, "host"))
     _validate_routes(require_mapping(schema, "routes"))
     _validate_sources(require_list(schema, "sources"), framework=framework)
-    _validate_models(require_mapping(schema, "models"))
+    global_models = require_mapping(schema, "models")
+    _validate_models(global_models)
     environments = require_mapping(schema, "environments")
     default_environment = str(schema["default_environment"])
     if default_environment not in environments:
@@ -70,7 +71,7 @@ def validate_project_schema(schema: Mapping[str, object]) -> None:
             raise ValueError("environment names must be non-empty strings.")
         if not isinstance(environment, Mapping):
             raise ValueError(f"environment {name!r} must be an object.")
-        _validate_environment(environment, name=name, global_models=schema["models"])
+        _validate_environment(environment, name=name, global_models=global_models)
 
 
 def active_project_schema(

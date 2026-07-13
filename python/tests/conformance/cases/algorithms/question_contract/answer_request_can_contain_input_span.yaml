@@ -9,6 +9,7 @@ input:
   answer_fact: count of in-person sales in the current month
   answer_outputs:
   - description: number of in-person sales this month
+    role: ANSWER_VALUE
   question_inputs:
   - input_ref: period
     source: question_context
@@ -25,6 +26,7 @@ expect:
     requested_facts:
     - answer_outputs:
       - description: number of in-person sales this month
+        role: ANSWER_VALUE
       known_inputs:
       - kind: literal_text
         text: this month

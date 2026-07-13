@@ -15,53 +15,51 @@ from . import (
     model,
     operations,
     relations,
-    render_spec,
+    result_projection,
     values,
 )
-from fervis.lookup.answer_program.model import AnswerProgram, ProgramCompatibility
+from fervis.lookup.answer_program.model import (
+    ANSWER_PROGRAM_SCHEMA_REVISION,
+    AnswerProgram,
+    ProgramCompatibility,
+)
 from fervis.lookup.answer_program.errors import AnswerProgramContractError
 from fervis.lookup.answer_program.values import BindingPatch, BindingSet
 from fervis.lookup.question_contract import model as question_contract_model
 from fervis.lookup import question_inputs
 
 
-ANSWER_PROGRAM_SCHEMA_REVISION = 1
-
-
 def canonicalize_answer_program(program: AnswerProgram) -> AnswerProgram:
     """Normalize declaration order without changing graph execution order."""
 
-    render = program.render_spec
     return replace(
         program,
-        fact_template=tuple(
-            sorted(program.fact_template, key=lambda item: item.id)
-        ),
+        fact_template=tuple(sorted(program.fact_template, key=lambda item: item.id)),
         fulfillment=tuple(
             sorted(
                 program.fulfillment,
                 key=lambda item: (
                     item.requested_fact_id,
                     item.answer_output_id,
-                    item.render_output_id,
+                    item.result_output_id,
                 ),
             )
         ),
         parameters=tuple(sorted(program.parameters, key=lambda item: item.id)),
         capabilities=tuple(sorted(program.capabilities, key=lambda item: item.id)),
         relations=tuple(sorted(program.relations, key=lambda item: item.id)),
-        render_spec=(
-            None
-            if render is None
-            else replace(
-                render,
-                relation_outputs=tuple(
-                    sorted(render.relation_outputs, key=lambda item: item.id)
-                ),
-                scalar_outputs=tuple(
-                    sorted(render.scalar_outputs, key=lambda item: item.id)
-                ),
-            )
+        result_projection=replace(
+            program.result_projection,
+            relation_outputs=tuple(
+                sorted(
+                    program.result_projection.relation_outputs, key=lambda item: item.id
+                )
+            ),
+            scalar_outputs=tuple(
+                sorted(
+                    program.result_projection.scalar_outputs, key=lambda item: item.id
+                )
+            ),
         ),
         compatibility=_canonical_compatibility(program.compatibility),
     )
@@ -341,9 +339,7 @@ def _encode_as(
         raise TypeError("canonical boolean field must be bool")
     if expected is int and type(value) is not int:
         raise TypeError("canonical integer field must be int")
-    if expected is float and (
-        type(value) is not float or not math.isfinite(value)
-    ):
+    if expected is float and (type(value) is not float or not math.isfinite(value)):
         raise TypeError("canonical float field must be a finite float")
     if expected is str and type(value) is not str:
         raise TypeError("canonical string field must be str")
@@ -364,8 +360,7 @@ def _encode_json_value(value: Any) -> Any:
             raise TypeError("JSON object keys must be strings")
         return {
             "$map": [
-                [key, _encode_json_value(item)]
-                for key, item in sorted(value.items())
+                [key, _encode_json_value(item)] for key, item in sorted(value.items())
             ]
         }
     raise TypeError("open contract fields accept JSON values only")
@@ -387,8 +382,7 @@ def _decode_json_value(value: Any) -> Any:
         if any(not isinstance(pair, list) or len(pair) != 2 for pair in pairs):
             raise ValueError("canonical JSON map entries must be key-value pairs")
         decoded = [
-            (_decode_as(pair[0], str), _decode_json_value(pair[1]))
-            for pair in pairs
+            (_decode_as(pair[0], str), _decode_json_value(pair[1])) for pair in pairs
         ]
         output = dict(decoded)
         if len(output) != len(decoded):
@@ -445,7 +439,9 @@ def _decode_union(value: Any, variants: tuple[Any, ...]) -> Any:
             return _decode_as(value, variant)
         except ValueError as exc:
             errors.append(exc)
-    raise ValueError("canonical value does not match its declared union") from errors[-1]
+    raise ValueError("canonical value does not match its declared union") from errors[
+        -1
+    ]
 
 
 def _decode_tuple(value: Any, arguments: tuple[Any, ...]) -> tuple[Any, ...]:
@@ -579,7 +575,7 @@ _CONTRACT_TYPES = (
     operations.PredicateOperator,
     operations.ProjectField,
     operations.ProjectSpec,
-    operations.ProjectToIdentitySpec,
+    operations.ProjectToKeySpec,
     operations.RankSpec,
     operations.RelationRole,
     operations.RelationRoleRef,
@@ -602,9 +598,11 @@ _CONTRACT_TYPES = (
     relations.RelationSourceRowFilter,
     relations.ReviewScopeDecisionKind,
     relations.SourceKind,
-    render_spec.RenderRelationOutput,
-    render_spec.RenderScalarOutput,
-    render_spec.RenderSpec,
+    result_projection.EntityKeyProjection,
+    result_projection.EntityKeyProjectionComponent,
+    result_projection.RelationResultOutput,
+    result_projection.ScalarResultOutput,
+    result_projection.ResultProjection,
     values.BindingPatch,
     values.BindingPatchOperationKind,
     values.BindingProvenance,
@@ -644,8 +642,8 @@ _CONTRACT_TYPES = (
     question_contract_model.GroupKeyDomainKind,
     question_contract_model.KnownInputSource,
     question_inputs.LiteralInputRole,
-    question_contract_model.MissingQuestionInput,
-    question_contract_model.MissingQuestionInputType,
+    question_contract_model.IncompleteFactualRequestItem,
+    question_contract_model.IncompleteFactualRequestKind,
     question_contract_model.NormalInstanceExcludedStateRole,
     question_contract_model.NormalInstanceExcludedStateRoleDefinition,
     question_contract_model.NormalInstanceExplicitOverrideReason,
@@ -672,9 +670,7 @@ _DATACLASS_TYPES = {
     _type_key(item): item for item in _CONTRACT_TYPES if is_dataclass(item)
 }
 _ENUM_TYPES = {
-    _type_key(item): item
-    for item in _CONTRACT_TYPES
-    if issubclass(item, Enum)
+    _type_key(item): item for item in _CONTRACT_TYPES if issubclass(item, Enum)
 }
 
 if len(_DATACLASS_TYPES) + len(_ENUM_TYPES) != len(_CONTRACT_TYPES):

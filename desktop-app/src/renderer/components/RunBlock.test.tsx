@@ -22,7 +22,14 @@ describe("RunBlock", () => {
           answer: null,
           resultData: {
             kind: "answer",
-            outputs: [{ key: "answer_1", valueKind: "number", value: "13" }]
+            outputs: [
+              {
+                key: "answer_1",
+                valueKind: "number",
+                value: { kind: "number", value: "13" },
+                displayValue: "13"
+              }
+            ]
           }
         }}
       />

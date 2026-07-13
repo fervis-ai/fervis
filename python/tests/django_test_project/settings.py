@@ -31,7 +31,7 @@ DATABASES = {
     }
 }
 
-MIDDLEWARE = []
+MIDDLEWARE: list[str] = []
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 
 MIGRATION_MODULES = {
@@ -44,7 +44,7 @@ MIGRATION_MODULES = {
     "retail_ops_reports": None,
 }
 
-REST_FRAMEWORK = {
+REST_FRAMEWORK: dict[str, str | list[str] | dict[str, str] | None] = {
     "DEFAULT_AUTHENTICATION_CLASSES": [],
     "DEFAULT_THROTTLE_RATES": {"fervis_question": "1000/min"},
     "UNAUTHENTICATED_USER": None,

@@ -16,11 +16,11 @@ input:
     program_invocations:
       - run_id: run_base
         kind: compiled_question
-        program_id: ap_d261575e1831f8d36c1424830364b3f6dda4c4b6e86b1d1bd7e31aea5c415e7c
+        program_id: ap_523d621def00b761d19290925f33718d34d628a1c62ae72ff6c9e9796024d748
         program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/capability}
         bindings:
           - parameter_id: question.store_ids
-            value: {kind: identity_set, identity_type: store, identity_field: store_id, values: [store_1, store_2]}
+            value: {kind: identity_set, entity_kind: store, key_id: primary_key, key_component_id: store_id, values: [store_1, store_2]}
             provenance: {kind: question_input}
     program_result:
       status: COMPLETED

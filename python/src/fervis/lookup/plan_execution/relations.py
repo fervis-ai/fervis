@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 import hashlib
 from typing import Mapping
 
-from fervis.lookup.canonical_data import canonical_runtime_json
+from fervis.lookup.canonical_data import RuntimeValue, canonical_runtime_json
 
 from fervis.lookup.relation_catalog.model import (
     CompletenessPolicy,
@@ -16,7 +16,7 @@ from fervis.lookup.relation_catalog.model import (
 )
 
 
-Row = Mapping[str, object]
+Row = Mapping[str, RuntimeValue]
 
 
 class CompletenessStatus(StrEnum):
@@ -75,7 +75,6 @@ class RelationRows:
     field_types: Mapping[str, str] | None = None
     field_answer_output_ids: Mapping[str, tuple[str, ...]] | None = None
     completeness: CompletenessProof = CompletenessProof()
-    identity_type: str = ""
     evidence: RelationEvidence = RelationEvidence()
 
     def __post_init__(self) -> None:
@@ -85,6 +84,7 @@ class RelationRows:
                 "completeness",
                 replace(self.completeness, row_count=len(self.rows)),
             )
+
     def with_filtered_rows(
         self,
         rows: tuple[Row, ...],

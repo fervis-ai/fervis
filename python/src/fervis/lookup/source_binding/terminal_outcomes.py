@@ -16,10 +16,12 @@ from fervis.lookup.fact_planning.fact_requirements import (
 )
 from fervis.lookup.fact_plan.row_sources import read_evidence_ref
 from fervis.lookup.source_binding.candidates import (
-    source_binding_candidate_payload,
+    source_candidate_registry,
     source_binding_prompt_candidate_fulfillment_answer_output_ids,
     source_binding_prompt_candidate_requested_fact_ids,
 )
+from fervis.lookup.source_binding.candidates.model import SourceCandidate
+from fervis.lookup.source_binding.candidates.contracts import ValueEvidence
 from fervis.lookup.source_binding.model import SourceBindingRequest
 
 
@@ -60,7 +62,7 @@ def backend_impossible_without_answer_candidates(
 
 
 def _has_value_source_candidates(request: SourceBindingRequest) -> bool:
-    payload = source_binding_candidate_payload(request)
+    candidates = source_candidate_registry(request).candidates_by_id.values()
     known_input_value_ids = {
         value.id
         for value in request.available_values
@@ -71,30 +73,27 @@ def _has_value_source_candidates(request: SourceBindingRequest) -> bool:
             candidate,
             known_input_value_ids=known_input_value_ids,
         )
-        for candidate in payload.get("value_source_candidates") or ()
+        for candidate in candidates
+        if candidate.kind == "value"
     )
 
 
 def _is_answer_capable_value_candidate(
-    candidate: object,
+    candidate: SourceCandidate,
     *,
     known_input_value_ids: set[str],
 ) -> bool:
-    if not isinstance(candidate, dict):
-        return False
-    value_id = str(candidate.get("value_id") or "")
+    value_id = candidate.value_id
     if value_id not in known_input_value_ids:
         return True
     return _candidate_has_number_value_evidence(candidate)
 
 
-def _candidate_has_number_value_evidence(candidate: dict[str, object]) -> bool:
-    for item in candidate.get("evidence_items") or ():
-        if not isinstance(item, dict):
-            continue
-        if str(item.get("type") or "") == "number":
-            return True
-    return str(candidate.get("literal_type") or candidate.get("type") or "") == "number"
+def _candidate_has_number_value_evidence(candidate: SourceCandidate) -> bool:
+    return any(
+        isinstance(item, ValueEvidence) and item.type == "number"
+        for item in candidate.evidence_items
+    )
 
 
 def _blocked_facts_without_answer_output_candidates(
@@ -108,12 +107,13 @@ def _blocked_facts_without_answer_output_candidates(
     )
     supported_output_ids_by_fact: dict[str, set[str]] = {}
     for candidate_id, output_ids in answer_output_ids_by_candidate.items():
-        requested_fact_id = requested_fact_ids_by_candidate.get(candidate_id, "")
-        if not requested_fact_id:
-            continue
-        supported_output_ids_by_fact.setdefault(requested_fact_id, set()).update(
-            output_ids
-        )
+        for requested_fact_id in requested_fact_ids_by_candidate.get(
+            candidate_id,
+            (),
+        ):
+            supported_output_ids_by_fact.setdefault(requested_fact_id, set()).update(
+                output_ids
+            )
     return tuple(
         _blocked_fact_for_requested_fact(fact.id, request=request)
         for fact in request.requested_facts

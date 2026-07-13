@@ -51,7 +51,7 @@ def record_source_read_observation(
     if scope is None:
         return None
     source_read_id = scope.source_read_id(source_read_key)
-    catalog_endpoint = _record_catalog_endpoint(
+    recorded_endpoint = _record_catalog_endpoint(
         scope,
         endpoint_name=endpoint_name,
         catalog_endpoint=catalog_endpoint,
@@ -62,7 +62,7 @@ def record_source_read_observation(
                 source_read_id=source_read_id,
                 run_id=scope.run_id,
                 step_id=scope.step_id,
-                catalog_endpoint_id=catalog_endpoint.catalog_endpoint_id,
+                catalog_endpoint_id=recorded_endpoint.catalog_endpoint_id,
                 args_json=dict(args),
                 status=SourceReadStatus.SUCCEEDED,
                 row_count=observation.row_count,
@@ -74,7 +74,7 @@ def record_source_read_observation(
     _record_failed_source_read(
         scope,
         source_read_id=source_read_id,
-        catalog_endpoint=catalog_endpoint,
+        catalog_endpoint=recorded_endpoint,
         args=args,
         error_json=observation.error_json,
         response_hash=observation.response_hash,
@@ -106,7 +106,7 @@ def record_source_read_error(
 ) -> None:
     if scope is None:
         return
-    catalog_endpoint = _record_catalog_endpoint(
+    recorded_endpoint = _record_catalog_endpoint(
         scope,
         endpoint_name=endpoint_name,
         catalog_endpoint=catalog_endpoint,
@@ -114,7 +114,7 @@ def record_source_read_error(
     _record_failed_source_read(
         scope,
         source_read_id=scope.source_read_id(source_read_key),
-        catalog_endpoint=catalog_endpoint,
+        catalog_endpoint=recorded_endpoint,
         args=args,
         error_json=error_json,
         response_hash=str(error_json.get("responseHash") or ""),
@@ -127,13 +127,13 @@ def _record_catalog_endpoint(
     endpoint_name: str,
     catalog_endpoint: CatalogEndpointMetadata | None,
 ) -> CatalogEndpointWrite:
-    catalog_endpoint = _catalog_endpoint_write(
+    recorded_endpoint = _catalog_endpoint_write(
         scope=scope,
         endpoint_name=endpoint_name,
         catalog_endpoint=catalog_endpoint,
     )
-    scope.recorder.record_catalog_endpoint(catalog_endpoint)
-    return catalog_endpoint
+    scope.recorder.record_catalog_endpoint(recorded_endpoint)
+    return recorded_endpoint
 
 
 def _record_failed_source_read(

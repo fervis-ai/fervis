@@ -1,0 +1,9 @@
+id: rank_limit_preserves_large_exact_integer
+kind: algorithm
+algorithm: answer_program.rank_limit
+description: Rank-limit instantiation preserves an exact integer beyond binary floating-point precision.
+input:
+  value: "9007199254740993"
+expect:
+  result_contains:
+    limit: 9007199254740993

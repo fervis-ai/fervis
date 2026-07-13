@@ -1,0 +1,44 @@
+id: entity_reference_targets_nonreadable_key_authority
+description: A relation may reference a framework-declared entity key even when no configured read exposes rows of the target entity.
+kind: algorithm
+algorithm: relation_catalog.row_source_projection
+input:
+  catalog:
+    candidate_key_authorities:
+      - id: primary_key
+        entity_kind: user
+        components:
+          - {id: user_id, type: uuid}
+        primary: true
+    reads:
+      - id: cash_deposit
+        endpoint_name: list_cash_deposit
+        resource_names: [cash_deposit]
+        row_paths:
+          - {id: data, path: data, cardinality: many}
+        fields:
+          - {ref: deposit.id, path: data.deposit_id, row_path_id: data, type: uuid}
+          - {ref: deposit.user_id, path: data.verified_by_id, row_path_id: data, type: uuid}
+        candidate_keys:
+          - id: primary_key
+            entity_kind: cash_deposit
+            components:
+              - {id: deposit_id, field_ref: deposit.id}
+            primary: true
+        entity_references:
+          - id: verifier_reference
+            target_entity_kind: user
+            target_key_id: primary_key
+            components:
+              - {target_component_id: user_id, local_field_ref: deposit.user_id}
+expect:
+  result_contains:
+    read_id: cash_deposit
+    row_path_id: data
+    entity_references:
+      - id: verifier_reference
+        target_entity_kind: user
+        target_key_id: primary_key
+        components:
+          - {target_component_id: user_id, local_field_id: verified_by_id}
+        context_field_ids: []

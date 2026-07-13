@@ -9,22 +9,34 @@ input:
     reads:
       - id: staff_detail
         endpoint_name: get_staff_detail
-        fields: [{ref: staff_detail.field.id, type: uuid, identity: {entity_ref: staff, identity_field: staff_id, primary_key: true}}]
+        resource_names: [staff]
+        fields: [{ref: staff_detail.field.id, type: uuid}]
+        candidate_keys: [{id: primary_key, entity_kind: staff, primary: true, components: [{id: staff_id, field_ref: staff_detail.field.id}]}]
       - id: area_detail
         endpoint_name: get_area_detail
-        fields: [{ref: area_detail.field.id, type: uuid, identity: {entity_ref: area, identity_field: area_id, primary_key: true}}]
+        resource_names: [area]
+        fields: [{ref: area_detail.field.id, type: uuid}]
+        candidate_keys: [{id: primary_key, entity_kind: area, primary: true, components: [{id: area_id, field_ref: area_detail.field.id}]}]
       - id: cash_deposit_detail
         endpoint_name: get_cash_deposit_detail
-        fields: [{ref: cash_deposit_detail.field.id, type: uuid, identity: {entity_ref: cash_deposit, identity_field: cash_deposit_id, primary_key: true}}]
+        resource_names: [cash_deposit]
+        fields: [{ref: cash_deposit_detail.field.id, type: uuid}]
+        candidate_keys: [{id: primary_key, entity_kind: cash_deposit, primary: true, components: [{id: cash_deposit_id, field_ref: cash_deposit_detail.field.id}]}]
       - id: deal_detail
         endpoint_name: get_deal_detail
-        fields: [{ref: deal_detail.field.id, type: uuid, identity: {entity_ref: deal, identity_field: deal_id, primary_key: true}}]
+        resource_names: [deal]
+        fields: [{ref: deal_detail.field.id, type: uuid}]
+        candidate_keys: [{id: primary_key, entity_kind: deal, primary: true, components: [{id: deal_id, field_ref: deal_detail.field.id}]}]
       - id: look_detail
         endpoint_name: get_look_detail
-        fields: [{ref: look_detail.field.id, type: uuid, identity: {entity_ref: look, identity_field: look_id, primary_key: true}}]
+        resource_names: [look]
+        fields: [{ref: look_detail.field.id, type: uuid}]
+        candidate_keys: [{id: primary_key, entity_kind: look, primary: true, components: [{id: look_id, field_ref: look_detail.field.id}]}]
       - id: staff_list
         endpoint_name: list_staff_list
-        fields: [{ref: staff_list.field.id, type: uuid, identity: {entity_ref: staff, identity_field: staff_id, primary_key: true}}]
+        resource_names: [staff]
+        fields: [{ref: staff_list.field.id, type: uuid}]
+        candidate_keys: [{id: primary_key, entity_kind: staff, primary: true, components: [{id: staff_id, field_ref: staff_list.field.id}]}]
   entity_targets:
     - target_id: entity_1
       catalog_search_terms: [staff, staff profile, staff detail]

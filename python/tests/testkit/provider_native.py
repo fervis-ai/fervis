@@ -8,44 +8,50 @@ def provider_native_test_arguments(
     tool_specs,
 ) -> dict:
     del prompt, tool_specs
-    if tool_name == "submit_answer_request_contract":
+    if tool_name == "submit_question_contract_outcome":
         return {
-            "kind": "question_contract",
-            "answer_requests_count": 1,
-            "question_inputs": [],
-            "answer_requests": [
-                {
-                    "answer_fact": "test adapter answer",
-                    "answer_expression": {"family": "scalar_value"},
-                    "answer_subject": {
-                        "subject_text": "test adapter answer",
-                        "instance_interpretation": {"kind": "NORMAL_BUSINESS_INSTANCE"},
-                    },
-                    "answer_population": {
-                        "population_label": "test adapter answer",
-                        "counted_unit": "test adapter answer",
-                        "membership_tests": [
+            "decision_basis": "The current wording identifies the requested fact.",
+            "outcome": {
+                "kind": "question_contract",
+                "answer_requests_count": 1,
+                "question_inputs": [],
+                "answer_requests": [
+                    {
+                        "answer_fact": "test adapter answer",
+                        "answer_expression": {"family": "scalar_value"},
+                        "answer_subject": {
+                            "subject_text": "test adapter answer",
+                            "instance_interpretation": {
+                                "kind": "NORMAL_BUSINESS_INSTANCE"
+                            },
+                        },
+                        "answer_population": {
+                            "population_label": "test adapter answer",
+                            "counted_unit": "test adapter answer",
+                            "membership_tests": [
+                                {
+                                    "test_id": "pop_test_1",
+                                    "kind": "SUBJECT_IDENTITY",
+                                    "polarity": "MUST_PASS",
+                                    "test_question": (
+                                        "Does the row/value represent test adapter answer?"
+                                    ),
+                                    "owned_question_input_refs": [],
+                                }
+                            ],
+                        },
+                        "answer_outputs": [
                             {
-                                "test_id": "pop_test_1",
-                                "kind": "SUBJECT_IDENTITY",
-                                "polarity": "MUST_PASS",
-                                "test_question": (
-                                    "Does the row/value represent test adapter answer?"
-                                ),
-                                "owned_question_input_refs": [],
+                                "description": "test adapter answer",
+                                "role": "ANSWER_VALUE",
                             }
                         ],
-                    },
-                    "answer_outputs": [
-                        {
-                            "description": "test adapter answer",
-                        }
-                    ],
-                    "used_question_inputs": [],
-                }
-            ],
-            "question_input_inventory_check": {
-                "all_input_like_phrases_declared": True,
+                        "used_question_inputs": [],
+                    }
+                ],
+                "question_input_inventory_check": {
+                    "all_input_like_phrases_declared": True,
+                },
             },
         }
     if tool_name == "submit_pattern_fact_plan":

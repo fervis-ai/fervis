@@ -1,0 +1,58 @@
+id: population_predicate_operand_is_question_input
+description: A concrete modifier value is a typed input owned by the population predicate, while the subject remains separate.
+kind: algorithm
+algorithm: question_contract.parse
+input:
+  question_context: How many priority jobs are there?
+  payload:
+    kind: question_contract
+    answer_requests_count: 1
+    question_inputs:
+    - input_ref: priority
+      kind: literal_text
+      source: question_context
+      value_source_text: priority
+      field_label_text: priority
+      operand_text: priority
+      value_meaning_hint: job priority
+      role: reference_value
+      inventory_check:
+        why_this_is_an_input: It is the concrete operand of the population predicate.
+    answer_requests:
+    - answer_fact: count of priority jobs
+      answer_expression:
+        family: scalar_aggregate
+      answer_subject:
+        subject_text: jobs
+        instance_interpretation:
+          kind: NORMAL_BUSINESS_INSTANCE
+      answer_population:
+        population_label: priority jobs
+        counted_unit: jobs
+        membership_tests:
+        - test_id: subject_identity
+          kind: SUBJECT_IDENTITY
+          polarity: MUST_PASS
+          test_question: Does the instance represent a job?
+          owned_question_input_refs: []
+        - test_id: requested_priority
+          kind: EXPLICIT_USER_CONSTRAINT
+          polarity: MUST_PASS
+          test_question: Does the job have the requested priority?
+          owned_question_input_refs: [priority]
+      answer_outputs:
+      - description: job count
+        role: ROW_COUNT
+      used_question_inputs: [priority]
+    question_input_inventory_check:
+      all_input_like_phrases_declared: true
+expect:
+  result_contains:
+    question_inputs:
+    - id: priority
+      text: priority
+      resolved_value_text: priority
+      role: reference_value
+    requested_facts:
+    - answer_subject_text: jobs
+      input_refs: [priority]

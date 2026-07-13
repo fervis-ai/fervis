@@ -33,6 +33,7 @@ input:
           owned_question_input_refs: [time_1]
       answer_outputs:
       - description: number of shifts
+        role: ANSWER_VALUE
       used_question_inputs:
       - time_1
     question_inputs:
@@ -42,7 +43,7 @@ input:
       inventory_check:
         why_this_is_an_input: today is a time scope
       value_source_text: today
-      resolved_value_text: today
+      operand_text: today
       role: time_value
     question_input_inventory_check:
       all_input_like_phrases_declared: true

@@ -1,109 +1,135 @@
-"""Provider-output DTOs for question contract."""
+"""Typed provider-output contracts for question interpretation."""
 
 from __future__ import annotations
 
-from fervis.lookup.provider_contract import provider_output_type
+from dataclasses import dataclass
+from typing import Optional
+
+from fervis.lookup.provider_contract import ProviderObject, ProviderOutput
 
 
-QuestionContractOutput = provider_output_type(
-    "QuestionContractOutput",
-    (
-        "kind",
-        "answer_requests_count",
-        "question_inputs",
-        "answer_requests",
-        "question_input_inventory_check",
-    ),
-)
-MissingInputClarificationOutput = provider_output_type(
-    "MissingInputClarificationOutput",
-    ("kind", "missing"),
-)
-MissingQuestionInputOutput = provider_output_type(
-    "MissingQuestionInputOutput",
-    ("type", "source_text", "entity_type", "why_context_is_insufficient"),
-)
-AnswerRequestOutput = provider_output_type(
-    "AnswerRequestOutput",
-    (
-        "answer_fact",
-        "answer_expression",
-        "answer_subject",
-        "answer_population",
-        "answer_outputs",
-        "used_question_inputs",
-    ),
-)
-AnswerExpressionOutput = provider_output_type(
-    "AnswerExpressionOutput",
-    ("family", "group_key"),
-    optional_fields=("group_key",),
-)
-GroupKeyOutput = provider_output_type(
-    "GroupKeyOutput",
-    ("description", "domain", "question_input_refs"),
-    optional_fields=("question_input_refs",),
-)
-AnswerSubjectOutput = provider_output_type(
-    "AnswerSubjectOutput",
-    ("subject_text", "instance_interpretation"),
-)
-AnswerSubjectInstanceInterpretationOutput = provider_output_type(
-    "AnswerSubjectInstanceInterpretationOutput",
-    ("kind",),
-)
-AnswerPopulationOutput = provider_output_type(
-    "AnswerPopulationOutput",
-    ("population_label", "counted_unit", "membership_tests"),
-)
-AnswerPopulationMembershipTestOutput = provider_output_type(
-    "AnswerPopulationMembershipTestOutput",
-    ("test_id", "kind", "polarity", "test_question", "owned_question_input_refs"),
-)
-AnswerOutputOutput = provider_output_type(
-    "AnswerOutputOutput",
-    ("description", "role"),
-    optional_fields=("role",),
-)
-LiteralTextInputOutput = provider_output_type(
-    "LiteralTextInputOutput",
-    (
-        "input_ref",
-        "source",
-        "value_source_text",
-        "resolved_value_text",
-        "field_label_text",
-        "value_meaning_hint",
-        "role",
-        "occurrence",
-        "resolved_input_ref",
-        "inventory_check",
-        "kind",
-    ),
-    optional_fields=(
-        "field_label_text",
-        "value_meaning_hint",
-        "resolved_input_ref",
-        "occurrence",
-    ),
-)
-RowSetReferenceInputOutput = provider_output_type(
-    "RowSetReferenceInputOutput",
-    (
-        "input_ref",
-        "source",
-        "reference_text",
-        "occurrence",
-        "resolved_input_ref",
-        "inventory_check",
-        "kind",
-    ),
-)
-QuestionInputInventoryCheckOutput = provider_output_type(
-    "QuestionInputInventoryCheckOutput",
-    ("all_input_like_phrases_declared",),
-)
-QuestionInputItemInventoryCheckOutput = provider_output_type(
-    "QuestionInputItemInventoryCheckOutput",
-    ("why_this_is_an_input",),
-)
+@dataclass(frozen=True)
+class QuestionContractDecisionOutput(ProviderOutput):
+    decision_basis: str
+    outcome: ProviderObject
+
+
+@dataclass(frozen=True)
+class QuestionInputItemInventoryCheckOutput(ProviderOutput):
+    why_this_is_an_input: str
+
+
+@dataclass(frozen=True)
+class QuestionInputInventoryCheckOutput(ProviderOutput):
+    all_input_like_phrases_declared: bool
+
+
+@dataclass(frozen=True)
+class LiteralTextInputOutput(ProviderOutput):
+    input_ref: str
+    source: str
+    value_source_text: str
+    operand_text: str
+    role: str
+    inventory_check: QuestionInputItemInventoryCheckOutput
+    kind: str
+    field_label_text: Optional[str] = None
+    value_meaning_hint: Optional[str] = None
+    occurrence: Optional[int] = None
+    resolved_input_ref: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class RowSetReferenceInputOutput(ProviderOutput):
+    input_ref: str
+    source: str
+    reference_text: str
+    occurrence: int
+    resolved_input_ref: str
+    inventory_check: QuestionInputItemInventoryCheckOutput
+    kind: str
+
+
+@dataclass(frozen=True)
+class AnswerOutputOutput(ProviderOutput):
+    description: str
+    role: str
+
+
+@dataclass(frozen=True)
+class AnswerPopulationMembershipTestOutput(ProviderOutput):
+    test_id: str
+    kind: str
+    polarity: str
+    test_question: str
+    owned_question_input_refs: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AnswerPopulationOutput(ProviderOutput):
+    population_label: str
+    counted_unit: str
+    membership_tests: tuple[AnswerPopulationMembershipTestOutput, ...]
+
+
+@dataclass(frozen=True)
+class AnswerSubjectInstanceInterpretationOutput(ProviderOutput):
+    kind: str
+
+
+@dataclass(frozen=True)
+class AnswerSubjectOutput(ProviderOutput):
+    subject_text: str
+    instance_interpretation: AnswerSubjectInstanceInterpretationOutput
+
+
+@dataclass(frozen=True)
+class GroupKeyOutput(ProviderOutput):
+    description: str
+    domain: str
+    question_input_refs: Optional[tuple[str, ...]] = None
+
+
+@dataclass(frozen=True)
+class AnswerExpressionOutput(ProviderOutput):
+    family: str
+    group_key: Optional[GroupKeyOutput] = None
+
+
+@dataclass(frozen=True)
+class AnswerRequestOutput(ProviderOutput):
+    answer_fact: str
+    answer_expression: AnswerExpressionOutput
+    answer_subject: AnswerSubjectOutput
+    answer_population: AnswerPopulationOutput
+    answer_outputs: tuple[AnswerOutputOutput, ...]
+    used_question_inputs: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class QuestionContractOutput(ProviderOutput):
+    kind: str
+    answer_requests_count: int
+    question_inputs: tuple[ProviderObject, ...]
+    answer_requests: tuple[AnswerRequestOutput, ...]
+    question_input_inventory_check: QuestionInputInventoryCheckOutput
+
+
+@dataclass(frozen=True)
+class UnresolvedPriorTurnReferenceOutput(ProviderOutput):
+    source_text: str
+    target_label: str
+    why_question_is_incomplete: str
+
+
+@dataclass(frozen=True)
+class UnresolvedPriorTurnReferencesOutput(ProviderOutput):
+    kind: str
+    references: tuple[UnresolvedPriorTurnReferenceOutput, ...]
+
+
+@dataclass(frozen=True)
+class MissingRequestedFactOutput(ProviderOutput):
+    kind: str
+    source_text: str
+    why_question_is_incomplete: str

@@ -1,0 +1,13 @@
+id: ranked_entity_metric_surface_includes_row_count
+description: A ranked entity answer can choose row count as its intermediate metric without declaring row count as the final answer output.
+kind: algorithm
+algorithm: source_binding.metric_fit_surface
+input:
+  request:
+    mode: multi_row_summary_ranked_metric
+expect:
+  result_contains:
+    row_population_metric_count_by_fact:
+      fact_1: 1
+    row_population_metric_operations_by_fact:
+      fact_1: [count_rows]

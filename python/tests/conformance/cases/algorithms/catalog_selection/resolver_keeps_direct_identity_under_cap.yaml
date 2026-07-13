@@ -10,23 +10,28 @@ input:
       - id: shade_store_availability
         endpoint_name: get_merch_shade_store_availability
         resource_names: [availability]
-        fields: [{ref: shade_store_availability.field.id, type: uuid, identity: {entity_ref: availability, identity_field: availability_id, primary_key: true, stable: true}}]
+        fields: [{ref: shade_store_availability.field.id, type: uuid}]
+        candidate_keys: [{id: primary_key, entity_kind: availability, primary: true, components: [{id: availability_id, field_ref: shade_store_availability.field.id}]}]
       - id: store_list
         endpoint_name: list_store_list
         resource_names: [store]
-        fields: [{ref: store_list.field.id, type: uuid, identity: {entity_ref: store, identity_field: store_id, primary_key: true, stable: true}}]
+        fields: [{ref: store_list.field.id, type: uuid}]
+        candidate_keys: [{id: primary_key, entity_kind: store, primary: true, components: [{id: store_id, field_ref: store_list.field.id}]}]
       - id: deal_location_limits
         endpoint_name: get_deal_location_limits
         resource_names: [deal]
-        fields: [{ref: deal_location_limits.field.id, type: uuid, identity: {entity_ref: deal, identity_field: deal_id, primary_key: true, stable: true}}]
+        fields: [{ref: deal_location_limits.field.id, type: uuid}]
+        candidate_keys: [{id: primary_key, entity_kind: deal, primary: true, components: [{id: deal_id, field_ref: deal_location_limits.field.id}]}]
       - id: location_list
         endpoint_name: list_location_list
         resource_names: [location]
-        fields: [{ref: location_list.field.id, type: uuid, identity: {entity_ref: location, identity_field: location_id, primary_key: true, stable: true}}]
+        fields: [{ref: location_list.field.id, type: uuid}]
+        candidate_keys: [{id: primary_key, entity_kind: location, primary: true, components: [{id: location_id, field_ref: location_list.field.id}]}]
       - id: location_deal_limits
         endpoint_name: get_location_deal_limits
         resource_names: [deal]
-        fields: [{ref: location_deal_limits.field.id, type: uuid, identity: {entity_ref: deal, identity_field: deal_id, primary_key: true, stable: true}}]
+        fields: [{ref: location_deal_limits.field.id, type: uuid}]
+        candidate_keys: [{id: primary_key, entity_kind: deal, primary: true, components: [{id: deal_id, field_ref: location_deal_limits.field.id}]}]
   entity_targets:
     - target_id: entity_1
       catalog_search_terms: [store, location]
@@ -35,4 +40,3 @@ expect:
   result_contains:
     selected_read_membership:
       location_list: true
-

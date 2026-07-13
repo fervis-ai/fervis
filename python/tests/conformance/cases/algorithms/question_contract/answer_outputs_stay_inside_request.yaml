@@ -12,11 +12,13 @@ input:
     instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
   answer_outputs:
     - description: work location
+      role: ANSWER_VALUE
 expect:
   result_contains:
     requested_facts:
     - answer_outputs:
       - description: work location
+        role: ANSWER_VALUE
   result_exact_fields:
     question_inputs: []
     requested_fact_input_handoff:

@@ -124,10 +124,12 @@ def _limit_failure(
     )
 
 
-def _merge_usage(*items: dict[str, Any]) -> dict[str, Any]:
+def _merge_usage(*items: dict[str, Any] | None) -> dict[str, Any]:
     merged: dict[str, Any] = {}
     for item in items:
-        for key, value in dict(item or {}).items():
+        if item is None:
+            continue
+        for key, value in item.items():
             if isinstance(value, (int, float)) and isinstance(
                 merged.get(key), (int, float)
             ):

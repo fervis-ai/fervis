@@ -191,9 +191,12 @@ def _openapi_enriched_contract(
         response_schema=evidence.response_schema,
         response_schema_source="openapi",
         response_cardinality=evidence.response_cardinality,
+        pagination=evidence.pagination,
         query_schema_source="openapi",
         tags=evidence.tags,
         resource_names=evidence.resource_names or contract.resource_names,
+        candidate_keys=evidence.candidate_keys,
+        entity_references=evidence.entity_references,
         catalog_endpoint=catalog_endpoint,
     )
 

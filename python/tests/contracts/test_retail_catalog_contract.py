@@ -108,11 +108,16 @@ def test_retail_catalog_exposes_semantic_resource_names_for_grounding(
 ) -> None:
     contracts = _contracts_by_name(retail_catalog_case.adapter)
 
-    for endpoint_name, expected_names in retail_catalog_case.expected_resource_names.items():
+    for (
+        endpoint_name,
+        expected_names,
+    ) in retail_catalog_case.expected_resource_names.items():
         assert expected_names.issubset(set(contracts[endpoint_name].resource_names))
         catalog_endpoint = contracts[endpoint_name].catalog_endpoint
         if catalog_endpoint is None:
-            raise AssertionError(f"{endpoint_name} is missing catalog endpoint metadata")
+            raise AssertionError(
+                f"{endpoint_name} is missing catalog endpoint metadata"
+            )
         assert expected_names.issubset(set(catalog_endpoint.domain_resource_names))
 
 
@@ -128,6 +133,14 @@ def test_retail_catalog_does_not_invent_undeclared_filters(
         "category_id",
         "ordering",
     }
+
+
+def test_django_catalog_excludes_optional_full_response_projection_control() -> None:
+    product_contract = _contracts_by_name(_django_retail_case().adapter)[
+        "list_products_list"
+    ]
+
+    assert "fields" not in {param.name for param in product_contract.query_params}
 
 
 def test_retail_catalog_excludes_custom_post_actions(
@@ -204,7 +217,7 @@ def _django_retail_case() -> RetailCatalogCase:
             "list_products_list": frozenset({"product"}),
             "list_orders_list": frozenset({"order"}),
             "list_stock_records_list": frozenset({"stock record"}),
-            "list_sales_summary": frozenset({"sale summary"}),
+            "list_sales_summary": frozenset({"sales summary"}),
         },
         read_authority=_django_read_authority(),
         seed=_seed_django_retail_ops_data,
@@ -278,9 +291,9 @@ def _openapi_route_names() -> frozenset[str]:
 
 def _openapi_resource_names() -> dict[str, frozenset[str]]:
     return {
-        "list_products": frozenset({"product"}),
-        "list_orders": frozenset({"order"}),
-        "list_stock_records": frozenset({"stock record"}),
+        "list_products": frozenset({"products"}),
+        "list_orders": frozenset({"orders"}),
+        "list_stock_records": frozenset({"stock records"}),
         "list_sales_summary": frozenset({"sales summary"}),
     }
 

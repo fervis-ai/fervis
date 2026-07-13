@@ -41,8 +41,11 @@ class ProofAppliedInputSummary:
 
 
 class ProofSourceRead(Protocol):
-    source_read_id: str
-    args: dict[str, object]
+    @property
+    def source_read_id(self) -> str: ...
+
+    @property
+    def args(self) -> dict[str, object]: ...
 
 
 def proof_source_read_ids(payload: ProofGraphPayload) -> tuple[str, ...]:

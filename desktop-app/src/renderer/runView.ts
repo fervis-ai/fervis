@@ -6,7 +6,10 @@ export function failMissingOption(): ClarificationOption {
 }
 
 export function firstClarification(run: RunPayload): ClarificationRequest | null {
-  if (run.resultData?.kind !== "needs_clarification") {
+  if (
+    run.status !== "WAITING_FOR_CLARIFICATION" ||
+    run.resultData?.kind !== "needs_clarification"
+  ) {
     return null;
   }
   return run.resultData.details.clarifications[0] ?? null;
@@ -40,7 +43,7 @@ export function statusClassName(status: RunStatus): string {
   if (status === "FAILED") {
     return "failed";
   }
-  if (status === "NEEDS_CLARIFICATION") {
+  if (status === "WAITING_FOR_CLARIFICATION") {
     return "clarification";
   }
   return "completed";
@@ -68,14 +71,14 @@ export function completedAnswerText(run: RunPayload): string | null {
   if (run.resultData?.kind !== "answer" || run.resultData.outputs.length === 0) {
     return null;
   }
-  return run.resultData.outputs.map((output) => output.value).join(", ");
+  return run.resultData.outputs.map((output) => output.displayValue).join(", ");
 }
 
 export function askPlaceholder(status: RunStatus): string {
   if (status === "FAILED") {
     return "Re-ask, or ask a different question…";
   }
-  if (status === "NEEDS_CLARIFICATION") {
+  if (status === "WAITING_FOR_CLARIFICATION") {
     return "Or ask a different question instead…";
   }
   return "Ask a follow-up question…";
@@ -85,7 +88,7 @@ export function askHint(status: RunStatus): string {
   if (status === "FAILED") {
     return "This run failed; sending a new question queues a fresh run.";
   }
-  if (status === "NEEDS_CLARIFICATION") {
+  if (status === "WAITING_FOR_CLARIFICATION") {
     return "A clarification is pending above; answering it continues this question.";
   }
   if (status === "RUNNING" || status === "QUEUED") {

@@ -1,0 +1,56 @@
+id: conversation_resolution_clarification_resumes_same_run
+description: A selected attributed interpretation remains owned by conversation resolution in the same run.
+kind: algorithm
+algorithm: questions.lifecycle
+input:
+  scenario: clarification_resume
+  tenant_id: tenant_1
+  principal_id: user_1
+  question: What about the earlier one?
+  clarification:
+    id: clarification_interpretation
+    need: question_interpretation
+    reason: ambiguous_interpretation
+    owner: conversation_resolution
+    continuation:
+      kind: conversation_resolution
+      acceptsFreeText: false
+      candidates:
+        - id: interpretation_orders
+          contextualizedQuestion: How many orders arrived yesterday?
+          sourceEvidence:
+            - sourceId: prior_question_1
+              exactSourceTexts: [orders, yesterday]
+        - id: interpretation_returns
+          contextualizedQuestion: How many returns arrived yesterday?
+          sourceEvidence:
+            - sourceId: prior_question_2
+              exactSourceTexts: [returns, yesterday]
+    requestedFactId: conversation_resolution
+    question: Which interpretation should I use?
+    subjects:
+      - kind: interpretation
+        id: clarification_interpretation
+        label: interpretation
+        sourceText: ""
+        options:
+          - {id: interpretation_orders, label: "How many orders arrived yesterday?"}
+          - {id: interpretation_returns, label: "How many returns arrived yesterday?"}
+    evidence:
+      - {kind: proof_ref, id: "conversation_resolution:unresolved"}
+  response_text: How many orders arrived yesterday?
+  selected_option_id: interpretation_orders
+  resumed_lookup_result: {status: COMPLETED, answer: "3", result_data: {value: 3}}
+expect:
+  result_contains:
+    resumed_result: {status: COMPLETED, run_id: run_1, answer: "3"}
+    question_count: 1
+    run_count: 1
+    resumed_clarification:
+      owner: conversation_resolution
+      continuation_kind: conversation_resolution
+      dispatch_count: 1
+      attributed_source:
+        responseId: clarification_response_1
+        clarificationId: clarification_interpretation
+        exactUserText: How many orders arrived yesterday?

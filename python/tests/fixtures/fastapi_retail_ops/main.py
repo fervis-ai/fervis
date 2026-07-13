@@ -49,7 +49,9 @@ sales = APIRouter(prefix="/retail/sales", tags=["sales"])
 reports = APIRouter(prefix="/retail/reports", tags=["reports"])
 
 
-@catalog.get("/products/", operation_id="list_products", response_model=list[ProductRow])
+@catalog.get(
+    "/products/", operation_id="list_products", response_model=list[ProductRow]
+)
 def list_products(
     category_id: int | None = None,
     active: bool | None = None,
@@ -70,7 +72,9 @@ def list_products(
     ]
 
 
-@catalog.get("/products/{product_id}/", operation_id="get_product", response_model=ProductRow)
+@catalog.get(
+    "/products/{product_id}/", operation_id="get_product", response_model=ProductRow
+)
 def get_product(product_id: int) -> ProductRow:
     return ProductRow(
         id=product_id,
@@ -143,11 +147,12 @@ def list_sales_summary(
     group_by: Literal["store", "day", "status"] | None = None,
 ) -> list[SalesSummaryRow]:
     del start_date, end_date, store_id, group_by
-    return [SalesSummaryRow(label="ABC Mall", total_orders=1, total_amount=Decimal("48.00"))]
+    return [
+        SalesSummaryRow(label="ABC Mall", total_orders=1, total_amount=Decimal("48.00"))
+    ]
 
 
 app.include_router(catalog)
 app.include_router(inventory)
 app.include_router(sales)
 app.include_router(reports)
-

@@ -1,0 +1,22 @@
+id: answer_addresses_preserve_typed_scalar_value
+description: Scalar answer memory preserves the canonical runtime type of the computed value.
+kind: algorithm
+algorithm: memory.answer_addresses
+input:
+  fact_result:
+    outcome:
+      kind: answer
+      scalar_outputs:
+        - id: answer_total
+          scalar_id: computed_total
+      scalars:
+        computed_total: 42
+expect:
+  result_contains:
+    addresses:
+      - address: value.computed_total
+        value:
+          type: decimal
+          value: 42
+        derivation:
+          answer_output_ids: [answer_total]

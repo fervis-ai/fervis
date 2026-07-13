@@ -15,7 +15,7 @@ input:
     subject_text: days
     answer_expression_family: list_rows
     answer_outputs:
-    - day
+      - {description: day, role: ANSWER_VALUE}
     known_inputs:
     - kind: literal_text
       text: last 2 days

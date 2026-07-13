@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone as datetime_timezone
 from typing import Any, Mapping
 
 
@@ -51,4 +51,6 @@ def _parse_expires_at(value: str) -> datetime:
     text = str(value or "").strip()
     if not text:
         raise ValueError("delegated credential expires_at is required")
-    return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(UTC)
+    return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(
+        datetime_timezone.utc
+    )

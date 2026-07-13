@@ -9,7 +9,7 @@ work, but not yet recommended for production.
 
 ## Install
 
-Fervis requires Python 3.11 or newer.
+Fervis requires Python 3.10 or newer.
 
 ```bash
 uv add fervis

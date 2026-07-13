@@ -3,45 +3,52 @@
 from __future__ import annotations
 
 from itertools import product
-from typing import Any
-
 from fervis.lookup.source_binding.compiler_ir import (
     DraftEndpointParamBinding,
     RelationInputOrigin,
 )
-from fervis.lookup.answer_program.values import FactValue, TimeComponent, ValueComponent, ValueKind
+from fervis.lookup.answer_program.values import (
+    FactValue,
+    TimeComponent,
+    ValueComponent,
+    ValueKind,
+)
 from fervis.lookup.fact_planning.value_components import value_component
 from fervis.lookup.relation_catalog.parameter_values import (
     parse_catalog_parameter_value,
 )
-from fervis.lookup.source_binding import provider_contract as provider_output
 from fervis.lookup.source_binding.model import AnswerPopulation
-from fervis.lookup.source_binding.param_surface import param_has_default_value
+from fervis.lookup.canonical_data import RuntimeValue
+from fervis.lookup.source_binding.candidates.model import (
+    CandidateParameter,
+    CandidateParamDecision,
+    SourceCandidate,
+)
 from fervis.lookup.source_binding.param_values import canonical_param_value
-from fervis.lookup.source_binding.parser.types import ParamDecisionParse, PopulationChoiceSet
-from fervis.lookup.source_binding.parser_common import _dict, _optional_text, _text
+from fervis.lookup.source_binding.parser.types import (
+    NormalizedParamDecision,
+    ParamDecisionParse,
+    PopulationChoiceSet,
+)
 
 
 __all__ = [
     "merged_param_bindings",
-    "normalize_param_decisions",
     "parse_param_decision_binding_sets",
 ]
 
 
 def parse_param_decision_binding_sets(
-    raw_decisions: Any,
+    decisions: dict[str, NormalizedParamDecision],
     *,
-    candidate: Any,
+    candidate: SourceCandidate,
     available_values: tuple[FactValue, ...],
     answer_population: AnswerPopulation,
     parameter_namespace: str,
     effective_param_ids: tuple[str, ...] | None = None,
 ) -> ParamDecisionParse:
     params_by_id = {
-        str(param.get("param_id") or ""): param
-        for param in candidate.params
-        if isinstance(param, dict) and _param_is_model_bindable(param)
+        param.id: param for param in candidate.params if _param_is_model_bindable(param)
     }
     if effective_param_ids is not None:
         effective = set(effective_param_ids)
@@ -52,19 +59,20 @@ def parse_param_decision_binding_sets(
         }
     options_by_id = _param_decision_options_by_id(params_by_id)
     output: list[tuple[tuple[DraftEndpointParamBinding, ...], ...]] = []
-    normalized_decisions = normalize_param_decisions(raw_decisions)
-    if not params_by_id and not normalized_decisions:
+    if not params_by_id and not decisions:
         return ParamDecisionParse(binding_sets=((),))
-    for param_id, raw in normalized_decisions.items():
+    for param_id, decision in decisions.items():
         if param_id not in params_by_id:
             raise ValueError("source param decision references unknown param")
-        match_basis_explanation = _text(raw.get("match_basis_explanation")).strip()
-        if not match_basis_explanation:
+        if not decision.match_basis_explanation.strip():
             raise ValueError("source param decision requires match basis explanation")
-        _validate_param_population_intent(raw)
+        if not decision.population_intent.strip():
+            raise ValueError(
+                "source param decision requires non-empty population intent"
+            )
         param = params_by_id[param_id]
-        if param.get("choices") and "population_choice_set" in raw:
-            choice_set = _population_choice_set(raw, param=param)
+        if param.choices and decision.population_choice_set is not None:
+            choice_set = _population_choice_set(decision, param=param)
             output.append(
                 _param_binding_sets(
                     param_id=param_id,
@@ -75,43 +83,41 @@ def parse_param_decision_binding_sets(
                 )
             )
             continue
-        decision_id = _text(raw.get("param_decision_id"))
-        option = options_by_id.get(decision_id)
-        if option is None:
+        decision_id = decision.param_decision_id or ""
+        indexed_option = options_by_id.get(decision_id)
+        if indexed_option is None:
             raise ValueError("source param decision references unknown option")
-        if str(option.get("param_id") or "") != param_id:
+        option_param_id, option = indexed_option
+        if option_param_id != param_id:
             raise ValueError("source param decision references mismatched param")
-        decision = str(option.get("decision") or "")
-        if decision == "use_default":
-            if not param_has_default_value(param):
+        option_kind = option.decision
+        if option_kind == "use_default":
+            if not param.has_default:
                 raise ValueError(
                     "source param decision uses default but param has no default"
                 )
             output.append(((),))
             continue
-        if decision == "omit":
+        if option_kind == "omit":
             output.append(((),))
             continue
-        if decision != "bind":
+        if option_kind != "bind":
             raise ValueError("unsupported source param decision")
-        value = str(option.get("value") or "")
-        choices = param.get("choices")
+        selected_value = option.value
+        value: RuntimeValue = selected_value
+        choices = param.choices
         if choices and value not in {str(choice) for choice in choices}:
             raise ValueError("source binding param value is not an available choice")
         proof_refs: tuple[str, ...] = ()
         value_id = ""
-        value_component = ValueComponent.VALUE
-        binding_values = param.get("binding_values")
+        value_component: ValueComponent | TimeComponent = ValueComponent.VALUE
+        binding_values = param.binding_values
         if binding_values:
-            allowed_value_ids = {
-                str(item.get("value") or "")
-                for item in binding_values
-                if isinstance(item, dict)
-            }
+            allowed_value_ids = {item.value for item in binding_values}
             if value not in allowed_value_ids:
                 raise ValueError("source binding param value is not bindable")
             value, proof_refs, value_id, value_component = _resolved_binding_value(
-                value,
+                selected_value,
                 param=param,
                 option=option,
                 available_values=available_values,
@@ -119,7 +125,7 @@ def parse_param_decision_binding_sets(
         else:
             value = parse_catalog_parameter_value(
                 value,
-                type_name=str(param.get("type") or ""),
+                type_name=param.type,
                 choices=tuple(str(choice) for choice in choices or ()),
             )
         output.append(
@@ -136,17 +142,14 @@ def parse_param_decision_binding_sets(
                 value_id=value_id,
                 value_component=value_component.value,
                 parameter_id=(
-                    ""
-                    if value_id
-                    else f"{parameter_namespace}.param.{param_id}"
+                    "" if value_id else f"{parameter_namespace}.param.{param_id}"
                 ),
             )
         )
     missing_param_ids = {
         param_id
         for param_id, param in params_by_id.items()
-        if param_id not in normalized_decisions
-        and _param_requires_explicit_decision(param)
+        if param_id not in decisions and _param_requires_explicit_decision(param)
     }
     if missing_param_ids:
         raise ValueError("source binding missing explicit param decision")
@@ -161,22 +164,20 @@ def parse_param_decision_binding_sets(
 
 
 def _population_choice_set(
-    raw: dict[str, Any],
+    decision: NormalizedParamDecision,
     *,
-    param: dict[str, Any],
+    param: CandidateParameter,
 ) -> PopulationChoiceSet:
-    if "param_decision_id" in raw:
+    if decision.param_decision_id:
         raise ValueError("choice params require population choice set")
-    choice_set = _dict(raw.get("population_choice_set"), "population_choice_set")
-    include_values = tuple(
-        canonical_param_value(value) for value in choice_set.get("include_values") or ()
-    )
-    exclude_values = tuple(
-        canonical_param_value(value) for value in choice_set.get("exclude_values") or ()
-    )
+    choice_set = decision.population_choice_set
+    if choice_set is None:
+        raise ValueError("choice params require population choice set")
+    include_values = tuple(map(canonical_param_value, choice_set.included_values))
+    exclude_values = tuple(map(canonical_param_value, choice_set.excluded_values))
     if not include_values:
         raise ValueError("population choice set requires included values")
-    choices = {canonical_param_value(choice) for choice in param.get("choices") or ()}
+    choices = set(param.choices)
     include_set = set(include_values)
     exclude_set = set(exclude_values)
     if include_set & exclude_set:
@@ -194,8 +195,8 @@ def _population_choice_set(
 def _param_binding_sets(
     *,
     param_id: str,
-    value: object,
-    param: dict[str, Any],
+    value: RuntimeValue,
+    param: CandidateParameter,
     proof_refs: tuple[str, ...] = (),
     origin_kind: RelationInputOrigin,
     value_id: str = "",
@@ -233,76 +234,42 @@ def _param_binding_sets(
     )
 
 
-def _param_accepts_collection(param: dict[str, Any]) -> bool:
-    return str(param.get("type") or "").strip() in {"array", "list"}
-
-
-def normalize_param_decisions(
-    raw_decisions: Any,
-    *,
-    parse_provider_output: bool = False,
-) -> dict[str, dict[str, Any]]:
-    output: dict[str, dict[str, Any]] = {}
-    if isinstance(raw_decisions, dict):
-        for raw_param_id, raw_value in raw_decisions.items():
-            param_id = str(raw_param_id)
-            if param_id in output:
-                raise ValueError("duplicate source param decision")
-            output[param_id] = (
-                vars(provider_output.ParamDecisionOutput.parse(raw_value))
-                if parse_provider_output
-                else _dict(raw_value, f"param_decisions.{param_id}")
-            )
-        return output
-    raise ValueError("param_decisions must be an object")
+def _param_accepts_collection(param: CandidateParameter) -> bool:
+    return param.type in {"array", "list"}
 
 
 def _param_decision_options_by_id(
-    params_by_id: dict[str, dict[str, Any]],
-) -> dict[str, dict[str, Any]]:
-    output: dict[str, dict[str, Any]] = {}
+    params_by_id: dict[str, CandidateParameter],
+) -> dict[str, tuple[str, CandidateParamDecision]]:
+    output: dict[str, tuple[str, CandidateParamDecision]] = {}
     for param_id, param in params_by_id.items():
-        for option in param.get("decision_options") or ():
-            if not isinstance(option, dict):
-                continue
-            decision_id = str(option.get("param_decision_id") or "")
+        for option in param.decision_options:
+            decision_id = option.id
             if not decision_id:
                 continue
-            output[decision_id] = {**option, "param_id": param_id}
+            output[decision_id] = (param_id, option)
     return output
 
 
-def _validate_param_population_intent(
-    raw: dict[str, Any],
-) -> str:
-    if "population_intent" not in raw:
-        raise ValueError("source param decision requires population intent")
-    population_intent = _optional_text(raw.get("population_intent"))
-    if not population_intent:
-        raise ValueError("source param decision requires non-empty population intent")
-    return population_intent
+def _param_requires_explicit_decision(param: CandidateParameter) -> bool:
+    return param.required or bool(param.choices)
 
 
-def _param_requires_explicit_decision(param: dict[str, Any]) -> bool:
-    return bool(param.get("required")) or bool(param.get("choices"))
-
-
-def _param_is_model_bindable(param: dict[str, Any]) -> bool:
-    decision_options = param.get("decision_options")
-    return isinstance(decision_options, list) and bool(decision_options)
+def _param_is_model_bindable(param: CandidateParameter) -> bool:
+    return bool(param.decision_options)
 
 
 def _resolved_binding_value(
     value: str,
     *,
-    param: dict[str, Any],
-    option: dict[str, Any],
+    param: CandidateParameter,
+    option: CandidateParamDecision,
     available_values: tuple[FactValue, ...],
-) -> tuple[object, tuple[str, ...], str, ValueComponent | TimeComponent]:
+) -> tuple[RuntimeValue, tuple[str, ...], str, ValueComponent | TimeComponent]:
     values_by_id = {item.id: item for item in available_values}
     fact_value = values_by_id.get(value)
     if fact_value is None:
-        if str(param.get("type") or "") == "boolean" and value in {"true", "false"}:
+        if param.type == "boolean" and value in {"true", "false"}:
             return value == "true", (), "", ValueComponent.VALUE
         return value, (), "", ValueComponent.VALUE
     component = _value_component_from_option(option)
@@ -313,9 +280,9 @@ def _resolved_binding_value(
 
 
 def _value_component_from_option(
-    option: dict[str, Any],
+    option: CandidateParamDecision,
 ) -> ValueComponent | TimeComponent:
-    raw_component = str(option.get("value_component") or "").strip()
+    raw_component = option.value_component
     if raw_component == TimeComponent.START.value:
         return TimeComponent.START
     if raw_component == TimeComponent.END.value:

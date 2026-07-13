@@ -6,10 +6,10 @@ from ._shared import Any
 
 
 _SLOT_EVIDENCE_KEYS = (
-    ("scope_evidence", "scope"),
     ("metric_measure_evidence", "metric"),
+    ("value_evidence", "value"),
     ("row_count_basis_evidence", "row_count_basis"),
-    ("group_key_evidence", "group_key"),
+    ("entity_evidence", "entity"),
 )
 
 
@@ -54,12 +54,17 @@ def _model_visible_evidence_item(
     choice_values_by_field: dict[tuple[str, str], tuple[str, ...]],
 ) -> dict[str, str]:
     field = str(item.get("field_id") or "")
+    component_field_ids = tuple(
+        str(component.get("field_id") or "")
+        for component in item.get("components") or ()
+        if isinstance(component, dict) and str(component.get("field_id") or "")
+    )
     row_path = str(item.get("row_path_id") or "")
     field_type = str(item.get("type") or "")
     output = {
         "kind": kind,
-        "field": field,
-        "label": str(item.get("label") or _field_label(field)),
+        "field": field or ", ".join(component_field_ids),
+        "label": str(item.get("label") or ""),
         "row_path": row_path,
         "type": field_type,
         "evidence_id": str(item.get("evidence_id") or ""),
@@ -67,26 +72,14 @@ def _model_visible_evidence_item(
     values = choice_values_by_field.get((field, row_path), ())
     if field_type == "choice" and values:
         output["meaning"] = f"Choices: {', '.join(values)}."
-    identity = _model_visible_identity(item.get("identity"))
-    if identity:
-        output["identity"] = identity
+    evidence_type = str(item.get("type") or "")
+    entity_kind = str(item.get("entity_kind") or item.get("target_entity_kind") or "")
+    key_id = str(item.get("key_id") or item.get("target_key_id") or "")
+    if entity_kind and key_id:
+        output["entity_key"] = f"{entity_kind}.{key_id}"
+    if kind == "entity" and evidence_type:
+        output["kind"] = evidence_type
     return {key: value for key, value in output.items() if value}
-
-
-def _model_visible_identity(raw_value: object) -> str:
-    if not isinstance(raw_value, dict):
-        return ""
-    entity_ref = str(raw_value.get("entity_ref") or "")
-    identity_field = str(raw_value.get("identity_field") or "")
-    if not entity_ref or not identity_field:
-        return ""
-    qualifiers = []
-    if raw_value.get("primary_key"):
-        qualifiers.append("primary")
-    if raw_value.get("stable", True):
-        qualifiers.append("stable")
-    qualifier_text = f" {'_'.join(qualifiers)}" if qualifiers else ""
-    return f"{entity_ref}.{identity_field}{qualifier_text}"
 
 
 def _choice_values_by_field(
@@ -110,14 +103,3 @@ def _choice_values_by_field(
             )
         ] = values
     return output
-
-
-def _field_label(field_id: str) -> str:
-    words = [word for word in str(field_id or "").replace("_", " ").split() if word]
-    return " ".join(_title_word(word) for word in words)
-
-
-def _title_word(word: str) -> str:
-    if word.casefold() == "id":
-        return "ID"
-    return word[:1].upper() + word[1:]

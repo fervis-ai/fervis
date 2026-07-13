@@ -13,7 +13,7 @@ input:
   context_frames:
     - frame_id: request:1
       source_ids: [prior_question]
-      answer_shape: {expression_family: scalar_aggregate, output_roles: [ROW_POPULATION]}
+      answer_shape: {expression_family: scalar_aggregate, output_roles: [ROW_COUNT]}
       parts:
         - {part_id: subject, kind: answer_subject, text: sales}
         - {part_id: output, kind: answer_output, text: sales count}
@@ -33,9 +33,9 @@ input:
           values:
             - value_id: subject
               resolved_text: stores
+              frame_parameter: {kind: none}
               sources:
                 - {kind: current_span, text: stores, occurrence: 1}
-      frame_call: {kind: none}
 expect:
   result_equals:
     current_question_text: What about stores?
@@ -49,6 +49,7 @@ expect:
               text: sales count
               answer_shape:
                 expression_family: scalar_aggregate
-                output_roles: [ROW_POPULATION]
+                output_roles: [ROW_COUNT]
     frame_call: {kind: none}
     uses_prior_context: true
+    canonical_identity_inputs: []

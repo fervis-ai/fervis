@@ -79,19 +79,29 @@ def _filter_candidate_fulfillment_support_sets(
     if not selected_support_set_ids:
         return candidate
     output = dict(candidate)
+    raw_support_sets = candidate.get("fulfillment_support_sets")
+    support_sets = (
+        raw_support_sets if isinstance(raw_support_sets, (list, tuple)) else ()
+    )
     output["fulfillment_support_sets"] = [
         support_set
-        for support_set in candidate.get("fulfillment_support_sets") or ()
+        for support_set in support_sets
         if isinstance(support_set, dict)
         and _support_set_binding_id(support_set) in selected_support_set_ids
     ]
     binding_surface = output.get("binding_surface")
     if isinstance(binding_surface, dict):
+        raw_binding_support_sets = binding_surface.get("fulfillment_support_sets")
+        binding_support_sets = (
+            raw_binding_support_sets
+            if isinstance(raw_binding_support_sets, (list, tuple))
+            else ()
+        )
         output["binding_surface"] = {
             **binding_surface,
             "fulfillment_support_sets": [
                 support_set
-                for support_set in binding_surface.get("fulfillment_support_sets") or ()
+                for support_set in binding_support_sets
                 if isinstance(support_set, dict)
                 and _support_set_binding_id(support_set) in selected_support_set_ids
             ],

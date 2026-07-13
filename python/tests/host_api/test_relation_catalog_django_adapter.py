@@ -1,6 +1,12 @@
-from fervis.lookup.relation_catalog import RelationCatalogProvider
+from fervis.lookup.relation_catalog import (
+    CandidateKey,
+    CandidateKeyComponent,
+    RelationCatalogProvider,
+)
 from fervis.host_api.adapters.django.adapter import DjangoHostApiAdapter
 from fervis.host_api.contracts import (
+    CandidateKeyContract,
+    CandidateKeyComponentContract,
     CatalogEndpointContract,
     EndpointContract,
     ResponseFieldContract,
@@ -33,6 +39,19 @@ def test_django_adapter_projects_endpoint_contracts_to_relation_catalog(monkeypa
     read = catalog.read("list_records")
     assert read.endpoint_name == "list_records"
     assert read.catalog_endpoint is not None
+    assert read.candidate_keys == (
+        CandidateKey(
+            id="record_code",
+            entity_kind="record",
+            components=(
+                CandidateKeyComponent(id="tenant_id", field_ref="field.tenant_id"),
+                CandidateKeyComponent(id="code", field_ref="field.code"),
+            ),
+            primary=False,
+            stable=True,
+            context_field_refs=("field.name",),
+        ),
+    )
     assert {
         "catalog_endpoint_key": read.catalog_endpoint.catalog_endpoint_key,
         "endpoint_name": read.catalog_endpoint.endpoint_name,
@@ -70,7 +89,26 @@ def _record_endpoint_contract() -> EndpointContract:
         view_class="tests.RecordView",
         resource_names=("record",),
         response_fields=(
-            ResponseFieldContract(name="id", type="string", path="id"),
+            ResponseFieldContract(name="tenant_id", type="string", path="tenant_id"),
+            ResponseFieldContract(name="code", type="string", path="code"),
+            ResponseFieldContract(name="name", type="string", path="name"),
+        ),
+        candidate_keys=(
+            CandidateKeyContract(
+                key_id="record_code",
+                entity_kind="record",
+                components=(
+                    CandidateKeyComponentContract(
+                        component_id="tenant_id",
+                        field_path="tenant_id",
+                    ),
+                    CandidateKeyComponentContract(
+                        component_id="code",
+                        field_path="code",
+                    ),
+                ),
+                context_field_paths=("name",),
+            ),
         ),
         catalog_endpoint=CatalogEndpointContract(
             framework_kind="django_drf",

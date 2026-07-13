@@ -249,7 +249,7 @@ def test_flask_catalog_enriches_routes_from_openapi_document(
         "app = Flask(__name__)\n\n"
         "@app.get('/api/orders/')\n"
         "def list_orders():\n"
-        "    return jsonify([{'id': 'ord_1', 'total': '10.00'}])\n\n"
+        "    return jsonify({'orders': [{'id': 'ord_1', 'total': '10.00'}], 'total': 1})\n\n"
         "@app.get('/api/swagger.json')\n"
         "def openapi():\n"
         "    return jsonify({\n"
@@ -258,17 +258,56 @@ def test_flask_catalog_enriches_routes_from_openapi_document(
         "            '/api/orders/': {\n"
         "                'get': {\n"
         "                    'operationId': 'list_orders',\n"
+        "                    'x-fervis': {\n"
+        "                        'pagination': {\n"
+        "                            'kind': 'page_number',\n"
+        "                            'positionQueryParam': 'page',\n"
+        "                            'pageSizeQueryParam': 'per_page',\n"
+        "                            'resultsPath': 'orders',\n"
+        "                            'pageSize': 50,\n"
+        "                            'maxPageSize': 100,\n"
+        "                            'totalPath': 'total'\n"
+        "                        },\n"
+        "                        'candidateKeys': [{\n"
+        "                            'keyId': 'primary_key',\n"
+        "                            'entityKind': 'order',\n"
+        "                            'components': [{\n"
+        "                                'componentId': 'order_id',\n"
+        "                                'fieldPath': 'orders.id'\n"
+        "                            }],\n"
+        "                            'primary': True\n"
+        "                        }],\n"
+        "                        'entityReferences': [{\n"
+        "                            'referenceId': 'store_reference',\n"
+        "                            'targetEntityKind': 'store',\n"
+        "                            'targetKeyId': 'primary_key',\n"
+        "                            'components': [{\n"
+        "                                'targetComponentId': 'store_id',\n"
+        "                                'localFieldPath': 'orders.store_id'\n"
+        "                            }]\n"
+        "                        }]\n"
+        "                    },\n"
         "                    'parameters': [\n"
         "                        {'name': 'status', 'in': 'query', "
-        "'schema': {'type': 'string'}}\n"
+        "'schema': {'type': 'string'}},\n"
+        "                        {'name': 'page', 'in': 'query', "
+        "'schema': {'type': 'integer'}},\n"
+        "                        {'name': 'per_page', 'in': 'query', "
+        "'schema': {'type': 'integer'}}\n"
         "                    ],\n"
         "                    'responses': {'200': {'content': {\n"
         "                        'application/json': {'schema': {\n"
-        "                            'type': 'array',\n"
-        "                            'items': {'type': 'object', 'properties': {\n"
-        "                                'id': {'type': 'string'},\n"
-        "                                'total': {'type': 'number'}\n"
-        "                            }}\n"
+        "                            'type': 'object',\n"
+        "                            'properties': {\n"
+        "                                'orders': {'type': 'array', 'items': {\n"
+        "                                    'type': 'object', 'properties': {\n"
+        "                                        'id': {'type': 'string'},\n"
+        "                                        'store_id': {'type': 'string'},\n"
+        "                                        'total': {'type': 'number'}\n"
+        "                                    }\n"
+        "                                }},\n"
+        "                                'total': {'type': 'integer'}\n"
+        "                            }\n"
         "                        }}\n"
         "                    }}}\n"
         "                }\n"
@@ -294,11 +333,22 @@ def test_flask_catalog_enriches_routes_from_openapi_document(
     assert contract.endpoint_name == "list_orders"
     assert contract.query_schema_source == "openapi"
     assert contract.response_schema_source == "openapi"
-    assert [param.name for param in contract.query_params] == ["status"]
-    assert [(field.path, field.type) for field in contract.response_fields] == [
-        ("id", "string"),
-        ("total", "decimal"),
+    assert [param.name for param in contract.query_params] == [
+        "status",
+        "page",
+        "per_page",
     ]
+    assert [(field.path, field.type) for field in contract.response_fields] == [
+        ("orders", "array"),
+        ("orders.id", "string"),
+        ("orders.store_id", "string"),
+        ("orders.total", "decimal"),
+        ("total", "integer"),
+    ]
+    assert contract.pagination is not None
+    assert contract.pagination.results_path == "orders"
+    assert contract.candidate_keys[0].entity_kind == "order"
+    assert contract.entity_references[0].target_entity_kind == "store"
 
 
 def test_flask_catalog_ignores_documentation_routes_under_source_prefix(
@@ -793,6 +843,8 @@ def test_flask_catalog_enriches_flask_appbuilder_bound_method_metadata(
     assert contract.response_schema_source == "flask_appbuilder"
     assert [(field.path, field.type) for field in contract.response_fields] == [
         ("result", "array"),
+        ("result.id", "integer"),
+        ("result.slice_name", "string"),
     ]
 
 

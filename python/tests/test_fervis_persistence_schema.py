@@ -66,7 +66,6 @@ def test_fresh_schema_matches_program_and_run_contract() -> None:
             "kind",
             "trigger_kind",
             "base_run_id",
-            "trigger_clarification_response_id",
             "adapter_ref",
             "runtime_version",
             "created_at",
@@ -80,11 +79,11 @@ def test_fresh_schema_matches_program_and_run_contract() -> None:
         "fervis_program_invocation": {
             "invocation_id",
             "run_id",
-                "program_id",
-                "bindings_json",
-                "kind",
-                "base_invocation_id",
-                "patch_id",
+            "program_id",
+            "bindings_json",
+            "kind",
+            "base_invocation_id",
+            "patch_id",
             "binding_patch_json",
             "revision_id",
             "created_at",
@@ -108,6 +107,8 @@ def test_fresh_schema_matches_program_and_run_contract() -> None:
             "spec_kind",
             "execution_spec",
             "idempotency_key",
+            "idempotency_authority_ref",
+            "idempotency_scope",
             "attempt_count",
             "active_attempt",
             "max_attempts",
@@ -131,7 +132,7 @@ def test_fresh_schema_matches_program_and_run_contract() -> None:
 def test_initial_revision_fingerprint_matches_current_metadata() -> None:
     assert (
         schema.metadata_fingerprint()
-        == "0f709421843a2bd09b9e40cbdce435ed781a0ec637fdeea01e91833786e462a5"
+        == "8003327592f8a83cf29c6be1f655bce33419d7e47e501b9a5b26cb731f5c3dcb"
     )
     schema.assert_head_schema_fingerprint_is_current()
 
@@ -154,8 +155,7 @@ def test_persistence_metadata_preserves_runtime_constraint_names() -> None:
 def test_persistence_metadata_preserves_indexed_runtime_fields() -> None:
     work_item = schema.metadata.tables["fervis_run_work_item"]
     index_columns = {
-        tuple(column.name for column in index.columns)
-        for index in work_item.indexes
+        tuple(column.name for column in index.columns) for index in work_item.indexes
     }
 
     assert ("status", "next_attempt_at", "created_at") in index_columns

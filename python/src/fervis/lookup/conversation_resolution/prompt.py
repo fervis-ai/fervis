@@ -6,9 +6,6 @@ from fervis.memory.conversation_context import (
     ConversationContextFrame,
     ConversationContextSource,
 )
-from fervis.lookup.conversation_resolution.clarifications import (
-    active_clarification_contract,
-)
 from fervis.lookup.conversation_resolution.model import (
     ConversationResolutionRequest,
 )
@@ -31,7 +28,9 @@ from fervis.model_io.structured_output.specs import required_tool_spec
 
 class ConversationResolutionTurnPrompt(TurnPromptBase):
     turn_name = "conversation resolution"
-    turn_task = "resolve how the current utterance depends on prior conversation context"
+    turn_task = (
+        "resolve how the current utterance depends on prior conversation context"
+    )
 
     def __init__(
         self,
@@ -53,7 +52,7 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
         self,
         builder: TurnPromptBuilder,
     ) -> tuple[PromptSection, ...]:
-        return (
+        sections = [
             builder.json_section(
                 "Context sources:",
                 {
@@ -77,7 +76,36 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                 },
                 indent=2,
             ),
-        )
+        ]
+        source = self.request.clarification_source
+        if source is not None:
+            candidate = self.request.selected_clarification_candidate
+            sections.append(
+                builder.json_section(
+                    "Attributed clarification response:",
+                    {
+                        "response_id": source.response_id,
+                        "clarification_id": source.clarification_id,
+                        "exact_user_text": source.exact_user_text,
+                        "selected_candidate": (
+                            None
+                            if candidate is None
+                            else {
+                                "id": candidate.id,
+                                "contextualized_question": candidate.contextualized_question,
+                                "source_evidence": [
+                                    {
+                                        "source_id": item.source_id,
+                                        "exact_source_texts": list(item.exact_source_texts),
+                                    }
+                                    for item in candidate.source_evidence
+                                ],
+                            }
+                        ),
+                    },
+                )
+            )
+        return tuple(sections)
 
     def instruction_sections(
         self,
@@ -157,26 +185,16 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                 ),
             ),
             builder.instruction_block(
-                "Callable Frames",
+                "Callable Parameters",
                 (
-                    "Use frame_call=call when and only when the complete resolved "
-                    "question is exactly another invocation of one shown callable "
-                    "frame's fixed factual function. A matching call is required, not "
-                    "optional.",
-                    "Write exactly one argument for every shown parameter. Use carry "
-                    "when its prior value remains unchanged and resolved_value when a "
-                    "resolved value supplies the new argument.",
-                    "Before writing frame_call=none, compare the resolved question to "
-                    "each frame as a function signature. If its fixed subject, outputs, "
-                    "population, grouping, and computation are unchanged and every "
-                    "changed value maps to a shown parameter, the frame matches and "
-                    "must be called.",
-                    "Use frame_call=none only when no callable frame matches, including "
-                    "when the resolved question changes fixed subject, outputs, "
-                    "population meaning, grouping, computation, or otherwise asks a "
-                    "new factual function.",
-                    "Do not force a new question into a frame merely because it refers "
-                    "to the same entities or prior result.",
+                    "For each resolved value, set frame_parameter to the shown callable "
+                    "parameter that the value supplies, or none when it supplies no "
+                    "shown parameter.",
+                    "Represent unchanged callable values as resolved values too, using "
+                    "their visible prior sources and parameter references.",
+                    "Do not decide whether to call a prior frame. The backend derives "
+                    "that result only when the retained fixed parts and parameter "
+                    "bindings completely match one callable signature.",
                 ),
             ),
             builder.instruction_block(
@@ -250,40 +268,10 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
 def conversation_resolution_context_sources(
     request: ConversationResolutionRequest,
 ) -> tuple[ConversationContextSource, ...]:
-    active_clarification = active_clarification_contract(
-        request.conversation_context,
-        current_question=request.question,
-    )
-    if active_clarification is None:
-        return request.context_sources
-    return (
-        *request.context_sources,
-        ConversationContextSource(
-            source_id="active_clarification_1",
-            kind="active_clarification",
-            text=_active_clarification_text(active_clarification),
-        ),
-    )
+    return request.context_sources
 
 
 def conversation_resolution_context_frames(
     request: ConversationResolutionRequest,
 ) -> tuple[ConversationContextFrame, ...]:
     return request.context_frames
-
-
-def _active_clarification_text(active_clarification: dict[str, object]) -> str:
-    exchanges = active_clarification.get("exchanges")
-    if not isinstance(exchanges, list):
-        return "Active clarification is available."
-    parts: list[str] = []
-    for exchange in exchanges:
-        if not isinstance(exchange, dict):
-            continue
-        questions = exchange.get("clarification_questions")
-        if isinstance(questions, list):
-            parts.extend(str(item) for item in questions if str(item).strip())
-        answer = str(exchange.get("answer") or "").strip()
-        if answer:
-            parts.append(answer)
-    return " ".join(parts).strip() or "Active clarification is available."

@@ -17,9 +17,9 @@ def plan_selection_shape_specs_for_family(
 
 
 @cache
-def _plan_shapes_by_family() -> (
-    dict[RequestedFactAnswerExpressionFamily, tuple[PlanSelectionShapeSpec, ...]]
-):
+def _plan_shapes_by_family() -> dict[
+    RequestedFactAnswerExpressionFamily, tuple[PlanSelectionShapeSpec, ...]
+]:
     from fervis.lookup.operation_families.comparison_check.plan_selection import (
         PLAN_SELECTION_SHAPES as COMPARISON_CHECK_PLAN_SELECTION_SHAPES,
     )
@@ -38,7 +38,7 @@ def _plan_shapes_by_family() -> (
     from fervis.lookup.operation_families.list_rows.plan_selection import (
         PLAN_SELECTION_SHAPES as LIST_ROWS_PLAN_SELECTION_SHAPES,
     )
-    from fervis.lookup.operation_families.ranked_selection.plan_selection import (
+    from fervis.lookup.operation_families.ranked.plan_selection import (
         PLAN_SELECTION_SHAPES as RANKED_SELECTION_PLAN_SELECTION_SHAPES,
     )
     from fervis.lookup.operation_families.scalar_aggregate.plan_selection import (

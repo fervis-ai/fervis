@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fervis.lookup.relation_catalog.model import (
-    IdentityMetadata,
+    EntityKeyComponentTarget,
     RowCardinality,
 )
 from fervis.lookup.answer_program.relations import FieldBindingRole
@@ -101,7 +101,6 @@ def _prompt_source_payload(source: RowSource) -> dict[str, Any]:
                 "type": field.type.value,
                 "allowed_roles": [role.value for role in field.allowed_roles],
                 **({"description": field.description} if field.description else {}),
-                **(_identity_prompt_payload(field.identity)),
             }
             for field in source.fields
         ],
@@ -142,7 +141,7 @@ def row_source_param_prompt_payload(
         "label": param.name,
         "source": _param_source_value(param.source),
         "type": param.type.value,
-        **(_identity_prompt_payload(param.identity)),
+        **(_entity_target_prompt_payload(param.entity_target)),
     }
     if param.required:
         payload["required"] = True
@@ -178,19 +177,18 @@ def _param_source_value(source: object) -> str:
     return str(getattr(source, "value", source) or "")
 
 
-def _identity_prompt_payload(
-    identity: IdentityMetadata | None,
+def _entity_target_prompt_payload(
+    target: EntityKeyComponentTarget | None,
 ) -> dict[str, dict[str, object]]:
-    if identity is None:
+    if target is None:
         return {}
-    payload: dict[str, object] = {"entity_ref": identity.entity_ref}
-    if identity.identity_field:
-        payload["identity_field"] = identity.identity_field
-    if identity.primary_key:
-        payload["primary_key"] = True
-    if identity.stable:
-        payload["stable"] = True
-    return {"identity": payload}
+    return {
+        "entity_target": {
+            "entity_kind": target.entity_kind,
+            "key_id": target.key_id,
+            "component_id": target.component_id,
+        }
+    }
 
 
 def _memory_prompt_roles(field: dict[str, Any]) -> tuple[FieldBindingRole, ...]:

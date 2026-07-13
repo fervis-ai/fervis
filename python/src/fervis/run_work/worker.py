@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Sequence
 from typing import Protocol
 
 from .contracts import FailQueuedRunRequest, QueuedRunRequest, QueuedRunResult
 
 
 class ClaimedRunWorkItem(Protocol):
-    run_id: str
-    active_attempt: int
+    @property
+    def run_id(self) -> str: ...
+
+    @property
+    def active_attempt(self) -> int: ...
 
 
 class RunWorkQueue(Protocol):
@@ -20,7 +24,7 @@ class RunWorkQueue(Protocol):
         worker_id: str,
         batch_size: int,
         lease_seconds: int,
-    ) -> list[ClaimedRunWorkItem]: ...
+    ) -> Sequence[ClaimedRunWorkItem]: ...
 
     def queue_counts(self) -> dict[str, int]: ...
 

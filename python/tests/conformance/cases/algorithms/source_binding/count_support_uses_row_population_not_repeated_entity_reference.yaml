@@ -1,0 +1,46 @@
+id: count_support_uses_row_population_not_repeated_entity_reference
+description: Counting source rows uses the declared row population, not a repeated reference to another entity.
+kind: algorithm
+algorithm: source_binding.fulfillment_support
+input:
+  requested_fact:
+    description: compensation record count
+    subject_text: compensation records
+    answer_output_role: ROW_COUNT
+  candidate:
+    source_candidate_id: source_1
+    kind: new_api_read
+    read_id: read_1
+    result_grains:
+      - grain_id: data
+        row_path_id: data
+        row_source_id: rs_source_1_data
+        cardinality: many
+        entity_references:
+          - reference_id: staff_reference
+            target_entity_kind: staff
+            target_key_id: staff_primary
+            components:
+              - component_id: staff_id
+                field_id: staff_id
+    evidence_items:
+      - evidence_id: row_population.rs_source_1_data
+        field_id: data
+        row_path_id: data
+        row_source_id: rs_source_1_data
+        row_cardinality: many
+        type: row_population
+      - evidence_id: source_1.data.reference.staff_reference
+        type: entity_reference
+        reference_id: staff_reference
+        target_entity_kind: staff
+        target_key_id: staff_primary
+        row_path_id: data
+        row_source_id: rs_source_1_data
+        components:
+          - component_id: staff_id
+            field_id: staff_id
+            field_evidence_id: source_1.data.staff_id
+expect:
+  result_contains:
+    row_count_evidence_ids: [row_population.rs_source_1_data]

@@ -1,0 +1,48 @@
+id: source_binding_catalog_clarification_resumes_same_run
+description: A source-binding catalog input response resumes only the source-binding owner in the same run.
+kind: algorithm
+algorithm: questions.lifecycle
+input:
+  scenario: clarification_resume
+  tenant_id: tenant_1
+  principal_id: user_1
+  question: How many orders used the selected channel?
+  clarification:
+    id: clarification_channel
+    need: catalog_input
+    reason: catalog_requires_choice
+    owner: source_binding
+    continuation:
+      kind: source_binding_catalog_input
+      requestedFactId: fact_1
+      target:
+        rowSourceId: orders_read
+        paramId: channel
+        paramRef: query.channel
+        valueType: string
+        choices: [online, retail]
+    requestedFactId: fact_1
+    question: Which channel should I use?
+    subjects:
+      - kind: catalog_choice
+        id: orders_read.channel
+        label: channel
+        sourceText: ""
+        options:
+          - {id: online, label: Online, value: online}
+          - {id: retail, label: Retail, value: retail}
+    evidence:
+      - {kind: catalog_input, id: "required_input:orders_read.channel"}
+  response_text: Online
+  selected_option_id: online
+  resumed_lookup_result: {status: COMPLETED, answer: "4", result_data: {value: 4}}
+expect:
+  result_contains:
+    resumed_result: {status: COMPLETED, run_id: run_1, answer: "4"}
+    question_count: 1
+    run_count: 1
+    resumed_clarification:
+      owner: source_binding
+      continuation_kind: source_binding_catalog_input
+      dispatch_count: 1
+      closed_target: {rowSourceId: orders_read, paramId: channel, valueType: string, value: online}

@@ -13,7 +13,6 @@ expect:
     applied_filters:
       - kind: identity
         known_input_id: area_1
-        identity_type: area
         display_value: London
         field_ids:
           - area_id

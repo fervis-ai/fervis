@@ -37,7 +37,7 @@ def test_prior_request_activation_uses_the_typed_projection() -> None:
             PriorRequestOutput(
                 output_id="answer_1",
                 description="sales count",
-                role="ROW_POPULATION",
+                role="ROW_COUNT",
             ),
         ),
     )
@@ -76,7 +76,7 @@ def test_prior_request_activation_uses_the_typed_projection() -> None:
                 {
                     "output_id": "answer_1",
                     "description": "sales count",
-                    "role": "ROW_POPULATION",
+                    "role": "ROW_COUNT",
                 },
             ),
             "slots": (),

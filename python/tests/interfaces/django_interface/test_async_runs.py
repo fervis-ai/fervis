@@ -52,6 +52,7 @@ from fervis.lineage.models import (
     Answer,
     AnswerOutput,
     ClarificationRequest,
+    ClarificationResponse,
     Conversation,
     FactResult,
     MemoryArtifact,
@@ -246,9 +247,10 @@ def test_django_question_memory_keeps_explicit_context_outside_recent_window(
         ),
     )
 
-    assert [
-        artifact["sourceAnswer"] for artifact in context["factArtifacts"]
-    ] == ["old selected variant", "latest primary"]
+    assert [artifact["sourceAnswer"] for artifact in context["factArtifacts"]] == [
+        "old selected variant",
+        "latest primary",
+    ]
 
 
 def _answered_lineage_run(
@@ -336,7 +338,9 @@ def _answered_lineage_variant(
         requested_fact_json={
             "id": "fact_1",
             "answer_fact": f"answer for {question.original_question}",
-            "answer_outputs": [{"id": "answer_1", "description": "answer"}],
+            "answer_outputs": [
+                {"id": "answer_1", "description": "answer", "role": "ANSWER_VALUE"}
+            ],
         },
     )
     fact_result = FactResult.objects.create(
@@ -387,6 +391,55 @@ def _answered_lineage_variant(
     )
 
 
+@pytest.mark.django_db
+def test_run_view_preserves_canonical_entity_output_separately_from_display_text():
+    conversation = Conversation.objects.create(
+        conversation_id="conversation_entity_result",
+        tenant_id="tenant-1",
+        read_context_ref=ReadContextRef(
+            scheme="django_principal",
+            key="user-memory",
+        ).to_storage_dict(),
+    )
+    _answered_lineage_run(
+        conversation=conversation,
+        question_id="question_entity_result",
+        run_id="run_entity_result",
+        sequence=1,
+        question="Which flow matched?",
+        value="Shipment Tracker",
+    )
+    AnswerOutput.objects.filter(run_id="run_entity_result").update(
+        value_kind=AnswerValueKind.ENTITY.value,
+        value_json={
+            "kind": "entity",
+            "entity_kind": "flow",
+            "key_id": "primary_key",
+            "components": {"id": "flow-5"},
+        },
+    )
+
+    run = get_run_view("run_entity_result")
+
+    assert run is not None
+    assert run["resultData"] == {
+        "kind": "answer",
+        "outputs": [
+            {
+                "key": "answer_1",
+                "valueKind": "entity",
+                "value": {
+                    "kind": "entity",
+                    "entity_kind": "flow",
+                    "key_id": "primary_key",
+                    "components": {"id": "flow-5"},
+                },
+                "displayValue": "flow:id=flow-5",
+            }
+        ],
+    }
+
+
 def _model_execution_spec(
     question: str,
     *,
@@ -396,6 +449,8 @@ def _model_execution_spec(
         "question": question,
         "provider": "anthropic",
         "model_key": "HAIKU",
+        "context_run_id": None,
+        "clarification_response": None,
         "conversation_context": {},
         "runtime_context": dict(runtime_context or {}),
         "max_budget_usd": "0.5",
@@ -739,33 +794,39 @@ def test_worker_fails_before_answer_synthesis_when_budget_is_exceeded(
         ):
             del model_id, system_prompt
             tool_name = tool_specs[0].name if tool_specs else ""
-            if tool_name == "submit_answer_request_contract":
+            if tool_name == "submit_question_contract_outcome":
                 return {
                     "answer": json.dumps(
                         {
-                            "tool": "submit_answer_request_contract",
-                            "arguments": {
-                                "kind": "question_contract",
-                                "answer_requests_count": 1,
-                                "question_inputs": [],
-                                "answer_requests": [
-                                    {
-                                        "answer_fact": "restricted fact",
-                                        "answer_expression": {"family": "scalar_value"},
-                                        "answer_subject": {
-                                            "subject_text": "restricted fact",
-                                            "instance_interpretation": {
-                                                "kind": "NORMAL_BUSINESS_INSTANCE"
+                                "tool": "submit_question_contract_outcome",
+                                "arguments": {
+                                    "decision_basis": (
+                                        "The question states one complete factual request."
+                                    ),
+                                    "outcome": {
+                                    "kind": "question_contract",
+                                    "answer_requests_count": 1,
+                                    "question_inputs": [],
+                                    "answer_requests": [
+                                        {
+                                            "answer_fact": "restricted fact",
+                                            "answer_expression": {
+                                                "family": "scalar_value"
                                             },
-                                        },
-                                        "answer_population": {
-                                            "population_label": "restricted fact",
-                                            "counted_unit": "restricted fact",
-                                            "membership_tests": [
-                                                {
-                                                    "test_id": "pop_test_1",
-                                                    "kind": "SUBJECT_IDENTITY",
-                                                    "polarity": "MUST_PASS",
+                                            "answer_subject": {
+                                                "subject_text": "restricted fact",
+                                                "instance_interpretation": {
+                                                    "kind": "NORMAL_BUSINESS_INSTANCE"
+                                                },
+                                            },
+                                            "answer_population": {
+                                                "population_label": "restricted fact",
+                                                "counted_unit": "restricted fact",
+                                                "membership_tests": [
+                                                    {
+                                                        "test_id": "pop_test_1",
+                                                        "kind": "SUBJECT_IDENTITY",
+                                                        "polarity": "MUST_PASS",
                                                         "test_question": (
                                                             "Does the row/value represent restricted fact?"
                                                         ),
@@ -773,16 +834,18 @@ def test_worker_fails_before_answer_synthesis_when_budget_is_exceeded(
                                                     }
                                                 ],
                                             },
-                                        "answer_outputs": [
-                                            {
-                                                "description": "restricted fact",
-                                            }
-                                        ],
-                                        "used_question_inputs": [],
-                                    }
-                                ],
-                                "question_input_inventory_check": {
-                                    "all_input_like_phrases_declared": True,
+                                            "answer_outputs": [
+                                                {
+                                                    "description": "restricted fact",
+                                                    "role": "ANSWER_VALUE",
+                                                }
+                                            ],
+                                            "used_question_inputs": [],
+                                        }
+                                    ],
+                                    "question_input_inventory_check": {
+                                        "all_input_like_phrases_declared": True,
+                                    },
                                 },
                             },
                         }
@@ -912,7 +975,7 @@ def test_run_view_projects_needs_clarification_result_data_in_canonical_shape(
         conversation_id=conversation.conversation_id,
         tenant_id=conversation.tenant_id,
         user_id="user-1",
-        status=RunWorkStatus.COMPLETED,
+        status=RunWorkStatus.WAITING_FOR_CLARIFICATION,
         spec_kind=RunExecutionSpecKind.RESOLVE_QUESTION.value,
         execution_spec={
             "question": question.original_question,
@@ -923,6 +986,7 @@ def test_run_view_projects_needs_clarification_result_data_in_canonical_shape(
             "runtime_context": {},
             "max_budget_usd": None,
             "max_thinking_tokens": None,
+            "clarification_response": None,
         },
         read_context_ref=conversation.read_context_ref,
     )
@@ -933,35 +997,10 @@ def test_run_view_projects_needs_clarification_result_data_in_canonical_shape(
         step_key=RunStepKey.GROUNDING.value,
         kind=RunStepKind.MODEL_TURN.value,
     )
-    RunResult.objects.create(
-        run_result_id="run_clarification_result_data.result",
-        run=run,
-        result_kind=RunResultKind.FACTUAL_TERMINAL.value,
-    )
-    requested_fact = RequestedFact.objects.create(
-        requested_fact_id="run_clarification_result_data.fact",
-        run=run,
-        produced_by_step=step,
-        fact_key="fact_1",
-        description="sales count",
-        answer_expression_family="scalar",
-        requested_fact_json={
-            "id": "fact_1",
-            "answer_fact": "sales count",
-            "answer_outputs": [{"id": "answer_1", "description": "answer"}],
-        },
-    )
-    fact_result = FactResult.objects.create(
-        fact_result_id="run_clarification_result_data.fact_result",
-        run=run,
-        requested_fact=requested_fact,
-        produced_by_step=step,
-        result_kind=FactResultKind.NEEDS_CLARIFICATION.value,
-    )
     ClarificationRequest.objects.create(
         clarification_id="clarification_1",
         run=run,
-        fact_result=fact_result,
+        step=step,
         need=ClarificationNeed.TARGET_REFERENCE.value,
         reason=ClarificationReason.UNRESOLVED_REFERENCE.value,
         payload_json={
@@ -986,7 +1025,7 @@ def test_run_view_projects_needs_clarification_result_data_in_canonical_shape(
     run_view = get_run_view("run_clarification_result_data")
 
     assert run_view is not None
-    assert run_view["status"] == "NEEDS_CLARIFICATION"
+    assert run_view["status"] == "WAITING_FOR_CLARIFICATION"
     assert run_view["resultData"] == {
         "kind": "needs_clarification",
         "details": {
@@ -1012,6 +1051,32 @@ def test_run_view_projects_needs_clarification_result_data_in_canonical_shape(
         },
     }
 
+    clarification = ClarificationRequest.objects.get(
+        clarification_id="clarification_1"
+    )
+    ClarificationResponse.objects.create(
+        response_id="clarification_response_1",
+        run=run,
+        clarification=clarification,
+        response_text="ABC Mall",
+        evidence_ref="clarification_response:clarification_response_1",
+    )
+    RunResult.objects.create(
+        run_result_id="run_clarification_result_data.result",
+        run=run,
+        result_kind=RunResultKind.FACTUAL_TERMINAL.value,
+    )
+    RunWorkItem.objects.filter(run_id=run.run_id).update(
+        status=RunWorkStatus.COMPLETED,
+        completed_at=timezone.now(),
+    )
+
+    completed_view = get_run_view("run_clarification_result_data")
+
+    assert completed_view is not None
+    assert completed_view["status"] == "COMPLETED"
+    assert completed_view["resultData"] is None
+
 
 @pytest.mark.django_db
 def test_fervis_worker_processes_queued_run_to_terminal(
@@ -1036,7 +1101,7 @@ def test_fervis_worker_processes_queued_run_to_terminal(
     assert (
         cycle.claimed_count,
         poll.status_code,
-        poll.json()["status"] in {"COMPLETED", "NEEDS_CLARIFICATION", "FAILED"},
+        poll.json()["status"] in {"COMPLETED", "WAITING_FOR_CLARIFICATION", "FAILED"},
     ) == (1, 200, True)
 
 
@@ -1085,6 +1150,14 @@ def test_idempotent_integrity_race_returns_existing_same_key(
     fervis_foundation_reset,
     monkeypatch,
 ):
+    submission = _model_submission(
+        run_id="new-race-run",
+        conversation_id="conversation-race",
+        tenant_id="tenant-race",
+        user_id="user-race",
+        question="same question",
+        idempotency_key="same-key",
+    )
     existing = RunWorkItem.objects.create(
         run_id="existing-race-run",
         conversation_id="conversation-race",
@@ -1098,6 +1171,8 @@ def test_idempotent_integrity_race_returns_existing_same_key(
             "tenant_key": None,
         },
         idempotency_key="same-key",
+        idempotency_authority_ref=submission.idempotency_authority_ref,
+        idempotency_scope=submission.idempotency_scope,
         status=RunWorkStatus.COMPLETED,
     )
     original_filter = RunWorkItem.objects.filter
@@ -1120,16 +1195,7 @@ def test_idempotent_integrity_race_returns_existing_same_key(
         filter_with_hidden_first_idempotent_lookup,
     )
 
-    enqueued = enqueue_run_work_item(
-        submission=_model_submission(
-            run_id="new-race-run",
-            conversation_id="conversation-race",
-            tenant_id="tenant-race",
-            user_id="user-race",
-            question="same question",
-            idempotency_key="same-key",
-        ),
-    )
+    enqueued = enqueue_run_work_item(submission=submission)
 
     assert (enqueued.item, enqueued.created, RunWorkItem.objects.count()) == (
         existing,

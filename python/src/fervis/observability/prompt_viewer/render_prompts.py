@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from enum import StrEnum
+from datetime import datetime, timezone as datetime_timezone
+from fervis.types.enums import StrEnum
 import html
 import json
 from pathlib import Path
@@ -163,7 +163,9 @@ def build_prompt_inspection_document(
             )
             for run in runs
         ),
-        generated_at=datetime.now(UTC).replace(microsecond=0).isoformat(),
+        generated_at=datetime.now(datetime_timezone.utc)
+        .replace(microsecond=0)
+        .isoformat(),
     )
 
 
@@ -451,7 +453,9 @@ def text_details(title: str, value: str) -> str:
 def page_shell(
     *, title: str, heading: str, breadcrumbs: str, body: str, asset_prefix: str
 ) -> str:
-    generated_at = datetime.now(UTC).replace(microsecond=0).isoformat()
+    generated_at = (
+        datetime.now(datetime_timezone.utc).replace(microsecond=0).isoformat()
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -527,14 +531,16 @@ def _event_type(status: ModelCallStatus) -> str:
 
 
 def _selected_tool_name(row: ModelTurnPromptCapture) -> str:
-    value = row.step_output_summary.get(
+    summary = row.step_output_summary or {}
+    value = summary.get(
         "selectedToolName"
-    ) or row.step_output_summary.get("selected_tool_name")
+    ) or summary.get("selected_tool_name")
     return str(value or "")
 
 
 def _prompt_frame(row: ModelTurnPromptCapture) -> dict[str, Any]:
-    value = row.step_input_summary.get("promptFrame") or row.step_input_summary.get(
+    summary = row.step_input_summary or {}
+    value = summary.get("promptFrame") or summary.get(
         "prompt_frame"
     )
     if isinstance(value, dict):

@@ -8,6 +8,7 @@ input:
   requested_fact:
     description: featured merch count
     subject_text: featured merch
+    answer_output_role: ROW_COUNT
   candidate:
     source_candidate_id: source_1
     kind: new_api_read
@@ -25,7 +26,6 @@ input:
         evidence_items:
           - field_id: merch_id
             type: uuid
-            identity: {entity_ref: merch, identity_field: merch_id, primary_key: true, stable: true}
       - grain_id: root
         row_path_id: root
         row_source_id: rs_source_1_root
@@ -45,7 +45,6 @@ input:
         field_id: merch_id
         row_path_id: data.merch
         type: uuid
-        identity: {entity_ref: merch, identity_field: merch_id, primary_key: true, stable: true}
 expect:
   result_contains:
     row_count_evidence_ids: [row_population.rs_source_1_data]

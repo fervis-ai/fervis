@@ -33,12 +33,14 @@ input:
             answer_outputs:
             - id: answer_1
               description: total sales amount
+              role: ANSWER_VALUE
             used_question_inputs: [sales_staff]
           - id: fact_stockouts
             answer_fact: stockouts by store
             answer_outputs:
             - id: answer_1
               description: store name
+              role: ANSWER_VALUE
             used_question_inputs: [stockout_store]
       addresses:
       - address: value.answer

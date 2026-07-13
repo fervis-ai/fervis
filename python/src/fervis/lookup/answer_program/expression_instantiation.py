@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, assert_never, cast
+from typing import Any, cast
+from typing_extensions import assert_never
 
 from fervis.lookup.relation_catalog.model import RelationCatalog
 from fervis.lookup.plan_execution.errors import VerificationError
@@ -32,11 +33,8 @@ from fervis.lookup.answer_program.values import (
     FactValue,
     LiteralType,
     ParameterRef,
-    TimeComponent,
-    ValueComponent,
     ValueFilterOperator,
 )
-from fervis.lookup.fact_planning.value_components import value_component
 from fervis.lookup.answer_program.contracts import (
     AnswerProgramContractError,
     BindingSet,
@@ -218,7 +216,7 @@ def _append_relation_source_row_filters(
                     ResolvedRowFilter(
                         relation_id=relation.id,
                         field_id=field_id,
-                        operator=ValueFilterOperator.EQUALS,
+                        operator=ValueFilterOperator(source_filter.operator),
                         value=resolved.value,
                         proof_refs=resolved.proof_refs,
                     )
@@ -600,26 +598,9 @@ def _row_source_for_relation(
     return row_source
 
 
-def _filter_value(
-    value: FactValue,
-    component: ValueComponent | TimeComponent,
-) -> Any:
-    _require_filter_value(value)
-    return value_component(value, component)
-
-
 def _require_filter_value(value: FactValue) -> None:
     if value.payload.row_filter_error:
         raise VerificationError(f"{value.payload.row_filter_error}: {value.id}")
-
-
-def _require_relation_field(
-    relations: tuple[Relation, ...],
-    relation_id: str,
-    field_id: str,
-) -> None:
-    relation = _relation(relations, relation_id)
-    _require_bound_relation_field(relation, field_id)
 
 
 def _require_bound_relation_field(relation: Relation, field_id: str) -> None:

@@ -173,7 +173,9 @@ def _relation(payload: dict[str, Any]) -> Relation:
         fields=tuple(
             RelationField(
                 field_id=str(item["field_id"]),
-                roles=tuple(FieldBindingRole(str(role)) for role in item.get("roles") or ()),
+                roles=tuple(
+                    FieldBindingRole(str(role)) for role in item.get("roles") or ()
+                ),
             )
             for item in payload.get("fields") or ()
         ),

@@ -1,5 +1,5 @@
 id: identity_projection_projects_row_identity_values
-description: Row fact addresses project canonical identity values using their relation identity type.
+description: Row fact addresses project canonical identity values from typed entity-key results.
 migrates:
   - api/tests/fervis/memory/test_identity_values.py::test_memory_projection_projects_row_identity_values
 kind: algorithm
@@ -12,7 +12,7 @@ input:
         addresses:
           - address: relation.sales
             kind: relation
-            source: {kind: api_read, identityType: sale}
+            source: {kind: api_read}
             grainKeys: [sale_id]
             completeness: {status: complete, pagination: all_pages, rowCount: 1}
             rowAddresses: [row.sales.1]
@@ -20,18 +20,25 @@ input:
             kind: row
             relation: relation.sales
             identity: {sale_id: sale-1}
+            values:
+              answer_1:
+                type: entity_key
+                value:
+                  entityKind: sale
+                  keyId: primary_key
+                  components: {sale_id: sale-1}
 expect:
   result_contains:
     identity_values:
-      - id: mem.turn_1.row.sales.1.identity.sale_id
+      - id: mem.turn_1.row.sales.1.entity_key.answer_1
         kind: identity
-        identity_type: sale
-        identity_field: sale_id
-        value: sale-1
+        value:
+          entity_kind: sale
+          key_id: primary_key
+          components: {sale_id: sale-1}
         display_label: sale identity from prior answer
         display_label_author: backend
         source:
           artifact_id: turn_1
           address: row.sales.1
-          field_id: sale_id
-
+          answer_output_id: answer_1

@@ -1,0 +1,60 @@
+id: specific_population_reference_is_not_subject_duplication
+description: A reference to one member of the answer population remains a typed input even when the population label names that member.
+kind: algorithm
+algorithm: question_contract.parse
+input:
+  question_context: What is the name of warehouse 2?
+  payload:
+    kind: question_contract
+    answer_requests_count: 1
+    question_inputs:
+    - input_ref: warehouse_2
+      kind: literal_text
+      source: question_context
+      value_source_text: warehouse 2
+      field_label_text: warehouse
+      operand_text: warehouse 2
+      value_meaning_hint: warehouse identifier
+      role: reference_value
+      inventory_check:
+        why_this_is_an_input: It identifies the warehouse whose name is requested.
+    answer_requests:
+    - answer_fact: name of warehouse 2
+      answer_expression:
+        family: scalar_value
+      answer_subject:
+        subject_text: warehouse
+        instance_interpretation:
+          kind: NORMAL_BUSINESS_INSTANCE
+      answer_population:
+        population_label: warehouse 2
+        counted_unit: warehouse
+        membership_tests:
+        - test_id: subject_identity
+          kind: SUBJECT_IDENTITY
+          polarity: MUST_PASS
+          test_question: Does the row represent a warehouse?
+          owned_question_input_refs: []
+        - test_id: selected_warehouse
+          kind: EXPLICIT_USER_CONSTRAINT
+          polarity: MUST_PASS
+          test_question: Is this warehouse the requested warehouse?
+          owned_question_input_refs: [warehouse_2]
+      answer_outputs:
+      - description: warehouse name
+        role: ANSWER_VALUE
+      used_question_inputs: [warehouse_2]
+    question_input_inventory_check:
+      all_input_like_phrases_declared: true
+expect:
+  result_contains:
+    question_inputs:
+    - id: warehouse_2
+      text: warehouse 2
+      resolved_value_text: warehouse 2
+      field_label_text: warehouse
+      value_meaning_hint: warehouse identifier
+      role: reference_value
+    requested_facts:
+    - answer_subject_text: warehouse
+      input_refs: [warehouse_2]

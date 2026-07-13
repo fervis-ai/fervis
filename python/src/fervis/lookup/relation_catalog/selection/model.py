@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from fervis.lookup.relation_catalog import RelationCatalog
 from fervis.lookup.question_contract import RequestedFact
+from fervis.lookup.answer_program.values import FactValue
 
 
 @dataclass(frozen=True)
@@ -29,23 +30,12 @@ class EntityTargetCatalogSearchTerms:
 
 
 @dataclass(frozen=True)
-class ActiveMemoryCatalogSignal:
-    memory_id: str
-    requested_fact_id: str
-    identity_type: str = ""
-    related_identity_types: tuple[str, ...] = ()
-    related_read_ids: tuple[str, ...] = ()
-    field_names: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
 class CatalogSelectionRequest:
     relation_catalog: RelationCatalog
     requested_facts: tuple[RequestedFact, ...]
     max_reads_per_fact: int
     resource_name_matches: tuple[RequestedFactResourceNameMatches, ...]
-    active_memory_signals: tuple[ActiveMemoryCatalogSignal, ...] = ()
-    available_values: tuple[object, ...] = ()
+    available_values: tuple[FactValue, ...] = ()
 
 
 @dataclass(frozen=True)

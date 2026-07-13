@@ -9,8 +9,6 @@ from fervis.lookup.turn_prompts.builder import (
     system_prompt_for,
 )
 from fervis.lookup.turn_prompts.context import (
-    ActiveClarificationPromptContext,
-    ClarificationExchangePromptContext,
     HostPromptContext,
     MemoryPromptContext,
     MemoryPromptValue,
@@ -32,9 +30,7 @@ from fervis.lookup.turn_prompts.sections import (
 from fervis.lookup.turn_prompts.turn_prompt import TurnPromptBase
 
 __all__ = [
-    "ActiveClarificationPromptContext",
     "ApprovedPromptChars",
-    "ClarificationExchangePromptContext",
     "HostPromptContext",
     "MemoryPromptContext",
     "MemoryPromptValue",

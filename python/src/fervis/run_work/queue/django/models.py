@@ -7,6 +7,10 @@ from django.db.models import Q
 class RunWorkStatus(models.TextChoices):
     QUEUED = "QUEUED", "Queued"
     RUNNING = "RUNNING", "Running"
+    WAITING_FOR_CLARIFICATION = (
+        "WAITING_FOR_CLARIFICATION",
+        "Waiting for clarification",
+    )
     COMPLETED = "COMPLETED", "Completed"
     FAILED = "FAILED", "Failed"
 
@@ -26,6 +30,8 @@ class RunWorkItem(models.Model):
     execution_spec = models.JSONField()
     read_context_ref = models.JSONField()
     idempotency_key = models.CharField(max_length=255, null=True, blank=True)
+    idempotency_authority_ref = models.CharField(max_length=96, blank=True, default="")
+    idempotency_scope = models.CharField(max_length=160, blank=True, default="")
     attempt_count = models.PositiveIntegerField(default=0)
     active_attempt = models.PositiveIntegerField(default=0)
     max_attempts = models.PositiveIntegerField(default=2)
@@ -44,13 +50,19 @@ class RunWorkItem(models.Model):
         ordering = ["created_at"]
         constraints = [
             models.UniqueConstraint(
-                fields=["tenant_id", "conversation_id", "idempotency_key"],
+                fields=[
+                    "idempotency_authority_ref",
+                    "idempotency_scope",
+                    "idempotency_key",
+                ],
                 condition=Q(idempotency_key__isnull=False),
                 name="fervis_work_idempotency_unique",
             ),
             models.UniqueConstraint(
                 fields=["tenant_id", "conversation_id"],
-                condition=Q(status__in=["QUEUED", "RUNNING"]),
+                condition=Q(
+                    status__in=["QUEUED", "RUNNING", "WAITING_FOR_CLARIFICATION"]
+                ),
                 name="fervis_work_active_conversation_unique",
             ),
         ]

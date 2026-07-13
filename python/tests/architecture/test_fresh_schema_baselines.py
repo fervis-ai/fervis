@@ -8,15 +8,16 @@ from fervis.project.persistence.revisions import ALEMBIC_REVISION, TARGET_REVISI
 SOURCE = Path(__file__).resolve().parents[2] / "src" / "fervis"
 
 
-def test_greenfield_persistence_has_one_schema_snapshot() -> None:
-    assert _snapshot_files(
-        SOURCE / "project" / "persistence" / "schema_snapshots"
-    ) == ("v0001.py",)
+def test_persistence_keeps_one_frozen_snapshot_per_public_revision() -> None:
+    assert _snapshot_files(SOURCE / "project" / "persistence" / "schema_snapshots") == (
+        "v0001.py",
+        "v0002.py",
+    )
 
 
-def test_public_and_alembic_revisions_name_the_fresh_baseline() -> None:
-    assert TARGET_REVISION == "fervis.0001"
-    assert ALEMBIC_REVISION == "0001_initial"
+def test_public_and_alembic_revisions_name_the_current_head() -> None:
+    assert TARGET_REVISION == "fervis.0002"
+    assert ALEMBIC_REVISION == "0002_same_run_clarification_and_idempotency"
 
 
 def _snapshot_files(path: Path) -> tuple[str, ...]:

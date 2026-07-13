@@ -7,7 +7,6 @@ import json
 from fervis.lookup.relation_catalog import (
     CatalogFact,
     CatalogField,
-    IdentityMetadata,
     RelationCatalog,
 )
 
@@ -56,7 +55,6 @@ def _field_parts(field: CatalogField) -> tuple[object, ...]:
         field.row_path_id,
         field.choices,
         field.metadata or {},
-        _identity_parts(field.identity),
     )
 
 
@@ -67,16 +65,6 @@ def _fact_parts(fact: CatalogFact) -> tuple[object, ...]:
         fact.field_ref,
         fact.read_id,
         fact.proof_refs,
-    )
-
-
-def _identity_parts(identity: IdentityMetadata | None) -> tuple[object, ...]:
-    if identity is None:
-        return ()
-    return (
-        identity.entity_ref,
-        identity.identity_field,
-        identity.display_fields,
     )
 
 

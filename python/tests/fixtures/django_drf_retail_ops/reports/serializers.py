@@ -5,7 +5,9 @@ class SalesSummaryQuerySerializer(serializers.Serializer):
     start_date = serializers.DateField(required=False)
     end_date = serializers.DateField(required=False)
     store_id = serializers.IntegerField(required=False)
-    group_by = serializers.ChoiceField(required=False, choices=["store", "day", "status"])
+    group_by = serializers.ChoiceField(
+        required=False, choices=["store", "day", "status"]
+    )
 
 
 class SalesSummaryRowSerializer(serializers.Serializer):
@@ -26,4 +28,3 @@ class LowStockRowSerializer(serializers.Serializer):
     location_name = serializers.CharField()
     quantity_on_hand = serializers.IntegerField()
     reorder_point = serializers.IntegerField()
-

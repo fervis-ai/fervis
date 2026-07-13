@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum, StrEnum
+from enum import Enum
+import hashlib
+import json
+
+from fervis.types.enums import StrEnum
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, TypeVar, assert_never
+from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, TypeVar
+from typing_extensions import assert_never
 
 from fervis.host_api.contracts.authority import ReadAuthority, ReadContextRef
 from fervis.host_api.contracts.credentials import DelegatedReadCredential
@@ -14,6 +19,7 @@ from fervis.lineage.recorder import (
     ProgramInvocationBundleWrite,
     ProgramRevisionBundleWrite,
 )
+from fervis.lookup.clarification.model import ClarificationOwnerResponse
 
 from .contracts import ExecutionMode, QuestionPrincipal
 
@@ -48,24 +54,24 @@ class QuestionRunStart:
     adapter_ref: str
     runtime_version: str
     base_run_id: str | None = None
-    trigger_clarification_response_id: str | None = None
-    trigger_clarification_selected_option_id: str | None = None
 
 
 @dataclass(frozen=True)
-class ClarificationResponseStart:
-    response_id: str
+class ClarificationRunResume:
+    question_id: str
     run_id: str
     clarification_id: str
+    response_id: str
     response_text: str
-    selected_option_id: str = ""
+    selected_option_id: str
+    principal: QuestionPrincipal
+    execution_mode: ExecutionMode
 
 
 @dataclass(frozen=True)
 class QuestionRunRecord:
     run: QuestionRunStart
     question: QuestionStart | None = None
-    clarification_response: ClarificationResponseStart | None = None
     program_invocation: ProgramInvocationBundleWrite | None = None
     program_revision: ProgramRevisionBundleWrite | None = None
 
@@ -80,6 +86,7 @@ class ResolveQuestionRunSpec:
     runtime_context: dict[str, Any] = field(default_factory=dict)
     max_budget_usd: Any = None
     max_thinking_tokens: int | None = None
+    clarification_response: ClarificationOwnerResponse | None = None
 
     def __post_init__(self) -> None:
         if not self.question.strip():
@@ -136,6 +143,37 @@ class RunSubmission:
     spec: RunExecutionSpec
     execution_mode: ExecutionMode = ExecutionMode.QUEUED
     idempotency_key: str | None = None
+    idempotency_authority_ref: str = ""
+    idempotency_scope: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.idempotency_key:
+            return
+        if not self.idempotency_authority_ref:
+            object.__setattr__(
+                self,
+                "idempotency_authority_ref",
+                _idempotency_authority_ref(self.principal),
+            )
+        if not self.idempotency_scope:
+            object.__setattr__(
+                self,
+                "idempotency_scope",
+                f"conversation:{self.conversation_id}",
+            )
+
+
+def _idempotency_authority_ref(principal: QuestionPrincipal) -> str:
+    payload = json.dumps(
+        {
+            "tenant_id": principal.tenant_id,
+            "principal_id": principal.principal_id,
+            "read_context_ref": principal.read_context_ref.to_storage_dict(),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return "idempotency-authority:sha256:" + hashlib.sha256(payload.encode()).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -159,7 +197,10 @@ class ParsedQuestionRunSubmission:
                 or record.question.tenant_id != submission.tenant_id
             ):
                 raise ValueError("submission and question lineage must match")
-            if record.question.read_context_ref != submission.principal.read_context_ref:
+            if (
+                record.question.read_context_ref
+                != submission.principal.read_context_ref
+            ):
                 raise ValueError("submission and question authority must match")
         fold_run_execution_spec(
             submission.spec,
@@ -264,6 +305,7 @@ class QueuedRun:
     result_data: dict[str, Any] | None = None
     error: str | None = None
     duration_ms: int | None = None
+    active_attempt: int | None = None
 
 
 @dataclass(frozen=True)
@@ -288,6 +330,7 @@ class LookupExecutionRequest:
     max_thinking_tokens: int | None
     active_attempt: int | None = None
     delegated_credential: DelegatedReadCredential | None = None
+    clarification_response: ClarificationOwnerResponse | None = None
 
 
 @dataclass(frozen=True)
@@ -387,7 +430,7 @@ class QuestionLifecyclePort(Protocol):
     def find_idempotent_run(
         self,
         *,
-        authority: ReadAuthority,
+        principal: QuestionPrincipal,
         conversation_id: str | None,
         idempotency_key: str | None,
     ) -> QueuedRun | None: ...
@@ -397,6 +440,11 @@ class QuestionLifecyclePort(Protocol):
         *,
         submission: RunSubmission,
         record: QuestionRunRecord,
+    ) -> QuestionRunSubmissionResult: ...
+
+    def resume_question_run_atomically(
+        self,
+        resume: ClarificationRunResume,
     ) -> QuestionRunSubmissionResult: ...
 
     def load_executable_run(
@@ -425,6 +473,14 @@ class QuestionLifecyclePort(Protocol):
         error: str | None,
         worker_id: str = "",
         active_attempt: int | None = None,
+    ) -> QueuedRun: ...
+
+    def wait_for_clarification(
+        self,
+        *,
+        run_id: str,
+        worker_id: str,
+        active_attempt: int,
     ) -> QueuedRun: ...
 
 

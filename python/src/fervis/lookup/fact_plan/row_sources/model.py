@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 
 from fervis.lookup.relation_catalog.model import (
     CatalogFactAvailability,
-    IdentityMetadata,
+    EntityKeyComponentTarget,
     ParamSource,
     RowCardinality,
 )
@@ -68,7 +68,6 @@ class RowSourceField:
     type: RowSourceValueType
     allowed_roles: tuple[FieldBindingRole, ...]
     choices: tuple[str, ...] = ()
-    identity: IdentityMetadata | None = None
     fact_refs: tuple[str, ...] = ()
     answer_output_ids: tuple[str, ...] = ()
     path: str = ""
@@ -77,9 +76,12 @@ class RowSourceField:
 
     @property
     def can_carry_lookup_text(self) -> bool:
-        return self.type in {RowSourceValueType.STRING, RowSourceValueType.ANY} and not (
-            self.identity is not None and self.identity.primary_key
-        )
+        return self.type in {
+            RowSourceValueType.STRING,
+            RowSourceValueType.ARRAY,
+            RowSourceValueType.LIST,
+            RowSourceValueType.ANY,
+        }
 
 
 @dataclass(frozen=True)
@@ -94,7 +96,7 @@ class RowSourceParam:
     choice_labels: dict[str, str] | None = None
     default: CatalogParameterValue = None
     default_source: str = ""
-    identity: IdentityMetadata | None = None
+    entity_target: EntityKeyComponentTarget | None = None
     semantics: RowSourceParamSemantics = RowSourceParamSemantics.OPAQUE_QUERY_PARAM
 
     @property
@@ -110,11 +112,53 @@ class RowSourceBlockedFact:
     proof_refs: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class RowSourceKeyComponent:
+    id: str
+    field_id: str
+
+
+@dataclass(frozen=True)
+class RowSourceCandidateKey:
+    id: str
+    entity_kind: str
+    components: tuple[RowSourceKeyComponent, ...]
+    primary: bool = False
+    stable: bool = True
+    context_field_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class RowSourceEntityReferenceComponent:
+    target_component_id: str
+    local_field_id: str
+
+
+@dataclass(frozen=True)
+class RowSourceEntityReference:
+    id: str
+    target_entity_kind: str
+    target_key_id: str
+    components: tuple[RowSourceEntityReferenceComponent, ...]
+    context_field_ids: tuple[str, ...] = ()
+
+
 def row_source_value_type(raw_value: str) -> RowSourceValueType:
     try:
         return RowSourceValueType(raw_value.strip().casefold())
     except ValueError:
         return RowSourceValueType.UNKNOWN
+
+
+def row_source_value_type_is_scalar(value_type: RowSourceValueType) -> bool:
+    return value_type not in {
+        RowSourceValueType.ANY,
+        RowSourceValueType.ARRAY,
+        RowSourceValueType.JSON,
+        RowSourceValueType.LIST,
+        RowSourceValueType.OBJECT,
+        RowSourceValueType.UNKNOWN,
+    }
 
 
 @dataclass(frozen=True)
@@ -129,8 +173,11 @@ class RowSource:
     row_path_id: str = ""
     row_path: str = ""
     parent_row_path: str = ""
+    parent_row_cardinality: RowCardinality | None = None
     row_cardinality: RowCardinality = RowCardinality.MANY
     fields: tuple[RowSourceField, ...] = ()
+    candidate_keys: tuple[RowSourceCandidateKey, ...] = ()
+    entity_references: tuple[RowSourceEntityReference, ...] = ()
     params: tuple[RowSourceParam, ...] = ()
     blocked_facts: tuple[RowSourceBlockedFact, ...] = ()
 
@@ -151,8 +198,11 @@ class RowSource:
 class RowSourceCatalog:
     sources: tuple[RowSource, ...] = ()
 
+    def find(self, source_id: str) -> RowSource | None:
+        return next((item for item in self.sources if item.id == source_id), None)
+
     def source(self, source_id: str) -> RowSource:
-        for item in self.sources:
-            if item.id == source_id:
-                return item
+        source = self.find(source_id)
+        if source is not None:
+            return source
         raise KeyError(source_id)

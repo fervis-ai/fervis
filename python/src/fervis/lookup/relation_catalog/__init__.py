@@ -8,10 +8,16 @@ from fervis.lookup.relation_catalog.model import (
     CatalogFact,
     CatalogFactAvailability,
     CatalogParam,
+    CandidateKey,
+    CandidateKeyAuthority,
+    CandidateKeyAuthorityComponent,
+    CandidateKeyComponent,
     CompletenessPolicy,
     EndpointRead,
+    EntityKeyComponentTarget,
+    EntityReference,
+    EntityReferenceComponent,
     FieldRequirement,
-    IdentityMetadata,
     PaginationMetadata,
     PaginationMode,
     ParamSource,
@@ -27,7 +33,7 @@ from fervis.lookup.relation_catalog.ports import (
 from fervis.lookup.relation_catalog.row_paths import infer_field_row_path_id
 from fervis.lookup.relation_catalog.validation import (
     CatalogValidationError,
-    validate_relation_catalog,
+    parse_relation_catalog,
 )
 from fervis.lookup.relation_catalog.facts import (
     blocked_catalog_fact,
@@ -43,11 +49,8 @@ from fervis.lookup.relation_catalog.interface_tokens import (
     catalog_output_field_token,
 )
 from fervis.lookup.relation_catalog.identity import (
-    catalog_field_has_primary_stable_identity,
-    catalog_field_is_count_anchor,
-    identity_is_primary_stable,
-    identity_payload_is_primary_stable,
-    primary_stable_identity_field_ids,
-    read_has_primary_stable_identity,
-    source_field_has_primary_stable_identity,
+    entity_identity_field_ids,
+    primary_stable_key_entity_kinds,
+    read_has_primary_stable_key,
+    source_field_is_entity_identity,
 )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from math import isfinite
 from typing import TypeAlias
+from uuid import UUID
 
 
 CatalogParameterValue: TypeAlias = (
@@ -33,27 +34,27 @@ def parse_catalog_parameter_value(
         return None
     normalized_type = type_name.strip().casefold()
     if normalized_type == "boolean":
-        if type(value) is bool:
+        if isinstance(value, bool):
             return value
-        if type(value) is str and value in {"true", "false"}:
+        if isinstance(value, str) and value in {"true", "false"}:
             return value == "true"
         raise CatalogParameterValueError("boolean value must be true or false")
     if normalized_type == "integer":
-        if type(value) is not int:
+        if not isinstance(value, int) or isinstance(value, bool):
             raise CatalogParameterValueError("integer value must be an integer")
         return value
     if normalized_type in {"number", "double", "float"}:
-        if type(value) not in {int, float} or (
-            type(value) is float and not isfinite(value)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or (
+            isinstance(value, float) and not isfinite(value)
         ):
             raise CatalogParameterValueError("numeric value must be finite")
         return value
     if normalized_type in {"array", "list"}:
-        if type(value) not in {list, tuple}:
+        if not isinstance(value, (list, tuple)):
             raise CatalogParameterValueError("sequence value must be an array")
         return tuple(_parse_json_value(item) for item in value)
     if normalized_type in {"json", "object"}:
-        if type(value) is not dict:
+        if not isinstance(value, dict):
             raise CatalogParameterValueError("object value must be an object")
         return _parse_json_object(value)
     if normalized_type in {
@@ -66,13 +67,19 @@ def parse_catalog_parameter_value(
         "pk",
         "string",
         "time",
-        "uuid",
     }:
-        if type(value) is not str:
+        if not isinstance(value, str):
             raise CatalogParameterValueError("text value must be a string")
         if choices and value not in choices:
             raise CatalogParameterValueError("value is not a declared choice")
         return value
+    if normalized_type == "uuid":
+        if not isinstance(value, str):
+            raise CatalogParameterValueError("UUID value must be text")
+        try:
+            return str(UUID(value))
+        except ValueError as exc:
+            raise CatalogParameterValueError("UUID value is invalid") from exc
     if normalized_type in {"any", "unknown", ""}:
         return _parse_json_value(value)
     raise CatalogParameterValueError(f"unsupported catalog value type {type_name}")
@@ -81,11 +88,11 @@ def parse_catalog_parameter_value(
 def _parse_json_value(value: object) -> CatalogParameterValue:
     if isinstance(value, float) and not isfinite(value):
         raise CatalogParameterValueError("JSON numbers must be finite")
-    if value is None or type(value) in {bool, int, float, str}:
+    if value is None or isinstance(value, (bool, int, float, str)):
         return value
-    if type(value) in {list, tuple}:
+    if isinstance(value, (list, tuple)):
         return tuple(_parse_json_value(item) for item in value)
-    if type(value) is dict:
+    if isinstance(value, dict):
         return _parse_json_object(value)
     raise CatalogParameterValueError("value must be JSON-compatible")
 

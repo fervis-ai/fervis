@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 
 from fervis.lineage.enums import ContributionOrigin
 from fervis.lineage.step_summary import StepSummaryDetail
@@ -213,8 +213,7 @@ class RuntimeErrorView:
 class ClarificationRequestView:
     clarification_id: str
     payload_json: dict[str, object]
-    fact_result_id: str | None = None
-    step_id: str | None = None
+    step_id: str
 
 
 @dataclass(frozen=True)
@@ -370,7 +369,6 @@ class RunView:
     memory_artifacts: tuple[MemoryArtifactView, ...] = ()
     program_derivation: ProgramDerivationView | None = None
     base_run_id: str | None = None
-    trigger_clarification_response_id: str | None = None
     clarification_requests: tuple[ClarificationRequestView, ...] = ()
     clarification_responses: tuple[ClarificationResponseView, ...] = ()
 
@@ -431,7 +429,6 @@ class TimelineRunView:
     steps: tuple[TimelineStepView, ...]
     program_derivation: ProgramDerivationView | None = None
     base_run_id: str | None = None
-    trigger_clarification_response_id: str | None = None
     clarification_responses: tuple[ClarificationResponseView, ...] = ()
 
 

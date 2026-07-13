@@ -42,6 +42,9 @@ class DjangoHostApiAdapter:
         self.sources = tuple(sources)
         self.auth_schema = auth_schema
 
+    def close(self) -> None:
+        pass
+
     def describe_sources(self) -> tuple[EndpointContract, ...]:
         return get_endpoint_contracts(sources=self.sources)
 

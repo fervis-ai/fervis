@@ -61,7 +61,6 @@ def _timeline_run(run, *, model_calls: tuple[ModelCallInspectionView, ...]):
             _timeline_step(step, run, model_calls=model_calls) for step in run.steps
         ),
         base_run_id=run.base_run_id,
-        trigger_clarification_response_id=run.trigger_clarification_response_id,
         clarification_responses=run.clarification_responses,
     )
 

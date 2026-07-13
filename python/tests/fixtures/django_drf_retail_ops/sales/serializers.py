@@ -10,7 +10,14 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OrderItem
-        fields = ["id", "product_id", "product_sku", "product_name", "quantity", "unit_price"]
+        fields = [
+            "id",
+            "product_id",
+            "product_sku",
+            "product_name",
+            "quantity",
+            "unit_price",
+        ]
 
 
 class OrderSerializer(serializers.ModelSerializer):
@@ -34,7 +41,8 @@ class OrderSerializer(serializers.ModelSerializer):
 
 class OrderQuerySerializer(serializers.Serializer):
     store_id = serializers.IntegerField(required=False)
-    status = serializers.ChoiceField(required=False, choices=["open", "paid", "cancelled"])
+    status = serializers.ChoiceField(
+        required=False, choices=["open", "paid", "cancelled"]
+    )
     start_date = serializers.DateField(required=False)
     end_date = serializers.DateField(required=False)
-

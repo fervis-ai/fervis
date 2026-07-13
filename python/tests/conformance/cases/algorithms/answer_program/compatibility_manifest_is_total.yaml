@@ -12,13 +12,13 @@ input:
       environment: {$ref: ../../../fixtures/answer_program_v1.yaml#/environments/invocation}
       bindings: &bindings
         - parameter_id: question.store_ids
-          value: {kind: identity_set, identity_type: store, identity_field: store_id, values: [store_1]}
+          value: {kind: identity_set, entity_kind: store, key_id: primary_key, key_component_id: store_id, values: [store_1]}
           provenance: {kind: question_input}
         - parameter_id: semantic.sale_states
           value: {kind: string_set, values: [COMPLETED]}
           provenance: {kind: semantic_choice}
       compatibility: &missing_function
-        schema_revision: 1
+        schema_revision: 2
         compiler_version: fervis.answer_program.compiler@1
         function_semantics:
           - {function_key: answer.materialize, version: '1'}

@@ -69,7 +69,7 @@ def test_lineage_view_keeps_answer_outputs_scoped_to_their_run() -> None:
     outputs = view.questions[0].runs[0].requested_facts[0].answer_outputs
 
     assert [(item.output_key, item.value) for item in outputs] == [
-        ("answer_1", "staff:staff_1")
+        ("answer_1", "staff:staff_id=staff_1")
     ]
 
 
@@ -118,7 +118,7 @@ def test_lineage_render_omits_full_answer_presentation_when_output_scoped() -> N
 
     output = render_lineage(lineage_timeline_view(view), answer_output="answer_1")
 
-    assert "staff:staff_1" in output
+    assert "staff:staff_id=staff_1" in output
     assert "location_1" not in output
 
 
@@ -146,14 +146,14 @@ def test_answer_explanation_json_exposes_semantic_step_contract() -> None:
             }
         ],
         "knownInputs": [
-                {
-                    "inputId": "fact_1_entity_1",
-                    "text": "ABC Mall",
-                    "kind": "literal_text",
-                    "role": "reference_value",
-                    "description": "store",
-                    "resolvedValueText": "ABC Mall",
-                }
+            {
+                "inputId": "fact_1_entity_1",
+                "text": "ABC Mall",
+                "kind": "literal_text",
+                "role": "reference_value",
+                "description": "store",
+                "resolvedValueText": "ABC Mall",
+            }
         ],
         "resolverCandidates": [],
         "groundingResults": [],
@@ -269,7 +269,7 @@ def _lineage_rows() -> LineageRows:
                 "step_compile",
                 "fact_1",
                 "staff member who earned most",
-                "ranked_selection",
+                "ranked_groups",
             ),
         ),
         fact_results=(
@@ -290,7 +290,12 @@ def _lineage_rows() -> LineageRows:
                 "fact_result_1",
                 "answer_1",
                 AnswerValueKind.ENTITY,
-                {"entity_type": "staff", "entity_id": "staff_1"},
+                {
+                    "kind": "entity",
+                    "entity_kind": "staff",
+                    "key_id": "primary_key",
+                    "components": {"staff_id": "staff_1"},
+                },
                 proof_node_refs_json=("answer_output:fact_1:answer_1",),
             ),
         ),
@@ -385,7 +390,12 @@ def _lineage_rows_with_cross_run_answer_output() -> LineageRows:
                     "fact_result_1",
                     "answer_1",
                     AnswerValueKind.ENTITY,
-                    {"entity_type": "staff", "entity_id": "wrong_staff"},
+                    {
+                        "kind": "entity",
+                        "entity_kind": "staff",
+                        "key_id": "primary_key",
+                        "components": {"staff_id": "wrong_staff"},
+                    },
                 ),
             ),
         }

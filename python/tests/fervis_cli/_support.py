@@ -84,11 +84,13 @@ from tests.testkit.algorithms.lineage import fixture_lineage_query
 
 API_DIR = Path(__file__).resolve().parents[3]
 
+
 def _agent_step(run: dict[str, object], step_key: str) -> dict[str, object]:
     for step in run["steps"]:
         if step["step_key"] == step_key:
             return step
     raise AssertionError(f"agent view missing step {step_key!r}")
+
 
 def _command_envelope(rendered: str, *, command: str) -> dict[str, object]:
     envelope = json.loads(rendered)
@@ -98,11 +100,14 @@ def _command_envelope(rendered: str, *, command: str) -> dict[str, object]:
     assert envelope["exit_code"] == 0
     return envelope
 
+
 def _command_payload(rendered: str, *, command: str) -> dict[str, object]:
     return _command_envelope(rendered, command=command)["payload"]
 
+
 def _jsonl_events(rendered: str) -> list[dict[str, object]]:
     return [json.loads(line) for line in rendered.splitlines() if line.strip()]
+
 
 def _blocked_envelope(rendered: str, *, command: str) -> dict[str, object]:
     envelope = json.loads(rendered)
@@ -112,6 +117,7 @@ def _blocked_envelope(rendered: str, *, command: str) -> dict[str, object]:
     assert envelope["exit_code"] == 2
     assert envelope["payload_schema"] == "fervis-command-error.v0.1"
     return envelope
+
 
 def _ports(
     questions=None,
@@ -148,6 +154,7 @@ def _ports(
         ),
         run_worker=run_worker,
     )
+
 
 def _lineage_dataset() -> dict[str, object]:
     return {
@@ -293,7 +300,7 @@ def _lineage_dataset() -> dict[str, object]:
                 "produced_by_step_id": "step_source_binding",
                 "fact_key": "fact_1",
                 "description": "staff member who earned the most compensation",
-                "answer_expression_family": "ranked_selection",
+                "answer_expression_family": "ranked_groups",
             }
         ],
         "fact_results": [
@@ -314,13 +321,19 @@ def _lineage_dataset() -> dict[str, object]:
         ],
         "answer_outputs": [
             {
+                "role": "ANSWER_VALUE",
                 "answer_output_id": "answer_output_1",
                 "run_id": "run_1",
                 "answer_id": "answer_1",
                 "fact_result_id": "fact_result_1",
                 "output_key": "answer_1",
                 "value_kind": "entity",
-                "value_json": {"entity_type": "staff", "entity_id": "staff_9393"},
+                "value_json": {
+                    "kind": "entity",
+                    "entity_kind": "staff",
+                    "key_id": "primary_key",
+                    "components": {"staff_id": "staff_9393"},
+                },
                 "proof_node_refs_json": ["answer_output:fact_1:answer_1"],
             }
         ],
@@ -444,6 +457,7 @@ def _lineage_dataset() -> dict[str, object]:
         ],
     }
 
+
 class _ObservabilityQuery(ObservabilityQueryPort):
     def run_id_for_answer(self, answer_id: str) -> str | None:
         return "run_1" if answer_id == "answer_1" else None
@@ -494,11 +508,13 @@ class _ObservabilityQuery(ObservabilityQueryPort):
             storage_ref=None,
         )
 
+
 class _PromptCaptureQuery(PromptCaptureQueryPort):
     def model_turn_prompt_captures_for_run(
         self, run_id: str
     ) -> tuple[ModelTurnPromptCapture, ...]:
         return ()
+
 
 class _QuestionService:
     def __init__(
@@ -518,14 +534,15 @@ class _QuestionService:
         self.requests.append(request)
         return self._emit_result(request, event_sink=event_sink)
 
-    def continue_question(self, request, event_sink=None):
+    def respond_to_clarification(self, request, event_sink=None):
         self.continue_requests.append(request)
         return self._emit_result(request, event_sink=event_sink)
 
     def _emit_result(self, request, *, event_sink=None):
         result = self.result or AskResult(
             status="COMPLETED",
-            conversation_id=getattr(request, "conversation_id", "") or "conversation_cli",
+            conversation_id=getattr(request, "conversation_id", "")
+            or "conversation_cli",
             question_id=getattr(request, "question_id", "") or "question_cli",
             run_id="run_cli",
             answer="42",
@@ -564,6 +581,7 @@ class _QuestionService:
             event_sink.emit(_terminal_event(result))
         return result
 
+
 def _terminal_event(result: AskResult) -> dict[str, object]:
     if result.status == "COMPLETED":
         return {
@@ -573,9 +591,9 @@ def _terminal_event(result: AskResult) -> dict[str, object]:
             "answer": result.answer,
             "result_data": result.result_data or {},
         }
-    if result.status == "NEEDS_CLARIFICATION":
+    if result.status == "WAITING_FOR_CLARIFICATION":
         return {
-            "event": "run.needs_clarification",
+            "event": "run.waiting_for_clarification",
             "conversation_id": result.conversation_id,
             "question_id": result.question_id,
             "run_id": result.run_id,
@@ -600,6 +618,7 @@ def _terminal_event(result: AskResult) -> dict[str, object]:
             "retryable": False,
         },
     }
+
 
 class _BlockingEventedQuestionService:
     def __init__(self) -> None:
@@ -628,9 +647,11 @@ class _BlockingEventedQuestionService:
             result_data={"value": 42},
         )
 
+
 class _ExplodingLineageQuery:
     def __getattr__(self, name):
         raise AssertionError(f"runtime ask should not read explain lineage: {name}")
+
 
 class _QuestionRunFollower:
     def __init__(
@@ -652,15 +673,18 @@ class _QuestionRunFollower:
             event_sink.emit(_terminal_event(followed))
         return followed
 
+
 class _TimedOutQuestionRunFollower:
     def follow(self, result, *, event_sink=None, wait_seconds=0.0):
         del event_sink, wait_seconds
         return result
 
+
 class _FailingQuestionRunFollower:
     def follow(self, result, *, event_sink=None, wait_seconds=0.0):
         del result, event_sink, wait_seconds
         raise RuntimeError("follower unavailable")
+
 
 class _FailingQuestionService:
     def ask(self, request, event_sink=None):
@@ -668,11 +692,13 @@ class _FailingQuestionService:
         del request
         raise RuntimeError("service unavailable")
 
+
 class _ValidationFailingQuestionService:
     def ask(self, request, event_sink=None):
         del event_sink
         del request
         raise ValueError("ask request question must not be empty")
+
 
 def _model_call() -> ObservabilityModelCall:
     return ObservabilityModelCall(
@@ -728,6 +754,7 @@ def _model_call() -> ObservabilityModelCall:
         ),
     )
 
+
 def _anthropic_model_call() -> ObservabilityModelCall:
     return ObservabilityModelCall(
         model_call_id="call_2",
@@ -754,4 +781,5 @@ def _anthropic_model_call() -> ObservabilityModelCall:
         ),
     )
 
-__all__ = [name for name in globals() if not name.startswith('__')]
+
+__all__ = [name for name in globals() if not name.startswith("__")]

@@ -1,5 +1,7 @@
 import json
 
+from tests.lookup.source_binding_helpers import source_binding_request
+
 from fervis.lookup.relation_catalog import (
     CatalogField,
     EndpointRead,
@@ -15,6 +17,8 @@ from fervis.lookup.relation_catalog.selection import (
 from fervis.lookup.grounding.model import (
     GroundingRequest,
     InputBindingOption,
+    InputBindingPurpose,
+    InputBindingRoute,
     KnownInputBindingTask,
 )
 from fervis.lookup.grounding.prompt import GroundingTurnPrompt
@@ -46,7 +50,6 @@ from fervis.lookup.source_binding import (
     AnswerPopulation,
     BoundSource,
     SourceFulfillment,
-    SourceBindingRequest,
     SourceBindingTurnPrompt,
 )
 from fervis.lookup.plan_selection import (
@@ -58,18 +61,13 @@ from fervis.lookup.plan_selection import (
     PlanSelectionSet,
     SelectedSourceStrategy,
 )
-from fervis.memory.addresses import FactAddress
-from fervis.memory.artifacts import (
-    build_fact_artifact,
-    FactOutcome,
-)
 
 
 _APPROVED_CHARS = {
-    "question contract": (364, 15515, 23013),
-    "query enrichment": (364, 5156, 7379),
-    "grounding": (364, 4943, 6760),
-    "source binding": (364, 14507, 18366),
+    "question contract": (364, 17840, 26925),
+    "query enrichment": (364, 5185, 7408),
+    "grounding": (364, 6473, 8781),
+    "source binding": (364, 14698, 18234),
     "pattern fact planning": (364, 3497, 5311),
 }
 
@@ -119,61 +117,29 @@ def test_model_turn_invocations_match_approved_prompt_chars():
         )
 
 
+def test_question_contract_prompt_states_relational_ownership_together():
+    invocation = next(
+        item for item in _turn_invocations() if item.turn_name == "question contract"
+    )
+    ownership = "\n".join(
+        (
+            "Relational Ownership",
+            "answer_subject: Kind of candidate instance to which answer_expression applies.",
+            "answer_population: Candidate instances qualifying independently, before cross-instance operations.",
+            "answer_expression: Operation over candidates: list, order, compare, rank, limit, or aggregate.",
+            "answer_outputs: Values or facts projected from the result.",
+        )
+    )
+
+    assert ownership in invocation.prompt_text
+
+
 def test_model_turn_invocations_render_expected_shared_frame():
     for invocation in _turn_invocations():
         assert invocation.prompt_text.startswith("Current question:\n")
         assert f"We are currently on the {invocation.turn_name} step." in (
             invocation.prompt_text
         )
-
-
-def test_active_clarification_context_is_question_contract_only():
-    question = "ABC Mall"
-    clarification = build_fact_artifact(
-        artifact_id="turn_clarification",
-        outcome=FactOutcome.NEEDS_CLARIFICATION,
-        source_question="How much did we make yesterday?",
-        addresses=(
-            FactAddress.outcome(
-                address="outcome.needs_clarification",
-                terminal="needs_clarification",
-                clarification_questions=("Which store?",),
-            ),
-        ),
-    )
-    context = {"factArtifacts": [clarification.to_dict()]}
-    contract = _question_contract()
-    catalog = _catalog()
-
-    question_prompt = QuestionContractTurnPrompt(
-        QuestionContractRequest(
-            current_question=question,
-            conversation_context=context,
-        )
-    ).to_model_invocation(
-        build_turn_prompt_context(
-            current_question=question,
-            conversation_context=context,
-        )
-    )
-    query_prompt = QueryEnrichmentTurnPrompt(
-        QueryEnrichmentRequest(
-            question=question,
-            conversation_context=context,
-            requested_facts=contract.requested_facts,
-            relation_catalog=catalog,
-        )
-    ).to_model_invocation(
-        build_turn_prompt_context(
-            current_question=question,
-            conversation_context=context,
-        )
-    )
-
-    assert "Active clarification context:" in question_prompt.prompt_text
-    assert "Which store?" in question_prompt.prompt_text
-    assert "Active clarification context:" not in query_prompt.prompt_text
-    assert "Which store?" not in query_prompt.prompt_text
 
 
 def _turn_invocations():
@@ -222,6 +188,25 @@ def _turn_invocations():
                         id="bind_input_today_1",
                         known_input_id="input_today",
                         path="placeholder resolver",
+                        purpose=InputBindingPurpose.REFERENCE_GROUNDING,
+                        route=InputBindingRoute(
+                            known_input_id="input_today",
+                            resolver_row_source_id="resolver_today",
+                            resolver_read_id="read_today",
+                            resolver_endpoint_name="read_today",
+                            lookup_param_id="query.value",
+                            lookup_param_ref="read_today.query.value",
+                            lookup_param_type="string",
+                            lookup_field_ids=("field.value",),
+                            lookup_field_refs=("read_today.value",),
+                            return_field_id="field.id",
+                            return_field_ref="read_today.id",
+                            entity_kind="calendar_value",
+                            key_id="primary_key",
+                            key_component_id="id",
+                            context_field_ids=("field.value",),
+                            display="value -> calendar value",
+                        ),
                     ),
                 ),
             ),
@@ -234,7 +219,7 @@ def _turn_invocations():
         )
     )
 
-    source_request = SourceBindingRequest(
+    source_request = source_binding_request(
         question=question,
         question_contract=contract,
         requested_facts=contract.requested_facts,
@@ -348,6 +333,7 @@ def _question_contract() -> QuestionContract:
                 answer_outputs=(
                     RequestedFactAnswerOutput(
                         id="answer_1",
+                        role="ANSWER_VALUE",
                         description="Count of sales",
                     ),
                 ),

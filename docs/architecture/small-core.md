@@ -42,7 +42,7 @@ interpretation controls but does not yet implement `SemanticCatalogSnapshot` or
 independently governed host-semantic version checking. Until that boundary exists, the
 kernel must not present hashes derived from a saved program as current semantic
 authority. The future saved-pin/current-registry rule is documented in
-`biggest-strenght-and-weakness.md`.
+`biggest-strength-and-weakness.md`.
 
 If an essential link is missing, ambiguous, unauthorized, incomplete, or cannot
 be represented in proof, Fervis must clarify, return a typed non-answer outcome,

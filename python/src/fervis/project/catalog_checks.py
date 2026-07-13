@@ -211,7 +211,9 @@ def _response_conformance_check(
     if auth_skips:
         first = auth_skips[0]
         suffix = (
-            "" if len(auth_skips) == 1 else f" {len(auth_skips) - 1} more auth-protected."
+            ""
+            if len(auth_skips) == 1
+            else f" {len(auth_skips) - 1} more auth-protected."
         )
         return DoctorCheck(
             id="source.response_conformance",
