@@ -31,6 +31,7 @@ class QuestionRunStart:
     adapter_ref: str
     runtime_version: str
     base_run_id: str | None = None
+    trigger_clarification_response_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -84,6 +85,9 @@ def record_question_run_start(
                 adapter_ref=request.run.adapter_ref,
                 runtime_version=request.run.runtime_version,
                 base_run_id=request.run.base_run_id,
+                trigger_clarification_response_id=(
+                    request.run.trigger_clarification_response_id
+                ),
             )
         )
 

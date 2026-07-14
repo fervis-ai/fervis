@@ -51,7 +51,7 @@ expect:
       - kind: prior_user_question
         text: Which products did Staff One sell today?
         meaning_anchors:
-          - memory_id: turn_staff_sales.entity.staff_1
+          - anchor_id: turn_staff_sales.entity.staff_1
             text: Staff One
             occurrence: 1
             kind: entity_identity

@@ -51,6 +51,7 @@ def run_conversation_resolution_compile_case(payload: dict[str, Any]) -> list[st
     compiled = compile_conversation_resolution(
         resolution,
         memory_projection=projection,
+        context_sources=projection.context_sources,
     )
     actual = {
         "current_question_text": compiled.current_question_text,
@@ -180,7 +181,7 @@ def _context_source(payload: dict[str, Any]) -> ConversationContextSource:
         ),
         meaning_anchors=tuple(
             ConversationMeaningAnchor(
-                memory_id=str(anchor["memory_id"]),
+                anchor_id=str(anchor["anchor_id"]),
                 text=str(anchor["text"]),
                 occurrence=int(anchor.get("occurrence") or 1),
                 kind=str(anchor["kind"]),

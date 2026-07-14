@@ -248,12 +248,16 @@ def _grounding_payload_from_prompt(prompt: str) -> dict[str, Any]:
             ),
         )
         task = tasks[group["known_input_id"]]
-        bindings[group["known_input_id"]] = {
+        binding = {
             "selected_option_id": selected["binding_option_id"],
             "input_value": task["lookup_text"],
             "result_kind": "canonical_identity",
             "selection_basis": "Selected by deterministic test model.",
         }
+        field_refs = selected.get("lookup_surface", {}).get("field_refs", ())
+        if field_refs:
+            binding["matched_field_ref"] = field_refs[-1]
+        bindings[group["known_input_id"]] = binding
     return {
         "known_time_resolutions": _time_resolution_payload_from_prompt(prompt),
         "known_input_bindings": bindings,

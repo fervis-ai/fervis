@@ -342,17 +342,24 @@ def _resolution_source(
         source_contract = context.source_contracts.get(source_id)
         if source_contract is None:
             raise ValueError(f"{path}.source_id is not available")
-        memory_id = _required_text(context_anchor.memory_id)
-        source_text = _required_text(context_anchor.source_text)
-        if not any(
-            anchor.memory_id == memory_id and anchor.text == source_text
+        anchor_id = _required_text(context_anchor.anchor_id)
+        matching_anchors = tuple(
+            anchor
             for anchor in source_contract.meaning_anchors
-        ):
+            if anchor.anchor_id == anchor_id
+        )
+        if len(matching_anchors) != 1:
             raise ValueError(f"{path} does not reference a visible context anchor")
+        source_text = matching_anchors[0].text
         return ContextAnchorSource(
             source_id=source_id,
-            memory_id=memory_id,
+            anchor_id=anchor_id,
             source_text=source_text,
+            memory_ids=(
+                (anchor_id,)
+                if anchor_id in source_contract.source_memory_ids
+                else ()
+            ),
         )
     if kind is ResolutionSourceKind.FRAME_PART:
         return _frame_part_source(

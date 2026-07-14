@@ -13,14 +13,20 @@ from fervis.lookup.canonical_data import EntityKeyComponentValue, EntityKeyValue
 from fervis.memory.conversation_context import (
     ConversationAnswerShape,
     ConversationContextFrame,
+    ConversationContextSource,
     ConversationFrameParameter,
     ConversationFramePart,
     ConversationFramePartKind,
     ConversationMemoryCardProjection,
 )
+from fervis.lookup.clarification.context import (
+    ActiveClarification,
+    active_clarification_from_source,
+)
 from fervis.memory.prior_requests import PriorEntityIdentityBinding
 
 from .model import (
+    ContextAnchorSource,
     ConversationFrameCall,
     ConversationResolution,
     FramePartSource,
@@ -246,6 +252,7 @@ class CompiledConversationResolution:
     frame_call: ConversationFrameCall | None
     used_source_card_ids: tuple[str, ...]
     used_memory_ids: tuple[str, ...]
+    active_clarification: ActiveClarification | None = None
 
     def __post_init__(self) -> None:
         if not self.current_question_text or not self.contextualized_question:
@@ -262,6 +269,10 @@ class CompiledConversationResolution:
             payload["resolved_question_inputs"] = [
                 item.to_prompt_payload() for item in self.inputs
             ]
+        if self.active_clarification is not None:
+            payload["active_clarification"] = (
+                self.active_clarification.to_prompt_payload()
+            )
         return payload
 
     def context_texts(self) -> tuple[str, ...]:
@@ -316,6 +327,12 @@ class CompiledConversationResolution:
         )
 
     @property
+    def clarification_lineage_refs(self) -> tuple[str, ...]:
+        if self.active_clarification is None:
+            return ()
+        return self.active_clarification.lineage_refs
+
+    @property
     def uses_prior_context(self) -> bool:
         return (
             self.frame_call is not None
@@ -333,6 +350,7 @@ def compile_conversation_resolution(
     resolution: ConversationResolution,
     *,
     memory_projection: ConversationMemoryCardProjection,
+    context_sources: tuple[ConversationContextSource, ...],
 ) -> CompiledConversationResolution:
     if resolution.needs_clarification:
         raise ValueError("an unresolved conversation cannot be compiled")
@@ -369,7 +387,36 @@ def compile_conversation_resolution(
         frame_call=resolution.frame_call,
         used_source_card_ids=resolution.used_source_card_ids,
         used_memory_ids=resolution.used_memory_ids,
+        active_clarification=_active_clarification(
+            resolution,
+            context_sources=context_sources,
+        ),
     )
+
+
+def _active_clarification(
+    resolution: ConversationResolution,
+    *,
+    context_sources: tuple[ConversationContextSource, ...],
+) -> ActiveClarification | None:
+    used_source_ids = {
+        source.source_id
+        for clause in resolution.clauses
+        for value in clause.values
+        for source in value.sources
+        if isinstance(source, ContextAnchorSource)
+    }
+    active_sources = tuple(
+        source
+        for source in context_sources
+        if source.kind == "active_clarification"
+        and source.source_id in used_source_ids
+    )
+    if not active_sources:
+        return None
+    if len(active_sources) != 1:
+        raise ValueError("conversation resolution selected multiple clarification chains")
+    return active_clarification_from_source(active_sources[0])
 
 
 def _compile_clause(

@@ -432,7 +432,7 @@ def _meaning_anchors_for_source(
             if occurrence < 1:
                 continue
             anchor = ConversationMeaningAnchor(
-                memory_id=memory_id,
+                anchor_id=memory_id,
                 text=anchor_text,
                 occurrence=occurrence,
                 kind=kind,
@@ -448,7 +448,7 @@ def _meaning_anchors_for_source(
                 and text.strip()
             ):
                 anchor = ConversationMeaningAnchor(
-                    memory_id=memory_id,
+                    anchor_id=memory_id,
                     text=text.strip(),
                     occurrence=1,
                     kind=kind,
@@ -560,15 +560,16 @@ def _context_frame_parts(
                 text=answer_subject,
             )
         )
-    parts.extend(
-        ConversationFramePart(
-            part_id=f"output:{index}",
-            kind=ConversationFramePartKind.ANSWER_OUTPUT,
-            text=output.description,
-            source_ref=output.output_id,
+    for index, output in enumerate(prior_request.output_frames, start=1):
+        output_text = "row count" if output.role == "ROW_COUNT" else output.description
+        parts.append(
+            ConversationFramePart(
+                part_id=f"output:{index}",
+                kind=ConversationFramePartKind.ANSWER_OUTPUT,
+                text=output_text,
+                source_ref=output.output_id,
+            )
         )
-        for index, output in enumerate(prior_request.output_frames, start=1)
-    )
     parts.extend(_input_frame_parts(prior_request.slots))
     role_counts: dict[tuple[str, str], int] = {}
     for part in prior_request.semantic_parts:

@@ -51,25 +51,6 @@ class GroundingTurnPrompt(TurnPromptBase):
             self.copying_and_validity_section(builder),
             self.output_section(builder),
         ]
-        responses = self.request.clarification_responses
-        if responses:
-            sections.insert(
-                0,
-                builder.json_section(
-                    "Attributed clarification responses:",
-                    {
-                        "responses": [
-                            {
-                                "response_id": response.source.response_id,
-                                "clarification_id": response.source.clarification_id,
-                                "exact_user_text": response.source.exact_user_text,
-                                "known_input_id": response.known_input_id,
-                            }
-                            for response in responses
-                        ]
-                    },
-                ),
-            )
         return tuple(sections)
 
     def grounding_objective_section(
@@ -124,7 +105,7 @@ class GroundingTurnPrompt(TurnPromptBase):
                 "lookup_text itself need not consist only of that value.",
                 "For identity_validation, input_value is the exact value span converted to the declared type, without its field label or surrounding grammar.",
                 "Select reference_grounding when the endpoint can search or match the descriptive text.",
-                "For reference_grounding with result_kind=canonical_identity, copy lookup_text verbatim as input_value.",
+                "For reference_grounding with result_kind=canonical_identity, copy lookup_text verbatim as input_value and select the returned field whose value names the returned entity.",
                 "For reference_grounding with result_kind=matched_value, select matched_field_ref and set input_value to that field's concrete value expressed by lookup_text; remove subject words and grammar that state how it constrains the subject.",
                 "A matched input_value must be possible content of matched_field_ref, not a phrase describing the subject or its relationship to that field.",
                 "For reference_grounding, use canonical_identity when lookup_text names the entity returned by the selected route.",
@@ -153,7 +134,7 @@ class GroundingTurnPrompt(TurnPromptBase):
             (
                 "Return known_time_resolutions as an object keyed by known_input_id; include every time input key exactly once.",
                 "Return known_input_bindings as an object keyed by known_input_id; include every reference input key exactly once.",
-                "Copy the selected binding_option_id as selected_option_id, choose its result_kind, and write input_value according to that option's declared purpose.",
+                "Copy the selected binding_option_id as selected_option_id, choose its result_kind, select matched_field_ref when the option has returned lookup fields, and write input_value according to that option's declared purpose.",
                 "When no option fits, use selected_option_id=none, result_kind=none, and input_value as an empty string.",
                 "Briefly state why the selected option fits in selection_basis.",
                 "Do not rewrite, normalize, abbreviate, or invent identity keys.",
@@ -268,8 +249,7 @@ class GroundingTurnPrompt(TurnPromptBase):
                 {
                     "known_input_id": task.known_input_id,
                     "binding_options": [
-                        self._binding_option_payload(option)
-                        for option in task.options
+                        self._binding_option_payload(option) for option in task.options
                     ],
                 }
                 for task in self.request.tasks

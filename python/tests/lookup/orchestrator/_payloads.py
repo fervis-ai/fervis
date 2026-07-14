@@ -1401,8 +1401,7 @@ def _resolved_values_for_sources(
                 {
                     "kind": "context_anchor",
                     "source_id": str(source["source_id"]),
-                    "memory_id": str(anchor["memory_id"]),
-                    "source_text": str(anchor["text"]),
+                    "anchor_id": str(anchor["anchor_id"]),
                 }
             ],
         }
@@ -1412,7 +1411,7 @@ def _resolved_values_for_sources(
                 for source in selected_sources
                 for anchor in source.get("meaning_anchors") or ()
                 if isinstance(anchor, dict)
-                and anchor.get("memory_id")
+                and anchor.get("anchor_id")
                 and anchor.get("text")
             ),
             start=1,

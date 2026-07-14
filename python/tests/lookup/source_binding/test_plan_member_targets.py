@@ -70,6 +70,7 @@ from fervis.lookup.source_binding import (
     SourceBindingRequest,
     SourceBindingTurnPrompt,
 )
+from fervis.lookup.source_binding.prompt import _grain_safe_fulfillment_supports
 from fervis.lookup.source_binding.candidates import SourceCandidate
 from fervis.lookup.source_binding.candidates.contracts import (
     parse_evidence_item,
@@ -489,7 +490,7 @@ def test_source_binding_prompt_requires_each_shape_role_once():
     assert fact["required"] == ["plan_shape", "candidate_set", "observed_set"]
 
 
-def test_source_binding_prompt_scopes_plan_selection_basis_to_api_read():
+def test_source_binding_prompt_does_not_forward_plan_selection_basis():
     request = _closed_key_grouped_staff_sales_request()
     note = "Uses row-level sales records; grouping and counting still happen later."
     plan = request.plan_selection.plan_selections[0]
@@ -498,18 +499,18 @@ def test_source_binding_prompt_scopes_plan_selection_basis_to_api_read():
         plan_selection=PlanSelectionSet(plan_selections=(replace(plan, basis=note),)),
     )
     prompt = SourceBindingTurnPrompt(request)
-    target = _only_binding_target(prompt)
     xml = source_binding_candidates_xml(prompt.source_invocation_candidate_payload())
 
-    api_read = f'<api_read id="{target["source_candidate_id"]}"'
-    note_node = f"<selection_note>{note}</selection_note>"
+    assert note not in xml
+    assert "<selection_note>" not in xml
 
-    assert api_read in xml
-    assert note_node in xml
-    api_read_start = xml.index(api_read)
-    note_start = xml.index(note_node)
-    input_params_start = xml.index("<input_params>", api_read_start)
-    assert api_read_start < note_start < input_params_start
+
+def test_source_binding_requested_fact_has_one_authoritative_description():
+    prompt = SourceBindingTurnPrompt(_closed_key_grouped_staff_sales_request())
+    fact = prompt.requested_facts_payload()["requested_facts"][0]
+
+    assert "description" not in fact
+    assert fact["answer_request"]["answer_fact"]
 
 
 def test_closed_key_grouped_identity_param_is_backend_owned_not_model_authored():
@@ -875,6 +876,101 @@ def test_parse_source_fulfillment_derives_required_row_count_without_selectable_
         if fulfillment.answer_output_id == "answer_count"
     )
     assert count_fulfillment.row_count_basis_evidence_ids == ("row_population.data",)
+
+
+def test_ranked_rows_rejects_repeating_entity_reference_fulfillment():
+    evidence_items = tuple(
+        parse_evidence_item(item)
+        for item in (
+            {
+                "evidence_id": "source_1.data.key.primary_key",
+                "type": "candidate_key",
+                "key_id": "primary_key",
+                "entity_kind": "shift_compensation",
+                "components": [
+                    {
+                        "component_id": "shift_compensation_id",
+                        "field_evidence_id": "source_1.data.shift_compensation_id",
+                        "field_id": "shift_compensation_id",
+                    }
+                ],
+                "row_source_id": "read.shift_compensation.data",
+                "row_path_id": "data",
+            },
+            {
+                "evidence_id": "source_1.data.reference.staff",
+                "type": "entity_reference",
+                "reference_id": "staff",
+                "target_entity_kind": "staff",
+                "target_key_id": "primary_key",
+                "components": [
+                    {
+                        "component_id": "staff_id",
+                        "field_evidence_id": "source_1.data.staff_id",
+                        "field_id": "staff_id",
+                    }
+                ],
+                "row_source_id": "read.shift_compensation.data",
+                "row_path_id": "data",
+            },
+        )
+    )
+    support_set = parse_fulfillment_support_set(
+        {
+            "answer_output_id": "answer_staff",
+            "fulfillment_choice_id": "fulfillment_staff",
+            "fulfillment_support_set_id": "support_staff",
+            "fulfillment_slots": [
+                {
+                    "fulfillment_slot_id": "slot_staff",
+                    "entity_evidence": [evidence_items[1].payload()],
+                }
+            ],
+        }
+    )
+    candidate = SourceCandidate(
+        id="source_1",
+        applies_to_requested_fact_ids=("fact_1",),
+        kind="read",
+        evidence_items=evidence_items,
+        fulfillment_support_sets=(support_set,),
+    )
+
+    visible_supports = _grain_safe_fulfillment_supports(
+        candidate,
+        target=SourceBindingTarget(
+            binding_target_id="target.fact_1.ranked_rows.source_1.primary",
+            requested_fact_id="fact_1",
+            plan_shape="ranked_rows",
+            source_candidate_id="source_1",
+            requirement_id="primary",
+            answer_output_ids=("answer_staff",),
+            required_answer_output_ids=("answer_staff",),
+        ),
+        fulfillment_supports={"answer_staff": ("fulfillment_staff",)},
+    )
+
+    assert visible_supports == {"answer_staff": ()}
+
+    with pytest.raises(
+        ValueError,
+        match="ranked_rows entity fulfillment does not identify source row grain",
+    ):
+        parse_source_fulfillments(
+            {
+                "answer_staff": FulfillmentDecisionOutput(
+                    fulfillment_choice_id="fulfillment_staff",
+                    match_basis_explanation="Return the staff on the highest row.",
+                )
+            },
+            requested_fact_id="fact_1",
+            answer_output_ids={"answer_staff"},
+            required_answer_output_ids={"answer_staff"},
+            metric_answer_output_ids=set(),
+            candidate=candidate,
+            plan_shape="ranked_rows",
+            metric_fit_reviews_by_requested_output={},
+        )
 
 
 def test_closed_key_source_binding_retains_input_proofs_through_grouped_count_plan():

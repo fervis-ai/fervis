@@ -70,6 +70,7 @@ class ClarificationOption:
         if not self.id:
             raise ValueError("clarification option requires id")
 
+
 @dataclass(frozen=True)
 class ClarificationSubject:
     kind: ClarificationSubjectKind
@@ -274,10 +275,7 @@ def _validate_continuation_authority(clarification: Clarification) -> None:
             raise ValueError(
                 "grounding continuation requires canonical options or a free-text slot"
             )
-        if any(
-            option.key is None
-            for option in subject.options
-        ):
+        if any(option.key is None for option in subject.options):
             raise ValueError("grounding options require complete canonical identity")
         return
 
@@ -311,6 +309,19 @@ class ClarificationResponseSource:
 class ConversationResolutionResponse:
     source: ClarificationResponseSource
     candidate: ConversationInterpretationCandidate | None = None
+    annotation: ClarificationAnnotation | None = None
+
+
+@dataclass(frozen=True)
+class ClarificationAnnotation:
+    suspended_question_text: str
+    clarification_question_text: str
+
+    def __post_init__(self) -> None:
+        if not self.suspended_question_text.strip():
+            raise ValueError("clarification annotation requires suspended question")
+        if not self.clarification_question_text.strip():
+            raise ValueError("clarification annotation requires clarification question")
 
 
 @dataclass(frozen=True)
@@ -327,13 +338,6 @@ class GroundingIdentityResponse:
     requested_fact_id: str
     known_input_id: str
     option: ClarificationOption
-
-
-@dataclass(frozen=True)
-class GroundingTextResponse:
-    source: ClarificationResponseSource
-    requested_fact_id: str
-    known_input_id: str
 
 
 @dataclass(frozen=True)
@@ -359,7 +363,6 @@ ClarificationOwnerResponse = (
     ConversationResolutionResponse
     | QuestionContractResponse
     | GroundingIdentityResponse
-    | GroundingTextResponse
     | SourceBindingCatalogInputResponse
     | FactPlanningCatalogInputResponse
 )

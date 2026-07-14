@@ -312,9 +312,7 @@ def test_question_continuation_creates_next_run_under_same_question(adapter):
 
 def test_clarification_response_resumes_the_waiting_run(adapter):
     adapter.lookup.needs_clarification()
-    first = adapter.questions.ask(
-        _ask(adapter, execution_mode=ExecutionMode.INLINE)
-    )
+    first = adapter.questions.ask(_ask(adapter, execution_mode=ExecutionMode.INLINE))
     waiting = _persisted_run(adapter, first.question_id, first.run_id)
 
     adapter.lookup.complete_with_terminal(answer="42")
@@ -350,6 +348,161 @@ def test_clarification_response_resumes_the_waiting_run(adapter):
     assert request.question == "How many orders came in today?"
     assert len(request.clarification_responses) == 1
     assert request.clarification_responses[0].option.id == "area_nairobi"
+
+
+def test_grounding_prose_starts_a_cr_annotated_successor_run(adapter):
+    clarification = {
+        "id": "clarification_area",
+        "need": "target_reference",
+        "reason": "unresolved_reference",
+        "owner": "grounding",
+        "continuation": {
+            "kind": "grounding",
+            "knownInputId": "area_input",
+            "acceptsFreeText": True,
+        },
+        "requestedFactId": "fact_1",
+        "question": "Which matching location or area should I use?",
+        "subjects": [
+            {
+                "kind": "question_input",
+                "id": "area_input",
+                "label": "area",
+                "sourceText": "Nairobi",
+                "options": [],
+            }
+        ],
+        "evidence": [],
+    }
+    adapter.lookup.needs_clarification(payload=clarification)
+    first = adapter.questions.ask(_ask(adapter, execution_mode=ExecutionMode.INLINE))
+
+    adapter.lookup.complete_with_terminal(answer="28")
+    continued = adapter.questions.respond_to_clarification(
+        ClarificationResponseRequest(
+            question_id=first.question_id,
+            run_id=first.run_id,
+            clarification_id="clarification_area",
+            response_text="Area: Nairobi",
+            principal=QuestionPrincipal(
+                principal_id=adapter.principal_id,
+                tenant_id=adapter.tenant_id,
+            ),
+            execution_mode=ExecutionMode.INLINE,
+        )
+    )
+
+    assert continued.status == "COMPLETED", continued.error
+    assert continued.run_id != first.run_id
+    assert adapter.probe.work_item_status(first.run_id) == "SUPERSEDED"
+    assert adapter.probe.run_count("conversation_1") == 2
+    persisted = _persisted_run(adapter, first.question_id, continued.run_id)
+    assert persisted["triggerKind"] == "clarification_response"
+    assert persisted["baseRunId"] == first.run_id
+    request = adapter.lookup.last_request()
+    assert request is not None
+    assert request.question == "Area: Nairobi"
+    assert len(request.clarification_responses) == 1
+    annotation = request.clarification_responses[0].annotation
+    assert annotation is not None
+    assert annotation.suspended_question_text == "How many orders came in today?"
+    assert annotation.clarification_question_text == (
+        'I could not find area "Nairobi". Which area should I use?'
+    )
+
+
+def test_consecutive_grounding_prose_preserves_the_clarification_chain(adapter):
+    first_clarification = {
+        "id": "clarification_area",
+        "need": "target_reference",
+        "reason": "unresolved_reference",
+        "owner": "grounding",
+        "continuation": {
+            "kind": "grounding",
+            "knownInputId": "area_input",
+            "acceptsFreeText": True,
+        },
+        "requestedFactId": "fact_1",
+        "question": "Which matching location or area should I use?",
+        "subjects": [
+            {
+                "kind": "question_input",
+                "id": "area_input",
+                "label": "area",
+                "sourceText": "Nairobi",
+                "options": [],
+            }
+        ],
+        "evidence": [],
+    }
+    second_clarification = {
+        **first_clarification,
+        "id": "clarification_location_type",
+        "question": "Which kind of place should I use?",
+    }
+    adapter.lookup.needs_clarification(payload=first_clarification)
+    first = adapter.questions.ask(_ask(adapter, execution_mode=ExecutionMode.INLINE))
+    adapter.lookup.needs_clarification(payload=second_clarification)
+
+    second = adapter.questions.respond_to_clarification(
+        ClarificationResponseRequest(
+            question_id=first.question_id,
+            run_id=first.run_id,
+            clarification_id="clarification_area",
+            response_text="Nairobi",
+            principal=QuestionPrincipal(
+                principal_id=adapter.principal_id,
+                tenant_id=adapter.tenant_id,
+            ),
+            execution_mode=ExecutionMode.INLINE,
+        )
+    )
+
+    assert second.status == "WAITING_FOR_CLARIFICATION"
+    adapter.lookup.complete_with_terminal(answer="28")
+    third = adapter.questions.respond_to_clarification(
+        ClarificationResponseRequest(
+            question_id=first.question_id,
+            run_id=second.run_id,
+            clarification_id="clarification_location_type",
+            response_text="Area",
+            principal=QuestionPrincipal(
+                principal_id=adapter.principal_id,
+                tenant_id=adapter.tenant_id,
+            ),
+            execution_mode=ExecutionMode.INLINE,
+        )
+    )
+
+    assert third.status == "COMPLETED", third.error
+    assert adapter.probe.run_count("conversation_1") == 3
+    request = adapter.lookup.last_request()
+    assert request is not None
+    assert request.question == "Area"
+    annotations = tuple(
+        response
+        for response in request.clarification_responses
+        if response.annotation is not None
+    )
+    assert tuple(
+        (
+            response.source.clarification_id,
+            response.annotation.suspended_question_text,
+            response.annotation.clarification_question_text,
+        )
+        for response in annotations
+    ) == (
+        (
+            "clarification_area",
+            "How many orders came in today?",
+            'I could not find area "Nairobi". Which area should I use?',
+        ),
+        (
+            "clarification_location_type",
+            "Nairobi",
+            'I could not find area "Nairobi". Which area should I use?',
+        ),
+    )
 
 
 def test_clarification_cycles_expose_only_the_current_request(adapter):

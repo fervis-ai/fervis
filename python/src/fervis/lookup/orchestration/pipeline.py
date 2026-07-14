@@ -24,6 +24,7 @@ from fervis.lookup.conversation_resolution import (
     ConversationResolutionRequest,
     ConversationResolutionTurnResult,
     compile_conversation_resolution,
+    conversation_resolution_context_sources,
     generate_conversation_resolution,
 )
 from fervis.lookup.conversation_resolution.callable_frames import (
@@ -55,6 +56,7 @@ from fervis.lookup.outcomes.answerability import classify_plan_impossible
 from fervis.lookup.clarification import (
     AmbiguousQuestionInterpretation,
     Clarification,
+    clarification_response_ref,
     clarify,
 )
 from fervis.lookup.clarification.model import (
@@ -64,7 +66,6 @@ from fervis.lookup.clarification.model import (
     ConversationInterpretationEvidence,
     FactPlanningCatalogInputResponse,
     GroundingIdentityResponse,
-    GroundingTextResponse,
     QuestionContractResponse,
     SourceBindingCatalogInputResponse,
 )
@@ -403,15 +404,16 @@ def _run_conversation_resolution_phase(
         message="resolving conversation context",
     )
     try:
+        resolution_request = ConversationResolutionRequest(
+            question=state.request.question,
+            conversation_context=state.request.conversation_context,
+            host=state.request.host,
+            context_sources=context_sources,
+            context_frames=context_frames,
+            clarification_responses=conversation_responses,
+        )
         state.conversation_turn = generate_conversation_resolution(
-            request=ConversationResolutionRequest(
-                question=state.request.question,
-                conversation_context=state.request.conversation_context,
-                host=state.request.host,
-                context_sources=context_sources,
-                context_frames=context_frames,
-                clarification_responses=conversation_responses,
-            ),
+            request=resolution_request,
             model_port=state.ports.planner_model_port,
             provider=state.provider,
             model_key=state.model_key,
@@ -454,6 +456,9 @@ def _run_conversation_resolution_phase(
         state.compiled_conversation_resolution = compile_conversation_resolution(
             state.conversation_resolution,
             memory_projection=state.memory_card_projection,
+            context_sources=conversation_resolution_context_sources(
+                resolution_request
+            ),
         )
     except ValueError:
         return _runtime_error_terminal(
@@ -629,7 +634,7 @@ def _run_grounding_phase(
                 for response in state.request.clarification_responses
                 if isinstance(
                     response,
-                    (GroundingIdentityResponse, GroundingTextResponse),
+                    GroundingIdentityResponse,
                 )
             ),
         )
@@ -1463,7 +1468,7 @@ def _catalog_response_value(
     value_id = f"clarification_value:{response.response_id}"
     proof_refs = (
         f"clarification:{response.clarification_id}",
-        f"clarification_response:{response.response_id}",
+        clarification_response_ref(response.response_id),
     )
     applies_to = (response.requested_fact_id,)
     value_type = response.target.value_type.casefold()

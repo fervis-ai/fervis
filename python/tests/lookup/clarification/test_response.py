@@ -8,7 +8,6 @@ from fervis.lookup.clarification.model import (
     ConversationResolutionResponse,
     FactPlanningCatalogInputResponse,
     GroundingIdentityResponse,
-    GroundingTextResponse,
     QuestionContractResponse,
     SourceBindingCatalogInputResponse,
 )
@@ -34,9 +33,7 @@ def _subject(kind: str, id: str, options: tuple[str, ...] = (), *, canonical=Fal
                     {
                         "entityKind": "customer",
                         "keyId": "customer_id",
-                        "keyComponents": [
-                            {"componentId": "customer_id", "value": "1"}
-                        ],
+                        "keyComponents": [{"componentId": "customer_id", "value": "1"}],
                         "matchedField": "customer_id",
                         "matchedValue": "1",
                     }
@@ -121,7 +118,7 @@ def _target(
             _subject("question_input", "customer"),
             "Customer One",
             "",
-            GroundingTextResponse,
+            ConversationResolutionResponse,
         ),
         (
             "source_binding",
@@ -163,6 +160,7 @@ def test_response_dispatches_once_to_closed_owner_variant(
         response_id="response_1",
         response_text=response_text,
         selected_option_id=selected,
+        suspended_question_text="How many orders did the customer place?",
     )
 
     assert isinstance(response, response_type)
@@ -199,9 +197,7 @@ def test_grounding_clarification_preserves_typed_canonical_key_components() -> N
         ("customer_1",),
         canonical=True,
     )
-    subject["options"][0]["keyComponents"][0]["value"] = {
-        "$uuid": str(customer_id)
-    }
+    subject["options"][0]["keyComponents"][0]["value"] = {"$uuid": str(customer_id)}
     clarification = _clarification(
         "grounding",
         {

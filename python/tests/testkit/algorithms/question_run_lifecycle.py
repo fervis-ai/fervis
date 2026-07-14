@@ -19,12 +19,13 @@ from fervis.lookup.answer_program.persistence import (
     parse_stored_program_invocation,
     program_invocation,
 )
-from fervis.questions.service import QuestionService
+from fervis.questions.service import QuestionService, clarification_successor_run
+from fervis.lookup.clarification.model import ConversationResolutionResponse
 from fervis.questions.execution_specs import execution_spec_kind
 from fervis.run_work import FailQueuedRunRequest, QueuedRunRequest
 from fervis.questions.ports import (
     AuthorizedQuestionAccess,
-    ClarificationRunResume,
+    ClarificationRunResponse,
     LookupExecutionRequest,
     LookupExecutionResult,
     ParsedQuestionRunSubmission,
@@ -106,14 +107,13 @@ def _run_clarification_resume_case(payload: dict[str, Any]) -> list[str]:
             response_text=str(input_payload["response_text"]),
             principal=_principal(input_payload),
             execution_mode=ExecutionMode.INLINE,
-            selected_option_id=str(
-                input_payload.get("selected_option_id") or ""
-            ),
+            selected_option_id=str(input_payload.get("selected_option_id") or ""),
         )
     )
     actual = {
         "first_result": _result_payload(first),
         "resumed_result": _result_payload(resumed),
+        "suspended_run_status": runs.runs[first.run_id].status,
         "run_count": lineage.run_count,
         "question_count": lineage.question_count,
         "clarification_response_count": runs.clarification_response_count,
@@ -139,12 +139,16 @@ def _resumed_clarification_summary(lookup: "_FakeLookup") -> dict[str, object] |
     payload = clarification_response_payload(response)
     kind = str(payload["kind"])
     summary: dict[str, object] = {
-        "owner": kind.removesuffix("_catalog_input").removesuffix("_identity").removesuffix("_text"),
+        "owner": kind.removesuffix("_catalog_input")
+        .removesuffix("_identity")
+        .removesuffix("_text"),
         "continuation_kind": kind,
         "dispatch_count": 1,
     }
-    if kind in {"conversation_resolution", "question_contract", "grounding_text"}:
+    if kind in {"conversation_resolution", "question_contract"}:
         summary["attributed_source"] = payload["source"]
+    if kind == "conversation_resolution" and payload.get("annotation") is not None:
+        summary["annotation"] = payload["annotation"]
     if kind == "grounding_identity":
         summary["closed_target"] = {
             "knownInputId": payload["knownInputId"],
@@ -689,39 +693,55 @@ class _InMemoryRuns:
             run=run,
         )
 
-    def resume_question_run_atomically(
+    def respond_to_clarification_atomically(
         self,
-        resume: ClarificationRunResume,
+        resume: ClarificationRunResponse,
     ) -> QuestionRunSubmissionResult:
         current = self.runs[resume.run_id]
         payload = self.pending_clarifications[resume.clarification_id]
+        spec = current.submission.spec
+        if not isinstance(spec, ResolveQuestionRunSpec):
+            raise ValueError("clarification can resume only a question lookup")
         response = parse_clarification_response(
             clarification_from_payload(payload),
             response_id=resume.response_id,
             response_text=resume.response_text,
             selected_option_id=resume.selected_option_id,
+            suspended_question_text=spec.question,
         )
-        spec = current.submission.spec
-        if not isinstance(spec, ResolveQuestionRunSpec):
-            raise ValueError("clarification can resume only a question lookup")
-        submission = replace(
-            current.submission,
-            spec=replace(
-                spec,
-                clarification_responses=(*spec.clarification_responses, response),
-            ),
-            execution_mode=resume.execution_mode,
-        )
+        if (
+            isinstance(response, ConversationResolutionResponse)
+            and response.annotation is not None
+        ):
+            submission, record = clarification_successor_run(
+                current.submission,
+                response=resume,
+                annotation=response,
+            )
+            self.runs[resume.run_id] = replace(current, status="SUPERSEDED")
+            self.lineage.record_question_run(record)
+            active_attempt = 1
+        else:
+            submission = replace(
+                current.submission,
+                spec=replace(
+                    spec,
+                    clarification_responses=(
+                        *spec.clarification_responses,
+                        response,
+                    ),
+                ),
+                execution_mode=resume.execution_mode,
+            )
+            active_attempt = 2
         queued = QueuedRun(
             submission=submission,
             status=(
-                "RUNNING"
-                if resume.execution_mode is ExecutionMode.INLINE
-                else "QUEUED"
+                "RUNNING" if resume.execution_mode is ExecutionMode.INLINE else "QUEUED"
             ),
-            active_attempt=2,
+            active_attempt=active_attempt,
         )
-        self.runs[resume.run_id] = queued
+        self.runs[submission.run_id] = queued
         self.clarification_response_count += 1
         return QuestionRunSubmissionResult(
             kind=QuestionRunSubmissionKind.CREATED,

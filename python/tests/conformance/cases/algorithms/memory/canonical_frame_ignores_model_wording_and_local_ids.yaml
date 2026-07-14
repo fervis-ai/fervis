@@ -72,5 +72,4 @@ expect:
             - {part_id: subject, kind: answer_subject}
             - {part_id: "output:1", kind: answer_output}
             - {part_id: "input:time_scope:1", kind: time_scope}
-            - {part_id: "population:normal_instance_guard:1", kind: population_constraint}
       - *canonical_frame

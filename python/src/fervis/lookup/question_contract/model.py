@@ -891,10 +891,17 @@ class RequestedFact:
 class QuestionContract:
     question_inputs: tuple[RequestedFactKnownInput, ...] = ()
     requested_facts: tuple[RequestedFact, ...] = ()
+    clarification_lineage_refs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.requested_facts:
             raise ValueError("question contract requires requested facts")
+        if any(not ref.strip() for ref in self.clarification_lineage_refs):
+            raise ValueError("clarification lineage refs must be non-empty")
+        if len(self.clarification_lineage_refs) != len(
+            set(self.clarification_lineage_refs)
+        ):
+            raise ValueError("clarification lineage refs must be unique")
         if not self.question_inputs:
             question_inputs: list[RequestedFactKnownInput] = []
             inputs_by_id: dict[str, RequestedFactKnownInput] = {}

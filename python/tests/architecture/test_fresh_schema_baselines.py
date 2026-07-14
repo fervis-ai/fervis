@@ -12,12 +12,13 @@ def test_persistence_keeps_one_frozen_snapshot_per_public_revision() -> None:
     assert _snapshot_files(SOURCE / "project" / "persistence" / "schema_snapshots") == (
         "v0001.py",
         "v0002.py",
+        "v0003.py",
     )
 
 
 def test_public_and_alembic_revisions_name_the_current_head() -> None:
-    assert TARGET_REVISION == "fervis.0002"
-    assert ALEMBIC_REVISION == "0002_same_run_clarification_and_idempotency"
+    assert TARGET_REVISION == "fervis.0003"
+    assert ALEMBIC_REVISION == "0003_clarification_successor_runs"
 
 
 def _snapshot_files(path: Path) -> tuple[str, ...]:

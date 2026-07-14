@@ -69,7 +69,7 @@ def _memory_attribution_response(
     selected_anchors = tuple(
         anchor
         for anchor in anchors
-        if str(getattr(anchor, "memory_id", "")) == selected_memory_id
+        if str(getattr(anchor, "anchor_id", "")) == selected_memory_id
     )
     values: list[dict[str, object]] = [
         {
@@ -80,8 +80,7 @@ def _memory_attribution_response(
                 {
                     "kind": "context_anchor",
                     "source_id": str(getattr(selected, "source_id")),
-                    "memory_id": str(getattr(anchor, "memory_id")),
-                    "source_text": str(getattr(anchor, "text")),
+                    "anchor_id": str(getattr(anchor, "anchor_id")),
                 }
             ],
         }
@@ -182,7 +181,7 @@ def _clause_resolution_conversation_response(
     entity_anchor = next(
         anchor
         for anchor in entity_selected.meaning_anchors
-        if anchor.memory_id == entity_memory_id
+        if anchor.anchor_id == entity_memory_id
     )
     clauses = payload["outcome"]["clauses"]
     assert isinstance(clauses, list)
@@ -197,8 +196,7 @@ def _clause_resolution_conversation_response(
                 {
                     "kind": "context_anchor",
                     "source_id": entity_selected.source_id,
-                    "memory_id": entity_anchor.memory_id,
-                    "source_text": entity_anchor.text,
+                    "anchor_id": entity_anchor.anchor_id,
                 }
             ],
         }
@@ -634,6 +632,7 @@ def test_subject_change_preserves_prior_canonical_identity() -> None:
     compiled = compile_conversation_resolution(
         resolution,
         memory_projection=projection,
+        context_sources=projection.context_sources,
     )
 
     identity = compiled.identity_inputs()[0].canonical_identity
@@ -644,6 +643,76 @@ def test_subject_change_preserves_prior_canonical_identity() -> None:
     prompt_payload = str(compiled.to_prompt_payload())
     assert "canonical_identity" not in prompt_payload
     assert "staff_alice" not in prompt_payload
+
+
+def test_subject_change_retains_operation_without_old_subject_policy() -> None:
+    projection = project_conversation_memory_cards(
+        {
+            "factArtifacts": [
+                build_fact_artifact(
+                    artifact_id="turn_locations",
+                    outcome=FactOutcome.ANSWERED,
+                    source_question="How many locations do we have?",
+                    provenance={
+                        "question_contract": {
+                            "question_inputs": [],
+                            "answer_requests": [
+                                {
+                                    "id": "fact_1",
+                                    "answer_fact": "number of locations",
+                                    "answer_expression": {
+                                        "family": "scalar_aggregate"
+                                    },
+                                    "answer_subject": _answer_subject_payload(
+                                        "locations"
+                                    ),
+                                    "answer_population": {
+                                        "population_label": "locations",
+                                        "counted_unit": "location",
+                                        "membership_tests": [
+                                            {
+                                                "test_id": "subject_identity",
+                                                "kind": "SUBJECT_IDENTITY",
+                                                "polarity": "MUST_PASS",
+                                                "test_question": (
+                                                    "Is this a location?"
+                                                ),
+                                                "owned_question_input_refs": [],
+                                            },
+                                            {
+                                                "test_id": "normal_instance_guard",
+                                                "kind": "NORMAL_INSTANCE_GUARD",
+                                                "polarity": "MUST_PASS",
+                                                "test_question": (
+                                                    "Is this an ordinary location?"
+                                                ),
+                                                "owned_question_input_refs": [],
+                                            },
+                                        ],
+                                    },
+                                    "answer_outputs": [
+                                        {
+                                            "id": "answer_1",
+                                            "description": "count of locations",
+                                            "role": "ROW_COUNT",
+                                        }
+                                    ],
+                                    "used_question_inputs": [],
+                                }
+                            ],
+                        }
+                    },
+                ).to_dict()
+            ]
+        },
+        current_question="What about stores?",
+    )
+
+    parts_by_id = {
+        part.part_id: part for part in projection.context_frames[0].parts
+    }
+    assert parts_by_id["output:1"].text == "row count"
+    assert tuple(parts_by_id) == ("subject", "output:1")
 
 
 def _memory_context_with_prior_numeric_slots() -> dict[str, object]:

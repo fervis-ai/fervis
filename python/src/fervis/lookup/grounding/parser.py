@@ -119,11 +119,18 @@ def _selected_binding(
     ):
         raise ValueError("identity validation must return canonical identity")
     matched_field_ref = (review.matched_field_ref or "").strip()
-    if result_kind is InputBindingResultKind.MATCHED_VALUE:
-        if matched_field_ref not in option.route.lookup_field_refs:
-            raise ValueError("matched value requires a selected lookup field")
+    if option.purpose is InputBindingPurpose.REFERENCE_GROUNDING:
+        allowed_field_refs = (
+            option.route.canonical_lookup_field_refs
+            if result_kind is InputBindingResultKind.CANONICAL_IDENTITY
+            else option.route.lookup_field_refs
+        )
+        if allowed_field_refs and matched_field_ref not in allowed_field_refs:
+            raise ValueError("reference grounding requires a selected lookup field")
+        if not allowed_field_refs and matched_field_ref:
+            raise ValueError("grounding selected an unexpected lookup field")
     elif matched_field_ref:
-        raise ValueError("canonical identity must not select a matched field")
+        raise ValueError("grounding selected an unexpected lookup field")
     return ResolvedInputBinding(
         option_id=option_id,
         input_value=input_value,

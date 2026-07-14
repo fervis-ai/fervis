@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import pytest
 
+from fervis.lookup.clarification import ActiveClarification, ClarificationExchange
+from fervis.lookup.conversation_resolution.compilation import (
+    CompiledConversationResolution,
+    ResolvedLiteralQuestionInput,
+)
 from fervis.lookup.question_contract import (
     KnownInputSource,
     LiteralInputRole,
@@ -101,6 +106,62 @@ def test_requested_fact_answer_output_serializes_its_computation_role():
             "role": "MEASURED_VALUE",
         }
     ]
+
+
+def test_question_contract_inherits_complete_clarification_lineage() -> None:
+    question = "How many sales happened today?"
+    payload = _single_input_payload(
+        {
+            "input_ref": "input_today",
+            "kind": "literal_text",
+            "source": "conversation_resolution",
+            "resolved_input_ref": "input_today",
+            "value_source_text": "today",
+            "operand_text": "today",
+            "role": "time_value",
+            "inventory_check": {
+                "why_this_is_an_input": "today constrains the requested result"
+            },
+        }
+    )
+    resolution = CompiledConversationResolution(
+        current_question_text="today",
+        contextualized_question=question,
+        clauses=(),
+        inputs=(
+            ResolvedLiteralQuestionInput(
+                input_ref="input_today",
+                value_source_text="today",
+                resolved_value_text="today",
+                role=LiteralInputRole.TIME_VALUE,
+            ),
+        ),
+        frame_call=None,
+        used_source_card_ids=(),
+        used_memory_ids=(),
+        active_clarification=ActiveClarification(
+            original_question="How many sales happened?",
+            exchanges=(
+                ClarificationExchange(
+                    response_id="response_1",
+                    clarification_id="clarification_1",
+                    question="Which day should I use?",
+                    answer="today",
+                ),
+            ),
+        ),
+    )
+
+    parsed = parse_question_contract(
+        tool_name="submit_question_contract_outcome",
+        payload=_decision_payload(payload),
+        question_context=question,
+        conversation_resolution=resolution,
+    )
+
+    assert parsed.outcome.clarification_lineage_refs == (
+        "clarification_response:response_1",
+    )
 
 
 def test_answer_output_schema_requires_a_computation_role():

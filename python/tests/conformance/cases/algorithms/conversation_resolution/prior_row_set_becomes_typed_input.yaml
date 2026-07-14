@@ -11,7 +11,7 @@ input:
       source_card_ids: [rows_card]
       source_memory_ids: [sales_rows]
       meaning_anchors:
-        - {memory_id: sales_rows, text: five sales, occurrence: 1, kind: row_set, label: prior sales}
+        - {anchor_id: sales_rows, text: five sales, occurrence: 1, kind: row_set, label: prior sales}
   memories:
     - {memory_id: sales_rows, kind: row_set}
   payload:
@@ -32,7 +32,7 @@ input:
               frame_parameter: {kind: none}
               sources:
                 - {kind: current_span, text: those, occurrence: 1}
-                - {kind: context_anchor, source_id: prior_answer, memory_id: sales_rows, source_text: five sales}
+                - {kind: context_anchor, source_id: prior_answer, anchor_id: sales_rows}
 expect:
   result_contains:
     question_contract_context:

@@ -250,11 +250,20 @@ def _reference_binding_options(
                         lookup_param.param_ref if lookup_param is not None else ""
                     ),
                     lookup_param_type=(
-                        lookup_param.type.value if lookup_param is not None else "string"
+                        lookup_param.type.value
+                        if lookup_param is not None
+                        else "string"
                     ),
                     lookup_field_ids=tuple(field.id for field in lookup_fields),
                     lookup_field_refs=(
                         tuple(field.field_ref for field in lookup_fields)
+                    ),
+                    canonical_lookup_field_refs=tuple(
+                        field.field_ref
+                        for field in _canonical_identity_lookup_fields(
+                            resolver_source,
+                            lookup_fields=lookup_fields,
+                        )
                     ),
                     entity_kind=resolver_return.entity_kind,
                     key_id=resolver_return.key_id,
@@ -262,7 +271,9 @@ def _reference_binding_options(
                         InputBindingKeyComponent(
                             component_id=component.id,
                             field_id=component.field_id,
-                            field_ref=resolver_source.field(component.field_id).field_ref,
+                            field_ref=resolver_source.field(
+                                component.field_id
+                            ).field_ref,
                         )
                         for component in resolver_return.key.components
                     ),
@@ -455,14 +466,15 @@ def _resolver_return_fields(source: RowSource) -> tuple[_ResolverReturnField, ..
     return tuple(
         _ResolverReturnField(
             key=key,
-            fields=tuple(source.field(component.field_id) for component in key.components),
+            fields=tuple(
+                source.field(component.field_id) for component in key.components
+            ),
             entity_kind=key.entity_kind,
             key_id=key.id,
             context_field_ids=_resolver_identity_context_field_ids(source, key=key),
         )
         for key in source.candidate_keys
-        if key.primary
-        and key.stable
+        if key.primary and key.stable
     )
 
 
@@ -542,6 +554,28 @@ def _resolver_text_lookup_fields(
     source: RowSource,
 ) -> tuple[RowSourceField, ...]:
     return tuple(field for field in source.fields if field.can_carry_lookup_text)
+
+
+def _canonical_identity_lookup_fields(
+    source: RowSource,
+    *,
+    lookup_fields: tuple[RowSourceField, ...],
+) -> tuple[RowSourceField, ...]:
+    related_entity_field_ids = {
+        *(
+            component.local_field_id
+            for ref in source.entity_references
+            for component in ref.components
+        ),
+        *(
+            field_id
+            for ref in source.entity_references
+            for field_id in ref.context_field_ids
+        ),
+    }
+    return tuple(
+        field for field in lookup_fields if field.id not in related_entity_field_ids
+    )
 
 
 def _binding_path(
@@ -789,7 +823,9 @@ def _identity_candidate_label(value: FactValue) -> str:
     if not isinstance(payload, IdentityValuePayload):
         return value.label or value.id
     identity_label = payload.entity_kind.replace("_", " ").title()
-    display = payload.display_value or value.label or str(payload.key.component_values())
+    display = (
+        payload.display_value or value.label or str(payload.key.component_values())
+    )
     components = ", ".join(
         f"{component.component_id}={component.value}"
         for component in payload.key.components
@@ -975,7 +1011,9 @@ def _fact_value_from_resolved_row(
     result_kind: InputBindingResultKind,
 ) -> FactValue | None:
     if result_kind is InputBindingResultKind.MATCHED_VALUE:
-        return _named_value_from_resolved_match(task=task, route=route, resolved=resolved)
+        return _named_value_from_resolved_match(
+            task=task, route=route, resolved=resolved
+        )
     key = _entity_key_from_resolved_row(
         route=route,
         resolver_source=resolver_source,
@@ -1175,7 +1213,6 @@ def _resolved_lookup_rows(
         route=route,
         resolver_source=resolver_source,
         text=input_value,
-        result_kind=result_kind,
         matched_field_ref=matched_field_ref,
     ):
         key = repr(sorted(resolved.row.items()))
@@ -1221,21 +1258,12 @@ def _exact_lookup_rows(
     route: InputBindingRoute,
     resolver_source: RowSource,
     text: str | int | float | bool,
-    result_kind: InputBindingResultKind,
     matched_field_ref: str = "",
 ) -> tuple[_ResolvedLookupRow, ...]:
     if not route.lookup_field_ids:
         return tuple(_ResolvedLookupRow(row=row) for row in rows)
     lookup_fields = _lookup_fields_for_route(route, resolver_source=resolver_source)
-    if (
-        result_kind is InputBindingResultKind.CANONICAL_IDENTITY
-        and not route.lookup_param_ref
-    ):
-        identity_field_ids = set(route.identity_lookup_field_ids)
-        lookup_fields = tuple(
-            field for field in lookup_fields if field.id in identity_field_ids
-        )
-    elif result_kind is InputBindingResultKind.MATCHED_VALUE and matched_field_ref:
+    if matched_field_ref:
         lookup_fields = tuple(
             field for field in lookup_fields if field.ref == matched_field_ref
         )

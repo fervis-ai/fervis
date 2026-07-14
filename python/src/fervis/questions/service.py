@@ -39,8 +39,10 @@ from fervis.lookup.answer_program.rerun import (
     ProgramNotRerunnableError,
     RerunnableProgramInvocation,
 )
+from fervis.lookup.clarification.context import extend_clarification_chain
+from fervis.lookup.clarification.model import ConversationResolutionResponse
 from .ports import (
-    ClarificationRunResume,
+    ClarificationRunResponse,
     QuestionRunRecord,
     QuestionRunStart,
     QuestionRunSubmissionKind,
@@ -66,8 +68,7 @@ def _require_matching_idempotent_ask(
     stored = existing.submission
     spec = stored.spec
     if not isinstance(spec, ResolveQuestionRunSpec) or (
-        _ask_replay_payload(request)
-        != _stored_ask_replay_payload(spec)
+        _ask_replay_payload(request) != _stored_ask_replay_payload(spec)
     ):
         raise QuestionLifecycleError(
             "idempotency_payload_conflict",
@@ -123,6 +124,48 @@ class UuidQuestionIdPort:
 
     def new_clarification_response_id(self) -> str:
         return str(uuid.uuid4())
+
+
+def clarification_successor_run(
+    current: RunSubmission,
+    *,
+    response: ClarificationRunResponse,
+    annotation: ConversationResolutionResponse,
+) -> tuple[RunSubmission, QuestionRunRecord]:
+    spec = current.spec
+    if not isinstance(spec, ResolveQuestionRunSpec):
+        raise ValueError("clarification can continue only a question lookup")
+    clarification_chain = extend_clarification_chain(
+        spec.clarification_responses,
+        annotation,
+    )
+    successor = RunSubmission(
+        conversation_id=current.conversation_id,
+        tenant_id=current.tenant_id,
+        question_id=current.question_id,
+        run_id=response.successor_run_id,
+        principal=response.principal,
+        spec=replace(
+            spec,
+            question=response.response_text,
+            context_run_id=None,
+            clarification_responses=clarification_chain,
+        ),
+        execution_mode=response.execution_mode,
+    )
+    record = QuestionRunRecord(
+        run=QuestionRunStart(
+            question_id=current.question_id,
+            run_id=successor.run_id,
+            kind=QuestionRunKind.MODEL_ASSISTED,
+            trigger_kind=RunTriggerKind.CLARIFICATION_RESPONSE,
+            adapter_ref=response.adapter_ref,
+            runtime_version=response.runtime_version,
+            base_run_id=response.run_id,
+            trigger_clarification_response_id=response.response_id,
+        )
+    )
+    return successor, record
 
 
 class QuestionService:
@@ -205,9 +248,7 @@ class QuestionService:
             ),
             execution_mode=request.execution_mode,
             idempotency_key=request.idempotency_key,
-            idempotency_scope=(
-                "" if requested_conversation_id else "new_conversation"
-            ),
+            idempotency_scope=("" if requested_conversation_id else "new_conversation"),
         )
         record = QuestionRunRecord(
             question=QuestionStart(
@@ -253,8 +294,8 @@ class QuestionService:
         )
         if stored is None:
             raise ValueError(f"question not found: {request.question_id}")
-        submitted = self.runs.resume_question_run_atomically(
-            ClarificationRunResume(
+        submitted = self.runs.respond_to_clarification_atomically(
+            ClarificationRunResponse(
                 question_id=stored.question_id,
                 run_id=request.run_id,
                 clarification_id=request.clarification_id,
@@ -263,6 +304,9 @@ class QuestionService:
                 selected_option_id=request.selected_option_id,
                 principal=request.principal,
                 execution_mode=request.execution_mode,
+                successor_run_id=self.ids.new_run_id(),
+                adapter_ref=self.adapter_ref,
+                runtime_version=self.runtime_version,
             )
         )
         return self._finish_submitted_question_run(

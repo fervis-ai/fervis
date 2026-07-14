@@ -173,6 +173,7 @@ def _entity_references_from_bindings(
     for binding in bindings:
         reference = _entity_reference_contract(
             binding,
+            bindings=bindings,
         )
         if reference is not None:
             references.append(reference)
@@ -181,6 +182,8 @@ def _entity_references_from_bindings(
 
 def _entity_reference_contract(
     binding: _ModelFieldBinding,
+    *,
+    bindings: tuple[_ModelFieldBinding, ...],
 ) -> EntityReferenceContract | None:
     if not _binding_has_scalar_value(binding):
         return None
@@ -198,7 +201,31 @@ def _entity_reference_contract(
         target_entity_kind=_model_identity_type(target_model),
         target_key_id=_model_field_key_id(target_key),
         components=(component,),
-        context_field_paths=(),
+        context_field_paths=_nested_reference_context_paths(
+            binding,
+            target_model=target_model,
+            bindings=bindings,
+        ),
+    )
+
+
+def _nested_reference_context_paths(
+    binding: _ModelFieldBinding,
+    *,
+    target_model: type,
+    bindings: tuple[_ModelFieldBinding, ...],
+) -> tuple[str, ...]:
+    parent_path, separator, _ = binding.output_path.rpartition(".")
+    if not separator:
+        return ()
+    nested_prefix = f"{parent_path}."
+    return tuple(
+        other.output_path
+        for other in bindings
+        if other is not binding
+        and other.model is target_model
+        and other.output_path.startswith(nested_prefix)
+        and _binding_has_scalar_value(other)
     )
 
 

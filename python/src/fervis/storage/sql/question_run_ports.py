@@ -26,7 +26,7 @@ from fervis.project.persistence.schema import metadata
 from fervis.questions.contracts import ExecutionMode, QuestionPrincipal
 from fervis.questions.ports import (
     AuthorizedQuestionAccess,
-    ClarificationRunResume,
+    ClarificationRunResponse,
     QueuedRun,
     QuestionRunRecord,
     ParsedQuestionRunSubmission,
@@ -36,8 +36,10 @@ from fervis.questions.ports import (
     ResolveQuestionRunSpec,
 )
 from fervis.lookup.clarification.response import parse_clarification_response
+from fervis.lookup.clarification import clarification_response_ref
 from fervis.lookup.clarification.payload import clarification_from_payload
-from fervis.questions.service import QuestionService
+from fervis.lookup.clarification.model import ConversationResolutionResponse
+from fervis.questions.service import QuestionService, clarification_successor_run
 from fervis.lookup.answer_program.persistence import (
     StoredProgramInvocation,
     parse_stored_program_invocation,
@@ -367,9 +369,9 @@ class SQLQuestionLifecyclePort:
             run=_queued_run_from_work_item(self.engine, enqueued.item),
         )
 
-    def resume_question_run_atomically(
+    def respond_to_clarification_atomically(
         self,
-        resume: ClarificationRunResume,
+        resume: ClarificationRunResponse,
     ) -> QuestionRunSubmissionResult:
         authority = ReadAuthority.from_principal(resume.principal)
         item = self.queue.get_work_item_for_run(resume.run_id)
@@ -396,26 +398,49 @@ class SQLQuestionLifecyclePort:
             response_id=resume.response_id,
             response_text=resume.response_text,
             selected_option_id=resume.selected_option_id,
+            suspended_question_text=item.spec.question,
         )
         with sql_transaction(self.engine):
-            resumed = self.queue.resume_from_clarification(
-                run_id=resume.run_id,
-                spec=replace(
-                    item.spec,
-                    clarification_responses=(*item.spec.clarification_responses, response),
-                ),
-                execution_mode=resume.execution_mode.value,
-            )
             self.recorder.record_clarification_response(
                 ClarificationResponseWrite(
                     response_id=resume.response_id,
                     run_id=resume.run_id,
                     clarification_id=resume.clarification_id,
-                    evidence_ref=f"clarification_response:{resume.response_id}",
+                    evidence_ref=clarification_response_ref(resume.response_id),
                     response_text=resume.response_text,
                     selected_option_id=resume.selected_option_id,
                 )
             )
+            if not (
+                isinstance(response, ConversationResolutionResponse)
+                and response.annotation is not None
+            ):
+                resumed = self.queue.resume_from_clarification(
+                    run_id=resume.run_id,
+                    spec=replace(
+                        item.spec,
+                        clarification_responses=(
+                            *item.spec.clarification_responses,
+                            response,
+                        ),
+                    ),
+                    execution_mode=resume.execution_mode.value,
+                )
+            else:
+                current = _queued_run_from_work_item(self.engine, item).submission
+                submission, record = clarification_successor_run(
+                    current,
+                    response=resume,
+                    annotation=response,
+                )
+                self.queue.supersede_waiting_run(resume.run_id)
+                enqueued = self.queue.enqueue_run_work_item(submission=submission)
+                record_question_run_start(
+                    _spine_question_run_start(record),
+                    sequence_store=SQLQuestionRunSequenceStore(self.engine),
+                    recorder=self.recorder,
+                )
+                resumed = enqueued.item
         return QuestionRunSubmissionResult(
             kind=QuestionRunSubmissionKind.CREATED,
             run=_queued_run_from_work_item(self.engine, resumed),
@@ -949,6 +974,9 @@ def _spine_question_run_start(record: QuestionRunRecord) -> QuestionRunStartRequ
             adapter_ref=record.run.adapter_ref,
             runtime_version=record.run.runtime_version,
             base_run_id=record.run.base_run_id,
+            trigger_clarification_response_id=(
+                record.run.trigger_clarification_response_id
+            ),
         ),
     )
 

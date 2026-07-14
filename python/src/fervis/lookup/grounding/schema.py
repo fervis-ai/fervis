@@ -77,11 +77,17 @@ def _selected_option_schemas(
     if route is None:
         raise ValueError("grounding option requires a route")
     schemas: list[dict[str, object]] = []
-    if (
-        route.lookup_param_ref
-        or not route.lookup_field_ids
-        or route.identity_lookup_field_ids
-    ):
+    canonical_field_refs = tuple(dict.fromkeys(route.canonical_lookup_field_refs))
+    if canonical_field_refs:
+        schemas.append(
+            _selected_option_schema(
+                option,
+                result_kind=InputBindingResultKind.CANONICAL_IDENTITY,
+                input_value_schema={"type": "string", "enum": [task.lookup_text]},
+                matched_field_refs=canonical_field_refs,
+            )
+        )
+    elif not route.lookup_field_ids:
         schemas.append(
             _selected_option_schema(
                 option,
@@ -115,7 +121,7 @@ def _matched_field_option_schema(
         option,
         result_kind=InputBindingResultKind.MATCHED_VALUE,
         input_value_schema=input_value_schema,
-        matched_field_ref=field_ref,
+        matched_field_refs=(field_ref,),
     )
 
 
@@ -124,7 +130,7 @@ def _selected_option_schema(
     *,
     result_kind: InputBindingResultKind,
     input_value_schema: dict[str, object],
-    matched_field_ref: str = "",
+    matched_field_refs: tuple[str, ...] = (),
 ) -> dict[str, object]:
     properties = {
         "selected_option_id": {"enum": [option.id]},
@@ -132,10 +138,10 @@ def _selected_option_schema(
         "result_kind": {"enum": [result_kind.value]},
         "selection_basis": {"type": "string", "minLength": 1},
     }
-    if matched_field_ref:
-        properties["matched_field_ref"] = {"enum": [matched_field_ref]}
+    if matched_field_refs:
+        properties["matched_field_ref"] = {"enum": list(matched_field_refs)}
     schema = provider_output.KnownInputBindingOutput.schema(properties)
-    if matched_field_ref:
+    if matched_field_refs:
         required = schema["required"]
         if not isinstance(required, list):
             raise ValueError("grounding schema required fields must be an array")

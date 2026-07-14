@@ -353,6 +353,7 @@ QUESTION_RUN = LineageRowSpec(
         field("kind", enum_type=QuestionRunKind),
         field("trigger_kind", enum_type=RunTriggerKind),
         field("base_run_id"),
+        field("trigger_clarification_response_id"),
         field("adapter_ref"),
         field("runtime_version"),
     ),
@@ -691,9 +692,7 @@ CLARIFICATION_REQUEST = LineageRowSpec(
         field("reason", enum_type=ClarificationReason),
         field("payload_json", json_value=True),
     ),
-    same_run_refs=(
-        SameRunReference("run_step", "step_id", "clarification step"),
-    ),
+    same_run_refs=(SameRunReference("run_step", "step_id", "clarification step"),),
 )
 
 CLARIFICATION_RESPONSE = LineageRowSpec(

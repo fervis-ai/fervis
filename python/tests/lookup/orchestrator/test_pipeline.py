@@ -1543,6 +1543,18 @@ def test_lookup_unresolved_named_entity_returns_resource_specific_clarification(
                     }
                 ],
             ),
+            "submit_grounding": {
+                "known_time_resolutions": {},
+                "known_input_bindings": {
+                    "fact_1_entity_1": {
+                        "selected_option_id": "bind_fact_1_entity_1_1",
+                        "input_value": "Nextgen",
+                        "result_kind": "canonical_identity",
+                        "matched_field_ref": "field.name",
+                        "selection_basis": "The selected location name field is the supplied store reference.",
+                    }
+                },
+            },
         }
     )
     ports = LookupRuntimePorts(
@@ -2022,6 +2034,7 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
                         "selected_option_id": "bind_fact_1_entity_1_1",
                         "input_value": "Jane Doe",
                         "result_kind": "canonical_identity",
+                        "matched_field_ref": "staff.field.full_name",
                         "selection_basis": "The staff resolver returns the staff identity named by Jane Doe.",
                     }
                 },
@@ -2113,9 +2126,7 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
             "resolver_label": "Staff List",
             "entity_kind": "staff",
             "key_id": "staff_key",
-            "key_components": [
-                {"component_id": "staff_id", "value": "staff-1"}
-            ],
+            "key_components": [{"component_id": "staff_id", "value": "staff-1"}],
             "matched_label": "Jane Doe",
         }
     ]
@@ -2162,6 +2173,7 @@ def test_lookup_runtime_fails_closed_on_grounding_resolver_source_read_failure()
                         "selected_option_id": "bind_fact_1_entity_1_1",
                         "input_value": "Jane Doe",
                         "result_kind": "canonical_identity",
+                        "matched_field_ref": "staff.field.full_name",
                         "selection_basis": "The staff resolver returns the staff identity named by Jane Doe.",
                     }
                 },
@@ -2249,6 +2261,7 @@ def test_lookup_runtime_fails_closed_on_grounding_missing_catalog_endpoint() -> 
                         "selected_option_id": "bind_fact_1_entity_1_1",
                         "input_value": "Jane Doe",
                         "result_kind": "canonical_identity",
+                        "matched_field_ref": "staff.field.full_name",
                         "selection_basis": "The staff resolver returns the staff identity named by Jane Doe.",
                     }
                 },

@@ -299,6 +299,7 @@ def test_flattened_related_key_remains_outside_the_owning_relation_key():
 def test_nested_to_one_key_is_a_reference_not_a_second_relation_key():
     class Area(models.Model):
         area_id = models.UUIDField(primary_key=True)
+        name = models.CharField(max_length=255)
 
         class Meta:
             app_label = "test_schema_introspection_nested_to_one"
@@ -313,7 +314,7 @@ def test_nested_to_one_key_is_a_reference_not_a_second_relation_key():
     class AreaSerializer(serializers.ModelSerializer):
         class Meta:
             model = Area
-            fields = ("area_id",)
+            fields = ("area_id", "name")
 
     class StaffSerializer(serializers.ModelSerializer):
         default_area = AreaSerializer()
@@ -333,9 +334,17 @@ def test_nested_to_one_key_is_a_reference_not_a_second_relation_key():
             reference.target_entity_kind,
             reference.target_key_id,
             reference.components[0].local_field_path,
+            reference.context_field_paths,
         )
         for reference in inspection.entity_references
-    ) == (("area", "primary_key", "default_area.area_id"),)
+    ) == (
+        (
+            "area",
+            "primary_key",
+            "default_area.area_id",
+            ("default_area.name",),
+        ),
+    )
 
 
 def test_foreign_key_reference_targets_the_declared_unique_key():

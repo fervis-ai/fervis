@@ -8,4 +8,4 @@ def test_declared_resource_names_are_preserved_without_morphology() -> None:
         path_template="/api/news/",
     )
 
-    assert names == ("series", "analysis", "status", "news")
+    assert names == ("series", "analysis", "status", "list news", "news")

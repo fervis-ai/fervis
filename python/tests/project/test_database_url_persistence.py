@@ -54,8 +54,37 @@ def test_database_url_migration_upgrades_revision_one_database(
     }
 
     assert migration.status is MigrationStatus.APPLIED
-    assert migration.pending_revisions == ["fervis.0002"]
+    assert migration.pending_revisions == ["fervis.0002", "fervis.0003"]
     assert {"idempotency_authority_ref", "idempotency_scope"} <= columns
+    assert all(check.passed for check in backend.inspect())
+
+
+def test_database_url_migration_upgrades_revision_two_database(
+    tmp_path,
+    monkeypatch,
+):
+    database_path = tmp_path / "fervis.sqlite3"
+    database_url = f"sqlite:///{database_path}"
+    engine = create_sqlite_engine(database_url)
+    with engine.begin() as connection:
+        command.upgrade(
+            alembic_config(connection),
+            "0002_same_run_clarification_and_idempotency",
+        )
+    monkeypatch.setenv("FERVIS_DATABASE_URL", database_url)
+    backend = DatabaseUrlPersistenceBackend(config=DatabaseUrlPersistence())
+
+    migration = backend.migrate()
+    columns = {
+        item["name"]: item
+        for item in inspect(engine).get_columns("fervis_question_run")
+    }
+
+    assert migration.status is MigrationStatus.APPLIED
+    assert migration.pending_revisions == ["fervis.0003"]
+    assert "trigger_clarification_response_id" in columns
+    assert columns["trigger_clarification_response_id"]["nullable"] is False
+    assert columns["trigger_clarification_response_id"]["default"] is None
     assert all(check.passed for check in backend.inspect())
 
 

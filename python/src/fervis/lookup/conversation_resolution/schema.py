@@ -76,6 +76,26 @@ def _resolved_clause_schema(
     context_sources: tuple[ConversationContextSource, ...],
     context_frames: tuple[ConversationContextFrame, ...],
 ) -> dict[str, object]:
+    values_schema: dict[str, object] = {
+        "type": "array",
+        "items": output.ResolvedValueOutput.schema(
+            {
+                "value_id": {"type": "string", "minLength": 1},
+                "resolved_text": {"type": "string", "minLength": 1},
+                "frame_parameter": _frame_parameter_schema(context_frames),
+                "sources": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": _resolution_source_schema(
+                        context_sources=context_sources,
+                        context_frames=context_frames,
+                    ),
+                },
+            }
+        ),
+    }
+    if not _has_resolved_value_authority(context_sources, context_frames):
+        values_schema["maxItems"] = 0
     return output.ResolvedClauseOutput.schema(
         {
             "current_clause_text": {"type": "string", "minLength": 1},
@@ -85,25 +105,19 @@ def _resolved_clause_schema(
                 context_frames,
                 allowed_kinds=_FIXED_SHAPE_PART_KINDS,
             ),
-            "values": {
-                "type": "array",
-                "items": output.ResolvedValueOutput.schema(
-                    {
-                        "value_id": {"type": "string", "minLength": 1},
-                        "resolved_text": {"type": "string", "minLength": 1},
-                        "frame_parameter": _frame_parameter_schema(context_frames),
-                        "sources": {
-                            "type": "array",
-                            "minItems": 1,
-                            "items": _resolution_source_schema(
-                                context_sources=context_sources,
-                                context_frames=context_frames,
-                            ),
-                        },
-                    }
-                ),
-            },
+            "values": values_schema,
         }
+    )
+
+
+def _has_resolved_value_authority(
+    context_sources: tuple[ConversationContextSource, ...],
+    context_frames: tuple[ConversationContextFrame, ...],
+) -> bool:
+    return any(source.meaning_anchors for source in context_sources) or any(
+        any(part.kind in _VALUE_PART_KINDS for part in frame.parts)
+        or (frame.callable is not None and bool(frame.callable.parameters))
+        for frame in context_frames
     )
 
 
@@ -148,8 +162,7 @@ def _context_anchor_source_schema(
         {
             "kind": {"type": "string", "enum": ["context_anchor"]},
             "source_id": {"type": "string", "enum": [source.source_id]},
-            "memory_id": {"type": "string", "enum": [anchor.memory_id]},
-            "source_text": {"type": "string", "enum": [anchor.text]},
+            "anchor_id": {"type": "string", "enum": [anchor.anchor_id]},
         }
     )
 

@@ -399,12 +399,18 @@ class _VariantGroundingPlannerPort:
         bindings = {}
         for group in option_groups:
             selected = _selected_grounding_option(group, task_texts=lookup_texts)
-            bindings[group["known_input_id"]] = {
+            binding = {
                 "selected_option_id": selected["binding_option_id"],
                 "input_value": lookup_texts[group["known_input_id"]],
                 "result_kind": "canonical_identity",
                 "selection_basis": "Selected by deterministic conformance model.",
             }
+            field_refs = selected.get("lookup_surface", {}).get("field_refs", ())
+            if lookup_texts[group["known_input_id"]] == "Alice":
+                binding["matched_field_ref"] = "field.staff.first_name"
+            elif field_refs:
+                binding["matched_field_ref"] = field_refs[0]
+            bindings[group["known_input_id"]] = binding
         return {
             "known_time_resolutions": _time_resolution_payload_from_prompt(prompt),
             "known_input_bindings": bindings,
@@ -620,6 +626,10 @@ def _scripted_selected_binding(
     }
     if matched_field_ref:
         selection["matched_field_ref"] = matched_field_ref
+    elif result_kind == "canonical_identity":
+        field_refs = selected.get("lookup_surface", {}).get("field_refs", ())
+        if field_refs:
+            selection["matched_field_ref"] = field_refs[0]
     return selection
 
 
@@ -1067,7 +1077,7 @@ def _meaning_component_for_memory_id(
         if not isinstance(source, dict):
             continue
         for component in _meaning_components_for_source(source):
-            if component.get("memory_id") == memory_id:
+            if component.get("anchor_id") == memory_id:
                 return {
                     **component,
                     "resolved_text": resolved_text or component["resolved_text"],
@@ -1080,16 +1090,16 @@ def _meaning_components_for_source(source: dict[str, Any]) -> list[dict[str, str
     for anchor in source.get("meaning_anchors") or ():
         if not isinstance(anchor, dict):
             continue
-        memory_id = str(anchor.get("memory_id") or "")
+        anchor_id = str(anchor.get("anchor_id") or "")
         source_text = str(anchor.get("text") or "")
-        if not memory_id or not source_text:
+        if not anchor_id or not source_text:
             continue
         components.append(
             {
                 "kind": _meaning_component_kind(str(anchor.get("kind") or "")),
                 "source_id": str(source.get("source_id") or ""),
                 "source_text": source_text,
-                "memory_id": memory_id,
+                "anchor_id": anchor_id,
                 "resolved_text": source_text,
             }
         )
@@ -1112,8 +1122,7 @@ def _context_anchor_source(component: dict[str, str]) -> dict[str, str]:
     return {
         "kind": "context_anchor",
         "source_id": component["source_id"],
-        "memory_id": component["memory_id"],
-        "source_text": component["source_text"],
+        "anchor_id": component["anchor_id"],
     }
 
 
