@@ -6,12 +6,11 @@ from fervis.memory.conversation_context import (
     ConversationContextFrame,
     ConversationContextSource,
 )
-from fervis.lookup.conversation_resolution.clarifications import (
-    active_clarification_contract,
+from fervis.lookup.clarification.context import (
+    active_clarification,
+    clarification_context_source,
 )
-from fervis.lookup.conversation_resolution.model import (
-    ConversationResolutionRequest,
-)
+from fervis.lookup.conversation_resolution.model import ConversationResolutionRequest
 from fervis.lookup.conversation_resolution.schema import (
     build_conversation_resolution_tool_schemas,
 )
@@ -31,7 +30,9 @@ from fervis.model_io.structured_output.specs import required_tool_spec
 
 class ConversationResolutionTurnPrompt(TurnPromptBase):
     turn_name = "conversation resolution"
-    turn_task = "resolve how the current utterance depends on prior conversation context"
+    turn_task = (
+        "resolve how the current utterance depends on prior conversation context"
+    )
 
     def __init__(
         self,
@@ -53,7 +54,7 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
         self,
         builder: TurnPromptBuilder,
     ) -> tuple[PromptSection, ...]:
-        return (
+        sections = [
             builder.json_section(
                 "Context sources:",
                 {
@@ -77,7 +78,46 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                 },
                 indent=2,
             ),
+        ]
+        responses = tuple(
+            response
+            for response in self.request.clarification_responses
+            if response.candidate is not None
         )
+        if responses:
+            sections.append(
+                builder.json_section(
+                    "Attributed clarification responses:",
+                    {
+                        "responses": [
+                            {
+                                "response_id": response.source.response_id,
+                                "clarification_id": response.source.clarification_id,
+                                "exact_user_text": response.source.exact_user_text,
+                                "selected_candidate": (
+                                    None
+                                    if response.candidate is None
+                                    else {
+                                        "id": response.candidate.id,
+                                        "contextualized_question": response.candidate.contextualized_question,
+                                        "source_evidence": [
+                                            {
+                                                "source_id": item.source_id,
+                                                "exact_source_texts": list(
+                                                    item.exact_source_texts
+                                                ),
+                                            }
+                                            for item in response.candidate.source_evidence
+                                        ],
+                                    }
+                                ),
+                            }
+                            for response in responses
+                        ]
+                    },
+                )
+            )
+        return tuple(sections)
 
     def instruction_sections(
         self,
@@ -98,6 +138,8 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                     "the resolved question and copy each clause exactly as resolved_text.",
                     "Use only the current question, visible context sources, and visible "
                     "context frames.",
+                    "An active_clarification context source contains the original question and every clarification question and answer in order. Resolve the current utterance using the complete chain.",
+                    "Each answer resolves the clarification question it follows. Later exchanges extend the established question context; they do not replace earlier exchanges.",
                 ),
             ),
             builder.instruction_block(
@@ -112,7 +154,7 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                     "write resolved_text as a complete standalone factual clause.",
                     "A resolved clause must retain every current constraint and every "
                     "prior meaning needed to answer it.",
-                    "Every meaning added to the resolved clause but absent from the "
+                    "Every value added to the resolved clause but absent from the "
                     "current clause must be represented by a resolved value with a "
                     "visible prior source.",
                     "Writing the complete text is part of the resolution task: use it "
@@ -122,23 +164,26 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Retained Frame Shape",
                 (
-                    "retained_frame_parts records fixed prior question meaning that "
-                    "the resolved clause still uses but the current clause omits.",
+                    "retained_frame_parts is the sole representation of fixed prior "
+                    "question shape that the resolved clause still uses but the "
+                    "current clause omits.",
                     "Select only retained subject, output, population, or grouping "
                     "parts. Do not select a part that explicit current meaning replaces.",
-                    "Fixed question shape belongs here, not in resolved values.",
+                    "Do not repeat retained frame meaning in resolved values.",
                 ),
             ),
             builder.instruction_block(
                 "Resolved Values",
                 (
-                    "Create a resolved value for every meaning needed to interpret the "
+                    "Create a resolved value for every value needed to interpret the "
                     "current clause that is established by a current span, context "
-                    "anchor, or prior frame part.",
+                    "anchor, or value-like prior frame part.",
                     "resolved_text states the value's standalone meaning.",
                     "A current_span source copies one exact occurrence from the current "
                     "clause. A context_anchor source copies one shown typed anchor. A "
                     "frame_part source carries one shown part of a prior question.",
+                    "Do not emit a resolved value established only by current_span; "
+                    "later interpretation already receives the current clause.",
                     "Do not emit a resolved value for prior meaning that explicit "
                     "current wording replaces. When only part of a prior frame part "
                     "remains relevant, resolved_text states only that retained meaning.",
@@ -149,34 +194,24 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                     "Use every source that materially establishes the resolved value. "
                     "Current text and prior verified evidence may both support the same "
                     "value.",
-                    "Every contextual meaning integrated into the complete clause must "
-                    "also be represented as a resolved value; resolved values are the "
-                    "structured handoff to later interpretation.",
+                    "Resolved values are the structured handoff for values to later "
+                    "interpretation; retained frame shape is already represented by "
+                    "retained_frame_parts.",
                     "Do not classify values by linguistic operation or by whether they "
                     "are self-sufficient.",
                 ),
             ),
             builder.instruction_block(
-                "Callable Frames",
+                "Callable Parameters",
                 (
-                    "Use frame_call=call when and only when the complete resolved "
-                    "question is exactly another invocation of one shown callable "
-                    "frame's fixed factual function. A matching call is required, not "
-                    "optional.",
-                    "Write exactly one argument for every shown parameter. Use carry "
-                    "when its prior value remains unchanged and resolved_value when a "
-                    "resolved value supplies the new argument.",
-                    "Before writing frame_call=none, compare the resolved question to "
-                    "each frame as a function signature. If its fixed subject, outputs, "
-                    "population, grouping, and computation are unchanged and every "
-                    "changed value maps to a shown parameter, the frame matches and "
-                    "must be called.",
-                    "Use frame_call=none only when no callable frame matches, including "
-                    "when the resolved question changes fixed subject, outputs, "
-                    "population meaning, grouping, computation, or otherwise asks a "
-                    "new factual function.",
-                    "Do not force a new question into a frame merely because it refers "
-                    "to the same entities or prior result.",
+                    "For each resolved value, set frame_parameter to the shown callable "
+                    "parameter that the value supplies, or none when it supplies no "
+                    "shown parameter.",
+                    "Represent unchanged callable values as resolved values too, using "
+                    "their visible prior sources and parameter references.",
+                    "Do not decide whether to call a prior frame. The backend derives "
+                    "that result only when the retained fixed parts and parameter "
+                    "bindings completely match one callable signature.",
                 ),
             ),
             builder.instruction_block(
@@ -250,40 +285,19 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
 def conversation_resolution_context_sources(
     request: ConversationResolutionRequest,
 ) -> tuple[ConversationContextSource, ...]:
-    active_clarification = active_clarification_contract(
-        request.conversation_context,
-        current_question=request.question,
+    responses = tuple(
+        response
+        for response in request.clarification_responses
+        if response.annotation is not None
     )
-    if active_clarification is None:
+    if not responses:
         return request.context_sources
-    return (
-        *request.context_sources,
-        ConversationContextSource(
-            source_id="active_clarification_1",
-            kind="active_clarification",
-            text=_active_clarification_text(active_clarification),
-        ),
-    )
+    chain = active_clarification(responses)
+    source = clarification_context_source(chain)
+    return (*request.context_sources, source)
 
 
 def conversation_resolution_context_frames(
     request: ConversationResolutionRequest,
 ) -> tuple[ConversationContextFrame, ...]:
     return request.context_frames
-
-
-def _active_clarification_text(active_clarification: dict[str, object]) -> str:
-    exchanges = active_clarification.get("exchanges")
-    if not isinstance(exchanges, list):
-        return "Active clarification is available."
-    parts: list[str] = []
-    for exchange in exchanges:
-        if not isinstance(exchange, dict):
-            continue
-        questions = exchange.get("clarification_questions")
-        if isinstance(questions, list):
-            parts.extend(str(item) for item in questions if str(item).strip())
-        answer = str(exchange.get("answer") or "").strip()
-        if answer:
-            parts.append(answer)
-    return " ".join(parts).strip() or "Active clarification is available."

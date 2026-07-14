@@ -5,10 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-from enum import StrEnum
-from typing import Callable, TypeVar, assert_never
+from fervis.types.enums import StrEnum
+from typing import Callable, TypeVar
+from typing_extensions import assert_never
 
 from fervis.lookup.answer_program.errors import AnswerProgramContractError
+from fervis.lookup.canonical_data import (
+    EntityKeyComponentValue,
+    EntityKeyValue,
+    canonical_runtime_json,
+)
 
 ANCHOR_DATE_REF = "ANCHOR_DATE"
 ANCHOR_TIMEZONE_REF = "ANCHOR_TIMEZONE"
@@ -32,6 +38,7 @@ class LiteralType(StrEnum):
 class ValueFilterOperator(StrEnum):
     EQUALS = "equals"
     IN = "in"
+    CONTAINS = "contains"
 
 
 class ValueDependencyKind(StrEnum):
@@ -67,14 +74,32 @@ class TimeGranularity(StrEnum):
     YEAR = "year"
 
 
+ValueComponentValue = str | bool | Decimal | tuple[str, ...]
+
+
 @dataclass(frozen=True)
 class IdentityValuePayload:
-    identity_type: str
-    identity_field: str
-    value: str
+    key: EntityKeyValue
     display_value: str = ""
     matched_field_ref: str = ""
     matched_field_path: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.key, EntityKeyValue):
+            raise TypeError("identity value requires a complete entity key")
+
+    @property
+    def entity_kind(self) -> str:
+        return self.key.entity_kind
+
+    @property
+    def key_id(self) -> str:
+        return self.key.key_id
+
+    def only_component(self) -> EntityKeyComponentValue:
+        if len(self.key.components) != 1:
+            raise ValueError("identity does not have exactly one key component")
+        return self.key.components[0]
 
     @property
     def kind(self) -> ValueKind:
@@ -84,13 +109,20 @@ class IdentityValuePayload:
     def parameter_value_type(self) -> str:
         return "identity"
 
-    def canonical_value(self) -> str:
-        return self.value
+    def canonical_value(self) -> str | EntityKeyValue:
+        if len(self.key.components) == 1:
+            return str(self.key.components[0].value)
+        return self.key
 
-    def component_value(self, component: ValueComponent | TimeComponent) -> object:
+    def component_value(
+        self,
+        component: ValueComponent | TimeComponent,
+    ) -> ValueComponentValue:
         if component is not ValueComponent.VALUE:
             raise ValueError("identity has only a value component")
-        return self.value
+        if len(self.key.components) != 1:
+            raise ValueError("composite identity requires an explicit key projection")
+        return str(self.key.components[0].value)
 
     @property
     def row_filter_error(self) -> str:
@@ -99,19 +131,36 @@ class IdentityValuePayload:
 
 @dataclass(frozen=True)
 class IdentitySetValuePayload:
-    identity_type: str
-    identity_field: str
-    values: tuple[str, ...]
+    keys: tuple[EntityKeyValue, ...]
     display_value: str = ""
     source_relation_id: str = ""
 
     def __post_init__(self) -> None:
-        if len(set(self.values)) != len(self.values):
+        if not self.keys:
+            raise ValueError("identity set requires complete entity keys")
+        contracts = {(key.entity_kind, key.key_id) for key in self.keys}
+        if len(contracts) != 1:
+            raise ValueError("identity set keys must share one key contract")
+        if len(set(self.keys)) != len(self.keys):
             raise AnswerProgramContractError(
                 "duplicate_set_value",
                 "identity-set value cannot contain duplicates",
             )
-        object.__setattr__(self, "values", tuple(sorted(self.values)))
+        ordered = tuple(
+            sorted(
+                self.keys,
+                key=lambda key: canonical_runtime_json(key.component_values()),
+            )
+        )
+        object.__setattr__(self, "keys", ordered)
+
+    @property
+    def entity_kind(self) -> str:
+        return self.keys[0].entity_kind
+
+    @property
+    def key_id(self) -> str:
+        return self.keys[0].key_id
 
     @property
     def kind(self) -> ValueKind:
@@ -121,13 +170,20 @@ class IdentitySetValuePayload:
     def parameter_value_type(self) -> str:
         return "identity_set"
 
-    def canonical_value(self) -> list[str]:
-        return list(self.values)
+    def canonical_value(self) -> list[str] | list[EntityKeyValue]:
+        if all(len(key.components) == 1 for key in self.keys):
+            return [str(key.components[0].value) for key in self.keys]
+        return list(self.keys)
 
-    def component_value(self, component: ValueComponent | TimeComponent) -> object:
+    def component_value(
+        self,
+        component: ValueComponent | TimeComponent,
+    ) -> ValueComponentValue:
         if component is not ValueComponent.VALUE:
             raise ValueError("identity set has only a value component")
-        return self.values
+        if any(len(key.components) != 1 for key in self.keys):
+            raise ValueError("composite identity set requires an explicit key projection")
+        return tuple(str(key.components[0].value) for key in self.keys)
 
     @property
     def row_filter_error(self) -> str:
@@ -138,6 +194,9 @@ class IdentitySetValuePayload:
 class NamedValuePayload:
     text: str
     reference_text: str = ""
+    matched_field_ref: str = ""
+    matched_field_path: str = ""
+    filter_operator: ValueFilterOperator = ValueFilterOperator.EQUALS
 
     @property
     def kind(self) -> ValueKind:
@@ -150,7 +209,10 @@ class NamedValuePayload:
     def canonical_value(self) -> str:
         return self.text
 
-    def component_value(self, component: ValueComponent | TimeComponent) -> object:
+    def component_value(
+        self,
+        component: ValueComponent | TimeComponent,
+    ) -> ValueComponentValue:
         if component is not ValueComponent.VALUE:
             raise ValueError("named value has only a value component")
         return self.text
@@ -242,7 +304,10 @@ class TimeValuePayload:
             "granularity": self.granularity,
         }
 
-    def component_value(self, component: ValueComponent | TimeComponent) -> object:
+    def component_value(
+        self,
+        component: ValueComponent | TimeComponent,
+    ) -> ValueComponentValue:
         if component is ValueComponent.VALUE or component is TimeComponent.INSTANT:
             if self.resolved_start != self.resolved_end:
                 raise ValueError("time value does not have an instant")
@@ -291,7 +356,10 @@ class LiteralValuePayload:
             return self.value.strip().lower() == "true"
         return self.value
 
-    def component_value(self, component: ValueComponent | TimeComponent) -> object:
+    def component_value(
+        self,
+        component: ValueComponent | TimeComponent,
+    ) -> ValueComponentValue:
         if component is not ValueComponent.VALUE:
             raise ValueError("literal has only a value component")
         if self.literal_type is LiteralType.NUMBER:
@@ -332,7 +400,10 @@ class StringSetValuePayload:
     def canonical_value(self) -> list[str]:
         return list(self.values)
 
-    def component_value(self, component: ValueComponent | TimeComponent) -> object:
+    def component_value(
+        self,
+        component: ValueComponent | TimeComponent,
+    ) -> ValueComponentValue:
         if component is not ValueComponent.VALUE:
             raise ValueError("string set has only a value component")
         return self.values
@@ -411,9 +482,7 @@ class FactValue:
         cls,
         *,
         id: str,
-        identity_type: str,
-        identity_field: str,
-        value: str,
+        key: EntityKeyValue,
         display_value: str = "",
         matched_field_ref: str = "",
         matched_field_path: str = "",
@@ -426,11 +495,9 @@ class FactValue:
         return cls(
             id=id,
             known_input_id=known_input_id,
-            label=display_value or value,
+            label=display_value or str(key.component_values()),
             payload=IdentityValuePayload(
-                identity_type=identity_type,
-                identity_field=identity_field,
-                value=value,
+                key=key,
                 display_value=display_value,
                 matched_field_ref=matched_field_ref,
                 matched_field_path=matched_field_path,
@@ -446,9 +513,7 @@ class FactValue:
         cls,
         *,
         id: str,
-        identity_type: str,
-        identity_field: str,
-        values: tuple[str, ...],
+        keys: tuple[EntityKeyValue, ...],
         display_value: str = "",
         source_relation_id: str = "",
         proof_refs: tuple[str, ...] = (),
@@ -460,11 +525,12 @@ class FactValue:
         return cls(
             id=id,
             known_input_id=known_input_id,
-            label=display_value or f"{len(values)} {identity_type} identities",
+            label=(
+                display_value
+                or f"{len(keys)} {keys[0].entity_kind if keys else ''} identities"
+            ),
             payload=IdentitySetValuePayload(
-                identity_type=identity_type,
-                identity_field=identity_field,
-                values=tuple(values),
+                keys=keys,
                 display_value=display_value,
                 source_relation_id=source_relation_id,
             ),
@@ -481,6 +547,9 @@ class FactValue:
         id: str,
         text: str,
         reference_text: str = "",
+        matched_field_ref: str = "",
+        matched_field_path: str = "",
+        filter_operator: ValueFilterOperator = ValueFilterOperator.EQUALS,
         proof_refs: tuple[str, ...] = (),
         source_refs: tuple[str, ...] = (),
         dependencies: tuple[ValueDependency, ...] = (),
@@ -494,6 +563,9 @@ class FactValue:
             payload=NamedValuePayload(
                 text=text,
                 reference_text=reference_text or text,
+                matched_field_ref=matched_field_ref,
+                matched_field_path=matched_field_path,
+                filter_operator=filter_operator,
             ),
             proof_refs=tuple(proof_refs),
             source_refs=tuple(source_refs),
@@ -764,8 +836,7 @@ class ParameterDeclaration:
         if not isinstance(self.allowed_values, tuple):
             raise TypeError("parameter allowed_values must be a tuple")
         if any(
-            not isinstance(value, str) or not value
-            for value in self.allowed_values
+            not isinstance(value, str) or not value for value in self.allowed_values
         ):
             raise ValueError("parameter allowed values must be non-empty strings")
         if not isinstance(self.semantic_control_ref, str):
@@ -898,11 +969,8 @@ class BindingPatch:
             for operation in self.operations
         ):
             raise TypeError("binding patch operations must be typed")
-        if any(
-            not isinstance(ref, str) or not ref for ref in self.provenance_refs
-        ):
+        if any(not isinstance(ref, str) or not ref for ref in self.provenance_refs):
             raise ValueError("binding patch provenance refs must be non-empty strings")
         parameter_ids = tuple(operation.parameter_id for operation in self.operations)
         if len(set(parameter_ids)) != len(parameter_ids):
             raise ValueError("binding patch cannot edit one parameter more than once")
-

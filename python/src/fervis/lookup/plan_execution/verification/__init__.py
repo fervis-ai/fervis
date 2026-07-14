@@ -69,10 +69,10 @@ def verify_answer_program_structure(
     catalog_selection: CatalogSelectionResult | None = None,
     authorized_sources: AuthorizedExecutionSources | None = None,
 ) -> AnswerProgram:
-    catalog = _execution_catalog(catalog, authorized_sources)
+    execution_catalog = _execution_catalog(catalog, authorized_sources)
     normalized = _normalize_fact_plan_for_verification(
         FactPlan(outcome=program),
-        catalog=catalog,
+        catalog=execution_catalog,
         memory_relations=memory_relations,
     )
     outcome = normalized.outcome
@@ -82,7 +82,7 @@ def verify_answer_program_structure(
         outcome,
         compiled_inputs=compiled_inputs,
         question_contract=question_contract,
-        catalog=catalog,
+        catalog=execution_catalog,
         memory_relations=memory_relations,
         catalog_selection=catalog_selection,
         authorized_sources=authorized_sources,

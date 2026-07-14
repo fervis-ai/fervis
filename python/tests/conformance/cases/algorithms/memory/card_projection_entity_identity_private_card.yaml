@@ -16,11 +16,12 @@ input:
           - address: entity.staff.alice
             kind: entity
             resource: staff
+            keyId: primary_key
             referenceText: Alice
             identity: {staff_id: staff-1}
           - address: relation.sales
             kind: relation
-            source: {kind: api_read, read_id: list_sale_list, identityType: sale}
+            source: {kind: api_read, read_id: list_sale_list}
             grainKeys: [sale_id]
             fieldCoverage: {sale_id: answer_rows.sale_id, item_count: answer_rows.item_count}
             completeness: {status: complete, pagination: not_paginated, rowCount: 0}
@@ -35,7 +36,8 @@ expect:
         kind: entity_identity
         artifact_id: turn_1
         address: entity.staff.alice
-        identity_type: staff
         reference_text: Alice
-        canonical_values: {staff_id: staff-1}
-
+        entity_key:
+          entity_kind: staff
+          key_id: primary_key
+          components: {staff_id: staff-1}

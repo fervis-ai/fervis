@@ -16,10 +16,9 @@ from fervis.questions import (
     AskRequest,
     AskRequestLimits,
     AskResult,
-    ContinueQuestionRequest,
+    ClarificationResponseRequest,
     ExecutionMode,
 )
-from fervis.lineage.enums import RunTriggerKind
 from fervis.run_work.events import (
     QuestionRunEventPayload,
     QuestionRunEventSink,
@@ -41,9 +40,9 @@ class RuntimeAskQuestions(Protocol):
         event_sink: QuestionRunEventSink | None = None,
     ) -> AskResult: ...
 
-    def continue_question(
+    def respond_to_clarification(
         self,
-        request: ContinueQuestionRequest,
+        request: ClarificationResponseRequest,
         *,
         event_sink: QuestionRunEventSink | None = None,
     ) -> AskResult: ...
@@ -132,7 +131,7 @@ class _HoldingQueuedTerminalSink:
         {
             "run.completed",
             "run.failed",
-            "run.needs_clarification",
+            "run.waiting_for_clarification",
             "run.active_conflict",
         }
     )
@@ -190,8 +189,11 @@ def run_runtime_ask(
         _HoldingQueuedTerminalSink(sink) if hold_queued else sink
     )
     try:
-        if isinstance(request, ContinueQuestionRequest):
-            result = ports.questions.continue_question(request, event_sink=ask_sink)
+        if isinstance(request, ClarificationResponseRequest):
+            result = ports.questions.respond_to_clarification(
+                request,
+                event_sink=ask_sink,
+            )
         else:
             result = ports.questions.ask(request, event_sink=ask_sink)
     except ValueError as error:
@@ -227,7 +229,7 @@ def _ask_request(
     limits: AskRequestLimits,
     model_policy: ConfiguredModelPolicy,
     project: ProjectInspection,
-) -> AskRequest | ContinueQuestionRequest:
+) -> AskRequest | ClarificationResponseRequest:
     continuation = _continuation_args(args)
     model = model_policy.admit(
         requested_provider="",
@@ -239,21 +241,14 @@ def _ask_request(
         project=project,
     )
     if continuation is not None:
-        question_id, base_run_id, clarification_id = continuation
-        return ContinueQuestionRequest(
+        question_id, run_id, clarification_id = continuation
+        return ClarificationResponseRequest(
             question_id=question_id,
-            question=args.question,
+            run_id=run_id,
+            clarification_id=clarification_id,
+            response_text=args.question,
             principal=principal,
-            trigger_kind=RunTriggerKind.CLARIFICATION_RESPONSE,
             execution_mode=ExecutionMode.QUEUED,
-            provider=model.provider,
-            model_key=model.model_key,
-            idempotency_key=args.idempotency_key,
-            base_run_id=base_run_id,
-            trigger_clarification_response_id=clarification_id,
-            max_budget_usd=args.max_budget_usd,
-            max_thinking_tokens=args.max_thinking_tokens,
-            limits=limits,
         )
     return AskRequest(
         question=args.question,
@@ -272,7 +267,7 @@ def _ask_request(
 def _continuation_args(args) -> tuple[str, str, str] | None:
     values = {
         "question_id": getattr(args, "question_id", None),
-        "base_run_id": getattr(args, "base_run_id", None),
+        "run_id": getattr(args, "run_id", None),
         "clarification_id": getattr(args, "clarification_id", None),
     }
     present = {key: str(value).strip() for key, value in values.items() if value}
@@ -286,7 +281,7 @@ def _continuation_args(args) -> tuple[str, str, str] | None:
         )
     return (
         present["question_id"],
-        present["base_run_id"],
+        present["run_id"],
         present["clarification_id"],
     )
 

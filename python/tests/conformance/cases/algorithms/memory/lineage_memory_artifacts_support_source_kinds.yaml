@@ -37,6 +37,7 @@ input:
           - address: entity.input_1
             kind: entity
             resource: area
+            keyId: primary_key
             referenceText: London
             identity:
               area_id: area_1
@@ -54,6 +55,7 @@ expect:
           - address: entity.input_1
             kind: entity
             resource: area
+            keyId: primary_key
             referenceText: London
             identity:
               area_id: area_1

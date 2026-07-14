@@ -4,6 +4,7 @@ from fervis.lookup.source_binding.candidates import (
     bound_sources_prompt_payload,
     same_scope_read_ids,
     source_binding_candidate_payload,
+    source_candidate_discovery_registry,
     source_candidate_discovery_payload,
 )
 from fervis.lookup.source_binding.model import (
@@ -17,6 +18,13 @@ from fervis.lookup.source_binding.model import (
     SourceBindingRequest,
     SourceBindingResult,
     SourceCandidateDiscoveryRequest,
+)
+from fervis.lookup.source_binding.candidates.contracts import (
+    CandidateKeyEvidence,
+    EntityReferenceEvidence,
+    EvidenceComponent as EntityEvidenceComponent,
+    entity_evidence_entity_kind,
+    entity_evidence_key_id,
 )
 from fervis.lookup.source_binding.prompt import (
     SourceBindingTurnPrompt,
@@ -36,6 +44,11 @@ from fervis.lookup.source_binding.terminal_outcomes import (
 __all__ = [
     "AnswerPopulation",
     "BoundSource",
+    "CandidateKeyEvidence",
+    "EntityEvidenceComponent",
+    "EntityReferenceEvidence",
+    "entity_evidence_entity_kind",
+    "entity_evidence_key_id",
     "SourceEvidenceItem",
     "SourceField",
     "SourceFulfillment",
@@ -53,5 +66,6 @@ __all__ = [
     "parse_source_binding",
     "same_scope_read_ids",
     "source_binding_candidate_payload",
+    "source_candidate_discovery_registry",
     "source_candidate_discovery_payload",
 ]

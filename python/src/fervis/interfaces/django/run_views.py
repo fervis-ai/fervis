@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, assert_never
+from typing import Any
+from typing_extensions import assert_never
 
 from fervis.lineage.views.django import DjangoLineageQuery
 from fervis.lineage.views.service import LineageRootNotFound

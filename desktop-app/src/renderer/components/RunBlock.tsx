@@ -71,7 +71,7 @@ function AnswerZone({
       {run.status === "RUNNING" || run.status === "QUEUED" ? (
         <LiveZone run={run} />
       ) : null}
-      {run.status === "NEEDS_CLARIFICATION" ? (
+      {run.status === "WAITING_FOR_CLARIFICATION" ? (
         <ClarificationForm
           apiClient={apiClient}
           onActionError={onActionError}

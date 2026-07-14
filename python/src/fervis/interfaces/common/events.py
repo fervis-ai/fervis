@@ -18,7 +18,7 @@ def agent_run_event(
 ) -> dict[str, object]:
     payload = dict(event)
     name = str(payload.get("event") or "")
-    if name == "run.needs_clarification":
+    if name == "run.waiting_for_clarification":
         conversation_id = str(payload.get("conversation_id") or "")
         question_id = str(payload.get("question_id") or "")
         run_id = str(payload.get("run_id") or "")
@@ -28,7 +28,7 @@ def agent_run_event(
                 provide_clarification_action(
                     conversation_id,
                     question_id=question_id or None,
-                    base_run_id=run_id or None,
+                    run_id=run_id or None,
                     clarification_id=clarification_id or None,
                     tenant_id=tenant_id,
                     principal_id=principal_id,
@@ -75,15 +75,21 @@ def _add_inspect_question_action(event: dict[str, object]) -> None:
 def _actionable_clarification_id(event: dict[str, object]) -> str:
     clarifications = event.get("clarifications")
     if not isinstance(clarifications, list) or not clarifications:
-        raise ValueError("run.needs_clarification event requires clarifications")
+        raise ValueError(
+            "run.waiting_for_clarification event requires clarifications"
+        )
     first = clarifications[0]
     if not isinstance(first, dict):
-        raise ValueError("run.needs_clarification event requires clarification objects")
+        raise ValueError(
+            "run.waiting_for_clarification event requires clarification objects"
+        )
     clarification_id = str(first.get("id") or "")
     if not clarification_id.strip():
-        raise ValueError("run.needs_clarification event requires clarification id")
+        raise ValueError(
+            "run.waiting_for_clarification event requires clarification id"
+        )
     if not str(first.get("question") or "").strip():
         raise ValueError(
-            "run.needs_clarification event requires clarification question"
+            "run.waiting_for_clarification event requires clarification question"
         )
     return clarification_id

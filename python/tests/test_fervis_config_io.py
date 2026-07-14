@@ -132,10 +132,7 @@ def test_write_json_schema_writes_canonical_json(tmp_path: Path) -> None:
     write_json_schema(path, {"schema_version": "v0.1", "framework": "django"})
 
     assert path.read_text(encoding="utf-8") == (
-        '{\n'
-        '  "framework": "django",\n'
-        '  "schema_version": "v0.1"\n'
-        "}\n"
+        '{\n  "framework": "django",\n  "schema_version": "v0.1"\n}\n'
     )
 
 
@@ -146,7 +143,9 @@ def _project_root(tmp_path: Path) -> Path:
 
 
 def _write_json(path: Path, payload: dict[str, object]) -> None:
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def _project_schema() -> dict[str, object]:

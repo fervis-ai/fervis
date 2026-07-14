@@ -1,4 +1,11 @@
+from datetime import timedelta
+
 import pytest
+from django.utils import timezone
+
+from fervis.host_api.context import get_host_api_context
+from fervis.host_api.contracts.authority import ReadContextRef
+from fervis.run_work.queue.django.models import RunWorkItem
 
 from .helpers import (
     primary_run_detail,
@@ -70,6 +77,25 @@ def test_question_run_detail_includes_structured_answer_explanation(
 
 
 @pytest.mark.django_db
+def test_question_run_duration_spans_submission_to_terminal_result(
+    api_client,
+    fervis_foundation_reset,
+):
+    submitted = post_fervis_question(api_client, "best product")
+    question = run_worker_until_terminal(api_client, submitted).json()
+    completed_at = timezone.now()
+    RunWorkItem.objects.filter(run_id=question["latestRunId"]).update(
+        created_at=completed_at - timedelta(seconds=10),
+        started_at=completed_at - timedelta(seconds=3),
+        completed_at=completed_at,
+    )
+
+    response = primary_run_detail(api_client, question)
+
+    assert response.json()["durationMs"] == 10_000
+
+
+@pytest.mark.django_db
 def test_question_runs_lists_attempts_for_question(
     api_client,
     fervis_foundation_reset,
@@ -94,12 +120,20 @@ def test_question_run_detail_is_tenant_scoped(
     fervis_foundation_reset,
     monkeypatch,
 ):
-    from fervis.interfaces.django import principal
-
-    monkeypatch.setattr(principal, "tenant_from_request", lambda request: "tenant-a")
+    adapter_type = type(get_host_api_context().adapter)
+    tenant = {"key": "tenant-a"}
+    monkeypatch.setattr(
+        adapter_type,
+        "capture_read_context",
+        lambda _adapter, request: ReadContextRef(
+            scheme="django_principal",
+            key=str(request.user.pk),
+            tenant_key=tenant["key"],
+        ),
+    )
     question = post_fervis_question(api_client, "show sales").json()
 
-    monkeypatch.setattr(principal, "tenant_from_request", lambda request: "tenant-b")
+    tenant["key"] = "tenant-b"
     response = api_client.get(
         question_run_detail_url(question["questionId"], question["latestRunId"]),
         HTTP_X_REQUESTER_SCOPES="fervis:read",

@@ -40,6 +40,9 @@ class FlaskHostApiAdapter:
         self.project_root = project_root
         self.auth_schema = auth_schema
 
+    def close(self) -> None:
+        pass
+
     def describe_sources(self) -> tuple[EndpointContract, ...]:
         return get_flask_endpoint_contracts(
             sources=self.sources,

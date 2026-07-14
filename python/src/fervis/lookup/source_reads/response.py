@@ -115,10 +115,13 @@ def extract_row_source_rows(
             row_source.row_path,
             cardinality=row_source.row_cardinality,
         )
+    parent_cardinality = row_source.parent_row_cardinality
+    if parent_cardinality is None:
+        raise EndpointResponseError("nested row source lacks parent cardinality")
     parent_rows = extract_response_rows(
         body,
         row_source.parent_row_path,
-        cardinality=RowCardinality.MANY,
+        cardinality=parent_cardinality,
     )
     child_path = relative_response_path(row_source.row_path, row_source.parent_row_path)
     rows: list[dict[str, Any]] = []

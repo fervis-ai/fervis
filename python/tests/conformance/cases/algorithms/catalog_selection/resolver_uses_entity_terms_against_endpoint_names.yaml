@@ -12,11 +12,8 @@ input:
         fields:
           - ref: staff.field.staff_id
             type: uuid
-            identity:
-              entity_ref: staff
-              identity_field: staff_id
-              primary_key: true
-              stable: true
+        candidate_keys:
+          - {id: primary_key, entity_kind: staff, primary: true, components: [{id: staff_id, field_ref: staff.field.staff_id}]}
       - id: field_docstring_decoy
         endpoint_name: list_notes
         source_metadata:
@@ -26,11 +23,8 @@ input:
             type: uuid
             metadata:
               label: staff profile
-            identity:
-              entity_ref: note
-              identity_field: note_id
-              primary_key: true
-              stable: true
+        candidate_keys:
+          - {id: primary_key, entity_kind: note, primary: true, components: [{id: note_id, field_ref: notes.field.staff_profile}]}
   entity_targets:
     - target_id: entity_1
       catalog_search_terms: [staff profile]

@@ -50,7 +50,7 @@ from fervis.lookup.answer_program.operations import (
     Operation,
     ProjectField,
     ProjectSpec,
-    ProjectToIdentitySpec,
+    ProjectToKeySpec,
     RankSpec,
     RoleExpandSpec,
     UnionSpec,

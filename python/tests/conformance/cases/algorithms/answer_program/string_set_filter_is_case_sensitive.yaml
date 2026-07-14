@@ -1,0 +1,39 @@
+id: string_set_filter_is_case_sensitive
+kind: algorithm
+algorithm: answer_program.invoke
+description: A declared string-set population filter uses exact string equality.
+input:
+  schema_revision: 1
+  program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/population_required}
+  catalog: {$ref: ../../../fixtures/answer_program_v1.yaml#/catalogs/sales}
+  environment: {$ref: ../../../fixtures/answer_program_v1.yaml#/environments/population_required}
+  invocations:
+    - id: exact_case
+      bindings:
+        - parameter_id: question.store_ids
+          value:
+            kind: identity_set
+            entity_kind: store
+            key_id: primary_key
+            key_component_id: store_id
+            values: [STORE_1]
+          provenance: {kind: question_input}
+        - parameter_id: semantic.store_population
+          value: {kind: string_set, values: [store_1]}
+          provenance: {kind: semantic_choice, refs: [semantic:store_population]}
+      evidence:
+        - request:
+            endpoint_name: list_sale_list
+            args: {sales.query.store_id: STORE_1}
+          response:
+            body:
+              results:
+                - {sale_id: sale_1, store_id: STORE_1}
+expect:
+  result_contains:
+    invocations:
+      - id: exact_case
+        status: completed
+        relations:
+          - id: sales_rows
+            rows: []

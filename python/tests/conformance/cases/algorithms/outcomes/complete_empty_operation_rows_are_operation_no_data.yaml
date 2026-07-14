@@ -12,7 +12,7 @@ input:
     - id: result
       rows: []
       completeness: {status: complete, source_kind: operation_output, set_kind: unknown, proof_refs: [missing]}
-  render_outputs:
+  result_outputs:
     - {id: answer, relation_id: result, field_id: name}
   operations:
     - id: missing

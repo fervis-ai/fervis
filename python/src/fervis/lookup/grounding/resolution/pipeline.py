@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from fervis.lookup.relation_catalog import RelationCatalog
-from fervis.lookup.relation_catalog.selection import (
-    EntityTargetResolverSelection,
-)
+from fervis.lookup.clarification import clarification_response_ref
 from fervis.lookup.conversation_resolution.compilation import (
     CompiledConversationResolution,
     ResolvedCanonicalIdentity,
@@ -17,9 +16,13 @@ from fervis.lookup.conversation_resolution.compilation import (
 from fervis.lookup.answer_program.values import FactValue
 from fervis.lookup.grounding.model import (
     CanonicalInputLedger,
+    GroundedInputUse,
     GroundedValueCertification,
     GroundedValueCertificationMethod,
+    GroundingIssue,
     GroundingRequest,
+    ExpectedInputIdentity,
+    InputBindingSelection,
 )
 from fervis.lookup.turn_prompts.context import HostPromptContext
 from fervis.lookup.grounding.turn import GroundingTurnResult, generate_grounding
@@ -31,6 +34,7 @@ from fervis.lookup.question_contract import (
     KnownInputSource,
     QuestionContract,
     RequestedFactKnownInput,
+    RequestedFactLiteralInput,
 )
 from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 from fervis.memory.projection import fact_artifacts_from_context
@@ -43,12 +47,16 @@ from .deterministic import (
 )
 from .model import GroundingOutput
 from .references import (
-    _execute_reference_compatibilities,
-    _reference_binding_tasks,
+    _execute_reference_selections,
     _reference_known_input_bindings,
     _resolve_reference_tasks,
+    reference_binding_row_sources,
+    reference_input_binding_tasks,
 )
 from .values import _dedupe_values, _grounded_value_id
+from fervis.lookup.clarification.model import (
+    GroundingIdentityResponse,
+)
 
 
 class GroundingSourceReadError(RuntimeError):
@@ -89,22 +97,35 @@ def ground_question_inputs(
     provider: str,
     model_key: str,
     max_thinking_tokens: int,
-    resolver_selections: tuple[EntityTargetResolverSelection, ...] = (),
     conversation_context: dict[str, Any] | None = None,
     active_memory_ids: frozenset[str] | None = None,
     conversation_resolution: CompiledConversationResolution | None = None,
     source_read_lineage: SourceReadLineageScope | None = None,
     host: HostPromptContext = HostPromptContext(),
     selected_input_ids: frozenset[str] | None = None,
+    expected_input_identities: Mapping[str, ExpectedInputIdentity] | None = None,
+    clarification_responses: tuple[GroundingIdentityResponse, ...] = (),
 ) -> GroundingOutput:
-    values = []
-    uses = []
-    issues = []
-    certifications = []
-    resolver_row_sources = build_row_source_catalog(resolver_catalog)
+    values: list[FactValue] = []
+    uses: list[GroundedInputUse] = []
+    issues: list[GroundingIssue] = []
+    certifications: list[GroundedValueCertification] = []
+    full_row_sources = build_row_source_catalog(full_catalog)
+    reference_grounding_sources = build_row_source_catalog(resolver_catalog)
+    input_binding_sources = reference_binding_row_sources(
+        full_row_sources=full_row_sources,
+        resolver_row_sources=reference_grounding_sources,
+    )
     current_active_memory_ids = (
         active_memory_ids if active_memory_ids is not None else frozenset()
     )
+    clarified = _clarification_identity_imports(
+        clarification_responses,
+        question_contract=question_contract,
+    )
+    values.extend(clarified.values)
+    certifications.extend(clarified.certifications)
+    clarified_input_ids = frozenset(value.known_input_id for value in clarified.values)
 
     active_time_anchor_periods = _active_time_anchor_periods(
         conversation_context=dict(conversation_context or {}),
@@ -136,14 +157,16 @@ def ground_question_inputs(
         if _selected(task.known_input_id, selected_input_ids=selected_input_ids)
     )
 
-    reference_tasks = _reference_binding_tasks(
+    reference_tasks = reference_input_binding_tasks(
         question_contract,
-        resolver_row_sources=resolver_row_sources,
+        resolver_row_sources=input_binding_sources,
+        expected_input_identities=expected_input_identities,
     )
     reference_tasks = tuple(
         task
         for task in reference_tasks
         if _selected(task.known_input_id, selected_input_ids=selected_input_ids)
+        and task.known_input_id not in clarified_input_ids
     )
     identity_imports = _resolved_canonical_identity_imports(
         question_contract=question_contract,
@@ -166,7 +189,7 @@ def ground_question_inputs(
         resolved_references = _resolve_reference_tasks(
             reference_tasks,
             full_catalog=full_catalog,
-            resolver_row_sources=resolver_row_sources,
+            resolver_row_sources=input_binding_sources,
             data_access_port=data_access_port,
             source_read_lineage=source_read_lineage,
         )
@@ -179,7 +202,7 @@ def ground_question_inputs(
     certifications.extend(resolved_references.certifications)
     issues.extend(resolved_references.issues)
     turn: GroundingTurnResult | None = None
-    compatibilities = []
+    selections: list[InputBindingSelection] = []
     model_tasks = resolved_references.model_tasks
     if model_tasks or time_tasks:
         turn = generate_grounding(
@@ -205,14 +228,13 @@ def ground_question_inputs(
         uses.extend(time_ledger.uses)
         issues.extend(time_ledger.issues)
         certifications.extend(time_ledger.certifications)
-        compatibilities.extend(turn.result.compatibilities)
+        selections.extend(turn.result.selections)
     try:
-        reference_ledger = _execute_reference_compatibilities(
-            compatibilities=tuple(compatibilities),
+        reference_ledger = _execute_reference_selections(
+            selections=tuple(selections),
             tasks=model_tasks,
-            resolver_selections=resolver_selections,
             full_catalog=full_catalog,
-            resolver_row_sources=resolver_row_sources,
+            resolver_row_sources=input_binding_sources,
             data_access_port=data_access_port,
             source_read_lineage=source_read_lineage,
         )
@@ -243,6 +265,64 @@ def _selected(
     selected_input_ids: frozenset[str] | None,
 ) -> bool:
     return selected_input_ids is None or known_input_id in selected_input_ids
+
+
+def _clarification_identity_imports(
+    responses: tuple[GroundingIdentityResponse, ...],
+    *,
+    question_contract: QuestionContract,
+) -> CanonicalInputLedger:
+    ledgers = tuple(
+        _clarification_identity_import(response, question_contract=question_contract)
+        for response in responses
+    )
+    return CanonicalInputLedger(
+        values=tuple(value for ledger in ledgers for value in ledger.values),
+        certifications=tuple(
+            certification
+            for ledger in ledgers
+            for certification in ledger.certifications
+        ),
+    )
+
+
+def _clarification_identity_import(
+    answer: GroundingIdentityResponse,
+    *,
+    question_contract: QuestionContract,
+) -> CanonicalInputLedger:
+    option = answer.option
+    requested_facts = {
+        fact.id: {known.id for known in fact.known_inputs}
+        for fact in question_contract.requested_facts
+    }
+    fact_inputs = requested_facts.get(answer.requested_fact_id)
+    if fact_inputs is None or answer.known_input_id not in fact_inputs:
+        raise ValueError("clarification subject does not match the current contract")
+    if option.key is None:
+        return CanonicalInputLedger()
+    value = FactValue.identity(
+        id=_grounded_value_id(answer.known_input_id),
+        known_input_id=answer.known_input_id,
+        key=option.key,
+        display_value=option.matched_label or option.label,
+        proof_refs=(
+            f"clarification:{answer.clarification_id}",
+            clarification_response_ref(answer.response_id),
+        ),
+        source_refs=(option.resolver_read_id,) if option.resolver_read_id else (),
+        applies_to_requested_fact_ids=(answer.requested_fact_id,),
+    )
+    certification = GroundedValueCertification(
+        value_id=value.id,
+        method=GroundedValueCertificationMethod.CLARIFICATION_SELECTION,
+        authority_refs=(option.resolver_read_id,) if option.resolver_read_id else (),
+        lineage_refs=(clarification_response_ref(answer.response_id),),
+    )
+    return CanonicalInputLedger(
+        values=(value,),
+        certifications=(certification,),
+    )
 
 
 def _selected_identity_imports(
@@ -302,23 +382,27 @@ def _resolved_identity_import(
     requested_fact_ids: tuple[str, ...],
     identities_by_ref: dict[str, ResolvedIdentityInput],
 ) -> _ResolvedIdentityImport | None:
-    if not _can_import_resolved_identity(known):
-        return None
-    resolved = identities_by_ref.get(known.resolved_input_ref)
-    if resolved is None or not _resolved_identity_matches_known(known, resolved):
+    match known:
+        case RequestedFactLiteralInput() as literal:
+            if not _can_import_resolved_identity(literal):
+                return None
+        case _:
+            return None
+    resolved = identities_by_ref.get(literal.resolved_input_ref)
+    if resolved is None or not _resolved_identity_matches_known(literal, resolved):
         return None
     canonical = resolved.canonical_identity
     value = _resolved_identity_value(
-        known=known,
+        known=literal,
         resolved=resolved,
         canonical=canonical,
         requested_fact_ids=requested_fact_ids,
     )
     return _ResolvedIdentityImport(
-        known_input_id=known.id,
+        known_input_id=literal.id,
         value=value,
         certification=_resolved_identity_certification(
-            known=known,
+            known=literal,
             resolved=resolved,
             canonical=canonical,
             value=value,
@@ -327,7 +411,7 @@ def _resolved_identity_import(
 
 
 def _resolved_identity_matches_known(
-    known: RequestedFactKnownInput,
+    known: RequestedFactLiteralInput,
     resolved: ResolvedIdentityInput,
 ) -> bool:
     return (
@@ -342,7 +426,7 @@ def _resolved_identity_matches_known(
 
 def _resolved_identity_value(
     *,
-    known: RequestedFactKnownInput,
+    known: RequestedFactLiteralInput,
     resolved: ResolvedIdentityInput,
     canonical: ResolvedCanonicalIdentity,
     requested_fact_ids: tuple[str, ...],
@@ -350,9 +434,7 @@ def _resolved_identity_value(
     return FactValue.identity(
         id=_grounded_value_id(known.id),
         known_input_id=known.id,
-        identity_type=canonical.identity_type,
-        identity_field=canonical.identity_field,
-        value=canonical.value,
+        key=canonical.key,
         display_value=known.resolved_value_text,
         proof_refs=(
             f"known_input:{known.id}",
@@ -365,7 +447,7 @@ def _resolved_identity_value(
 
 def _resolved_identity_certification(
     *,
-    known: RequestedFactKnownInput,
+    known: RequestedFactLiteralInput,
     resolved: ResolvedIdentityInput,
     canonical: ResolvedCanonicalIdentity,
     value: FactValue,
@@ -394,7 +476,7 @@ def _resolved_identity_imports_ledger(
     )
 
 
-def _can_import_resolved_identity(known: RequestedFactKnownInput) -> bool:
+def _can_import_resolved_identity(known: RequestedFactLiteralInput) -> bool:
     return (
         known.kind == KnownInputKind.LITERAL
         and known.source == KnownInputSource.CONVERSATION_RESOLUTION

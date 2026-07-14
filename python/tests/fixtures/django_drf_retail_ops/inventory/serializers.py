@@ -43,4 +43,3 @@ class StockRecordQuerySerializer(serializers.Serializer):
     product_id = serializers.IntegerField(required=False)
     location_id = serializers.IntegerField(required=False)
     below_reorder_point = serializers.BooleanField(required=False)
-

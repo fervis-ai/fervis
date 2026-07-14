@@ -11,7 +11,7 @@ from ._shared import (
     JoinSpec,
     Operation,
     ProjectSpec,
-    ProjectToIdentitySpec,
+    ProjectToKeySpec,
     RankSpec,
     UniversalConditionSpec,
     VerificationError,
@@ -87,9 +87,8 @@ def _operation_field_outputs(operations: tuple[Operation, ...]) -> set[str]:
                     outputs.add(aggregation.output_field)
         elif isinstance(spec, ProjectSpec):
             outputs.update(field.output or field.source for field in spec.fields)
-        elif isinstance(spec, ProjectToIdentitySpec):
-            outputs.update(spec.identity_fields)
-            outputs.update(field.output or field.source for field in spec.fields)
+        elif isinstance(spec, ProjectToKeySpec):
+            outputs.update(spec.key_fields)
     return outputs
 
 

@@ -1,5 +1,5 @@
 id: schema_root_separates_answer_contract_and_clarification
-description: Question-contract schema keeps answer contracts and missing-input clarifications in separate strict branches.
+description: Question-contract schema records one decision basis and keeps each outcome in a separate strict branch.
 migrates:
   - api/tests/fervis/lookup/question_contract/test_canonicalization.py::test_question_contract_schema_is_answer_requests_root
 kind: algorithm
@@ -7,8 +7,13 @@ algorithm: question_contract.schema
 input: {}
 expect:
   result_contains:
-    has_root_one_of: true
-    branch_kinds: [needs_clarification, question_contract]
+    root_required: [decision_basis, outcome]
+    root_properties: [decision_basis, outcome]
+    has_outcome_one_of: true
+    branch_kinds:
+      - missing_requested_fact
+      - question_contract
+      - unresolved_prior_turn_references
     answer_contract_required:
       - kind
       - answer_requests_count
@@ -17,11 +22,18 @@ expect:
       - question_input_inventory_check
     answer_contract_kind_values: [question_contract]
     answer_contract_has_clarification_fields: false
-    clarification_required:
+    missing_fact_required:
       - kind
-      - missing
-    clarification_kind_values: [needs_clarification]
-    clarification_has_answer_fields: false
+      - source_text
+      - why_question_is_incomplete
+    unresolved_required:
+      - kind
+      - references
+    unresolved_reference_properties:
+      - source_text
+      - target_label
+      - why_question_is_incomplete
+    clarifications_have_answer_fields: false
     answer_request_required:
       - answer_fact
       - answer_expression
@@ -30,8 +42,13 @@ expect:
       - answer_outputs
       - used_question_inputs
   result_exact_fields:
-    has_root_one_of: true
-    branch_kinds: [needs_clarification, question_contract]
+    root_required: [decision_basis, outcome]
+    root_properties: [decision_basis, outcome]
+    has_outcome_one_of: true
+    branch_kinds:
+      - missing_requested_fact
+      - question_contract
+      - unresolved_prior_turn_references
     answer_contract_required:
       - kind
       - answer_requests_count
@@ -46,14 +63,25 @@ expect:
       - question_input_inventory_check
     answer_contract_kind_values: [question_contract]
     answer_contract_has_clarification_fields: false
-    clarification_required:
+    missing_fact_required:
       - kind
-      - missing
-    clarification_properties:
+      - source_text
+      - why_question_is_incomplete
+    missing_fact_properties:
       - kind
-      - missing
-    clarification_kind_values: [needs_clarification]
-    clarification_has_answer_fields: false
+      - source_text
+      - why_question_is_incomplete
+    unresolved_required:
+      - kind
+      - references
+    unresolved_properties:
+      - kind
+      - references
+    unresolved_reference_properties:
+      - source_text
+      - target_label
+      - why_question_is_incomplete
+    clarifications_have_answer_fields: false
     answer_request_required:
       - answer_fact
       - answer_expression

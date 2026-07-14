@@ -3,8 +3,10 @@ from fervis.lookup.fact_plan.row_sources.model import RowSourceValueType
 from fervis.lookup.relation_catalog import (
     CatalogField,
     CatalogParam,
+    CandidateKey,
+    CandidateKeyComponent,
     EndpointRead,
-    IdentityMetadata,
+    EntityKeyComponentTarget,
     ParamSource,
     RelationCatalog,
     RowCardinality,
@@ -24,11 +26,10 @@ def test_row_source_catalog_allows_any_api_param_type_for_identity_route():
                 source=ParamSource.PATH,
                 type="any",
                 required=True,
-                identity=IdentityMetadata(
-                    entity_ref="staff",
-                    identity_field="staff_id",
-                    primary_key=True,
-                    stable=True,
+                entity_target=EntityKeyComponentTarget(
+                    entity_kind="staff",
+                    key_id="primary_key",
+                    component_id="staff_id",
                 ),
             ),
         ),
@@ -39,19 +40,26 @@ def test_row_source_catalog_allows_any_api_param_type_for_identity_route():
                 path="data.staff_id",
                 row_path_id="data",
                 type="uuid",
-                identity=IdentityMetadata(
-                    entity_ref="staff",
-                    identity_field="staff_id",
-                    primary_key=True,
-                    stable=True,
-                    display_fields=("field.data.full_name",),
-                ),
             ),
             CatalogField(
                 ref="field.data.full_name",
                 path="data.full_name",
                 row_path_id="data",
                 type="string",
+            ),
+        ),
+        candidate_keys=(
+            CandidateKey(
+                id="primary_key",
+                entity_kind="staff",
+                components=(
+                    CandidateKeyComponent(
+                        id="staff_id",
+                        field_ref="field.data.staff_id",
+                    ),
+                ),
+                primary=True,
+                context_field_refs=("field.data.full_name",),
             ),
         ),
     )
@@ -74,19 +82,26 @@ def test_row_source_catalog_allows_any_response_field_type():
                 path="data.staff_id",
                 row_path_id="data",
                 type="uuid",
-                identity=IdentityMetadata(
-                    entity_ref="staff",
-                    identity_field="staff_id",
-                    primary_key=True,
-                    stable=True,
-                    display_fields=("field.data.full_name",),
-                ),
             ),
             CatalogField(
                 ref="field.data.full_name",
                 path="data.full_name",
                 row_path_id="data",
                 type="any",
+            ),
+        ),
+        candidate_keys=(
+            CandidateKey(
+                id="primary_key",
+                entity_kind="staff",
+                components=(
+                    CandidateKeyComponent(
+                        id="staff_id",
+                        field_ref="field.data.staff_id",
+                    ),
+                ),
+                primary=True,
+                context_field_refs=("field.data.full_name",),
             ),
         ),
     )

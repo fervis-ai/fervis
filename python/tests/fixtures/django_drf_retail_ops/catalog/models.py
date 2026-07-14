@@ -19,4 +19,3 @@ class Product(models.Model):
     class Meta:
         app_label = "retail_ops_catalog"
         ordering = ["sku"]
-

@@ -22,6 +22,7 @@ input:
                 answer_outputs:
                   - id: answer_1
                     description: total sales amount
+                    role: ANSWER_VALUE
                 used_question_inputs: []
         addresses:
           - address: value.placeholder
@@ -38,3 +39,4 @@ expect:
           answer_outputs:
             - output_id: answer_1
               description: total sales amount
+              role: ANSWER_VALUE

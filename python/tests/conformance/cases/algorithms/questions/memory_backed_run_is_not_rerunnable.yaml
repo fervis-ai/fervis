@@ -18,7 +18,7 @@ input:
         program_invocations:
           - run_id: run_base
             kind: compiled_question
-            program_id: ap_36bb7f114624d4a9aaf7522f8a3236cf5f2a6e749aa9c286422911edb8810cb2
+            program_id: ap_6d5e6c8659c8881add965115b9a8ace47ebe3f90c3e5ad3575172900723db624
             program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/memory_backed}
             bindings: []
       command:
@@ -37,7 +37,7 @@ input:
         program_invocations:
           - run_id: run_base
             kind: compiled_question
-            program_id: ap_0368e27547b3a53e76a342eefc8564946b2d239820a5edfddd8b0e9de7488e3f
+            program_id: ap_2073de9e80c2e4b8e803b7f801def99515d59a4ec385bb607fca1b32d49617f1
             program: {$ref: ../../../fixtures/answer_program_memory_constant_v1.yaml}
             bindings: []
       command:
@@ -56,7 +56,7 @@ input:
         program_invocations:
           - run_id: run_base
             kind: compiled_question
-            program_id: ap_63856fc42e749c05124673568f425709e1c64e8db3539d7ae628da9941a515ec
+            program_id: ap_e44f756f12d4f59551d7e12251fed76c02a5a8da91d2f3f0a1b5c35a2868b65f
             program: {$ref: ../../../fixtures/answer_program_memory_rank_limit_v1.yaml}
             bindings: []
       command:

@@ -99,8 +99,7 @@ class AskRequest:
 
     def __post_init__(self) -> None:
         if self.context_run_id is not None and (
-            not isinstance(self.context_run_id, str)
-            or not self.context_run_id.strip()
+            not isinstance(self.context_run_id, str) or not self.context_run_id.strip()
         ):
             raise ValueError("context_run_id must be a non-empty string")
         if not isinstance(self.execution_mode, ExecutionMode):
@@ -132,18 +131,52 @@ class AskRequest:
 
 
 @dataclass(frozen=True)
-class ContinueQuestionRequest:
+class ClarificationResponseRequest:
+    question_id: str
+    run_id: str
+    clarification_id: str
+    response_text: str
+    principal: QuestionPrincipal
+    selected_option_id: str = ""
+    execution_mode: ExecutionMode = ExecutionMode.QUEUED
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.execution_mode, ExecutionMode):
+            object.__setattr__(
+                self,
+                "execution_mode",
+                ExecutionMode(str(self.execution_mode)),
+            )
+        for field_name in (
+            "question_id",
+            "run_id",
+            "clarification_id",
+        ):
+            if not str(getattr(self, field_name) or "").strip():
+                raise ValueError(f"clarification response requires {field_name}")
+        if not self.response_text.strip() and not self.selected_option_id.strip():
+            raise ValueError(
+                "clarification response requires response_text or selected_option_id"
+            )
+
+    def accepted_trigger(self) -> dict[str, object]:
+        return {
+            "kind": "clarification_response",
+            "run_id": self.run_id,
+            "clarification_id": self.clarification_id,
+        }
+
+
+@dataclass(frozen=True)
+class RetryQuestionRequest:
     question_id: str
     question: str
     principal: QuestionPrincipal
-    trigger_kind: RunTriggerKind
     base_run_id: str
     execution_mode: ExecutionMode = ExecutionMode.QUEUED
     provider: str | None = None
     model_key: str = ""
     idempotency_key: str | None = None
-    trigger_clarification_response_id: str | None = None
-    trigger_clarification_selected_option_id: str | None = None
     max_budget_usd: Any = None
     max_thinking_tokens: int | None = None
     runtime_context: dict[str, Any] = field(default_factory=dict)
@@ -156,26 +189,13 @@ class ContinueQuestionRequest:
                 "execution_mode",
                 ExecutionMode(str(self.execution_mode)),
             )
-        if not isinstance(self.trigger_kind, RunTriggerKind):
-            object.__setattr__(
-                self,
-                "trigger_kind",
-                RunTriggerKind(str(self.trigger_kind)),
-            )
-        if self.trigger_kind not in {
-            RunTriggerKind.CLARIFICATION_RESPONSE,
-            RunTriggerKind.RETRY,
-        }:
-            raise ValueError("continue request requires clarification_response or retry")
-        if not str(self.base_run_id or "").strip():
-            raise ValueError("continue request requires base_run_id")
+        if not self.question.strip():
+            raise ValueError("retry requires question")
+        if not self.base_run_id.strip():
+            raise ValueError("retry requires base_run_id")
         if not isinstance(self.limits, AskRequestLimits):
             raise ValueError("limits must be an AskRequestLimits instance")
-        object.__setattr__(
-            self,
-            "model_key",
-            _normalize_model_ref(self.model_key),
-        )
+        object.__setattr__(self, "model_key", _normalize_model_ref(self.model_key))
         object.__setattr__(
             self,
             "max_budget_usd",
@@ -188,13 +208,10 @@ class ContinueQuestionRequest:
         )
 
     def accepted_trigger(self) -> dict[str, object]:
-        trigger: dict[str, object] = {
-            "kind": self.trigger_kind.value,
+        return {
+            "kind": RunTriggerKind.RETRY.value,
             "base_run_id": self.base_run_id,
         }
-        if self.trigger_clarification_response_id:
-            trigger["clarification_id"] = self.trigger_clarification_response_id
-        return trigger
 
 
 @dataclass(frozen=True)

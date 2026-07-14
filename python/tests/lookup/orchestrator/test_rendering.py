@@ -1,9 +1,70 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
+from fervis.lookup.answer_rendering import render_fact_result, rendered_fact_payload
+from fervis.lookup.answer_program.result_projection import (
+    RelationResultOutput,
+    ResultProjection,
+)
+from fervis.lookup.outcomes.model import AnswerResult, FactResult
+from fervis.lookup.plan_execution.relations import RelationRows
+
 from tests.lookup.orchestrator._helpers import *  # noqa: F403
 
 
-def test_lookup_cutover_persists_fact_addresses_with_non_rendered_identity_fields():
+def test_renderer_exposes_answer_and_ranking_outputs_without_support_fields():
+    result = FactResult(
+        outcome=AnswerResult(
+            result_projection=ResultProjection(
+                relation_outputs=(
+                    RelationResultOutput(
+                        id="staff",
+                        relation_id="ranked_staff",
+                        field_id="staff_id",
+                        role="answer_value",
+                    ),
+                    RelationResultOutput(
+                        id="compensation",
+                        relation_id="ranked_staff",
+                        field_id="calculated_pay",
+                        role="ranking_metric",
+                    ),
+                    RelationResultOutput(
+                        id="payment_status",
+                        relation_id="ranked_staff",
+                        field_id="payment_status",
+                        role="support",
+                    ),
+                )
+            ),
+            relations=(
+                RelationRows(
+                    id="ranked_staff",
+                    rows=(
+                        {
+                            "staff_id": "staff-3",
+                            "calculated_pay": Decimal("1200.00"),
+                            "payment_status": "PARTIALLY_PAID",
+                        },
+                    ),
+                ),
+            ),
+        )
+    )
+
+    rendered = render_fact_result(result)
+
+    assert rendered.rows == (
+        {"staff": "staff-3", "compensation": Decimal("1200.00")},
+    )
+    assert rendered_fact_payload(rendered)["renderOutputs"] == [
+        {"key": "staff", "role": "answer_value"},
+        {"key": "compensation", "role": "ranking_metric"},
+    ]
+
+
+def test_lookup_cutover_persists_fact_addresses_with_typed_entity_results():
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(
@@ -16,11 +77,10 @@ def test_lookup_cutover_persists_fact_addresses_with_non_rendered_identity_field
                     fields=(
                         RelationField(
                             field_id="staff_id",
-                            roles=(FieldBindingRole.IDENTITY,),
-                        ),
-                        RelationField(
-                            field_id="staff_name",
-                            roles=(FieldBindingRole.OUTPUT,),
+                            roles=(
+                                FieldBindingRole.IDENTITY,
+                                FieldBindingRole.OUTPUT,
+                            ),
                         ),
                         RelationField(
                             field_id="sales_total",
@@ -36,21 +96,29 @@ def test_lookup_cutover_persists_fact_addresses_with_non_rendered_identity_field
                         input_relation="staff_sales_rows",
                         fields=(
                             ProjectField(source="staff_id"),
-                            ProjectField(source="staff_name"),
                             ProjectField(source="sales_total"),
                         ),
                     ),
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
-                        id="staff_name",
+                    RelationResultOutput(
+                        id="staff",
                         relation_id="answer_rows",
-                        field_id="staff_name",
+                        entity_key=EntityKeyProjection(
+                            entity_kind="staff",
+                            key_id="primary_key",
+                            components=(
+                                EntityKeyProjectionComponent(
+                                    component_id="staff_id",
+                                    field_id="staff_id",
+                                ),
+                            ),
+                        ),
                     ),
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="sales_total",
                         relation_id="answer_rows",
                         field_id="sales_total",
@@ -76,11 +144,6 @@ def test_lookup_cutover_persists_fact_addresses_with_non_rendered_identity_field
                         path="data.staff_id",
                         row_path_id="data",
                         type="string",
-                        identity=IdentityMetadata(
-                            entity_ref="staff",
-                            primary_key=True,
-                            display_fields=("field.staff_name",),
-                        ),
                     ),
                     CatalogField(
                         ref="field.staff_name",
@@ -95,11 +158,54 @@ def test_lookup_cutover_persists_fact_addresses_with_non_rendered_identity_field
                         type="number",
                     ),
                 ),
+                entity_references=(
+                    EntityReference(
+                        id="staff_reference",
+                        target_entity_kind="staff",
+                        target_key_id="primary_key",
+                        components=(
+                            EntityReferenceComponent(
+                                target_component_id="staff_id",
+                                local_field_ref="field.staff_id",
+                            ),
+                        ),
+                        context_field_refs=("field.staff_name",),
+                    ),
+                ),
                 pagination=PaginationMetadata(
                     mode=PaginationMode.NONE,
                     completeness_policy=CompletenessPolicy.COMPLETE,
                 ),
-            )
+            ),
+            EndpointRead(
+                id="staff_read",
+                endpoint_name="list_staff_list",
+                resource_names=("staff",),
+                row_paths=(
+                    RowPath(id="data", path="data", cardinality=RowCardinality.MANY),
+                ),
+                fields=(
+                    CatalogField(
+                        ref="staff.field.staff_id",
+                        path="data.staff_id",
+                        row_path_id="data",
+                        type="string",
+                    ),
+                ),
+                candidate_keys=(
+                    CandidateKey(
+                        id="primary_key",
+                        entity_kind="staff",
+                        components=(
+                            CandidateKeyComponent(
+                                id="staff_id",
+                                field_ref="staff.field.staff_id",
+                            ),
+                        ),
+                        primary=True,
+                    ),
+                ),
+            ),
         ),
         responses={
             "staff_sales_read": {
@@ -125,9 +231,15 @@ def test_lookup_cutover_persists_fact_addresses_with_non_rendered_identity_field
     )
 
     addresses = {item["address"]: item for item in result.fact_addresses}
-    assert result.answer == "Alice: 12000.00"
     assert result.rendered_fact.rows == (  # type: ignore[union-attr]
-        {"answer_1": "Alice", "answer_2": "12000.00"},
+        {
+            "answer_1": {
+                "entityKind": "staff",
+                "keyId": "primary_key",
+                "components": {"staff_id": "staff-1"},
+            },
+            "answer_2": Decimal("12000.00"),
+        },
     )
     assert addresses["row.answer_1_rows.1"]["identity"] == {"staff_id": "staff-1"}
     assert "staff_id" not in addresses["row.answer_1_rows.1"]["values"]
@@ -165,9 +277,9 @@ def test_lookup_cutover_fact_addresses_expose_only_rendered_answer_fields():
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="customer_name",
                         relation_id="answer_rows",
                         field_id="customer_name",
@@ -264,9 +376,9 @@ def test_lookup_cutover_result_data_exposes_only_rendered_answer_fields():
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="customer_name",
                         relation_id="answer_rows",
                         field_id="customer_name",
@@ -359,9 +471,9 @@ def test_lookup_cutover_aggregate_result_payload_is_json_safe():
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="total_sales",
                         relation_id="answer_rows",
                         field_id="total_sales",

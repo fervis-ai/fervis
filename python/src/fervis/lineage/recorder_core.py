@@ -11,7 +11,6 @@ from fervis.lineage.enums import (
     RunResultKind,
     RunStepKey,
     RunStepKind,
-    RunTriggerKind,
 )
 from fervis.lineage.payloads.execution_proof_graph import (
     ProofGraphPayload,
@@ -104,7 +103,9 @@ class LineageRecorder:
             label="program invocation run",
         )
         if bundle.invocation.program_id != bundle.program.program_id:
-            raise LineageRecorderConflict("invocation must reference its answer program")
+            raise LineageRecorderConflict(
+                "invocation must reference its answer program"
+            )
         if bundle.invocation.revision_id is not None:
             revision = self._require_row(
                 records.PROGRAM_REVISION,
@@ -134,7 +135,9 @@ class LineageRecorder:
                 "program revision must reference its revised answer program"
             )
         if bundle.revision.base_program_id == bundle.revision.revised_program_id:
-            raise LineageRecorderConflict("program revision must change program identity")
+            raise LineageRecorderConflict(
+                "program revision must change program identity"
+            )
         with self._store.transaction():
             self._record_idempotent(records.ANSWER_PROGRAM, bundle.program)
             self._record_idempotent(records.PROGRAM_REVISION, bundle.revision)
@@ -280,8 +283,6 @@ class LineageRecorder:
                 self.record_fact_result(fact_result)
             for proof_graph in terminal_result.proof_graphs:
                 self.record_execution_proof_graph(proof_graph)
-            for clarification in terminal_result.clarifications:
-                self.record_clarification_request(clarification)
             for memory_artifact in terminal_result.memory_artifacts:
                 self.record_memory_artifact(memory_artifact)
         return terminal_result
@@ -302,7 +303,6 @@ class LineageRecorder:
     def record_clarification_request(
         self, clarification: ClarificationRequestWrite
     ) -> ClarificationRequestWrite:
-        self._validate_clarification_request(clarification)
         return self._record_idempotent(records.CLARIFICATION_REQUEST, clarification)
 
     def record_clarification_response(
@@ -395,17 +395,13 @@ class LineageRecorder:
     def _require_proof_graph_fact_result(
         self, proof_graph: ExecutionProofGraphWrite
     ) -> None:
-        row = self._require_same_run_row(
+        self._require_same_run_row(
             records.FACT_RESULT,
             run_id=proof_graph.run_id,
             identity_field="fact_result_id",
             identity_value=proof_graph.fact_result_id,
             label="proof graph fact result",
         )
-        if row.values["result_kind"] == FactResultKind.NEEDS_CLARIFICATION.value:
-            raise LineageRecorderConflict(
-                "proof graph fact result cannot be needs_clarification"
-            )
 
     def _record_idempotent(
         self,
@@ -422,10 +418,6 @@ class LineageRecorder:
                 f"{spec.label} {identifier!r} already exists with {conflict_detail}"
             )
         return write
-
-    def _insert_row(self, row: LineageRow) -> None:
-        self._validate_row_refs(row)
-        self._store.insert_row(row)
 
     def _validate_row_refs(self, row: LineageRow) -> None:
         for reference in row.same_run_refs:
@@ -467,31 +459,6 @@ class LineageRecorder:
                 raise LineageRecorderConflict(
                     f"base run {run.base_run_id!r} must belong to question {run.question_id!r}"
                 )
-        if run.trigger_kind is not RunTriggerKind.CLARIFICATION_RESPONSE:
-            return
-        self._require_same_run_row(
-            records.CLARIFICATION_RESPONSE,
-            run_id=run.base_run_id or "",
-            identity_field="response_id",
-            identity_value=run.trigger_clarification_response_id,
-            label="clarification trigger response",
-        )
-
-    def _validate_clarification_request(
-        self,
-        clarification: ClarificationRequestWrite,
-    ) -> None:
-        if clarification.fact_result_id is None:
-            return
-        self._require_row_value(
-            records.FACT_RESULT,
-            run_id=clarification.run_id,
-            identity_field="fact_result_id",
-            identity_value=clarification.fact_result_id,
-            value_field="result_kind",
-            expected=FactResultKind.NEEDS_CLARIFICATION.value,
-            label="clarification fact result",
-        )
 
     def _validate_answer_output_proof_refs(
         self,
@@ -547,7 +514,7 @@ class LineageRecorder:
 
     def _require_row_value(
         self,
-        spec: records.LineageRowSpec[object],
+        spec: records.LineageRowSpec[T],
         *,
         run_id: str,
         identity_field: str,
@@ -568,7 +535,7 @@ class LineageRecorder:
 
     def _require_same_run_row(
         self,
-        spec: records.LineageRowSpec[object],
+        spec: records.LineageRowSpec[T],
         *,
         run_id: str,
         identity_field: str,
@@ -583,7 +550,7 @@ class LineageRecorder:
 
     def _require_row(
         self,
-        spec: records.LineageRowSpec[object],
+        spec: records.LineageRowSpec[T],
         lookup: dict[str, object],
         *,
         label: str,

@@ -3,25 +3,32 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
-from typing import Any, Protocol
+from fervis.types.enums import StrEnum
+from typing import Protocol
+
+from fervis.lookup.plan_selection.support_options import PlanSelectionSupportOption
+from fervis.lookup.source_binding.candidates.contracts import (
+    CountBasisEvidence,
+    FulfillmentSupportSet,
+    RowPopulationEvidence,
+)
 
 
 class SupportSetGrouper(Protocol):
     def __call__(
         self,
-        support_sets: tuple[dict[str, Any], ...],
+        support_sets: tuple[FulfillmentSupportSet, ...],
         *,
         requirement_id: str,
         required_answer_output_ids: tuple[str, ...],
         source_candidate_id: str,
-    ) -> tuple[tuple[dict[str, Any], ...], ...]: ...
+    ) -> tuple[tuple[FulfillmentSupportSet, ...], ...]: ...
 
 
 _MEMBER_REQUIREMENT_SUPPORT_ROLES: dict[str, frozenset[str]] = {
-    "metric": frozenset(("MEASURED_VALUE", "ROW_POPULATION")),
+    "metric": frozenset(("MEASURED_VALUE", "ROW_COUNT")),
     "group_identity": frozenset(("GROUP_KEY",)),
-    "operation": frozenset(("MEASURED_VALUE", "ROW_POPULATION", "GROUP_KEY")),
+    "operation": frozenset(("MEASURED_VALUE", "ROW_COUNT", "GROUP_KEY")),
     "value_1": frozenset(("VALUE_SOURCE",)),
     "value_2": frozenset(("VALUE_SOURCE",)),
 }
@@ -70,31 +77,30 @@ class PlanSelectionShapeSpec:
         self,
         requirement_id: str,
         *,
-        support_options: tuple[dict[str, object], ...],
+        support_options: tuple[PlanSelectionSupportOption, ...],
     ) -> frozenset[str] | None:
         if requirement_id == "population":
             return frozenset()
         if requirement_id == "metric":
             has_measured_value = any(
-                "MEASURED_VALUE" in set(option.get("support_roles") or ())
-                for option in support_options
+                "MEASURED_VALUE" in option.support_roles for option in support_options
             )
             if (
                 self.plan_shape in {"aggregate_by_group", "ranked_aggregate"}
                 and has_measured_value
             ):
                 return frozenset(("MEASURED_VALUE",))
-            return frozenset(("MEASURED_VALUE", "ROW_POPULATION"))
+            return frozenset(("MEASURED_VALUE", "ROW_COUNT"))
         return _MEMBER_REQUIREMENT_BINDING_ROLES.get(requirement_id)
 
     def support_set_groups_for_requirement(
         self,
-        support_sets: tuple[dict[str, Any], ...],
+        support_sets: tuple[FulfillmentSupportSet, ...],
         *,
         requirement_id: str,
         required_answer_output_ids: tuple[str, ...],
         source_candidate_id: str,
-    ) -> tuple[tuple[dict[str, Any], ...], ...]:
+    ) -> tuple[tuple[FulfillmentSupportSet, ...], ...]:
         if self.support_set_grouper is not None:
             return self.support_set_grouper(
                 support_sets,
@@ -152,20 +158,20 @@ class PlanSelectionShapeSpec:
 
 
 def _row_population_grain_groups(
-    support_sets: tuple[dict[str, Any], ...],
+    support_sets: tuple[FulfillmentSupportSet, ...],
     *,
     required_answer_output_ids: tuple[str, ...],
-) -> tuple[tuple[dict[str, Any], ...], ...]:
+) -> tuple[tuple[FulfillmentSupportSet, ...], ...]:
     """Validate row-population grain support without selecting operation parts."""
 
-    support_sets_by_output: dict[str, list[dict[str, Any]]] = {
+    support_sets_by_output: dict[str, list[FulfillmentSupportSet]] = {
         answer_output_id: [] for answer_output_id in required_answer_output_ids
     }
     has_support_by_output = {
         answer_output_id: False for answer_output_id in required_answer_output_ids
     }
     for support_set in support_sets:
-        answer_output_id = str(support_set.get("answer_output_id") or "")
+        answer_output_id = support_set.answer_output_id
         if answer_output_id not in support_sets_by_output:
             continue
         support_sets_by_output[answer_output_id].append(support_set)
@@ -185,38 +191,29 @@ def _row_population_grain_groups(
     )
 
 
-def _support_set_has_row_count_basis(support_set: dict[str, Any]) -> bool:
-    return any(
-        isinstance(slot, dict) and bool(slot.get("row_count_basis_evidence"))
-        for slot in support_set.get("fulfillment_slots") or ()
-    )
+def _support_set_has_row_count_basis(support_set: FulfillmentSupportSet) -> bool:
+    return any(slot.row_count_basis_evidence for slot in support_set.fulfillment_slots)
 
 
 def _support_set_has_executable_row_count_basis(
-    support_set: dict[str, Any],
+    support_set: FulfillmentSupportSet,
 ) -> bool:
     return any(
-        isinstance(slot, dict)
-        and any(
+        any(
             _row_count_basis_evidence_is_executable(evidence)
-            for evidence in slot.get("row_count_basis_evidence") or ()
-            if isinstance(evidence, dict)
+            for evidence in slot.row_count_basis_evidence
         )
-        for slot in support_set.get("fulfillment_slots") or ()
+        for slot in support_set.fulfillment_slots
     )
 
 
-def _row_count_basis_evidence_is_executable(evidence: dict[str, Any]) -> bool:
-    if str(evidence.get("type") or "") == "row_population":
+def _row_count_basis_evidence_is_executable(
+    evidence: CountBasisEvidence,
+) -> bool:
+    if isinstance(evidence, RowPopulationEvidence):
         return (
-            str(evidence.get("row_cardinality") or "") == "many"
-            and bool(str(evidence.get("row_source_id") or ""))
-            and bool(
-                str(evidence.get("row_path_id") or "")
-                or str(evidence.get("field_id") or "")
-            )
+            evidence.row_cardinality == "many"
+            and bool(evidence.row_source_id)
+            and bool(evidence.row_path_id)
         )
-    field_id = str(evidence.get("field_id") or "")
-    if not field_id:
-        return False
-    return True
+    return bool(evidence.field_id)

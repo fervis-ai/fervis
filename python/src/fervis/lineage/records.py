@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
+from datetime import date, datetime, time
+from decimal import Decimal
+from enum import Enum
+
+from fervis.types.enums import StrEnum
 from typing import Any, Generic, TypeVar
+from uuid import UUID
 
 from fervis.lineage.enums import (
     AnswerValueKind,
@@ -106,6 +111,12 @@ def _normalize_json_value(value: Any) -> Any:
         return [_normalize_json_value(item) for item in value]
     if isinstance(value, dict):
         return {str(key): _normalize_json_value(item) for key, item in value.items()}
+    if isinstance(value, Decimal):
+        return format(value, "f")
+    if isinstance(value, (datetime, date, time, UUID)):
+        return str(value)
+    if isinstance(value, Enum):
+        return _normalize_json_value(value.value)
     return value
 
 
@@ -342,7 +353,7 @@ QUESTION_RUN = LineageRowSpec(
         field("kind", enum_type=QuestionRunKind),
         field("trigger_kind", enum_type=RunTriggerKind),
         field("base_run_id"),
-        field("trigger_clarification_response_id", none_as_blank=True),
+        field("trigger_clarification_response_id"),
         field("adapter_ref"),
         field("runtime_version"),
     ),
@@ -676,21 +687,12 @@ CLARIFICATION_REQUEST = LineageRowSpec(
     identity=field("clarification_id"),
     fields=(
         field("run_id"),
-        field("fact_result_id"),
         field("step_id"),
         field("need", enum_type=ClarificationNeed),
         field("reason", enum_type=ClarificationReason),
         field("payload_json", json_value=True),
     ),
-    same_run_refs=(
-        SameRunReference(
-            "fact_result",
-            "fact_result_id",
-            "clarification fact result",
-            required=False,
-        ),
-        SameRunReference("run_step", "step_id", "clarification step", required=False),
-    ),
+    same_run_refs=(SameRunReference("run_step", "step_id", "clarification step"),),
 )
 
 CLARIFICATION_RESPONSE = LineageRowSpec(

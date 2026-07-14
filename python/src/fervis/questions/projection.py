@@ -12,12 +12,17 @@ class QuestionRunStatus(str, Enum):
     QUEUED = "QUEUED"
     RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
-    NEEDS_CLARIFICATION = "NEEDS_CLARIFICATION"
+    WAITING_FOR_CLARIFICATION = "WAITING_FOR_CLARIFICATION"
+    SUPERSEDED = "SUPERSEDED"
     FAILED = "FAILED"
 
 
 _ACTIVE_STATUSES = frozenset(
-    {QuestionRunStatus.QUEUED, QuestionRunStatus.RUNNING}
+    {
+        QuestionRunStatus.QUEUED,
+        QuestionRunStatus.RUNNING,
+        QuestionRunStatus.WAITING_FOR_CLARIFICATION,
+    }
 )
 
 
@@ -101,9 +106,7 @@ def project_question_runs(
         else (model_runs[-1] if model_runs else None)
     )
     active_runs = tuple(
-        run
-        for run in ordered
-        if not run.terminal and run.status in _ACTIVE_STATUSES
+        run for run in ordered if not run.terminal and run.status in _ACTIVE_STATUSES
     )
     return QuestionRunProjection(
         primary_run_id=primary.run_id if primary is not None else None,

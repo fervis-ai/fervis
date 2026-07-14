@@ -16,7 +16,6 @@ from fervis.lineage.recorder import (
     ProgramRevisionWrite,
 )
 from fervis.lookup.answer_program.codec import (
-    ANSWER_PROGRAM_SCHEMA_REVISION,
     answer_program_id,
     binding_patch_id,
     canonical_answer_program_json,
@@ -27,7 +26,10 @@ from fervis.lookup.answer_program.codec import (
     decode_binding_set,
 )
 from fervis.lookup.answer_program.instantiation import VerifiedExecution
-from fervis.lookup.answer_program.model import AnswerProgram
+from fervis.lookup.answer_program.model import (
+    ANSWER_PROGRAM_SCHEMA_REVISION,
+    AnswerProgram,
+)
 from fervis.lookup.answer_program.revisions import (
     ProgramRevision,
     canonical_capability_application_json,
@@ -54,7 +56,9 @@ class ProgramInvocation:
                 raise ValueError("compiled question cannot have a base invocation")
             return
         if self.base_invocation_id is None:
-            raise ValueError("continued and rerun invocations require a base invocation")
+            raise ValueError(
+                "continued and rerun invocations require a base invocation"
+            )
 
     @property
     def patch_id(self) -> str | None:
@@ -239,9 +243,7 @@ def program_invocation(
     )
 
 
-def program_invocation_id(
-    *, run_id: str, program_id: str, bindings: BindingSet
-) -> str:
+def program_invocation_id(*, run_id: str, program_id: str, bindings: BindingSet) -> str:
     payload = "\0".join(
         (run_id, program_id, canonical_binding_set_json(bindings))
     ).encode()

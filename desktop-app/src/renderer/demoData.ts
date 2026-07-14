@@ -8,11 +8,10 @@ import {
 import type { RunPayload } from "../fervis-api/contracts";
 import type { ConversationDetails } from "./viewTypes";
 
-const completedAfterClarificationRun = {
-  ...completedRunFixture,
-  runNumber: 2,
-  triggerKind: "clarification_response",
-  baseRunId: clarificationRunFixture.runId
+const choiceClarificationDemoRun = {
+  ...clarificationRunFixture,
+  conversationId: "conv_choice_clarification",
+  questionId: "q_choice_clarification"
 } satisfies RunPayload;
 
 const runningDemoRun = {
@@ -39,7 +38,7 @@ const textClarificationDemoRun = {
       kind: "provide_clarification",
       description: "Continue the same question by answering the clarification.",
       command:
-        'fervis runtime ask "<answer>" --question-id q_clarification --base-run-id run_clarify_text --clarification-id clar_period',
+        'fervis runtime ask "<answer>" --question-id q_clarification --run-id run_clarify_text --clarification-id clar_period',
       request: null
     }
   ]
@@ -69,11 +68,26 @@ export const demoConversations: readonly ConversationDetails[] = [
       latestRunId: "run_sales",
       activeRunId: null,
       status: "COMPLETED",
-      runCount: 2,
+      runCount: 1,
       updatedAt: "2026-06-27T10:15:00+00:00"
     },
     question: "How many in-person sales happened this month?",
-    runs: [clarificationRunFixture, completedAfterClarificationRun]
+    runs: [completedRunFixture]
+  },
+  {
+    summary: {
+      conversationId: "conv_choice_clarification",
+      firstQuestion: "How many sales happened at the matching store?",
+      latestQuestionId: "q_choice_clarification",
+      primaryRunId: null,
+      latestRunId: "run_clarify",
+      activeRunId: "run_clarify",
+      status: "WAITING_FOR_CLARIFICATION",
+      runCount: 1,
+      updatedAt: "2026-06-27T10:15:30+00:00"
+    },
+    question: "How many sales happened at the matching store?",
+    runs: [choiceClarificationDemoRun]
   },
   {
     summary: {
@@ -97,8 +111,8 @@ export const demoConversations: readonly ConversationDetails[] = [
       latestQuestionId: "q_clarification",
       primaryRunId: "run_clarify_text",
       latestRunId: "run_clarify_text",
-      activeRunId: null,
-      status: "NEEDS_CLARIFICATION",
+      activeRunId: "run_clarify_text",
+      status: "WAITING_FOR_CLARIFICATION",
       runCount: 1,
       updatedAt: "2026-06-27T10:17:00+00:00"
     },

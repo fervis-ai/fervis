@@ -7,6 +7,7 @@ requested_facts:
     answer_outputs:
       - id: answer_1
         description: number of stores in London
+        role: ANSWER_VALUE
 catalog:
   reads:
     - id: list_location_list

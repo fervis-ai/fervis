@@ -10,6 +10,7 @@ from fervis.lookup.conversation_resolution import (
     ConversationResolutionRequest,
     generate_conversation_resolution,
 )
+from fervis.lookup.conversation_resolution.prompt import ConversationResolutionTurnPrompt
 from fervis.lookup.conversation_resolution.schema import (
     build_conversation_resolution_tool_schemas,
 )
@@ -24,7 +25,7 @@ def _context_source() -> ConversationContextSource:
         source_memory_ids=("mem_1",),
         meaning_anchors=(
             ConversationMeaningAnchor(
-                memory_id="mem_1",
+                anchor_id="mem_1",
                 text="total sales",
                 occurrence=1,
                 kind="scalar_value",
@@ -32,6 +33,19 @@ def _context_source() -> ConversationContextSource:
             ),
         ),
     )
+
+
+def test_retained_frame_shape_has_one_model_facing_owner():
+    prompt = ConversationResolutionTurnPrompt(
+        question="What about stores?",
+        context_sources=(_context_source(),),
+    ).to_model_invocation().prompt_text
+
+    assert (
+        "retained_frame_parts is the sole representation of fixed prior question "
+        "shape" in prompt
+    )
+    assert "Do not repeat retained frame meaning in resolved values." in prompt
 
 
 def test_conversation_resolution_schemas_are_provider_compatible_root_objects():
@@ -64,14 +78,20 @@ def test_conversation_resolution_array_items_are_typed_for_provider_schemas():
     ] == []
 
 
+def test_conversation_resolution_without_prior_value_authority_has_no_values():
+    schema = next(iter(build_conversation_resolution_tool_schemas().values()))
+    resolved_outcome = schema["properties"]["outcome"]["oneOf"][0]
+    clause = resolved_outcome["properties"]["clauses"]["items"]
+
+    assert clause["properties"]["values"]["maxItems"] == 0
+
+
 def _array_item_type_violations(schema: object, *, path: str) -> list[str]:
     violations = []
     if isinstance(schema, dict):
         if schema.get("type") == "array":
             items = schema.get("items")
-            if not isinstance(items, dict) or not (
-                "type" in items or "oneOf" in items
-            ):
+            if not isinstance(items, dict) or not ("type" in items or "oneOf" in items):
                 violations.append(path)
         for key, value in schema.items():
             violations.extend(_array_item_type_violations(value, path=f"{path}.{key}"))
@@ -132,6 +152,7 @@ class _ConversationResolutionModelPort:
                                         {
                                             "value_id": "prior_rows",
                                             "resolved_text": "prior rows",
+                                            "frame_parameter": {"kind": "none"},
                                             "sources": [
                                                 {
                                                     "kind": "current_span",
@@ -141,15 +162,13 @@ class _ConversationResolutionModelPort:
                                                 {
                                                     "kind": "context_anchor",
                                                     "source_id": "prior_1",
-                                                    "memory_id": "mem_1",
-                                                    "source_text": "prior rows",
+                                                    "anchor_id": "mem_1",
                                                 },
                                             ],
                                         }
                                     ],
                                 }
                             ],
-                            "frame_call": {"kind": "none"},
                         },
                     },
                 }
@@ -172,7 +191,7 @@ def test_conversation_resolution_artifact_separates_submitted_and_derived_payloa
                     source_memory_ids=("mem_1",),
                     meaning_anchors=(
                         ConversationMeaningAnchor(
-                            memory_id="mem_1",
+                            anchor_id="mem_1",
                             text="prior rows",
                             occurrence=1,
                             kind="row_set",
@@ -200,9 +219,7 @@ def test_conversation_resolution_artifact_separates_submitted_and_derived_payloa
         "derived_source_card_ids": result.artifact.derived_payload[
             "used_source_card_ids"
         ],
-        "derived_memory_ids": result.artifact.derived_payload[
-            "activated_memory_ids"
-        ],
+        "derived_memory_ids": result.artifact.derived_payload["activated_memory_ids"],
     } == {
         "submitted_has_derived_keys": False,
         "parsed_has_derived_keys": False,

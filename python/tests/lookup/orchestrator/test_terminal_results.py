@@ -3,6 +3,7 @@ from fervis.lookup.grounding.model import (
     GroundingIssue,
     GroundingTerminalKind,
 )
+from fervis.lookup.canonical_data import EntityKeyComponentValue, EntityKeyValue
 from fervis.lookup.clarification import clarification_payload
 from fervis.lookup.orchestration.terminal_results import _grounding_issue_fact_result
 from fervis.lookup.outcomes.model import NeedsClarification
@@ -62,6 +63,18 @@ def test_grounding_issues_for_one_input_produce_one_complete_clarification():
                     GroundingCandidate(
                         id=candidate_id,
                         label=candidate_id,
+                        key=EntityKeyValue(
+                            entity_kind="store",
+                            key_id="store_id",
+                            components=(
+                                EntityKeyComponentValue(
+                                    component_id="store_id",
+                                    value=candidate_id,
+                                ),
+                            ),
+                        ),
+                        matched_field="store_id",
+                        matched_value=candidate_id,
                         resolver_read_id=resolver_read_id,
                     ),
                 ),
@@ -78,9 +91,10 @@ def test_grounding_issues_for_one_input_produce_one_complete_clarification():
     assert isinstance(result.outcome, NeedsClarification)
     assert len(result.outcome.clarifications) == 1
     payload = clarification_payload(result.outcome.clarifications[0])
-    assert [
-        option["id"] for option in payload["subjects"][0]["options"]
-    ] == ["store_1", "location_1"]
+    assert [option["id"] for option in payload["subjects"][0]["options"]] == [
+        "store_1",
+        "location_1",
+    ]
     assert [
         item["readId"]
         for item in payload["evidence"]

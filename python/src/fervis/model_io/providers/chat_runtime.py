@@ -7,7 +7,6 @@ from decimal import Decimal
 import json
 import os
 import queue
-import threading
 from typing import Any, Callable
 
 from fervis.observability.usage_types import CostSource
@@ -102,9 +101,6 @@ class ConfiguredChatLoopRuntime:
     def request_payload(self, request: ProviderRunRequest) -> Any:
         raise NotImplementedError
 
-    def timeout_reason(self) -> str:
-        return f"{self.config.provider_name} provider hard timeout exceeded."
-
     def _sdk_status(self) -> str:
         return provider_sdk_status(self.config, sdk_available=self.sdk_available())
 
@@ -117,17 +113,10 @@ class ConfiguredChatLoopRuntime:
                 error_class="ProviderConfigurationError",
             )
         try:
-            payload = run_provider_worker_with_timeout(
+            payload = run_provider_worker(
                 self.worker(),
                 self.request_payload(request),
-                timeout_reason=self.timeout_reason(),
             )
-        except ProviderHardTimeout as exc:
-            raise provider_unavailable_error(
-                self.config,
-                reason=str(exc),
-                error_class=exc.__class__.__name__,
-            ) from exc
         except ProviderExecutionError as exc:
             raise provider_unavailable_error(
                 self.config,
@@ -152,10 +141,6 @@ class ConfiguredChatLoopRuntime:
                 error_class=exc.error_class,
                 context=exc.context,
             ) from exc
-
-
-class ProviderHardTimeout(TimeoutError):
-    pass
 
 
 class ProviderExecutionError(RuntimeError):
@@ -220,7 +205,6 @@ def provider_unavailable_error(
     if (
         normalized
         in {
-            "ProviderHardTimeout",
             "TimeoutError",
             "APITimeoutError",
             "TimeoutException",
@@ -514,44 +498,75 @@ def chat_runtime_base_system_prompt() -> str:
 
 
 def provider_timeout_seconds() -> float:
-    return max(1.0, float(os.getenv("FERVIS_PROVIDER_TIMEOUT_SECONDS", "120")))
+    return _environment_float(
+        "FERVIS_PROVIDER_TIMEOUT_SECONDS",
+        default=120.0,
+        minimum=1.0,
+    )
 
 
 def provider_max_retries() -> int:
-    raw = os.getenv("FERVIS_PROVIDER_MAX_RETRIES", "0")
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        return 0
-    return max(0, value)
-
-
-def provider_hard_timeout_seconds() -> float:
-    return max(1.0, float(os.getenv("FERVIS_PROVIDER_HARD_TIMEOUT_SECONDS", "150")))
+    return _environment_int(
+        "FERVIS_PROVIDER_MAX_RETRIES",
+        default=0,
+        minimum=0,
+    )
 
 
 def provider_max_output_tokens() -> int:
-    return max(
-        1024, min(8192, int(os.getenv("FERVIS_PROVIDER_MAX_OUTPUT_TOKENS", "4096")))
+    return _environment_int(
+        "FERVIS_PROVIDER_MAX_OUTPUT_TOKENS",
+        default=4096,
+        minimum=1024,
+        maximum=8192,
     )
 
 
-def run_provider_worker_with_timeout(
+def _environment_float(name: str, *, default: float, minimum: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise _invalid_provider_setting(name) from exc
+    if value < minimum:
+        raise _invalid_provider_setting(name)
+    return value
+
+
+def _environment_int(
+    name: str,
+    *,
+    default: int,
+    minimum: int,
+    maximum: int | None = None,
+) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise _invalid_provider_setting(name) from exc
+    if value < minimum or (maximum is not None and value > maximum):
+        raise _invalid_provider_setting(name)
+    return value
+
+
+def _invalid_provider_setting(name: str) -> ProviderExecutionError:
+    return ProviderExecutionError(
+        error_class="ProviderConfigurationError",
+        reason=f"{name} is invalid.",
+    )
+
+
+def run_provider_worker(
     worker: ProviderWorker,
     payload: Any,
-    *,
-    timeout_reason: str,
 ) -> dict[str, Any]:
     result_queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
-    thread = threading.Thread(
-        target=_run_provider_worker,
-        args=(worker, payload, result_queue),
-        daemon=True,
-    )
-    thread.start()
-    thread.join(timeout=provider_hard_timeout_seconds())
-    if thread.is_alive():
-        raise ProviderHardTimeout(timeout_reason)
+    _run_provider_worker(worker, payload, result_queue)
 
     try:
         result = result_queue.get_nowait()
@@ -593,14 +608,14 @@ def _put_provider_worker_result(
 
 def provider_error_payload(exc: BaseException) -> dict[str, Any]:
     if isinstance(exc, ProviderExecutionError):
-        payload = {
+        execution_error = {
             "ok": False,
             "errorClass": exc.error_class,
             "error": exc.reason,
         }
         if exc.context:
-            payload["context"] = dict(exc.context)
-        return payload
+            execution_error["context"] = dict(exc.context)
+        return execution_error
     payload: dict[str, Any] = {
         "ok": False,
         "errorClass": exc.__class__.__name__,
@@ -633,9 +648,8 @@ def _provider_worker_no_result_context() -> dict[str, Any]:
 
 
 def _provider_error_context(result: dict[str, Any]) -> dict[str, Any]:
-    raw_context = (
-        dict(result.get("context")) if isinstance(result.get("context"), dict) else {}
-    )
+    context = result.get("context")
+    raw_context = dict(context) if isinstance(context, dict) else {}
     metadata = {
         key: result[key]
         for key in ("statusCode", "requestId", "errorCode", "errorType")

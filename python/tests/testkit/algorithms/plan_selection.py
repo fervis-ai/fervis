@@ -8,27 +8,21 @@ from fervis.lookup.operation_families.plan_selection_registry import (
     plan_selection_shape_specs_for_family,
 )
 from fervis.lookup.plan_selection.source_strategies import source_strategies_by_fact
+from fervis.lookup.plan_selection.model import OperationEvidence
 from fervis.lookup.question_contract import (
     GroupKeyDomainKind,
     QuestionContract,
     RequestedFact,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
+    ResultSelectionKind,
     RequestedFactGroupKey,
     RequestedFactAnswerOutput,
     RequestedFactAnswerSubject,
 )
 from fervis.lookup.read_eligibility import ReadAssessment, ReadEligibilityResult
 from fervis.lookup.read_eligibility.candidate_identity import read_candidate_signature
-from fervis.lookup.relation_catalog import (
-    CatalogField,
-    CatalogParam,
-    EndpointRead,
-    ParamSource,
-    RelationCatalog,
-    RowCardinality,
-    RowPath,
-)
+from fervis.lookup.relation_catalog import RelationCatalog
 from fervis.lookup.relation_catalog.selection import (
     CatalogSelectionRanking,
     CatalogSelectionResult,
@@ -36,10 +30,12 @@ from fervis.lookup.relation_catalog.selection import (
 )
 from fervis.lookup.source_binding.candidates.registry import (
     source_candidate_discovery_payload,
+    source_candidate_discovery_registry,
 )
 from fervis.lookup.source_binding.model import SourceCandidateDiscoveryRequest
 
 from tests.testkit.assertions import subset_mismatches
+from tests.testkit.catalog import catalog_from_payload
 
 
 def run_plan_selection_prompt_surface_case(payload: dict[str, Any]) -> list[str]:
@@ -53,7 +49,7 @@ def run_plan_selection_prompt_surface_case(payload: dict[str, Any]) -> list[str]
     candidate_payload = source_candidate_discovery_payload(request)
     candidates_by_id = _source_candidates_by_id(candidate_payload)
     strategies = source_strategies_by_fact(
-        candidate_payload,
+        source_candidate_discovery_registry(request),
         requested_facts=request.requested_facts,
         relation_catalog=request.relation_catalog,
         shape_specs_for_family=plan_selection_shape_specs_for_family,
@@ -160,14 +156,27 @@ def _source_candidates_by_read(payload: dict[str, Any]) -> dict[str, dict[str, A
 
 
 def _requested_fact(payload: dict[str, Any]) -> RequestedFact:
+    family = RequestedFactAnswerExpressionFamily(
+        str(payload["answer_expression_family"])
+    )
     return RequestedFact(
         id=str(payload.get("id") or "fact_1"),
         description=str(payload["description"]),
         answer_expression=RequestedFactAnswerExpression(
-            family=RequestedFactAnswerExpressionFamily(
-                str(payload["answer_expression_family"])
-            ),
+            family=family,
             group_key=_group_key(payload.get("group_key")),
+            selection_kind=(
+                ResultSelectionKind.LIMITED_RESULTS
+                if family is RequestedFactAnswerExpressionFamily.RANKED_SELECTION
+                else ResultSelectionKind.ALL_RESULTS
+                if family is RequestedFactAnswerExpressionFamily.LIST_ROWS
+                else None
+            ),
+            limit_input_ref=(
+                "limit"
+                if family is RequestedFactAnswerExpressionFamily.RANKED_SELECTION
+                else ""
+            ),
         ),
         answer_subject=RequestedFactAnswerSubject(
             subject_text=str(payload["subject_text"])
@@ -175,6 +184,7 @@ def _requested_fact(payload: dict[str, Any]) -> RequestedFact:
         answer_outputs=tuple(
             RequestedFactAnswerOutput(
                 id=str(item["id"]),
+                role=str(item["role"]),
                 description=str(item.get("description") or item["id"]),
             )
             for item in payload["answer_outputs"]
@@ -198,48 +208,7 @@ def _group_key(raw_value: object) -> RequestedFactGroupKey | None:
 
 
 def _catalog(payload: dict[str, Any]) -> RelationCatalog:
-    return RelationCatalog(
-        reads=tuple(_read(item) for item in payload.get("reads") or ())
-    )
-
-
-def _read(payload: dict[str, Any]) -> EndpointRead:
-    return EndpointRead(
-        id=str(payload["id"]),
-        endpoint_name=str(payload.get("endpoint_name") or payload["id"]),
-        resource_names=tuple(str(item) for item in payload.get("resource_names") or ()),
-        params=tuple(_param(item) for item in payload.get("params") or ()),
-        row_paths=tuple(_row_path(item) for item in payload.get("row_paths") or ()),
-        fields=tuple(_field(item) for item in payload.get("fields") or ()),
-    )
-
-
-def _param(payload: dict[str, Any]) -> CatalogParam:
-    return CatalogParam(
-        ref=str(payload["ref"]),
-        name=str(payload["name"]),
-        source=ParamSource(str(payload.get("source") or "query")),
-        type=str(payload.get("type") or "string"),
-        required=bool(payload.get("required") or False),
-    )
-
-
-def _row_path(payload: dict[str, Any]) -> RowPath:
-    return RowPath(
-        id=str(payload["id"]),
-        path=str(payload.get("path") or ""),
-        cardinality=RowCardinality(str(payload["cardinality"])),
-        parent_path=str(payload.get("parent_path") or ""),
-    )
-
-
-def _field(payload: dict[str, Any]) -> CatalogField:
-    return CatalogField(
-        ref=str(payload["ref"]),
-        path=str(payload["path"]),
-        type=str(payload["type"]),
-        row_path_id=str(payload.get("row_path_id") or ""),
-    )
+    return catalog_from_payload(payload)
 
 
 def _fact_values(payload: object) -> tuple[FactValue, ...]:
@@ -251,7 +220,8 @@ def _fact_values(payload: object) -> tuple[FactValue, ...]:
             resolved_end=str(item["resolved_end"]),
             granularity=str(item["granularity"]),
             applies_to_requested_fact_ids=tuple(
-                str(fact_id) for fact_id in item.get("applies_to_requested_fact_ids") or ()
+                str(fact_id)
+                for fact_id in item.get("applies_to_requested_fact_ids") or ()
             ),
         )
         for item in payload
@@ -289,9 +259,8 @@ def _evidence_summary(
         and str(support_set.get("fulfillment_support_set_id") or "") in selected_ids
     ]
     return {
-        "group_fields_by_field": _evidence_by_field(
+        "entity_evidence_by_id": _entity_evidence_by_id(
             support_sets,
-            evidence_key="group_key_evidence",
         ),
         "metric_fields_by_field": _evidence_by_field(
             support_sets,
@@ -300,11 +269,40 @@ def _evidence_summary(
     }
 
 
-def _operation_key(operation_evidence: tuple[dict[str, Any], ...]) -> str:
+def _entity_evidence_by_id(
+    support_sets: list[dict[str, Any]],
+) -> dict[str, dict[str, object]]:
+    output: dict[str, dict[str, object]] = {}
+    for support_set in support_sets:
+        for slot in support_set.get("fulfillment_slots") or ():
+            if not isinstance(slot, dict):
+                continue
+            for item in slot.get("entity_evidence") or ():
+                if not isinstance(item, dict):
+                    continue
+                key_id = str(item.get("key_id") or item.get("target_key_id") or "")
+                if not key_id:
+                    continue
+                output[key_id] = {
+                    "entity_kind": str(
+                        item.get("entity_kind") or item.get("target_entity_kind") or ""
+                    ),
+                    "fields": [
+                        str(component.get("field_id") or "")
+                        for component in item.get("components") or ()
+                        if isinstance(component, dict)
+                        and str(component.get("field_id") or "")
+                    ],
+                    "row_path": str(item.get("row_path_id") or ""),
+                }
+    return output
+
+
+def _operation_key(operation_evidence: tuple[OperationEvidence, ...]) -> str:
     field_ids = tuple(
-        str(item.get("field_id") or "")
+        item.field_id
         for item in operation_evidence
-        if isinstance(item, dict) and str(item.get("field_id") or "")
+        if item.field_id
     )
     return "__".join(field_ids)
 

@@ -1,13 +1,18 @@
+from dataclasses import replace
 import json
 
 import pytest
 from jsonschema import ValidationError, validate
 
 from fervis.lookup.relation_catalog import (
+    CandidateKey,
+    CandidateKeyComponent,
     CatalogField,
     CatalogParam,
     EndpointRead,
-    IdentityMetadata,
+    EntityKeyComponentTarget,
+    EntityReference,
+    EntityReferenceComponent,
     ParamSource,
     RelationCatalog,
     RowCardinality,
@@ -19,6 +24,7 @@ from fervis.lookup.conversation_resolution import (
     ResolvedLiteralQuestionInput,
 )
 from fervis.lookup.conversation_resolution.compilation import CompiledResolvedClause
+from fervis.lookup.canonical_data import entity_key_value
 from fervis.memory.addresses import FactAddress
 from fervis.memory.artifacts import (
     build_fact_artifact,
@@ -31,6 +37,7 @@ from fervis.lookup.grounding.model import (
 )
 from fervis.lookup.grounding.model import (
     InputBindingOption,
+    InputBindingPurpose,
     GroundingRequest,
     KnownInputBindingTask,
     KnownTimeResolutionTask,
@@ -40,8 +47,14 @@ from fervis.lookup.fact_planning.request import RuntimeValueContext
 from fervis.lookup.fact_plan.row_sources import (
     CALENDAR_END_PARAM_ID,
     CALENDAR_START_PARAM_ID,
+    build_row_source_catalog,
 )
-from fervis.lookup.answer_program.values import IdentityValuePayload
+from fervis.lookup.grounding.resolution.references import reference_input_binding_tasks
+from fervis.lookup.answer_program.values import (
+    IdentityValuePayload,
+    NamedValuePayload,
+    ValueFilterOperator,
+)
 from fervis.lookup.turn_prompts import build_turn_prompt_context
 from fervis.lookup.question_contract import (
     AnswerPopulationMembershipTestKind,
@@ -106,9 +119,16 @@ class _DataAccess:
 
 
 class _GroundingModel:
-    def __init__(self, *, known_input_id: str, binding_option_id: str):
+    def __init__(
+        self,
+        *,
+        known_input_id: str,
+        binding_option_id: str,
+        matched_field_ref: str = "",
+    ):
         self.known_input_id = known_input_id
         self.binding_option_id = binding_option_id
+        self.matched_field_ref = matched_field_ref
 
     def generate(self, **kwargs):
         prompt = str(kwargs.get("prompt") or "")
@@ -120,6 +140,9 @@ class _GroundingModel:
                         prompt,
                         selected_by_input={
                             self.known_input_id: self.binding_option_id,
+                        },
+                        matched_field_ref_by_input={
+                            self.known_input_id: self.matched_field_ref,
                         },
                     ),
                 }
@@ -205,8 +228,18 @@ class _AreaRouteGroundingModel:
 
 
 class _ReadRouteGroundingModel:
-    def __init__(self, *, read_id: str):
+    def __init__(
+        self,
+        *,
+        read_id: str,
+        input_value: str | int | float | bool | None = None,
+        result_kind: str = "canonical_identity",
+        matched_field_ref: str = "",
+    ):
         self.read_id = read_id
+        self.input_value = input_value
+        self.result_kind = result_kind
+        self.matched_field_ref = matched_field_ref
         self.prompt = ""
 
     def generate(self, **kwargs):
@@ -226,6 +259,17 @@ class _ReadRouteGroundingModel:
                                 "arguments": _grounding_review_arguments(
                                     self.prompt,
                                     selected_by_input=selected_by_input,
+                                    input_value_by_input=(
+                                        {task["known_input_id"]: self.input_value}
+                                        if self.input_value is not None
+                                        else {}
+                                    ),
+                                    result_kind_by_input={
+                                        task["known_input_id"]: self.result_kind
+                                    },
+                                    matched_field_ref_by_input={
+                                        task["known_input_id"]: self.matched_field_ref
+                                    },
                                 ),
                             }
                         ),
@@ -234,37 +278,51 @@ class _ReadRouteGroundingModel:
         raise AssertionError(f"grounding prompt did not expose {self.read_id} route")
 
 
-class _CompatibilityGroundingModel:
-    def __init__(self, *, compatible_read_ids: set[str]):
+class _SelectingGroundingModel:
+    def __init__(
+        self,
+        *,
+        compatible_read_ids: set[str],
+        matched_field_ref: str = "",
+    ):
         self.compatible_read_ids = compatible_read_ids
+        self.matched_field_ref = matched_field_ref
         self.prompt = ""
 
     def generate(self, **kwargs):
         self.prompt = str(kwargs.get("prompt") or "")
         payload = _json_payload_from_prompt_section(self.prompt, "Binding options:")
-        reviews = {}
+        bindings = {}
         for task in payload["known_input_binding_options"]:
-            reviews[task["known_input_id"]] = {
-                "option_reviews": {
-                    option["binding_option_id"]: {
-                        "resolver_fit_question": option["resolver_fit_question"],
-                        "because": "Reviewed by compatibility test model.",
-                        "decision": (
-                            "CAN_RESOLVE_LOOKUP_TEXT"
-                            if option.get("read_id") in self.compatible_read_ids
-                            else "CANNOT_RESOLVE_LOOKUP_TEXT"
-                        ),
-                    }
+            known_input_id = task["known_input_id"]
+            selected_option = next(
+                (
+                    option
                     for option in task["binding_options"]
+                    if option.get("read_id") in self.compatible_read_ids
+                ),
+                None,
+            )
+            if selected_option is None:
+                bindings[known_input_id] = {
+                    "selected_option_id": "none",
+                    "input_value": "",
+                    "result_kind": "none",
+                    "selection_basis": "No shown option fits.",
                 }
-            }
+            else:
+                bindings[known_input_id] = _selected_binding_payload(
+                    selected_option,
+                    lookup_text=_lookup_text_by_input(self.prompt)[known_input_id],
+                    matched_field_ref=self.matched_field_ref,
+                )
         return {
             "answer": json.dumps(
                 {
                     "tool": "submit_grounding",
                     "arguments": {
                         "known_time_resolutions": {},
-                        "known_input_binding_reviews": reviews,
+                        "known_input_bindings": bindings,
                     },
                 }
             ),
@@ -294,7 +352,7 @@ class _BusinessTimeGroundingModel:
                     "tool": "submit_grounding",
                     "arguments": {
                         "known_time_resolutions": time_resolutions,
-                        "known_input_binding_reviews": {},
+                        "known_input_bindings": {},
                     },
                 }
             ),
@@ -329,7 +387,7 @@ class _CurrentPeriodBusinessResultGroundingModel:
                     "tool": "submit_grounding",
                     "arguments": {
                         "known_time_resolutions": time_resolutions,
-                        "known_input_binding_reviews": {},
+                        "known_input_bindings": {},
                     },
                 }
             ),
@@ -389,7 +447,14 @@ def _grounding_review_arguments(
     prompt: str,
     *,
     selected_by_input: dict[str, str],
+    input_value_by_input: dict[str, str | int | float | bool] | None = None,
+    result_kind_by_input: dict[str, str] | None = None,
+    matched_field_ref_by_input: dict[str, str] | None = None,
 ) -> dict:
+    route_input_values = input_value_by_input or {}
+    result_kinds = result_kind_by_input or {}
+    matched_field_refs = matched_field_ref_by_input or {}
+    lookup_text_by_input = _lookup_text_by_input(prompt)
     time_resolutions = {}
     for task in _json_payload_from_prompt_section(
         prompt,
@@ -398,31 +463,78 @@ def _grounding_review_arguments(
         time_resolutions[task["known_input_id"]] = {
             "date_intent": _full_period_time_intent(task["time_expression"])
         }
-    reviews = {}
+    bindings = {}
     for task in _json_payload_from_prompt_section(
         prompt,
         "Binding options:",
     )["known_input_binding_options"]:
         known_input_id = task["known_input_id"]
         selected = selected_by_input[known_input_id]
-        reviews[known_input_id] = {
-            "option_reviews": {
-                option["binding_option_id"]: {
-                    "resolver_fit_question": option["resolver_fit_question"],
-                    "because": "Selected by test model.",
-                    "decision": (
-                        "CAN_RESOLVE_LOOKUP_TEXT"
-                        if option["binding_option_id"] == selected
-                        else "CANNOT_RESOLVE_LOOKUP_TEXT"
-                    ),
-                }
-                for option in task["binding_options"]
-            }
-        }
+        selected_option = next(
+            option
+            for option in task["binding_options"]
+            if option["binding_option_id"] == selected
+        )
+        bindings[known_input_id] = _selected_binding_payload(
+            selected_option,
+            lookup_text=lookup_text_by_input[known_input_id],
+            override=route_input_values.get(known_input_id),
+            result_kind=result_kinds.get(known_input_id, "canonical_identity"),
+            matched_field_ref=matched_field_refs.get(known_input_id, ""),
+        )
     return {
         "known_time_resolutions": time_resolutions,
-        "known_input_binding_reviews": reviews,
+        "known_input_bindings": bindings,
     }
+
+
+def _lookup_text_by_input(prompt: str) -> dict[str, str]:
+    payload = _json_payload_from_prompt_section(prompt, "Known inputs to ground:")
+    return {
+        task["known_input_id"]: task["lookup_text"]
+        for task in payload["known_input_binding_tasks"]
+    }
+
+
+def _selected_binding_payload(
+    option: dict,
+    *,
+    lookup_text: str,
+    override: str | int | float | bool | None = None,
+    result_kind: str = "canonical_identity",
+    matched_field_ref: str = "",
+) -> dict[str, object]:
+    input_value = lookup_text if override is None else override
+    if (
+        not matched_field_ref
+        and result_kind == "canonical_identity"
+        and option.get("purpose") == "reference_grounding"
+    ):
+        matched_field_ref = _default_identity_match_field(option)
+    payload = {
+        "selected_option_id": option["binding_option_id"],
+        "input_value": input_value,
+        "result_kind": result_kind,
+        "selection_basis": "Selected by test model.",
+    }
+    if matched_field_ref:
+        payload["matched_field_ref"] = matched_field_ref
+    return payload
+
+
+def _default_identity_match_field(option: dict) -> str:
+    lookup_surface = option.get("lookup_surface") or {}
+    lookup_field_refs = tuple(lookup_surface.get("field_refs") or ())
+    returned_identity = option.get("returned_identity") or {}
+    key_field_refs = {
+        component["field_ref"]
+        for component in returned_identity.get("components") or ()
+    }
+    non_key_fields = tuple(
+        field_ref for field_ref in lookup_field_refs if field_ref not in key_field_refs
+    )
+    candidates = non_key_fields or lookup_field_refs
+    return str(candidates[0]) if candidates else ""
 
 
 def _full_period_time_intent(text: str) -> dict[str, object]:
@@ -510,47 +622,29 @@ def _named_quarter_time_intent(text: str, *, quarter: int) -> dict[str, object]:
 
 
 def test_grounding_prompt_instructs_binding_id_copying_verbatim():
-    request = GroundingRequest(
-        question="What were sales at ABC Mall?",
-        tasks=(
-            KnownInputBindingTask(
-                known_input_id="input_location",
-                known_input_text="ABC Mall",
-                known_input_kind="literal_text",
-                requested_fact_id="fact_1",
-                lookup_text="ABC Mall",
-                options=(
-                    InputBindingOption(
-                        id="bind_input_location_1",
-                        known_input_id="input_location",
-                        path="Location name -> sales location",
-                    ),
-                ),
-            ),
+    [task] = reference_input_binding_tasks(
+        _question_contract("Shipment Tracker", description="flow"),
+        resolver_row_sources=build_row_source_catalog(
+            RelationCatalog(reads=(_flow_read(),))
         ),
+    )
+    request = GroundingRequest(
+        question="What does Shipment Tracker do?",
+        tasks=(task,),
     )
     prompt = _grounding_prompt(request)
 
     assert prompt.index("Known inputs to ground:") < prompt.index("Binding options:")
     schema = GroundingTurnPrompt(request).response_contract().provider_schema
-    reviews_schema = schema["properties"]["known_input_binding_reviews"]
-    assert reviews_schema["type"] == "object"
-    assert reviews_schema["required"] == ["input_location"]
-    option_reviews_schema = reviews_schema["properties"]["input_location"][
-        "properties"
-    ]["option_reviews"]
-    assert option_reviews_schema["type"] == "object"
-    assert option_reviews_schema["additionalProperties"] is False
-    assert option_reviews_schema["required"] == ["bind_input_location_1"]
-    item_schema = option_reviews_schema["properties"]["bind_input_location_1"]
-    assert item_schema["properties"]["resolver_fit_question"]["enum"] == [
-        "Can this resolver search lookup text 'ABC Mall' and return canonical "
-        "API identity 'no_returned_identity' for target meaning ''?"
+    bindings_schema = schema["properties"]["known_input_bindings"]
+    assert bindings_schema["type"] == "object"
+    assert bindings_schema["required"] == [task.known_input_id]
+    variants = bindings_schema["properties"][task.known_input_id]["oneOf"]
+    selected_option_ids = [
+        variant["properties"]["selected_option_id"]["enum"][0] for variant in variants
     ]
-    assert item_schema["properties"]["decision"]["enum"] == [
-        "CAN_RESOLVE_LOOKUP_TEXT",
-        "CANNOT_RESOLVE_LOOKUP_TEXT",
-    ]
+    assert selected_option_ids[-1] == "none"
+    assert set(selected_option_ids[:-1]) == {option.id for option in task.options}
 
 
 def test_grounding_time_schema_rejects_relative_word_as_yearless_point_date():
@@ -592,7 +686,7 @@ def test_grounding_time_schema_rejects_relative_word_as_yearless_point_date():
                 }
             }
         },
-        "known_input_binding_reviews": {},
+        "known_input_bindings": {},
     }
 
     with pytest.raises(ValidationError):
@@ -616,7 +710,11 @@ def test_grounding_imports_resolved_canonical_identity_without_resolver():
                 RequestedFact(
                     id="fact_1",
                     description="sales for Alice Smith",
-                    answer_outputs=(RequestedFactAnswerOutput(id="sales_total"),),
+                    answer_outputs=(
+                        RequestedFactAnswerOutput(
+                            id="sales_total", role="ANSWER_VALUE"
+                        ),
+                    ),
                     known_inputs=(known,),
                 ),
             )
@@ -640,9 +738,11 @@ def test_grounding_imports_resolved_canonical_identity_without_resolver():
             role=LiteralInputRole.REFERENCE_VALUE,
             value_meaning_hint="staff member",
             canonical_identity=ResolvedCanonicalIdentity(
-                identity_type="staff",
-                identity_field="staff_id",
-                value="51515151-0000-0000-0002-000000000001",
+                key=entity_key_value(
+                    "staff",
+                    "primary_key",
+                    {"staff_id": "51515151-0000-0000-0002-000000000001"},
+                ),
                 authority_refs=("prior_source_read:staff:list:row_1",),
                 lineage_refs=("memory:turn_1.entity.staff.alice",),
             ),
@@ -651,9 +751,11 @@ def test_grounding_imports_resolved_canonical_identity_without_resolver():
 
     assert not output.ledger.issues
     value = output.ledger.values[0]
-    assert value.payload.identity_type == "staff"
-    assert value.payload.identity_field == "staff_id"
-    assert value.payload.value == "51515151-0000-0000-0002-000000000001"
+    assert value.payload.entity_kind == "staff"
+    assert value.payload.only_component().component_id == "staff_id"
+    assert (
+        value.payload.only_component().value == "51515151-0000-0000-0002-000000000001"
+    )
     assert value.proof_refs == (
         "known_input:input_staff",
         "resolved_question_input:cr_input_1",
@@ -689,7 +791,11 @@ def test_grounding_imports_canonical_handoff_without_active_memory_check():
                 RequestedFact(
                     id="fact_1",
                     description="sales for Alice Smith",
-                    answer_outputs=(RequestedFactAnswerOutput(id="sales_total"),),
+                    answer_outputs=(
+                        RequestedFactAnswerOutput(
+                            id="sales_total", role="ANSWER_VALUE"
+                        ),
+                    ),
                     known_inputs=(known,),
                 ),
             )
@@ -713,9 +819,11 @@ def test_grounding_imports_canonical_handoff_without_active_memory_check():
             role=LiteralInputRole.REFERENCE_VALUE,
             value_meaning_hint="staff member",
             canonical_identity=ResolvedCanonicalIdentity(
-                identity_type="staff",
-                identity_field="staff_id",
-                value="51515151-0000-0000-0002-000000000001",
+                key=entity_key_value(
+                    "staff",
+                    "primary_key",
+                    {"staff_id": "51515151-0000-0000-0002-000000000001"},
+                ),
                 authority_refs=("prior_source_read:staff:list:row_1",),
                 lineage_refs=("memory:turn_1.entity.staff.alice",),
             ),
@@ -723,7 +831,7 @@ def test_grounding_imports_canonical_handoff_without_active_memory_check():
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == (
+    assert output.ledger.values[0].payload.only_component().value == (
         "51515151-0000-0000-0002-000000000001"
     )
     assert output.ledger.certifications[0].lineage_refs == (
@@ -770,7 +878,11 @@ def test_grounding_certifies_separate_current_input_when_prior_lineage_mentions_
                 RequestedFact(
                     id="fact_1",
                     description="sales comparison",
-                    answer_outputs=(RequestedFactAnswerOutput(id="sales_total"),),
+                    answer_outputs=(
+                        RequestedFactAnswerOutput(
+                            id="sales_total", role="ANSWER_VALUE"
+                        ),
+                    ),
                     known_inputs=(imported, current),
                     input_refs=("input_staff", "old_id"),
                 ),
@@ -798,9 +910,9 @@ def test_grounding_certifies_separate_current_input_when_prior_lineage_mentions_
             role=LiteralInputRole.REFERENCE_VALUE,
             value_meaning_hint="staff member",
             canonical_identity=ResolvedCanonicalIdentity(
-                identity_type="staff",
-                identity_field="staff_id",
-                value="staff_alice",
+                key=entity_key_value(
+                    "staff", "primary_key", {"staff_id": "staff_alice"}
+                ),
                 authority_refs=("prior_source_read:staff:list:row_1",),
                 lineage_refs=("known_input:old_id",),
             ),
@@ -809,20 +921,23 @@ def test_grounding_certifies_separate_current_input_when_prior_lineage_mentions_
 
     assert not output.ledger.issues
     values_by_id = {value.id: value for value in output.ledger.values}
-    assert values_by_id["grounded_input_staff"].payload.value == "staff_alice"
+    assert (
+        values_by_id["grounded_input_staff"].payload.only_component().value
+        == "staff_alice"
+    )
     jane_values = [
         value
         for value in output.ledger.values
         if value.proof_refs == ("known_input:old_id",)
     ]
     assert len(jane_values) == 1
-    assert jane_values[0].payload.value == "staff_jane"
+    assert jane_values[0].payload.only_component().value == "staff_jane"
     assert data_access.calls == [
         ("list_staff_list", {"list_staff_list.query.name": "Jane Doe"}),
     ]
 
 
-def test_reference_grounding_executes_compatible_routes_and_dedupes_identity():
+def test_reference_grounding_selected_route_determines_entity_kind():
     data_access = _EndpointDataAccess(
         {
             "list_location_list": {
@@ -846,7 +961,7 @@ def test_reference_grounding_executes_compatible_routes_and_dedupes_identity():
             runtime_date="2026-05-09",
             timezone="Africa/London",
         ),
-        model_port=_CompatibilityGroundingModel(
+        model_port=_SelectingGroundingModel(
             compatible_read_ids={"list_location_list", "list_location_alias_list"}
         ),
         provider="test",
@@ -858,17 +973,11 @@ def test_reference_grounding_executes_compatible_routes_and_dedupes_identity():
     assert len(output.ledger.values) == 1
     value = output.ledger.values[0]
     assert isinstance(value.payload, IdentityValuePayload)
-    assert value.payload.identity_type == "location"
-    assert value.payload.identity_field == "location_id"
-    assert value.payload.value == "loc_bbs"
+    assert value.payload.entity_kind == "location"
+    assert value.payload.only_component().component_id == "location_id"
+    assert value.payload.only_component().value == "loc_bbs"
     assert data_access.calls == [
         ("list_location_list", {"list_location_list.query.name": "ABC Mall"}),
-        ("list_location_list", {}),
-        (
-            "list_location_alias_list",
-            {"list_location_alias_list.query.display_name": "ABC Mall"},
-        ),
-        ("list_location_alias_list", {}),
     ]
 
 
@@ -899,8 +1008,8 @@ def test_reference_grounding_ambiguous_when_compatible_routes_find_multiple_iden
             runtime_date="2026-05-09",
             timezone="Africa/London",
         ),
-        model_port=_CompatibilityGroundingModel(
-            compatible_read_ids={"list_location_list", "list_location_alias_list"}
+        model_port=_SelectingGroundingModel(
+            compatible_read_ids={"list_location_alias_list"}
         ),
         provider="test",
         model_key="test",
@@ -913,24 +1022,19 @@ def test_reference_grounding_ambiguous_when_compatible_routes_find_multiple_iden
     assert issue.kind == GroundingTerminalKind.AMBIGUOUS_REFERENCE
     assert issue.known_input_id == "input_location"
     assert issue.candidates == (
-        "location:location_id:loc_bbs",
-        "location:location_id:loc_other",
+        'location:primary_key:{"location_id":"loc_bbs"}',
+        'location:primary_key:{"location_id":"loc_other"}',
     )
     assert data_access.calls == [
-        ("list_location_list", {"list_location_list.query.name": "ABC Mall"}),
-        ("list_location_list", {}),
         (
             "list_location_alias_list",
             {"list_location_alias_list.query.display_name": "ABC Mall"},
         ),
-        ("list_location_alias_list", {}),
     ]
 
 
 def test_reference_grounding_city_target_carries_identity_candidates_without_clarifying():
-    model = _CompatibilityGroundingModel(
-        compatible_read_ids={"list_area_list", "list_location_list"}
-    )
+    model = _SelectingGroundingModel(compatible_read_ids={"list_area_list"})
     locations = [
         {
             "location_id": f"loc_{index}",
@@ -967,9 +1071,9 @@ def test_reference_grounding_city_target_carries_identity_candidates_without_cla
     assert not output.ledger.issues
     identities = {
         (
-            value.payload.identity_type,
-            value.payload.identity_field,
-            value.payload.value,
+            value.payload.entity_kind,
+            value.payload.only_component().component_id,
+            value.payload.only_component().value,
         )
         for value in output.ledger.values
         if isinstance(value.payload, IdentityValuePayload)
@@ -989,12 +1093,12 @@ def test_reference_grounding_city_target_carries_identity_candidates_without_cla
         "field_ref": "field.data.area_id",
         "field_path": "data.area_id",
         "type": "string",
-        "identity": {
-            "entity_ref": "area",
-            "identity_field": "area_id",
-            "primary_key": True,
-        },
     } in area_option["selected_output_fields"]
+    assert area_option["returned_identity"] == {
+        "entity_kind": "area",
+        "key_id": "primary_key",
+        "components": [{"component_id": "area_id", "field_ref": "field.data.area_id"}],
+    }
     location_option = next(
         option for option in options if option.get("read_id") == "list_location_list"
     )
@@ -1009,21 +1113,6 @@ def test_reference_grounding_city_target_carries_identity_candidates_without_cla
         "field_path": "data.type",
         "type": "choice",
         "choices": ["STORE", "WAREHOUSE"],
-    } in location_option["selected_output_fields"]
-    assert {
-        "field_ref": "field.data.area.area_id",
-        "field_path": "data.area.area_id",
-        "type": "string",
-        "identity": {
-            "entity_ref": "area",
-            "identity_field": "area_id",
-            "primary_key": True,
-        },
-    } in location_option["selected_output_fields"]
-    assert {
-        "field_ref": "field.data.area.name",
-        "field_path": "data.area.name",
-        "type": "string",
     } in location_option["selected_output_fields"]
     assert (
         "list_area_list",
@@ -1053,6 +1142,70 @@ def _grounding_prompt(request: GroundingRequest) -> str:
     )
 
 
+def test_identity_validation_prompt_allows_a_typed_value_subspan() -> None:
+    request = GroundingRequest(
+        question="What is the status for tracking number 42?",
+        tasks=(
+            KnownInputBindingTask(
+                known_input_id="tracking_number",
+                known_input_text="tracking number 42",
+                known_input_kind="literal_text",
+                requested_fact_id="fact_1",
+                lookup_text="tracking number 42",
+                known_input_description="shipment reference",
+                field_label_text="tracking number",
+                options=(
+                    InputBindingOption(
+                        id="validate_shipment",
+                        known_input_id="tracking_number",
+                        path="tracking number -> shipment",
+                        purpose=InputBindingPurpose.IDENTITY_VALIDATION,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    prompt = _grounding_prompt(request)
+
+    assert "lookup_text itself need not consist only of that value" in prompt
+
+
+def test_matched_value_prompt_derives_the_field_value_from_the_question_phrase() -> (
+    None
+):
+    request = GroundingRequest(
+        question="How many priority jobs are there?",
+        tasks=(
+            KnownInputBindingTask(
+                known_input_id="priority_scope",
+                known_input_text="priority jobs",
+                known_input_kind="literal_text",
+                requested_fact_id="fact_1",
+                lookup_text="priority jobs",
+                known_input_description="job priority",
+                field_label_text="priority",
+                options=(
+                    InputBindingOption(
+                        id="ground_priority",
+                        known_input_id="priority_scope",
+                        path="priority -> jobs",
+                        purpose=InputBindingPurpose.REFERENCE_GROUNDING,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    prompt = _grounding_prompt(request)
+
+    assert (
+        "select matched_field_ref and set input_value to that field's concrete value"
+        in prompt
+    )
+    assert "For reference_grounding, copy lookup_text verbatim" not in prompt
+
+
 def test_reference_grounding_extracts_canonical_identity_from_exact_lookup_match():
     output = ground_question_inputs(
         question="What were sales at ABC Mall?",
@@ -1069,6 +1222,7 @@ def test_reference_grounding_extracts_canonical_identity_from_exact_lookup_match
         model_port=_GroundingModel(
             known_input_id="input_location",
             binding_option_id="bind_input_location_1",
+            matched_field_ref="field.data.name",
         ),
         provider="test",
         model_key="test",
@@ -1080,13 +1234,323 @@ def test_reference_grounding_extracts_canonical_identity_from_exact_lookup_match
     assert len(output.ledger.values) == 1
     value = output.ledger.values[0]
     assert isinstance(value.payload, IdentityValuePayload)
-    assert value.payload.identity_type == "location"
-    assert value.payload.identity_field == "location_id"
-    assert value.payload.value == "loc_1"
+    assert value.payload.entity_kind == "location"
+    assert value.payload.only_component().component_id == "location_id"
+    assert value.payload.only_component().value == "loc_1"
     assert value.payload.matched_field_ref == "field.data.name"
     assert value.payload.matched_field_path == "data.name"
     assert len(output.ledger.uses) == 1
     assert output.ledger.uses[0].field_id == "location_id"
+
+
+def test_reference_grounding_returns_the_complete_composite_candidate_key():
+    read = replace(
+        _location_read(),
+        candidate_keys=(
+            CandidateKey(
+                id="tenant_location_key",
+                entity_kind="location",
+                components=(
+                    CandidateKeyComponent(
+                        id="location_id",
+                        field_ref="field.data.location_id",
+                    ),
+                    CandidateKeyComponent(
+                        id="name",
+                        field_ref="field.data.name",
+                    ),
+                ),
+                primary=True,
+                stable=True,
+            ),
+        ),
+    )
+    output = ground_question_inputs(
+        question="What were sales at ABC Mall?",
+        question_contract=_question_contract("ABC Mall"),
+        full_catalog=RelationCatalog(reads=(read,)),
+        resolver_catalog=RelationCatalog(reads=(read,)),
+        data_access_port=_DataAccess(
+            _endpoint_result({"data": [{"location_id": "loc_1", "name": "ABC Mall"}]})
+        ),
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-05-09",
+            timezone="Africa/London",
+        ),
+        model_port=_GroundingModel(
+            known_input_id="input_location",
+            binding_option_id="bind_input_location_1",
+            matched_field_ref="field.data.name",
+        ),
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+    )
+
+    value = output.ledger.values[0]
+    assert isinstance(value.payload, IdentityValuePayload)
+    assert value.payload.key == entity_key_value(
+        "location",
+        "tenant_location_key",
+        {"location_id": "loc_1", "name": "ABC Mall"},
+    )
+    assert {use.field_id for use in output.ledger.uses} == {"location_id", "name"}
+
+
+def test_reference_grounding_uses_exact_lookup_value_to_establish_identity():
+    location_read = replace(
+        _location_read(),
+        candidate_keys=_candidate_key(
+            "location",
+            "location_id",
+            "field.data.location_id",
+        ),
+    )
+
+    output = ground_question_inputs(
+        question="What were sales at ABC Mall?",
+        question_contract=_question_contract("ABC Mall"),
+        full_catalog=RelationCatalog(reads=(location_read,)),
+        resolver_catalog=RelationCatalog(reads=(location_read,)),
+        data_access_port=_DataAccess(
+            _endpoint_result({"data": [{"location_id": "loc_1", "name": "ABC Mall"}]})
+        ),
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-05-09",
+            timezone="Africa/London",
+        ),
+        model_port=_GroundingModel(
+            known_input_id="input_location",
+            binding_option_id="bind_input_location_1",
+        ),
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+    )
+
+    assert not output.ledger.issues
+    value = output.ledger.values[0]
+    assert isinstance(value.payload, IdentityValuePayload)
+    assert value.payload.only_component().value == "loc_1"
+    assert value.payload.matched_field_ref == "field.data.name"
+
+
+def test_reference_grounding_verifies_the_selected_identity_field() -> None:
+    output = ground_question_inputs(
+        question="How many stores are in Nairobi?",
+        question_contract=_city_question_contract("Nairobi"),
+        full_catalog=RelationCatalog(reads=(_location_with_area_read(),)),
+        resolver_catalog=RelationCatalog(reads=(_location_with_area_read(),)),
+        data_access_port=_DataAccess(
+            _endpoint_result(
+                {
+                    "data": [
+                        {
+                            "location_id": "loc_1",
+                            "name": "Goldset Nairobi Store",
+                            "area": {"area_id": "area_1", "name": "Nairobi"},
+                        }
+                    ]
+                }
+            )
+        ),
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-05-09",
+            timezone="Africa/Nairobi",
+        ),
+        model_port=_ReadRouteGroundingModel(
+            read_id="list_location_list",
+            matched_field_ref="field.data.name",
+        ),
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+    )
+
+    assert not output.ledger.values
+    assert len(output.ledger.issues) == 1
+    assert output.ledger.issues[0].kind == GroundingTerminalKind.UNRESOLVED_REFERENCE
+
+
+def test_reference_grounding_deduplicates_same_row_lookup_field_matches() -> None:
+    location_read = _location_read()
+    location_read = replace(
+        location_read,
+        fields=(
+            *location_read.fields,
+            CatalogField(
+                ref="field.data.code",
+                path="data.code",
+                row_path_id="data",
+                type="string",
+            ),
+        ),
+        candidate_keys=(
+            *location_read.candidate_keys,
+            CandidateKey(
+                id="location_code",
+                entity_kind="location",
+                components=(
+                    CandidateKeyComponent(
+                        id="code",
+                        field_ref="field.data.code",
+                    ),
+                ),
+            ),
+        ),
+    )
+    output = ground_question_inputs(
+        question="What were sales at ABC?",
+        question_contract=_question_contract("ABC"),
+        full_catalog=RelationCatalog(reads=(location_read,)),
+        resolver_catalog=RelationCatalog(reads=(location_read,)),
+        data_access_port=_DataAccess(
+            _endpoint_result(
+                {"data": [{"location_id": "loc_1", "name": "ABC", "code": "ABC"}]}
+            )
+        ),
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-05-09",
+            timezone="Africa/London",
+        ),
+        model_port=_GroundingModel(
+            known_input_id="input_location",
+            binding_option_id="bind_input_location_1",
+        ),
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+    )
+
+    assert not output.ledger.issues
+    assert output.ledger.values[0].payload.only_component().value == "loc_1"
+
+
+def test_reference_grounding_matches_one_value_in_a_collection_field():
+    data_access = _EndpointDataAccess(
+        {
+            "list_flows": {
+                "data": [
+                    {
+                        "id": "flow_1",
+                        "name": "Inventory Monitor",
+                        "tags": ["operations", "inventory"],
+                    },
+                    {
+                        "id": "flow_2",
+                        "name": "Shipment Tracker",
+                        "tags": ["operations", "shipping"],
+                    },
+                ]
+            }
+        }
+    )
+    read = _flow_read()
+
+    output = ground_question_inputs(
+        question="Which operations-tagged flows are there?",
+        question_contract=_question_contract(
+            "operations-tagged",
+            description="tag label",
+        ),
+        full_catalog=RelationCatalog(reads=(read,)),
+        resolver_catalog=RelationCatalog(reads=(read,)),
+        data_access_port=data_access,
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-05-09",
+            timezone="Africa/London",
+        ),
+        model_port=_ReadRouteGroundingModel(
+            read_id="list_flows",
+            input_value="operations",
+            result_kind="matched_value",
+            matched_field_ref="flow.tags",
+        ),
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+    )
+
+    assert not output.ledger.issues
+    assert len(output.ledger.values) == 1
+    payload = output.ledger.values[0].payload
+    assert isinstance(payload, NamedValuePayload)
+    assert payload.text == "operations"
+    assert payload.matched_field_ref == "flow.tags"
+    assert payload.matched_field_path == "data.tags"
+    assert payload.filter_operator is ValueFilterOperator.CONTAINS
+
+
+def test_reference_grounding_preserves_distinct_catalog_routes() -> None:
+    direct_read = _flow_read()
+    qualified_read = replace(
+        direct_read,
+        id="list_basic_example_flows",
+        endpoint_name="list_basic_example_flows",
+        resource_names=("flow", "basic example"),
+    )
+
+    [task] = reference_input_binding_tasks(
+        _question_contract(
+            "operations",
+            description="tag label",
+        ),
+        resolver_row_sources=build_row_source_catalog(
+            RelationCatalog(reads=(direct_read, qualified_read))
+        ),
+    )
+
+    tag_routes = tuple(
+        option.route
+        for option in task.options
+        if option.route is not None and "flow.tags" in option.route.lookup_field_refs
+    )
+    assert {route.resolver_read_id for route in tag_routes} == {
+        "list_flows",
+        "list_basic_example_flows",
+    }
+
+
+def test_entity_grounding_exposes_declared_lookup_fields() -> None:
+    [task] = reference_input_binding_tasks(
+        _question_contract(
+            "Shipment Tracker",
+            description="flow",
+        ),
+        resolver_row_sources=build_row_source_catalog(
+            RelationCatalog(reads=(_flow_read(),))
+        ),
+    )
+
+    lookup_surfaces = {
+        option.route.lookup_field_refs
+        for option in task.options
+        if option.route is not None
+    }
+    assert lookup_surfaces == {("flow.id", "flow.name", "flow.tags")}
+
+
+def test_canonical_grounding_excludes_related_entity_fields() -> None:
+    [task] = reference_input_binding_tasks(
+        _city_question_contract("Nairobi"),
+        resolver_row_sources=build_row_source_catalog(
+            RelationCatalog(reads=(_location_with_area_read(),))
+        ),
+    )
+
+    location_routes = tuple(
+        option.route
+        for option in task.options
+        if option.route is not None
+        and option.route.resolver_read_id == "list_location_list"
+    )
+    assert location_routes
+    assert all(
+        "field.data.area.name" in route.lookup_field_refs
+        and "field.data.area.name" not in route.canonical_lookup_field_refs
+        and "field.data.name" in route.canonical_lookup_field_refs
+        for route in location_routes
+    )
 
 
 def test_reference_grounding_preserves_question_input_fact_applicability():
@@ -1126,7 +1590,7 @@ def test_reference_grounding_preserves_question_input_fact_applicability():
     assert not output.ledger.issues
     value = output.ledger.values[0]
     assert isinstance(value.payload, IdentityValuePayload)
-    assert value.payload.value == "staff_1"
+    assert value.payload.only_component().value == "staff_1"
     assert value.applies_to_requested_fact_ids == ("fact_1", "fact_2")
     task = _json_payload_from_prompt_section(model.prompt, "Known inputs to ground:")[
         "known_input_binding_tasks"
@@ -1186,7 +1650,7 @@ def test_reference_grounding_uses_case_and_spacing_normalized_exact_match():
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "loc_1"
+    assert output.ledger.values[0].payload.only_component().value == "loc_1"
 
 
 def test_reference_grounding_resolver_route_owns_allowed_lookup_fields():
@@ -1216,6 +1680,7 @@ def test_reference_grounding_resolver_route_owns_allowed_lookup_fields():
         model_port=_GroundingModel(
             known_input_id="input_staff",
             binding_option_id="bind_input_staff_1",
+            matched_field_ref="field.data.first_name",
         ),
         provider="test",
         model_key="test",
@@ -1223,7 +1688,7 @@ def test_reference_grounding_resolver_route_owns_allowed_lookup_fields():
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "staff_1"
+    assert output.ledger.values[0].payload.only_component().value == "staff_1"
     assert len(output.ledger.uses) == 1
     assert output.ledger.uses[0].field_id == "staff_id"
 
@@ -1306,6 +1771,7 @@ def test_reference_grounding_validates_field_labeled_identity_value(
         model_port=_GroundingModel(
             known_input_id="input_staff",
             binding_option_id="bind_input_staff_1",
+            matched_field_ref="field.data.staff_id",
         ),
         provider="test",
         model_key="test",
@@ -1315,9 +1781,9 @@ def test_reference_grounding_validates_field_labeled_identity_value(
     if expect_grounded:
         assert not output.ledger.issues
         value = output.ledger.values[0]
-        assert value.payload.identity_type == "staff"
-        assert value.payload.identity_field == "staff_id"
-        assert value.payload.value == staff_id
+        assert value.payload.entity_kind == "staff"
+        assert value.payload.only_component().component_id == "staff_id"
+        assert value.payload.only_component().value == staff_id
     else:
         assert not output.ledger.values
         assert (
@@ -1328,7 +1794,7 @@ def test_reference_grounding_validates_field_labeled_identity_value(
     ]
 
 
-def test_reference_grounding_exact_qualifier_does_not_override_ambiguous_evidence():
+def test_reference_grounding_selected_field_excludes_other_exact_matches():
     staff_id = "51515151-0000-0000-0002-000000000001"
     data_access = _DataAccess(
         _endpoint_result(
@@ -1366,23 +1832,19 @@ def test_reference_grounding_exact_qualifier_does_not_override_ambiguous_evidenc
             runtime_date="2026-05-09",
             timezone="Africa/London",
         ),
-        model_port=_CompatibilityGroundingModel(
-            compatible_read_ids={"list_staff_list"}
+        model_port=_SelectingGroundingModel(
+            compatible_read_ids={"list_staff_list"},
+            matched_field_ref="field.data.staff_id",
         ),
         provider="test",
         model_key="test",
         max_thinking_tokens=0,
     )
 
-    assert not output.ledger.values
-    assert output.ledger.issues[0].kind == GroundingTerminalKind.AMBIGUOUS_REFERENCE
-    assert output.ledger.issues[0].candidates == (
-        "staff:staff_id:51515151-0000-0000-0002-000000000001",
-        "staff:staff_id:staff_other",
-    )
+    assert not output.ledger.issues
+    assert output.ledger.values[0].payload.only_component().value == staff_id
     assert data_access.calls == [
         ("list_staff_list", {"list_staff_list.query.name": staff_id}),
-        ("list_staff_list", {}),
     ]
 
 
@@ -1418,8 +1880,9 @@ def test_reference_grounding_verifies_natural_id_qualifier_against_identity_fiel
             runtime_date="2026-05-09",
             timezone="Africa/London",
         ),
-        model_port=_CompatibilityGroundingModel(
-            compatible_read_ids={"list_staff_list"}
+        model_port=_SelectingGroundingModel(
+            compatible_read_ids={"list_staff_list"},
+            matched_field_ref="field.data.staff_id",
         ),
         provider="test",
         model_key="test",
@@ -1428,12 +1891,11 @@ def test_reference_grounding_verifies_natural_id_qualifier_against_identity_fiel
 
     assert not output.ledger.issues
     value = output.ledger.values[0]
-    assert value.payload.identity_type == "staff"
-    assert value.payload.identity_field == "staff_id"
-    assert value.payload.value == staff_id
+    assert value.payload.entity_kind == "staff"
+    assert value.payload.only_component().component_id == "staff_id"
+    assert value.payload.only_component().value == staff_id
     assert data_access.calls == [
         ("list_staff_list", {"list_staff_list.query.name": staff_id}),
-        ("list_staff_list", {}),
     ]
 
 
@@ -1458,8 +1920,8 @@ def test_reference_grounding_proves_field_labeled_id_through_required_detail_rea
             resolved_value_text=staff_id,
             field_label_text="staff_id",
         ),
-        full_catalog=RelationCatalog(reads=(_staff_detail_read(),)),
-        resolver_catalog=RelationCatalog(reads=(_staff_detail_read(),)),
+        full_catalog=RelationCatalog(reads=(_staff_read(), _staff_detail_read())),
+        resolver_catalog=RelationCatalog(reads=(_staff_read(),)),
         data_access_port=data_access,
         runtime_values=RuntimeValueContext(
             runtime_date="2026-05-09",
@@ -1474,15 +1936,154 @@ def test_reference_grounding_proves_field_labeled_id_through_required_detail_rea
     assert output.turn is not None
     assert not output.ledger.issues
     value = output.ledger.values[0]
-    assert value.payload.identity_type == "staff"
-    assert value.payload.identity_field == "staff_id"
-    assert value.payload.value == staff_id
+    assert value.payload.entity_kind == "staff"
+    assert value.payload.only_component().component_id == "staff_id"
+    assert value.payload.only_component().value == staff_id
     assert output.ledger.certifications[0].method == (
-        GroundedValueCertificationMethod.RESOLVER_SOURCE_READ
+        GroundedValueCertificationMethod.IDENTITY_VALIDATION_READ
     )
     assert data_access.calls == [
         ("get_staff_detail", {"get_staff_detail.path.staff_id": staff_id})
     ]
+
+
+def test_reference_grounding_receives_field_label_when_entity_keys_compete():
+    staff_id = "51515151-0000-0000-0002-000000000001"
+    data_access = _EndpointDataAccess(
+        {
+            "get_staff_detail": {
+                "data": {
+                    "staff_id": staff_id,
+                    "full_name": "Alice Smith",
+                }
+            },
+            "get_location_detail": {
+                "data": {
+                    "location_id": staff_id,
+                    "name": "Wrong Location",
+                }
+            },
+        }
+    )
+
+    model = _ReadRouteGroundingModel(read_id="get_staff_detail")
+    output = ground_question_inputs(
+        question=f"How much did staff_id {staff_id} make today?",
+        question_contract=_staff_question_contract(
+            f"staff_id {staff_id}",
+            description="staff member",
+            resolved_value_text=staff_id,
+            field_label_text="staff_id",
+        ),
+        full_catalog=RelationCatalog(
+            reads=(_staff_detail_read(), _location_detail_read())
+        ),
+        resolver_catalog=RelationCatalog(
+            reads=(_staff_detail_read(), _location_detail_read())
+        ),
+        data_access_port=data_access,
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-05-09",
+            timezone="Africa/London",
+        ),
+        model_port=model,
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+    )
+
+    assert not output.ledger.issues
+    assert output.ledger.values[0].payload.entity_kind == "staff"
+    known_inputs = _json_payload_from_prompt_section(
+        model.prompt,
+        "Known inputs to ground:",
+    )
+    assert known_inputs["known_input_binding_tasks"][0]["field_label_text"] == (
+        "staff_id"
+    )
+    assert data_access.calls == [
+        ("get_staff_detail", {"get_staff_detail.path.staff_id": staff_id})
+    ]
+
+
+def test_reference_grounding_executes_only_the_selected_route():
+    staff_id = "51515151-0000-0000-0002-000000000001"
+    model = _SelectingGroundingModel(compatible_read_ids={"get_staff_detail"})
+    data_access = _EndpointDataAccess(
+        {
+            "get_staff_detail": {
+                "data": {"staff_id": staff_id, "full_name": "Alice Smith"}
+            },
+            "get_location_detail": {
+                "data": {"location_id": staff_id, "name": "Wrong entity"}
+            },
+        }
+    )
+
+    output = ground_question_inputs(
+        question=f"How much did staff member {staff_id} make today?",
+        question_contract=_staff_question_contract(
+            staff_id,
+            description="staff member",
+            resolved_value_text=staff_id,
+            field_label_text="staff identifier",
+        ),
+        full_catalog=RelationCatalog(
+            reads=(_staff_detail_read(), _location_detail_read())
+        ),
+        resolver_catalog=RelationCatalog(
+            reads=(_staff_detail_read(), _location_detail_read())
+        ),
+        data_access_port=data_access,
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-05-09",
+            timezone="Africa/London",
+        ),
+        model_port=model,
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+    )
+
+    assert not output.ledger.issues
+    assert output.ledger.values[0].payload.entity_kind == "staff"
+    assert data_access.calls == [
+        ("get_staff_detail", {"get_staff_detail.path.staff_id": staff_id})
+    ]
+
+
+def test_identity_validation_rejects_invalid_typed_key_before_source_read():
+    combined_ids = (
+        "51515151-0000-0000-0002-000000000001 and 51515151-0000-0000-0002-000000000002"
+    )
+    data_access = _EndpointDataAccess({})
+
+    output = ground_question_inputs(
+        question="How many sales did the specified staff members make?",
+        question_contract=_staff_question_contract(
+            combined_ids,
+            description="staff members",
+            resolved_value_text=combined_ids,
+            field_label_text="staff identifiers",
+        ),
+        full_catalog=RelationCatalog(reads=(_staff_detail_read(param_type="uuid"),)),
+        resolver_catalog=RelationCatalog(
+            reads=(_staff_detail_read(param_type="uuid"),)
+        ),
+        data_access_port=data_access,
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-05-09",
+            timezone="Africa/London",
+        ),
+        model_port=_ReadRouteGroundingModel(read_id="get_staff_detail"),
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+    )
+
+    assert not output.ledger.values
+    assert output.ledger.issues[0].kind is GroundingTerminalKind.UNRESOLVED_REFERENCE
+    assert data_access.calls == []
 
 
 def test_reference_grounding_natural_id_qualifier_can_use_identity_param_route():
@@ -1521,13 +2122,51 @@ def test_reference_grounding_natural_id_qualifier_can_use_identity_param_route()
 
     assert output.turn is not None
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == staff_id
+    assert output.ledger.values[0].payload.only_component().value == staff_id
     assert data_access.calls == [
         ("get_staff_detail", {"get_staff_detail.path.staff_id": staff_id})
     ]
 
 
-def test_reference_grounding_direct_identity_route_uses_catalog_identity_metadata():
+def test_identity_validation_extracts_the_declared_path_value_from_reference_text():
+    data_access = _EndpointDataAccess(
+        {"get_staff_detail": {"data": {"staff_id": "2", "full_name": "Alice Smith"}}}
+    )
+
+    output = ground_question_inputs(
+        question="What is the name of the staff member with staff ID 2?",
+        question_contract=_staff_question_contract(
+            "staff ID 2",
+            description="staff member",
+            resolved_value_text="staff ID 2",
+            field_label_text="staff ID",
+        ),
+        full_catalog=RelationCatalog(reads=(_staff_detail_read(param_type="integer"),)),
+        resolver_catalog=RelationCatalog(
+            reads=(_staff_detail_read(param_type="integer"),)
+        ),
+        data_access_port=data_access,
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-05-09",
+            timezone="Africa/London",
+        ),
+        model_port=_ReadRouteGroundingModel(
+            read_id="get_staff_detail",
+            input_value=2,
+        ),
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+    )
+
+    assert not output.ledger.issues, data_access.calls
+    assert output.ledger.values[0].payload.only_component().value == "2"
+    assert data_access.calls == [
+        ("get_staff_detail", {"get_staff_detail.path.staff_id": 2})
+    ]
+
+
+def test_reference_grounding_direct_identity_route_uses_catalog_key_contract():
     staff_id = "staff-5151"
     staff_read = EndpointRead(
         id="get_staff_detail",
@@ -1540,12 +2179,7 @@ def test_reference_grounding_direct_identity_route_uses_catalog_identity_metadat
                 source=ParamSource.PATH,
                 type="pk",
                 required=True,
-                identity=IdentityMetadata(
-                    entity_ref="staff",
-                    identity_field="staff_id",
-                    primary_key=True,
-                    stable=True,
-                ),
+                entity_target=_entity_target("staff", "staff_id"),
             ),
         ),
         row_paths=(RowPath(id="data", path="data", cardinality=RowCardinality.ONE),),
@@ -1555,13 +2189,6 @@ def test_reference_grounding_direct_identity_route_uses_catalog_identity_metadat
                 path="data.staff_id",
                 row_path_id="data",
                 type="pk",
-                identity=IdentityMetadata(
-                    entity_ref="staff",
-                    identity_field="staff_id",
-                    primary_key=True,
-                    stable=True,
-                    display_fields=("field.data.full_name",),
-                ),
             ),
             CatalogField(
                 ref="field.data.full_name",
@@ -1569,6 +2196,12 @@ def test_reference_grounding_direct_identity_route_uses_catalog_identity_metadat
                 row_path_id="data",
                 type="string",
             ),
+        ),
+        candidate_keys=_candidate_key(
+            "staff",
+            "staff_id",
+            "field.data.staff_id",
+            context_field_refs=("field.data.full_name",),
         ),
     )
     data_access = _EndpointDataAccess(
@@ -1605,10 +2238,36 @@ def test_reference_grounding_direct_identity_route_uses_catalog_identity_metadat
 
     assert output.turn is not None
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == staff_id
+    assert output.ledger.values[0].payload.only_component().value == staff_id
     assert data_access.calls == [
         ("get_staff_detail", {"get_staff_detail.path.staff_id": staff_id})
     ]
+
+
+def test_typed_entity_kind_does_not_depend_on_display_resource_name() -> None:
+    staff_read = _staff_read()
+    sales_order_read = replace(
+        staff_read,
+        resource_names=("sales order",),
+        candidate_keys=_candidate_key(
+            "sales_order",
+            "staff_id",
+            "field.data.staff_id",
+            context_field_refs=("field.data.full_name",),
+        ),
+    )
+
+    [task] = reference_input_binding_tasks(
+        _staff_question_contract("order ABC", description="sales order"),
+        resolver_row_sources=build_row_source_catalog(
+            RelationCatalog(reads=(sales_order_read,))
+        ),
+    )
+
+    entity_kinds = {
+        option.route.entity_kind for option in task.options if option.route is not None
+    }
+    assert entity_kinds == {"sales_order"}
 
 
 def test_reference_grounding_generic_id_does_not_auto_execute_wrong_identity_type():
@@ -1677,13 +2336,6 @@ def test_reference_grounding_uses_explicit_identity_display_fields_not_name_heur
                 path="data.book_id",
                 row_path_id="data",
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref="book",
-                    identity_field="book_id",
-                    primary_key=True,
-                    stable=True,
-                    display_fields=("field.data.title",),
-                ),
             ),
             CatalogField(
                 ref="field.data.title",
@@ -1691,6 +2343,12 @@ def test_reference_grounding_uses_explicit_identity_display_fields_not_name_heur
                 row_path_id="data",
                 type="string",
             ),
+        ),
+        candidate_keys=_candidate_key(
+            "book",
+            "book_id",
+            "field.data.book_id",
+            context_field_refs=("field.data.title",),
         ),
     )
 
@@ -1704,6 +2362,7 @@ def test_reference_grounding_uses_explicit_identity_display_fields_not_name_heur
                     answer_outputs=(
                         RequestedFactAnswerOutput(
                             id="answer_1",
+                            role="ANSWER_VALUE",
                             description="revenue",
                         ),
                     ),
@@ -1738,10 +2397,10 @@ def test_reference_grounding_uses_explicit_identity_display_fields_not_name_heur
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "book_1"
+    assert output.ledger.values[0].payload.only_component().value == "book_1"
 
 
-def test_reference_grounding_does_not_require_identity_display_fields_for_resolver_route():
+def test_reference_grounding_uses_declared_key_context_fields_for_resolver_route():
     staff_read = EndpointRead(
         id="list_staff",
         endpoint_name="list_staff",
@@ -1760,12 +2419,6 @@ def test_reference_grounding_does_not_require_identity_display_fields_for_resolv
                 path="data.staff_id",
                 row_path_id="data",
                 type="uuid",
-                identity=IdentityMetadata(
-                    entity_ref="staff",
-                    identity_field="staff_id",
-                    primary_key=True,
-                    stable=True,
-                ),
             ),
             CatalogField(
                 ref="field.data.full_name",
@@ -1780,6 +2433,15 @@ def test_reference_grounding_does_not_require_identity_display_fields_for_resolv
                 type="string",
             ),
         ),
+        candidate_keys=_candidate_key(
+            "staff",
+            "staff_id",
+            "field.data.staff_id",
+            context_field_refs=(
+                "field.data.full_name",
+                "field.data.first_name",
+            ),
+        ),
     )
 
     output = ground_question_inputs(
@@ -1792,6 +2454,7 @@ def test_reference_grounding_does_not_require_identity_display_fields_for_resolv
                     answer_outputs=(
                         RequestedFactAnswerOutput(
                             id="answer_1",
+                            role="ANSWER_VALUE",
                             description="products",
                         ),
                     ),
@@ -1824,15 +2487,201 @@ def test_reference_grounding_does_not_require_identity_display_fields_for_resolv
             runtime_date="2026-05-09",
             timezone="Africa/London",
         ),
-        model_port=_ReadRouteGroundingModel(read_id="list_staff"),
+        model_port=_ReadRouteGroundingModel(
+            read_id="list_staff",
+            matched_field_ref="field.data.first_name",
+        ),
         provider="test",
         model_key="test",
         max_thinking_tokens=0,
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "staff_1"
-    assert output.ledger.values[0].payload.identity_type == "staff"
+    assert output.ledger.values[0].payload.only_component().value == "staff_1"
+    assert output.ledger.values[0].payload.entity_kind == "staff"
+
+
+def test_reference_grounding_uses_alternate_candidate_key_to_select_primary_identity():
+    area_read = EndpointRead(
+        id="list_areas",
+        endpoint_name="list_areas",
+        source_metadata={
+            "description": "Lists operational areas by their declared names."
+        },
+        params=(
+            CatalogParam(
+                ref="list_areas.query.name",
+                name="name",
+                source=ParamSource.QUERY,
+                type="string",
+            ),
+        ),
+        row_paths=(RowPath(id="data", path="data", cardinality=RowCardinality.MANY),),
+        fields=(
+            CatalogField(
+                ref="field.data.area_id",
+                path="data.area_id",
+                row_path_id="data",
+                type="uuid",
+            ),
+            CatalogField(
+                ref="field.data.name",
+                path="data.name",
+                row_path_id="data",
+                type="string",
+            ),
+        ),
+        candidate_keys=(
+            CandidateKey(
+                id="primary_key",
+                entity_kind="area",
+                components=(
+                    CandidateKeyComponent(
+                        id="area_id",
+                        field_ref="field.data.area_id",
+                    ),
+                ),
+                primary=True,
+            ),
+            CandidateKey(
+                id="unique_name",
+                entity_kind="area",
+                components=(
+                    CandidateKeyComponent(
+                        id="name",
+                        field_ref="field.data.name",
+                    ),
+                ),
+            ),
+        ),
+    )
+    data_access = _EndpointDataAccess(
+        {
+            "list_areas": {
+                "data": [
+                    {"area_id": "area_nairobi", "name": "Nairobi"},
+                    {"area_id": "area_mombasa", "name": "Mombasa"},
+                ]
+            }
+        }
+    )
+    model = _ReadRouteGroundingModel(read_id="list_areas")
+
+    output = ground_question_inputs(
+        question="How many stores are in Nairobi?",
+        question_contract=_question_contract("Nairobi", description="area"),
+        full_catalog=RelationCatalog(reads=(area_read,)),
+        resolver_catalog=RelationCatalog(reads=(area_read,)),
+        data_access_port=data_access,
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-05-09",
+            timezone="Africa/London",
+        ),
+        model_port=model,
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+    )
+
+    assert not output.ledger.issues
+    value = output.ledger.values[0]
+    assert isinstance(value.payload, IdentityValuePayload)
+    assert value.payload.entity_kind == "area"
+    assert value.payload.only_component().component_id == "area_id"
+    assert value.payload.only_component().value == "area_nairobi"
+    assert data_access.calls == [("list_areas", {"list_areas.query.name": "Nairobi"})]
+    option = next(
+        option
+        for option in _all_binding_options(model.prompt)
+        if option.get("read_id") == "list_areas"
+    )
+    assert option["description"] == "Lists operational areas by their declared names."
+
+
+def test_reference_grounding_uses_text_evidence_from_the_identity_row():
+    location_read = EndpointRead(
+        id="list_locations",
+        endpoint_name="list_locations",
+        row_paths=(RowPath(id="data", path="data", cardinality=RowCardinality.MANY),),
+        fields=(
+            CatalogField(
+                ref="field.data.location_id",
+                path="data.location_id",
+                row_path_id="data",
+                type="uuid",
+            ),
+            CatalogField(
+                ref="field.data.name",
+                path="data.name",
+                row_path_id="data",
+                type="string",
+            ),
+            CatalogField(
+                ref="field.data.area.name",
+                path="data.area.name",
+                row_path_id="data",
+                type="string",
+            ),
+        ),
+        candidate_keys=_candidate_key(
+            "location",
+            "location_id",
+            "field.data.location_id",
+            context_field_refs=("field.data.name",),
+        ),
+    )
+    data_access = _EndpointDataAccess(
+        {
+            "list_locations": {
+                "data": [
+                    {
+                        "location_id": "location_acacia",
+                        "name": "Acacia Mall",
+                        "area": {"name": "Nairobi"},
+                    },
+                    {
+                        "location_id": "location_pivot",
+                        "name": "Pivot Mall",
+                        "area": {"name": "Nairobi"},
+                    },
+                ]
+            }
+        }
+    )
+    model = _ReadRouteGroundingModel(read_id="list_locations")
+
+    output = ground_question_inputs(
+        question="How many sales did we make at Acacia Mall today?",
+        question_contract=_question_contract("Acacia Mall", description="location"),
+        full_catalog=RelationCatalog(reads=(location_read,)),
+        resolver_catalog=RelationCatalog(reads=(location_read,)),
+        data_access_port=data_access,
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-05-09",
+            timezone="Africa/London",
+        ),
+        model_port=model,
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+    )
+
+    assert not output.ledger.issues
+    value = output.ledger.values[0]
+    assert isinstance(value.payload, IdentityValuePayload)
+    assert value.payload.entity_kind == "location"
+    assert value.payload.only_component().value == "location_acacia"
+    assert data_access.calls == [("list_locations", {})]
+    option = next(
+        option
+        for option in _all_binding_options(model.prompt)
+        if option.get("read_id") == "list_locations"
+        and not option["lookup_surface"].get("param_ref")
+    )
+    assert option["lookup_surface"]["field_refs"] == [
+        "field.data.name",
+        "field.data.area.name",
+    ]
 
 
 def test_reference_grounding_excludes_control_params_from_lookup_templates():
@@ -1861,12 +2710,6 @@ def test_reference_grounding_excludes_control_params_from_lookup_templates():
                 path="data.staff_id",
                 row_path_id="data",
                 type="uuid",
-                identity=IdentityMetadata(
-                    entity_ref="staff",
-                    identity_field="staff_id",
-                    primary_key=True,
-                    stable=True,
-                ),
             ),
             CatalogField(
                 ref="field.data.full_name",
@@ -1879,6 +2722,15 @@ def test_reference_grounding_excludes_control_params_from_lookup_templates():
                 path="data.first_name",
                 row_path_id="data",
                 type="string",
+            ),
+        ),
+        candidate_keys=_candidate_key(
+            "staff",
+            "staff_id",
+            "field.data.staff_id",
+            context_field_refs=(
+                "field.data.full_name",
+                "field.data.first_name",
             ),
         ),
     )
@@ -1894,6 +2746,7 @@ def test_reference_grounding_excludes_control_params_from_lookup_templates():
                     answer_outputs=(
                         RequestedFactAnswerOutput(
                             id="answer_1",
+                            role="ANSWER_VALUE",
                             description="products",
                         ),
                     ),
@@ -1914,14 +2767,17 @@ def test_reference_grounding_excludes_control_params_from_lookup_templates():
             runtime_date="2026-05-09",
             timezone="Africa/London",
         ),
-        model_port=_ReadRouteGroundingModel(read_id="list_staff"),
+        model_port=_ReadRouteGroundingModel(
+            read_id="list_staff",
+            matched_field_ref="field.data.first_name",
+        ),
         provider="test",
         model_key="test",
         max_thinking_tokens=0,
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "staff_1"
+    assert output.ledger.values[0].payload.only_component().value == "staff_1"
     assert data_access.calls == [
         ("list_staff", {"list_staff.query.name": "Alice"}),
     ]
@@ -1955,14 +2811,14 @@ def test_reference_grounding_executes_selected_route_after_model_selection():
 
     assert output.turn is not None
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "loc_1"
+    assert output.ledger.values[0].payload.only_component().value == "loc_1"
     assert data_access.calls == [
         ("list_location_list", {"list_location_list.query.name": "ABC Mall"}),
     ]
 
 
 def test_reference_grounding_exposes_field_only_route_alongside_lookup_param():
-    model = _CompatibilityGroundingModel(compatible_read_ids=set())
+    model = _SelectingGroundingModel(compatible_read_ids=set())
 
     output = ground_question_inputs(
         question="What were sales at ABC Mall?",
@@ -1990,9 +2846,53 @@ def test_reference_grounding_exposes_field_only_route_alongside_lookup_param():
     assert output.turn is not None
     assert {
         "param_ref": "list_location_list.query.name",
+        "param_type": "string",
         "field_refs": ["field.data.location_id", "field.data.name"],
     } in surfaces
-    assert {"field_refs": ["field.data.location_id", "field.data.name"]} in surfaces
+    assert {
+        "field_refs": ["field.data.location_id", "field.data.name"],
+    } in surfaces
+
+
+def test_reference_grounding_uses_text_param_without_scanning_uuid_key():
+    model = _SelectingGroundingModel(compatible_read_ids={"list_staff_uuid_list"})
+    data_access = _EndpointDataAccess(
+        {
+            "list_staff_uuid_list": {
+                "data": [{"staff_id": "00000000-0000-0000-0000-000000000001"}]
+            }
+        }
+    )
+    read = _staff_uuid_only_read()
+
+    output = ground_question_inputs(
+        question="Who is Alice?",
+        question_contract=_staff_question_contract("Alice", description="staff"),
+        full_catalog=RelationCatalog(reads=(read,)),
+        resolver_catalog=RelationCatalog(reads=(read,)),
+        data_access_port=data_access,
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-05-09",
+            timezone="Africa/London",
+        ),
+        model_port=model,
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+    )
+
+    options = _all_binding_options(model.prompt)
+    assert [option["lookup_surface"] for option in options] == [
+        {
+            "param_ref": "list_staff_uuid_list.query.name",
+            "param_type": "string",
+            "field_refs": [],
+        }
+    ]
+    assert not output.ledger.issues
+    assert data_access.calls == [
+        ("list_staff_uuid_list", {"list_staff_uuid_list.query.name": "Alice"})
+    ]
 
 
 def test_reference_grounding_resolves_store_target_from_location_rows_without_lookup_param():
@@ -2029,8 +2929,8 @@ def test_reference_grounding_resolves_store_target_from_location_rows_without_lo
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "loc_1"
-    assert output.ledger.values[0].payload.identity_type == "location"
+    assert output.ledger.values[0].payload.only_component().value == "loc_1"
+    assert output.ledger.values[0].payload.entity_kind == "location"
     assert data_access.calls == [
         ("list_location_list", {}),
     ]
@@ -2065,7 +2965,7 @@ def test_reference_grounding_skips_resolver_when_declared_row_path_is_unavailabl
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "loc_1"
+    assert output.ledger.values[0].payload.only_component().value == "loc_1"
     assert data_access.calls == [
         ("list_location_list", {"list_location_list.query.name": "ABC Mall"}),
     ]
@@ -2079,6 +2979,7 @@ def test_reference_grounding_uses_live_resolver_for_active_memory_without_cr_han
             FactAddress.entity(
                 address="entity.location.abc",
                 resource="location",
+                key_id="primary_key",
                 reference_text="ABC Mall",
                 identity={"location_id": "loc_1"},
             ),
@@ -2112,7 +3013,7 @@ def test_reference_grounding_uses_live_resolver_for_active_memory_without_cr_han
 
     assert output.turn is not None
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "loc_live_catalog"
+    assert output.ledger.values[0].payload.only_component().value == "loc_live_catalog"
     assert output.ledger.certifications[0].method == (
         GroundedValueCertificationMethod.RESOLVER_SOURCE_READ
     )
@@ -2129,6 +3030,7 @@ def test_reference_grounding_does_not_import_selected_active_memory_without_cr_h
             FactAddress.entity(
                 address="entity.location.other",
                 resource="location",
+                key_id="primary_key",
                 reference_text="Other Mall",
                 identity={"location_id": "loc_1"},
             ),
@@ -2141,6 +3043,7 @@ def test_reference_grounding_does_not_import_selected_active_memory_without_cr_h
             FactAddress.entity(
                 address="entity.location.abc",
                 resource="location",
+                key_id="primary_key",
                 reference_text="ABC Mall",
                 identity={"location_id": "loc_1"},
             ),
@@ -2181,7 +3084,7 @@ def test_reference_grounding_does_not_import_selected_active_memory_without_cr_h
 
     assert output.turn is not None
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "loc_live_catalog"
+    assert output.ledger.values[0].payload.only_component().value == "loc_live_catalog"
     assert output.ledger.certifications[0].method == (
         GroundedValueCertificationMethod.RESOLVER_SOURCE_READ
     )
@@ -2199,6 +3102,7 @@ def test_reference_grounding_uses_live_resolver_when_memory_identity_is_not_acti
             FactAddress.entity(
                 address="entity.location.abc",
                 resource="location",
+                key_id="primary_key",
                 reference_text="ABC Mall",
                 identity={"location_id": "loc_stale_memory"},
             ),
@@ -2230,7 +3134,7 @@ def test_reference_grounding_uses_live_resolver_when_memory_identity_is_not_acti
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "loc_live_catalog"
+    assert output.ledger.values[0].payload.only_component().value == "loc_live_catalog"
     assert data_access.calls == [
         ("list_location_list", {"list_location_list.query.name": "ABC Mall"})
     ]
@@ -2244,6 +3148,7 @@ def test_reference_grounding_active_memory_without_cr_handoff_does_not_certify()
             FactAddress.entity(
                 address="entity.location.abc",
                 resource="location",
+                key_id="primary_key",
                 reference_text="ABC Mall",
                 identity={"location_id": "loc_1"},
             ),
@@ -2287,6 +3192,7 @@ def test_reference_grounding_does_not_reuse_memory_identity_for_unmatched_target
             FactAddress.entity(
                 address="entity.location.abc",
                 resource="location",
+                key_id="primary_key",
                 reference_text="ABC Mall",
                 identity={"location_id": "loc_1"},
             ),
@@ -2318,7 +3224,7 @@ def test_reference_grounding_does_not_reuse_memory_identity_for_unmatched_target
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "loc_2"
+    assert output.ledger.values[0].payload.only_component().value == "loc_2"
     assert data_access.calls == [
         ("list_location_list", {"list_location_list.query.name": "Nextgen Mall"})
     ]
@@ -2384,6 +3290,7 @@ def test_reference_grounding_uses_live_resolver_for_repeated_concrete_name_witho
             FactAddress.entity(
                 address="entity.staff.jane",
                 resource="staff",
+                key_id="primary_key",
                 reference_text="Jane Doe",
                 identity={"staff_id": "40404040-0000-0000-0002-000000000001"},
             ),
@@ -2421,8 +3328,8 @@ def test_reference_grounding_uses_live_resolver_for_repeated_concrete_name_witho
     )
 
     assert not output.ledger.issues
-    assert output.ledger.values[0].payload.value == "different-staff"
-    assert output.ledger.values[0].payload.identity_type == "staff"
+    assert output.ledger.values[0].payload.only_component().value == "different-staff"
+    assert output.ledger.values[0].payload.entity_kind == "staff"
     assert data_access.calls == [
         ("list_staff_list", {"list_staff_list.query.name": "Jane Doe"})
     ]
@@ -2480,7 +3387,9 @@ def test_time_grounding_uses_conversation_resolved_value_text():
             RequestedFact(
                 id="fact_1",
                 description="sales total for the resolved period",
-                answer_outputs=(RequestedFactAnswerOutput(id="total_sales"),),
+                answer_outputs=(
+                    RequestedFactAnswerOutput(id="total_sales", role="ANSWER_VALUE"),
+                ),
                 known_inputs=(time_input,),
                 input_refs=("input_date",),
             ),
@@ -2641,7 +3550,7 @@ def test_reference_grounding_uses_literal_resolved_value_text():
 
     assert not output.ledger.issues
     value = output.ledger.values[0]
-    assert value.payload.value == "staff_1"
+    assert value.payload.only_component().value == "staff_1"
     assert [
         certification.to_payload() for certification in output.ledger.certifications
     ] == [
@@ -2664,7 +3573,11 @@ def _endpoint_result(response_body):
     }
 
 
-def _question_contract(text: str, *, description: str = "") -> QuestionContract:
+def _question_contract(
+    text: str,
+    *,
+    description: str = "",
+) -> QuestionContract:
     return QuestionContract(
         requested_facts=(
             RequestedFact(
@@ -2673,6 +3586,7 @@ def _question_contract(text: str, *, description: str = "") -> QuestionContract:
                 answer_outputs=(
                     RequestedFactAnswerOutput(
                         id="total_sales",
+                        role="ANSWER_VALUE",
                         description="total sales",
                     ),
                 ),
@@ -2709,6 +3623,7 @@ def _city_question_contract(text: str) -> QuestionContract:
                 answer_outputs=(
                     RequestedFactAnswerOutput(
                         id="answer_1",
+                        role="ANSWER_VALUE",
                         description="number of stores",
                     ),
                 ),
@@ -2739,6 +3654,7 @@ def _staff_question_contract(
                 answer_outputs=(
                     RequestedFactAnswerOutput(
                         id="total_sales",
+                        role="ANSWER_VALUE",
                         description="total sales",
                     ),
                 ),
@@ -2764,6 +3680,7 @@ def _shared_staff_question_contract(text: str) -> QuestionContract:
         answer_outputs=(
             RequestedFactAnswerOutput(
                 id="total_sales",
+                role="ANSWER_VALUE",
                 description="total sales",
             ),
         ),
@@ -2776,6 +3693,7 @@ def _shared_staff_question_contract(text: str) -> QuestionContract:
         answer_outputs=(
             RequestedFactAnswerOutput(
                 id="store",
+                role="ANSWER_VALUE",
                 description="store",
             ),
         ),
@@ -2801,6 +3719,7 @@ def _staff_question_contract_with_resolved_value_text(
                 answer_outputs=(
                     RequestedFactAnswerOutput(
                         id="staff_id",
+                        role="ANSWER_VALUE",
                         description="staff ID",
                     ),
                 ),
@@ -2825,6 +3744,7 @@ def _time_question_contract(text: str) -> QuestionContract:
                 answer_outputs=(
                     RequestedFactAnswerOutput(
                         id="total_sales",
+                        role="ANSWER_VALUE",
                         description="total sales",
                     ),
                 ),
@@ -2843,12 +3763,39 @@ def _quarter_question_contract(text: str) -> QuestionContract:
                 answer_outputs=(
                     RequestedFactAnswerOutput(
                         id="total_sales",
+                        role="ANSWER_VALUE",
                         description="total sales",
                     ),
                 ),
                 known_inputs=(_time_input("input_date", text),),
             ),
         )
+    )
+
+
+def _candidate_key(
+    entity_kind: str,
+    component_id: str,
+    field_ref: str,
+    *,
+    context_field_refs: tuple[str, ...] = (),
+) -> tuple[CandidateKey, ...]:
+    return (
+        CandidateKey(
+            id="primary_key",
+            entity_kind=entity_kind,
+            components=(CandidateKeyComponent(id=component_id, field_ref=field_ref),),
+            primary=True,
+            context_field_refs=context_field_refs,
+        ),
+    )
+
+
+def _entity_target(entity_kind: str, component_id: str) -> EntityKeyComponentTarget:
+    return EntityKeyComponentTarget(
+        entity_kind=entity_kind,
+        key_id="primary_key",
+        component_id=component_id,
     )
 
 
@@ -2872,6 +3819,41 @@ def _staff_catalog() -> RelationCatalog:
 
 def _selected_catalog() -> RelationCatalog:
     return RelationCatalog(reads=(_sales_read(),))
+
+
+def _flow_read() -> EndpointRead:
+    return EndpointRead(
+        id="list_flows",
+        endpoint_name="list_flows",
+        resource_names=("flow",),
+        row_paths=(RowPath(id="data", path="data", cardinality=RowCardinality.MANY),),
+        fields=(
+            CatalogField(
+                ref="flow.id",
+                path="data.id",
+                row_path_id="data",
+                type="string",
+            ),
+            CatalogField(
+                ref="flow.name",
+                path="data.name",
+                row_path_id="data",
+                type="string",
+            ),
+            CatalogField(
+                ref="flow.tags",
+                path="data.tags",
+                row_path_id="data",
+                type="array",
+            ),
+        ),
+        candidate_keys=_candidate_key(
+            "flow",
+            "id",
+            "flow.id",
+            context_field_refs=("flow.name",),
+        ),
+    )
 
 
 def _location_read() -> EndpointRead:
@@ -2907,13 +3889,6 @@ def _location_read() -> EndpointRead:
                 path="data.location_id",
                 row_path_id="data",
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref="location",
-                    identity_field="location_id",
-                    primary_key=True,
-                    stable=True,
-                    display_fields=("field.data.name",),
-                ),
             ),
             CatalogField(
                 ref="field.data.name",
@@ -2921,6 +3896,12 @@ def _location_read() -> EndpointRead:
                 row_path_id="data",
                 type="string",
             ),
+        ),
+        candidate_keys=_candidate_key(
+            "location",
+            "location_id",
+            "field.data.location_id",
+            context_field_refs=("field.data.name",),
         ),
     )
 
@@ -2952,13 +3933,6 @@ def _location_read_without_lookup_param() -> EndpointRead:
                 path="data.location_id",
                 row_path_id="data",
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref="location",
-                    identity_field="location_id",
-                    primary_key=True,
-                    stable=True,
-                    display_fields=("field.data.name",),
-                ),
             ),
             CatalogField(
                 ref="field.data.name",
@@ -2966,6 +3940,12 @@ def _location_read_without_lookup_param() -> EndpointRead:
                 row_path_id="data",
                 type="string",
             ),
+        ),
+        candidate_keys=_candidate_key(
+            "location",
+            "location_id",
+            "field.data.location_id",
+            context_field_refs=("field.data.name",),
         ),
     )
 
@@ -2996,13 +3976,6 @@ def _location_alias_read() -> EndpointRead:
                 path="data.location_id",
                 row_path_id="data",
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref="location",
-                    identity_field="location_id",
-                    primary_key=True,
-                    stable=True,
-                    display_fields=("field.data.display_name",),
-                ),
             ),
             CatalogField(
                 ref="field.data.display_name",
@@ -3010,6 +3983,12 @@ def _location_alias_read() -> EndpointRead:
                 row_path_id="data",
                 type="string",
             ),
+        ),
+        candidate_keys=_candidate_key(
+            "location",
+            "location_id",
+            "field.data.location_id",
+            context_field_refs=("field.data.display_name",),
         ),
     )
 
@@ -3047,12 +4026,6 @@ def _location_with_area_read() -> EndpointRead:
                 path="data.location_id",
                 row_path_id="data",
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref="location",
-                    identity_field="location_id",
-                    primary_key=True,
-                    stable=True,
-                ),
             ),
             CatalogField(
                 ref="field.data.name",
@@ -3072,19 +4045,31 @@ def _location_with_area_read() -> EndpointRead:
                 path="data.area.area_id",
                 row_path_id="data",
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref="area",
-                    identity_field="area_id",
-                    primary_key=True,
-                    stable=True,
-                    display_fields=("field.data.area.name",),
-                ),
             ),
             CatalogField(
                 ref="field.data.area.name",
                 path="data.area.name",
                 row_path_id="data",
                 type="string",
+            ),
+        ),
+        candidate_keys=_candidate_key(
+            "location",
+            "location_id",
+            "field.data.location_id",
+        ),
+        entity_references=(
+            EntityReference(
+                id="area_reference",
+                target_entity_kind="area",
+                target_key_id="primary_key",
+                components=(
+                    EntityReferenceComponent(
+                        target_component_id="area_id",
+                        local_field_ref="field.data.area.area_id",
+                    ),
+                ),
+                context_field_refs=("field.data.area.name",),
             ),
         ),
     )
@@ -3116,13 +4101,6 @@ def _area_read() -> EndpointRead:
                 path="data.area_id",
                 row_path_id="data",
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref="area",
-                    identity_field="area_id",
-                    primary_key=True,
-                    stable=True,
-                    display_fields=("field.data.name",),
-                ),
             ),
             CatalogField(
                 ref="field.data.name",
@@ -3130,6 +4108,12 @@ def _area_read() -> EndpointRead:
                 row_path_id="data",
                 type="string",
             ),
+        ),
+        candidate_keys=_candidate_key(
+            "area",
+            "area_id",
+            "field.data.area_id",
+            context_field_refs=("field.data.name",),
         ),
     )
 
@@ -3159,13 +4143,6 @@ def _store_read() -> EndpointRead:
                 path="data.store_id",
                 row_path_id="data",
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref="store",
-                    identity_field="store_id",
-                    primary_key=True,
-                    stable=True,
-                    display_fields=("field.data.name",),
-                ),
             ),
             CatalogField(
                 ref="field.data.name",
@@ -3173,6 +4150,12 @@ def _store_read() -> EndpointRead:
                 row_path_id="data",
                 type="string",
             ),
+        ),
+        candidate_keys=_candidate_key(
+            "store",
+            "store_id",
+            "field.data.store_id",
+            context_field_refs=("field.data.name",),
         ),
     )
 
@@ -3202,13 +4185,6 @@ def _broken_store_read() -> EndpointRead:
                 path="data.deposits.store_id",
                 row_path_id="data_deposits",
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref="store",
-                    identity_field="store_id",
-                    primary_key=True,
-                    stable=True,
-                    display_fields=("field.data_deposits.name",),
-                ),
             ),
             CatalogField(
                 ref="field.data_deposits.name",
@@ -3216,6 +4192,12 @@ def _broken_store_read() -> EndpointRead:
                 row_path_id="data_deposits",
                 type="string",
             ),
+        ),
+        candidate_keys=_candidate_key(
+            "store",
+            "store_id",
+            "field.data_deposits.store_id",
+            context_field_refs=("field.data_deposits.name",),
         ),
     )
 
@@ -3245,17 +4227,6 @@ def _staff_read() -> EndpointRead:
                 path="data.staff_id",
                 row_path_id="data",
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref="staff",
-                    identity_field="staff_id",
-                    primary_key=True,
-                    stable=True,
-                    display_fields=(
-                        "field.data.full_name",
-                        "field.data.first_name",
-                        "field.data.last_name",
-                    ),
-                ),
             ),
             CatalogField(
                 ref="field.data.full_name",
@@ -3276,10 +4247,50 @@ def _staff_read() -> EndpointRead:
                 type="string",
             ),
         ),
+        candidate_keys=_candidate_key(
+            "staff",
+            "staff_id",
+            "field.data.staff_id",
+            context_field_refs=(
+                "field.data.full_name",
+                "field.data.first_name",
+                "field.data.last_name",
+            ),
+        ),
     )
 
 
-def _staff_detail_read() -> EndpointRead:
+def _staff_uuid_only_read() -> EndpointRead:
+    return EndpointRead(
+        id="list_staff_uuid_list",
+        endpoint_name="list_staff_uuid_list",
+        resource_names=("staff",),
+        params=(
+            CatalogParam(
+                ref="list_staff_uuid_list.query.name",
+                name="name",
+                source=ParamSource.QUERY,
+                type="string",
+            ),
+        ),
+        row_paths=(RowPath(id="data", path="data", cardinality=RowCardinality.MANY),),
+        fields=(
+            CatalogField(
+                ref="field.data.staff_id",
+                path="data.staff_id",
+                row_path_id="data",
+                type="uuid",
+            ),
+        ),
+        candidate_keys=_candidate_key(
+            "staff",
+            "staff_id",
+            "field.data.staff_id",
+        ),
+    )
+
+
+def _staff_detail_read(*, param_type: str = "string") -> EndpointRead:
     return EndpointRead(
         id="get_staff_detail",
         endpoint_name="get_staff_detail",
@@ -3289,14 +4300,9 @@ def _staff_detail_read() -> EndpointRead:
                 ref="get_staff_detail.path.staff_id",
                 name="staff_id",
                 source=ParamSource.PATH,
-                type="string",
+                type=param_type,
                 required=True,
-                identity=IdentityMetadata(
-                    entity_ref="staff",
-                    identity_field="staff_id",
-                    primary_key=True,
-                    stable=True,
-                ),
+                entity_target=_entity_target("staff", "staff_id"),
             ),
         ),
         row_paths=(
@@ -3312,13 +4318,6 @@ def _staff_detail_read() -> EndpointRead:
                 path="data.staff_id",
                 row_path_id="data",
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref="staff",
-                    identity_field="staff_id",
-                    primary_key=True,
-                    stable=True,
-                    display_fields=("field.data.full_name",),
-                ),
             ),
             CatalogField(
                 ref="field.data.full_name",
@@ -3326,6 +4325,12 @@ def _staff_detail_read() -> EndpointRead:
                 row_path_id="data",
                 type="string",
             ),
+        ),
+        candidate_keys=_candidate_key(
+            "staff",
+            "staff_id",
+            "field.data.staff_id",
+            context_field_refs=("field.data.full_name",),
         ),
     )
 
@@ -3342,12 +4347,7 @@ def _location_detail_read() -> EndpointRead:
                 source=ParamSource.PATH,
                 type="string",
                 required=True,
-                identity=IdentityMetadata(
-                    entity_ref="location",
-                    identity_field="location_id",
-                    primary_key=True,
-                    stable=True,
-                ),
+                entity_target=_entity_target("location", "location_id"),
             ),
         ),
         row_paths=(
@@ -3363,13 +4363,6 @@ def _location_detail_read() -> EndpointRead:
                 path="data.location_id",
                 row_path_id="data",
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref="location",
-                    identity_field="location_id",
-                    primary_key=True,
-                    stable=True,
-                    display_fields=("field.data.name",),
-                ),
             ),
             CatalogField(
                 ref="field.data.name",
@@ -3377,6 +4370,12 @@ def _location_detail_read() -> EndpointRead:
                 row_path_id="data",
                 type="string",
             ),
+        ),
+        candidate_keys=_candidate_key(
+            "location",
+            "location_id",
+            "field.data.location_id",
+            context_field_refs=("field.data.name",),
         ),
     )
 
@@ -3391,12 +4390,7 @@ def _staff_sales_read() -> EndpointRead:
                 name="staff_id",
                 source=ParamSource.QUERY,
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref="staff",
-                    identity_field="staff_id",
-                    primary_key=True,
-                    stable=True,
-                ),
+                entity_target=_entity_target("staff", "staff_id"),
             ),
         ),
         row_paths=(
@@ -3458,12 +4452,7 @@ def _sales_read() -> EndpointRead:
                 name="location_id",
                 source=ParamSource.QUERY,
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref="location",
-                    identity_field="location_id",
-                    primary_key=True,
-                    stable=True,
-                ),
+                entity_target=_entity_target("location", "location_id"),
             ),
         ),
         row_paths=(

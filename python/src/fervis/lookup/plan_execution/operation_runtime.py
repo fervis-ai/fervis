@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Mapping, TypeAlias, TypeVar, assert_never
+from typing import Mapping, TypeAlias, TypeVar
+from typing_extensions import assert_never
 
 from fervis.lookup.plan_execution.errors import RelationEngineError
 from fervis.lookup.answer_program.operations import (
@@ -14,10 +15,9 @@ from fervis.lookup.answer_program.operations import (
     CrossJoinSpec,
     FilterSpec,
     JoinSpec,
-    Operation,
     OperationKind,
     ProjectSpec,
-    ProjectToIdentitySpec,
+    ProjectToKeySpec,
     RoleExpandSpec,
     SortKey,
     TiePolicy,
@@ -25,6 +25,7 @@ from fervis.lookup.answer_program.operations import (
     UniversalConditionSpec,
 )
 from fervis.lookup.plan_execution.relations import RelationRows
+from fervis.lookup.canonical_data import RuntimeValue
 from fervis.lookup.outcomes.errors import ExecutionIssue
 from fervis.lookup.outcomes.model import Undefined
 
@@ -32,7 +33,8 @@ from fervis.lookup.outcomes.model import Undefined
 @dataclass(frozen=True)
 class ScalarInput:
     id: str
-    value: object
+    value: RuntimeValue
+    value_type: str = ""
     proof_refs: tuple[str, ...] = ()
 
 
@@ -40,7 +42,7 @@ class ScalarInput:
 class ResolvedOperationInput:
     operation_id: str
     input_id: str
-    value: object
+    value: RuntimeValue
     proof_refs: tuple[str, ...] = ()
 
 
@@ -156,7 +158,7 @@ class ResolvedComputeSpec:
 ExecutableOperationSpec: TypeAlias = (
     FilterSpec
     | ProjectSpec
-    | ProjectToIdentitySpec
+    | ProjectToKeySpec
     | JoinSpec
     | UnionSpec
     | RoleExpandSpec
@@ -170,8 +172,10 @@ ExecutableOperationSpec: TypeAlias = (
 
 
 @dataclass(frozen=True)
-class ExecutableOperation(Operation):
+class ExecutableOperation:
+    id: str
     spec: ExecutableOperationSpec
+    output_relation: str = ""
 
 
 @dataclass(frozen=True)
@@ -185,8 +189,9 @@ class RelationEngineInput:
 @dataclass(frozen=True)
 class RelationEngineOutput:
     relations: tuple[RelationRows, ...] = ()
-    scalars: Mapping[str, object] | None = None
+    scalars: Mapping[str, RuntimeValue] | None = None
     scalar_proofs: Mapping[str, tuple[str, ...]] | None = None
+    scalar_types: Mapping[str, str] | None = None
     undefined: Undefined | None = None
     issue: ExecutionIssue | None = None
 

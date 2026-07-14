@@ -1,6 +1,7 @@
 """Lookup runtime pipeline."""
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -8,7 +9,7 @@ from fervis.model_io.turns import ModelTurnPurpose
 from fervis.lineage.enums import ProgramInvocationKind
 from fervis.lookup.errors import ErrorCode
 from fervis.observability.event_contracts import EventPayloadKey
-from fervis.lookup.relation_catalog import validate_relation_catalog
+from fervis.lookup.relation_catalog import parse_relation_catalog
 from fervis.lookup.relation_catalog.selection import (
     CatalogSelectionRequest,
     CatalogSelectionResult,
@@ -23,6 +24,7 @@ from fervis.lookup.conversation_resolution import (
     ConversationResolutionRequest,
     ConversationResolutionTurnResult,
     compile_conversation_resolution,
+    conversation_resolution_context_sources,
     generate_conversation_resolution,
 )
 from fervis.lookup.conversation_resolution.callable_frames import (
@@ -42,6 +44,7 @@ from fervis.lookup.grounding.resolution import (
     ground_question_inputs,
     GroundingSourceReadError,
 )
+from fervis.lookup.grounding.model import ExpectedInputIdentity, GroundedInputUse
 from fervis.lookup.grounding.turn import GroundingGenerationError
 from fervis.lookup.memory.projection import project_lookup_memory
 from fervis.lookup.memory.outcomes import fact_value_memory_addresses
@@ -53,8 +56,18 @@ from fervis.lookup.outcomes.answerability import classify_plan_impossible
 from fervis.lookup.clarification import (
     AmbiguousQuestionInterpretation,
     Clarification,
-    ClarificationOption,
+    clarification_response_ref,
     clarify,
+)
+from fervis.lookup.clarification.model import (
+    ClarificationOwner,
+    ConversationResolutionResponse,
+    ConversationInterpretationCandidate,
+    ConversationInterpretationEvidence,
+    FactPlanningCatalogInputResponse,
+    GroundingIdentityResponse,
+    QuestionContractResponse,
+    SourceBindingCatalogInputResponse,
 )
 from fervis.lookup.plan_selection import (
     BoundPlanSelectionSet,
@@ -68,13 +81,12 @@ from fervis.lookup.fact_plan.fact_plan import (
     PlanClarification,
     PlanImpossible,
 )
-from fervis.lookup.answer_program.values import FactValue
+from fervis.lookup.answer_program.values import FactValue, LiteralType
 from fervis.lookup.fact_planning.request import FactPlanRequest
 from fervis.lookup.fact_planning.turn import (
     FactPlanGenerationError,
     generate_pattern_fact_plan,
 )
-from fervis.lookup.turn_prompts.context import active_clarification_context
 from fervis.lookup.query_enrichment import (
     QueryEnrichmentGenerationError,
     QueryEnrichmentRequest,
@@ -106,8 +118,9 @@ from fervis.lookup.source_binding import (
     SourceBindingTurnResult,
     SourceCandidateDiscoveryRequest,
     generate_source_binding,
-    source_candidate_discovery_payload,
+    source_candidate_discovery_registry,
 )
+from fervis.lookup.source_binding.candidates.model import SourceCandidateRegistry
 from fervis.lookup.source_binding.role_selection import (
     bound_plan_selection_for_source_binding,
     plan_selection_uses_only_values,
@@ -189,6 +202,7 @@ class _LookupPipelineState:
     read_eligibility_turn: Any = None
     read_eligibility_usage: dict[str, Any] | None = None
     plan_selection_turn_number: int = 3
+    source_candidates: SourceCandidateRegistry | None = None
     plan_selection_turn: Any = None
     plan_selection_outcome: Any = None
     catalog: Any = None
@@ -292,7 +306,7 @@ def _run_continue_prior_request_execution(
     execution: ContinuePriorRequestExecution,
 ) -> LookupResult:
     state.question_contract = execution.frame.question_contract
-    state.full_catalog = validate_relation_catalog(
+    state.full_catalog = parse_relation_catalog(
         state.ports.relation_catalog_port.build_relation_catalog()
     )
     enrichment_result = _run_query_enrichment_and_catalog_phase(state)
@@ -301,6 +315,7 @@ def _run_continue_prior_request_execution(
     grounding_result = _run_grounding_phase(
         state,
         selected_input_ids=execution.frame.changed_input_ids,
+        expected_input_identities=execution.frame.expected_input_identities,
         prepare_answer_reads=False,
     )
     if grounding_result is not None:
@@ -373,14 +388,12 @@ def _run_conversation_resolution_phase(
 ) -> LookupResult | None:
     context_sources = state.memory_card_projection.context_sources
     context_frames = state.memory_card_projection.context_frames
-    if (
-        not context_sources
-        and active_clarification_context(
-            state.request.conversation_context,
-            current_question=state.request.question,
-        )
-        is None
-    ):
+    conversation_responses = tuple(
+        response
+        for response in state.request.clarification_responses
+        if isinstance(response, ConversationResolutionResponse)
+    )
+    if not context_sources and not conversation_responses:
         return None
     limit_failure = _limit_before_next_model_turn(state.ports, state.request.run_id)
     if limit_failure is not None:
@@ -391,14 +404,16 @@ def _run_conversation_resolution_phase(
         message="resolving conversation context",
     )
     try:
+        resolution_request = ConversationResolutionRequest(
+            question=state.request.question,
+            conversation_context=state.request.conversation_context,
+            host=state.request.host,
+            context_sources=context_sources,
+            context_frames=context_frames,
+            clarification_responses=conversation_responses,
+        )
         state.conversation_turn = generate_conversation_resolution(
-            request=ConversationResolutionRequest(
-                question=state.request.question,
-                conversation_context=state.request.conversation_context,
-                host=state.request.host,
-                context_sources=context_sources,
-                context_frames=context_frames,
-            ),
+            request=resolution_request,
             model_port=state.ports.planner_model_port,
             provider=state.provider,
             model_key=state.model_key,
@@ -437,24 +452,13 @@ def _run_conversation_resolution_phase(
                 turn=1,
             ),
         )
-    if (
-        active_clarification_context(
-            state.request.conversation_context,
-            current_question=state.request.question,
-        )
-        is not None
-        and not state.conversation_resolution.used_memory_ids
-    ):
-        return _runtime_error_terminal(
-            state,
-            error_code=ErrorCode.PLANNING_FAILED,
-            message="clarification response was not connected to the active clarification",
-            usage=state.conversation_turn.usage,
-        )
     try:
         state.compiled_conversation_resolution = compile_conversation_resolution(
             state.conversation_resolution,
             memory_projection=state.memory_card_projection,
+            context_sources=conversation_resolution_context_sources(
+                resolution_request
+            ),
         )
     except ValueError:
         return _runtime_error_terminal(
@@ -479,6 +483,11 @@ def _run_question_contract_phase(state: _LookupPipelineState) -> LookupResult | 
         message="normalizing requested fact",
     )
     try:
+        question_responses = tuple(
+            response
+            for response in state.request.clarification_responses
+            if isinstance(response, QuestionContractResponse)
+        )
         state.question_turn = generate_question_contract(
             request=QuestionContractRequest(
                 current_question=state.request.question,
@@ -490,6 +499,7 @@ def _run_question_contract_phase(state: _LookupPipelineState) -> LookupResult | 
                     else None
                 ),
                 host=state.request.host,
+                clarification_responses=question_responses,
             ),
             model_port=state.ports.planner_model_port,
             provider=state.provider,
@@ -527,7 +537,7 @@ def _run_question_contract_phase(state: _LookupPipelineState) -> LookupResult | 
             ),
         )
     state.question_contract = outcome
-    state.full_catalog = validate_relation_catalog(
+    state.full_catalog = parse_relation_catalog(
         state.ports.relation_catalog_port.build_relation_catalog()
     )
     return None
@@ -588,6 +598,7 @@ def _run_grounding_phase(
     state: _LookupPipelineState,
     *,
     selected_input_ids: frozenset[str] | None = None,
+    expected_input_identities: Mapping[str, ExpectedInputIdentity] | None = None,
     prepare_answer_reads: bool = True,
 ) -> LookupResult | None:
     limit_failure = _limit_before_next_model_turn(state.ports, state.request.run_id)
@@ -612,14 +623,20 @@ def _run_grounding_phase(
             provider=state.provider,
             model_key=state.model_key,
             max_thinking_tokens=state.request.max_thinking_tokens,
-            resolver_selections=(
-                state.resolver_catalog_selection.entity_target_selections
-            ),
             active_memory_ids=_active_memory_ids(state),
             conversation_resolution=state.compiled_conversation_resolution,
             source_read_lineage=grounding_lineage.scope,
             host=state.request.host,
             selected_input_ids=selected_input_ids,
+            expected_input_identities=expected_input_identities,
+            clarification_responses=tuple(
+                response
+                for response in state.request.clarification_responses
+                if isinstance(
+                    response,
+                    GroundingIdentityResponse,
+                )
+            ),
         )
     except GroundingGenerationError as exc:
         return _model_turn_failure_result(
@@ -702,7 +719,7 @@ def _run_read_eligibility_phase(state: _LookupPipelineState) -> LookupResult | N
                 question=state.request.question,
                 question_contract=state.question_contract,
                 requested_facts=state.question_contract.requested_facts,
-                catalog_selection=state.catalog_selection,
+                catalog_selection=_required_catalog_selection(state),
                 conversation_context=state.request.conversation_context,
                 available_values=_catalog_available_values_for_state(state),
                 host=state.request.host,
@@ -728,10 +745,10 @@ def _run_read_eligibility_phase(state: _LookupPipelineState) -> LookupResult | N
     )
     state.read_eligibility_usage = state.read_eligibility_turn.usage
     state.catalog_selection = filter_catalog_selection_for_read_eligibility(
-        catalog_selection=state.catalog_selection,
+        catalog_selection=_required_catalog_selection(state),
         read_eligibility=state.read_eligibility_turn.result,
     )
-    state.catalog = validate_relation_catalog(state.catalog_selection.relation_catalog)
+    state.catalog = state.catalog_selection.relation_catalog
     return None
 
 
@@ -783,9 +800,7 @@ def _run_continue_prior_request_program(
         ),
         usage=_phase_usage(state),
         grounded_values=state.grounding.ledger.values,
-        extra_fact_addresses=fact_value_memory_addresses(
-            state.grounding.ledger.values
-        ),
+        extra_fact_addresses=fact_value_memory_addresses(state.grounding.ledger.values),
         known_input_step_id=_continue_prior_request_known_input_step_id(state),
         conversation_resolution_activation=_conversation_resolution_activation(state),
         invocation_kind=ProgramInvocationKind.CONTINUE_PRIOR_REQUEST,
@@ -804,16 +819,23 @@ def _select_answer_reads_for_eligibility(
             resource_name_matches=(
                 state.query_enrichment_turn.result.requested_fact_resource_name_matches
             ),
-            active_memory_signals=(),
             available_values=_catalog_available_values_for_state(state),
         )
     )
     state.catalog_selection = prepare_catalog_selection_for_read_eligibility(
-        catalog_selection=state.catalog_selection,
+        catalog_selection=_required_catalog_selection(state),
         full_catalog=state.full_catalog,
         max_reads_per_fact=READ_ELIGIBILITY_RECALL_READS_PER_FACT,
     )
-    state.catalog = validate_relation_catalog(state.catalog_selection.relation_catalog)
+    state.catalog = state.catalog_selection.relation_catalog
+
+
+def _required_catalog_selection(
+    state: _LookupPipelineState,
+) -> CatalogSelectionResult:
+    if state.catalog_selection is None:
+        raise AssertionError("catalog selection phase has not completed")
+    return state.catalog_selection
 
 
 def _run_source_binding_phase(state: _LookupPipelineState) -> LookupResult | None:
@@ -895,9 +917,15 @@ def _set_fact_plan_request_from_source_binding(state: _LookupPipelineState) -> N
         same_scope_relation_catalog=state.full_catalog,
         memory_inputs=_active_memory_prompt_context(state),
         memory_relations=state.memory.relations,
-        catalog_selection=state.catalog_selection,
-        available_values=_available_values_for_state(state),
-        available_value_uses=state.grounding.ledger.uses,
+        catalog_selection=_required_catalog_selection(state),
+        available_values=_fact_planning_response_values(
+            state,
+            base=_available_values_for_state(state),
+        ),
+        available_value_uses=(
+            *state.grounding.ledger.uses,
+            *_fact_planning_response_uses(state),
+        ),
         conversation_context=state.request.conversation_context,
         host=state.request.host,
     )
@@ -919,6 +947,9 @@ def _run_plan_selection_phase(state: _LookupPipelineState) -> LookupResult | Non
         stage="plan_selection",
         message="choosing answer strategy",
     )
+    state.source_candidates = source_candidate_discovery_registry(
+        _source_candidate_discovery_request_for_state(state)
+    )
     try:
         state.plan_selection_turn = generate_plan_selection(
             request=PlanSelectionRequest(
@@ -926,9 +957,7 @@ def _run_plan_selection_phase(state: _LookupPipelineState) -> LookupResult | Non
                 question_contract=state.question_contract,
                 requested_facts=state.question_contract.requested_facts,
                 relation_catalog=state.catalog,
-                source_candidate_payload=source_candidate_discovery_payload(
-                    _source_candidate_discovery_request_for_state(state)
-                ),
+                source_candidates=state.source_candidates,
                 conversation_context=state.request.conversation_context,
                 host=state.request.host,
             ),
@@ -974,6 +1003,8 @@ def _source_binding_request_for_state(
     plan_selection: PlanSelectionSet,
     available_values: tuple[FactValue, ...] | None = None,
 ) -> SourceBindingRequest:
+    if state.source_candidates is None:
+        raise VerificationError("source binding requires discovered candidates")
     return SourceBindingRequest(
         question=state.request.question,
         question_contract=state.question_contract,
@@ -982,19 +1013,26 @@ def _source_binding_request_for_state(
         same_scope_relation_catalog=state.full_catalog,
         memory_inputs=_active_memory_prompt_context(state),
         active_memory_ids=tuple(_active_memory_prompt_ids(state)),
-        catalog_selection=state.catalog_selection,
-        available_values=(
-            available_values
-            if available_values is not None
-            else _source_binding_available_values_for_state(state)
+        catalog_selection=_required_catalog_selection(state),
+        available_values=_source_binding_response_values(
+            state,
+            base=(
+                available_values
+                if available_values is not None
+                else _source_binding_available_values_for_state(state)
+            ),
         ),
-        available_value_uses=state.grounding.ledger.uses,
+        available_value_uses=(
+            *state.grounding.ledger.uses,
+            *_source_binding_response_uses(state),
+        ),
         read_eligibility=(
             state.read_eligibility_turn.result
             if state.read_eligibility_turn is not None
             else None
         ),
         plan_selection=plan_selection,
+        source_candidates=state.source_candidates,
         conversation_context=state.request.conversation_context,
         conversation_resolution=state.compiled_conversation_resolution,
         host=state.request.host,
@@ -1012,7 +1050,7 @@ def _source_candidate_discovery_request_for_state(
         same_scope_relation_catalog=state.full_catalog,
         memory_inputs=_active_memory_prompt_context(state),
         active_memory_ids=tuple(_active_memory_prompt_ids(state)),
-        catalog_selection=state.catalog_selection,
+        catalog_selection=_required_catalog_selection(state),
         available_values=_available_values_for_state(state),
         available_value_uses=state.grounding.ledger.uses,
         read_eligibility=(
@@ -1039,6 +1077,13 @@ def _run_planning_phase(state: _LookupPipelineState) -> LookupResult | None:
             state,
             error_code=ErrorCode.PLAN_VALIDATION_FAILED,
             message="source binding did not match the selected source plan",
+            usage=_source_binding_usage(state),
+        )
+    if state.fact_plan_request is None:
+        return _runtime_error_terminal(
+            state,
+            error_code=ErrorCode.PLAN_VALIDATION_FAILED,
+            message="source binding did not produce a fact-planning request",
             usage=_source_binding_usage(state),
         )
     _emit_progress(
@@ -1142,6 +1187,7 @@ def _source_binding_terminal_result(
             ports=state.ports,
             fact_result=_plan_clarification_fact_result(
                 state.source_binding_outcome,
+                owner=ClarificationOwner.SOURCE_BINDING,
                 catalog=state.catalog,
                 memory_relations=state.memory.relations,
             ),
@@ -1187,6 +1233,7 @@ def _pattern_plan_terminal_result(state: _LookupPipelineState) -> LookupResult |
             ports=state.ports,
             fact_result=_plan_clarification_fact_result(
                 plan_outcome,
+                owner=ClarificationOwner.FACT_PLANNING,
                 catalog=state.catalog,
                 memory_relations=state.memory.relations,
             ),
@@ -1204,13 +1251,21 @@ def _pattern_plan_terminal_result(state: _LookupPipelineState) -> LookupResult |
             ),
         )
     if isinstance(plan_outcome, PlanImpossible):
+        impossible_result = classify_plan_impossible(
+            plan_outcome,
+            question_contract=state.question_contract,
+        )
+        if impossible_result is None:
+            return _plan_validation_failed_result(
+                request=state.request,
+                ports=state.ports,
+                usage=_pattern_plan_usage(state),
+                exc=VerificationError("impossible plan requires blocked facts"),
+            )
         return _synthesize_result(
             request=state.request,
             ports=state.ports,
-            fact_result=classify_plan_impossible(
-                plan_outcome,
-                question_contract=state.question_contract,
-            ),
+            fact_result=impossible_result,
             status=RunStatus.COMPLETED,
             usage=_pattern_plan_usage(state),
             question_contract=state.question_contract,
@@ -1249,13 +1304,28 @@ def _verified_impossible_result(
             usage=usage,
             exc=exc,
         )
+    if not isinstance(verified_impossible, PlanImpossible):
+        return _plan_validation_failed_result(
+            request=state.request,
+            ports=state.ports,
+            usage=usage,
+            exc=VerificationError("impossible verification changed outcome kind"),
+        )
+    fact_result = classify_plan_impossible(
+        verified_impossible,
+        question_contract=state.question_contract,
+    )
+    if fact_result is None:
+        return _plan_validation_failed_result(
+            request=state.request,
+            ports=state.ports,
+            usage=usage,
+            exc=VerificationError("impossible plan requires blocked facts"),
+        )
     return _synthesize_result(
         request=state.request,
         ports=state.ports,
-        fact_result=classify_plan_impossible(
-            verified_impossible,
-            question_contract=state.question_contract,
-        ),
+        fact_result=fact_result,
         status=RunStatus.COMPLETED,
         usage=usage,
         question_contract=state.question_contract,
@@ -1334,6 +1404,107 @@ def _source_binding_available_values_for_state(
         tuple(state.grounding.ledger.values) if state.grounding is not None else ()
     )
     return _dedupe_fact_values(grounded_values)
+
+
+def _source_binding_response_values(
+    state: _LookupPipelineState,
+    *,
+    base: tuple[FactValue, ...],
+) -> tuple[FactValue, ...]:
+    responses = tuple(
+        response
+        for response in state.request.clarification_responses
+        if isinstance(response, SourceBindingCatalogInputResponse)
+    )
+    return _dedupe_fact_values(
+        (*base, *(_catalog_response_value(response) for response in responses))
+    )
+
+
+def _source_binding_response_uses(
+    state: _LookupPipelineState,
+) -> tuple[GroundedInputUse, ...]:
+    return tuple(
+        _catalog_response_use(response)
+        for response in state.request.clarification_responses
+        if isinstance(response, SourceBindingCatalogInputResponse)
+    )
+
+
+def _fact_planning_response_values(
+    state: _LookupPipelineState,
+    *,
+    base: tuple[FactValue, ...],
+) -> tuple[FactValue, ...]:
+    responses = tuple(
+        response
+        for response in state.request.clarification_responses
+        if isinstance(
+            response,
+            (SourceBindingCatalogInputResponse, FactPlanningCatalogInputResponse),
+        )
+    )
+    return _dedupe_fact_values(
+        (*base, *(_catalog_response_value(response) for response in responses))
+    )
+
+
+def _fact_planning_response_uses(
+    state: _LookupPipelineState,
+) -> tuple[GroundedInputUse, ...]:
+    return tuple(
+        _catalog_response_use(response)
+        for response in state.request.clarification_responses
+        if isinstance(
+            response,
+            (SourceBindingCatalogInputResponse, FactPlanningCatalogInputResponse),
+        )
+    )
+
+
+def _catalog_response_value(
+    response: SourceBindingCatalogInputResponse | FactPlanningCatalogInputResponse,
+) -> FactValue:
+    value_id = f"clarification_value:{response.response_id}"
+    proof_refs = (
+        f"clarification:{response.clarification_id}",
+        clarification_response_ref(response.response_id),
+    )
+    applies_to = (response.requested_fact_id,)
+    value_type = response.target.value_type.casefold()
+    if value_type in {"number", "integer"}:
+        return FactValue.literal(
+            id=value_id,
+            literal_type=LiteralType.NUMBER,
+            value=response.value,
+            proof_refs=proof_refs,
+            applies_to_requested_fact_ids=applies_to,
+        )
+    if value_type == "boolean":
+        return FactValue.literal(
+            id=value_id,
+            literal_type=LiteralType.BOOLEAN,
+            value=response.value,
+            proof_refs=proof_refs,
+            applies_to_requested_fact_ids=applies_to,
+        )
+    return FactValue.named(
+        id=value_id,
+        text=response.value,
+        proof_refs=proof_refs,
+        applies_to_requested_fact_ids=applies_to,
+    )
+
+
+def _catalog_response_use(
+    response: SourceBindingCatalogInputResponse | FactPlanningCatalogInputResponse,
+) -> GroundedInputUse:
+    return GroundedInputUse(
+        id=f"clarification_use:{response.response_id}",
+        value_id=f"clarification_value:{response.response_id}",
+        row_source_id=response.target.row_source_id,
+        param_id=response.target.param_id,
+    )
 
 
 def _catalog_available_values_for_state(
@@ -1423,20 +1594,27 @@ def _conversation_resolution_clarifications(
     unresolved: UnresolvedResolution,
 ) -> tuple[Clarification, ...]:
     if unresolved.unresolved_kind == "multiple_meanings":
-        option_labels = tuple(
-            item.contextualized_question
-            for item in unresolved.candidate_interpretations
-            if item.contextualized_question
-        )
         return (
             clarify(
                 AmbiguousQuestionInterpretation(
                     clarification_id="conversation_resolution_ambiguous_1",
                     requested_fact_id="conversation_resolution",
                     source_text="",
-                    options=tuple(
-                        ClarificationOption(id=item, label=item)
-                        for item in option_labels
+                    candidates=tuple(
+                        ConversationInterpretationCandidate(
+                            id=f"interpretation_{index}",
+                            contextualized_question=item.contextualized_question,
+                            source_evidence=tuple(
+                                ConversationInterpretationEvidence(
+                                    source_id=evidence.source_id,
+                                    exact_source_texts=evidence.exact_source_texts,
+                                )
+                                for evidence in item.context_evidence
+                            ),
+                        )
+                        for index, item in enumerate(
+                            unresolved.candidate_interpretations, start=1
+                        )
                     ),
                     proof_refs=("conversation_resolution:unresolved",),
                 )
@@ -1448,12 +1626,7 @@ def _conversation_resolution_clarifications(
                 clarification_id="conversation_resolution_ambiguous_1",
                 requested_fact_id="conversation_resolution",
                 source_text=_unresolved_text(unresolved),
-                options=(
-                    ClarificationOption(
-                        id=_unresolved_text(unresolved),
-                        label=_unresolved_text(unresolved),
-                    ),
-                ),
+                accepts_free_text=True,
                 proof_refs=("conversation_resolution:unresolved",),
             )
         ),

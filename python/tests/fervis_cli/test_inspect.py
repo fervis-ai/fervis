@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ._support import *  # noqa: F401,F403
 
+
 def test_fervis_project_inspect_module_entrypoint_bypasses_full_parser(
     monkeypatch,
     tmp_path: Path,
@@ -26,6 +27,7 @@ def test_fervis_project_inspect_module_entrypoint_bypasses_full_parser(
     assert exit_code == 2
     assert inspected_commands[0][0] == ("project", "inspect")
     assert inspected_commands[0][1].root_path == tmp_path
+
 
 def test_fervis_project_inspect_returns_agent_envelope() -> None:
     stdout = StringIO()
@@ -67,6 +69,7 @@ def test_fervis_project_inspect_returns_agent_envelope() -> None:
         },
     }
 
+
 def test_fervis_project_inspect_unknown_project_is_blocked() -> None:
     stdout = StringIO()
     project = ProjectInspection(
@@ -95,6 +98,7 @@ def test_fervis_project_inspect_unknown_project_is_blocked() -> None:
     assert payload["payload"]["blocked_reason"] == (
         "No Django or FastAPI project marker was found."
     )
+
 
 def test_fervis_inspect_prompts_is_the_prompt_viewer_execution_surface(
     monkeypatch,
@@ -132,6 +136,7 @@ def test_fervis_inspect_prompts_is_the_prompt_viewer_execution_surface(
     ]
     assert all(isinstance(call[1], _PromptCaptureQuery) for call in calls)
 
+
 def test_fervis_inspect_prompts_supports_explicit_text_format(monkeypatch) -> None:
     import fervis.observability.prompt_viewer.render_prompts as prompt_viewer
 
@@ -157,6 +162,7 @@ def test_fervis_inspect_prompts_supports_explicit_text_format(monkeypatch) -> No
     assert "Wrote 1 run(s) to .goldset-runs/prompt-viewer/latest/index.html" in (
         stdout.getvalue()
     )
+
 
 def test_fervis_inspect_prompts_supports_explicit_html_format(monkeypatch) -> None:
     import fervis.observability.prompt_viewer.render_prompts as prompt_viewer
@@ -187,6 +193,7 @@ def test_fervis_inspect_prompts_supports_explicit_html_format(monkeypatch) -> No
         prompt_viewer.PromptInspectionFormat.HTML
     ]
 
+
 def test_fervis_inspect_prompts_open_requires_html_format() -> None:
     stdout = StringIO()
 
@@ -203,6 +210,7 @@ def test_fervis_inspect_prompts_open_requires_html_format() -> None:
         "--open requires --viewer-format html"
         in (envelope["payload"]["error"]["message"])
     )
+
 
 def test_fervis_inspect_artifact_is_the_full_artifact_surface() -> None:
     stdout = StringIO()
@@ -237,6 +245,7 @@ def test_fervis_inspect_artifact_is_the_full_artifact_surface() -> None:
     )
     assert '{"answer": "parsed"}' in rendered
 
+
 def test_fervis_inspect_artifact_rejects_removed_json_flag() -> None:
     with pytest.raises(SystemExit) as error:
         run_fervis(
@@ -247,6 +256,7 @@ def test_fervis_inspect_artifact_rejects_removed_json_flag() -> None:
         )
 
     assert error.value.code == 2
+
 
 def test_fervis_command_result_is_structured_before_text_rendering() -> None:
     result = evaluate_fervis(

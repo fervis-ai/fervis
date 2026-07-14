@@ -67,7 +67,6 @@ def _resolved_outcome_schema(
                     context_frames=context_frames,
                 ),
             },
-            "frame_call": _frame_call_schema(context_frames),
         }
     )
 
@@ -77,6 +76,26 @@ def _resolved_clause_schema(
     context_sources: tuple[ConversationContextSource, ...],
     context_frames: tuple[ConversationContextFrame, ...],
 ) -> dict[str, object]:
+    values_schema: dict[str, object] = {
+        "type": "array",
+        "items": output.ResolvedValueOutput.schema(
+            {
+                "value_id": {"type": "string", "minLength": 1},
+                "resolved_text": {"type": "string", "minLength": 1},
+                "frame_parameter": _frame_parameter_schema(context_frames),
+                "sources": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": _resolution_source_schema(
+                        context_sources=context_sources,
+                        context_frames=context_frames,
+                    ),
+                },
+            }
+        ),
+    }
+    if not _has_resolved_value_authority(context_sources, context_frames):
+        values_schema["maxItems"] = 0
     return output.ResolvedClauseOutput.schema(
         {
             "current_clause_text": {"type": "string", "minLength": 1},
@@ -86,24 +105,19 @@ def _resolved_clause_schema(
                 context_frames,
                 allowed_kinds=_FIXED_SHAPE_PART_KINDS,
             ),
-            "values": {
-                "type": "array",
-                "items": output.ResolvedValueOutput.schema(
-                    {
-                        "value_id": {"type": "string", "minLength": 1},
-                        "resolved_text": {"type": "string", "minLength": 1},
-                        "sources": {
-                            "type": "array",
-                            "minItems": 1,
-                            "items": _resolution_source_schema(
-                                context_sources=context_sources,
-                                context_frames=context_frames,
-                            ),
-                        },
-                    }
-                ),
-            },
+            "values": values_schema,
         }
+    )
+
+
+def _has_resolved_value_authority(
+    context_sources: tuple[ConversationContextSource, ...],
+    context_frames: tuple[ConversationContextFrame, ...],
+) -> bool:
+    return any(source.meaning_anchors for source in context_sources) or any(
+        any(part.kind in _VALUE_PART_KINDS for part in frame.parts)
+        or (frame.callable is not None and bool(frame.callable.parameters))
+        for frame in context_frames
     )
 
 
@@ -148,8 +162,7 @@ def _context_anchor_source_schema(
         {
             "kind": {"type": "string", "enum": ["context_anchor"]},
             "source_id": {"type": "string", "enum": [source.source_id]},
-            "memory_id": {"type": "string", "enum": [anchor.memory_id]},
-            "source_text": {"type": "string", "enum": [anchor.text]},
+            "anchor_id": {"type": "string", "enum": [anchor.anchor_id]},
         }
     )
 
@@ -204,15 +217,17 @@ def _frame_part_references_schema(
     }
 
 
-def _frame_call_schema(
+def _frame_parameter_schema(
     context_frames: tuple[ConversationContextFrame, ...],
 ) -> dict[str, object]:
     return {
         "type": "object",
         "oneOf": [
-            _no_frame_call_schema(),
+            output.NoFrameParameterOutput.schema(
+                {"kind": {"type": "string", "enum": ["none"]}}
+            ),
             *(
-                _callable_frame_schema(frame)
+                _frame_parameter_branches(frame)
                 for frame in context_frames
                 if frame.callable is not None
             ),
@@ -220,54 +235,20 @@ def _frame_call_schema(
     }
 
 
-def _no_frame_call_schema() -> dict[str, object]:
-    return output.NoFrameCallOutput.schema(
-        {"kind": {"type": "string", "enum": ["none"]}}
-    )
-
-
-def _callable_frame_schema(
+def _frame_parameter_branches(
     frame: ConversationContextFrame,
 ) -> dict[str, object]:
     callable_signature = frame.callable
     if callable_signature is None:
         raise ValueError("frame is not callable")
-    parameter_ids = [item.parameter_id for item in callable_signature.parameters]
-    return output.FrameCallOutput.schema(
+    parameter_ids = [parameter.parameter_id for parameter in callable_signature.parameters]
+    return output.FrameParameterOutput.schema(
         {
-            "kind": {"type": "string", "enum": ["call"]},
+            "kind": {"type": "string", "enum": ["parameter"]},
             "frame_id": {"type": "string", "enum": [frame.frame_id]},
-            "arguments": {
-                "type": "array",
-                "minItems": len(parameter_ids),
-                "maxItems": len(parameter_ids),
-                "items": {
-                    "type": "object",
-                    "oneOf": [
-                        output.CarriedFrameArgumentOutput.schema(
-                            {
-                                "kind": {"type": "string", "enum": ["carry"]},
-                                "parameter_id": {
-                                    "type": "string",
-                                    "enum": parameter_ids,
-                                },
-                            }
-                        ),
-                        output.ResolvedValueFrameArgumentOutput.schema(
-                            {
-                                "kind": {
-                                    "type": "string",
-                                    "enum": ["resolved_value"],
-                                },
-                                "parameter_id": {
-                                    "type": "string",
-                                    "enum": parameter_ids,
-                                },
-                                "value_id": {"type": "string", "minLength": 1},
-                            }
-                        ),
-                    ],
-                },
+            "parameter_id": {
+                "type": "string",
+                "enum": parameter_ids,
             },
         }
     )

@@ -26,6 +26,12 @@ from fervis.lookup.clarification import (
     TargetReferenceUnsupported,
     clarify,
 )
+from fervis.lookup.clarification.model import (
+    CatalogInputTarget,
+    ClarificationOwner,
+    FactPlanningCatalogInputContinuation,
+    SourceBindingCatalogInputContinuation,
+)
 from fervis.lookup.fact_plan.row_sources import build_row_source_catalog
 from fervis.lookup.fact_plan.fact_plan import (
     MissingCatalogChoiceInput,
@@ -37,8 +43,7 @@ from fervis.lookup.fact_planning.required_inputs import (
 )
 from fervis.lookup.fact_plan.row_sources import required_input_evidence_ref
 from fervis.lookup.question_contract import (
-    MissingQuestionInput,
-    MissingQuestionInputType,
+    IncompleteFactualRequestKind,
     QuestionContractNeedsClarification,
 )
 from fervis.lookup.orchestration.request import (
@@ -86,27 +91,23 @@ def _grounding_issue_cause(
     issues: tuple[GroundingIssue, ...],
 ) -> TargetReferenceNotFound | TargetReferenceAmbiguous | TargetReferenceUnsupported:
     issue = issues[0]
-    common = {
-        "clarification_id": f"clarify_{issue.known_input_id}_grounding",
-        "requested_fact_id": issue.requested_fact_id,
-        "known_input_id": issue.known_input_id,
-        "source_text": str(issue.known_input_text or ""),
-        "target_label": _grounding_issue_target_label(issue),
-        "evidence": tuple(
-            dict.fromkeys(
-                evidence
-                for grouped_issue in issues
-                for evidence in _grounding_issue_structured_evidence(grouped_issue)
-            )
-        ),
-        "proof_refs": tuple(
-            dict.fromkeys(
-                proof_ref
-                for grouped_issue in issues
-                for proof_ref in _grounding_issue_proof_refs(grouped_issue)
-            )
-        ),
-    }
+    clarification_id = f"clarify_{issue.known_input_id}_grounding"
+    source_text = str(issue.known_input_text or "")
+    target_label = _grounding_issue_target_label(issue)
+    evidence = tuple(
+        dict.fromkeys(
+            evidence
+            for grouped_issue in issues
+            for evidence in _grounding_issue_structured_evidence(grouped_issue)
+        )
+    )
+    proof_refs = tuple(
+        dict.fromkeys(
+            proof_ref
+            for grouped_issue in issues
+            for proof_ref in _grounding_issue_proof_refs(grouped_issue)
+        )
+    )
     ambiguous = tuple(
         grouped_issue
         for grouped_issue in issues
@@ -114,7 +115,13 @@ def _grounding_issue_cause(
     )
     if ambiguous:
         return TargetReferenceAmbiguous(
-            **common,
+            clarification_id=clarification_id,
+            requested_fact_id=issue.requested_fact_id,
+            known_input_id=issue.known_input_id,
+            source_text=source_text,
+            target_label=target_label,
+            evidence=evidence,
+            proof_refs=proof_refs,
             options=tuple(
                 dict.fromkeys(
                     _clarification_option_from_grounding_candidate(candidate)
@@ -127,8 +134,24 @@ def _grounding_issue_cause(
         grouped_issue.kind == GroundingTerminalKind.UNRESOLVED_REFERENCE
         for grouped_issue in issues
     ):
-        return TargetReferenceNotFound(**common)
-    return TargetReferenceUnsupported(**common)
+        return TargetReferenceNotFound(
+            clarification_id=clarification_id,
+            requested_fact_id=issue.requested_fact_id,
+            known_input_id=issue.known_input_id,
+            source_text=source_text,
+            target_label=target_label,
+            evidence=evidence,
+            proof_refs=proof_refs,
+        )
+    return TargetReferenceUnsupported(
+        clarification_id=clarification_id,
+        requested_fact_id=issue.requested_fact_id,
+        known_input_id=issue.known_input_id,
+        source_text=source_text,
+        target_label=target_label,
+        evidence=evidence,
+        proof_refs=proof_refs,
+    )
 
 
 def _grounding_issue_target_label(issue: GroundingIssue) -> str:
@@ -161,7 +184,7 @@ def _clarification_option_from_grounding_candidate(
         id=candidate.id,
         label=candidate.label,
         value=candidate.matched_value,
-        entity_kind=candidate.entity_kind,
+        key=candidate.key,
         matched_label=candidate.matched_label,
         matched_field=candidate.matched_field,
         matched_value=candidate.matched_value,
@@ -175,7 +198,10 @@ def _question_contract_clarification_fact_result(
 ) -> FactResult:
     clarifications: list[Clarification] = []
     for index, item in enumerate(outcome.missing, start=1):
-        if item.type == MissingQuestionInputType.TARGET_REFERENCE:
+        if (
+            item.missing_kind
+            is IncompleteFactualRequestKind.UNRESOLVED_PRIOR_TURN_REFERENCE
+        ):
             known_input_id = f"question_contract:{item.source_text}"
             clarifications.append(
                 clarify(
@@ -184,7 +210,7 @@ def _question_contract_clarification_fact_result(
                         requested_fact_id="question_contract",
                         known_input_id=known_input_id,
                         source_text=item.source_text,
-                        target_label=_missing_question_input_target_label(item),
+                        target_label=item.target_label,
                         proof_refs=(
                             f"known_input:{known_input_id}",
                             "question_contract:needs_clarification",
@@ -199,7 +225,7 @@ def _question_contract_clarification_fact_result(
                     clarification_id=f"clarify_question_contract_{index}",
                     requested_fact_id="question_contract",
                     source_text=item.source_text,
-                    metric_needed=item.why_context_is_insufficient,
+                    metric_needed=item.why_question_is_incomplete,
                     proof_refs=(
                         "requested_fact:question_contract",
                         "question_contract:needs_clarification",
@@ -210,13 +236,10 @@ def _question_contract_clarification_fact_result(
     return FactResult(outcome=NeedsClarification(clarifications=tuple(clarifications)))
 
 
-def _missing_question_input_target_label(item: MissingQuestionInput) -> str:
-    return str(item.entity_type or "reference").strip().lower()
-
-
 def _plan_clarification_fact_result(
     outcome: PlanClarification,
     *,
+    owner: ClarificationOwner,
     catalog,
     memory_relations,
 ) -> FactResult:
@@ -235,6 +258,12 @@ def _plan_clarification_fact_result(
                         requested_fact_id=item.requested_fact_id,
                         required_input_id=item.required_catalog_input_id,
                         label=required.param_label or required.param_id,
+                        continuation=_catalog_continuation(
+                            owner=owner,
+                            requested_fact_id=item.requested_fact_id,
+                            planning_requirement_id=item.id,
+                            required=required,
+                        ),
                         proof_refs=(
                             required_input_evidence_ref(
                                 required_input_id=item.required_catalog_input_id,
@@ -261,6 +290,12 @@ def _plan_clarification_fact_result(
                             )
                             for choice in required.choices
                         ),
+                        continuation=_catalog_continuation(
+                            owner=owner,
+                            requested_fact_id=item.requested_fact_id,
+                            planning_requirement_id=item.id,
+                            required=required,
+                        ),
                         proof_refs=(
                             required_input_evidence_ref(
                                 required_input_id=item.required_catalog_choice_input_id,
@@ -270,6 +305,34 @@ def _plan_clarification_fact_result(
                 )
             )
     return FactResult(outcome=NeedsClarification(clarifications=tuple(clarifications)))
+
+
+def _catalog_continuation(
+    *,
+    owner: ClarificationOwner,
+    requested_fact_id: str,
+    planning_requirement_id: str,
+    required,
+) -> SourceBindingCatalogInputContinuation | FactPlanningCatalogInputContinuation:
+    target = CatalogInputTarget(
+        row_source_id=required.row_source_id,
+        param_id=required.param_id,
+        param_ref=required.param_ref,
+        value_type=required.param_type,
+        choices=tuple(required.choices),
+    )
+    if owner is ClarificationOwner.SOURCE_BINDING:
+        return SourceBindingCatalogInputContinuation(
+            requested_fact_id=requested_fact_id,
+            target=target,
+        )
+    if owner is ClarificationOwner.FACT_PLANNING:
+        return FactPlanningCatalogInputContinuation(
+            requested_fact_id=requested_fact_id,
+            planning_requirement_id=planning_requirement_id,
+            target=target,
+        )
+    raise ValueError("catalog clarification requires source-binding or fact-planning owner")
 
 
 def _plan_validation_failed_result(

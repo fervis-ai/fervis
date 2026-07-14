@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from fervis.lookup.read_eligibility.candidate_scope import (
     ReadEligibilityCandidateScope,
@@ -106,7 +105,7 @@ class _ReadEligibilityParseContext:
 
 
 def parse_read_eligibility(
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
     request: ReadEligibilityRequest,
 ) -> ReadEligibilityResult:
@@ -126,18 +125,15 @@ def parse_read_eligibility(
 
 
 def _read_assessments_by_key(
-    raw_items: object,
+    items: tuple[provider_output.RequestedFactAssessmentOutput, ...],
     *,
     context: _ReadEligibilityParseContext,
 ) -> dict[tuple[str, str], ReadAssessment]:
-    if not isinstance(raw_items, list):
-        raise ValueError("requested_fact_assessments must be an array")
     seen_requested_facts: set[str] = set()
     seen_requested_fact_order: list[str] = []
     output: dict[tuple[str, str], ReadAssessment] = {}
-    for raw in raw_items:
-        item = provider_output.RequestedFactAssessmentOutput.parse(raw)
-        requested_fact_id = _text(item.requested_fact_id)
+    for item in items:
+        requested_fact_id = _required_text(item.requested_fact_id)
         if requested_fact_id not in context.requested_fact_ids:
             raise ValueError("requested fact assessment references unknown fact")
         if requested_fact_id in seen_requested_facts:
@@ -172,36 +168,33 @@ def _read_assessments_by_key(
 
 
 def _read_candidate_reviews(
-    raw_items: object,
+    items: tuple[provider_output.ReadCandidateReviewOutput, ...],
     *,
     context: _ReadEligibilityParseContext,
     requested_fact_id: str,
 ) -> dict[str, ReadAssessment]:
-    if not isinstance(raw_items, list):
-        raise ValueError("read_candidate_reviews must be an array")
     output: dict[str, ReadAssessment] = {}
-    for raw in raw_items:
-        item = provider_output.ReadCandidateReviewOutput.parse(raw)
-        source_candidate_id = _text(item.source_candidate_id)
+    for item in items:
+        source_candidate_id = _required_text(item.source_candidate_id)
         if source_candidate_id in output:
             raise ValueError("read candidate assessed more than once")
-        read_id = _text(item.read_id)
+        read_id = _required_text(item.read_id)
         expected = context.expected_candidate(requested_fact_id, source_candidate_id)
         if expected is None:
             raise ValueError("read candidate review references unknown candidate")
         if expected.read_id != read_id:
             raise ValueError("read candidate review read_id does not match candidate")
         row_path_ids = _row_path_ids(
-            item.relevant_row_path_tokens,
+            _required_texts(item.relevant_row_path_tokens),
             context=context,
             expected=expected,
         )
         field_refs = _field_refs(
-            item.relevant_field_tokens,
+            _required_texts(item.relevant_field_tokens),
             context=context,
             expected=expected,
         )
-        retention_decision = _text(item.retention_decision)
+        retention_decision = _required_text(item.retention_decision)
         if retention_decision not in RETENTION_DECISION_VALUES:
             raise ValueError("read candidate review has unsupported retention decision")
         output[source_candidate_id] = ReadAssessment(
@@ -211,20 +204,20 @@ def _read_candidate_reviews(
             read_id=expected.read_id,
             relevant_row_path_ids=row_path_ids,
             relevant_field_refs=field_refs,
-            retention_basis=_text(item.retention_basis),
+            retention_basis=_required_text(item.retention_basis),
             retention_decision=retention_decision,
         )
     return output
 
 
 def _row_path_ids(
-    raw_tokens: object,
+    tokens: tuple[str, ...],
     *,
     context: _ReadEligibilityParseContext,
     expected: _ExpectedCandidate,
 ) -> tuple[str, ...]:
     output: list[str] = []
-    for token in _string_tuple(raw_tokens, path="relevant_row_path_tokens"):
+    for token in tokens:
         row_path_id = context.row_path_id_for_token(
             source_candidate_signature=expected.source_candidate_signature,
             evidence_token=token,
@@ -236,13 +229,13 @@ def _row_path_ids(
 
 
 def _field_refs(
-    raw_tokens: object,
+    tokens: tuple[str, ...],
     *,
     context: _ReadEligibilityParseContext,
     expected: _ExpectedCandidate,
 ) -> tuple[str, ...]:
     output: list[str] = []
-    for token in _string_tuple(raw_tokens, path="relevant_field_tokens"):
+    for token in tokens:
         field_ref = context.field_ref_for_token(
             source_candidate_signature=expected.source_candidate_signature,
             evidence_token=token,
@@ -297,20 +290,12 @@ def _row_path_ids_by_candidate_signature_and_token(
     }
 
 
-def _text(value: object) -> str:
-    if not isinstance(value, str):
-        raise ValueError("expected string value")
-    output = value.strip()
-    if not output:
-        raise ValueError("expected non-empty string value")
-    return output
+def _required_text(value: str) -> str:
+    text = value.strip()
+    if not text:
+        raise ValueError("expected non-empty text")
+    return text
 
 
-def _string_tuple(
-    value: object,
-    *,
-    path: str,
-) -> tuple[str, ...]:
-    if not isinstance(value, list):
-        raise ValueError(f"{path} must be an array")
-    return tuple(_text(item) for item in value)
+def _required_texts(values: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(_required_text(value) for value in values)

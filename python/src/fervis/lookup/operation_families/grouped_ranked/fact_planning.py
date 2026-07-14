@@ -61,7 +61,7 @@ def _grouped_ranked_pattern_answer_schema(
             kind="function",
         ),
     }
-    required = (
+    required: tuple[str, ...] = (
         "requested_fact_id",
         "pattern",
         "source_binding_id",
@@ -112,7 +112,7 @@ def _candidate_schema(candidate: dict[str, object], *, kind: str) -> dict[str, o
         "selection_basis": {"type": "string", "minLength": 1},
         "id": {"enum": [_text(candidate.get("id"))]},
     }
-    required = ("selection_basis", "id")
+    required: tuple[str, ...] = ("selection_basis", "id")
     if kind == "metric":
         metric_kind = _text(candidate.get("kind"))
         properties["kind"] = {"enum": [metric_kind]}

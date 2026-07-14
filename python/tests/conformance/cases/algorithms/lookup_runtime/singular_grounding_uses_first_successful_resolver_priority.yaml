@@ -13,7 +13,7 @@ input:
     - count
     resource_terms:
     - location
-    support_role: ROW_POPULATION
+    support_role: ROW_COUNT
     entity_target_catalog_search_terms:
     - target_id: input_1
       catalog_search_terms:
@@ -52,11 +52,6 @@ input:
         path: data.location_id
         row_path_id: data
         type: uuid
-        identity:
-          entity_ref: location
-          identity_field: location_id
-          primary_key: true
-          stable: true
       - ref: field.location_name
         path: data.name
         row_path_id: data
@@ -65,11 +60,10 @@ input:
         path: data.area.area_id
         row_path_id: data
         type: uuid
-        identity:
-          entity_ref: area
-          identity_field: area_id
-          primary_key: true
-          stable: true
+      candidate_keys:
+      - {id: primary_key, entity_kind: location, primary: true, components: [{id: location_id, field_ref: field.location_id}], context_field_refs: [field.location_name]}
+      entity_references:
+      - {id: area_reference, target_entity_kind: area, target_key_id: primary_key, components: [{target_component_id: area_id, local_field_ref: field.area_id}]}
     - id: list_area_list
       endpoint_name: list_area_list
       resource_names:
@@ -88,15 +82,12 @@ input:
         path: data.area_id
         row_path_id: data
         type: uuid
-        identity:
-          entity_ref: area
-          identity_field: area_id
-          primary_key: true
-          stable: true
       - ref: field.area_name
         path: data.name
         row_path_id: data
         type: string
+      candidate_keys:
+      - {id: primary_key, entity_kind: area, primary: true, components: [{id: area_id, field_ref: field.area_id}], context_field_refs: [field.area_name]}
   fact_plan:
     outcome:
       kind: fact_plan
@@ -114,7 +105,6 @@ input:
             kind: row_population
             row_path_id: data
             row_cardinality: many
-          record_id_field_id: location_id
           label: count
   read_eligibility:
   - requested_fact_id: fact_1

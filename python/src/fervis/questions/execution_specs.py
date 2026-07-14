@@ -12,6 +12,11 @@ from .ports import (
     RunExecutionSpecKind,
     fold_run_execution_spec,
 )
+from fervis.lookup.clarification.response import (
+    clarification_response_from_payload,
+    clarification_response_payload,
+)
+from fervis.lookup.clarification.model import ClarificationOwnerResponse
 
 
 def execution_spec_kind(spec: RunExecutionSpec) -> RunExecutionSpecKind:
@@ -42,6 +47,10 @@ def _resolve_question_storage_dict(spec: ResolveQuestionRunSpec) -> dict[str, An
             None if spec.max_budget_usd is None else str(spec.max_budget_usd)
         ),
         "max_thinking_tokens": spec.max_thinking_tokens,
+        "clarification_responses": [
+            clarification_response_payload(response)
+            for response in spec.clarification_responses
+        ],
     }
 
 
@@ -72,16 +81,16 @@ def execution_spec_from_storage(
                 "runtime_context",
                 "max_budget_usd",
                 "max_thinking_tokens",
+                "clarification_responses",
             },
         )
         provider = values["provider"]
         context_run_id = values["context_run_id"]
         max_budget = values["max_budget_usd"]
         max_thinking = values["max_thinking_tokens"]
+        clarification_responses = values["clarification_responses"]
         return ResolveQuestionRunSpec(
-            question=_required_text(
-                values["question"], "question"
-            ),
+            question=_required_text(values["question"], "question"),
             provider=None if provider is None else _text(provider, "provider"),
             model_key=_text(values["model_key"], "model_key"),
             context_run_id=(
@@ -92,9 +101,7 @@ def execution_spec_from_storage(
             conversation_context=_json_object(
                 values["conversation_context"], "conversation_context"
             ),
-            runtime_context=_json_object(
-                values["runtime_context"], "runtime_context"
-            ),
+            runtime_context=_json_object(values["runtime_context"], "runtime_context"),
             max_budget_usd=(
                 None
                 if max_budget is None
@@ -105,11 +112,27 @@ def execution_spec_from_storage(
                 if max_thinking is None
                 else _integer(max_thinking, "max_thinking_tokens")
             ),
+            clarification_responses=_clarification_responses_from_storage(
+                clarification_responses
+            ),
         )
     _require_exact_fields(values, {"invocation_id", "runtime_context"})
     return RerunProgramSpec(
         invocation_id=_required_text(values["invocation_id"], "invocation_id"),
         runtime_context=_json_object(values["runtime_context"], "runtime_context"),
+    )
+
+
+def _clarification_responses_from_storage(
+    value: object,
+) -> tuple[ClarificationOwnerResponse, ...]:
+    if not isinstance(value, list):
+        raise ValueError("execution spec clarification_responses must be a list")
+    return tuple(
+        clarification_response_from_payload(
+            _json_object(item, "clarification_responses item")
+        )
+        for item in value
     )
 
 

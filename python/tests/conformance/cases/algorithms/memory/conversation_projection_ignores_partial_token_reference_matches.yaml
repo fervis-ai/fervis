@@ -15,6 +15,7 @@ input:
           - address: entity.staff.ann
             kind: entity
             resource: staff
+            keyId: primary_key
             referenceText: Ann
             identity: {staff_id: staff-ann}
       - artifactId: run_revenue
@@ -23,6 +24,7 @@ input:
           - address: entity.report.annual_revenue
             kind: entity
             resource: report
+            keyId: primary_key
             referenceText: annual revenue
             identity: {report_id: annual-revenue}
 expect:

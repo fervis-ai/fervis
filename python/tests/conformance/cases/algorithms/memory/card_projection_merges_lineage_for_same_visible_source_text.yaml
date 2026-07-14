@@ -20,6 +20,7 @@ input:
                 answer_outputs:
                   - id: answer_1
                     description: store identity
+                    role: ANSWER_VALUE
                 used_question_inputs: []
         addresses:
           - address: relation.stores

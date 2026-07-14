@@ -2,8 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass, replace
 from typing import Any
+
+from fervis.lookup.canonical_data import (
+    EntityKeyValue,
+    RuntimeValue,
+    parse_runtime_value,
+)
 
 from fervis.lookup.plan_execution.relations import (
     CompletenessProof,
@@ -19,7 +26,7 @@ from fervis.memory.prior_requests import (
     prior_requests_from_artifact,
 )
 from fervis.memory.artifacts import FactArtifact, FactOutcome
-from fervis.memory.addresses import FactAddress, FactAddressKind
+from fervis.memory.addresses import FactAddress, FactAddressKind, FactAddressValue
 from fervis.memory.identities import (
     MemoryIdentitySet,
     MemoryIdentityValue,
@@ -414,7 +421,6 @@ def _meaning_anchors_for_source(
         private = private_cards.get(memory_id) or {}
         kind = str(private.get("kind") or "").strip()
         if kind not in {
-            "clarification_answer",
             "entity_identity",
             "time_scope",
             "scalar_value",
@@ -426,7 +432,7 @@ def _meaning_anchors_for_source(
             if occurrence < 1:
                 continue
             anchor = ConversationMeaningAnchor(
-                memory_id=memory_id,
+                anchor_id=memory_id,
                 text=anchor_text,
                 occurrence=occurrence,
                 kind=kind,
@@ -442,7 +448,7 @@ def _meaning_anchors_for_source(
                 and text.strip()
             ):
                 anchor = ConversationMeaningAnchor(
-                    memory_id=memory_id,
+                    anchor_id=memory_id,
                     text=text.strip(),
                     occurrence=1,
                     kind=kind,
@@ -482,9 +488,11 @@ def _first_occurrence(needle: str, haystack: str) -> int:
 
 def _meaning_anchor_label(*, kind: str, private: dict[str, Any]) -> str:
     if kind == "entity_identity":
-        identity_type = str(private.get("identity_type") or "").strip()
-        if identity_type:
-            return f"{identity_type} identity"
+        entity_key = private.get("entity_key")
+        if isinstance(entity_key, dict):
+            entity_kind = str(entity_key.get("entity_kind") or "").strip()
+            if entity_kind:
+                return f"{entity_kind} identity"
     if kind == "time_scope":
         return "time scope"
     if kind == "row_set":
@@ -493,8 +501,6 @@ def _meaning_anchor_label(*, kind: str, private: dict[str, Any]) -> str:
         return "scalar value"
     if kind == "prior_answer_request":
         return "prior answer request"
-    if kind == "clarification_answer":
-        return "clarification answer"
     return kind.replace("_", " ")
 
 
@@ -537,9 +543,7 @@ def _context_frames(
         if key in seen:
             continue
         seen.add(key)
-        output.append(
-            replace(candidate, frame_id=f"request:{len(output) + 1}")
-        )
+        output.append(replace(candidate, frame_id=f"request:{len(output) + 1}"))
     return tuple(output)
 
 
@@ -556,15 +560,16 @@ def _context_frame_parts(
                 text=answer_subject,
             )
         )
-    parts.extend(
-        ConversationFramePart(
-            part_id=f"output:{index}",
-            kind=ConversationFramePartKind.ANSWER_OUTPUT,
-            text=output.description,
-            source_ref=output.output_id,
+    for index, output in enumerate(prior_request.output_frames, start=1):
+        output_text = "row count" if output.role == "ROW_COUNT" else output.description
+        parts.append(
+            ConversationFramePart(
+                part_id=f"output:{index}",
+                kind=ConversationFramePartKind.ANSWER_OUTPUT,
+                text=output_text,
+                source_ref=output.output_id,
+            )
         )
-        for index, output in enumerate(prior_request.output_frames, start=1)
-    )
     parts.extend(_input_frame_parts(prior_request.slots))
     role_counts: dict[tuple[str, str], int] = {}
     for part in prior_request.semantic_parts:
@@ -608,16 +613,11 @@ def _callable_signature(
     *,
     parts: tuple[ConversationFramePart, ...],
 ) -> ConversationCallableSignature | None:
-    if (
-        not prior_request.run_id
-        or prior_request.program_request_ids != (prior_request.request_id,)
+    if not prior_request.run_id or prior_request.program_request_ids != (
+        prior_request.request_id,
     ):
         return None
-    parts_by_source_ref = {
-        part.source_ref: part
-        for part in parts
-        if part.source_ref
-    }
+    parts_by_source_ref = {part.source_ref: part for part in parts if part.source_ref}
     parameters = tuple(
         ConversationFrameParameter(
             parameter_id=f"question.{slot.slot_id}",
@@ -627,6 +627,7 @@ def _callable_signature(
             resolved_text=slot.resolved_value_text,
             field_label_text=slot.field_label_text,
             value_meaning_hint=slot.value_meaning_hint,
+            binding=prior_request.binding(slot.slot_id),
         )
         for slot in prior_request.slots
     )
@@ -688,7 +689,7 @@ def _artifact_context_source_texts(
 
 def _record_has_memory_id(
     record: tuple[ConversationMemoryCard, dict[str, Any]],
-    memory_ids: object,
+    memory_ids: Collection[str],
 ) -> bool:
     return any(memory_id in memory_ids for memory_id in _record_memory_ids(record))
 
@@ -708,18 +709,7 @@ def _record_memory_ids(
 
 
 def _must_include_artifacts(artifacts: tuple[Any, ...]) -> tuple[Any, ...]:
-    latest = artifacts[-1]
-    if getattr(latest, "outcome", None) != FactOutcome.NEEDS_CLARIFICATION:
-        return (latest,)
-    output = [latest]
-    for artifact in reversed(artifacts[:-1]):
-        if getattr(artifact, "outcome", None) == FactOutcome.NEEDS_CLARIFICATION:
-            output.append(artifact)
-            continue
-        if getattr(artifact, "outcome", None) == FactOutcome.ANSWERED:
-            output.append(artifact)
-            break
-    return tuple(output)
+    return (artifacts[-1],)
 
 
 def _direct_artifact_memory_ids(artifact: FactArtifact) -> tuple[str, ...]:
@@ -866,10 +856,9 @@ def _ranked_memory_card_records(
             card, private = projected
             if not ownership.is_visible_address_card(card):
                 continue
-            rank = 0 if card.kind == "clarification_answer" else 1
             records.append(
                 (
-                    rank,
+                    1,
                     position,
                     card,
                     private,
@@ -1093,10 +1082,7 @@ def _prior_request_card_display(
 ) -> str:
     if use_fact_scoped_display:
         return answer_request.answer_fact
-    return (
-        artifact.source_question.strip()
-        or answer_request.answer_fact
-    )
+    return artifact.source_question.strip() or answer_request.answer_fact
 
 
 def _memory_card_coalesce_key(address: Any) -> tuple[object, ...] | None:
@@ -1139,22 +1125,6 @@ def _memory_card_for_address(
     return builder(artifact=artifact, address=address)
 
 
-def _clarification_memory_card(
-    *,
-    artifact: Any,
-    address: Any,
-) -> tuple[ConversationMemoryCard, dict[str, Any]] | None:
-    if str(getattr(address, "terminal", "") or "") != "needs_clarification":
-        return None
-    details = _clarification_card_details(artifact=artifact, address=address)
-    return _memory_card_pair(
-        artifact=artifact,
-        address=address,
-        kind="clarification_answer",
-        details=details,
-    )
-
-
 def _entity_memory_card(
     *,
     artifact: Any,
@@ -1165,11 +1135,14 @@ def _entity_memory_card(
         address=address,
         kind="entity_identity",
     )
-    private["identity_type"] = str(getattr(address, "resource", "") or "").strip()
+    private["entity_key"] = {
+        "entity_kind": str(getattr(address, "resource", "") or "").strip(),
+        "key_id": str(getattr(address, "key_id", "") or "").strip(),
+        "components": dict(getattr(address, "identity", {}) or {}),
+    }
     private["reference_text"] = str(
         getattr(address, "reference_text", "") or ""
     ).strip()
-    private["canonical_values"] = dict(getattr(address, "identity", {}) or {})
     return card, private
 
 
@@ -1197,12 +1170,55 @@ def _relation_memory_card(
     address: Any,
 ) -> tuple[ConversationMemoryCard, dict[str, Any]]:
     subject = _single_answer_request_display(artifact)
-    return _memory_card_pair(
+    card, private = _memory_card_pair(
         artifact=artifact,
         address=address,
         kind="row_set",
         display=subject,
     )
+    identity = _singleton_answer_entity_key(artifact, address=address)
+    if identity is not None:
+        entity_kind, key_id, components = identity
+        private["entity_key"] = {
+            "entity_kind": entity_kind,
+            "key_id": key_id,
+            "components": components,
+        }
+    return card, private
+
+
+def _singleton_answer_entity_key(
+    artifact: FactArtifact,
+    *,
+    address: FactAddress,
+) -> tuple[str, str, dict[str, str]] | None:
+    if len(address.row_addresses) != 1:
+        return None
+    row = artifact.address(address.row_addresses[0])
+    if row is None:
+        return None
+    identities = tuple(
+        value.value
+        for value in row.values.values()
+        if isinstance(value.value, EntityKeyValue)
+    )
+    unique = tuple(dict.fromkeys(_entity_key_signature(item) for item in identities))
+    if len(unique) != 1:
+        return None
+    entity_kind, key_id, components = unique[0]
+    return entity_kind, key_id, dict(components)
+
+
+def _entity_key_signature(
+    identity: EntityKeyValue,
+) -> tuple[str, str, tuple[tuple[str, str], ...]]:
+    components = tuple(
+        sorted(
+            (component.component_id, str(component.value))
+            for component in identity.components
+        )
+    )
+    return identity.entity_kind, identity.key_id, components
 
 
 def _memory_card_pair(
@@ -1244,7 +1260,6 @@ def _memory_card_pair(
 
 
 _MEMORY_CARD_BUILDERS = {
-    FactAddressKind.OUTCOME: _clarification_memory_card,
     FactAddressKind.ENTITY: _entity_memory_card,
     FactAddressKind.VALUE: _value_memory_card,
     FactAddressKind.RELATION: _relation_memory_card,
@@ -1278,21 +1293,6 @@ def _single_answer_request_display(artifact: FactArtifact) -> str:
     if len(requests) != 1:
         return ""
     return requests[0].answer_fact
-
-
-def _clarification_card_details(*, artifact: Any, address: Any) -> dict[str, str]:
-    return _without_empty_strings(
-        {
-            "clarification_question": " ".join(
-                question
-                for raw in getattr(address, "clarification_questions", ()) or ()
-                if (question := str(raw or "").strip())
-            ),
-            "question_being_clarified": str(
-                getattr(artifact, "source_question", "") or ""
-            ).strip(),
-        }
-    )
 
 
 def _without_empty_strings(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1425,44 +1425,40 @@ def _relation_cell_values(
     return tuple(output)
 
 
-def _row_scalar_value(row: Any, *, field_id: str) -> tuple[str, object] | None:
-    raw = (getattr(row, "values", None) or {}).get(field_id)
-    if raw in ("", None) or isinstance(raw, (dict, list)) and not raw:
+def _row_scalar_value(
+    row: FactAddress,
+    *,
+    field_id: str,
+) -> tuple[str, RuntimeValue] | None:
+    address_value = row.values.get(field_id)
+    if address_value is None or isinstance(address_value.value, EntityKeyValue):
         return None
-    if isinstance(raw, dict):
-        value = raw.get("value")
-        if value in ("", None) or isinstance(value, (dict, list)):
-            return None
-        value_type = str(raw.get("type") or _python_value_type(value))
-        return value_type, value
-    if isinstance(raw, (dict, list)):
+    value = address_value.value
+    if value in ("", None) or isinstance(value, (dict, list)):
         return None
-    return _python_value_type(raw), raw
+    return address_value.type, value
 
 
-def _row_answer_output_ids(row: Any, *, field_id: str) -> tuple[str, ...]:
-    raw = (getattr(row, "values", None) or {}).get(field_id)
-    if not isinstance(raw, dict):
-        return ()
-    return tuple(
-        str(item).strip()
-        for item in raw.get("answer_output_ids") or ()
-        if str(item).strip()
-    )
+def _row_answer_output_ids(row: FactAddress, *, field_id: str) -> tuple[str, ...]:
+    value = row.values.get(field_id)
+    return value.answer_output_ids if value is not None else ()
 
 
-def _row_proof_refs(row: Any) -> tuple[str, ...]:
-    evidence = getattr(row, "evidence", None)
-    return tuple(getattr(evidence, "step_ids", ()) or ())
+def _row_proof_refs(row: FactAddress) -> tuple[str, ...]:
+    return row.evidence.step_ids if row.evidence is not None else ()
 
 
-def _memory_field_ids(*, address: Any, rows: tuple[Any, ...]) -> tuple[str, ...]:
+def _memory_field_ids(
+    *,
+    address: FactAddress,
+    rows: tuple[FactAddress, ...],
+) -> tuple[str, ...]:
     ids: list[str] = []
     seen: set[str] = set()
     for field_id in (
         *tuple(address.grain_keys),
-        *tuple((address.field_coverage or {}).keys()),
-        *tuple(key for row in rows for key in (row.values or {}).keys()),
+        *tuple(address.field_coverage),
+        *tuple(key for row in rows for key in row.values),
     ):
         normalized = str(field_id)
         if normalized and normalized not in seen:
@@ -1474,15 +1470,15 @@ def _memory_field_ids(*, address: Any, rows: tuple[Any, ...]) -> tuple[str, ...]
 def _memory_field_prompt(
     field_id: str,
     *,
-    address: Any,
-    rows: tuple[Any, ...],
+    address: FactAddress,
+    rows: tuple[FactAddress, ...],
 ) -> dict[str, Any]:
     field: dict[str, Any] = {
         "id": field_id,
         "type": _memory_field_type(field_id, rows),
         "grain": field_id in set(address.grain_keys),
     }
-    source_field = (address.field_coverage or {}).get(field_id)
+    source_field = address.field_coverage.get(field_id)
     if source_field:
         field["sourceField"] = str(source_field)
     answer_output_ids = _memory_field_answer_output_ids(field_id, rows)
@@ -1491,46 +1487,30 @@ def _memory_field_prompt(
     return field
 
 
-def _memory_field_type(field_id: str, rows: tuple[Any, ...]) -> str:
+def _memory_field_type(field_id: str, rows: tuple[FactAddress, ...]) -> str:
     for row in rows:
-        value = (row.values or {}).get(field_id)
-        if isinstance(value, dict) and value.get("type"):
-            return str(value["type"])
+        value = row.values.get(field_id)
         if value is not None:
-            return _python_value_type(value)
+            return value.type
     return "unknown"
 
 
 def _memory_field_answer_output_ids(
     field_id: str,
-    rows: tuple[Any, ...],
+    rows: tuple[FactAddress, ...],
 ) -> tuple[str, ...]:
     output: list[str] = []
     seen: set[str] = set()
     for row in rows:
-        value = (getattr(row, "values", None) or {}).get(field_id)
-        if not isinstance(value, dict):
+        value = row.values.get(field_id)
+        if value is None:
             continue
-        for raw in value.get("answer_output_ids") or ():
+        for raw in value.answer_output_ids:
             normalized = str(raw or "").strip()
             if normalized and normalized not in seen:
                 seen.add(normalized)
                 output.append(normalized)
     return tuple(output)
-
-
-def _python_value_type(value: Any) -> str:
-    if isinstance(value, bool):
-        return "boolean"
-    if isinstance(value, (int, float)):
-        return "number"
-    if isinstance(value, str):
-        return "string"
-    if isinstance(value, list):
-        return "array"
-    if isinstance(value, dict):
-        return "object"
-    return "unknown"
 
 
 def _memory_completeness_prompt(completeness: CompletenessProof) -> dict[str, Any]:
@@ -1591,21 +1571,27 @@ def _int_or_none(value: Any) -> int | None:
     return value if isinstance(value, int) else None
 
 
-def _row_values(row: Any) -> dict[str, object]:
-    output: dict[str, object] = {}
+def _row_values(row: FactAddress) -> dict[str, RuntimeValue]:
+    output: dict[str, RuntimeValue] = {}
     for values in (row.grain, row.identity, row.values):
         for key, value in values.items():
             _assign_row_value(output, str(key), _memory_value(value))
     return output
 
 
-def _memory_value(value: Any) -> object:
-    if isinstance(value, dict) and "value" in value:
-        return value["value"]
-    return value
+def _memory_value(value: Any) -> RuntimeValue:
+    if isinstance(value, FactAddressValue):
+        if isinstance(value.value, EntityKeyValue):
+            return value.value.component_values()
+        return value.value
+    return parse_runtime_value(value)
 
 
-def _assign_row_value(output: dict[str, object], key: str, value: object) -> None:
+def _assign_row_value(
+    output: dict[str, RuntimeValue],
+    key: str,
+    value: RuntimeValue,
+) -> None:
     existing = output.get(key)
     if key in output and existing != value:
         raise ValueError(f"conflicting memory row field {key}")

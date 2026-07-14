@@ -1,7 +1,9 @@
 from ._helpers import *  # noqa: F403
 
+
 def test_model_turn_prompt_budget_ceiling_is_explicit():
     assert MODEL_TURN_PROMPT_BUDGET_CHARS == 400_000
+
 
 def test_model_turn_artifact_captures_prompt_schema_and_payload():
     artifact = ModelTurnArtifact(
@@ -28,6 +30,7 @@ def test_model_turn_artifact_captures_prompt_schema_and_payload():
     assert artifact.submitted_payload["answer"] == {}
     assert artifact.verifier_diagnostics == ("ok",)
 
+
 def test_fact_plan_generation_enforces_prompt_budget_before_provider_call():
     class ProviderMustNotBeCalled:
         def generate(self, **kwargs):
@@ -48,6 +51,7 @@ def test_fact_plan_generation_enforces_prompt_budget_before_provider_call():
             model_key="HAIKU",
             max_thinking_tokens=64,
         )
+
 
 def test_fact_plan_prompt_renders_endpoint_fields_once():
     prompt = _fact_plan_prompt(
@@ -91,20 +95,19 @@ def test_fact_plan_prompt_renders_endpoint_fields_once():
     assert read["fields"] == [
         {
             "field_id": "field_item_id",
-            "label": "field item id",
             "roles": ["output", "predicate"],
             "row_cardinality": "one",
             "type": "string",
         },
         {
             "field_id": "field_item_name",
-            "label": "field item name",
             "roles": ["output", "predicate"],
             "row_cardinality": "one",
             "type": "string",
         },
     ]
     assert "params" not in read
+
 
 def test_fact_plan_prompt_exposes_bound_params_without_available_param_choices():
     prompt = _fact_plan_prompt(
@@ -158,7 +161,7 @@ def test_fact_plan_prompt_exposes_bound_params_without_available_param_choices()
                         SourceFulfillment(
                             requested_fact_id="fact_1",
                             answer_output_id="answer_1",
-                            group_key_evidence_ids=("record_id",),
+                            value_evidence_ids=("record_id",),
                             match_basis_explanation=(
                                 "answer_value is fulfilled by record_id because "
                                 "record_id provides the answer evidence."
@@ -188,6 +191,7 @@ def test_fact_plan_prompt_exposes_bound_params_without_available_param_choices()
         {"param_id": "status", "value": "COMPLETED"},
     ]
 
+
 def test_fact_plan_prompt_groups_pattern_details_before_copy_rules():
     prompt = _fact_plan_prompt(
         FactPlanRequest(
@@ -199,7 +203,6 @@ def test_fact_plan_prompt_groups_pattern_details_before_copy_rules():
 
     assert "List And Field Patterns" in prompt
     assert "metric.kind" not in prompt
-    assert "record_id_field_id" not in prompt
     assert "Metric Patterns" not in prompt
     assert "Grouped Metric Patterns" not in prompt
     assert "Computed Scalar" not in prompt
@@ -209,6 +212,7 @@ def test_fact_plan_prompt_groups_pattern_details_before_copy_rules():
     assert "computed_scalar" not in prompt
     assert "ranked_aggregate" not in prompt
     assert "rank.limit_value_id" not in prompt
+
 
 def test_fulfillment_evidence_field_resolution_requires_explicit_mapping_or_exact_field_id():
     assert (

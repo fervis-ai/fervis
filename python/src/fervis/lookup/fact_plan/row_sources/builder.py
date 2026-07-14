@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 from itertools import product
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from fervis.lookup.relation_catalog.model import (
+    CandidateKey,
     CatalogFactAvailability,
     CatalogField,
     CatalogParam,
     EndpointRead,
+    EntityReference,
     RelationCatalog,
     RowCardinality,
     RowPath,
 )
-from fervis.lookup.relation_catalog.validation import parse_relation_catalog_values
+from fervis.lookup.relation_catalog.parameter_values import CatalogParameterValue
 from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
     Relation,
@@ -45,6 +48,10 @@ from .model import (
     CALENDAR_START_PARAM_REF,
     _MISSING,
     RowSource,
+    RowSourceCandidateKey,
+    RowSourceEntityReference,
+    RowSourceEntityReferenceComponent,
+    RowSourceKeyComponent,
     RowSourceBlockedFact,
     RowSourceCatalog,
     RowSourceField,
@@ -64,7 +71,6 @@ def build_row_source_catalog(
     *,
     memory_relations: tuple["RelationRows", ...] = (),
 ) -> RowSourceCatalog:
-    catalog = parse_relation_catalog_values(catalog)
     return RowSourceCatalog(
         sources=(
             _generated_calendar_row_source(),
@@ -167,6 +173,10 @@ def _api_row_sources(
             row_path_id=row_path.id,
             row_path=row_path.path,
             parent_row_path=row_path.parent_path,
+            parent_row_cardinality=_parent_row_cardinality(
+                row_path,
+                row_paths=row_paths,
+            ),
             row_cardinality=row_path.cardinality,
             label=f"{read.endpoint_name} row set {index}",
             catalog=catalog,
@@ -181,6 +191,7 @@ def _api_row_sources_for_path(
     row_path_id: str,
     row_path: str,
     parent_row_path: str = "",
+    parent_row_cardinality: RowCardinality | None = None,
     row_cardinality: RowCardinality,
     label: str,
     catalog: RelationCatalog,
@@ -211,6 +222,7 @@ def _api_row_sources_for_path(
             row_path_id=row_path_id,
             row_path=row_path,
             parent_row_path=parent_row_path,
+            parent_row_cardinality=parent_row_cardinality,
             row_cardinality=row_cardinality,
             fields=_api_fields(
                 read.fields,
@@ -218,6 +230,17 @@ def _api_row_sources_for_path(
                 row_path_id=row_path_id if row_paths else "",
                 row_path=row_path,
                 catalog=catalog,
+                row_paths=row_paths,
+                identity_field_refs=_identity_field_refs(read),
+            ),
+            candidate_keys=_row_source_candidate_keys(
+                read,
+                row_path_id=row_path_id if row_paths else "",
+                row_paths=row_paths,
+            ),
+            entity_references=_row_source_entity_references(
+                read,
+                row_path_id=row_path_id if row_paths else "",
                 row_paths=row_paths,
             ),
             params=_api_params(
@@ -240,6 +263,166 @@ def _api_row_sources_for_path(
     )
 
 
+def _parent_row_cardinality(
+    row_path: RowPath,
+    *,
+    row_paths: tuple[RowPath, ...],
+) -> RowCardinality | None:
+    if not row_path.parent_path:
+        return None
+    for candidate in row_paths:
+        if candidate.path == row_path.parent_path:
+            return candidate.cardinality
+    raise ValueError(f"row path {row_path.id} references unknown parent row path")
+
+
+def _row_source_candidate_keys(
+    read: EndpointRead,
+    *,
+    row_path_id: str,
+    row_paths: tuple[RowPath, ...],
+) -> tuple[RowSourceCandidateKey, ...]:
+    fields_by_ref = {field.ref: field for field in read.fields}
+    field_ids = _row_source_field_ids(
+        read,
+        row_path_id=row_path_id,
+        row_paths=row_paths,
+    )
+    candidate_keys: list[RowSourceCandidateKey] = []
+    for key in read.candidate_keys:
+        if not _candidate_key_belongs_to_row_path(
+            key,
+            row_path_id=row_path_id,
+            fields_by_ref=fields_by_ref,
+            row_paths=row_paths,
+        ):
+            continue
+        components = tuple(
+            RowSourceKeyComponent(
+                id=component.id,
+                field_id=field_ids[component.field_ref],
+            )
+            for component in key.components
+        )
+        context_field_ids = tuple(
+            field_ids[field_ref] for field_ref in key.context_field_refs
+        )
+        candidate_key = RowSourceCandidateKey(
+            id=key.id,
+            entity_kind=key.entity_kind,
+            components=components,
+            primary=key.primary,
+            stable=key.stable,
+            context_field_ids=context_field_ids,
+        )
+        candidate_keys.append(candidate_key)
+    return tuple(candidate_keys)
+
+
+def _candidate_key_belongs_to_row_path(
+    key: CandidateKey,
+    *,
+    row_path_id: str,
+    fields_by_ref: dict[str, CatalogField],
+    row_paths: tuple[RowPath, ...],
+) -> bool:
+    component_refs = tuple(component.field_ref for component in key.components)
+    required_refs = (*component_refs, *key.context_field_refs)
+    if any(field_ref not in fields_by_ref for field_ref in required_refs):
+        return False
+    return all(
+        _field_row_path_id(
+            fields_by_ref[field_ref],
+            row_paths=row_paths,
+        )
+        == row_path_id
+        for field_ref in component_refs
+    )
+
+
+def _row_path_for_id(row_path_id: str, *, row_paths: tuple[RowPath, ...]) -> str:
+    for row_path in row_paths:
+        if row_path.id == row_path_id:
+            return row_path.path
+    return ""
+
+
+def _row_source_entity_references(
+    read: EndpointRead,
+    *,
+    row_path_id: str,
+    row_paths: tuple[RowPath, ...],
+) -> tuple[RowSourceEntityReference, ...]:
+    fields_by_ref = {field.ref: field for field in read.fields}
+    field_ids = _row_source_field_ids(
+        read,
+        row_path_id=row_path_id,
+        row_paths=row_paths,
+    )
+    references: list[RowSourceEntityReference] = []
+    for reference in read.entity_references:
+        if not _entity_reference_belongs_to_row_path(
+            reference,
+            row_path_id=row_path_id,
+            fields_by_ref=fields_by_ref,
+            row_paths=row_paths,
+        ):
+            continue
+        components = tuple(
+            RowSourceEntityReferenceComponent(
+                target_component_id=component.target_component_id,
+                local_field_id=field_ids[component.local_field_ref],
+            )
+            for component in reference.components
+        )
+        context_field_ids = tuple(
+            field_ids[field_ref] for field_ref in reference.context_field_refs
+        )
+        row_source_reference = RowSourceEntityReference(
+            id=reference.id,
+            target_entity_kind=reference.target_entity_kind,
+            target_key_id=reference.target_key_id,
+            components=components,
+            context_field_ids=context_field_ids,
+        )
+        references.append(row_source_reference)
+    return tuple(references)
+
+
+def _row_source_field_ids(
+    read: EndpointRead,
+    *,
+    row_path_id: str,
+    row_paths: tuple[RowPath, ...],
+) -> dict[str, str]:
+    fields = _selected_api_fields_for_source(
+        read.fields,
+        row_path_id=row_path_id,
+        row_paths=row_paths,
+    )
+    row_path = _row_path_for_id(row_path_id, row_paths=row_paths)
+    return _field_ids(fields, row_path=row_path, row_paths=row_paths)
+
+
+def _entity_reference_belongs_to_row_path(
+    reference: EntityReference,
+    *,
+    row_path_id: str,
+    fields_by_ref: dict[str, CatalogField],
+    row_paths: tuple[RowPath, ...],
+) -> bool:
+    component_refs = tuple(
+        component.local_field_ref for component in reference.components
+    )
+    required_refs = (*component_refs, *reference.context_field_refs)
+    if any(field_ref not in fields_by_ref for field_ref in required_refs):
+        return False
+    return all(
+        _field_row_path_id(fields_by_ref[field_ref], row_paths=row_paths) == row_path_id
+        for field_ref in component_refs
+    )
+
+
 def _response_shape_param_refs(fields: tuple[CatalogField, ...]) -> frozenset[str]:
     return frozenset(
         requirement.param_ref
@@ -257,6 +440,7 @@ def _api_fields(
     row_path: str = "",
     catalog: RelationCatalog,
     row_paths: tuple[RowPath, ...],
+    identity_field_refs: frozenset[str],
 ) -> tuple[RowSourceField, ...]:
     selected = (
         _selected_api_fields_for_source(
@@ -279,8 +463,10 @@ def _api_fields(
             ),
             type=row_source_value_type(field.type),
             choices=field.choices,
-            allowed_roles=_allowed_roles(field),
-            identity=field.identity,
+            allowed_roles=_allowed_roles(
+                field,
+                identity_field_refs=identity_field_refs,
+            ),
             fact_refs=_field_fact_refs(field, catalog=catalog, read_id=read_id),
             answer_output_ids=_field_answer_output_ids(field),
             path=field.path,
@@ -293,6 +479,20 @@ def _api_fields(
         for field in selected
         if not row_path or field.path != row_path
     )
+
+
+def _identity_field_refs(read: EndpointRead) -> frozenset[str]:
+    key_field_refs = (
+        component.field_ref
+        for key in read.candidate_keys
+        for component in key.components
+    )
+    reference_field_refs = (
+        component.local_field_ref
+        for reference in read.entity_references
+        for component in reference.components
+    )
+    return frozenset((*key_field_refs, *reference_field_refs))
 
 
 def _field_description(field: CatalogField) -> str:
@@ -353,7 +553,7 @@ def _selected_api_fields_for_source(
 def _api_params(
     params: tuple[CatalogParam, ...],
     *,
-    defaults: dict[str, object],
+    defaults: dict[str, CatalogParameterValue],
     response_shape_param_refs: frozenset[str],
 ) -> tuple[RowSourceParam, ...]:
     ids = _param_ids(params)
@@ -369,7 +569,7 @@ def _api_params(
             choice_labels=param.choice_labels,
             default=defaults.get(param.ref, param.default),
             default_source="source_variant" if param.ref in defaults else "",
-            identity=param.identity,
+            entity_target=param.entity_target,
             semantics=_param_semantics(
                 param,
                 response_shape_param_refs=response_shape_param_refs,
@@ -397,8 +597,8 @@ def _param_semantics(
 def _source_default_variants(
     params: tuple[CatalogParam, ...],
     *,
-    field_defaults: dict[str, object],
-) -> tuple[dict[str, object], ...]:
+    field_defaults: dict[str, CatalogParameterValue],
+) -> tuple[dict[str, CatalogParameterValue], ...]:
     source_shape_params = tuple(
         param
         for param in params
@@ -429,8 +629,8 @@ def _source_variant_param(param: CatalogParam) -> bool:
 
 def _field_requirement_defaults(
     fields: tuple[CatalogField, ...],
-) -> dict[str, object]:
-    defaults: dict[str, object] = {}
+) -> dict[str, CatalogParameterValue]:
+    defaults: dict[str, CatalogParameterValue] = {}
     for field in fields:
         for requirement in field.requirements:
             existing = defaults.get(requirement.param_ref, _MISSING)
@@ -442,12 +642,15 @@ def _field_requirement_defaults(
     return defaults
 
 
-def _row_source_id_seed(row_path_id: str, defaults: dict[str, object]) -> str:
+def _row_source_id_seed(
+    row_path_id: str,
+    defaults: dict[str, CatalogParameterValue],
+) -> str:
     base = row_path_id or "root"
     if not defaults:
         return base
     suffix = "__".join(
-        f"{_symbol(param_ref.rsplit('.', 1)[-1])}_{_symbol(value)}"
+        f"{_symbol(param_ref.rsplit('.', 1)[-1])}_{_symbol(str(value))}"
         for param_ref, value in sorted(defaults.items())
     )
     return f"{base}__{suffix}"
@@ -457,7 +660,7 @@ def _source_label(
     label: str,
     *,
     params: tuple[CatalogParam, ...],
-    defaults: dict[str, object],
+    defaults: dict[str, CatalogParameterValue],
 ) -> str:
     default_label = _defaults_label(params, defaults=defaults)
     if not default_label:
@@ -469,7 +672,7 @@ def _source_description(
     read: EndpointRead,
     *,
     params: tuple[CatalogParam, ...],
-    defaults: dict[str, object],
+    defaults: Mapping[str, CatalogParameterValue],
 ) -> str:
     description = _read_description(read)
     default_label = _defaults_label(params, defaults=defaults)
@@ -484,7 +687,7 @@ def _source_description(
 def _defaults_label(
     params: tuple[CatalogParam, ...],
     *,
-    defaults: dict[str, object],
+    defaults: Mapping[str, CatalogParameterValue],
 ) -> str:
     if not defaults:
         return ""
@@ -544,7 +747,6 @@ def _memory_row_source(relation: "RelationRows") -> RowSource:
                 label=field_id,
                 type=RowSourceValueType.UNKNOWN,
                 allowed_roles=_memory_roles(field_id, relation=relation),
-                identity=None,
             )
             for field_id in field_ids
         ),
@@ -569,7 +771,6 @@ def _generated_calendar_row_source() -> RowSource:
                     FieldBindingRole.OUTPUT,
                     FieldBindingRole.PREDICATE,
                 ),
-                identity=None,
             ),
         ),
         params=(

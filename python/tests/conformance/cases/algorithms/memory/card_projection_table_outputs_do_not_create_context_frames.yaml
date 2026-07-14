@@ -21,8 +21,10 @@ input:
                 answer_outputs:
                   - id: answer_output_1
                     description: the products included in each sale
+                    role: ANSWER_VALUE
                   - id: answer_output_2
                     description: the sale grouping for each product
+                    role: ANSWER_VALUE
                 used_question_inputs: []
         addresses:
           - address: relation.answer_rows

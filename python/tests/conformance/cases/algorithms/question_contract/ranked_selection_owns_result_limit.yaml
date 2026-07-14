@@ -1,0 +1,36 @@
+id: ranked_selection_owns_result_limit
+description: A ranked fact owns one explicit result-limit question input.
+kind: algorithm
+algorithm: question_contract.parse
+input:
+  question_context: Show the first two stores
+  answer_fact: first two stores
+  answer_expression:
+    family: ranked_selection
+  answer_subject:
+    subject_text: stores
+    instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
+  answer_outputs:
+    - {description: stores, role: ANSWER_VALUE}
+  question_inputs:
+    - input_ref: limit_1
+      source: question_context
+      kind: literal_text
+      inventory_check:
+        why_this_is_an_input: The explicit quantity limits the ranked result.
+      value_source_text: first two
+      resolved_value_text: '2'
+      role: result_limit
+  used_input_refs: [limit_1]
+expect:
+  result_contains:
+    question_inputs:
+      - {id: limit_1, role: result_limit, resolved_value_text: '2'}
+    requested_facts:
+      - answer_expression_family: ranked_selection
+        answer_request:
+          answer_expression:
+            family: ranked_selection
+            selection_kind: limited_results
+            limit_input_ref: limit_1
+        input_refs: [limit_1]

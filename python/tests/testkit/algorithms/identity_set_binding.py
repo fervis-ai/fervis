@@ -5,8 +5,12 @@ from typing import Any
 from fervis.lookup.relation_catalog import (
     CatalogField,
     CatalogParam,
+    CandidateKey,
+    CandidateKeyComponent,
+    EntityKeyComponentTarget,
+    EntityReference,
+    EntityReferenceComponent,
     EndpointRead,
-    IdentityMetadata,
     ParamSource,
     RelationCatalog,
     RowCardinality,
@@ -33,9 +37,9 @@ from fervis.lookup.answer_program.relations import (
     RelationSource,
     SourceKind,
 )
-from fervis.lookup.answer_program.render_spec import (
-    RenderRelationOutput,
-    RenderSpec,
+from fervis.lookup.answer_program.result_projection import (
+    RelationResultOutput,
+    ResultProjection,
 )
 from fervis.lookup.answer_program.relations import EndpointParamBinding
 from fervis.lookup.answer_program import (
@@ -49,6 +53,7 @@ from fervis.lookup.answer_program import (
     ParameterValueType,
 )
 from fervis.lookup.answer_program.values import FactValue
+from fervis.lookup.canonical_data import entity_key_value
 
 from tests.testkit.assertions import subset_mismatches
 from tests.testkit.question_contract import question_contract_from_payload
@@ -64,7 +69,7 @@ def run_identity_set_binding_case(payload: dict[str, Any]) -> list[str]:
                 {
                     "id": "fact_1",
                     "description": "sales for prior stores",
-                    "answer_outputs": [{"id": "answer_1"}],
+                    "answer_outputs": [{"id": "answer_1", "role": "ANSWER_VALUE"}],
                 }
             ]
         }
@@ -116,10 +121,10 @@ def _catalog(*, param_type: str) -> RelationCatalog:
                         name="store_id",
                         source=ParamSource.QUERY,
                         type=param_type,
-                        identity=IdentityMetadata(
-                            entity_ref="store",
-                            identity_field="store_id",
-                            primary_key=True,
+                        entity_target=EntityKeyComponentTarget(
+                            entity_kind="store",
+                            key_id="primary_key",
+                            component_id="store_id",
                         ),
                     ),
                 ),
@@ -135,21 +140,61 @@ def _catalog(*, param_type: str) -> RelationCatalog:
                         ref="sales.field.sale_id",
                         path="results.sale_id",
                         type="uuid",
-                        identity=IdentityMetadata(
-                            entity_ref="sale",
-                            identity_field="sale_id",
-                            primary_key=True,
-                        ),
                     ),
                     CatalogField(
                         ref="sales.field.store_id",
                         path="results.store_id",
                         type="uuid",
-                        identity=IdentityMetadata(
-                            entity_ref="store",
-                            identity_field="store_id",
-                            primary_key=True,
+                    ),
+                ),
+                candidate_keys=(
+                    CandidateKey(
+                        id="primary_key",
+                        entity_kind="sale",
+                        components=(
+                            CandidateKeyComponent(
+                                id="sale_id",
+                                field_ref="sales.field.sale_id",
+                            ),
                         ),
+                        primary=True,
+                    ),
+                ),
+                entity_references=(
+                    EntityReference(
+                        id="store_reference",
+                        target_entity_kind="store",
+                        target_key_id="primary_key",
+                        components=(
+                            EntityReferenceComponent(
+                                target_component_id="store_id",
+                                local_field_ref="sales.field.store_id",
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            EndpointRead(
+                id="stores",
+                endpoint_name="list_store_list",
+                fields=(
+                    CatalogField(
+                        ref="stores.field.store_id",
+                        path="results.store_id",
+                        type="uuid",
+                    ),
+                ),
+                candidate_keys=(
+                    CandidateKey(
+                        id="primary_key",
+                        entity_kind="store",
+                        components=(
+                            CandidateKeyComponent(
+                                id="store_id",
+                                field_ref="stores.field.store_id",
+                            ),
+                        ),
+                        primary=True,
                     ),
                 ),
             ),
@@ -162,9 +207,10 @@ def _plan(*, param_value: object) -> FactPlan:
     parameter_id = "question.store_ids"
     binding_value = FactValue.identity_set(
         id="store_ids",
-        identity_type="store",
-        identity_field="store_id",
-        values=identity_values,
+        keys=tuple(
+            entity_key_value("store", "primary_key", {"store_id": value})
+            for value in identity_values
+        ),
     )
     return FactPlan(
         bindings=BindingSet.from_bindings(
@@ -190,7 +236,7 @@ def _plan(*, param_value: object) -> FactPlan:
                 FactFulfillment(
                     requested_fact_id="fact_1",
                     answer_output_id="answer_1",
-                    render_output_id="answer_1",
+                    result_output_id="answer_1",
                 ),
             ),
             relations=(
@@ -231,9 +277,9 @@ def _plan(*, param_value: object) -> FactPlan:
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer_1",
                         relation_id="answer_rows",
                         field_id="store_id",
@@ -241,7 +287,7 @@ def _plan(*, param_value: object) -> FactPlan:
                     ),
                 ),
             ),
-        )
+        ),
     )
 
 

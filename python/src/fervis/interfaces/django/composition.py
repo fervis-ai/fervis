@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
@@ -23,10 +21,6 @@ if TYPE_CHECKING:
 
 _RUNTIME: LookupService | None = None
 RUN_CONTEXT_KEY = "_runtimeContext"
-_REQUEST_RUNTIME_CONTEXT: ContextVar[dict[str, str] | None] = ContextVar(
-    "fervis_request_runtime_context",
-    default=None,
-)
 
 
 def get_runtime() -> LookupService:
@@ -44,32 +38,6 @@ def reset_runtime_for_tests(
     if provider_backbone is None:
         reset_provider_backbone_for_tests()
     _RUNTIME = _new_lookup_service(provider_backbone=provider_backbone)
-
-
-@contextmanager
-def request_runtime_context(runtime_context: dict[str, Any] | None):
-    token = _REQUEST_RUNTIME_CONTEXT.set(normalize_runtime_context(runtime_context))
-    try:
-        yield
-    finally:
-        _REQUEST_RUNTIME_CONTEXT.reset(token)
-
-
-def current_request_runtime_context() -> dict[str, str]:
-    return dict(_REQUEST_RUNTIME_CONTEXT.get() or {})
-
-
-def normalize_runtime_context(
-    runtime_context: dict[str, Any] | None,
-) -> dict[str, str] | None:
-    if not runtime_context:
-        return None
-    normalized = {
-        str(key): str(value)
-        for key, value in runtime_context.items()
-        if value not in (None, "")
-    }
-    return normalized or None
 
 
 def runtime_context_from_conversation(

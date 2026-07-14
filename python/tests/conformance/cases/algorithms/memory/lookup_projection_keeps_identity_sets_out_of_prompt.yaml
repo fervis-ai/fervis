@@ -12,7 +12,7 @@ input:
         addresses:
           - address: relation.stores
             kind: relation
-            source: {kind: api_read, identityType: store}
+            source: {kind: api_read}
             grainKeys: [store_id]
             completeness: {status: complete, pagination: all_pages, rowCount: 2}
             rowAddresses: [row.stores.1, row.stores.2]
@@ -20,10 +20,18 @@ input:
             kind: row
             relation: relation.stores
             identity: {store_id: store_1}
+            values:
+              answer_1:
+                type: entity_key
+                value: {entityKind: store, keyId: primary_key, components: {store_id: store_1}}
           - address: row.stores.2
             kind: row
             relation: relation.stores
             identity: {store_id: store_2}
+            values:
+              answer_1:
+                type: entity_key
+                value: {entityKind: store, keyId: primary_key, components: {store_id: store_2}}
   excludes_from:
     prompt_context:
       - identity_sets
@@ -31,7 +39,9 @@ input:
 expect:
   result_contains:
     identity_sets:
-      - values: [store_1, store_2]
+      - keys:
+          - components: {store_id: store_1}
+          - components: {store_id: store_2}
     excludes_from:
       prompt_context:
         identity_sets: true

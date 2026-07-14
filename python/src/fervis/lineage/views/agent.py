@@ -194,7 +194,6 @@ def _run_json(
             "trigger_kind": run.trigger_kind,
             "result_kind": run.result_kind,
             "base_run_id": run.base_run_id,
-            "trigger_clarification_response_id": run.trigger_clarification_response_id,
             "program_derivation": view_json(run.program_derivation),
             "activated_memory_ids": run.activated_memory_ids,
             "memory_artifacts": tuple(
@@ -390,15 +389,14 @@ def _proof_endpoint_arg_json(arg, *, detail: LineageRenderDetail) -> dict[str, o
 
 
 def _proof_inputs_json(proof: ExecutionProofView) -> dict[str, tuple[str, ...]]:
-    return _clean(
-        {
-            "explicit": _proof_contribution_labels(proof, ContributionOrigin.EXPLICIT),
-            "derived": _proof_contribution_labels(proof, ContributionOrigin.DERIVED),
-            "contextual": _proof_contribution_labels(
-                proof, ContributionOrigin.CONTEXTUAL
-            ),
-        }
-    )
+    inputs = {
+        "explicit": _proof_contribution_labels(proof, ContributionOrigin.EXPLICIT),
+        "derived": _proof_contribution_labels(proof, ContributionOrigin.DERIVED),
+        "contextual": _proof_contribution_labels(
+            proof, ContributionOrigin.CONTEXTUAL
+        ),
+    }
+    return {key: value for key, value in inputs.items() if value}
 
 
 def _proof_contribution_labels(
@@ -514,7 +512,7 @@ def _clarification_json(
             provide_clarification_action(
                 conversation_id,
                 question_id=question_id,
-                base_run_id=run_id,
+                run_id=run_id,
                 clarification_id=clarification.clarification_id,
             ),
         ),

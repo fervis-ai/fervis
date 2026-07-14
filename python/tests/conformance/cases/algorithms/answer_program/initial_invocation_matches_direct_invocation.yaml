@@ -13,8 +13,9 @@ input:
         - parameter_id: question.store_ids
           value:
             kind: identity_set
-            identity_type: store
-            identity_field: store_id
+            entity_kind: store
+            key_id: primary_key
+            key_component_id: store_id
             values: [store_1]
             known_input_id: store_ids
             applies_to_requested_fact_ids: [fact_1]

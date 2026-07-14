@@ -17,7 +17,10 @@ from fervis.lookup.answer_program.relations import (
     ReviewScopeDecisionKind,
     SourceKind,
 )
-from fervis.lookup.answer_program.render_spec import RenderRelationOutput, RenderSpec
+from fervis.lookup.answer_program.result_projection import (
+    RelationResultOutput,
+    ResultProjection,
+)
 from fervis.lookup.fact_plan.row_sources import (
     RowSource,
     RowSourceCatalog,
@@ -68,9 +71,7 @@ def run_execution_proof_graph_case(payload: dict[str, Any]) -> list[str]:
                 }
                 for edge in sorted(
                     compiled.proof_graph.edges,
-                    key=lambda item: not item.source.startswith(
-                        "population_choice:"
-                    ),
+                    key=lambda item: not item.source.startswith("population_choice:"),
                 )
             ],
             "contributions": [
@@ -81,13 +82,17 @@ def run_execution_proof_graph_case(payload: dict[str, Any]) -> list[str]:
                 }
                 for item in sorted(
                     compiled.proof_graph.contributions,
-                    key=lambda contribution: not contribution.node_refs[0].startswith(
-                        "population_choice:"
+                    key=lambda contribution: (
+                        not contribution.node_refs[0].startswith("population_choice:")
                     ),
                 )
             ],
-            "node_kinds": sorted({node.kind.value for node in compiled.proof_graph.nodes}),
-            "edge_roles": sorted({edge.role.value for edge in compiled.proof_graph.edges}),
+            "node_kinds": sorted(
+                {node.kind.value for node in compiled.proof_graph.nodes}
+            ),
+            "edge_roles": sorted(
+                {edge.role.value for edge in compiled.proof_graph.edges}
+            ),
         },
         expected_subset=payload["expect"]["result_contains"],
     )
@@ -99,14 +104,16 @@ def _answer_plan(input_payload: dict[str, Any]) -> AnswerProgram:
             RequestedFact(
                 id="fact_1",
                 description="requested fact",
-                answer_outputs=(RequestedFactAnswerOutput(id="answer_1"),),
+                answer_outputs=(
+                    RequestedFactAnswerOutput(id="answer_1", role="ANSWER_VALUE"),
+                ),
             ),
         ),
         fulfillment=(
             FactFulfillment(
                 requested_fact_id="fact_1",
                 answer_output_id="answer_1",
-                render_output_id="answer_1",
+                result_output_id="answer_1",
             ),
         ),
         parameters=tuple(
@@ -124,9 +131,9 @@ def _answer_plan(input_payload: dict[str, Any]) -> AnswerProgram:
                 output_relation="result",
             ),
         ),
-        render_spec=RenderSpec(
+        result_projection=ResultProjection(
             relation_outputs=(
-                RenderRelationOutput(
+                RelationResultOutput(
                     id="answer_1",
                     relation_id="result",
                     field_id="id",
@@ -174,8 +181,7 @@ def _population_choice(item: dict[str, Any]) -> RelationSourcePopulationChoice:
         controller_id=str(item["controller_id"]),
         field_id=str(item["field_id"]),
         requested_fact_ids=tuple(
-            str(fact_id)
-            for fact_id in item.get("requested_fact_ids") or ("fact_1",)
+            str(fact_id) for fact_id in item.get("requested_fact_ids") or ("fact_1",)
         ),
         selection_expr=ParameterRef(
             parameter_id=_population_parameter_id(item),
@@ -209,9 +215,7 @@ def _population_bindings(input_payload: dict[str, Any]) -> BindingSet:
                 value=FactValue.string_set(
                     id=f"fixture.population.{item['controller_id']}",
                     values=tuple(str(value) for value in item["included_values"]),
-                    proof_refs=tuple(
-                        str(ref) for ref in item.get("proof_refs") or ()
-                    ),
+                    proof_refs=tuple(str(ref) for ref in item.get("proof_refs") or ()),
                 ),
                 provenance=BindingProvenance(
                     kind=BindingProvenanceKind.SEMANTIC_CHOICE,

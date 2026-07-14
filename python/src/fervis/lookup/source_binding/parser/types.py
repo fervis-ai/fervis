@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Optional
 
 from fervis.lookup.source_binding.compiler_ir import (
     DraftEndpointParamBinding,
@@ -13,6 +13,7 @@ from fervis.lookup.source_binding.compiler_ir import (
 
 __all__ = [
     "DerivedFiniteChoiceParamDecisions",
+    "NormalizedParamDecision",
     "ParamDecisionParse",
     "PopulationChoiceSet",
     "RowPredicateParse",
@@ -27,6 +28,7 @@ class ParamDecisionParse:
 @dataclass(frozen=True)
 class RowPredicateParse:
     population_choices: tuple[DraftRelationSourcePopulationChoice, ...] = ()
+    discharged_membership_test_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -36,6 +38,15 @@ class PopulationChoiceSet:
 
 
 @dataclass(frozen=True)
+class NormalizedParamDecision:
+    population_intent: str
+    match_basis_explanation: str
+    param_decision_id: Optional[str] = None
+    population_choice_set: Optional[PopulationChoiceSet] = None
+
+
+@dataclass(frozen=True)
 class DerivedFiniteChoiceParamDecisions:
-    param_decisions: dict[str, dict[str, Any]]
+    param_decisions: dict[str, NormalizedParamDecision]
     population_choices: tuple[DraftRelationSourcePopulationChoice, ...]
+    discharged_membership_test_ids: tuple[str, ...] = ()

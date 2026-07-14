@@ -32,11 +32,14 @@ input:
             path: data.location_id
             row_path_id: data
             type: uuid
-            identity: {entity_ref: location, identity_field: location_id, primary_key: true, stable: true}
           - ref: field.metric_total
             path: data.metric_total
             row_path_id: data
             type: decimal
+        candidate_keys:
+          - id: location_key
+            entity_kind: location
+            components: [{id: location_id, field_ref: field.location_id}]
   fact_plan:
     outcome:
       kind: fact_plan
@@ -67,7 +70,13 @@ expect:
   result_contains:
     status: COMPLETED
     rendered_rows:
-      - location_id: location_alpha
-        metric_total: "10.00"
-      - location_id: location_beta
-        metric_total: "20.00"
+      - group_key:
+          entityKind: location
+          keyId: location_key
+          components: {location_id: location_alpha}
+        answer_1: "10.00"
+      - group_key:
+          entityKind: location
+          keyId: location_key
+          components: {location_id: location_beta}
+        answer_1: "20.00"

@@ -24,6 +24,7 @@ input:
     description: staff sales total
     answer_outputs:
     - id: sales_total
+      role: ANSWER_VALUE
     known_inputs:
     - id: person_name
       kind: literal_text

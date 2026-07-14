@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from fervis.lookup.relation_catalog import IdentityMetadata
 from fervis.lookup.fact_planning.grouped_ranked_choices import (
     grouped_ranked_choice_payload,
 )
@@ -11,6 +10,9 @@ from fervis.lookup.answer_program.relations import SourceKind
 from fervis.lookup.source_binding import (
     AnswerPopulation,
     BoundSource,
+    CandidateKeyEvidence,
+    EntityEvidenceComponent,
+    EntityReferenceEvidence,
     SourceEvidenceItem,
     SourceField,
     SourceFulfillment,
@@ -37,10 +39,11 @@ def run_grouped_ranked_choices_case(payload: dict[str, Any]) -> list[str]:
         actual={
             "group_field_ids": sorted(
                 {
-                    str(group.get("field_id") or "")
+                    str(field_id)
                     for choice in choices
                     for group in (choice.get("group"),)
                     if isinstance(group, dict)
+                    for field_id in group.get("field_ids") or ()
                 }
             ),
             "metric_field_ids": sorted(
@@ -99,7 +102,6 @@ def _bound_source(payload: dict[str, Any]) -> BoundSource:
                 type=str(item.get("type") or ""),
                 roles=tuple(item.get("roles") or ()),
                 row_cardinality=str(item.get("row_cardinality") or ""),
-                identity=_identity(item.get("identity")),
             )
             for item in payload.get("fields") or ()
         ),
@@ -110,7 +112,6 @@ def _bound_source(payload: dict[str, Any]) -> BoundSource:
                 type=str(item.get("type") or ""),
                 row_cardinality=str(item.get("row_cardinality") or ""),
                 row_source_id=str(item.get("row_source_id") or ""),
-                identity=_identity(item.get("identity")),
             )
             for item in payload.get("evidence") or ()
         ),
@@ -124,9 +125,8 @@ def _bound_source(payload: dict[str, Any]) -> BoundSource:
                 answer_output_id=str(item.get("answer_output_id") or "answer_1"),
                 match_basis_explanation="Conformance fulfillment.",
                 fulfillment_support_set_id=str(item.get("support_id") or "support_1"),
-                group_key_evidence_ids=tuple(
-                    item.get("group_key_evidence_ids") or ()
-                ),
+                entity_evidence=_entity_evidence(item.get("entity_evidence")),
+                value_evidence_ids=tuple(item.get("value_evidence_ids") or ()),
                 metric_measure_evidence_ids=tuple(
                     item.get("metric_measure_evidence_ids") or ()
                 ),
@@ -147,12 +147,36 @@ def _bound_source(payload: dict[str, Any]) -> BoundSource:
     )
 
 
-def _identity(payload: Any) -> IdentityMetadata | None:
+def _entity_evidence(
+    payload: Any,
+) -> CandidateKeyEvidence | EntityReferenceEvidence | None:
     if not isinstance(payload, dict):
         return None
-    return IdentityMetadata(
-        entity_ref=str(payload.get("entity_ref") or ""),
-        identity_field=str(payload.get("identity_field") or ""),
-        primary_key=bool(payload.get("primary_key") or False),
-        stable=bool(payload.get("stable", True)),
+    components = tuple(
+        EntityEvidenceComponent(
+            component_id=str(item["component_id"]),
+            field_evidence_id=str(item["field_evidence_id"]),
+            field_id=str(item["field_id"]),
+        )
+        for item in payload.get("components") or ()
     )
+    common = {
+        "evidence_id": str(payload.get("evidence_id") or "entity_1"),
+        "components": components,
+        "row_source_id": str(payload.get("row_source_id") or "row_source_1"),
+        "row_path_id": str(payload.get("row_path_id") or "data"),
+    }
+    if payload.get("type") == "candidate_key":
+        return CandidateKeyEvidence(
+            key_id=str(payload["key_id"]),
+            entity_kind=str(payload["entity_kind"]),
+            **common,
+        )
+    if payload.get("type") == "entity_reference":
+        return EntityReferenceEvidence(
+            reference_id=str(payload["reference_id"]),
+            target_key_id=str(payload["target_key_id"]),
+            target_entity_kind=str(payload["target_entity_kind"]),
+            **common,
+        )
+    raise ValueError("unsupported entity evidence")

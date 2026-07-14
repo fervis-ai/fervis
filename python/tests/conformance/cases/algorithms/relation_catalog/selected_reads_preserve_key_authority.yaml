@@ -1,0 +1,38 @@
+id: selected_reads_preserve_key_authority
+description: Selecting reads preserves global candidate-key authority needed by a detail validator.
+kind: algorithm
+algorithm: relation_catalog.row_source_projection
+input:
+  selected_read_ids: [shipment_detail]
+  catalog:
+    candidate_key_authorities:
+      - id: tracking_number
+        entity_kind: shipment
+        components:
+          - {id: tracking_number, type: string}
+    reads:
+      - id: shipment_detail
+        endpoint_name: shipment_detail
+        resource_names: [shipment]
+        row_paths:
+          - {id: root, path: "", cardinality: one}
+        params:
+          - ref: shipment.tracking_number
+            name: tracking_number
+            source: path
+            type: string
+            required: true
+            entity_target:
+              entity_kind: shipment
+              key_id: tracking_number
+              component_id: tracking_number
+        fields:
+          - {ref: shipment.status, path: status, row_path_id: root, type: string}
+expect:
+  result_contains:
+    read_id: shipment_detail
+    candidate_key_authorities:
+      - id: tracking_number
+        entity_kind: shipment
+        components:
+          - {id: tracking_number, type: string}

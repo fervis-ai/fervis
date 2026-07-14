@@ -8,6 +8,7 @@ from typing import Mapping, TypeVar
 from fervis.lookup.source_binding.compiler_ir import (
     DraftEndpointParamBinding,
     RelationInputOrigin,
+    SourceAppliedFilter,
 )
 from fervis.lookup.answer_program.values import (
     FactValue,
@@ -15,6 +16,7 @@ from fervis.lookup.answer_program.values import (
     ValueKind,
     known_input_id_for_value,
 )
+from fervis.lookup.canonical_data import EntityKeyValue
 from fervis.lookup.question_contract import (
     GroupKeyDomainKind,
     RequestedFact,
@@ -22,6 +24,19 @@ from fervis.lookup.question_contract import (
     RequestedFactGroupKey,
 )
 from fervis.lookup.source_binding.candidates import SourceCandidate
+from fervis.lookup.source_binding.candidates.model import CandidateParameter
+from fervis.lookup.source_binding.grounded_params import grounded_param_bindings
+from fervis.lookup.fact_plan.row_sources import (
+    RowSource,
+    RowSourceCatalog,
+    build_row_source_catalog,
+    row_sources_for_read_id,
+)
+from fervis.lookup.source_binding.candidates.contracts import (
+    FulfillmentSupportSet,
+    entity_evidence_entity_kind,
+    entity_evidence_key_id,
+)
 from fervis.lookup.source_binding.model import SourceBindingRequest, SourceFulfillment
 from fervis.lookup.source_binding.plan_targets import (
     SourceBindingTarget,
@@ -35,8 +50,7 @@ _ParamMapValue = TypeVar("_ParamMapValue")
 class _KeyInputBinding:
     question_input_id: str
     value_id: str
-    value: str
-    identity_field: str
+    key: EntityKeyValue
     proof_refs: tuple[str, ...]
 
     @classmethod
@@ -47,8 +61,7 @@ class _KeyInputBinding:
         return cls(
             question_input_id=question_input_id,
             value_id=value.id,
-            value=payload.value,
-            identity_field=payload.identity_field,
+            key=payload.key,
             proof_refs=value.proof_refs,
         )
 
@@ -56,7 +69,10 @@ class _KeyInputBinding:
         return {
             "question_input_id": self.question_input_id,
             "value_id": self.value_id,
-            "value": self.value,
+            "key_components": {
+                component.component_id: str(component.value)
+                for component in self.key.components
+            },
             "proof_refs": list(self.proof_refs),
         }
 
@@ -64,8 +80,9 @@ class _KeyInputBinding:
 @dataclass(frozen=True)
 class _ClosedKeyParamBinding:
     answer_output_id: str
-    param_id: str
-    identity_field: str
+    entity_kind: str
+    key_id: str
+    params_by_component_id: tuple[tuple[str, str], ...]
     key_input_bindings: tuple[_KeyInputBinding, ...]
 
     @property
@@ -77,14 +94,15 @@ class _ClosedKeyParamBinding:
     @property
     def param_binding_sets(self) -> tuple[tuple[DraftEndpointParamBinding, ...], ...]:
         return tuple(
-            (
+            tuple(
                 DraftEndpointParamBinding(
-                    param_id=self.param_id,
-                    value=binding.value,
+                    param_id=param_id,
+                    value=binding.key.component_value(component_id),
                     origin_kind=RelationInputOrigin.QUESTION_INPUT,
                     value_id=binding.value_id,
                     proof_refs=binding.proof_refs,
-                ),
+                )
+                for component_id, param_id in self.params_by_component_id
             )
             for binding in self.key_input_bindings
         )
@@ -92,8 +110,9 @@ class _ClosedKeyParamBinding:
     def to_payload(self) -> dict[str, object]:
         return {
             "answer_output_id": self.answer_output_id,
-            "param_id": self.param_id,
-            "identity_field": self.identity_field,
+            "entity_kind": self.entity_kind,
+            "key_id": self.key_id,
+            "params_by_component_id": dict(self.params_by_component_id),
             "key_input_bindings": [
                 binding.to_payload() for binding in self.key_input_bindings
             ],
@@ -110,6 +129,11 @@ class _TargetClosedKeyBinding:
 @dataclass(frozen=True)
 class ClosedKeyParamBindingIndex:
     _target_bindings_by_id: dict[str, _TargetClosedKeyBinding]
+    _candidate_id_by_target_id: dict[str, str]
+    _grounded_bindings_by_target_id: dict[
+        str,
+        tuple[DraftEndpointParamBinding, ...],
+    ]
 
     def model_visible_target_payload(
         self,
@@ -117,8 +141,15 @@ class ClosedKeyParamBindingIndex:
     ) -> dict[str, object]:
         payload = target.to_payload()
         binding = self._binding_for_target(target.binding_target_id)
+        backend_bindings: list[dict[str, object]] = []
         if binding is not None:
-            payload["backend_owned_param_bindings"] = [binding.to_payload()]
+            backend_bindings.append(binding.to_payload())
+        backend_bindings.extend(
+            _grounded_binding_payload(item)
+            for item in self._grounded_bindings(target.binding_target_id)
+        )
+        if backend_bindings:
+            payload["backend_owned_param_bindings"] = backend_bindings
         return payload
 
     def model_visible_candidate_payload(
@@ -138,13 +169,13 @@ class ClosedKeyParamBindingIndex:
         target_id: str,
         values_by_param: Mapping[str, _ParamMapValue],
     ) -> dict[str, _ParamMapValue]:
-        param_id = self._owned_param_id(target_id)
-        if not param_id:
+        owned_param_ids = self.owned_param_ids(target_id)
+        if not owned_param_ids:
             return dict(values_by_param)
         return {
             candidate_param_id: value
             for candidate_param_id, value in values_by_param.items()
-            if candidate_param_id != param_id
+            if candidate_param_id not in owned_param_ids
         }
 
     def model_visible_fulfillment_supports(
@@ -170,27 +201,34 @@ class ClosedKeyParamBindingIndex:
         target_id: str,
     ) -> tuple[tuple[DraftEndpointParamBinding, ...], ...]:
         binding = self._binding_for_target(target_id)
-        if binding is None:
-            return ((),)
-        return binding.param_binding_sets
+        closed_sets = binding.param_binding_sets if binding is not None else ((),)
+        grounded = self._grounded_bindings(target_id)
+        return tuple((*closed, *grounded) for closed in closed_sets)
 
     def owned_param_ids(self, target_id: str) -> frozenset[str]:
-        param_id = self._owned_param_id(target_id)
-        return frozenset((param_id,)) if param_id else frozenset()
+        binding = self._binding_for_target(target_id)
+        closed_param_ids = (
+            tuple(param_id for _, param_id in binding.params_by_component_id)
+            if binding is not None
+            else ()
+        )
+        grounded_param_ids = tuple(
+            binding.param_id for binding in self._grounded_bindings(target_id)
+        )
+        return frozenset((*closed_param_ids, *grounded_param_ids))
 
     def source_level_applied_filters(
         self,
         target_id: str,
-        applied_filters: tuple[Mapping[str, object], ...],
-    ) -> tuple[dict[str, object], ...]:
+        applied_filters: tuple[SourceAppliedFilter, ...],
+    ) -> tuple[SourceAppliedFilter, ...]:
         binding = self._binding_for_target(target_id)
         if binding is None:
-            return tuple(dict(applied_filter) for applied_filter in applied_filters)
+            return applied_filters
         return tuple(
-            dict(applied_filter)
+            applied_filter
             for applied_filter in applied_filters
-            if str(applied_filter.get("known_input_id") or "")
-            not in binding.question_input_ids
+            if applied_filter.known_input_id not in binding.question_input_ids
         )
 
     def require_compatible_fulfillments(
@@ -224,20 +262,20 @@ class ClosedKeyParamBindingIndex:
         target_binding = self._target_bindings_by_id.get(target_id)
         return target_binding.binding if target_binding is not None else None
 
-    def _owned_param_id(self, target_id: str) -> str:
-        binding = self._binding_for_target(target_id)
-        return binding.param_id if binding is not None else ""
-
     def _owned_param_ids_by_candidate(self) -> dict[str, frozenset[str]]:
         grouped: dict[str, set[str]] = {}
-        for target_binding in self._target_bindings_by_id.values():
-            grouped.setdefault(target_binding.source_candidate_id, set()).add(
-                target_binding.binding.param_id
-            )
+        for target_id, candidate_id in self._candidate_id_by_target_id.items():
+            grouped.setdefault(candidate_id, set()).update(self.owned_param_ids(target_id))
         return {
             candidate_id: frozenset(param_ids)
             for candidate_id, param_ids in grouped.items()
         }
+
+    def _grounded_bindings(
+        self,
+        target_id: str,
+    ) -> tuple[DraftEndpointParamBinding, ...]:
+        return self._grounded_bindings_by_target_id.get(target_id, ())
 
     def _fulfillment_choice_ids(
         self,
@@ -248,11 +286,7 @@ class ClosedKeyParamBindingIndex:
         choice_ids: tuple[str, ...],
     ) -> tuple[str, ...]:
         binding = self._binding_for_target(target_id)
-        target_has_no_closed_key_binding = binding is None
-        answer_output_is_not_closed_key = (
-            binding is not None and answer_output_id != binding.answer_output_id
-        )
-        if target_has_no_closed_key_binding or answer_output_is_not_closed_key:
+        if binding is None or answer_output_id != binding.answer_output_id:
             return choice_ids
         compatible = set(
             _closed_key_group_key_fulfillment_choice_ids(candidate, binding)
@@ -267,26 +301,73 @@ def closed_key_param_binding_index(
     candidates_by_id: Mapping[str, SourceCandidate],
 ) -> ClosedKeyParamBindingIndex:
     facts_by_id = {fact.id: fact for fact in request.requested_facts}
-    return ClosedKeyParamBindingIndex(
-        _target_bindings_by_id={
-            target.binding_target_id: _TargetClosedKeyBinding(
-                target_id=target.binding_target_id,
+    row_sources = build_row_source_catalog(request.relation_catalog)
+    closed_bindings: dict[str, _TargetClosedKeyBinding] = {}
+    grounded_bindings: dict[str, tuple[DraftEndpointParamBinding, ...]] = {}
+    candidate_ids: dict[str, str] = {}
+    for target in targets:
+        candidate = candidates_by_id.get(target.source_candidate_id)
+        if candidate is None:
+            continue
+        target_id = target.binding_target_id
+        candidate_ids[target_id] = target.source_candidate_id
+        closed = _closed_key_param_binding(
+            request,
+            fact=_target_fact(target, facts_by_id),
+            target=target,
+            candidate=candidate,
+        )
+        excluded_param_ids: frozenset[str] = frozenset()
+        if closed is not None:
+            closed_bindings[target_id] = _TargetClosedKeyBinding(
+                target_id=target_id,
                 source_candidate_id=target.source_candidate_id,
-                binding=binding,
+                binding=closed,
             )
-            for target in targets
-            if target.source_candidate_id in candidates_by_id
-            for binding in (
-                _closed_key_param_binding(
-                    request,
-                    fact=_target_fact(target, facts_by_id),
-                    target=target,
-                    candidate=candidates_by_id[target.source_candidate_id],
-                ),
+            excluded_param_ids = frozenset(
+                param_id for _, param_id in closed.params_by_component_id
             )
-            if binding is not None
-        },
+        row_source = _candidate_row_source(candidate, row_sources=row_sources)
+        if row_source is None:
+            continue
+        bindings = grounded_param_bindings(
+            available_values=request.available_values,
+            available_value_uses=request.available_value_uses,
+            row_source=row_source,
+            requested_fact_id=target.requested_fact_id,
+            excluded_param_ids=excluded_param_ids,
+        )
+        if bindings:
+            grounded_bindings[target_id] = bindings
+    return ClosedKeyParamBindingIndex(
+        _target_bindings_by_id=closed_bindings,
+        _candidate_id_by_target_id=candidate_ids,
+        _grounded_bindings_by_target_id=grounded_bindings,
     )
+
+
+def _candidate_row_source(
+    candidate: SourceCandidate,
+    *,
+    row_sources: RowSourceCatalog,
+) -> RowSource | None:
+    source = candidate.source
+    if source is None:
+        return None
+    if source.read_id:
+        candidates = row_sources_for_read_id(source.read_id, row_sources=row_sources)
+        return candidates[0] if candidates else None
+    return row_sources.find(source.row_source_id)
+
+
+def _grounded_binding_payload(
+    binding: DraftEndpointParamBinding,
+) -> dict[str, object]:
+    return {
+        "param_id": binding.param_id,
+        "value_id": binding.value_id,
+        "proof_refs": list(binding.proof_refs),
+    }
 
 
 def _model_visible_candidate_payload(
@@ -301,9 +382,11 @@ def _model_visible_candidate_payload(
         candidate_id = str(output.get("source_candidate_id") or "")
         owned_param_ids = param_ids_by_candidate.get(candidate_id, frozenset())
         if owned_param_ids:
+            raw_params = output.get("params")
+            params = raw_params if isinstance(raw_params, (list, tuple)) else ()
             output["params"] = [
                 param
-                for param in output.get("params") or ()
+                for param in params
                 if isinstance(param, dict)
                 and str(param.get("param_id") or "") not in owned_param_ids
             ]
@@ -331,9 +414,13 @@ def _closed_key_group_key_fulfillment_choice_ids(
             for support_set in _closed_key_group_key_fulfillment_supports(
                 candidate,
                 answer_output_id=binding.answer_output_id,
-                identity_field=binding.identity_field,
+                entity_kind=binding.entity_kind,
+                key_id=binding.key_id,
+                key_component_ids=tuple(
+                    component_id for component_id, _ in binding.params_by_component_id
+                ),
             )
-            for choice_id in (str(support_set.get("fulfillment_choice_id") or ""),)
+            for choice_id in (support_set.fulfillment_choice_id,)
             if choice_id
         )
     )
@@ -349,11 +436,13 @@ def _closed_key_group_key_fulfillment_support_set_ids(
             for support_set in _closed_key_group_key_fulfillment_supports(
                 candidate,
                 answer_output_id=binding.answer_output_id,
-                identity_field=binding.identity_field,
+                entity_kind=binding.entity_kind,
+                key_id=binding.key_id,
+                key_component_ids=tuple(
+                    component_id for component_id, _ in binding.params_by_component_id
+                ),
             )
-            for support_set_id in (
-                str(support_set.get("fulfillment_support_set_id") or ""),
-            )
+            for support_set_id in (support_set.fulfillment_support_set_id,)
             if support_set_id
         )
     )
@@ -374,26 +463,32 @@ def _closed_key_param_binding(
         requested_fact_id=target.requested_fact_id,
         question_input_refs=group_key.question_input_refs,
     )
-    identity_field = _shared_identity_field(bindings)
-    if not identity_field:
+    identity_contract = _shared_identity_contract(bindings)
+    if identity_contract is None:
         return None
-    param_id = _candidate_identity_param_id(
+    entity_kind, key_id, key_component_ids = identity_contract
+    params_by_component_id = _candidate_identity_params(
         candidate,
-        identity_field=identity_field,
+        entity_kind=entity_kind,
+        key_id=key_id,
+        key_component_ids=key_component_ids,
         value_ids=frozenset(binding.value_id for binding in bindings),
     )
-    if not param_id:
+    if not params_by_component_id:
         return None
-    if not _candidate_has_group_key_evidence(
+    if not _candidate_has_entity_evidence(
         candidate,
         answer_output_id=group_key.id,
-        identity_field=identity_field,
+        entity_kind=entity_kind,
+        key_id=key_id,
+        key_component_ids=key_component_ids,
     ):
         return None
     return _ClosedKeyParamBinding(
         answer_output_id=group_key.id,
-        param_id=param_id,
-        identity_field=identity_field,
+        entity_kind=entity_kind,
+        key_id=key_id,
+        params_by_component_id=params_by_component_id,
         key_input_bindings=bindings,
     )
 
@@ -477,62 +572,83 @@ def _is_scalar_identity_value(value: FactValue) -> bool:
     return (
         value.kind == ValueKind.IDENTITY
         and isinstance(value.payload, IdentityValuePayload)
-        and bool(value.payload.identity_field)
-        and bool(value.payload.value)
+        and bool(value.payload.key_id)
+        and bool(value.payload.key.components)
     )
 
 
-def _shared_identity_field(bindings: tuple[_KeyInputBinding, ...]) -> str:
-    fields = {binding.identity_field for binding in bindings}
-    return next(iter(fields)) if len(fields) == 1 else ""
+def _shared_identity_contract(
+    bindings: tuple[_KeyInputBinding, ...],
+) -> tuple[str, str, tuple[str, ...]] | None:
+    contracts = {
+        (
+            binding.key.entity_kind,
+            binding.key.key_id,
+            tuple(component.component_id for component in binding.key.components),
+        )
+        for binding in bindings
+    }
+    return next(iter(contracts)) if len(contracts) == 1 else None
 
 
-def _candidate_identity_param_id(
+def _candidate_identity_params(
     candidate: SourceCandidate,
     *,
-    identity_field: str,
+    entity_kind: str,
+    key_id: str,
+    key_component_ids: tuple[str, ...],
     value_ids: frozenset[str],
-) -> str:
-    params = tuple(
-        param
-        for param in candidate.params
-        if _param_matches_closed_key_identity(
-            param,
-            identity_field=identity_field,
-            value_ids=value_ids,
+) -> tuple[tuple[str, str], ...]:
+    output: list[tuple[str, str]] = []
+    for component_id in key_component_ids:
+        params = tuple(
+            param
+            for param in candidate.params
+            if _param_matches_closed_key_identity(
+                param,
+                entity_kind=entity_kind,
+                key_id=key_id,
+                key_component_id=component_id,
+                value_ids=value_ids,
+            )
         )
-    )
-    if len(params) != 1:
-        return ""
-    return str(params[0].get("param_id") or "")
+        if len(params) != 1:
+            return ()
+        output.append((component_id, params[0].id))
+    return tuple(output)
 
 
-def _param_identity_field(param: Mapping[str, object]) -> str:
-    identity = param.get("identity")
-    if not isinstance(identity, Mapping):
-        return ""
-    return str(identity.get("identity_field") or "")
+def _param_entity_target(param: CandidateParameter) -> tuple[str, str, str] | None:
+    target = param.entity_target
+    if target is None:
+        return None
+    entity_kind = target.entity_kind
+    key_id = target.key_id
+    component_id = target.component_id
+    if not entity_kind or not key_id or not component_id:
+        return None
+    return entity_kind, key_id, component_id
 
 
-def _param_bindable_value_ids(param: Mapping[str, object]) -> frozenset[str]:
-    return frozenset(
-        str(item.get("value") or "")
-        for item in param.get("binding_values") or ()
-        if isinstance(item, Mapping) and str(item.get("value") or "")
-    )
+def _param_bindable_value_ids(param: CandidateParameter) -> frozenset[str]:
+    return frozenset(item.value for item in param.binding_values if item.value)
 
 
-def _candidate_has_group_key_evidence(
+def _candidate_has_entity_evidence(
     candidate: SourceCandidate,
     *,
     answer_output_id: str,
-    identity_field: str,
+    entity_kind: str,
+    key_id: str,
+    key_component_ids: tuple[str, ...],
 ) -> bool:
     return bool(
         _closed_key_group_key_fulfillment_supports(
             candidate,
             answer_output_id=answer_output_id,
-            identity_field=identity_field,
+            entity_kind=entity_kind,
+            key_id=key_id,
+            key_component_ids=key_component_ids,
         )
     )
 
@@ -541,102 +657,57 @@ def _closed_key_group_key_fulfillment_supports(
     candidate: SourceCandidate,
     *,
     answer_output_id: str,
-    identity_field: str,
-) -> tuple[Mapping[str, object], ...]:
-    fields_by_id = _candidate_fields_by_id(candidate)
+    entity_kind: str,
+    key_id: str,
+    key_component_ids: tuple[str, ...],
+) -> tuple[FulfillmentSupportSet, ...]:
     return tuple(
         support_set
         for support_set in _candidate_fulfillment_support_sets(candidate)
-        if str(support_set.get("answer_output_id") or "") == answer_output_id
-        and _support_set_has_group_key_identity(
+        if support_set.answer_output_id == answer_output_id
+        and _support_set_has_entity_key(
             support_set,
-            fields_by_id=fields_by_id,
-            identity_field=identity_field,
+            entity_kind=entity_kind,
+            key_id=key_id,
+            key_component_ids=key_component_ids,
         )
     )
 
 
-def _support_set_has_group_key_identity(
-    support_set: Mapping[str, object],
+def _support_set_has_entity_key(
+    support_set: FulfillmentSupportSet,
     *,
-    fields_by_id: dict[str, Mapping[str, object]],
-    identity_field: str,
+    entity_kind: str,
+    key_id: str,
+    key_component_ids: tuple[str, ...],
 ) -> bool:
     return any(
-        _group_key_evidence_matches_identity(
-            item,
-            fields_by_id=fields_by_id,
-            identity_field=identity_field,
-        )
-        for slot in support_set.get("fulfillment_slots") or ()
-        if isinstance(slot, Mapping)
-        for item in slot.get("group_key_evidence") or ()
-        if isinstance(item, Mapping)
+        entity_evidence_entity_kind(item) == entity_kind
+        and entity_evidence_key_id(item) == key_id
+        and set(key_component_ids)
+        <= {component.component_id for component in item.components}
+        for slot in support_set.fulfillment_slots
+        for item in slot.entity_evidence
     )
-
-
-def _group_key_evidence_matches_identity(
-    item: Mapping[str, object],
-    *,
-    fields_by_id: dict[str, Mapping[str, object]],
-    identity_field: str,
-) -> bool:
-    evidence_identity_field = _evidence_identity_field(
-        item,
-        fields_by_id=fields_by_id,
-    )
-    evidence_identity_matches = evidence_identity_field == identity_field
-    if evidence_identity_matches:
-        return True
-    evidence_field_id_matches_identity_field = (
-        str(item.get("field_id") or "") == identity_field
-    )
-    return evidence_field_id_matches_identity_field
-
 
 def _param_matches_closed_key_identity(
-    param: Mapping[str, object],
+    param: CandidateParameter,
     *,
-    identity_field: str,
+    entity_kind: str,
+    key_id: str,
+    key_component_id: str,
     value_ids: frozenset[str],
 ) -> bool:
-    param_identity_matches = _param_identity_field(param) == identity_field
+    param_identity_matches = _param_entity_target(param) == (
+        entity_kind,
+        key_id,
+        key_component_id,
+    )
     param_can_bind_all_key_values = value_ids <= _param_bindable_value_ids(param)
     return param_identity_matches and param_can_bind_all_key_values
 
 
-def _candidate_fields_by_id(
-    candidate: SourceCandidate,
-) -> dict[str, Mapping[str, object]]:
-    return {
-        field_id: field
-        for field in candidate.fields
-        if isinstance(field, Mapping)
-        for field_id in (str(field.get("field_id") or field.get("id") or ""),)
-        if field_id
-    }
-
-
 def _candidate_fulfillment_support_sets(
     candidate: SourceCandidate,
-) -> tuple[Mapping[str, object], ...]:
-    payload = candidate.payload or {}
-    return tuple(
-        support_set
-        for support_set in payload.get("fulfillment_support_sets") or ()
-        if isinstance(support_set, Mapping)
-    )
-
-
-def _evidence_identity_field(
-    item: Mapping[str, object],
-    *,
-    fields_by_id: dict[str, Mapping[str, object]],
-) -> str:
-    identity = item.get("identity")
-    if not isinstance(identity, Mapping):
-        field = fields_by_id.get(str(item.get("field_id") or ""))
-        identity = field.get("identity") if field is not None else None
-    if not isinstance(identity, Mapping):
-        return ""
-    return str(identity.get("identity_field") or "")
+) -> tuple[FulfillmentSupportSet, ...]:
+    return candidate.fulfillment_support_sets

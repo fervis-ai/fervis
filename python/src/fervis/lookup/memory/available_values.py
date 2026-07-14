@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from fervis.lookup.memory.projection import LookupMemory, MemoryValue
 from fervis.lookup.answer_program.values import (
     FactValue,
     LiteralType,
     ValueDependency,
     ValueDependencyKind,
 )
+from fervis.lookup.memory.projection import LookupMemory, MemoryValue
 
 
 def active_memory_reference_values(
@@ -54,24 +54,26 @@ def _active_identity_values(
     memory: LookupMemory,
     active_memory_ids: frozenset[str],
 ) -> tuple[FactValue, ...]:
-    return tuple(
-        FactValue.identity(
-            id=value.id,
-            identity_type=value.identity_type,
-            identity_field=value.identity_field,
-            value=value.value,
-            display_value=value.display_label or value.lookup_text or value.value,
-            proof_refs=value.proof_refs,
-            source_refs=_active_memory_source_refs(
-                _identity_value_memory_id(value.source)
-            ),
-            dependencies=_active_memory_dependencies(
-                _identity_value_memory_id(value.source)
-            ),
+    values: list[FactValue] = []
+    for value in memory.identity_values:
+        memory_id = _identity_value_memory_id(value.source)
+        if memory_id not in active_memory_ids:
+            continue
+        values.append(
+            FactValue.identity(
+                id=value.id,
+                key=value.value,
+                display_value=(
+                    value.display_label
+                    or value.lookup_text
+                    or str(value.value.component_values())
+                ),
+                proof_refs=value.proof_refs,
+                source_refs=_active_memory_source_refs(memory_id),
+                dependencies=_active_memory_dependencies(memory_id),
+            )
         )
-        for value in memory.identity_values
-        if _identity_value_memory_id(value.source) in active_memory_ids
-    )
+    return tuple(values)
 
 
 def _identity_value_memory_id(source: dict[str, Any]) -> str:
@@ -87,21 +89,22 @@ def _active_identity_sets(
     memory: LookupMemory,
     active_memory_ids: frozenset[str],
 ) -> tuple[FactValue, ...]:
-    return tuple(
-        FactValue.identity_set(
-            id=value.id,
-            identity_type=value.identity_type,
-            identity_field=value.identity_field,
-            values=value.values,
-            display_value=value.display_label,
-            source_relation_id=value.source_relation_id,
-            proof_refs=value.proof_refs,
-            source_refs=_active_memory_source_refs(value.source_relation_id),
-            dependencies=_active_memory_dependencies(value.source_relation_id),
+    values: list[FactValue] = []
+    for value in memory.identity_sets:
+        if value.source_relation_id not in active_memory_ids:
+            continue
+        values.append(
+            FactValue.identity_set(
+                id=value.id,
+                keys=value.keys,
+                display_value=value.display_label,
+                source_relation_id=value.source_relation_id,
+                proof_refs=value.proof_refs,
+                source_refs=_active_memory_source_refs(value.source_relation_id),
+                dependencies=_active_memory_dependencies(value.source_relation_id),
+            )
         )
-        for value in memory.identity_sets
-        if value.source_relation_id in active_memory_ids
-    )
+    return tuple(values)
 
 
 def _active_literal_values(

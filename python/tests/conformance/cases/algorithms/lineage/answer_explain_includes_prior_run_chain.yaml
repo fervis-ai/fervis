@@ -66,6 +66,7 @@ input:
         value_kind: number
         value_json:
           value: 2
+        role: ANSWER_VALUE
     source_reads: []
     proof_graphs: []
 expect:

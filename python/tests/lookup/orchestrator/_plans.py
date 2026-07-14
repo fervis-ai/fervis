@@ -8,13 +8,14 @@ def _join_key(left: str, right: str):
 
 
 def _answer_plan(**kwargs) -> AnswerProgram:
-    render_spec = kwargs.get("render_spec")
+    result_projection = kwargs.get("result_projection") or ResultProjection()
+    kwargs["result_projection"] = result_projection
     operations = tuple(kwargs.get("operations", ()))
     kwargs.pop("requested_facts", None)
     return AnswerProgram(
         fulfillment=kwargs.pop(
             "fulfillment",
-            _default_fulfillment(render_spec, operations),
+            _default_fulfillment(result_projection, operations),
         ),
         **kwargs,
     )
@@ -38,25 +39,27 @@ def _plan_clarification(
 
 
 def _default_fulfillment(
-    render_spec: RenderSpec | None,
+    result_projection: ResultProjection,
     operations: tuple[Operation, ...],
 ) -> tuple[FactFulfillment, ...]:
-    if render_spec is not None:
-        outputs = (*render_spec.relation_outputs, *render_spec.scalar_outputs)
-        if outputs:
-            return tuple(
-                FactFulfillment(
-                    requested_fact_id="rf_answer",
-                    answer_output_id=output.id,
-                    render_output_id=output.id,
-                )
-                for output in outputs
+    outputs = (
+        *result_projection.relation_outputs,
+        *result_projection.scalar_outputs,
+    )
+    if outputs:
+        return tuple(
+            FactFulfillment(
+                requested_fact_id="rf_answer",
+                answer_output_id=output.id,
+                result_output_id=output.id,
             )
+            for output in outputs
+        )
     return (
         FactFulfillment(
             requested_fact_id="rf_answer",
             answer_output_id="answer",
-            render_output_id="answer",
+            result_output_id="answer",
         ),
     )
 
@@ -73,8 +76,11 @@ def _metric_answer_plan() -> FactPlan:
                     ),
                     fields=(
                         RelationField(
-                            field_id="location_name",
-                            roles=(FieldBindingRole.OUTPUT,),
+                            field_id="location_id",
+                            roles=(
+                                FieldBindingRole.IDENTITY,
+                                FieldBindingRole.OUTPUT,
+                            ),
                         ),
                         RelationField(
                             field_id="metric_total",
@@ -89,21 +95,30 @@ def _metric_answer_plan() -> FactPlan:
                     spec=ProjectSpec(
                         input_relation="rows",
                         fields=(
-                            ProjectField(source="location_name", output="location"),
+                            ProjectField(source="location_id"),
                             ProjectField(source="metric_total"),
                         ),
                     ),
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="location",
                         relation_id="answer_rows",
-                        field_id="location",
+                        entity_key=EntityKeyProjection(
+                            entity_kind="location",
+                            key_id="location_key",
+                            components=(
+                                EntityKeyProjectionComponent(
+                                    component_id="location_id",
+                                    field_id="location_id",
+                                ),
+                            ),
+                        ),
                     ),
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="metric_total",
                         relation_id="answer_rows",
                         field_id="metric_total",
@@ -169,20 +184,24 @@ def _question_contract_for(
     description: str | None = None,
     subject_text: str | None = None,
     binding_target_ids: tuple[str, ...] = ("answer",),
-    answer_output_role: str = "",
+    answer_output_role: str | None = None,
     known_inputs: tuple[RequestedFactKnownInput, ...] = (),
     answer_expression_family: RequestedFactAnswerExpressionFamily = (
         RequestedFactAnswerExpressionFamily.SCALAR_AGGREGATE
     ),
 ) -> QuestionContract:
     text = description or requested_fact_id
+    output_role = answer_output_role or _default_answer_output_role(
+        answer_expression_family
+    )
     return QuestionContract(
         requested_facts=(
             RequestedFact(
                 id=requested_fact_id,
                 description=text,
                 answer_expression=_requested_fact_answer_expression(
-                    answer_expression_family
+                    answer_expression_family,
+                    known_inputs=known_inputs,
                 ),
                 answer_subject=RequestedFactAnswerSubject(
                     subject_text=subject_text or text
@@ -190,7 +209,7 @@ def _question_contract_for(
                 answer_outputs=tuple(
                     RequestedFactAnswerOutput(
                         id=binding_target_id,
-                        role=answer_output_role,
+                        role=output_role,
                     )
                     for binding_target_id in binding_target_ids
                 ),
@@ -200,9 +219,31 @@ def _question_contract_for(
     )
 
 
+def _default_answer_output_role(
+    family: RequestedFactAnswerExpressionFamily,
+) -> str:
+    if family in {
+        RequestedFactAnswerExpressionFamily.SCALAR_AGGREGATE,
+        RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
+        RequestedFactAnswerExpressionFamily.COMPUTED_SCALAR,
+    }:
+        return "MEASURED_VALUE"
+    return "ANSWER_VALUE"
+
+
 def _requested_fact_answer_expression(
     family: RequestedFactAnswerExpressionFamily,
+    *,
+    known_inputs: tuple[RequestedFactKnownInput, ...] = (),
 ) -> RequestedFactAnswerExpression:
+    limit_input = next(
+        (known for known in known_inputs if known.is_result_limit),
+        None,
+    )
+    selects_rows = family in {
+        RequestedFactAnswerExpressionFamily.LIST_ROWS,
+        RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+    }
     return RequestedFactAnswerExpression(
         family=family,
         group_key=(
@@ -213,6 +254,14 @@ def _requested_fact_answer_expression(
             if family == RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE
             else None
         ),
+        selection_kind=(
+            ResultSelectionKind.LIMITED_RESULTS
+            if limit_input is not None
+            else ResultSelectionKind.ALL_RESULTS
+            if selects_rows
+            else None
+        ),
+        limit_input_ref=(limit_input.id if limit_input is not None else ""),
     )
 
 
@@ -246,7 +295,7 @@ def _question_contract_for_plan(
     *,
     description: str | None = None,
 ) -> QuestionContract:
-    binding_target_ids = _render_output_ids(plan)
+    binding_target_ids = _result_output_ids(plan)
     return _question_contract_for(
         "rf_answer",
         description=description or _default_description(plan),
@@ -277,37 +326,41 @@ def _answer_expression_family_for_plan(
         if any(spec.group_by for spec in aggregate_specs):
             return RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE
         return RequestedFactAnswerExpressionFamily.SCALAR_AGGREGATE
-    if outcome.render_spec and outcome.render_spec.relation_outputs:
+    if outcome.result_projection.relation_outputs:
         return RequestedFactAnswerExpressionFamily.LIST_ROWS
-    if outcome.render_spec and outcome.render_spec.scalar_outputs:
+    if outcome.result_projection.scalar_outputs:
         return RequestedFactAnswerExpressionFamily.SCALAR_VALUE
     return RequestedFactAnswerExpressionFamily.SCALAR_AGGREGATE
 
 
-def _render_output_ids(plan: FactPlan) -> tuple[str, ...]:
+def _result_output_ids(plan: FactPlan) -> tuple[str, ...]:
     outcome = plan.outcome
-    if not isinstance(outcome, AnswerProgram) or outcome.render_spec is None:
+    if not isinstance(outcome, AnswerProgram):
         return ()
     return tuple(
         slot.id
         for slot in (
-            *outcome.render_spec.relation_outputs,
-            *outcome.render_spec.scalar_outputs,
+            *outcome.result_projection.relation_outputs,
+            *outcome.result_projection.scalar_outputs,
         )
     )
 
 
 def _default_description(plan: FactPlan) -> str:
     outcome = plan.outcome
-    if not isinstance(outcome, AnswerProgram) or outcome.render_spec is None:
+    if not isinstance(outcome, AnswerProgram):
         return "field.name"
-    render_spec = outcome.render_spec
-    if render_spec.scalar_outputs:
-        return " ".join(slot.scalar_id for slot in render_spec.scalar_outputs)
-    if render_spec.relation_outputs:
+    result_projection = outcome.result_projection
+    if result_projection.scalar_outputs:
+        return " ".join(slot.scalar_id for slot in result_projection.scalar_outputs)
+    if result_projection.relation_outputs:
         descriptions = [
-            _source_description(outcome, slot.relation_id, slot.field_id)
-            for slot in render_spec.relation_outputs
+            (
+                slot.entity_key.entity_kind
+                if slot.entity_key is not None
+                else _source_description(outcome, slot.relation_id, slot.field_id)
+            )
+            for slot in result_projection.relation_outputs
         ]
         return " ".join(dict.fromkeys(descriptions))
     return "field.name"

@@ -849,9 +849,12 @@ def test_django_lineage_recorder_records_answered_result_atomically() -> None:
         "kind": "number",
         "value": 2,
     }
-    assert MemoryArtifact.objects.get(
-        memory_artifact_id="memory_artifact_1"
-    ).payload_json["addresses"][0]["address"] == "value.answer_1"
+    assert (
+        MemoryArtifact.objects.get(memory_artifact_id="memory_artifact_1").payload_json[
+            "addresses"
+        ][0]["address"]
+        == "value.answer_1"
+    )
 
 
 def test_django_lineage_recorder_records_answered_result_idempotently() -> None:
@@ -1002,29 +1005,20 @@ def test_django_lineage_recorder_persists_clarification_primitives() -> None:
             kind=RunStepKind.MODEL_TURN,
         )
     )
-    requested_fact = RequestedFactWrite(
-        requested_fact_id="fact_1",
-        run_id="run_1",
-        produced_by_step_id="step_contract",
-        fact_key="fact_1",
-        answer_expression_family="scalar_value",
-    )
-    fact_result = FactResultWrite(
-        fact_result_id="fact_result_1",
-        run_id="run_1",
-        requested_fact_id="fact_1",
-        produced_by_step_id="step_contract",
-        result_kind=FactResultKind.NEEDS_CLARIFICATION,
-        evidence_refs_json=["known_input:input_1"],
-    )
     clarification = ClarificationRequestWrite(
         clarification_id="clarification_1",
         run_id="run_1",
-        fact_result_id="fact_result_1",
+        step_id="step_contract",
         payload_json={
             "id": "clarification_1",
             "need": "target_reference",
             "reason": "multiple_matching_entities",
+            "owner": "grounding",
+            "continuation": {
+                "kind": "grounding",
+                "knownInputId": "input_1",
+                "acceptsFreeText": False,
+            },
             "requestedFactId": "fact_1",
             "question": "Which matching area should I use?",
             "subjects": [
@@ -1033,7 +1027,20 @@ def test_django_lineage_recorder_persists_clarification_primitives() -> None:
                     "id": "input_1",
                     "label": "area",
                     "sourceText": "London",
-                    "options": [{"id": "area:1", "label": "London"}],
+                    "options": [
+                        {
+                            "id": "area:1",
+                            "label": "London",
+                                "entityKind": "area",
+                                "keyId": "primary_key",
+                                "keyComponents": [
+                                    {"componentId": "area_id", "value": "area:1"}
+                                ],
+                                "matchedField": "area_id",
+                            "matchedValue": "area:1",
+                            "resolverReadId": "list_areas",
+                        }
+                    ],
                 }
             ],
             "evidence": [{"kind": "known_input", "id": "known_input:input_1"}],
@@ -1048,8 +1055,6 @@ def test_django_lineage_recorder_persists_clarification_primitives() -> None:
         evidence_ref="clarification_response:response_1",
     )
 
-    recorder.record_requested_fact(requested_fact)
-    recorder.record_fact_result(fact_result)
     recorder.record_clarification_request(clarification)
     recorder.record_clarification_response(response)
 
@@ -1058,7 +1063,7 @@ def test_django_lineage_recorder_persists_clarification_primitives() -> None:
     )
     saved_response = ClarificationResponse.objects.get(response_id="response_1")
 
-    assert saved_clarification.fact_result_id == "fact_result_1"
+    assert saved_clarification.step_id == "step_contract"
     assert saved_clarification.need == ClarificationNeed.TARGET_REFERENCE
     assert saved_clarification.reason == ClarificationReason.MULTIPLE_MATCHING_ENTITIES
     assert saved_clarification.payload_json["question"] == (
@@ -1269,31 +1274,6 @@ def test_django_lineage_query_loads_memory_for_selected_runs() -> None:
     )
 
     assert [row.memory_artifact_id for row in rows] == ["memory_artifact_1"]
-
-
-def test_django_lineage_recorder_rejects_missing_clarification_trigger_response() -> (
-    None
-):
-    recorder: LineageRecorderPort = DjangoLineageRecorder()
-    _record_run_spine(recorder)
-
-    with pytest.raises(
-        LineageRecorderConflict,
-        match="clarification trigger response does not exist",
-    ):
-        recorder.start_run(
-            QuestionRunWrite(
-                run_id="run_2",
-                question_id="q_1",
-                run_number=2,
-                kind=QuestionRunKind.MODEL_ASSISTED,
-                trigger_kind=RunTriggerKind.CLARIFICATION_RESPONSE,
-                base_run_id="run_1",
-                trigger_clarification_response_id="response_missing",
-                adapter_ref="django_drf:test",
-                runtime_version="test-runtime",
-            )
-        )
 
 
 def test_django_lineage_recorder_rejects_answer_for_non_answered_result() -> None:

@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from fervis.host_api.contracts import PaginationContract
+from fervis.host_api.contracts.endpoint import relation_metadata_from_public_value
+from fervis.host_api.contracts.values import ContractValue
 from fervis.project.source_paths import (
     normalize_source_path_prefixes,
     source_path_matches,
@@ -63,6 +66,8 @@ def _operation(
         *_parameters(operation.get("parameters"), document),
     ]
     response_schema = _normalize_schema(_response_schema(operation), document)
+    extension = _fervis_extension(operation)
+    candidate_keys, entity_references = relation_metadata_from_public_value(extension)
     return OpenApiOperation(
         operation_id=operation_id,
         method="GET",
@@ -71,7 +76,26 @@ def _operation(
         tags=tuple(str(tag) for tag in operation.get("tags") or ()),
         parameters=tuple(parameters),
         response_schema=response_schema,
+        pagination=_pagination(extension),
+        candidate_keys=candidate_keys,
+        entity_references=entity_references,
     )
+
+
+def _fervis_extension(operation: dict[str, Any]) -> dict[str, ContractValue]:
+    value = operation.get("x-fervis")
+    return value if isinstance(value, dict) else {}
+
+
+def _pagination(
+    extension: dict[str, ContractValue],
+) -> PaginationContract | None:
+    value = extension.get("pagination")
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("x-fervis pagination must be an object")
+    return PaginationContract.from_public_dict(value)
 
 
 def _parameters(
@@ -148,29 +172,29 @@ def _normalize_schema(
     if isinstance(ref, str):
         if ref in seen:
             return {}
-        resolved = _local_ref(document, ref)
-        if resolved is None:
+        referenced_schema = _local_ref(document, ref)
+        if referenced_schema is None:
             return schema
-        return _normalize_schema(resolved, document, seen=seen | {ref})
+        return _normalize_schema(referenced_schema, document, seen=seen | {ref})
 
     all_of = schema.get("allOf")
     if isinstance(all_of, list):
         return _normalize_all_of(schema, all_of, document, seen=seen)
 
-    resolved: dict[str, Any] = {}
+    normalized: dict[str, Any] = {}
     for key, value in schema.items():
         if isinstance(value, dict):
-            resolved[key] = _normalize_schema(value, document, seen=seen)
+            normalized[key] = _normalize_schema(value, document, seen=seen)
         elif isinstance(value, list):
-            resolved[key] = [
+            normalized[key] = [
                 _normalize_schema(item, document, seen=seen)
                 if isinstance(item, dict)
                 else item
                 for item in value
             ]
         else:
-            resolved[key] = value
-    return resolved
+            normalized[key] = value
+    return normalized
 
 
 def _normalize_object(

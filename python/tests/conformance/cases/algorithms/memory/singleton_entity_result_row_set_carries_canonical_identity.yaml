@@ -1,0 +1,43 @@
+id: singleton_entity_result_row_set_carries_canonical_identity
+description: A one-row result whose answer value is a typed entity key carries that canonical identity on its row-set memory card.
+kind: algorithm
+algorithm: conversation_memory.card_projection
+input:
+  current_question: Where did Nadia work?
+  conversation_context:
+    factArtifacts:
+      - artifactId: turn_1
+        outcome: answered
+        sourceQuestion: What is Nadia's staff ID?
+        sourceAnswer: Nadia's staff identity
+        addresses:
+          - address: relation.staff_rows
+            kind: relation
+            source: {kind: operation_output, relationId: staff_rows}
+            grainKeys: [staff_id]
+            completeness: {status: complete, pagination: all_pages}
+            rowAddresses: [row.staff_rows.1]
+            evidence: {stepIds: [source_read:list_staff]}
+          - address: row.staff_rows.1
+            kind: row
+            relation: relation.staff_rows
+            identity: {staff_id: 40404040-0000-0000-0002-000000000001}
+            values:
+              answer_1:
+                type: entity_key
+                value:
+                  entityKind: staff
+                  keyId: primary_key
+                  components: {staff_id: 40404040-0000-0000-0002-000000000001}
+                answer_output_ids: [answer_1]
+            evidence: {stepIds: [source_read:list_staff]}
+expect:
+  result_contains:
+    private_cards:
+      turn_1.relation.staff_rows:
+        kind: row_set
+        entity_key:
+          entity_kind: staff
+          key_id: primary_key
+          components: {staff_id: 40404040-0000-0000-0002-000000000001}
+        proof_refs: [source_read:list_staff]

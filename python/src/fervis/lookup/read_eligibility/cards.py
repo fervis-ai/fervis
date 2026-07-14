@@ -163,7 +163,9 @@ def _applicable_known_inputs(
                 {
                     "known_input_id": known_input_id,
                     "display_value": str(item.get("display_value") or ""),
-                    "identity_type": str(item.get("identity_type") or ""),
+                    "entity_kind": str(item.get("entity_kind") or ""),
+                    "key_id": str(item.get("key_id") or ""),
+                    "key_components": list(item.get("key_components") or ()),
                     "applies_via_field": field_path,
                     "role": "POPULATION_SCOPE",
                 }

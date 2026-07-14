@@ -15,9 +15,7 @@ from fervis.lookup.relation_catalog.from_host_api import (
 
 
 def host_relation_catalog(host_api_context: HostApiContext) -> RelationCatalog:
-    return relation_catalog_from_endpoint_contracts(
-        host_api_context.describe_sources()
-    )
+    return relation_catalog_from_endpoint_contracts(host_api_context.describe_sources())
 
 
 @dataclass(frozen=True)
@@ -44,9 +42,7 @@ class HostRelationDataAccess:
             elif param.source == "query":
                 query_params[param.name] = value
             else:
-                raise ValueError(
-                    f"Unsupported endpoint parameter source: {param_ref}"
-                )
+                raise ValueError(f"Unsupported endpoint parameter source: {param_ref}")
         return self.host_api_context.execute_read(
             authority=self.authority,
             invocation=ReadInvocation(
@@ -54,7 +50,11 @@ class HostRelationDataAccess:
                 path_params=path_params,
                 query_params=query_params,
                 page_policy={
-                    "mode": "all_pages" if contract.paginated else "single_page"
+                    "mode": (
+                        "all_pages"
+                        if contract.pagination is not None
+                        else "single_page"
+                    )
                 },
             ),
         ).to_public_dict()

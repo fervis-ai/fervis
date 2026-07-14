@@ -170,6 +170,42 @@ def test_fervis_init_patches_simple_flask_app_factory(tmp_path: Path) -> None:
     assert "    configured_fervis().init_app(app)\n    return app" in text
 
 
+def test_fervis_init_ignores_returns_owned_by_nested_route_handlers(
+    tmp_path: Path,
+) -> None:
+    root = _flask_project(tmp_path)
+    app_path = root / "app.py"
+    app_path.write_text(
+        "from flask import Flask\n\n"
+        "def create_app():\n"
+        "    app = Flask(__name__)\n\n"
+        "    @app.get('/health')\n"
+        "    def health():\n"
+        "        return {'status': 'ok'}\n\n"
+        "    return app\n",
+        encoding="utf-8",
+    )
+
+    exit_code = run_init_command(
+        (
+            "init",
+            "--framework",
+            "flask",
+            "--app",
+            "app:create_app",
+            "--source-prefix",
+            "/api/",
+            "--yes",
+        ),
+        project=discover_project(root),
+        stdout=StringIO(),
+    )
+
+    assert exit_code == 0
+    text = app_path.read_text(encoding="utf-8")
+    assert "    configured_fervis().init_app(app)\n    return app" in text
+
+
 def test_fervis_init_honors_explicit_flask_app_when_manage_py_exists(
     tmp_path: Path,
 ) -> None:

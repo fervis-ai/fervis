@@ -1,7 +1,7 @@
 schema_revision: 1
 programs:
   canonical_a:
-    schema_revision: 1
+    schema_revision: 2
     program:
       $type: AnswerProgram
       fields:
@@ -45,18 +45,22 @@ programs:
           $tuple: []
         operations:
           $tuple: []
-        render_spec: null
+        result_projection: &empty_result_projection
+          $type: ResultProjection
+          fields:
+            relation_outputs: {$tuple: []}
+            scalar_outputs: {$tuple: []}
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 1
+            schema_revision: 2
             compiler_version: ''
             function_semantics:
               $tuple: []
             source_contracts:
               $tuple: []
   canonical_b:
-    schema_revision: 1
+    schema_revision: 2
     program:
       $type: AnswerProgram
       fields:
@@ -100,18 +104,18 @@ programs:
           $tuple: []
         operations:
           $tuple: []
-        render_spec: null
+        result_projection: *empty_result_projection
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 1
+            schema_revision: 2
             compiler_version: ''
             function_semantics:
               $tuple: []
             source_contracts:
               $tuple: []
   compile_catalog_default:
-    schema_revision: 1
+    schema_revision: 2
     program:
       $type: AnswerProgram
       fields:
@@ -123,7 +127,7 @@ programs:
             fields:
               requested_fact_id: fact_1
               answer_output_id: answer_1
-              render_output_id: answer_1
+              result_output_id: answer_1
         parameters:
           $tuple:
           - $type: ParameterDeclaration
@@ -219,16 +223,17 @@ programs:
                     $enum: OperationKind
                     value: project
               output_relation: answer_rows
-        render_spec:
-          $type: RenderSpec
+        result_projection:
+          $type: ResultProjection
           fields:
             relation_outputs:
               $tuple:
-              - $type: RenderRelationOutput
+              - $type: RelationResultOutput
                 fields:
                   id: answer_1
                   relation_id: answer_rows
                   field_id: store_id
+                  entity_key: null
                   label: ''
                   role: answer_value
             scalar_outputs:
@@ -236,14 +241,14 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 1
+            schema_revision: 2
             compiler_version: ''
             function_semantics:
               $tuple: []
             source_contracts:
               $tuple: []
   compile_hidden_value:
-    schema_revision: 1
+    schema_revision: 2
     program:
       $type: AnswerProgram
       fields:
@@ -255,7 +260,7 @@ programs:
             fields:
               requested_fact_id: fact_1
               answer_output_id: answer_1
-              render_output_id: answer_1
+              result_output_id: answer_1
         parameters:
           $tuple:
           - $type: ParameterDeclaration
@@ -353,16 +358,17 @@ programs:
                     $enum: OperationKind
                     value: project
               output_relation: answer_rows
-        render_spec:
-          $type: RenderSpec
+        result_projection:
+          $type: ResultProjection
           fields:
             relation_outputs:
               $tuple:
-              - $type: RenderRelationOutput
+              - $type: RelationResultOutput
                 fields:
                   id: answer_1
                   relation_id: answer_rows
                   field_id: store_id
+                  entity_key: null
                   label: ''
                   role: answer_value
             scalar_outputs:
@@ -370,14 +376,14 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 1
+            schema_revision: 2
             compiler_version: ''
             function_semantics:
               $tuple: []
             source_contracts:
               $tuple: []
   invocation:
-    schema_revision: 1
+    schema_revision: 2
     program:
       $type: AnswerProgram
       fields:
@@ -396,7 +402,7 @@ programs:
                   fields:
                     id: answer_1
                     description: answer_1
-                    role: ''
+                    role: ANSWER_VALUE
               known_inputs:
                 $tuple:
                 - $type: RequestedFactLiteralInput
@@ -421,7 +427,7 @@ programs:
             fields:
               requested_fact_id: fact_1
               answer_output_id: answer_1
-              render_output_id: answer_1
+              result_output_id: answer_1
         parameters:
           $tuple:
           - $type: ParameterDeclaration
@@ -532,16 +538,17 @@ programs:
                     $enum: OperationKind
                     value: project
               output_relation: answer_rows
-        render_spec:
-          $type: RenderSpec
+        result_projection:
+          $type: ResultProjection
           fields:
             relation_outputs:
               $tuple:
-              - $type: RenderRelationOutput
+              - $type: RelationResultOutput
                 fields:
                   id: answer_1
                   relation_id: answer_rows
                   field_id: store_id
+                  entity_key: null
                   label: ''
                   role: answer_value
             scalar_outputs:
@@ -549,7 +556,7 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 1
+            schema_revision: 2
             compiler_version: fervis.answer_program.compiler@1
             function_semantics:
               $tuple:
@@ -589,9 +596,9 @@ programs:
                     $enum: SourceContractKind
                     value: catalog_read
                   source_id: sales
-                  fingerprint: 2d9a5f0e9bb0e0c7e1787d62d2f3c9f00446b2b57a4acd9ed2ac414a4e59f575
+                  fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   memory_backed:
-    schema_revision: 1
+    schema_revision: 2
     program:
       $type: AnswerProgram
       fields:
@@ -626,11 +633,11 @@ programs:
                       $tuple:
                       - {$enum: FieldBindingRole, value: identity}
         operations: {$tuple: []}
-        render_spec: null
+        result_projection: *empty_result_projection
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 1
+            schema_revision: 2
             compiler_version: fervis.answer_program.compiler@1
             function_semantics:
               $tuple:
@@ -650,7 +657,7 @@ programs:
                   source_id: mem_fe7f674c7ac59e4a
                   fingerprint: 8a2f05f7e1f6c2aee3b39cb8f1d4572306d28bfbd81a671f099af87d915638f2
   population_required:
-    schema_revision: 1
+    schema_revision: 2
     program:
       $type: AnswerProgram
       fields:
@@ -669,7 +676,7 @@ programs:
                   fields:
                     id: answer_1
                     description: answer_1
-                    role: ''
+                    role: ANSWER_VALUE
               known_inputs:
                 $tuple: []
               input_refs:
@@ -683,7 +690,7 @@ programs:
             fields:
               requested_fact_id: fact_1
               answer_output_id: answer_1
-              render_output_id: answer_1
+              result_output_id: answer_1
         parameters:
           $tuple:
           - &population_question_parameter
@@ -822,16 +829,17 @@ programs:
                     $enum: OperationKind
                     value: project
               output_relation: answer_rows
-        render_spec: &population_render_spec
-          $type: RenderSpec
+        result_projection: &population_result_projection
+          $type: ResultProjection
           fields:
             relation_outputs:
               $tuple:
-              - $type: RenderRelationOutput
+              - $type: RelationResultOutput
                 fields:
                   id: answer_1
                   relation_id: answer_rows
                   field_id: store_id
+                  entity_key: null
                   label: ''
                   role: answer_value
             scalar_outputs:
@@ -839,7 +847,7 @@ programs:
         compatibility: &population_compatibility
           $type: ProgramCompatibility
           fields:
-            schema_revision: 1
+            schema_revision: 2
             compiler_version: fervis.answer_program.compiler@1
             function_semantics:
               $tuple:
@@ -883,9 +891,9 @@ programs:
                     $enum: SourceContractKind
                     value: catalog_read
                   source_id: sales
-                  fingerprint: 2d9a5f0e9bb0e0c7e1787d62d2f3c9f00446b2b57a4acd9ed2ac414a4e59f575
+                  fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   population_scalar_invalid:
-    schema_revision: 1
+    schema_revision: 2
     program:
       $type: AnswerProgram
       fields:
@@ -905,10 +913,10 @@ programs:
         capabilities: *population_capabilities
         relations: *population_relations
         operations: *population_operations
-        render_spec: *population_render_spec
+        result_projection: *population_result_projection
         compatibility: *population_compatibility
   population_plan_control_invalid:
-    schema_revision: 1
+    schema_revision: 2
     program:
       $type: AnswerProgram
       fields:
@@ -928,10 +936,10 @@ programs:
         capabilities: *population_capabilities
         relations: *population_relations
         operations: *population_operations
-        render_spec: *population_render_spec
+        result_projection: *population_result_projection
         compatibility: *population_compatibility
   population_optional:
-    schema_revision: 1
+    schema_revision: 2
     program:
       $type: AnswerProgram
       fields:
@@ -950,7 +958,7 @@ programs:
                   fields:
                     id: answer_1
                     description: answer_1
-                    role: ''
+                    role: ANSWER_VALUE
               known_inputs:
                 $tuple: []
               input_refs:
@@ -964,7 +972,7 @@ programs:
             fields:
               requested_fact_id: fact_1
               answer_output_id: answer_1
-              render_output_id: answer_1
+              result_output_id: answer_1
         parameters:
           $tuple:
           - $type: ParameterDeclaration
@@ -1102,16 +1110,17 @@ programs:
                     $enum: OperationKind
                     value: project
               output_relation: answer_rows
-        render_spec:
-          $type: RenderSpec
+        result_projection:
+          $type: ResultProjection
           fields:
             relation_outputs:
               $tuple:
-              - $type: RenderRelationOutput
+              - $type: RelationResultOutput
                 fields:
                   id: answer_1
                   relation_id: answer_rows
                   field_id: store_id
+                  entity_key: null
                   label: ''
                   role: answer_value
             scalar_outputs:
@@ -1119,7 +1128,7 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 1
+            schema_revision: 2
             compiler_version: fervis.answer_program.compiler@1
             function_semantics:
               $tuple:
@@ -1163,9 +1172,9 @@ programs:
                     $enum: SourceContractKind
                     value: catalog_read
                   source_id: sales
-                  fingerprint: 2d9a5f0e9bb0e0c7e1787d62d2f3c9f00446b2b57a4acd9ed2ac414a4e59f575
+                  fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   capability:
-    schema_revision: 1
+    schema_revision: 2
     program:
       $type: AnswerProgram
       fields:
@@ -1184,7 +1193,7 @@ programs:
                   fields:
                     id: answer_1
                     description: answer_1
-                    role: ''
+                    role: ANSWER_VALUE
               known_inputs:
                 $tuple: []
               input_refs:
@@ -1198,7 +1207,7 @@ programs:
             fields:
               requested_fact_id: fact_1
               answer_output_id: answer_1
-              render_output_id: answer_1
+              result_output_id: answer_1
         parameters:
           $tuple:
           - $type: ParameterDeclaration
@@ -1335,16 +1344,17 @@ programs:
                     $enum: OperationKind
                     value: project
               output_relation: answer_rows
-        render_spec:
-          $type: RenderSpec
+        result_projection:
+          $type: ResultProjection
           fields:
             relation_outputs:
               $tuple:
-              - $type: RenderRelationOutput
+              - $type: RelationResultOutput
                 fields:
                   id: answer_1
                   relation_id: answer_rows
                   field_id: store_id
+                  entity_key: null
                   label: ''
                   role: answer_value
             scalar_outputs:
@@ -1352,7 +1362,7 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 1
+            schema_revision: 2
             compiler_version: fervis.answer_program.compiler@1
             function_semantics:
               $tuple:
@@ -1402,7 +1412,7 @@ programs:
                   source_id: sales
                   fingerprint: e7351d0771a04bb0704b7babf7f953eb634c0b1f8a0e9d88dffbf3ed981ab612
   incompatible_compiler:
-    schema_revision: 1
+    schema_revision: 2
     program:
       $type: AnswerProgram
       fields:
@@ -1421,7 +1431,7 @@ programs:
                   fields:
                     id: answer_1
                     description: answer_1
-                    role: ''
+                    role: ANSWER_VALUE
               known_inputs:
                 $tuple: []
               input_refs:
@@ -1435,7 +1445,7 @@ programs:
             fields:
               requested_fact_id: fact_1
               answer_output_id: answer_1
-              render_output_id: answer_1
+              result_output_id: answer_1
         parameters:
           $tuple:
           - $type: ParameterDeclaration
@@ -1546,16 +1556,17 @@ programs:
                     $enum: OperationKind
                     value: project
               output_relation: answer_rows
-        render_spec:
-          $type: RenderSpec
+        result_projection:
+          $type: ResultProjection
           fields:
             relation_outputs:
               $tuple:
-              - $type: RenderRelationOutput
+              - $type: RelationResultOutput
                 fields:
                   id: answer_1
                   relation_id: answer_rows
                   field_id: store_id
+                  entity_key: null
                   label: ''
                   role: answer_value
             scalar_outputs:
@@ -1563,7 +1574,7 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 1
+            schema_revision: 2
             compiler_version: incompatible.compiler@1
             function_semantics:
               $tuple:
@@ -1603,9 +1614,9 @@ programs:
                     $enum: SourceContractKind
                     value: catalog_read
                   source_id: sales
-                  fingerprint: 2d9a5f0e9bb0e0c7e1787d62d2f3c9f00446b2b57a4acd9ed2ac414a4e59f575
+                  fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   incompatible_function:
-    schema_revision: 1
+    schema_revision: 2
     program:
       $type: AnswerProgram
       fields:
@@ -1624,7 +1635,7 @@ programs:
                   fields:
                     id: answer_1
                     description: answer_1
-                    role: ''
+                    role: ANSWER_VALUE
               known_inputs:
                 $tuple: []
               input_refs:
@@ -1638,7 +1649,7 @@ programs:
             fields:
               requested_fact_id: fact_1
               answer_output_id: answer_1
-              render_output_id: answer_1
+              result_output_id: answer_1
         parameters:
           $tuple:
           - $type: ParameterDeclaration
@@ -1749,16 +1760,17 @@ programs:
                     $enum: OperationKind
                     value: project
               output_relation: answer_rows
-        render_spec:
-          $type: RenderSpec
+        result_projection:
+          $type: ResultProjection
           fields:
             relation_outputs:
               $tuple:
-              - $type: RenderRelationOutput
+              - $type: RelationResultOutput
                 fields:
                   id: answer_1
                   relation_id: answer_rows
                   field_id: store_id
+                  entity_key: null
                   label: ''
                   role: answer_value
             scalar_outputs:
@@ -1766,7 +1778,7 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 1
+            schema_revision: 2
             compiler_version: fervis.answer_program.compiler@1
             function_semantics:
               $tuple:
@@ -1806,9 +1818,9 @@ programs:
                     $enum: SourceContractKind
                     value: catalog_read
                   source_id: sales
-                  fingerprint: 2d9a5f0e9bb0e0c7e1787d62d2f3c9f00446b2b57a4acd9ed2ac414a4e59f575
+                  fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   compute_versioned_constant:
-    schema_revision: 1
+    schema_revision: 2
     program:
       $type: AnswerProgram
       fields:
@@ -1824,7 +1836,7 @@ programs:
               answer_outputs:
                 $tuple:
                 - $type: RequestedFactAnswerOutput
-                  fields: {id: answer_1, description: answer_1, role: ''}
+                  fields: {id: answer_1, description: answer_1, role: ANSWER_VALUE}
               known_inputs: {$tuple: []}
               input_refs: {$tuple: []}
               required_for: ''
@@ -1835,7 +1847,7 @@ programs:
             fields:
               requested_fact_id: fact_1
               answer_output_id: answer_1
-              render_output_id: answer_1
+              result_output_id: answer_1
         parameters: {$tuple: []}
         capabilities: {$tuple: []}
         relations: {$tuple: []}
@@ -1902,22 +1914,22 @@ programs:
                   output_scalar: scaled
                   kind: {$enum: OperationKind, value: compute}
               output_relation: ''
-        render_spec:
-          $type: RenderSpec
+        result_projection:
+          $type: ResultProjection
           fields:
             relation_outputs: {$tuple: []}
             scalar_outputs:
               $tuple:
-              - $type: RenderScalarOutput
+              - $type: ScalarResultOutput
                 fields:
                   id: answer_1
                   scalar_id: scaled
                   label: ''
-                  role: ''
+                  role: ANSWER_VALUE
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 1
+            schema_revision: 2
             compiler_version: fervis.answer_program.compiler@1
             function_semantics:
               $tuple:
@@ -1937,8 +1949,9 @@ binding_sets:
   - parameter_id: question.store_ids
     value:
       kind: identity_set
-      identity_type: store
-      identity_field: store_id
+      entity_kind: store
+      key_id: primary_key
+      key_component_id: store_id
       values: [store_1]
       known_input_id: store_ids
       applies_to_requested_fact_ids: [fact_1]
@@ -1950,8 +1963,9 @@ binding_sets:
   - parameter_id: question.store_ids
     value:
       kind: identity_set
-      identity_type: store
-      identity_field: store_id
+      entity_kind: store
+      key_id: primary_key
+      key_component_id: store_id
       values: [store_1, store_2]
     provenance: {kind: question_input}
   - parameter_id: semantic.store_population
@@ -1961,16 +1975,18 @@ binding_sets:
   - parameter_id: question.store_ids
     value:
       kind: identity_set
-      identity_type: store
-      identity_field: store_id
+      entity_kind: store
+      key_id: primary_key
+      key_component_id: store_id
       values: [store_1, store_2]
     provenance: {kind: question_input}
   capability:
   - parameter_id: question.store_ids
     value:
       kind: identity_set
-      identity_type: store
-      identity_field: store_id
+      entity_kind: store
+      key_id: primary_key
+      key_component_id: store_id
       values: [store_1, store_2]
     provenance: {kind: question_input}
 catalogs:
@@ -1984,10 +2000,7 @@ catalogs:
         name: store_id
         source: query
         type: uuid
-        identity:
-          entity_ref: store
-          identity_field: store_id
-          primary_key: true
+        entity_target: {entity_kind: store, key_id: primary_key, component_id: store_id}
       row_paths:
       - id: results
         path: results
@@ -1996,17 +2009,30 @@ catalogs:
       - ref: sales.field.sale_id
         path: results.sale_id
         type: uuid
-        identity:
-          entity_ref: sale
-          identity_field: sale_id
-          primary_key: true
       - ref: sales.field.store_id
         path: results.store_id
         type: uuid
-        identity:
-          entity_ref: store
-          identity_field: store_id
-          primary_key: true
+      candidate_keys:
+      - id: primary_key
+        entity_kind: sale
+        primary: true
+        components: [{id: sale_id, field_ref: sales.field.sale_id}]
+      entity_references:
+      - id: store_reference
+        target_entity_kind: store
+        target_key_id: primary_key
+        components: [{target_component_id: store_id, local_field_ref: sales.field.store_id}]
+    - &store_key_authority
+      id: stores
+      endpoint_name: list_store_list
+      resource_names: [store]
+      fields:
+      - {ref: stores.field.store_id, path: results.store_id, type: uuid}
+      candidate_keys:
+      - id: primary_key
+        entity_kind: store
+        primary: true
+        components: [{id: store_id, field_ref: stores.field.store_id}]
   sales_grouped:
     reads:
     - id: sales
@@ -2017,10 +2043,7 @@ catalogs:
         name: store_id
         source: query
         type: uuid
-        identity:
-          entity_ref: store
-          identity_field: store_id
-          primary_key: true
+        entity_target: {entity_kind: store, key_id: primary_key, component_id: store_id}
       - ref: sales.query.group_by
         name: group_by
         source: query
@@ -2035,20 +2058,23 @@ catalogs:
       - ref: sales.field.sale_id
         path: results.sale_id
         type: uuid
-        identity:
-          entity_ref: sale
-          identity_field: sale_id
-          primary_key: true
       - ref: sales.field.store_id
         path: results.store_id
         type: uuid
-        identity:
-          entity_ref: store
-          identity_field: store_id
-          primary_key: true
         requirements:
         - param_ref: sales.query.group_by
           value: location
+      candidate_keys:
+      - id: primary_key
+        entity_kind: sale
+        primary: true
+        components: [{id: sale_id, field_ref: sales.field.sale_id}]
+      entity_references:
+      - id: store_reference
+        target_entity_kind: store
+        target_key_id: primary_key
+        components: [{target_component_id: store_id, local_field_ref: sales.field.store_id}]
+    - *store_key_authority
   sales_channel:
     reads:
     - id: sales
@@ -2059,10 +2085,7 @@ catalogs:
         name: store_id
         source: query
         type: uuid
-        identity:
-          entity_ref: store
-          identity_field: store_id
-          primary_key: true
+        entity_target: {entity_kind: store, key_id: primary_key, component_id: store_id}
       row_paths:
       - id: results
         path: results
@@ -2071,20 +2094,23 @@ catalogs:
       - ref: sales.field.sale_id
         path: results.sale_id
         type: uuid
-        identity:
-          entity_ref: sale
-          identity_field: sale_id
-          primary_key: true
       - ref: sales.field.store_id
         path: results.store_id
         type: uuid
-        identity:
-          entity_ref: store
-          identity_field: store_id
-          primary_key: true
       - ref: sales.field.channel
         path: results.channel
         type: string
+      candidate_keys:
+      - id: primary_key
+        entity_kind: sale
+        primary: true
+        components: [{id: sale_id, field_ref: sales.field.sale_id}]
+      entity_references:
+      - id: store_reference
+        target_entity_kind: store
+        target_key_id: primary_key
+        components: [{target_component_id: store_id, local_field_ref: sales.field.store_id}]
+    - *store_key_authority
   sales_changed_endpoint:
     reads:
     - id: sales
@@ -2094,10 +2120,7 @@ catalogs:
         name: store_id
         source: query
         type: uuid
-        identity:
-          entity_ref: store
-          identity_field: store_id
-          primary_key: true
+        entity_target: {entity_kind: store, key_id: primary_key, component_id: store_id}
       row_paths:
       - id: results
         path: results
@@ -2106,17 +2129,20 @@ catalogs:
       - ref: sales.field.sale_id
         path: results.sale_id
         type: uuid
-        identity:
-          entity_ref: sale
-          identity_field: sale_id
-          primary_key: true
       - ref: sales.field.store_id
         path: results.store_id
         type: uuid
-        identity:
-          entity_ref: store
-          identity_field: store_id
-          primary_key: true
+      candidate_keys:
+      - id: primary_key
+        entity_kind: sale
+        primary: true
+        components: [{id: sale_id, field_ref: sales.field.sale_id}]
+      entity_references:
+      - id: store_reference
+        target_entity_kind: store
+        target_key_id: primary_key
+        components: [{target_component_id: store_id, local_field_ref: sales.field.store_id}]
+    - *store_key_authority
 question_contracts:
   computed_scalar:
     requested_facts:
@@ -2124,12 +2150,14 @@ question_contracts:
       description: scaled amount
       answer_outputs:
       - id: answer_1
+        role: ANSWER_VALUE
   sales_for_store:
     requested_facts:
     - id: fact_1
       description: sales for a store
       answer_outputs:
       - id: answer_1
+        role: ANSWER_VALUE
 environments:
   invocation:
     authority_ref: authority:current

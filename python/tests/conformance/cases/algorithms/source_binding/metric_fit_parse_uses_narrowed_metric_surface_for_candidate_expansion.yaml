@@ -8,7 +8,7 @@ input:
   selected_metric_field: amount
   metric_decisions:
     amount: FITS_REQUESTED_ANSWER
-    data: DOES_NOT_FIT_REQUESTED_ANSWER
+  row_population_decision: DOES_NOT_FIT_REQUESTED_ANSWER
 expect:
   result_contains:
     metric_measure_field_ids: [amount]

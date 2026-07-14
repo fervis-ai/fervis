@@ -1,0 +1,66 @@
+id: clarification_resumes_same_run
+description: A run waits for clarification, then resumes with typed request-response lineage before one final result.
+kind: algorithm
+algorithm: questions.lifecycle
+input:
+  scenario: clarification_resume
+  tenant_id: tenant_1
+  principal_id: user_1
+  question: How many sales happened in the selected area?
+  clarification:
+    id: clarification_1
+    need: target_reference
+    reason: multiple_matching_entities
+    owner: grounding
+    continuation:
+      kind: grounding
+      knownInputId: area_input
+      acceptsFreeText: false
+    requestedFactId: fact_1
+    question: Which matching area should I use?
+    subjects:
+      - kind: question_input
+        id: area_input
+        label: area
+        sourceText: selected area
+        options:
+          - id: area_nairobi
+            label: Nairobi
+            entityKind: area
+            keyId: area_id
+            keyComponents:
+              - componentId: id
+                value: area_1
+            matchedField: id
+            matchedValue: area_1
+            resolverReadId: list_areas
+    evidence:
+      - kind: resolver_read
+        id: list_areas
+        readId: list_areas
+  response_text: Nairobi
+  selected_option_id: area_nairobi
+  resumed_lookup_result:
+    status: COMPLETED
+    answer: "3"
+    result_data: {value: 3}
+expect:
+  result_contains:
+    first_result:
+      status: WAITING_FOR_CLARIFICATION
+      run_id: run_1
+    resumed_result:
+      status: COMPLETED
+      run_id: run_1
+      answer: "3"
+    question_count: 1
+    run_count: 1
+    clarification_response_count: 1
+    lookup_call_count: 2
+    resumed_original_question: How many sales happened in the selected area?
+    resumed_has_clarification_response: true
+    resumed_clarification:
+      owner: grounding
+      continuation_kind: grounding_identity
+      dispatch_count: 1
+      closed_target: {knownInputId: area_input, optionId: area_nairobi}

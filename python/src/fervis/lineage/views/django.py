@@ -101,8 +101,9 @@ class DjangoLineageQuery(LineageQueryPort):
             item.revision_id for item in invocations if item.revision_id is not None
         }
         revisions = tuple(
-            models.ProgramRevision.objects.filter(revision_id__in=revision_ids)
-            .order_by("revision_id")
+            models.ProgramRevision.objects.filter(
+                revision_id__in=revision_ids
+            ).order_by("revision_id")
         )
         program_ids = {
             *(item.program_id for item in invocations),
@@ -132,9 +133,7 @@ class DjangoLineageQuery(LineageQueryPort):
             program_invocations=tuple(
                 _program_invocation_row(item) for item in invocations
             ),
-            program_revisions=tuple(
-                _program_revision_row(item) for item in revisions
-            ),
+            program_revisions=tuple(_program_revision_row(item) for item in revisions),
             steps=tuple(
                 _step_row(item)
                 for item in models.RunStep.objects.filter(
@@ -266,9 +265,6 @@ def _run_row(item: models.QuestionRun) -> RunRow:
         kind=QuestionRunKind(item.kind),
         trigger_kind=RunTriggerKind(item.trigger_kind),
         base_run_id=item.base_run_id,
-        trigger_clarification_response_id=(
-            item.trigger_clarification_response_id or None
-        ),
     )
 
 
@@ -356,7 +352,6 @@ def _clarification_request_row(
         need=ClarificationNeed(item.need),
         reason=ClarificationReason(item.reason),
         payload_json=item.payload_json or {},
-        fact_result_id=item.fact_result_id,
         step_id=item.step_id,
     )
 

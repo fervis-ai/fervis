@@ -4,14 +4,25 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import TypeAlias, cast
 
 from fervis.lookup.question_contract import RequestedFact
-from fervis.lookup.source_binding.candidates import source_candidate_registry
+from fervis.lookup.source_binding.candidates import (
+    SourceCandidate,
+    source_candidate_registry,
+)
+from fervis.lookup.source_binding.candidates.contracts import (
+    EvidenceItem,
+    FieldEvidence,
+    RowPopulationEvidence,
+)
 from fervis.lookup.source_binding.evidence_types import (
     evidence_item_can_measure,
 )
 from fervis.lookup.source_binding.model import SourceBindingRequest
+from fervis.lookup.relation_catalog.model import CatalogField, EndpointRead
+
+MetricCandidatePayload: TypeAlias = dict[str, str | list[str]]
 
 
 def source_binding_metric_fit_surface_payload(
@@ -75,9 +86,9 @@ def _metric_candidates_by_requested_fact(
     request: SourceBindingRequest,
     *,
     metric_contexts: dict[str, dict[str, object]] | None = None,
-) -> dict[str, tuple[dict[str, object], ...]]:
+) -> dict[str, tuple[MetricCandidatePayload, ...]]:
     registry = source_candidate_registry(request)
-    output: dict[str, list[dict[str, object]]] = {}
+    output: dict[str, list[MetricCandidatePayload]] = {}
     seen_by_requested_fact: dict[str, set[str]] = {}
     relevant_field_refs = _relevant_field_refs_by_fact_candidate(request)
     facts_by_id = {fact.id: fact for fact in request.requested_facts}
@@ -88,8 +99,7 @@ def _metric_candidates_by_requested_fact(
         requested_fact_ids = _requested_fact_ids_for_candidate(candidate, request)
         if not requested_fact_ids:
             continue
-        payload = candidate.payload or {}
-        read_contract = _read_contract(payload)
+        read = _candidate_read(candidate, request=request)
         for requested_fact_id in requested_fact_ids:
             fact = facts_by_id.get(requested_fact_id)
             if fact is None:
@@ -107,7 +117,7 @@ def _metric_candidates_by_requested_fact(
                 (requested_fact_id, candidate.id)
             )
             for item in _metric_evidence_items(
-                payload,
+                candidate.evidence_items,
                 evidence_policy=evidence_policy,
                 scoped_field_refs=scoped_field_refs,
             ):
@@ -118,7 +128,7 @@ def _metric_candidates_by_requested_fact(
                     relevant_field_refs=relevant_field_refs,
                 ):
                     continue
-                evidence_id = str(item.get("evidence_id") or "")
+                evidence_id = item.evidence_id
                 if not evidence_id:
                     continue
                 field_path = _field_path_for_evidence_item(item)
@@ -131,7 +141,7 @@ def _metric_candidates_by_requested_fact(
                     metric_contexts[context_id] = _metric_context_payload(
                         candidate,
                         request=request,
-                        read_contract=read_contract,
+                        read=read,
                         context_id=context_id,
                         row_path_id=row_path_id,
                         existing=metric_contexts.get(context_id),
@@ -147,7 +157,7 @@ def _metric_candidates_by_requested_fact(
                     _metric_candidate_payload(
                         item,
                         source_candidate_id=candidate.id,
-                        read_contract=read_contract,
+                        read=read,
                         field_path=field_path,
                         metric_context_id=context_id,
                     )
@@ -173,30 +183,27 @@ def _relevant_field_refs_by_fact_candidate(
 
 
 def _metric_evidence_is_relevant(
-    item: dict[str, Any],
+    item: EvidenceItem,
     *,
     requested_fact_id: str,
     source_candidate_id: str,
     relevant_field_refs: dict[tuple[str, str], frozenset[str]],
 ) -> bool:
-    field_ref = str(item.get("field_ref") or "")
+    field_ref = item.field_ref if isinstance(item, FieldEvidence) else ""
     evidence_has_no_scope_ref = not field_ref
     if evidence_has_no_scope_ref:
         return True
     allowed_refs = relevant_field_refs.get((requested_fact_id, source_candidate_id))
-    candidate_has_no_scoped_refs = allowed_refs is None
-    if candidate_has_no_scoped_refs:
+    if allowed_refs is None:
         return True
     evidence_ref_is_in_scope = field_ref in allowed_refs
     return evidence_ref_is_in_scope
 
 
 def _requested_fact_ids_for_candidate(
-    candidate: Any,
+    candidate: SourceCandidate,
     request: SourceBindingRequest,
 ) -> tuple[str, ...]:
-    if candidate.requested_fact_id:
-        return (candidate.requested_fact_id,)
     requested_fact_ids = {fact.id for fact in request.requested_facts}
     explicit_fact_ids = tuple(
         dict.fromkeys(
@@ -213,32 +220,34 @@ def _requested_fact_ids_for_candidate(
 
 
 def _metric_candidate_payload(
-    item: dict[str, Any],
+    item: EvidenceItem,
     *,
     source_candidate_id: str,
-    read_contract: dict[str, Any],
+    read: EndpointRead | None,
     field_path: str,
     metric_context_id: str,
-) -> dict[str, object]:
-    output = {
-        "metric_evidence_id": str(item.get("evidence_id") or ""),
+) -> MetricCandidatePayload:
+    output: MetricCandidatePayload = {
+        "metric_evidence_id": item.evidence_id,
         "source_candidate_id": source_candidate_id,
-        "read_id": str(read_contract.get("read_id") or ""),
+        "read_id": read.id if read is not None else "",
         "field_path": field_path,
-        "field_type": str(item.get("type") or ""),
+        "field_type": item.type,
         "metric_context_id": metric_context_id,
     }
-    resource_names = read_contract.get("resource_names")
+    if isinstance(item, RowPopulationEvidence):
+        output["metric_operation"] = "count_rows"
+    resource_names = read.resource_names if read is not None else ()
     if resource_names:
         output["resource_names"] = list(resource_names)
     return {key: value for key, value in output.items() if value not in ("", [], ())}
 
 
 def _metric_context_payload(
-    candidate: Any,
+    candidate: SourceCandidate,
     *,
     request: SourceBindingRequest,
-    read_contract: dict[str, Any],
+    read: EndpointRead | None,
     context_id: str,
     row_path_id: str,
     existing: dict[str, object] | None,
@@ -246,23 +255,23 @@ def _metric_context_payload(
     same_row_field_paths = _same_row_field_paths(
         candidate,
         request=request,
-        read_contract=read_contract,
+        read=read,
         row_path_id=row_path_id,
     )
     scope_field_paths: tuple[str, ...] = ()
     if existing:
         same_row_field_paths = _unique(
-            *tuple(existing.get("same_row_field_paths") or ()),
+            *cast(tuple[str, ...], existing.get("same_row_field_paths") or ()),
             *same_row_field_paths,
         )
         scope_field_paths = _unique(
-            *tuple(existing.get("scope_field_paths") or ()),
+            *cast(tuple[str, ...], existing.get("scope_field_paths") or ()),
             *scope_field_paths,
         )
     output = {
         "metric_context_id": context_id,
         "source_candidate_id": candidate.id,
-        "read_id": str(read_contract.get("read_id") or ""),
+        "read_id": read.id if read is not None else "",
         "row_path_id": row_path_id,
         "same_row_field_paths": list(same_row_field_paths),
         "scope_field_paths": list(scope_field_paths),
@@ -271,15 +280,15 @@ def _metric_context_payload(
 
 
 def _same_row_field_paths(
-    candidate: Any,
+    candidate: SourceCandidate,
     *,
     request: SourceBindingRequest,
-    read_contract: dict[str, Any],
+    read: EndpointRead | None,
     row_path_id: str,
 ) -> tuple[str, ...]:
     catalog_field_paths = _same_row_catalog_field_paths(
         request=request,
-        read_id=str(read_contract.get("read_id") or ""),
+        read_id=read.id if read is not None else "",
         row_path_id=row_path_id,
     )
     if catalog_field_paths:
@@ -287,8 +296,8 @@ def _same_row_field_paths(
     return _unique(
         *(
             field_path
-            for field in candidate.fields
-            if isinstance(field, dict)
+            for field in candidate.evidence_items
+            if isinstance(field, FieldEvidence)
             for field_path in (_field_path_for_candidate_field(field),)
             if field_path and _row_path_id_for_field_path(field_path) == row_path_id
         )
@@ -318,42 +327,45 @@ def _same_row_catalog_field_paths(
     )
 
 
-def _catalog_field_row_path_id(field: Any, field_path: str) -> str:
-    row_path_id = str(getattr(field, "row_path_id", "") or "")
+def _catalog_field_row_path_id(field: CatalogField, field_path: str) -> str:
+    row_path_id = field.row_path_id
     if row_path_id:
         return row_path_id
     return _row_path_id_for_field_path(field_path)
 
 
-def _field_path_for_candidate_field(field: dict[str, Any]) -> str:
-    explicit_path = str(
-        field.get("field_path") or field.get("response_path") or field.get("path") or ""
-    )
+def _field_path_for_candidate_field(field: FieldEvidence) -> str:
+    explicit_path = field.response_path or field.path
     if explicit_path:
         return explicit_path
-    field_id = str(field.get("field_id") or field.get("id") or "")
+    field_id = field.field_id
     if not field_id:
         return ""
     if "." in field_id:
         return field_id
-    row_path_id = str(field.get("row_path_id") or "")
+    row_path_id = field.row_path_id
     if row_path_id and row_path_id != "root":
         return f"{row_path_id}.{field_id}"
     return field_id
 
 
 def _field_path_for_evidence_item(
-    item: dict[str, Any],
+    item: EvidenceItem,
 ) -> str:
-    explicit_path = str(
-        item.get("field_path") or item.get("response_path") or item.get("path") or ""
-    )
+    if isinstance(item, FieldEvidence):
+        explicit_path = item.response_path or item.path
+        field_id = item.field_id
+        row_path_id = item.row_path_id
+    elif isinstance(item, RowPopulationEvidence):
+        explicit_path = ""
+        field_id = item.row_path_id
+        row_path_id = item.row_path_id
+    else:
+        return ""
     if explicit_path:
         return explicit_path
-    field_id = str(item.get("field_id") or item.get("id") or "")
     if "." in field_id:
         return field_id
-    row_path_id = str(item.get("row_path_id") or "")
     if row_path_id and row_path_id != "root" and field_id:
         return f"{row_path_id}.{field_id}"
     return field_id
@@ -377,22 +389,18 @@ def _unique(*items: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(item for item in items if item))
 
 
-def _read_contract(payload: dict[str, Any]) -> dict[str, Any]:
-    read_contract = payload.get("read_contract")
-    if isinstance(read_contract, dict):
-        return read_contract
-    return {
-        key: payload[key]
-        for key in ("read_id", "description", "resource_names")
-        if key in payload and payload[key] not in (None, "", [], ())
-    }
-
-
-def _metric_evidence_source(payload: dict[str, Any]) -> dict[str, Any]:
-    binding_surface = payload.get("binding_surface")
-    if isinstance(binding_surface, dict):
-        return binding_surface
-    return payload
+def _candidate_read(
+    candidate: SourceCandidate,
+    *,
+    request: SourceBindingRequest,
+) -> EndpointRead | None:
+    source = candidate.source
+    if source is None or not source.read_id:
+        return None
+    try:
+        return request.relation_catalog.read(source.read_id)
+    except KeyError:
+        return None
 
 
 @dataclass(frozen=True)
@@ -404,7 +412,7 @@ class _MetricEvidencePolicy:
 
 class _MetricEvidenceKind(Enum):
     MEASURED_FIELD = "measured_field"
-    ROW_POPULATION = "row_population"
+    ROW_COUNT = "row_population"
     UNSUPPORTED = "unsupported"
 
 
@@ -415,58 +423,35 @@ def _metric_evidence_policy(
 ) -> _MetricEvidencePolicy:
     roles = _answer_output_roles(fact)
     supports_row_count_metric = _plan_shape_supports_row_count_metric(plan_shape)
-    if not roles:
-        return _legacy_metric_evidence_policy(
-            supports_row_count_metric=supports_row_count_metric,
-        )
-    return _role_scoped_metric_evidence_policy(
-        roles,
-        supports_row_count_metric=supports_row_count_metric,
-    )
-
-
-def _answer_output_roles(fact: RequestedFact) -> frozenset[str]:
-    return frozenset(
-        output.role for output in fact.support_answer_outputs if output.role
-    )
-
-
-def _role_scoped_metric_evidence_policy(
-    roles: frozenset[str],
-    *,
-    supports_row_count_metric: bool,
-) -> _MetricEvidencePolicy:
+    row_count_is_answer = "ROW_COUNT" in roles
+    row_count_is_intermediate = plan_shape in {
+        "aggregate_by_group",
+        "ranked_aggregate",
+    }
     return _MetricEvidencePolicy(
         include_measured_fields=bool(roles & {"ANSWER_VALUE", "MEASURED_VALUE"}),
-        include_scoped_measured_fields="ROW_POPULATION" in roles,
+        include_scoped_measured_fields=row_count_is_answer,
         include_row_population=(
-            "ROW_POPULATION" in roles and supports_row_count_metric
+            supports_row_count_metric
+            and (row_count_is_answer or row_count_is_intermediate)
         ),
     )
 
 
-def _legacy_metric_evidence_policy(
-    *,
-    supports_row_count_metric: bool,
-) -> _MetricEvidencePolicy:
-    return _MetricEvidencePolicy(
-        include_measured_fields=True,
-        include_scoped_measured_fields=False,
-        include_row_population=supports_row_count_metric,
-    )
+def _answer_output_roles(fact: RequestedFact) -> frozenset[str]:
+    return frozenset(output.role for output in fact.support_answer_outputs)
 
 
 def _metric_evidence_items(
-    payload: dict[str, Any],
+    evidence_items: tuple[EvidenceItem, ...],
     *,
     evidence_policy: _MetricEvidencePolicy,
     scoped_field_refs: frozenset[str] | None,
-) -> tuple[dict[str, Any], ...]:
+) -> tuple[EvidenceItem, ...]:
     return tuple(
         item
-        for item in _metric_evidence_source(payload).get("evidence_items") or ()
-        if isinstance(item, dict)
-        and _metric_evidence_policy_allows(
+        for item in evidence_items
+        if _metric_evidence_policy_allows(
             evidence_policy,
             item,
             scoped_field_refs=scoped_field_refs,
@@ -476,7 +461,7 @@ def _metric_evidence_items(
 
 def _metric_evidence_policy_allows(
     policy: _MetricEvidencePolicy,
-    item: dict[str, Any],
+    item: EvidenceItem,
     *,
     scoped_field_refs: frozenset[str] | None,
 ) -> bool:
@@ -491,36 +476,34 @@ def _metric_evidence_policy_allows(
             )
         )
         return measured_fields_are_allowed or scoped_measured_field_is_allowed
-    if evidence_kind == _MetricEvidenceKind.ROW_POPULATION:
+    if evidence_kind == _MetricEvidenceKind.ROW_COUNT:
         row_population_is_allowed = policy.include_row_population
         row_population_is_executable = _is_executable_row_population(item)
         return row_population_is_allowed and row_population_is_executable
     return False
 
 
-def _metric_evidence_kind(item: dict[str, Any]) -> _MetricEvidenceKind:
-    if str(item.get("type") or "") == "row_population":
-        return _MetricEvidenceKind.ROW_POPULATION
-    if evidence_item_can_measure(item):
+def _metric_evidence_kind(item: EvidenceItem) -> _MetricEvidenceKind:
+    if isinstance(item, RowPopulationEvidence):
+        return _MetricEvidenceKind.ROW_COUNT
+    if isinstance(item, FieldEvidence) and evidence_item_can_measure(item):
         return _MetricEvidenceKind.MEASURED_FIELD
     return _MetricEvidenceKind.UNSUPPORTED
 
 
 def _evidence_item_has_scoped_field_ref(
-    item: dict[str, Any],
+    item: EvidenceItem,
     *,
     scoped_field_refs: frozenset[str] | None,
 ) -> bool:
-    field_ref = str(item.get("field_ref") or "")
-    candidate_has_scoped_field_refs = scoped_field_refs is not None
-    field_ref_is_scoped = (
-        candidate_has_scoped_field_refs and field_ref in scoped_field_refs
-    )
-    return field_ref_is_scoped
+    field_ref = item.field_ref if isinstance(item, FieldEvidence) else ""
+    if scoped_field_refs is None:
+        return False
+    return field_ref in scoped_field_refs
 
 
-def _is_executable_row_population(item: dict[str, Any]) -> bool:
-    return str(item.get("row_cardinality") or "") == "many"
+def _is_executable_row_population(item: EvidenceItem) -> bool:
+    return isinstance(item, RowPopulationEvidence) and item.row_cardinality == "many"
 
 
 def _plan_shape_supports_row_count_metric(plan_shape: str) -> bool:

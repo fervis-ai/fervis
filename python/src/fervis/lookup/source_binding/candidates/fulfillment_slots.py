@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fervis.lookup.relation_catalog import identity_payload_is_primary_stable
 from fervis.lookup.question_contract import RequestedFact
 from fervis.lookup.question_contract.answer_output_support import (
     ANSWER_OUTPUT_SUPPORT_ROLE_VALUES,
@@ -14,21 +13,35 @@ from fervis.lookup.source_binding.evidence_types import (
 )
 
 from ._shared import Any
+from fervis.lookup.source_binding.candidates.contracts import (
+    EvidenceItem,
+    EntityEvidence,
+    CandidateKeyEvidence,
+    EntityReferenceEvidence,
+    FieldEvidence,
+    FulfillmentSlot,
+    FulfillmentSupportSet,
+    RowPopulationEvidence,
+    ValueEvidence,
+    parse_evidence_item,
+)
+
+
 @dataclass(frozen=True)
 class _EvidenceGroup:
     compatibility_basis: str
-    metric_items: tuple[dict[str, Any], ...] = ()
-    count_basis_items: tuple[dict[str, Any], ...] = ()
-    scope_items: tuple[dict[str, Any], ...] = ()
-    group_key_items: tuple[dict[str, Any], ...] = ()
+    metric_items: tuple[FieldEvidence, ...] = ()
+    value_items: tuple[FieldEvidence, ...] = ()
+    count_basis_items: tuple[RowPopulationEvidence, ...] = ()
+    entity_items: tuple[EntityEvidence, ...] = ()
 
 
 FULFILLMENT_EVIDENCE_GROUP_KINDS_BY_ANSWER_ROLE = {
-    "GROUP_KEY": ("group_key",),
-    "ROW_POPULATION": ("count_basis",),
+    "GROUP_KEY": ("entity", "value"),
+    "ROW_COUNT": ("count_basis", "metric"),
     "MEASURED_VALUE": ("metric",),
-    "POPULATION_SCOPE": ("scope",),
-    "ANSWER_VALUE": ("group_key", "metric", "scope"),
+    "POPULATION_SCOPE": ("entity", "value"),
+    "ANSWER_VALUE": ("entity", "metric", "value"),
 }
 
 if set(FULFILLMENT_EVIDENCE_GROUP_KINDS_BY_ANSWER_ROLE) != set(
@@ -44,7 +57,7 @@ def _candidate_with_fulfillment_slots(
     support_field_refs: frozenset[str] | None = None,
 ) -> dict[str, Any]:
     evidence_items = tuple(
-        item
+        parse_evidence_item(item)
         for item in candidate.get("evidence_items") or ()
         if isinstance(item, dict) and str(item.get("evidence_id") or "")
     )
@@ -58,78 +71,87 @@ def _candidate_with_fulfillment_slots(
     output = dict(candidate)
     fulfillment_slots = [
         slot
-    for fact in requested_facts
+        for fact in requested_facts
         for answer_output in fact.support_answer_outputs
         for group in _answer_output_evidence_item_groups(
             support_evidence_items,
             answer_output_id=answer_output.id,
             answer_output_role=answer_output.role,
             row_population_path_ids=row_population_path_ids,
-            allow_scoped_metrics_for_row_population=support_field_refs is not None,
         )
         for slot in (
             _fulfillment_slot(
                 candidate_id=str(output.get("source_candidate_id") or ""),
                 answer_output_id=answer_output.id,
+                answer_output_role=answer_output.role,
                 evidence_group=group,
             ),
         )
     ]
-    output["fulfillment_slots"] = fulfillment_slots
+    output["fulfillment_slots"] = [slot.payload() for slot in fulfillment_slots]
     output["fulfillment_support_sets"] = _fulfillment_support_sets(
         candidate_id=str(output.get("source_candidate_id") or ""),
         fulfillment_slots=tuple(fulfillment_slots),
     )
+    output["fulfillment_support_sets"] = [
+        support_set.payload() for support_set in output["fulfillment_support_sets"]
+    ]
     return output
 
 
 def _support_evidence_items(
-    evidence_items: tuple[dict[str, Any], ...],
+    evidence_items: tuple[EvidenceItem, ...],
     *,
     support_field_refs: frozenset[str] | None,
-) -> tuple[dict[str, Any], ...]:
+) -> tuple[EvidenceItem, ...]:
     if support_field_refs is None:
         return evidence_items
     return tuple(
         item
         for item in evidence_items
-        if str(item.get("type") or "") == "row_population"
-        or str(item.get("field_ref") or "") in support_field_refs
+        if item.type in {"candidate_key", "entity_reference", "row_population"}
+        or isinstance(item, FieldEvidence)
+        and item.field_ref in support_field_refs
     )
 
 
 def _answer_output_evidence_item_groups(
-    evidence_items: tuple[dict[str, Any], ...],
+    evidence_items: tuple[EvidenceItem, ...],
     *,
     answer_output_id: str,
     answer_output_role: str,
     row_population_path_ids: tuple[str, ...],
-    allow_scoped_metrics_for_row_population: bool,
 ) -> tuple[_EvidenceGroup, ...]:
     explicitly_scoped = tuple(
         item
         for item in evidence_items
-        if answer_output_id
-        in {str(raw) for raw in item.get("answer_output_ids") or () if str(raw).strip()}
+        if isinstance(item, (FieldEvidence, ValueEvidence))
+        and answer_output_id in item.answer_output_ids
     )
     row_population_groups = _row_population_count_basis_groups(
         evidence_items,
         row_path_ids=row_population_path_ids,
         compatibility_basis="source_result_grain",
     )
+    entity_groups = _entity_evidence_groups(
+        evidence_items,
+        compatibility_basis="declared_candidate_key",
+    )
     if explicitly_scoped:
         groups = (
             *row_population_groups,
+            *entity_groups,
             *_evidence_item_groups(
-                _with_structural_identity_items(
-                    explicitly_scoped,
-                    evidence_items=evidence_items,
-                ),
+                explicitly_scoped,
                 compatibility_basis="explicit_answer_output_metadata",
             ),
         )
-    elif any(item.get("answer_output_ids") for item in evidence_items):
-        groups = row_population_groups
+    elif any(
+        item.answer_output_ids
+        for item in evidence_items
+        if isinstance(item, (FieldEvidence, ValueEvidence))
+    ):
+        groups = (*row_population_groups, *entity_groups)
     else:
         groups = _open_candidate_evidence_item_groups(
             evidence_items,
@@ -142,9 +164,6 @@ def _answer_output_evidence_item_groups(
         if _evidence_group_matches_answer_output_role(
             group,
             answer_output_role=answer_output_role,
-            allow_scoped_metrics_for_row_population=(
-                allow_scoped_metrics_for_row_population
-            ),
         )
     )
 
@@ -153,14 +172,10 @@ def _evidence_group_matches_answer_output_role(
     group: _EvidenceGroup,
     *,
     answer_output_role: str,
-    allow_scoped_metrics_for_row_population: bool,
 ) -> bool:
     if not answer_output_role:
         return True
-    allowed_kinds = _allowed_evidence_group_kinds(
-        answer_output_role,
-        allow_scoped_metrics_for_row_population=allow_scoped_metrics_for_row_population,
-    )
+    allowed_kinds = _allowed_evidence_group_kinds(answer_output_role)
     if allowed_kinds is None:
         raise ValueError("unsupported answer output support role")
     allowed_kind_set = set(allowed_kinds)
@@ -171,31 +186,21 @@ def _evidence_group_matches_answer_output_role(
 
 def _allowed_evidence_group_kinds(
     answer_output_role: str,
-    *,
-    allow_scoped_metrics_for_row_population: bool,
 ) -> tuple[str, ...] | None:
-    kinds = FULFILLMENT_EVIDENCE_GROUP_KINDS_BY_ANSWER_ROLE.get(answer_output_role)
-    if kinds is None:
-        return None
-    answer_role_is_row_population = answer_output_role == "ROW_POPULATION"
-    scoped_metric_support_is_allowed = allow_scoped_metrics_for_row_population
-    if answer_role_is_row_population and scoped_metric_support_is_allowed:
-        return (*kinds, "metric")
-    return kinds
+    return FULFILLMENT_EVIDENCE_GROUP_KINDS_BY_ANSWER_ROLE.get(answer_output_role)
 
 
 def _evidence_group_kinds(group: _EvidenceGroup) -> set[str]:
     kinds: set[str] = set()
-    if group.group_key_items:
-        kinds.add("group_key")
+    if group.entity_items:
+        kinds.add("entity")
     if group.count_basis_items:
         kinds.add("count_basis")
     if group.metric_items:
         kinds.add("metric")
-    if group.scope_items:
-        kinds.add("scope")
+    if group.value_items:
+        kinds.add("value")
     return kinds
-
 
 
 def _candidate_row_population_path_ids(candidate: dict[str, Any]) -> tuple[str, ...]:
@@ -211,7 +216,7 @@ def _candidate_row_population_path_ids(candidate: dict[str, Any]) -> tuple[str, 
 
 
 def _open_candidate_evidence_item_groups(
-    evidence_items: tuple[dict[str, Any], ...],
+    evidence_items: tuple[EvidenceItem, ...],
     *,
     row_population_path_ids: tuple[str, ...],
     compatibility_basis: str,
@@ -230,7 +235,7 @@ def _open_candidate_evidence_item_groups(
 
 
 def _row_population_count_basis_groups(
-    evidence_items: tuple[dict[str, Any], ...],
+    evidence_items: tuple[EvidenceItem, ...],
     *,
     row_path_ids: tuple[str, ...],
     compatibility_basis: str,
@@ -249,47 +254,25 @@ def _row_population_count_basis_groups(
 
 
 def _row_population_count_basis_items(
-    evidence_items: tuple[dict[str, Any], ...],
+    evidence_items: tuple[EvidenceItem, ...],
     *,
     row_path_id: str,
-) -> tuple[dict[str, Any], ...]:
+) -> tuple[RowPopulationEvidence, ...]:
     return tuple(
         item
         for item in evidence_items
-        if _evidence_item_is_row_population_for_path(item, row_path_id=row_path_id)
+        if isinstance(item, RowPopulationEvidence) and item.row_path_id == row_path_id
     )
 
 
-def _with_structural_identity_items(
-    items: tuple[dict[str, Any], ...],
-    *,
-    evidence_items: tuple[dict[str, Any], ...],
-) -> tuple[dict[str, Any], ...]:
-    output = list(items)
-    seen = {str(item.get("evidence_id") or "") for item in output}
-    for item in evidence_items:
-        evidence_id = str(item.get("evidence_id") or "")
-        evidence_item_already_selected = evidence_id in seen
-        evidence_item_has_stable_identity = _field_has_stable_identity_shape(item)
-        if evidence_item_already_selected or not evidence_item_has_stable_identity:
-            continue
-        output.append(item)
-        seen.add(evidence_id)
-    return tuple(output)
-
-
 def _evidence_item_groups(
-    evidence_items: tuple[dict[str, Any], ...],
+    evidence_items: tuple[EvidenceItem, ...],
     *,
     compatibility_basis: str,
 ) -> tuple[_EvidenceGroup, ...]:
-    group_key_groups = tuple(
-        _EvidenceGroup(
-            group_key_items=(item,),
-            compatibility_basis=compatibility_basis,
-        )
-        for item in evidence_items
-        if _field_can_group_rows(item)
+    entity_groups = _entity_evidence_groups(
+        evidence_items,
+        compatibility_basis=compatibility_basis,
     )
     metric_groups = tuple(
         _EvidenceGroup(
@@ -297,130 +280,100 @@ def _evidence_item_groups(
             compatibility_basis=compatibility_basis,
         )
         for item in evidence_items
-        if evidence_item_can_measure(item)
+        if isinstance(item, FieldEvidence) and evidence_item_can_measure(item)
     )
-    return (*group_key_groups, *metric_groups)
+    value_groups = tuple(
+        _EvidenceGroup(
+            value_items=(item,),
+            compatibility_basis=compatibility_basis,
+        )
+        for item in evidence_items
+        if isinstance(item, FieldEvidence) and _evidence_item_can_be_direct_value(item)
+    )
+    return (*entity_groups, *metric_groups, *value_groups)
 
 
-def _field_can_group_rows(evidence_item: dict[str, Any]) -> bool:
-    field_id = str(evidence_item.get("field_id") or "")
-    field_has_id = bool(field_id)
-    if not field_has_id:
+def _evidence_item_can_be_direct_value(item: EvidenceItem) -> bool:
+    if not isinstance(item, FieldEvidence):
         return False
-    field_is_measure = evidence_item_can_measure(evidence_item)
-    if field_is_measure:
+    if item.presentation_only:
         return False
-    field_type = str(evidence_item.get("type") or "").lower()
-    field_type_can_group_rows = field_type not in {
+    if item.entity_evidence_member:
+        return False
+    if evidence_item_can_measure(item):
+        return False
+    if not item.field_id:
+        return False
+    return item.type.lower() not in {
         "any",
-        "json",
-        "object",
         "array",
+        "json",
         "list",
+        "object",
+        "row_population",
     }
-    return field_type_can_group_rows
 
 
-def _evidence_item_is_row_population_for_path(
-    item: dict[str, Any],
+def _entity_evidence_groups(
+    evidence_items: tuple[EvidenceItem, ...],
     *,
-    row_path_id: str,
-) -> bool:
-    evidence_is_for_row_path = str(item.get("row_path_id") or "") == row_path_id
-    evidence_is_row_population = str(item.get("type") or "") == "row_population"
-    return evidence_is_for_row_path and evidence_is_row_population
-
-
-def _field_has_stable_identity_shape(evidence_item: dict[str, Any]) -> bool:
-    return identity_payload_is_primary_stable(evidence_item.get("identity"))
+    compatibility_basis: str,
+) -> tuple[_EvidenceGroup, ...]:
+    return tuple(
+        _EvidenceGroup(
+            entity_items=(item,),
+            compatibility_basis=compatibility_basis,
+        )
+        for item in evidence_items
+        if isinstance(item, (CandidateKeyEvidence, EntityReferenceEvidence))
+    )
 
 
 def _fulfillment_slot(
     *,
     candidate_id: str,
     answer_output_id: str,
+    answer_output_role: str,
     evidence_group: _EvidenceGroup,
-) -> dict[str, Any]:
+) -> FulfillmentSlot:
     evidence_ids = tuple(
         dict.fromkeys(
-            str(evidence_item.get("evidence_id") or "")
+            evidence_item.evidence_id
             for evidence_item in (
                 *evidence_group.metric_items,
+                *evidence_group.value_items,
                 *evidence_group.count_basis_items,
-                *evidence_group.scope_items,
-                *evidence_group.group_key_items,
+                *evidence_group.entity_items,
             )
-            if str(evidence_item.get("evidence_id") or "")
+            if evidence_item.evidence_id
         )
     )
-    output = {
-        "fulfillment_slot_id": _fulfillment_slot_id(
+    return FulfillmentSlot(
+        fulfillment_slot_id=_fulfillment_slot_id(
             candidate_id=candidate_id,
             answer_output_id=answer_output_id,
             evidence_ids=evidence_ids,
             role_key=_fulfillment_slot_role_key(evidence_group),
         ),
-        "answer_output_id": answer_output_id,
-        "compatibility_basis": evidence_group.compatibility_basis,
-    }
-    if evidence_group.scope_items:
-        output["scope_evidence"] = [
-            _fulfillment_evidence_item(evidence_item)
-            for evidence_item in evidence_group.scope_items
-        ]
-    if evidence_group.metric_items:
-        output["metric_measure_evidence"] = [
-            _fulfillment_evidence_item(evidence_item)
-            for evidence_item in evidence_group.metric_items
-        ]
-    if evidence_group.count_basis_items:
-        output["row_count_basis_evidence"] = [
-            _fulfillment_evidence_item(evidence_item)
-            for evidence_item in evidence_group.count_basis_items
-        ]
-    if evidence_group.group_key_items:
-        output["group_key_evidence"] = [
-            _fulfillment_evidence_item(evidence_item)
-            for evidence_item in evidence_group.group_key_items
-        ]
-    return output
-
-
-def _fulfillment_evidence_item(evidence_item: dict[str, Any]) -> dict[str, Any]:
-    output = {
-        key: str(evidence_item.get(key) or "")
-        for key in (
-            "evidence_id",
-            "field_id",
-            "field_ref",
-            "label",
-            "path",
-            "response_path",
-            "type",
-            "row_cardinality",
-            "row_path_id",
-            "row_source_id",
-        )
-        if str(evidence_item.get(key) or "")
-    }
-    identity = evidence_item.get("identity")
-    if isinstance(identity, dict) and identity:
-        output["identity"] = dict(identity)
-    roles = tuple(str(role) for role in evidence_item.get("roles") or () if str(role))
-    if roles:
-        output["roles"] = list(roles)
-    if "field_id" not in output:
-        output["field_id"] = output.get("evidence_id", "")
-    return output
+        answer_output_id=answer_output_id,
+        compatibility_basis=evidence_group.compatibility_basis,
+        answer_output_role=answer_output_role,
+        metric_measure_evidence=evidence_group.metric_items,
+        value_evidence=evidence_group.value_items,
+        row_count_basis_evidence=evidence_group.count_basis_items,
+        entity_evidence=evidence_group.entity_items,
+    )
 
 
 def _fulfillment_slot_role_key(evidence_group: _EvidenceGroup) -> str:
     if evidence_group.metric_items:
         return "metric"
+    if evidence_group.value_items:
+        return "value"
     if evidence_group.count_basis_items:
         return "count"
-    if evidence_group.group_key_items:
-        return "group"
+    if evidence_group.entity_items:
+        return "entity"
     return "support"
 
 
@@ -438,15 +391,15 @@ def _fulfillment_slot_id(
 def _fulfillment_support_sets(
     *,
     candidate_id: str,
-    fulfillment_slots: tuple[dict[str, Any], ...],
-) -> list[dict[str, Any]]:
-    slots_by_output: dict[str, list[dict[str, Any]]] = {}
+    fulfillment_slots: tuple[FulfillmentSlot, ...],
+) -> list[FulfillmentSupportSet]:
+    slots_by_output: dict[str, list[FulfillmentSlot]] = {}
     for slot in fulfillment_slots:
-        answer_output_id = str(slot.get("answer_output_id") or "")
+        answer_output_id = slot.answer_output_id
         if not answer_output_id:
             continue
         slots_by_output.setdefault(answer_output_id, []).append(slot)
-    output: list[dict[str, Any]] = []
+    output: list[FulfillmentSupportSet] = []
     for answer_output_id, slots in slots_by_output.items():
         if not slots:
             continue
@@ -464,8 +417,8 @@ def _role_aware_fulfillment_support_sets(
     *,
     candidate_id: str,
     answer_output_id: str,
-    slots: tuple[dict[str, Any], ...],
-) -> tuple[dict[str, Any], ...]:
+    slots: tuple[FulfillmentSlot, ...],
+) -> tuple[FulfillmentSupportSet, ...]:
     return tuple(
         _fulfillment_support_set(
             candidate_id=candidate_id,
@@ -477,15 +430,12 @@ def _role_aware_fulfillment_support_sets(
     )
 
 
-def _support_slot_has_evidence(slot: dict[str, Any]) -> bool:
-    return any(
-        slot.get(key)
-        for key in (
-            "metric_measure_evidence",
-            "row_count_basis_evidence",
-            "scope_evidence",
-            "group_key_evidence",
-        )
+def _support_slot_has_evidence(slot: FulfillmentSlot) -> bool:
+    return bool(
+        slot.metric_measure_evidence
+        or slot.value_evidence
+        or slot.row_count_basis_evidence
+        or slot.entity_evidence
     )
 
 
@@ -493,21 +443,20 @@ def _fulfillment_support_set(
     *,
     candidate_id: str,
     answer_output_id: str,
-    slots: tuple[dict[str, Any], ...],
-) -> dict[str, Any]:
-    return {
-        "fulfillment_support_set_id": _fulfillment_support_set_id(
-            candidate_id=candidate_id,
-            answer_output_id=answer_output_id,
-            slot_ids=tuple(
-                str(slot.get("fulfillment_slot_id") or "")
-                for slot in slots
-                if str(slot.get("fulfillment_slot_id") or "")
-            ),
+    slots: tuple[FulfillmentSlot, ...],
+) -> FulfillmentSupportSet:
+    support_set_id = _fulfillment_support_set_id(
+        candidate_id=candidate_id,
+        answer_output_id=answer_output_id,
+        slot_ids=tuple(
+            slot.fulfillment_slot_id for slot in slots if slot.fulfillment_slot_id
         ),
-        "answer_output_id": answer_output_id,
-        "fulfillment_slots": list(slots),
-    }
+    )
+    return FulfillmentSupportSet(
+        fulfillment_support_set_id=support_set_id,
+        answer_output_id=answer_output_id,
+        fulfillment_slots=slots,
+    )
 
 
 def _fulfillment_support_set_id(

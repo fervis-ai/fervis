@@ -4,10 +4,13 @@ from dataclasses import replace
 import pytest
 
 from fervis.lookup.relation_catalog import (
+    CandidateKey,
+    CandidateKeyComponent,
     CatalogField,
     CatalogParam,
     EndpointRead,
-    IdentityMetadata,
+    EntityReference,
+    EntityReferenceComponent,
     ParamSource,
     RelationCatalog,
     RowCardinality,
@@ -28,14 +31,20 @@ from fervis.lookup.answer_program.values import (
     FactValue,
     TimeComponent,
 )
+from fervis.lookup.canonical_data import entity_key_value
 from fervis.lookup.question_contract import (
+    AnswerPopulationMembershipTestKind,
+    AnswerPopulationMembershipTestPolarity,
     KnownInputSource,
     LiteralInputRole,
     NormalInstanceExcludedStateRole,
     QuestionContract,
     RequestedFact,
+    RequestedFactAnswerPopulation,
+    RequestedFactAnswerPopulationMembershipTest,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
+    ResultSelectionKind,
     RequestedFactAnswerOutput,
     RequestedFactAnswerSubject,
     RequestedFactLiteralInput,
@@ -57,6 +66,8 @@ from fervis.lookup.read_eligibility.surface import (
 from fervis.lookup.source_binding import (
     AnswerPopulation,
     BoundSource,
+    CandidateKeyEvidence,
+    EntityEvidenceComponent,
     SourceEvidenceItem,
     SourceFulfillment,
     SourceBindingRequest,
@@ -85,7 +96,10 @@ from fervis.lookup.source_binding.candidates.fulfillment_slots import (
 from fervis.lookup.source_binding.candidates.evidence import (
     _candidate_with_evidence_items,
 )
-from fervis.lookup.source_binding.candidates import source_candidate_registry
+from fervis.lookup.source_binding.candidates import (
+    SourceCandidate,
+    source_candidate_registry,
+)
 from fervis.lookup.source_binding.candidates.registry import (
     source_candidate_discovery_payload,
 )
@@ -94,7 +108,11 @@ from fervis.lookup.source_binding.parser.candidate_access import (
 )
 from fervis.lookup.source_binding.parser import parse_source_binding
 from fervis.lookup.turn_prompts.projections import source_binding_candidates_xml
-from tests.lookup.source_binding_helpers import source_fulfills_for_candidate
+from tests.lookup.source_binding_helpers import (
+    source_binding_request,
+    source_fulfills_for_candidate,
+    source_fulfills_keys_for_candidate,
+)
 
 
 def _candidate_with_evidence_and_fulfillment_slots(
@@ -218,6 +236,107 @@ def test_source_binding_does_not_promote_utility_sources_as_fact_sources_after_r
     assert "utility_source_candidates" not in payload
 
 
+def test_source_candidate_discovery_offers_source_with_grounded_named_filter(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    base_request = _request_with_optional_params()
+    location_input = RequestedFactLiteralInput(
+        id="location_1",
+        source=KnownInputSource.QUESTION_CONTEXT,
+        text="Nairobi",
+        resolved_value_text="Nairobi",
+        role=LiteralInputRole.REFERENCE_VALUE,
+    )
+    fact = replace(
+        base_request.requested_facts[0],
+        answer_population=RequestedFactAnswerPopulation(
+            population_label="stores in Nairobi",
+            counted_unit="stores",
+            membership_tests=(
+                RequestedFactAnswerPopulationMembershipTest(
+                    id="subject_identity",
+                    kind=AnswerPopulationMembershipTestKind.SUBJECT_IDENTITY,
+                    polarity=AnswerPopulationMembershipTestPolarity.MUST_PASS,
+                    test_question="Does this row represent a store?",
+                ),
+                RequestedFactAnswerPopulationMembershipTest(
+                    id="location_constraint",
+                    kind=(
+                        AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT
+                    ),
+                    polarity=AnswerPopulationMembershipTestPolarity.MUST_PASS,
+                    test_question="Is the store in the requested location?",
+                    owned_question_input_refs=("location_1",),
+                ),
+            ),
+        ),
+        known_inputs=(location_input,),
+        input_refs=("location_1",),
+    )
+    location_value = FactValue.named(
+        id="grounded_location_1",
+        known_input_id="location_1",
+        text="Nairobi",
+        matched_field_ref="field.location.area_name",
+        applies_to_requested_fact_ids=("fact_1",),
+    )
+    request = replace(
+        base_request,
+        question_contract=QuestionContract(requested_facts=(fact,)),
+        requested_facts=(fact,),
+        available_values=(location_value,),
+        available_value_uses=(),
+        read_eligibility=None,
+    )
+    candidates = (
+        {
+            "read_id": "list_store_list",
+            "row_source_id": "api:list_store_list:root",
+            "row_path_id": "root",
+            "read_row_source_count": 1,
+            "fields": [{"field_id": "store_id", "type": "uuid"}],
+            "result_grains": [],
+        },
+        {
+            "read_id": "list_location_list",
+            "row_source_id": "api:list_location_list:root",
+            "row_path_id": "root",
+            "read_row_source_count": 1,
+            "fields": [{"field_id": "location_id", "type": "uuid"}],
+            "result_grains": [],
+            "applied_filters": [
+                {
+                    "kind": "named",
+                    "known_input_id": "location_1",
+                    "value_id": "grounded_location_1",
+                    "field_ids": ["area_name"],
+                    "matched_field_ref": "field.location.area_name",
+                    "display_value": "Nairobi",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        raw_payload_module,
+        "available_relation_catalog_payload",
+        lambda *args, **kwargs: {
+            "requested_fact_relations": [
+                {
+                    "requested_fact_id": "fact_1",
+                    "query_terms": ["stores", "Nairobi"],
+                    "available_relations": list(candidates),
+                }
+            ]
+        },
+    )
+
+    payload = raw_payload_module._raw_source_binding_candidate_payload(request)
+
+    assert [candidate["read_id"] for candidate in _source_options(payload)] == [
+        "list_location_list"
+    ]
+
+
 def test_source_binding_registry_candidates_use_model_visible_support_sets():
     request = _request_with_optional_params()
     registry = source_candidate_registry(request)
@@ -226,20 +345,18 @@ def test_source_binding_registry_candidates_use_model_visible_support_sets():
         prompt_candidate["source_candidate_id"]
     ]
     prompt_support_sets = _binding_surface(prompt_candidate)["fulfillment_support_sets"]
-    parser_support_sets = parser_candidate.payload["fulfillment_support_sets"]
+    parser_support_sets = parser_candidate.fulfillment_support_sets
 
     assert set(registry.candidates_by_id) == set(registry.prompt_candidate_ids)
     assert all("fulfillment_choice_id" in item for item in prompt_support_sets)
     assert all("fulfillment_support_set_id" not in item for item in prompt_support_sets)
     parser_visible_support_sets = [
-        item for item in parser_support_sets if item.get("fulfillment_choice_id")
+        item for item in parser_support_sets if item.fulfillment_choice_id
     ]
-    assert [item["fulfillment_choice_id"] for item in parser_visible_support_sets] == [
+    assert [item.fulfillment_choice_id for item in parser_visible_support_sets] == [
         item["fulfillment_choice_id"] for item in prompt_support_sets
     ]
-    assert all(
-        "fulfillment_support_set_id" in item for item in parser_visible_support_sets
-    )
+    assert all(item.fulfillment_support_set_id for item in parser_visible_support_sets)
 
 
 def test_source_binding_targets_are_compact_role_targets_not_private_plan_variants():
@@ -397,7 +514,20 @@ def test_bound_source_prompt_payload_carries_only_answer_evidence_roles():
                         requested_fact_id="fact_1",
                         answer_output_id="answer_1",
                         match_basis_explanation="The source exposes the answer value.",
-                        group_key_evidence_ids=("source_1.root.name",),
+                        entity_evidence=CandidateKeyEvidence(
+                            evidence_id="source_1.root.key.staff_key",
+                            key_id="staff_key",
+                            entity_kind="staff",
+                            components=(
+                                EntityEvidenceComponent(
+                                    component_id="staff_id",
+                                    field_evidence_id="source_1.root.name",
+                                    field_id="name",
+                                ),
+                            ),
+                            row_source_id="read.staff.root",
+                            row_path_id="root",
+                        ),
                     ),
                 ),
                 evidence_items=(
@@ -417,19 +547,31 @@ def test_bound_source_prompt_payload_carries_only_answer_evidence_roles():
         "answer_output_id",
         "match_basis_explanation",
         "metric_measure_evidence_ids",
+        "value_evidence_ids",
         "row_count_basis_evidence_ids",
-        "scope_evidence_ids",
-        "group_key_evidence_ids",
+        "entity_evidence",
     }
-    assert fulfillment["group_key_evidence_ids"] == ["source_1.root.name"]
+    assert fulfillment["entity_evidence"] == {
+        "type": "candidate_key",
+        "key_id": "staff_key",
+        "entity_kind": "staff",
+        "components": [
+            {
+                "component_id": "staff_id",
+                "field_evidence_id": "source_1.root.name",
+                "field_id": "name",
+            }
+        ],
+    }
 
 
 def test_source_linked_value_usage_checks_metric_evidence():
-    candidate = type(
-        "Candidate",
-        (),
-        {"payload": {"source_field_id": "amount"}},
-    )()
+    candidate = SourceCandidate(
+        id="source_1",
+        applies_to_requested_fact_ids=("fact_1",),
+        kind="value",
+        source_field_id="amount",
+    )
     bound = BoundSource(
         id="sb_1",
         requested_fact_id="fact_1",
@@ -460,11 +602,17 @@ def test_source_linked_value_usage_checks_metric_evidence():
 
 
 def test_ranked_aggregate_source_binding_keeps_selected_group_key_lineage():
-    base = _request_with_optional_params(include_extra_evidence_field=True)
+    base = _request_with_optional_params(
+        include_extra_evidence_field=True,
+        include_identity_evidence_field=True,
+        include_many_data_row_path=True,
+    )
     fact = replace(
         base.requested_facts[0],
         answer_expression=RequestedFactAnswerExpression(
             family=RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+            selection_kind=ResultSelectionKind.LIMITED_RESULTS,
+            limit_input_ref="limit",
         ),
     )
     request = replace(
@@ -500,7 +648,7 @@ def test_ranked_aggregate_source_binding_keeps_selected_group_key_lineage():
                 does_not_count=("CLOSED",),
             )
         },
-        field_ids=("unrelated",),
+        key_ids_by_answer_output={"answer_1": "sale_key"},
     )
     metric_evidence_ids = source_binding_metric_evidence_ids_by_requested_fact(request)[
         "fact_1"
@@ -524,11 +672,37 @@ def test_ranked_aggregate_source_binding_keeps_selected_group_key_lineage():
     result = parse_source_binding({"outcome": outcome}, request=request)
 
     fulfillment = result.outcome.bound_sources[0].fulfillments[0]
-    assert fulfillment.group_key_evidence_ids == ("source_1.root.unrelated",)
+    assert fulfillment.entity_evidence is not None
+    assert fulfillment.entity_evidence.key_id == "sale_key"
+    assert tuple(
+        component.field_id for component in fulfillment.entity_evidence.components
+    ) == ("sale_id",)
 
 
 def test_ranked_aggregate_source_binding_choices_use_canonical_group_identity():
     request = _ranked_staff_compensation_request()
+    expected_choice_id = "source_1.data.reference.compensation_staff"
+    candidate = source_candidate_registry(request).candidates_by_id["source_1"]
+    selected_support_set = next(
+        support_set
+        for support_set in candidate.fulfillment_support_sets
+        if support_set.fulfillment_choice_id == expected_choice_id
+    )
+    selected_plan = request.plan_selection.plan_selections[0]
+    selected_member = replace(
+        selected_plan.source_members[0],
+        fulfillment_support_set_ids=(
+            selected_support_set.fulfillment_support_set_id,
+        ),
+    )
+    request = replace(
+        request,
+        plan_selection=PlanSelectionSet(
+            plan_selections=(
+                replace(selected_plan, source_members=(selected_member,)),
+            )
+        ),
+    )
     prompt = SourceBindingTurnPrompt(request)
     candidate_payload = prompt.source_invocation_candidate_payload()
     candidate = _source_candidate(
@@ -545,15 +719,14 @@ def test_ranked_aggregate_source_binding_choices_use_canonical_group_identity():
     )
     candidate_prompt = source_binding_candidates_xml(candidate_payload)
 
-    assert choice_ids == ("source_1.data.staff_id",)
-    assert '<choice id="source_1.data.staff_id"' in candidate_prompt
-    assert 'identity="staff.staff_id primary_stable"' in candidate_prompt
+    assert choice_ids == (expected_choice_id,)
+    assert f'<choice id="{expected_choice_id}"' in candidate_prompt
     assert "data.staff_name" in candidate_prompt
     assert '<choice id="source_1.data.staff_name"' not in candidate_prompt
     assert '<choice id="source_1.data.location_name"' not in candidate_prompt
 
 
-def test_ranked_aggregate_source_binding_prefers_relevant_answer_identity():
+def test_ranked_aggregate_source_binding_exposes_declared_entity_evidence():
     request = _ranked_store_sales_request()
     prompt = SourceBindingTurnPrompt(request)
     candidate_payload = prompt.source_invocation_candidate_payload()
@@ -571,10 +744,11 @@ def test_ranked_aggregate_source_binding_prefers_relevant_answer_identity():
     )
     candidate_prompt = source_binding_candidates_xml(candidate_payload)
 
-    assert "source_1.data.location_id" in choice_ids
-    assert "source_1.data.sale_id" not in choice_ids
-    assert '<choice id="source_1.data.location_id"' in candidate_prompt
-    assert '<choice id="source_1.data.sale_id"' not in candidate_prompt
+    assert "source_1.data.reference.sale_location" in choice_ids
+    assert "source_1.data.key.sale_key" in choice_ids
+    assert '<choice id="source_1.data.reference.sale_location"' in candidate_prompt
+    assert '<choice id="source_1.data.key.sale_key"' in candidate_prompt
+    assert '<choice id="source_1.data.location_name"' not in candidate_prompt
 
 
 def test_row_population_metric_fit_surface_is_backend_owned_count_basis():
@@ -597,7 +771,7 @@ def test_row_population_metric_fit_surface_is_backend_owned_count_basis():
             RequestedFactAnswerOutput(
                 id="answer_1",
                 description="sales count",
-                role="ROW_POPULATION",
+                role="ROW_COUNT",
             ),
         ),
     )
@@ -641,26 +815,6 @@ def test_row_population_metric_fit_keeps_read_scoped_summary_metric():
         "source_1.summary.total_count",
     )
     assert "source_1.data.item_count" not in metric_evidence_ids
-
-    prompt = SourceBindingTurnPrompt(request)
-    candidate = _source_candidate(
-        prompt.source_invocation_candidate_payload(),
-        requested_fact_id="fact_1",
-        read_id="sales_summary",
-    )
-    support_sets = _binding_surface(candidate).get("fulfillment_support_sets") or ()
-    fulfillment_metric_ids = {
-        item["evidence_id"]
-        for support_set in support_sets
-        if isinstance(support_set, dict)
-        and support_set.get("answer_output_id") == "answer_1"
-        for slot in support_set.get("fulfillment_slots") or ()
-        if isinstance(slot, dict)
-        for item in slot.get("metric_measure_evidence") or ()
-        if isinstance(item, dict)
-    }
-
-    assert fulfillment_metric_ids == {"source_1.summary.total_count"}
 
 
 def test_row_population_metric_fit_ids_do_not_collapse_across_candidates():
@@ -718,8 +872,20 @@ def test_row_population_metric_fit_ids_do_not_collapse_across_candidates():
         ),
         selected_read_ids=("sales", "returns"),
     )
-    request = replace(
-        base,
+    row_count_fact = replace(
+        base.requested_facts[0],
+        answer_outputs=(
+            RequestedFactAnswerOutput(
+                id="answer_1",
+                description="record count",
+                role="ROW_COUNT",
+            ),
+        ),
+    )
+    request = source_binding_request(
+        question=base.question,
+        question_contract=QuestionContract(requested_facts=(row_count_fact,)),
+        requested_facts=(row_count_fact,),
         relation_catalog=catalog,
         catalog_selection=catalog_selection,
         plan_selection=_selected_plan(
@@ -731,6 +897,10 @@ def test_row_population_metric_fit_ids_do_not_collapse_across_candidates():
             requested_facts=base.requested_facts,
             catalog_selection=catalog_selection,
         ),
+        available_values=base.available_values,
+        available_value_uses=base.available_value_uses,
+        conversation_context=base.conversation_context,
+        host=base.host,
     )
 
     surface = source_binding_metric_fit_surface_payload(request)
@@ -820,8 +990,10 @@ def test_generate_source_binding_runs_one_model_turn():
 
 def test_generate_source_binding_returns_backend_impossible_without_answer_candidates():
     base_request = _request_with_optional_params()
-    request = replace(
-        base_request,
+    request = source_binding_request(
+        question=base_request.question,
+        question_contract=base_request.question_contract,
+        requested_facts=base_request.requested_facts,
         relation_catalog=RelationCatalog(),
         catalog_selection=CatalogSelectionResult(
             relation_catalog=RelationCatalog(),
@@ -837,6 +1009,9 @@ def test_generate_source_binding_returns_backend_impossible_without_answer_candi
         ),
         read_eligibility=ReadEligibilityResult(read_assessments=()),
         available_values=(),
+        plan_selection=base_request.plan_selection,
+        conversation_context=base_request.conversation_context,
+        host=base_request.host,
     )
     model_port = _ExplodingSourceBindingModelPort()
 
@@ -878,6 +1053,7 @@ def _request_with_optional_params(
     answer_outputs = tuple(
         RequestedFactAnswerOutput(
             id=answer_output_id,
+            role="ANSWER_VALUE",
             description=f"Sales output {answer_output_id}.",
         )
         for answer_output_id in answer_output_ids
@@ -932,11 +1108,6 @@ def _request_with_optional_params(
                     path=field_path("sale_id"),
                     row_path_id=row_path_id,
                     type="uuid",
-                    identity=IdentityMetadata(
-                        entity_ref="sale",
-                        identity_field="sale_id",
-                        primary_key=True,
-                    ),
                 ),
             )
             if include_identity_evidence_field
@@ -1047,6 +1218,21 @@ def _request_with_optional_params(
                 ),
                 params=tuple(params),
                 fields=tuple(fields),
+                candidate_keys=(
+                    CandidateKey(
+                        id="sale_key",
+                        entity_kind="sale",
+                        components=(
+                            CandidateKeyComponent(
+                                id="sale_id",
+                                field_ref="sales.field.sale_id",
+                            ),
+                        ),
+                        primary=True,
+                    ),
+                )
+                if include_identity_evidence_field
+                else (),
             ),
             *(
                 (
@@ -1109,7 +1295,7 @@ def _request_with_optional_params(
         requested_facts=(fact,),
         catalog_selection=catalog_selection,
     )
-    return SourceBindingRequest(
+    return source_binding_request(
         question="How many sales happened today?",
         question_contract=QuestionContract(requested_facts=(fact,)),
         requested_facts=(fact,),
@@ -1158,7 +1344,7 @@ def _request_with_identity_field_filter() -> SourceBindingRequest:
         id="fact_1",
         description="Locations in London.",
         answer_subject=RequestedFactAnswerSubject(subject_text="locations"),
-        answer_outputs=(RequestedFactAnswerOutput(id="answer_1"),),
+        answer_outputs=(RequestedFactAnswerOutput(id="answer_1", role="ANSWER_VALUE"),),
         known_inputs=(
             RequestedFactLiteralInput(
                 id="area_1",
@@ -1185,24 +1371,67 @@ def _request_with_identity_field_filter() -> SourceBindingRequest:
                         path="data.location_id",
                         row_path_id="data",
                         type="uuid",
-                        identity=IdentityMetadata(
-                            entity_ref="location",
-                            identity_field="location_id",
-                            primary_key=True,
-                            stable=True,
-                        ),
                     ),
                     CatalogField(
                         ref="locations.field.area_id",
                         path="data.area_id",
                         row_path_id="data",
                         type="uuid",
-                        identity=IdentityMetadata(
-                            entity_ref="area",
-                            identity_field="area_id",
-                            primary_key=True,
-                            stable=True,
+                    ),
+                ),
+                candidate_keys=(
+                    CandidateKey(
+                        id="location_key",
+                        entity_kind="location",
+                        components=(
+                            CandidateKeyComponent(
+                                id="location_id",
+                                field_ref="locations.field.location_id",
+                            ),
                         ),
+                        primary=True,
+                    ),
+                ),
+                entity_references=(
+                    EntityReference(
+                        id="location_area",
+                        target_entity_kind="area",
+                        target_key_id="area_key",
+                        components=(
+                            EntityReferenceComponent(
+                                target_component_id="area_id",
+                                local_field_ref="locations.field.area_id",
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            EndpointRead(
+                id="areas",
+                endpoint_name="list_areas",
+                resource_names=("area",),
+                row_paths=(
+                    RowPath(id="data", path="data", cardinality=RowCardinality.MANY),
+                ),
+                fields=(
+                    CatalogField(
+                        ref="areas.field.area_id",
+                        path="data.area_id",
+                        row_path_id="data",
+                        type="uuid",
+                    ),
+                ),
+                candidate_keys=(
+                    CandidateKey(
+                        id="area_key",
+                        entity_kind="area",
+                        components=(
+                            CandidateKeyComponent(
+                                id="area_id",
+                                field_ref="areas.field.area_id",
+                            ),
+                        ),
+                        primary=True,
                     ),
                 ),
             ),
@@ -1234,7 +1463,7 @@ def _request_with_identity_field_filter() -> SourceBindingRequest:
         requested_facts=(fact,),
         catalog_selection=catalog_selection,
     )
-    return SourceBindingRequest(
+    return source_binding_request(
         question="How many locations are in London?",
         question_contract=QuestionContract(requested_facts=(fact,)),
         requested_facts=(fact,),
@@ -1244,9 +1473,9 @@ def _request_with_identity_field_filter() -> SourceBindingRequest:
         available_values=(
             FactValue.identity(
                 id="nairobi_area",
-                identity_type="area",
-                identity_field="area_id",
-                value="area_nairobi",
+                key=entity_key_value(
+                    "area", "primary_key", {"area_id": "area_nairobi"}
+                ),
                 display_value="London",
                 matched_field_ref="field.data.name",
                 matched_field_path="data.name",
@@ -1266,11 +1495,14 @@ def _ranked_staff_compensation_request() -> SourceBindingRequest:
         answer_outputs=(
             RequestedFactAnswerOutput(
                 id="answer_1",
+                role="ANSWER_VALUE",
                 description="staff member who earned the most compensation",
             ),
         ),
         answer_expression=RequestedFactAnswerExpression(
             family=RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+            selection_kind=ResultSelectionKind.LIMITED_RESULTS,
+            limit_input_ref="limit",
         ),
     )
     catalog = RelationCatalog(
@@ -1294,12 +1526,6 @@ def _ranked_staff_compensation_request() -> SourceBindingRequest:
                         path="data.staff_id",
                         row_path_id="data",
                         type="uuid",
-                        identity=IdentityMetadata(
-                            entity_ref="staff",
-                            identity_field="staff_id",
-                            primary_key=True,
-                            stable=True,
-                        ),
                     ),
                     CatalogField(
                         ref="shift_compensation.field.staff_name",
@@ -1318,6 +1544,49 @@ def _ranked_staff_compensation_request() -> SourceBindingRequest:
                         path="data.calculated_pay",
                         row_path_id="data",
                         type="decimal",
+                    ),
+                ),
+                entity_references=(
+                    EntityReference(
+                        id="compensation_staff",
+                        target_entity_kind="staff",
+                        target_key_id="staff_key",
+                        components=(
+                            EntityReferenceComponent(
+                                target_component_id="staff_id",
+                                local_field_ref="shift_compensation.field.staff_id",
+                            ),
+                        ),
+                        context_field_refs=("shift_compensation.field.staff_name",),
+                    ),
+                ),
+            ),
+            EndpointRead(
+                id="staff",
+                endpoint_name="list_staff",
+                resource_names=("staff",),
+                row_paths=(
+                    RowPath(id="data", path="data", cardinality=RowCardinality.MANY),
+                ),
+                fields=(
+                    CatalogField(
+                        ref="staff.field.staff_id",
+                        path="data.staff_id",
+                        row_path_id="data",
+                        type="uuid",
+                    ),
+                ),
+                candidate_keys=(
+                    CandidateKey(
+                        id="staff_key",
+                        entity_kind="staff",
+                        components=(
+                            CandidateKeyComponent(
+                                id="staff_id",
+                                field_ref="staff.field.staff_id",
+                            ),
+                        ),
+                        primary=True,
                     ),
                 ),
             ),
@@ -1364,7 +1633,7 @@ def _ranked_staff_compensation_request() -> SourceBindingRequest:
             ),
         )
     )
-    return SourceBindingRequest(
+    return source_binding_request(
         question="Which staff earned the most compensation this month?",
         question_contract=QuestionContract(requested_facts=(fact,)),
         requested_facts=(fact,),
@@ -1389,6 +1658,8 @@ def _ranked_store_sales_request() -> SourceBindingRequest:
         ),
         answer_expression=RequestedFactAnswerExpression(
             family=RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+            selection_kind=ResultSelectionKind.LIMITED_RESULTS,
+            limit_input_ref="limit",
         ),
     )
     catalog = RelationCatalog(
@@ -1406,23 +1677,12 @@ def _ranked_store_sales_request() -> SourceBindingRequest:
                         path="data.sale_id",
                         row_path_id="data",
                         type="uuid",
-                        identity=IdentityMetadata(
-                            entity_ref="sale",
-                            identity_field="sale_id",
-                            primary_key=True,
-                            stable=True,
-                        ),
                     ),
                     CatalogField(
                         ref="sales.field.location_id",
                         path="data.location_id",
                         row_path_id="data",
                         type="uuid",
-                        identity=IdentityMetadata(
-                            entity_ref="location",
-                            identity_field="location_id",
-                            stable=True,
-                        ),
                     ),
                     CatalogField(
                         ref="sales.field.location_name",
@@ -1435,6 +1695,62 @@ def _ranked_store_sales_request() -> SourceBindingRequest:
                         path="data.amount",
                         row_path_id="data",
                         type="decimal",
+                    ),
+                ),
+                candidate_keys=(
+                    CandidateKey(
+                        id="sale_key",
+                        entity_kind="sale",
+                        components=(
+                            CandidateKeyComponent(
+                                id="sale_id",
+                                field_ref="sales.field.sale_id",
+                            ),
+                        ),
+                        primary=True,
+                    ),
+                ),
+                entity_references=(
+                    EntityReference(
+                        id="sale_location",
+                        target_entity_kind="location",
+                        target_key_id="location_key",
+                        components=(
+                            EntityReferenceComponent(
+                                target_component_id="location_id",
+                                local_field_ref="sales.field.location_id",
+                            ),
+                        ),
+                        context_field_refs=("sales.field.location_name",),
+                    ),
+                ),
+            ),
+            EndpointRead(
+                id="locations",
+                endpoint_name="list_locations",
+                resource_names=("location",),
+                row_paths=(
+                    RowPath(id="data", path="data", cardinality=RowCardinality.MANY),
+                ),
+                fields=(
+                    CatalogField(
+                        ref="locations.field.location_id",
+                        path="data.location_id",
+                        row_path_id="data",
+                        type="uuid",
+                    ),
+                ),
+                candidate_keys=(
+                    CandidateKey(
+                        id="location_key",
+                        entity_kind="location",
+                        components=(
+                            CandidateKeyComponent(
+                                id="location_id",
+                                field_ref="locations.field.location_id",
+                            ),
+                        ),
+                        primary=True,
                     ),
                 ),
             ),
@@ -1478,7 +1794,7 @@ def _ranked_store_sales_request() -> SourceBindingRequest:
             ),
         )
     )
-    return SourceBindingRequest(
+    return source_binding_request(
         question="Which store has the highest sales this month?",
         question_contract=QuestionContract(requested_facts=(fact,)),
         requested_facts=(fact,),
@@ -1518,7 +1834,7 @@ def _request_with_scoped_summary_count_metric() -> SourceBindingRequest:
             RequestedFactAnswerOutput(
                 id="answer_1",
                 description="sales count",
-                role="ROW_POPULATION",
+                role="ROW_COUNT",
             ),
         ),
     )
@@ -1593,7 +1909,7 @@ def _request_with_scoped_summary_count_metric() -> SourceBindingRequest:
             ),
         )
     )
-    return SourceBindingRequest(
+    return source_binding_request(
         question="How many sales happened this month?",
         question_contract=QuestionContract(requested_facts=(fact,)),
         requested_facts=(fact,),
@@ -1616,6 +1932,7 @@ def _request_with_reused_answer_output_metric_support() -> SourceBindingRequest:
             answer_outputs=(
                 RequestedFactAnswerOutput(
                     id="answer_1",
+                    role="ANSWER_VALUE",
                     description="sales amount",
                 ),
             ),
@@ -1627,6 +1944,7 @@ def _request_with_reused_answer_output_metric_support() -> SourceBindingRequest:
             answer_outputs=(
                 RequestedFactAnswerOutput(
                     id="answer_1",
+                    role="ANSWER_VALUE",
                     description="payment amount",
                 ),
             ),
@@ -1717,7 +2035,7 @@ def _request_with_reused_answer_output_metric_support() -> SourceBindingRequest:
             ),
         )
     )
-    return SourceBindingRequest(
+    return source_binding_request(
         question="Compare sales and payment totals.",
         question_contract=QuestionContract(requested_facts=facts),
         requested_facts=facts,
@@ -1741,6 +2059,7 @@ def _request_with_filtered_response_shape_variant() -> SourceBindingRequest:
         answer_outputs=(
             RequestedFactAnswerOutput(
                 id="answer_1",
+                role="ANSWER_VALUE",
                 description="sales count",
             ),
         ),
@@ -1856,7 +2175,7 @@ def _request_with_filtered_response_shape_variant() -> SourceBindingRequest:
         ),
         selected_read_ids=("sales_summary",),
     )
-    return SourceBindingRequest(
+    return source_binding_request(
         question="How many sales by status?",
         question_contract=QuestionContract(requested_facts=(fact,)),
         requested_facts=(fact,),
@@ -1877,6 +2196,7 @@ def _request_with_source_default_param_after_read_eligibility() -> SourceBinding
         answer_outputs=(
             RequestedFactAnswerOutput(
                 id="answer_1",
+                role="ANSWER_VALUE",
                 description="sales summary",
             ),
         ),
@@ -1950,7 +2270,7 @@ def _request_with_source_default_param_after_read_eligibility() -> SourceBinding
             ),
         )
     )
-    return SourceBindingRequest(
+    return source_binding_request(
         question="Show sales summary.",
         question_contract=QuestionContract(requested_facts=(fact,)),
         requested_facts=(fact,),
@@ -2024,11 +2344,18 @@ def _source_binding_outcome(
     finite_choice_param_reviews: dict[str, dict[str, object]],
     row_predicate_reviews: dict[str, dict[str, object]] | None = None,
     field_ids: tuple[str, ...] = ("amount",),
+    key_ids_by_answer_output: dict[str, str] | None = None,
 ) -> dict[str, object]:
-    fulfillment_decisions = source_fulfills_for_candidate(
-        candidate,
-        field_ids=field_ids,
-    )
+    if key_ids_by_answer_output is None:
+        fulfillment_decisions = source_fulfills_for_candidate(
+            candidate,
+            field_ids=field_ids,
+        )
+    else:
+        fulfillment_decisions = source_fulfills_keys_for_candidate(
+            candidate,
+            key_ids_by_answer_output=key_ids_by_answer_output,
+        )
     metric_fit_contract = _metric_fit_contract_for_candidate(
         candidate,
         requested_fact_id="fact_1",
@@ -2040,22 +2367,22 @@ def _source_binding_outcome(
         "bindings_for_fact_1": {
             "plan_shape": binding_target_id.split(".")[2],
             binding_target_id.rsplit(".", 1)[-1]: {
-                        "binding_target_id": binding_target_id,
-                        "answer_population": {
-                            "population_binding_id": _binding_surface(candidate)[
-                                "population_bindings"
-                            ][0]["population_binding_id"],
-                            "intent_text": "sales that happened today",
-                            "match_basis_explanation": "The requested fact asks for today's sales.",
-                        },
-                        "fulfillment_decisions": fulfillment_decisions,
-                        "param_decisions": {
-                            param_id: _param_decision(param_id, decision)
-                            for param_id, decision in param_decisions.items()
-                        },
-                        "row_predicate_reviews": dict(row_predicate_reviews or {}),
-                        "finite_choice_param_reviews": finite_choice_param_reviews,
-            }
+                "binding_target_id": binding_target_id,
+                "answer_population": {
+                    "population_binding_id": _binding_surface(candidate)[
+                        "population_bindings"
+                    ][0]["population_binding_id"],
+                    "intent_text": "sales that happened today",
+                    "match_basis_explanation": "The requested fact asks for today's sales.",
+                },
+                "fulfillment_decisions": fulfillment_decisions,
+                "param_decisions": {
+                    param_id: _param_decision(param_id, decision)
+                    for param_id, decision in param_decisions.items()
+                },
+                "row_predicate_reviews": dict(row_predicate_reviews or {}),
+                "finite_choice_param_reviews": finite_choice_param_reviews,
+            },
         },
     }
 
@@ -2442,10 +2769,10 @@ def _support_set_field_refs(candidate: dict[str, object]) -> set[str]:
         for slot in support_set.get("fulfillment_slots") or ()
         if isinstance(slot, dict)
         for key in (
-            "group_key_evidence",
+            "entity_evidence",
             "metric_measure_evidence",
             "row_count_basis_evidence",
-            "scope_evidence",
+            "value_evidence",
         )
         for item in slot.get(key) or ()
         if isinstance(item, dict) and str(item.get("field_ref") or "")

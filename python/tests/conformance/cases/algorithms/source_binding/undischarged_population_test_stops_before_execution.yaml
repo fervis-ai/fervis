@@ -1,0 +1,13 @@
+id: undischarged_population_test_stops_before_execution
+description: Source binding rejects a requested population constraint when no selected source mechanism enforces it.
+kind: algorithm
+algorithm: source_binding.parse
+input:
+  request:
+    mode: scoped_review_owned_input_unbound
+  choices:
+    OPEN: DOES_NOT_DECIDE_TEST
+    CLOSED: DOES_NOT_DECIDE_TEST
+expect:
+  result_contains:
+    status: rejected

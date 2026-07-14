@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from datetime import timedelta
 from typing import Any
 
 from django.db import transaction
+from django.utils import timezone
 
 from fervis.run_work.queue.django.queue import (
     ActiveRunConflict,
@@ -17,6 +20,7 @@ from fervis.run_work.queue.django.queue import (
     require_current_run_lease,
 )
 from fervis.run_work.queue.django.models import RunWorkItem
+from fervis.run_work.queue.django.models import RunWorkStatus
 from fervis.lineage.django.runtime_spine import (
     DJANGO_DRF_ADAPTER_REF,
     record_question_run_start,
@@ -29,9 +33,10 @@ from fervis.lineage.models import (
     Question,
     QuestionRun,
     RunResult,
+    ClarificationRequest,
+    ClarificationResponse,
 )
 from fervis.lineage.run_spine import (
-    ClarificationResponseStart as SpineClarificationResponseStart,
     QuestionRunStart as SpineQuestionRunStart,
     QuestionRunStartRequest,
     QuestionStart as SpineQuestionStart,
@@ -51,6 +56,7 @@ from fervis.host_api.credentials import (
 from fervis.lookup.orchestration.question_lookup_port import (
     LookupServiceQuestionLookupPort,
 )
+from fervis.lookup.clarification import clarification_response_ref
 from fervis.lookup.orchestration.question_program_port import AnswerProgramQuestionPort
 from fervis.lookup.orchestration.program_service import AnswerProgramService
 from fervis.host_api.context import get_host_api_context
@@ -62,8 +68,11 @@ from fervis.memory.lineage import (
     DEFAULT_RECENT_MEMORY_RUN_LIMIT,
     LineageMemoryArtifactService,
 )
-from fervis.questions.contracts import QuestionPrincipal
+from fervis.questions.contracts import ExecutionMode, QuestionPrincipal
 from fervis.questions.execution_specs import execution_spec_from_storage
+from fervis.questions.execution_specs import execution_spec_to_storage_dict
+from fervis.lookup.clarification.payload import clarification_from_payload
+from fervis.lineage.recorder import ClarificationResponseWrite
 from fervis.questions.projection import (
     QuestionMemoryRunSelection,
     QuestionRunProjection,
@@ -72,17 +81,23 @@ from fervis.questions.projection import (
     project_question_runs,
     select_conversation_memory_runs,
 )
+from fervis.questions.clarification_state import pending_clarification_ids
 from fervis.questions.ports import (
     AuthorizedQuestionAccess,
+    ClarificationRunResponse,
     QueuedRun,
     QuestionRunRecord,
     ParsedQuestionRunSubmission,
     QuestionRunSubmissionKind,
     QuestionRunSubmissionResult,
+    ResolveQuestionRunSpec,
     RunSubmission,
 )
-from fervis.questions.service import QuestionService
+from fervis.lookup.clarification.response import parse_clarification_response
+from fervis.lookup.clarification.model import ConversationResolutionResponse
+from fervis.questions.service import QuestionService, clarification_successor_run
 from fervis.run_work.service import RunWorkService
+from fervis.run_work.contracts import run_wall_clock_duration_ms
 
 from .composition import (
     get_runtime,
@@ -113,19 +128,25 @@ class DjangoQuestionLineagePort:
             authority=authority,
         ):
             return {}
-        if context_run_id is not None and not QuestionRun.objects.filter(
-            run_id=context_run_id,
-            question__conversation_id=conversation_id,
-            question__conversation__tenant_id=authority.tenant_id,
-            run_result__result_kind=RunResultKind.ANSWERED.value,
-        ).exists():
+        if (
+            context_run_id is not None
+            and not QuestionRun.objects.filter(
+                run_id=context_run_id,
+                question__conversation_id=conversation_id,
+                question__conversation__tenant_id=authority.tenant_id,
+                run_result__result_kind=RunResultKind.ANSWERED.value,
+            ).exists()
+        ):
             raise PermissionError("context run is not an authorized answered run")
-        if continuation_run_id is not None and not QuestionRun.objects.filter(
-            run_id=continuation_run_id,
-            question__conversation_id=conversation_id,
-            question__conversation__tenant_id=authority.tenant_id,
-            run_result__isnull=False,
-        ).exists():
+        if (
+            continuation_run_id is not None
+            and not QuestionRun.objects.filter(
+                run_id=continuation_run_id,
+                question__conversation_id=conversation_id,
+                question__conversation__tenant_id=authority.tenant_id,
+                run_result__isnull=False,
+            ).exists()
+        ):
             raise PermissionError("continuation run is not an authorized terminal run")
         selected_run_id = context_run_id or continuation_run_id
         artifacts = LineageMemoryArtifactService(DjangoLineageQuery()).for_runs(
@@ -259,14 +280,22 @@ class DjangoQuestionLifecyclePort:
     def find_idempotent_run(
         self,
         *,
-        authority: ReadAuthority,
+        principal: QuestionPrincipal,
         conversation_id: str | None,
         idempotency_key: str | None,
     ) -> QueuedRun | None:
+        authority = ReadAuthority.from_principal(principal)
         item = find_idempotent_work_item(
             tenant_id=authority.tenant_id,
+            principal_id=principal.principal_id,
+            read_context_ref=authority.read_context_ref,
             conversation_id=conversation_id,
             idempotency_key=idempotency_key,
+            idempotency_scope=(
+                f"conversation:{conversation_id}"
+                if conversation_id is not None
+                else "new_conversation"
+            ),
         )
         if item is None:
             return None
@@ -313,6 +342,80 @@ class DjangoQuestionLifecyclePort:
         return QuestionRunSubmissionResult(
             kind=QuestionRunSubmissionKind.CREATED,
             run=_queued_run_from_work_item(enqueued.item),
+        )
+
+    def respond_to_clarification_atomically(
+        self,
+        resume: ClarificationRunResponse,
+    ) -> QuestionRunSubmissionResult:
+        authority = ReadAuthority.from_principal(resume.principal)
+        with transaction.atomic():
+            item = RunWorkItem.objects.select_for_update().get(run_id=resume.run_id)
+            _require_resumable_clarification(item, resume=resume, authority=authority)
+            clarification = ClarificationRequest.objects.select_for_update().get(
+                clarification_id=resume.clarification_id,
+                run_id=resume.run_id,
+                responses__isnull=True,
+            )
+            spec = execution_spec_from_storage(
+                item.spec_kind,
+                item.execution_spec or {},
+            )
+            if not isinstance(spec, ResolveQuestionRunSpec):
+                raise ValueError("clarification can resume only a question lookup")
+            response = parse_clarification_response(
+                clarification_from_payload(clarification.payload_json or {}),
+                response_id=resume.response_id,
+                response_text=resume.response_text,
+                selected_option_id=resume.selected_option_id,
+                suspended_question_text=spec.question,
+            )
+            DjangoLineageRecorder().record_clarification_response(
+                ClarificationResponseWrite(
+                    response_id=resume.response_id,
+                    run_id=resume.run_id,
+                    clarification_id=resume.clarification_id,
+                    evidence_ref=clarification_response_ref(resume.response_id),
+                    response_text=resume.response_text,
+                    selected_option_id=resume.selected_option_id,
+                )
+            )
+            if not (
+                isinstance(response, ConversationResolutionResponse)
+                and response.annotation is not None
+            ):
+                resumed_spec = replace(
+                    spec,
+                    clarification_responses=(
+                        *spec.clarification_responses,
+                        response,
+                    ),
+                )
+                item.execution_spec = execution_spec_to_storage_dict(resumed_spec)
+                _resume_work_item(item, execution_mode=resume.execution_mode)
+                queued_item = item
+            else:
+                current = _queued_run_from_work_item(item).submission
+                submission, record = clarification_successor_run(
+                    current,
+                    response=resume,
+                    annotation=response,
+                )
+                item.status = RunWorkStatus.SUPERSEDED
+                item.lease_owner = None
+                item.lease_expires_at = None
+                item.next_attempt_at = None
+                item.completed_at = timezone.now()
+                item.save()
+                enqueued = enqueue_run_work_item(submission=submission)
+                record_question_run_start(
+                    _spine_question_run_start(record),
+                    recorder=DjangoLineageRecorder(),
+                )
+                queued_item = enqueued.item
+        return QuestionRunSubmissionResult(
+            kind=QuestionRunSubmissionKind.CREATED,
+            run=_queued_run_from_work_item(queued_item),
         )
 
     def load_executable_run(
@@ -380,6 +483,30 @@ class DjangoQuestionLifecyclePort:
         item = get_work_item_for_run(run_id)
         run = get_run_view(run_id, tenant_id=item.tenant_id)
         return _queued_run_from_work_item(item, run_view=run)
+
+    def wait_for_clarification(
+        self,
+        *,
+        run_id: str,
+        worker_id: str,
+        active_attempt: int,
+    ) -> QueuedRun:
+        updated = RunWorkItem.objects.filter(
+            run_id=run_id,
+            status=RunWorkStatus.RUNNING,
+            lease_owner=worker_id,
+            active_attempt=active_attempt,
+        ).update(
+            status=RunWorkStatus.WAITING_FOR_CLARIFICATION,
+            completed_at=None,
+            lease_owner=None,
+            lease_expires_at=None,
+            last_error="",
+        )
+        if updated != 1:
+            raise ValueError("clarification wait requires the current run lease")
+        item = get_work_item_for_run(run_id)
+        return _queued_run_from_work_item(item)
 
 
 class DjangoQuestionStateReaderPort:
@@ -726,8 +853,7 @@ def _question_run_projection(question: Question) -> QuestionRunProjection:
                 kind=QuestionRunKind(run.kind),
                 status=QuestionRunStatus(statuses[str(run.run_id)]),
                 answered=(
-                    result_kinds.get(str(run.run_id))
-                    == RunResultKind.ANSWERED.value
+                    result_kinds.get(str(run.run_id)) == RunResultKind.ANSWERED.value
                 ),
                 terminal=str(run.run_id) in result_kinds,
             )
@@ -757,8 +883,9 @@ def _primary_run_ids_for_conversation(
     context_run_id: str | None = None,
 ) -> tuple[str, ...]:
     questions = tuple(
-        Question.objects.filter(conversation_id=conversation_id)
-        .order_by("-conversation_sequence")[:DEFAULT_RECENT_MEMORY_RUN_LIMIT]
+        Question.objects.filter(conversation_id=conversation_id).order_by(
+            "-conversation_sequence"
+        )[:DEFAULT_RECENT_MEMORY_RUN_LIMIT]
     )
     context_question_id = (
         str(
@@ -801,9 +928,6 @@ def _spine_question_run_start(record: QuestionRunRecord) -> QuestionRunStartRequ
         )
     return QuestionRunStartRequest(
         question=question,
-        clarification_response=_spine_clarification_response(
-            record.clarification_response
-        ),
         run=SpineQuestionRunStart(
             question_id=record.run.question_id,
             run_id=record.run.run_id,
@@ -819,18 +943,6 @@ def _spine_question_run_start(record: QuestionRunRecord) -> QuestionRunStartRequ
     )
 
 
-def _spine_clarification_response(response):
-    if response is None:
-        return None
-    return SpineClarificationResponseStart(
-        response_id=response.response_id,
-        run_id=response.run_id,
-        clarification_id=response.clarification_id,
-        response_text=response.response_text,
-        selected_option_id=response.selected_option_id,
-    )
-
-
 def _queued_run_from_work_item(
     item,
     *,
@@ -841,14 +953,49 @@ def _queued_run_from_work_item(
         tenant_id=item.tenant_id,
     ):
         run_view = get_run_view(item.run_id, tenant_id=item.tenant_id)
+    result_data = (run_view or {}).get("resultData")
+    if result_data is None and item.status == RunWorkStatus.WAITING_FOR_CLARIFICATION:
+        result_data = _pending_clarification_result_data(item.run_id)
     return QueuedRun(
         submission=_submission_from_work_item(item),
         status=str((run_view or {}).get("status") or item.status),
         answer=(run_view or {}).get("answer"),
-        result_data=(run_view or {}).get("resultData"),
+        result_data=result_data,
         error=(run_view or {}).get("error") or item.last_error or None,
         duration_ms=_queued_run_duration_ms(item=item, run_view=run_view),
+        active_attempt=(
+            int(item.active_attempt) if int(item.active_attempt or 0) > 0 else None
+        ),
     )
+
+
+def _pending_clarification_result_data(run_id: str) -> dict[str, Any]:
+    request_rows = tuple(
+        ClarificationRequest.objects.filter(run_id=run_id)
+        .order_by("created_at", "clarification_id")
+        .values_list("clarification_id", "payload_json")
+    )
+    response_ids = tuple(
+        str(value)
+        for value in ClarificationResponse.objects.filter(run_id=run_id).values_list(
+            "clarification_id", flat=True
+        )
+    )
+    pending_ids = frozenset(
+        pending_clarification_ids(
+            tuple(str(clarification_id) for clarification_id, _ in request_rows),
+            response_ids,
+        )
+    )
+    payloads = tuple(
+        payload
+        for clarification_id, payload in request_rows
+        if str(clarification_id) in pending_ids
+    )
+    return {
+        "kind": "needs_clarification",
+        "details": {"clarifications": list(payloads)},
+    }
 
 
 def _queued_run_duration_ms(
@@ -859,11 +1006,12 @@ def _queued_run_duration_ms(
     projected_duration = (run_view or {}).get("durationMs")
     if projected_duration is not None:
         return int(projected_duration)
-    started_at = getattr(item, "started_at", None)
+    created_at = item.created_at
     completed_at = getattr(item, "completed_at", None)
-    if started_at is None or completed_at is None:
-        return None
-    return max(0, int((completed_at - started_at).total_seconds() * 1000))
+    return run_wall_clock_duration_ms(
+        created_at=created_at,
+        completed_at=completed_at,
+    )
 
 
 def _terminal_run_from_lineage(item) -> QueuedRun | None:
@@ -897,6 +1045,8 @@ def _submission_from_work_item(item) -> RunSubmission:
         ),
         spec=spec,
         idempotency_key=item.idempotency_key,
+        idempotency_authority_ref=item.idempotency_authority_ref,
+        idempotency_scope=item.idempotency_scope,
     )
 
 
@@ -905,3 +1055,41 @@ def _question_id_for_run(run_id: str) -> str:
     if run is None:
         return ""
     return str(run.question_id)
+
+
+def _require_resumable_clarification(
+    item: RunWorkItem,
+    *,
+    resume: ClarificationRunResponse,
+    authority: ReadAuthority,
+) -> None:
+    question_id = _question_id_for_run(resume.run_id)
+    if (
+        item.status != RunWorkStatus.WAITING_FOR_CLARIFICATION
+        or question_id != resume.question_id
+        or item.tenant_id != authority.tenant_id
+        or not _read_context_ref_matches(
+            item.read_context_ref, authority.read_context_ref
+        )
+    ):
+        raise PermissionError("clarification does not belong to a resumable run")
+
+
+def _resume_work_item(
+    item: RunWorkItem,
+    *,
+    execution_mode: ExecutionMode,
+) -> None:
+    inline = execution_mode is ExecutionMode.INLINE
+    now = timezone.now()
+    next_attempt = int(item.attempt_count) + 1
+    item.status = RunWorkStatus.RUNNING if inline else RunWorkStatus.QUEUED
+    item.attempt_count = next_attempt if inline else item.attempt_count
+    item.active_attempt = next_attempt if inline else 0
+    item.max_attempts = max(int(item.max_attempts), next_attempt + 1)
+    item.lease_owner = "inline" if inline else None
+    item.lease_expires_at = now + timedelta(seconds=300) if inline else None
+    item.next_attempt_at = None
+    item.completed_at = None
+    item.last_error = ""
+    item.save()

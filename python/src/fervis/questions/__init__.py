@@ -4,8 +4,9 @@ from .contracts import (
     AskRequest,
     AskRequestLimits,
     AskResult,
-    ContinueQuestionRequest,
+    ClarificationResponseRequest,
     RerunQuestionRequest,
+    RetryQuestionRequest,
     ExecutionMode,
     QuestionPrincipal,
 )
@@ -14,8 +15,9 @@ __all__ = [
     "AskRequest",
     "AskRequestLimits",
     "AskResult",
-    "ContinueQuestionRequest",
+    "ClarificationResponseRequest",
     "RerunQuestionRequest",
+    "RetryQuestionRequest",
     "ExecutionMode",
     "QuestionPrincipal",
 ]

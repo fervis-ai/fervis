@@ -18,7 +18,20 @@ MIN_QUARTER = 1
 MAX_QUARTER = 4
 
 
+class TimeIntentValidationError(ValueError):
+    """The structured time intent is not executable as declared."""
+
+
 def validate_time_intent(intent: dict[str, Any]) -> None:
+    try:
+        _validate_time_intent(intent)
+    except TimeIntentValidationError:
+        raise
+    except ValueError as exc:
+        raise TimeIntentValidationError(str(exc)) from exc
+
+
+def _validate_time_intent(intent: dict[str, Any]) -> None:
     kind = str(intent.get(IntentField.KIND) or "")
     if kind == IntentKind.POINT:
         _require_exact(intent, IntentField.PRECISION, Unit.DAY)

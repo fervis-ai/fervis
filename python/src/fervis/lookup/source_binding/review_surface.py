@@ -3,16 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 
 from fervis.lookup.source_binding.candidates import SourceCandidate
-from fervis.lookup.source_binding.normal_instance_roles import (
-    NORMAL_INSTANCE_ROLE_PROFILES_KEY,
-)
-from fervis.lookup.source_binding.param_surface import (
-    param_requires_finite_choice_review,
-)
-from fervis.lookup.source_binding.param_values import canonical_param_value
 
 
 class SourceBindingReviewAxisKind(StrEnum):
@@ -104,27 +97,28 @@ def _finite_choice_params(
 ) -> dict[str, FiniteChoiceReviewAxis]:
     output: dict[str, FiniteChoiceReviewAxis] = {}
     for param in candidate.params:
-        if not isinstance(param, dict) or not param_requires_finite_choice_review(param):
+        if not param.finite_choice_review:
             continue
-        param_id = str(param.get("param_id") or "")
-        choices = tuple(
-            canonical_param_value(choice)
-            for choice in param.get("choices") or ()
-            if canonical_param_value(choice)
-        )
+        param_id = param.id
+        choices = param.choices
         if not param_id or not choices:
             continue
         output[param_id] = FiniteChoiceReviewAxis(
             axis_id=param_id,
             choices=choices,
-            required=param.get("required") is True,
-            omission_behavior=_omission_behavior(param.get("population_contract")),
-            normal_instance_profiles=_normal_instance_profiles(
-                param.get(NORMAL_INSTANCE_ROLE_PROFILES_KEY),
+            required=param.required,
+            omission_behavior=FiniteChoiceOmissionBehavior(
+                kind=param.omission_kind,
+                default_value=param.omission_default_value,
             ),
-            owned_membership_test_ids=_owned_membership_test_ids(
-                param.get("population_contract"),
+            normal_instance_profiles=tuple(
+                NormalInstanceReviewProfile(
+                    test_id=profile.test_id,
+                    excluded_role_ids=profile.excluded_role_ids,
+                )
+                for profile in param.normal_instance_profiles
             ),
+            owned_membership_test_ids=param.owned_membership_test_ids,
         )
     return output
 
@@ -132,25 +126,20 @@ def _finite_choice_params(
 def _row_predicates(
     candidate: SourceCandidate,
 ) -> dict[str, RowPredicateReviewAxis]:
-    payload = candidate.payload or {}
     output: dict[str, RowPredicateReviewAxis] = {}
-    for item in payload.get("row_predicates") or ():
-        if not isinstance(item, dict):
-            continue
-        predicate_id = str(item.get("predicate_id") or "")
-        field_id = str(item.get("field_id") or "")
-        allowed_values = tuple(
-            str(value) for value in item.get("allowed_values") or () if str(value)
-        )
+    for item in candidate.row_predicates:
+        predicate_id = item.id
+        field_id = item.field_id
+        allowed_values = item.allowed_values
         if not predicate_id or not field_id or not allowed_values:
             continue
         output[predicate_id] = RowPredicateReviewAxis(
             axis_id=predicate_id,
             field_id=field_id,
-            field_type=str(item.get("type") or ""),
-            operator=str(item.get("operator") or "in"),
+            field_type=item.field_type,
+            operator=item.operator,
             allowed_values=allowed_values,
-            owned_membership_test_ids=_owned_membership_test_ids(item),
+            owned_membership_test_ids=item.owned_membership_test_ids,
         )
     return output
 
@@ -158,71 +147,8 @@ def _row_predicates(
 def _population_roles(
     candidate: SourceCandidate,
 ) -> tuple[SourceBindingPopulationRole, ...]:
-    payload = candidate.payload or {}
     return tuple(
         SourceBindingPopulationRole(role_id=role_id)
-        for item in payload.get("population_roles") or ()
-        if isinstance(item, dict)
-        for role_id in (str(item.get("role_id") or ""),)
+        for role_id in candidate.population_role_ids
         if role_id
-    )
-
-
-def _omission_behavior(raw: object) -> FiniteChoiceOmissionBehavior:
-    if not isinstance(raw, dict):
-        return FiniteChoiceOmissionBehavior()
-    omission = raw.get("omission_behavior")
-    if not isinstance(omission, dict):
-        return FiniteChoiceOmissionBehavior()
-    return FiniteChoiceOmissionBehavior(
-        kind=str(omission.get("kind") or ""),
-        default_value=canonical_param_value(omission.get("default_value")),
-    )
-
-
-def _normal_instance_profiles(raw: object) -> tuple[NormalInstanceReviewProfile, ...]:
-    if not isinstance(raw, list):
-        return ()
-    return tuple(
-        profile
-        for item in raw
-        if isinstance(item, dict)
-        for profile in (_normal_instance_profile(item),)
-        if profile is not None
-    )
-
-
-def _normal_instance_profile(
-    item: dict[object, object],
-) -> NormalInstanceReviewProfile | None:
-    test_id = str(item.get("test_id") or "")
-    if not test_id:
-        return None
-    return NormalInstanceReviewProfile(
-        test_id=test_id,
-        excluded_role_ids=_normal_instance_role_ids(item.get("excluded_state_roles")),
-    )
-
-
-def _normal_instance_role_ids(raw: object) -> tuple[str, ...]:
-    if not isinstance(raw, list):
-        return ()
-    return tuple(
-        role_id
-        for item in raw
-        if isinstance(item, dict)
-        for role_id in (str(item.get("role") or ""),)
-        if role_id
-    )
-
-
-def _owned_membership_test_ids(raw: object) -> tuple[str, ...]:
-    if not isinstance(raw, dict):
-        return ()
-    return tuple(
-        dict.fromkeys(
-            str(item).strip()
-            for item in raw.get("owned_membership_test_ids") or ()
-            if str(item).strip()
-        )
     )

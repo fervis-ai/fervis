@@ -13,13 +13,14 @@ input:
           - address: entity.staff.jane
             kind: entity
             resource: staff
+            keyId: primary_key
             referenceText: Jane Doe
             identity: {staff_id: staff-1}
 expect:
   result_contains:
     identity_values:
       - kind: identity
-        identity_type: staff
-        identity_field: staff_id
-        value: staff-1
-
+        value:
+          entity_kind: staff
+          key_id: primary_key
+          components: {staff_id: staff-1}

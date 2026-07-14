@@ -22,10 +22,12 @@ input:
       description: sales amount
       answer_outputs:
         - id: answer_1
+          role: ANSWER_VALUE
     - id: staff_last_name
       description: staff last name
       answer_outputs:
         - id: answer_2
+          role: ANSWER_VALUE
   resource_name_matches:
     - requested_fact_id: sales_amount
       answer_output_resource_lineage:

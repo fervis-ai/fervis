@@ -6,8 +6,12 @@ from .models import StockTransfer
 class StockTransferSerializer(serializers.ModelSerializer):
     product_id = serializers.IntegerField(source="product.id", read_only=True)
     product_sku = serializers.CharField(source="product.sku", read_only=True)
-    from_location_id = serializers.IntegerField(source="from_location.id", read_only=True)
-    from_location_name = serializers.CharField(source="from_location.name", read_only=True)
+    from_location_id = serializers.IntegerField(
+        source="from_location.id", read_only=True
+    )
+    from_location_name = serializers.CharField(
+        source="from_location.name", read_only=True
+    )
     to_location_id = serializers.IntegerField(source="to_location.id", read_only=True)
     to_location_name = serializers.CharField(source="to_location.name", read_only=True)
 
@@ -29,7 +33,8 @@ class StockTransferSerializer(serializers.ModelSerializer):
 
 
 class StockTransferQuerySerializer(serializers.Serializer):
-    status = serializers.ChoiceField(required=False, choices=["draft", "in_transit", "received"])
+    status = serializers.ChoiceField(
+        required=False, choices=["draft", "in_transit", "received"]
+    )
     product_id = serializers.IntegerField(required=False)
     to_location_id = serializers.IntegerField(required=False)
-

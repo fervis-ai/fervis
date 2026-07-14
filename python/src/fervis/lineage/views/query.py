@@ -46,7 +46,6 @@ class RunRow:
     kind: QuestionRunKind
     trigger_kind: RunTriggerKind
     base_run_id: str | None = None
-    trigger_clarification_response_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -119,8 +118,7 @@ class ClarificationRequestRow:
     need: ClarificationNeed
     reason: ClarificationReason
     payload_json: JsonObject
-    fact_result_id: str | None = None
-    step_id: str | None = None
+    step_id: str
 
 
 @dataclass(frozen=True)

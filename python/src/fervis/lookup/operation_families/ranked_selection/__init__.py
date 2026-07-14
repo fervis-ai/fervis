@@ -1,1 +1,0 @@
-"""Ranked-selection operation family."""

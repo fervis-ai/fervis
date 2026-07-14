@@ -1,0 +1,20 @@
+id: one_parent_many_children_extracts_rows
+description: A child collection is extracted beneath one object parent using declared cardinalities.
+kind: algorithm
+algorithm: execution.endpoint_response
+input:
+  body:
+    summary:
+      report_id: report-1
+      items:
+        - {item_id: item-1}
+        - {item_id: item-2}
+  row_path: summary.items
+  parent_row_path: summary
+  parent_cardinality: one
+  cardinality: many
+expect:
+  result_contains:
+    rows:
+      - {report_id: report-1, item_id: item-1}
+      - {report_id: report-1, item_id: item-2}

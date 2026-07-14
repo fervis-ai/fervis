@@ -9,7 +9,7 @@ def test_lookup_cutover_projects_selected_endpoint_candidates_to_fact_planning()
     sales_read_id = "sales"
     planner = _ToolNamePlannerPort(
         responses={
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="sales amount",
                 parts=("sales amount",),
             ),
@@ -106,7 +106,7 @@ def test_lookup_cutover_projects_selected_endpoint_candidates_to_fact_planning()
     )
 
     assert planner.tool_names == [
-        "submit_answer_request_contract",
+        "submit_question_contract_outcome",
         "submit_query_enrichment",
         "submit_read_eligibility",
         "submit_source_alignment_reviews",
@@ -202,12 +202,18 @@ def test_lookup_cutover_selects_catalog_reads_per_requested_fact():
             RequestedFact(
                 id="rf_sales",
                 description="sales amount",
-                answer_outputs=(RequestedFactAnswerOutput(id="sales_amount"),),
+                answer_outputs=(
+                    RequestedFactAnswerOutput(id="sales_amount", role="ANSWER_VALUE"),
+                ),
             ),
             RequestedFact(
                 id="rf_staff",
                 description="staff last name",
-                answer_outputs=(RequestedFactAnswerOutput(id="staff_last_name"),),
+                answer_outputs=(
+                    RequestedFactAnswerOutput(
+                        id="staff_last_name", role="ANSWER_VALUE"
+                    ),
+                ),
             ),
         )
     )
@@ -334,7 +340,13 @@ def test_lookup_cutover_classifies_blocked_requested_fact_as_impossible_without_
                 id="rf_restricted_secret",
                 description="restricted secret tokens",
                 required_for="secret token",
-                answer_outputs=(RequestedFactAnswerOutput(id="secret_token"),),
+                answer_expression=RequestedFactAnswerExpression(
+                    family=RequestedFactAnswerExpressionFamily.LIST_ROWS,
+                    selection_kind=ResultSelectionKind.ALL_RESULTS,
+                ),
+                answer_outputs=(
+                    RequestedFactAnswerOutput(id="secret_token", role="ANSWER_VALUE"),
+                ),
             ),
         )
     )
@@ -365,7 +377,6 @@ def test_lookup_cutover_classifies_blocked_requested_fact_as_impossible_without_
                         CatalogFact(
                             ref="secret.full_token",
                             availability=CatalogFactAvailability.POLICY_BLOCKED,
-                            field_ref="field.masked_token",
                             read_id="secrets",
                             proof_refs=("policy:secret_full_token",),
                         ),
@@ -380,6 +391,7 @@ def test_lookup_cutover_classifies_blocked_requested_fact_as_impossible_without_
             ReadEligibilityRetentionSpec(
                 requested_fact_id="fact_1",
                 read_id="secrets",
+                answer_value_fields=("masked_token",),
             ),
         ),
     )

@@ -17,16 +17,15 @@ from fervis.lookup.turn_prompts import (
 from fervis.lookup.turn_prompts.projections import source_binding_candidates_xml
 from fervis.lookup.question_contract import requested_fact_evidence_ref
 from fervis.lookup.source_binding.candidates import (
+    SourceCandidate,
     SourceCandidateRegistry,
+    fulfillment_preserves_row_grain,
     source_binding_candidate_payload,
     source_binding_prompt_candidate_fulfillment_support_set_ids_by_answer_output,
     source_binding_prompt_candidate_population_binding_ids,
     source_candidate_registry,
 )
-from fervis.lookup.source_binding.candidates.candidate_tree import (
-    CandidateTreeContext,
-    map_source_candidate_tree,
-)
+from fervis.lookup.source_binding.candidates.contracts import JsonObject, JsonValue
 from fervis.lookup.source_binding.closed_key_params import (
     ClosedKeyParamBindingIndex,
     closed_key_param_binding_index,
@@ -73,7 +72,6 @@ def source_binding_requested_facts_payload(
             {
                 "requested_fact_id": fact.id,
                 "evidence_ref": requested_fact_evidence_ref(fact.id),
-                "description": fact.description,
                 "answer_request": fact.answer_request_model_dict(),
                 "answer_outputs": [
                     {
@@ -132,12 +130,35 @@ def source_binding_transport_context_payload(
             ),
             target_payload=closed_key_bindings.model_visible_target_payload,
         ),
-        "source_candidates_by_id": {
-            candidate_id: candidate.payload or {}
-            for candidate_id, candidate in registry.candidates_by_id.items()
-            if candidate_id in registry.prompt_candidate_ids
-        },
+        "source_candidates_by_id": _prompt_candidates_by_id(registry.prompt_payload),
     }
+
+
+def _prompt_candidates_by_id(cards: JsonObject) -> dict[str, JsonObject]:
+    output: dict[str, JsonObject] = {}
+    for fact_sources in _json_objects(cards.get("requested_fact_sources")):
+        for context in _json_objects(fact_sources.get("source_contexts")):
+            _index_prompt_cards(context.get("source_options"), output=output)
+    for key in ("utility_source_candidates", "value_source_candidates"):
+        _index_prompt_cards(cards.get(key), output=output)
+    return output
+
+
+def _index_prompt_cards(
+    value: JsonValue | None,
+    *,
+    output: dict[str, JsonObject],
+) -> None:
+    for card in _json_objects(value):
+        candidate_id = card.get("source_candidate_id")
+        if isinstance(candidate_id, str) and candidate_id:
+            output[candidate_id] = card
+
+
+def _json_objects(value: JsonValue | None) -> tuple[JsonObject, ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(item for item in value if isinstance(item, dict))
 
 
 def _prompt_binding_targets(
@@ -198,6 +219,8 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                     "For each requested fact, complete its bindings_for_<requested_fact_id> object: choose one shown plan_shape and bind every role shown for that shape exactly once, including roles with no answer outputs.",
                     "Choose each binding_target_id only from its enclosing role and obey the shape's member_constraint.",
                     "The role binding also chooses its answer population, required fulfillment, params, and population reviews.",
+                    "ranked_rows ranks individual source rows without grouping or aggregation.",
+                    "ranked_aggregate groups source rows by an entity key, aggregates a measure within each group, and ranks the resulting groups.",
                 ),
             ),
             builder.instruction_block(
@@ -207,21 +230,20 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                     "answer_population.population_binding_id is the source candidate's population handle that this invocation uses.",
                     "applied_filters are backend-derived grounded-value filters already attached to this source candidate.",
                     "Do not reinterpret, rematch, remove, or rewrite applied_filters.",
-                    "For each answer output shown under the selected binding target, choose fulfillment_choice_id from that source candidate's fulfillment_choices; for entity/group computation keys, prefer stable primary identity evidence when available, because display labels are presentation context unless no stable identity is available.",
+                    "For each answer output shown under the selected binding target, choose fulfillment_choice_id from that source candidate's fulfillment_choices. Entity outputs use a declared source candidate key or entity reference. Scalar group outputs use a declared factual value. Context labels are not selectable computation evidence.",
                     "Before choosing fulfillment, write metric_fit_bases for every metric candidate.",
                     "Metric contexts are read-only interpretation context for metric candidates.",
                     "Use metric_contexts to understand what a metric field is likely measuring from its row path, same-row sibling fields, and scope fields.",
                     "Do not copy metric_context_id, same_row_field_paths, or scope_field_paths into output.",
                     "Do not treat metric context fields as selectable fulfillment evidence.",
-                    "Consider each api_read selection_note before choosing an invocation, but treat it as advisory guidance to evaluate against the read's evidence, not as source truth.",
                     "metric_fit_bases is keyed by requested_fact_id, then metric_evidence_id from Metric fit candidates.",
                     "metric_meaning states what the reviewed metric_evidence_id appears to measure from field_path, field_type, resource_names, and the referenced metric_context.",
-                    "fit_basis evaluates whether the metric is the row-level or scalar measure that should be aggregated, ranked, compared, or otherwise computed to determine the requested answer output.",
-                    "fit_basis must not reject a metric merely because it is an input to a later computation rather than the final answer value.",
+                    "fit_basis evaluates whether the metric is the row-level or scalar measure that should be aggregated, ranked, compared, or otherwise computed to determine the requested answer.",
+                    "A metric fits when it is the correct measure input to the requested computation. Do not reject it merely because aggregation or another later operation produces the final answer value.",
                     "After all fit_basis entries, write fit_basis_interpretations with the same keys, using only the already-written fit_basis text.",
                     "Use interpretation=FITS_REQUESTED_ANSWER when the written fit_basis says the metric fits that role; otherwise use DOES_NOT_FIT_REQUESTED_ANSWER.",
                     "A fulfillment_choice_id is valid only when its metric_measure_evidence and row_count_basis_evidence ids have interpretation=FITS_REQUESTED_ANSWER.",
-                    "row_count_basis_evidence represents count_rows over a response row population; review it as a metric candidate.",
+                    "For metric_operation=count_rows, evaluate the count of rows in that population, not the raw population object.",
                     "Decide final source population, row grain, fulfillment, and param membership from the source-binding candidate data and the metric_fit_bases interpretations.",
                     "When multiple source candidates can fulfill the same answer output, choose the invocation whose fitted metric evidence set most directly measures or computes the requested fact.",
                     "If you choose a fitted metric evidence set that is less direct than another available fitted set, the source population or fulfillment basis must explain why that invocation is still stronger.",
@@ -272,8 +294,9 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                 (
                     "For each choice, write choice_domain_meaning, choice_inclusion_basis, then choice_inclusion, then population_test_results.",
                     "choice_domain_meaning states what the source returns when this choice value is applied, read against the source candidate description and the answer subject. Do not paraphrase the choice token alone.",
-                    "choice_inclusion_basis explains why rows with this choice value should be included or excluded from the answer computation, read against the requested fact and the source candidate description.",
-                    "choice_inclusion states whether rows with this choice value should be included in the answer computation: INCLUDE or EXCLUDE.",
+                    "choice_inclusion_basis explains why rows with this choice value independently belong or do not belong in the answer computation.",
+                    "choice_inclusion is row-set membership for this one choice, not selection of one parameter value. Multiple choices may be INCLUDE.",
+                    "Do not exclude a choice because selecting only that value would omit rows belonging to another included choice.",
                     "population_test_results is keyed only by the membership-test keys exposed for this review entry; write every exposed key exactly once.",
                     "Do not add population_test_results keys that are not exposed for this review entry.",
                     "For non-NORMAL_INSTANCE_GUARD tests, write test_basis, population_consequence, then test_effect.",
@@ -328,6 +351,7 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                     "Do not write SATISFIES_TEST only because the user did not explicitly exclude that choice.",
                     "Do not write SATISFIES_TEST merely because the API can return rows with this choice or because omitting the param includes it.",
                     "Do not write CONFLICTS_WITH_TEST merely because the requested fact does not mention or restrict this param axis; use DOES_NOT_DECIDE_TEST when this choice does not decide that test.",
+                    "Do not narrow the requested population for an unstated preference for cleaner, safer, validated, finalized, or higher-quality evidence. Exclude a choice only when the requested fact, supplied semantic authority, or a population test supports excluding its rows.",
                     "The backend derives include and exclude choice sets from population_test_results and choice_inclusion.",
                     "Do not output include_values, exclude_values, unresolved_values, keep_choice_argument, remove_choice_argument, argument_comparison, membership_effect, omit, safe_to_omit, applicability_decision, or omission_safety.",
                 ),
@@ -385,10 +409,7 @@ class SourceBindingTurnPrompt(TurnPromptBase):
         registry = source_candidate_registry(self.request)
         targets = _prompt_binding_targets(self.request, registry=registry)
         closed_key_bindings = self._closed_key_bindings(targets, registry=registry)
-        payload = _candidate_payload_with_selection_notes(
-            source_binding_candidate_payload(self.request),
-            self.request,
-        )
+        payload = source_binding_candidate_payload(self.request)
         return closed_key_bindings.model_visible_candidate_payload(payload)
 
     def binding_plan_families_payload(self) -> dict[str, object]:
@@ -465,9 +486,7 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                         for param_id, decision_ids in param_decision_ids_by_effective_param(
                             candidate,
                             effective_param_ids=tuple(
-                                str(param.get("param_id") or "")
-                                for param in candidate.params
-                                if isinstance(param, dict)
+                                param.id for param in candidate.params
                             ),
                         ).items()
                         if param_id not in finite_choice_param_ids
@@ -506,15 +525,19 @@ class SourceBindingTurnPrompt(TurnPromptBase):
             target_population_roles[target_id] = tuple(
                 {"role_id": role.role_id} for role in review_surface.population_roles
             )
-            target_fulfillment_supports[target_id] = (
+            visible_fulfillment_supports = (
                 closed_key_bindings.model_visible_fulfillment_supports(
                     candidate,
                     target=target,
-                    candidate_fulfillment_supports=candidate_fulfillment_supports.get(
-                        candidate.id,
-                        {},
+                    candidate_fulfillment_supports=(
+                        candidate_fulfillment_supports.get(candidate.id, {})
                     ),
                 )
+            )
+            target_fulfillment_supports[target_id] = _grain_safe_fulfillment_supports(
+                candidate,
+                target=target,
+                fulfillment_supports=visible_fulfillment_supports,
             )
             target_required_fulfillment_output_ids[target_id] = (
                 target.required_answer_output_ids
@@ -565,48 +588,22 @@ class SourceBindingTurnPrompt(TurnPromptBase):
         )
 
 
-def _candidate_payload_with_selection_notes(
-    payload: dict[str, object],
-    request: SourceBindingRequest,
-) -> dict[str, object]:
-    notes = _selection_notes_by_fact_source(request)
-    if not notes:
-        return payload
-
-    def apply_note(
-        candidate: dict[str, Any],
-        context: CandidateTreeContext,
-    ) -> dict[str, Any]:
-        note = notes.get(
-            (
-                context.requested_fact_id,
-                str(candidate.get("source_candidate_id") or ""),
-            ),
-            "",
+def _grain_safe_fulfillment_supports(
+    candidate: SourceCandidate,
+    *,
+    target: SourceBindingTarget,
+    fulfillment_supports: dict[str, tuple[str, ...]],
+) -> dict[str, tuple[str, ...]]:
+    if target.plan_shape != "ranked_rows":
+        return fulfillment_supports
+    return {
+        answer_output_id: tuple(
+            support_set_id
+            for support_set_id in support_set_ids
+            if fulfillment_preserves_row_grain(candidate, support_set_id)
         )
-        return {**candidate, "selection_note": note} if note else candidate
-
-    return map_source_candidate_tree(
-        payload,
-        apply_note,
-        top_level_keys=(),
-    )
-
-
-def _selection_notes_by_fact_source(
-    request: SourceBindingRequest,
-) -> dict[tuple[str, str], str]:
-    grouped: dict[tuple[str, str], list[str]] = {}
-    for plan in request.plan_selection.plan_selections:
-        basis = plan.basis.strip()
-        if not basis:
-            continue
-        for member in plan.source_members:
-            key = (plan.requested_fact_id, member.source_candidate_id)
-            notes = grouped.setdefault(key, [])
-            if basis not in notes:
-                notes.append(basis)
-    return {key: " | ".join(notes) for key, notes in grouped.items() if notes}
+        for answer_output_id, support_set_ids in fulfillment_supports.items()
+    }
 
 
 def _plan_families_payload(

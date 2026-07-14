@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import hashlib
 from pathlib import Path
 import sys
+from types import ModuleType
 
 from .contracts import GoldsetSuite
 
@@ -26,21 +28,28 @@ def _load_path_suite(suite_ref: str) -> GoldsetSuite:
     if not module_path.exists():
         raise ValueError(f"goldset suite entrypoint not found: {module_path}")
 
-    module_name = f"_fervis_goldset_{abs(hash(str(module_path)))}"
+    module_name = _path_module_name(module_path)
+    loaded = sys.modules.get(module_name)
+    if loaded is not None:
+        return _suite_from_module(loaded)
     spec = importlib.util.spec_from_file_location(module_name, module_path)
     if spec is None or spec.loader is None:
         raise ValueError(f"goldset suite cannot be loaded: {module_path}")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
     sys.path.insert(0, str(module_path.parent))
     try:
         spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(module_name, None)
+        raise
     finally:
         try:
             sys.path.remove(str(module_path.parent))
         except ValueError:
             pass
 
-    return _suite_from_loader(getattr(module, "load_suite", None))
+    return _suite_from_module(module)
 
 
 def _load_import_suite(suite_ref: str) -> GoldsetSuite:
@@ -61,6 +70,15 @@ def _suite_from_loader(load_suite: object) -> GoldsetSuite:
     if not isinstance(suite, GoldsetSuite):
         raise ValueError("load_suite() must return GoldsetSuite")
     return suite
+
+
+def _suite_from_module(module: ModuleType) -> GoldsetSuite:
+    return _suite_from_loader(getattr(module, "load_suite", None))
+
+
+def _path_module_name(module_path: Path) -> str:
+    digest = hashlib.sha256(str(module_path).encode("utf-8")).hexdigest()[:20]
+    return f"_fervis_goldset_{digest}"
 
 
 def _looks_like_path(value: str) -> bool:

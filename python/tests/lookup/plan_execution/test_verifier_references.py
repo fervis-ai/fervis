@@ -1,18 +1,22 @@
 import hashlib
 import json
 from dataclasses import replace
+from decimal import Decimal
 from uuid import UUID
 
 import pytest
 
 from fervis.lookup.relation_catalog import (
+    CandidateKey,
+    CandidateKeyComponent,
     CatalogEndpointMetadata,
     CatalogFact,
     CatalogField,
     CatalogParam,
     EndpointRead,
+    EntityReference,
+    EntityReferenceComponent,
     FieldRequirement,
-    IdentityMetadata,
     ParamSource,
     RelationCatalog,
     RowCardinality,
@@ -61,7 +65,7 @@ from fervis.lookup.answer_program.operations import (
     PredicateOperator,
     ProjectField,
     ProjectSpec,
-    ProjectToIdentitySpec,
+    ProjectToKeySpec,
     RankSpec,
     RelationRole,
     RelationRoleRef,
@@ -96,6 +100,7 @@ from fervis.lookup.answer_program.values import (
 from fervis.lookup.answer_program import BindingSet, compiler_input_context
 from fervis.lookup.answer_program import AnswerProgramContractError
 from fervis.lookup.answer_program.values import LiteralType
+from fervis.lookup.canonical_data import entity_key_value
 from fervis.lookup.question_contract import (
     KnownInputSource,
     LiteralInputRole,
@@ -105,17 +110,19 @@ from fervis.lookup.question_contract import (
     RequestedFactKnownInput,
     RequestedFactLiteralInput,
 )
-from fervis.lookup.answer_program.render_spec import (
-    RenderRelationOutput,
-    RenderScalarOutput,
-    RenderSpec,
+from fervis.lookup.answer_program.result_projection import (
+    EntityKeyProjection,
+    EntityKeyProjectionComponent,
+    RelationResultOutput,
+    ScalarResultOutput,
+    ResultProjection,
 )
 
 
 def _answer_plan(**kwargs) -> AnswerProgram:
-    render_spec = kwargs.get("render_spec")
+    result_projection = kwargs.get("result_projection")
     operations = tuple(kwargs.get("operations", ()))
-    fulfillment = _default_fulfillment(render_spec, operations)
+    fulfillment = _default_fulfillment(result_projection, operations)
     kwargs.pop("requested_facts", None)
     if "fulfillment" not in kwargs:
         kwargs["fulfillment"] = fulfillment
@@ -136,7 +143,7 @@ def _question_contract(
                 id="rf_answer",
                 description=description,
                 answer_outputs=tuple(
-                    RequestedFactAnswerOutput(id=binding_target_id)
+                    RequestedFactAnswerOutput(id=binding_target_id, role="ANSWER_VALUE")
                     for binding_target_id in binding_target_ids
                 ),
                 known_inputs=known_inputs,
@@ -210,7 +217,7 @@ def verify_fact_plan(plan: FactPlan, **kwargs):
         "question_contract",
         _question_contract(
             _default_description(plan),
-            binding_target_ids=_render_output_ids(plan),
+            binding_target_ids=_result_output_ids(plan),
         ),
     )
     explicit_values = tuple(kwargs.pop("available_values", ()))
@@ -354,24 +361,24 @@ def _available_values_for_contract(
 
 def _default_description(plan: FactPlan) -> str:
     outcome = plan.outcome
-    render_spec = outcome.render_spec
-    if render_spec is not None and render_spec.scalar_outputs:
-        return render_spec.scalar_outputs[0].scalar_id
-    if render_spec is not None and render_spec.relation_outputs:
-        slot = render_spec.relation_outputs[0]
+    result_projection = outcome.result_projection
+    if result_projection is not None and result_projection.scalar_outputs:
+        return result_projection.scalar_outputs[0].scalar_id
+    if result_projection.relation_outputs:
+        slot = result_projection.relation_outputs[0]
+        if slot.entity_key is not None:
+            return slot.entity_key.entity_kind
         return _source_description(outcome, slot.relation_id, slot.field_id)
     return "field.name"
 
 
-def _render_output_ids(plan: FactPlan) -> tuple[str, ...]:
+def _result_output_ids(plan: FactPlan) -> tuple[str, ...]:
     outcome = plan.outcome
-    if outcome.render_spec is None:
-        return ("answer",)
     binding_target_ids = tuple(
         slot.id
         for slot in (
-            *outcome.render_spec.relation_outputs,
-            *outcome.render_spec.scalar_outputs,
+            *outcome.result_projection.relation_outputs,
+            *outcome.result_projection.scalar_outputs,
         )
     )
     return binding_target_ids or ("answer",)
@@ -410,16 +417,11 @@ def _source_description_inner(
                 return _source_description_inner(
                     answer, spec.input_relation, field.source, seen=seen
                 )
-    if isinstance(spec, ProjectToIdentitySpec):
-        if field_id in spec.identity_fields:
+    if isinstance(spec, ProjectToKeySpec):
+        if field_id in spec.key_fields:
             return _source_description_inner(
                 answer, spec.input_relation, field_id, seen=seen
             )
-        for field in spec.fields:
-            if (field.output or field.source) == field_id:
-                return _source_description_inner(
-                    answer, spec.input_relation, field.source, seen=seen
-                )
     if isinstance(spec, AggregateSpec):
         if field_id in spec.group_by:
             return _source_description_inner(
@@ -434,17 +436,20 @@ def _source_description_inner(
 
 
 def _default_fulfillment(
-    render_spec: RenderSpec | None,
+    result_projection: ResultProjection | None,
     operations: tuple[Operation, ...],
 ) -> tuple[FactFulfillment, ...]:
-    if render_spec is not None:
-        outputs = (*render_spec.relation_outputs, *render_spec.scalar_outputs)
+    if result_projection is not None:
+        outputs = (
+            *result_projection.relation_outputs,
+            *result_projection.scalar_outputs,
+        )
         if outputs:
             return tuple(
                 FactFulfillment(
                     requested_fact_id="rf_answer",
                     answer_output_id=output.id,
-                    render_output_id=output.id,
+                    result_output_id=output.id,
                 )
                 for output in outputs
             )
@@ -452,7 +457,7 @@ def _default_fulfillment(
         FactFulfillment(
             requested_fact_id="rf_answer",
             answer_output_id="answer",
-            render_output_id="answer",
+            result_output_id="answer",
         ),
     )
 
@@ -461,6 +466,54 @@ def _source() -> RelationSource:
     return RelationSource(
         kind=SourceKind.API_READ,
         read_id="records",
+    )
+
+
+def _entity_reference(
+    reference_id: str,
+    component_id: str,
+    field_ref: str,
+    *,
+    target_entity_kind: str | None = None,
+) -> EntityReference:
+    entity_kind = target_entity_kind or reference_id
+    return EntityReference(
+        id=f"{reference_id}_reference",
+        target_entity_kind=entity_kind,
+        target_key_id="primary_key",
+        components=(
+            EntityReferenceComponent(
+                target_component_id=component_id,
+                local_field_ref=field_ref,
+            ),
+        ),
+    )
+
+
+def _authority_read(entity_kind: str, component_id: str) -> EndpointRead:
+    field_ref = f"authority.{entity_kind}.{component_id}"
+    return EndpointRead(
+        id=f"{entity_kind}_authority",
+        endpoint_name=f"list_{entity_kind}_authority",
+        row_paths=(RowPath(id="data", path="data", cardinality=RowCardinality.MANY),),
+        fields=(
+            CatalogField(
+                ref=field_ref,
+                path=f"data.{component_id}",
+                row_path_id="data",
+                type="string",
+            ),
+        ),
+        candidate_keys=(
+            CandidateKey(
+                id="primary_key",
+                entity_kind=entity_kind,
+                components=(
+                    CandidateKeyComponent(id=component_id, field_ref=field_ref),
+                ),
+                primary=True,
+            ),
+        ),
     )
 
 
@@ -488,29 +541,21 @@ def _catalog() -> RelationCatalog:
                         ref="field.entity_id",
                         path="data.entity_id",
                         type="string",
-                        identity=IdentityMetadata(
-                            entity_ref="entity", primary_key=True
-                        ),
                     ),
                     CatalogField(
                         ref="field.observed_id",
                         path="data.observed_id",
                         type="string",
-                        identity=IdentityMetadata(
-                            entity_ref="entity", primary_key=True
-                        ),
                     ),
                     CatalogField(
                         ref="field.row_id",
                         path="data.row_id",
                         type="string",
-                        identity=IdentityMetadata(entity_ref="row", primary_key=True),
                     ),
                     CatalogField(
                         ref="field.event_id",
                         path="data.event_id",
                         type="string",
-                        identity=IdentityMetadata(entity_ref="event", primary_key=True),
                     ),
                     CatalogField(
                         ref="field.display", path="data.display", type="string"
@@ -527,7 +572,21 @@ def _catalog() -> RelationCatalog:
                         type="string",
                     ),
                 ),
+                entity_references=(
+                    _entity_reference("entity", "entity_id", "field.entity_id"),
+                    _entity_reference(
+                        "observed_entity",
+                        "entity_id",
+                        "field.observed_id",
+                        target_entity_kind="entity",
+                    ),
+                    _entity_reference("row", "row_id", "field.row_id"),
+                    _entity_reference("event", "event_id", "field.event_id"),
+                ),
             ),
+            _authority_read("entity", "entity_id"),
+            _authority_read("row", "row_id"),
+            _authority_read("event", "event_id"),
         )
     )
 
@@ -698,9 +757,9 @@ def test_row_filter_references_existing_value():
         outcome=_answer_plan(
             relations=(_rows_relation_with_filter(ParameterRef("missing")),),
             operations=(_project_operation(input_relation="rows"),),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="result",
                         field_id="name",
@@ -721,9 +780,9 @@ def test_row_filter_can_reference_known_question_input():
                 _rows_relation_with_filter(ParameterRef("question.person_name")),
             ),
             operations=(_project_operation(input_relation="rows"),),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="result",
                         field_id="name",
@@ -747,9 +806,9 @@ def test_known_inputs_are_inventory_not_automatic_obligations():
         outcome=_answer_plan(
             relations=(_rows_relation(),),
             operations=(_project_operation(input_relation="rows"),),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="result",
                         field_id="name",
@@ -767,7 +826,9 @@ def test_known_inputs_are_inventory_not_automatic_obligations():
                 RequestedFact(
                     id="rf_answer",
                     description="answer",
-                    answer_outputs=(RequestedFactAnswerOutput(id="answer"),),
+                    answer_outputs=(
+                        RequestedFactAnswerOutput(id="answer", role="ANSWER_VALUE"),
+                    ),
                 ),
             ),
         ),
@@ -779,9 +840,9 @@ def test_unclassified_literal_cannot_supply_row_filter_value():
         outcome=_answer_plan(
             relations=(_rows_relation_with_filter({"literal": "Alice"}),),
             operations=(_project_operation(input_relation="rows"),),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="result",
                         field_id="name",
@@ -804,9 +865,9 @@ def test_unused_known_time_input_does_not_require_runtime_anchors():
         outcome=_answer_plan(
             relations=(_rows_relation(),),
             operations=(_project_operation(input_relation="rows"),),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="result",
                         field_id="name",
@@ -824,7 +885,9 @@ def test_unused_known_time_input_does_not_require_runtime_anchors():
                 RequestedFact(
                     id="rf_answer",
                     description="answer",
-                    answer_outputs=(RequestedFactAnswerOutput(id="answer"),),
+                    answer_outputs=(
+                        RequestedFactAnswerOutput(id="answer", role="ANSWER_VALUE"),
+                    ),
                 ),
             ),
         ),
@@ -859,9 +922,9 @@ def test_endpoint_time_param_can_reference_grounded_time_input():
         outcome=_answer_plan(
             relations=(relation,),
             operations=(_project_operation(input_relation="rows"),),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="result",
                         field_id="name",
@@ -904,9 +967,9 @@ def test_endpoint_time_param_requires_grounded_time_value():
         outcome=_answer_plan(
             relations=(_rows_relation(),),
             operations=(_project_operation(input_relation="rows"),),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="result",
                         field_id="name",
@@ -986,9 +1049,9 @@ def test_endpoint_requirement_uses_selected_time_component():
         outcome=_answer_plan(
             relations=(relation,),
             operations=(_project_operation(input_relation="rows"),),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="result",
                         field_id="name",
@@ -1020,9 +1083,9 @@ def test_empty_relation_id_is_rejected():
                 ),
             ),
             operations=(_project_operation(input_relation=""),),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="result",
                         field_id="name",
@@ -1050,9 +1113,9 @@ def test_empty_operation_id_is_rejected():
                     output_relation="result",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="result",
                         field_id="name",
@@ -1073,13 +1136,17 @@ def test_fact_local_known_inputs_are_canonicalized_to_shared_question_inputs():
             RequestedFact(
                 id="rf_answer",
                 description="answer",
-                answer_outputs=(RequestedFactAnswerOutput(id="answer"),),
+                answer_outputs=(
+                    RequestedFactAnswerOutput(id="answer", role="ANSWER_VALUE"),
+                ),
                 known_inputs=(person,),
             ),
             RequestedFact(
                 id="rf_context",
                 description="context",
-                answer_outputs=(RequestedFactAnswerOutput(id="context"),),
+                answer_outputs=(
+                    RequestedFactAnswerOutput(id="context", role="ANSWER_VALUE"),
+                ),
                 known_inputs=(person,),
             ),
         )
@@ -1100,14 +1167,18 @@ def test_shared_question_input_refs_are_valid_across_answer_requests():
             RequestedFact(
                 id="rf_amount",
                 description="sales amount yesterday",
-                answer_outputs=(RequestedFactAnswerOutput(id="amount"),),
+                answer_outputs=(
+                    RequestedFactAnswerOutput(id="amount", role="ANSWER_VALUE"),
+                ),
                 known_inputs=(period,),
                 input_refs=("period",),
             ),
             RequestedFact(
                 id="rf_store",
                 description="sales store yesterday",
-                answer_outputs=(RequestedFactAnswerOutput(id="store"),),
+                answer_outputs=(
+                    RequestedFactAnswerOutput(id="store", role="ANSWER_VALUE"),
+                ),
                 known_inputs=(period,),
                 input_refs=("period",),
             ),
@@ -1119,24 +1190,24 @@ def test_shared_question_input_refs_are_valid_across_answer_requests():
                 FactFulfillment(
                     requested_fact_id="rf_amount",
                     answer_output_id="amount",
-                    render_output_id="amount",
+                    result_output_id="amount",
                 ),
                 FactFulfillment(
                     requested_fact_id="rf_store",
                     answer_output_id="store",
-                    render_output_id="store",
+                    result_output_id="store",
                 ),
             ),
             relations=(_rows_relation_filtered_by_known_input("period"),),
             operations=(_project_operation(input_relation="rows"),),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="amount",
                         relation_id="result",
                         field_id="name",
                     ),
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="store",
                         relation_id="result",
                         field_id="name",
@@ -1171,9 +1242,9 @@ def test_known_limit_input_must_match_rank_limit():
                     output_relation="result",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="result",
                         field_id="name",
@@ -1210,9 +1281,9 @@ def test_rank_limit_allows_literal_limit_without_bound_known_input():
                     output_relation="result",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="result",
                         field_id="name",
@@ -1261,7 +1332,7 @@ def test_rank_limit_expression_requires_positive_integer_value():
                             output_relation="result",
                         ),
                     ),
-                    render_spec=RenderSpec(relation_outputs=()),
+                    result_projection=ResultProjection(relation_outputs=()),
                 )
             )
             verify_fact_plan(plan)
@@ -1293,9 +1364,9 @@ def test_rank_limit_rejects_non_numeric_expression():
                     output_relation="result",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="result",
                         field_id="name",
@@ -1314,9 +1385,9 @@ def test_fulfillment_uses_visible_requested_fact_id_and_rendered_output():
         outcome=_answer_plan(
             relations=(_rows_relation(),),
             operations=(_project_operation(),),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="name", relation_id="result", field_id="name"
                     ),
                 )
@@ -1328,7 +1399,9 @@ def test_fulfillment_uses_visible_requested_fact_id_and_rendered_output():
             RequestedFact(
                 id="rf_answer",
                 description="person name",
-                answer_outputs=(RequestedFactAnswerOutput(id="name"),),
+                answer_outputs=(
+                    RequestedFactAnswerOutput(id="name", role="ANSWER_VALUE"),
+                ),
             ),
         )
     )
@@ -1367,12 +1440,12 @@ def test_field_binding_id_must_exist_on_row_source():
                 FactFulfillment(
                     requested_fact_id="rf_answer",
                     answer_output_id="name",
-                    render_output_id="name",
+                    result_output_id="name",
                 ),
                 FactFulfillment(
                     requested_fact_id="rf_answer",
                     answer_output_id="answer",
-                    render_output_id="answer",
+                    result_output_id="answer",
                 ),
             ),
             relations=(
@@ -1402,9 +1475,9 @@ def test_field_binding_id_must_exist_on_row_source():
                     output_relation="result",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="result",
                         field_id="answer",
@@ -1418,7 +1491,9 @@ def test_field_binding_id_must_exist_on_row_source():
             RequestedFact(
                 id="rf_answer",
                 description="restricted full value",
-                answer_outputs=(RequestedFactAnswerOutput(id="answer"),),
+                answer_outputs=(
+                    RequestedFactAnswerOutput(id="answer", role="ANSWER_VALUE"),
+                ),
             ),
         )
     )
@@ -1446,7 +1521,7 @@ def test_proof_backed_scalar_output_can_satisfy_requested_derived_fact():
                 FactFulfillment(
                     requested_fact_id="rf_answer",
                     answer_output_id="answer",
-                    render_output_id="answer",
+                    result_output_id="answer",
                 ),
             ),
             relations=(_rows_relation(),),
@@ -1477,14 +1552,14 @@ def test_proof_backed_scalar_output_can_satisfy_requested_derived_fact():
                     ),
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="name", relation_id="result", field_id="name"
                     ),
                 ),
                 scalar_outputs=(
-                    RenderScalarOutput(
+                    ScalarResultOutput(
                         id="answer",
                         scalar_id="remaining",
                     ),
@@ -1535,7 +1610,7 @@ def test_chained_compute_scalar_output_preserves_evidence_proof():
                 FactFulfillment(
                     requested_fact_id="rf_answer",
                     answer_output_id="answer",
-                    render_output_id="answer",
+                    result_output_id="answer",
                 ),
             ),
             relations=(_rows_relation(),),
@@ -1576,16 +1651,16 @@ def test_chained_compute_scalar_output_preserves_evidence_proof():
                     ),
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="name",
                         relation_id="result",
                         field_id="name",
                     ),
                 ),
                 scalar_outputs=(
-                    RenderScalarOutput(
+                    ScalarResultOutput(
                         id="answer",
                         scalar_id="final_total",
                     ),
@@ -1603,14 +1678,14 @@ def test_chained_compute_scalar_output_preserves_evidence_proof():
     )
 
 
-def test_fulfillment_must_reference_rendered_relation_field():
+def test_fulfillment_must_reference_projected_relation_field():
     plan = FactPlan(
         outcome=_answer_plan(
             fulfillment=(
                 FactFulfillment(
                     requested_fact_id="rf_answer",
                     answer_output_id="answer",
-                    render_output_id="internal_total",
+                    result_output_id="internal_total",
                 ),
             ),
             relations=(_rows_relation(),),
@@ -1627,9 +1702,9 @@ def test_fulfillment_must_reference_rendered_relation_field():
                     output_relation="result",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="result",
                         field_id="display_total",
@@ -1640,7 +1715,7 @@ def test_fulfillment_must_reference_rendered_relation_field():
     )
 
     with pytest.raises(
-        VerificationError, match="fulfillment render output is not rendered"
+        VerificationError, match="fulfillment result output is not projected"
     ):
         verify_fact_plan(plan)
 
@@ -1652,7 +1727,7 @@ def test_fulfillment_allows_fact_scoped_selected_read_without_global_selection()
                 FactFulfillment(
                     requested_fact_id="rf_sales",
                     answer_output_id="sales_total",
-                    render_output_id="sales_total",
+                    result_output_id="sales_total",
                 ),
             ),
             relations=(
@@ -1684,9 +1759,9 @@ def test_fulfillment_allows_fact_scoped_selected_read_without_global_selection()
                     output_relation="result",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="sales_total",
                         relation_id="result",
                         field_id="staff_name",
@@ -1752,7 +1827,11 @@ def test_fulfillment_allows_fact_scoped_selected_read_without_global_selection()
                 RequestedFact(
                     id="rf_sales",
                     description="sales total",
-                    answer_outputs=(RequestedFactAnswerOutput(id="sales_total"),),
+                    answer_outputs=(
+                        RequestedFactAnswerOutput(
+                            id="sales_total", role="ANSWER_VALUE"
+                        ),
+                    ),
                 ),
             )
         ),
@@ -1768,7 +1847,7 @@ def test_fulfillment_allows_source_binding_authorized_api_replay():
                 FactFulfillment(
                     requested_fact_id="rf_sales",
                     answer_output_id="sales_total",
-                    render_output_id="sales_total",
+                    result_output_id="sales_total",
                 ),
             ),
             relations=(
@@ -1796,9 +1875,9 @@ def test_fulfillment_allows_source_binding_authorized_api_replay():
                     output_relation="result",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="sales_total",
                         relation_id="result",
                         field_id="sales_total",
@@ -1855,7 +1934,11 @@ def test_fulfillment_allows_source_binding_authorized_api_replay():
                 RequestedFact(
                     id="rf_sales",
                     description="sales total",
-                    answer_outputs=(RequestedFactAnswerOutput(id="sales_total"),),
+                    answer_outputs=(
+                        RequestedFactAnswerOutput(
+                            id="sales_total", role="ANSWER_VALUE"
+                        ),
+                    ),
                 ),
             )
         ),
@@ -1872,7 +1955,7 @@ def test_execution_uses_same_authorized_catalog_as_verification():
                 FactFulfillment(
                     requested_fact_id="rf_sales",
                     answer_output_id="sales_total",
-                    render_output_id="sales_total",
+                    result_output_id="sales_total",
                 ),
             ),
             relations=(
@@ -1897,9 +1980,9 @@ def test_execution_uses_same_authorized_catalog_as_verification():
                     output_relation="result",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="sales_total",
                         relation_id="result",
                         field_id="sales_total",
@@ -1960,7 +2043,11 @@ def test_execution_uses_same_authorized_catalog_as_verification():
                 RequestedFact(
                     id="rf_sales",
                     description="sales total",
-                    answer_outputs=(RequestedFactAnswerOutput(id="sales_total"),),
+                    answer_outputs=(
+                        RequestedFactAnswerOutput(
+                            id="sales_total", role="ANSWER_VALUE"
+                        ),
+                    ),
                 ),
             )
         ),
@@ -1972,7 +2059,7 @@ def test_execution_uses_same_authorized_catalog_as_verification():
     )
 
     assert data_access.requests == [{"endpointName": "list_records", "args": {}}]
-    assert result.relations[0].rows == ({"sales_total": "12"},)
+    assert result.relations[0].rows == ({"sales_total": Decimal("12")},)
 
 
 def test_api_execution_records_source_read_lineage():
@@ -1991,9 +2078,9 @@ def test_api_execution_records_source_read_lineage():
                 ),
             ),
             operations=(_project_operation(),),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="result",
                         field_id="name",
@@ -2105,14 +2192,14 @@ def test_api_execution_records_one_source_read_for_one_backend_request():
                 ),
                 _project_operation(input_relation="rows", output_relation="row_result"),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="summary_answer",
                         relation_id="summary_result",
                         field_id="total",
                     ),
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="row_answer",
                         relation_id="row_result",
                         field_id="name",
@@ -2177,9 +2264,9 @@ def test_api_execution_records_failed_source_read_when_response_shape_is_invalid
                 ),
             ),
             operations=(_project_operation(),),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="result",
                         field_id="name",
@@ -2241,9 +2328,9 @@ def test_api_execution_records_failed_source_read_when_response_status_is_invali
                 ),
             ),
             operations=(_project_operation(),),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="result",
                         field_id="name",
@@ -2307,7 +2394,7 @@ def _execute_location_id_plan_with_observed_label():
                 FactFulfillment(
                     requested_fact_id="rf_location",
                     answer_output_id="location",
-                    render_output_id="location",
+                    result_output_id="location",
                 ),
             ),
             relations=(
@@ -2332,9 +2419,9 @@ def _execute_location_id_plan_with_observed_label():
                     output_relation="result",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="location",
                         relation_id="result",
                         field_id="location_id",
@@ -2357,18 +2444,25 @@ def _execute_location_id_plan_with_observed_label():
                         path="data.location_id",
                         row_path_id="data",
                         type="uuid",
-                        identity=IdentityMetadata(
-                            entity_ref="location",
-                            identity_field="location_id",
-                            primary_key=True,
-                            stable=True,
-                        ),
                     ),
                     CatalogField(
                         ref="field.location_name",
                         path="data.location_name",
                         row_path_id="data",
                         type="string",
+                    ),
+                ),
+                candidate_keys=(
+                    CandidateKey(
+                        id="primary_key",
+                        entity_kind="location",
+                        components=(
+                            CandidateKeyComponent(
+                                id="location_id",
+                                field_ref="field.location_id",
+                            ),
+                        ),
+                        primary=True,
                     ),
                 ),
             ),
@@ -2397,7 +2491,9 @@ def _execute_location_id_plan_with_observed_label():
                 RequestedFact(
                     id="rf_location",
                     description="location",
-                    answer_outputs=(RequestedFactAnswerOutput(id="location"),),
+                    answer_outputs=(
+                        RequestedFactAnswerOutput(id="location", role="ANSWER_VALUE"),
+                    ),
                 ),
             )
         ),
@@ -2411,9 +2507,9 @@ def test_relation_source_applied_filter_constrains_rows_before_operation():
     area_expression = _constant_expression(
         FactValue.identity(
             id="nairobi_area",
-            identity_type="area",
-            identity_field="area_id",
-            value="area_nairobi",
+            key=entity_key_value(
+                "area", "primary_key", {"area_id": "area_nairobi"}
+            ),
             display_value="Nairobi",
             proof_refs=("known_input:input_1",),
         ),
@@ -2467,9 +2563,9 @@ def test_relation_source_applied_filter_constrains_rows_before_operation():
                     output_relation="result",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="result",
                         field_id="total",
@@ -2492,12 +2588,6 @@ def test_relation_source_applied_filter_constrains_rows_before_operation():
                         path="data.location_id",
                         row_path_id="data",
                         type="uuid",
-                        identity=IdentityMetadata(
-                            entity_ref="location",
-                            identity_field="location_id",
-                            primary_key=True,
-                            stable=True,
-                        ),
                     ),
                     CatalogField(
                         ref="field.area_id",
@@ -2510,6 +2600,19 @@ def test_relation_source_applied_filter_constrains_rows_before_operation():
                         path="data.metric_total",
                         row_path_id="data",
                         type="number",
+                    ),
+                ),
+                candidate_keys=(
+                    CandidateKey(
+                        id="primary_key",
+                        entity_kind="location",
+                        components=(
+                            CandidateKeyComponent(
+                                id="location_id",
+                                field_ref="field.location_id",
+                            ),
+                        ),
+                        primary=True,
                     ),
                 ),
             ),
@@ -2554,12 +2657,12 @@ def test_relation_source_applied_filter_constrains_rows_before_operation():
         {
             "location_id": "loc_1",
             "area_id": "area_nairobi",
-            "metric_total": "10",
+            "metric_total": Decimal("10"),
         },
         {
             "location_id": "loc_2",
             "area_id": "area_nairobi",
-            "metric_total": "20",
+            "metric_total": Decimal("20"),
         },
     )
 
@@ -2571,7 +2674,7 @@ def test_fulfillment_rejects_rendered_scalar_without_evidence_proof():
                 FactFulfillment(
                     requested_fact_id="rf_answer",
                     answer_output_id="answer",
-                    render_output_id="answer",
+                    result_output_id="answer",
                 ),
             ),
             relations=(_rows_relation(),),
@@ -2599,16 +2702,16 @@ def test_fulfillment_rejects_rendered_scalar_without_evidence_proof():
                     ),
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="name",
                         relation_id="result",
                         field_id="name",
                     ),
                 ),
                 scalar_outputs=(
-                    RenderScalarOutput(
+                    ScalarResultOutput(
                         id="answer",
                         scalar_id="current_total",
                     ),
@@ -2636,9 +2739,9 @@ def test_row_filter_targets_are_verified_against_catalog_and_relations():
                 ),
             ),
             operations=(_project_operation(input_relation="rows"),),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer", relation_id="result", field_id="name"
                     ),
                 )
@@ -2712,9 +2815,9 @@ def test_fulfillment_rejects_known_input_proof_from_unrelated_join_branch():
                     output_relation="result",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="result",
                         field_id="name",
@@ -2725,7 +2828,7 @@ def test_fulfillment_rejects_known_input_proof_from_unrelated_join_branch():
     )
 
     with pytest.raises(
-        VerificationError, match="fulfillment render output missing input proof"
+        VerificationError, match="fulfillment result output missing input proof"
     ):
         verify_fact_plan(
             plan,
@@ -2736,7 +2839,9 @@ def test_fulfillment_rejects_known_input_proof_from_unrelated_join_branch():
                         description="records in area",
                         input_refs=("input_1",),
                         known_inputs=(_known_reference("input_1", "London"),),
-                        answer_outputs=(RequestedFactAnswerOutput(id="answer"),),
+                        answer_outputs=(
+                            RequestedFactAnswerOutput(id="answer", role="ANSWER_VALUE"),
+                        ),
                     ),
                 )
             ),
@@ -2758,7 +2863,19 @@ def test_count_fulfillment_does_not_inherit_unrelated_field_proof():
                         ref="field.row_id",
                         path="data.row_id",
                         type="string",
-                        identity=IdentityMetadata(entity_ref="row", primary_key=True),
+                    ),
+                ),
+                candidate_keys=(
+                    CandidateKey(
+                        id="primary_key",
+                        entity_kind="row",
+                        components=(
+                            CandidateKeyComponent(
+                                id="row_id",
+                                field_ref="field.row_id",
+                            ),
+                        ),
+                        primary=True,
                     ),
                 ),
                 facts=(
@@ -2805,9 +2922,9 @@ def test_count_fulfillment_does_not_inherit_unrelated_field_proof():
                     output_relation="totals",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="totals",
                         field_id="total",
@@ -2818,7 +2935,7 @@ def test_count_fulfillment_does_not_inherit_unrelated_field_proof():
     )
 
     with pytest.raises(
-        VerificationError, match="fulfillment render output missing input proof"
+        VerificationError, match="fulfillment result output missing input proof"
     ):
         verify_fact_plan(
             plan,
@@ -2830,7 +2947,9 @@ def test_count_fulfillment_does_not_inherit_unrelated_field_proof():
                         description="count rows for named input",
                         input_refs=("input_1",),
                         known_inputs=(_known_reference("input_1", "Name"),),
-                        answer_outputs=(RequestedFactAnswerOutput(id="answer"),),
+                        answer_outputs=(
+                            RequestedFactAnswerOutput(id="answer", role="ANSWER_VALUE"),
+                        ),
                     ),
                 )
             ),
@@ -2869,9 +2988,9 @@ def test_role_expand_generated_role_field_carries_evidence_proof():
                     output_relation="expanded",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="expanded",
                         field_id="role",
@@ -2902,16 +3021,25 @@ def test_api_identity_binding_can_use_catalog_display_field_as_relation_grain():
                         ref="field.staff_id",
                         path="data.staff_id",
                         type="string",
-                        identity=IdentityMetadata(
-                            entity_ref="staff",
-                            primary_key=True,
-                            display_fields=("field.staff_name",),
-                        ),
                     ),
                     CatalogField(
                         ref="field.staff_name",
                         path="data.staff_name",
                         type="string",
+                    ),
+                ),
+                candidate_keys=(
+                    CandidateKey(
+                        id="primary_key",
+                        entity_kind="staff",
+                        components=(
+                            CandidateKeyComponent(
+                                id="staff_id",
+                                field_ref="field.staff_id",
+                            ),
+                        ),
+                        primary=True,
+                        context_field_refs=("field.staff_name",),
                     ),
                 ),
             ),
@@ -2948,9 +3076,9 @@ def test_api_identity_binding_can_use_catalog_display_field_as_relation_grain():
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="staff",
                         relation_id="answer_rows",
                         field_id="staff_name",
@@ -2981,11 +3109,6 @@ def test_api_identity_binding_declares_relation_grain_without_entity_metadata():
                         ref="field.record_id",
                         path="data.record_id",
                         type="string",
-                        identity=IdentityMetadata(
-                            entity_ref="record",
-                            primary_key=True,
-                            display_fields=("field.name",),
-                        ),
                     ),
                     CatalogField(
                         ref="field.status",
@@ -2996,6 +3119,20 @@ def test_api_identity_binding_declares_relation_grain_without_entity_metadata():
                         ref="field.name",
                         path="data.name",
                         type="string",
+                    ),
+                ),
+                candidate_keys=(
+                    CandidateKey(
+                        id="primary_key",
+                        entity_kind="record",
+                        components=(
+                            CandidateKeyComponent(
+                                id="record_id",
+                                field_ref="field.record_id",
+                            ),
+                        ),
+                        primary=True,
+                        context_field_refs=("field.name",),
                     ),
                 ),
             ),
@@ -3032,9 +3169,9 @@ def test_api_identity_binding_declares_relation_grain_without_entity_metadata():
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="record",
                         relation_id="answer_rows",
                         field_id="name",
@@ -3066,11 +3203,6 @@ def test_api_identity_binding_requires_primary_stable_row_key():
                         path="data.reference_code",
                         row_path_id="data",
                         type="string",
-                        identity=IdentityMetadata(
-                            entity_ref="record",
-                            primary_key=False,
-                            stable=True,
-                        ),
                     ),
                     CatalogField(
                         ref="field.name",
@@ -3113,9 +3245,9 @@ def test_api_identity_binding_requires_primary_stable_row_key():
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="record",
                         relation_id="answer_rows",
                         field_id="name",
@@ -3149,9 +3281,9 @@ def test_relation_field_binding_ids_must_be_unique():
                 ),
             ),
             operations=(_project_operation(input_relation="rows"),),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer", relation_id="result", field_id="name"
                     ),
                 )
@@ -3188,16 +3320,25 @@ def test_api_relation_child_rows_can_include_parent_identity_fields():
                         path="orders.order_id",
                         row_path_id="orders",
                         type="string",
-                        identity=IdentityMetadata(
-                            entity_ref="order",
-                            primary_key=True,
-                        ),
                     ),
                     CatalogField(
                         ref="field.orders.items.sku",
                         path="orders.items.sku",
                         row_path_id="items",
                         type="string",
+                    ),
+                ),
+                candidate_keys=(
+                    CandidateKey(
+                        id="primary_key",
+                        entity_kind="order",
+                        components=(
+                            CandidateKeyComponent(
+                                id="order_id",
+                                field_ref="field.orders.order_id",
+                            ),
+                        ),
+                        primary=True,
                     ),
                 ),
             ),
@@ -3234,9 +3375,9 @@ def test_api_relation_child_rows_can_include_parent_identity_fields():
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="sku",
                         relation_id="answer_rows",
                         field_id="sku",
@@ -3313,9 +3454,9 @@ def test_api_relation_field_requirements_are_satisfied_by_row_source_default():
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="item_name",
                         relation_id="answer_rows",
                         field_id="item_name",
@@ -3349,7 +3490,7 @@ def test_compute_node_output_requires_matching_prior_operation():
                     ),
                 ),
             ),
-            render_spec=RenderSpec(relation_outputs=()),
+            result_projection=ResultProjection(relation_outputs=()),
         )
     )
 
@@ -3382,9 +3523,9 @@ def test_predicate_scalar_rhs_requires_prior_scalar_output():
         outcome=_answer_plan(
             relations=(relation,),
             operations=(operation,),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="name",
                         relation_id="filtered",
                         field_id="name",
@@ -3411,9 +3552,9 @@ def test_operation_input_references_existing_relation_or_prior_operation():
                     output_relation="result",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer", relation_id="result", field_id="name"
                     ),
                 )
@@ -3444,9 +3585,9 @@ def test_operation_ids_are_unique():
                 _project_operation(input_relation="rows"),
                 _project_operation(input_relation="rows"),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer", relation_id="result", field_id="name"
                     ),
                 )
@@ -3466,9 +3607,9 @@ def test_relation_and_output_relation_ids_are_unique():
                 Relation(id="rows", source=_source()),
             ),
             operations=(_project_operation(input_relation="rows"),),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer", relation_id="result", field_id="name"
                     ),
                 )
@@ -3485,9 +3626,9 @@ def test_relation_and_output_relation_ids_are_unique():
             operations=(
                 _project_operation(input_relation="rows", output_relation="rows"),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer", relation_id="rows", field_id="name"
                     ),
                 )
@@ -3576,9 +3717,9 @@ def test_operation_field_references_must_exist_on_input_relation_contracts():
                     ),
                 ),
                 operations=(operation,),
-                render_spec=RenderSpec(
+                result_projection=ResultProjection(
                     relation_outputs=(
-                        RenderRelationOutput(
+                        RelationResultOutput(
                             id="answer",
                             relation_id=final_relation,
                             field_id=final_field,
@@ -3619,7 +3760,7 @@ def test_compute_scalar_outputs_are_unique():
                     ),
                 ),
             ),
-            render_spec=RenderSpec(relation_outputs=()),
+            result_projection=ResultProjection(relation_outputs=()),
         )
     )
 
@@ -3672,9 +3813,9 @@ def test_compute_scalar_outputs_do_not_shadow_aggregate_fields():
                     ),
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer", relation_id="totals", field_id="total"
                     ),
                 )
@@ -3686,14 +3827,14 @@ def test_compute_scalar_outputs_do_not_shadow_aggregate_fields():
         verify_fact_plan(plan)
 
 
-def test_render_output_references_existing_operation_output():
+def test_result_output_references_existing_operation_output():
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(_rows_relation(),),
             operations=(_project_operation(output_relation="result"),),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer", relation_id="missing", field_id="name"
                     ),
                 )
@@ -3705,16 +3846,16 @@ def test_render_output_references_existing_operation_output():
         verify_fact_plan(plan)
 
 
-def test_render_output_cannot_bypass_operation_output():
+def test_result_output_cannot_bypass_operation_output():
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(_rows_relation(),),
             operations=(
                 _project_operation(input_relation="rows", output_relation="result"),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer", relation_id="rows", field_id="name"
                     ),
                 )
@@ -3726,16 +3867,16 @@ def test_render_output_cannot_bypass_operation_output():
         verify_fact_plan(plan)
 
 
-def test_render_output_requires_known_output_field():
+def test_result_output_requires_known_output_field():
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(_rows_relation(),),
             operations=(
                 _project_operation(input_relation="rows", output_relation="result"),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="result",
                         field_id="missing",
@@ -3749,7 +3890,7 @@ def test_render_output_requires_known_output_field():
         verify_fact_plan(plan)
 
 
-def test_render_outputs_may_use_multiple_final_relations():
+def test_result_outputs_may_use_multiple_final_relations():
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(_rows_relation(),),
@@ -3764,14 +3905,14 @@ def test_render_outputs_may_use_multiple_final_relations():
                     output_relation="result_b",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer_a",
                         relation_id="result_a",
                         field_id="name",
                     ),
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer_b",
                         relation_id="result_b",
                         field_id="name",
@@ -3812,9 +3953,9 @@ def test_render_relation_must_be_terminal_operation_output():
                     output_relation="final_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="intermediate",
                         field_id="name",
@@ -3828,7 +3969,7 @@ def test_render_relation_must_be_terminal_operation_output():
         verify_fact_plan(plan)
 
 
-def test_render_output_must_reference_display_output_field():
+def test_entity_result_output_requires_key_metadata():
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(
@@ -3877,9 +4018,9 @@ def test_render_output_must_reference_display_output_field():
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="answer_rows",
                         field_id="entity_id",
@@ -3889,7 +4030,7 @@ def test_render_output_must_reference_display_output_field():
         )
     )
 
-    with pytest.raises(VerificationError, match="factual output field"):
+    with pytest.raises(VerificationError, match="entity key metadata"):
         verify_fact_plan(plan)
 
 
@@ -3925,9 +4066,9 @@ def test_derived_candidate_output_fields_keep_roles():
             operations=(
                 Operation(
                     id="entity_rows",
-                    spec=ProjectToIdentitySpec(
+                    spec=ProjectToKeySpec(
                         input_relation="source_rows",
-                        identity_fields=("entity_id",),
+                        key_fields=("entity_id",),
                     ),
                     output_relation="entity_rows",
                 ),
@@ -3952,9 +4093,9 @@ def test_derived_candidate_output_fields_keep_roles():
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="answer_rows",
                         field_id="name",
@@ -4032,7 +4173,7 @@ def test_project_cannot_partially_change_relation_grain_for_coverage_role():
                     output_relation="answer_rows",
                 ),
             ),
-            render_spec=RenderSpec(relation_outputs=()),
+            result_projection=ResultProjection(relation_outputs=()),
         )
     )
 
@@ -4040,7 +4181,19 @@ def test_project_cannot_partially_change_relation_grain_for_coverage_role():
         verify_fact_plan(plan)
 
 
-def test_project_to_identity_keeps_identity_and_display_fields_separate():
+@pytest.mark.parametrize(
+    ("entity_kind", "key_id", "component_id"),
+    (
+        ("other_entity", "primary_key", "entity_id"),
+        ("entity", "undeclared_key", "entity_id"),
+        ("entity", "primary_key", "other_component"),
+    ),
+)
+def test_project_to_key_rejects_undeclared_entity_key(
+    entity_kind: str,
+    key_id: str,
+    component_id: str,
+) -> None:
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(
@@ -4062,30 +4215,39 @@ def test_project_to_identity_keeps_identity_and_display_fields_separate():
             operations=(
                 Operation(
                     id="entity_rows",
-                    spec=ProjectToIdentitySpec(
+                    spec=ProjectToKeySpec(
                         input_relation="source_rows",
-                        identity_fields=("entity_id",),
-                        fields=(ProjectField(source="entity_label"),),
+                        key_fields=("entity_id",),
                     ),
                     output_relation="entity_rows",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="entity_rows",
-                        field_id="entity_label",
+                        entity_key=EntityKeyProjection(
+                            entity_kind=entity_kind,
+                            key_id=key_id,
+                            components=(
+                                EntityKeyProjectionComponent(
+                                    component_id=component_id,
+                                    field_id="entity_id",
+                                ),
+                            ),
+                        ),
                     ),
                 )
             ),
         )
     )
 
-    verify_fact_plan(plan)
+    with pytest.raises(VerificationError, match="declared entity key"):
+        verify_fact_plan(plan)
 
 
-def test_aggregate_keeps_identity_and_display_fields_separate():
+def test_aggregate_outputs_only_group_key_and_measure():
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(
@@ -4113,7 +4275,7 @@ def test_aggregate_keeps_identity_and_display_fields_separate():
                     id="totals",
                     spec=AggregateSpec(
                         input_relation="source_rows",
-                        group_by=("entity_id", "entity_label"),
+                        group_by=("entity_id",),
                         aggregations=(
                             AggregationSpec(
                                 function=AggregationFunction.SUM,
@@ -4125,12 +4287,21 @@ def test_aggregate_keeps_identity_and_display_fields_separate():
                     output_relation="totals",
                 ),
             ),
-            render_spec=RenderSpec(
+            result_projection=ResultProjection(
                 relation_outputs=(
-                    RenderRelationOutput(
+                    RelationResultOutput(
                         id="answer",
                         relation_id="totals",
-                        field_id="entity_label",
+                        entity_key=EntityKeyProjection(
+                            entity_kind="entity",
+                            key_id="primary_key",
+                            components=(
+                                EntityKeyProjectionComponent(
+                                    component_id="entity_id",
+                                    field_id="entity_id",
+                                ),
+                            ),
+                        ),
                     ),
                 )
             ),

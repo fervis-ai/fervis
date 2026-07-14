@@ -9,6 +9,7 @@ from fervis.lookup.conversation_resolution import (
 )
 from fervis.lookup.conversation_resolution.compilation import CompiledResolvedClause
 from fervis.lookup.answer_program.values import FactValue, IdentityValuePayload
+from fervis.lookup.canonical_data import entity_key_value
 from fervis.lookup.fact_planning.request import RuntimeValueContext
 from fervis.lookup.grounding.resolution import ground_question_inputs
 from fervis.lookup.question_contract import (
@@ -20,6 +21,9 @@ from fervis.lookup.question_contract import (
     RequestedFactLiteralInput,
 )
 from fervis.lookup.relation_catalog import RelationCatalog
+from fervis.lookup.clarification.payload import clarification_from_payload
+from fervis.lookup.clarification.model import ClarificationOwnerResponse
+from fervis.lookup.clarification.response import parse_clarification_response
 
 from tests.testkit.assertions import exact_mismatches, subset_mismatches
 
@@ -53,12 +57,12 @@ def _run_grounding_runtime_case(payload: dict[str, Any]) -> list[str]:
         model_key="test",
         max_thinking_tokens=0,
         conversation_resolution=_compiled_resolution_from_input(input_payload),
+        clarification_responses=_clarification_responses_from_input(input_payload),
     )
     actual = {
         "values": [_value_payload(value) for value in output.ledger.values],
         "certifications": [
-            certification.to_payload()
-            for certification in output.ledger.certifications
+            certification.to_payload() for certification in output.ledger.certifications
         ],
     }
     if "result_equals" in payload["expect"]:
@@ -83,6 +87,7 @@ def _question_contract_from_input(payload: dict[str, Any]) -> QuestionContract:
                 answer_outputs=(
                     RequestedFactAnswerOutput(
                         id=str(fact_payload["answer_output_id"]),
+                        role="ANSWER_VALUE",
                     ),
                 ),
                 known_inputs=(known,),
@@ -119,12 +124,26 @@ def _compiled_resolution_from_input(
                 values=(),
             ),
         ),
-        inputs=(
-            _resolved_question_input(payload["resolved_question_input"]),
-        ),
+        inputs=(_resolved_question_input(payload["resolved_question_input"]),),
         frame_call=None,
         used_source_card_ids=(),
         used_memory_ids=(),
+    )
+
+
+def _clarification_responses_from_input(
+    payload: dict[str, Any],
+) -> tuple[ClarificationOwnerResponse, ...]:
+    answer = payload.get("clarification_response")
+    if not isinstance(answer, dict):
+        return ()
+    return (
+        parse_clarification_response(
+            clarification_from_payload(answer["clarification"]),
+            response_id=str(answer["response_id"]),
+            response_text=str(answer["response_text"]),
+            selected_option_id=str(answer.get("selected_option_id") or ""),
+        ),
     )
 
 
@@ -147,9 +166,11 @@ def _resolved_canonical_identity(
     payload: dict[str, Any],
 ) -> ResolvedCanonicalIdentity:
     return ResolvedCanonicalIdentity(
-        identity_type=str(payload["identity_type"]),
-        identity_field=str(payload["identity_field"]),
-        value=str(payload["value"]),
+        key=entity_key_value(
+            str(payload["entity_kind"]),
+            str(payload["key_id"]),
+            {str(payload["key_component_id"]): str(payload["value"])},
+        ),
         authority_refs=tuple(str(ref) for ref in payload["authority_refs"]),
         lineage_refs=tuple(str(ref) for ref in payload["lineage_refs"]),
     )
@@ -160,14 +181,13 @@ def _value_payload(value: FactValue) -> dict[str, object]:
         return {
             "id": value.id,
             "kind": value.kind.value,
-            "identity_type": value.payload.identity_type,
-            "identity_field": value.payload.identity_field,
-            "value": value.payload.value,
+            "entity_kind": value.payload.entity_kind,
+            "key_id": value.payload.key_id,
+            "key_component_id": value.payload.only_component().component_id,
+            "value": value.payload.only_component().value,
             "display_value": value.payload.display_value,
             "proof_refs": list(value.proof_refs),
-            "applies_to_requested_fact_ids": list(
-                value.applies_to_requested_fact_ids
-            ),
+            "applies_to_requested_fact_ids": list(value.applies_to_requested_fact_ids),
         }
     return {
         "id": value.id,

@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import StrEnum
+from dataclasses import dataclass, field
+from fervis.types.enums import StrEnum
 from typing import TYPE_CHECKING, Mapping
 
+from fervis.lookup.answer_program.result_projection import (
+    ProjectedResultRow,
+    ResultProjection,
+)
 from fervis.lookup.clarification import Clarification
+from fervis.lookup.canonical_data import RuntimeValue
 
 if TYPE_CHECKING:
     from fervis.lookup.plan_execution.relations import RelationRows
-    from fervis.lookup.answer_program.render_spec import RenderSpec
 
 
 class OutcomeKind(StrEnum):
@@ -118,11 +122,20 @@ class Undefined:
 
 @dataclass(frozen=True)
 class AnswerResult:
-    render_spec: RenderSpec | None = None
+    result_projection: ResultProjection = ResultProjection()
     relations: tuple["RelationRows", ...] = ()
-    scalars: Mapping[str, object] | None = None
+    scalars: Mapping[str, RuntimeValue] | None = None
     proof_refs: tuple[str, ...] = ()
     kind: OutcomeKind = OutcomeKind.ANSWER
+    projected_rows: tuple[ProjectedResultRow, ...] = field(init=False)
+
+    def __post_init__(self) -> None:
+        relation_rows = {relation.id: relation.rows for relation in self.relations}
+        object.__setattr__(
+            self,
+            "projected_rows",
+            self.result_projection.project_rows(relation_rows),
+        )
 
 
 ResultOutcome = AnswerResult | NeedsClarification | Impossible | NoData | Undefined

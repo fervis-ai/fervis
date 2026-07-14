@@ -6,14 +6,22 @@ from typing import Protocol
 
 
 class ReadAssessmentLike(Protocol):
-    source_candidate_id: str
-    source_candidate_signature: str
-    is_retained: bool
-    relevant_field_refs: tuple[str, ...]
+    @property
+    def source_candidate_id(self) -> str: ...
+
+    @property
+    def source_candidate_signature(self) -> str: ...
+
+    @property
+    def is_retained(self) -> bool: ...
+
+    @property
+    def relevant_field_refs(self) -> tuple[str, ...]: ...
 
 
 class ReadEligibilityResultLike(Protocol):
-    read_assessments: tuple[ReadAssessmentLike, ...]
+    @property
+    def read_assessments(self) -> tuple[ReadAssessmentLike, ...]: ...
 
 
 def retained_source_candidate_ids_by_signature(

@@ -41,7 +41,7 @@ from fervis.lookup.answer_program.operations import (
     PredicateOperator,
     ProjectField,
     ProjectSpec,
-    ProjectToIdentitySpec,
+    ProjectToKeySpec,
     RelationRole,
     RelationRoleRef,
     RoleExpandSpec,
@@ -73,7 +73,7 @@ def run_relation_engine_case(payload: dict[str, Any]) -> list[str]:
         return [f"unexpected error: {exc}"]
     if expects_rejection(payload["expect"]):
         return status_mismatches(actual_status="accepted", expected=payload["expect"])
-    actual = {
+    actual: dict[str, Any] = {
         relation.id: {
             "rows": list(relation.rows),
             "grain_keys": list(relation.grain_keys),
@@ -85,7 +85,6 @@ def run_relation_engine_case(payload: dict[str, Any]) -> list[str]:
             "completeness_pagination": relation.completeness.pagination.value,
             "completeness_proof_refs": list(relation.completeness.proof_refs),
             "completeness_scope": relation.completeness.scope_fingerprint,
-            "identity_type": relation.identity_type,
         }
         for relation in output.relations
     }
@@ -97,7 +96,9 @@ def run_relation_engine_case(payload: dict[str, Any]) -> list[str]:
             for scalar_id, proof_refs in output.scalar_proofs.items()
         }
     if "result_equals" in payload["expect"]:
-        return exact_mismatches(actual=actual, expected=payload["expect"]["result_equals"])
+        return exact_mismatches(
+            actual=actual, expected=payload["expect"]["result_equals"]
+        )
     return subset_mismatches(
         actual=actual,
         expected_subset=payload["expect"]["result_contains"],
@@ -144,7 +145,11 @@ def run_calendar_relation_case(payload: dict[str, Any]) -> list[str]:
 def engine_input_from_payload(payload: dict[str, Any]) -> RelationEngineInput:
     return RelationEngineInput(
         scalar_inputs=tuple(
-            ScalarInput(id=str(item["id"]), value=item["value"])
+            ScalarInput(
+                id=str(item["id"]),
+                value=item["value"],
+                value_type=str(item.get("value_type") or ""),
+            )
             for item in payload.get("scalar_inputs") or ()
         ),
         relations=tuple(_relation(item) for item in payload.get("relations") or ()),
@@ -158,16 +163,23 @@ def _relation(payload: dict[str, Any]) -> RelationRows:
         id=str(payload["id"]),
         rows=tuple(dict(row) for row in payload.get("rows") or ()),
         grain_keys=tuple(str(item) for item in payload.get("grain_keys") or ()),
-        identity_type=str(payload.get("identity_type") or ""),
+        field_types={
+            str(field_id): str(field_type)
+            for field_id, field_type in (payload.get("field_types") or {}).items()
+        },
         completeness=(
             CompletenessProof(
                 status=CompletenessStatus(str(completeness.get("status"))),
                 source_kind=CompletenessSourceKind(
                     str(completeness.get("source_kind") or "api_read")
                 ),
-                set_kind=RelationSetKind(str(completeness.get("set_kind") or "universe")),
+                set_kind=RelationSetKind(
+                    str(completeness.get("set_kind") or "universe")
+                ),
                 scope_fingerprint=str(completeness.get("scope") or "scope"),
-                proof_refs=tuple(str(item) for item in completeness.get("proof_refs") or ()),
+                proof_refs=tuple(
+                    str(item) for item in completeness.get("proof_refs") or ()
+                ),
             )
             if isinstance(completeness, dict)
             else CompletenessProof()
@@ -195,11 +207,10 @@ def _operation_spec(payload: dict[str, Any]) -> Any:
             input_relation=str(payload["input_relation"]),
             fields=tuple(_project_field(item) for item in payload["fields"]),
         )
-    if kind == "project_to_identity":
-        return ProjectToIdentitySpec(
+    if kind == "project_to_key":
+        return ProjectToKeySpec(
             input_relation=str(payload["input_relation"]),
-            identity_fields=tuple(str(item) for item in payload["identity_fields"]),
-            fields=tuple(_project_field(item) for item in payload.get("fields") or ()),
+            key_fields=tuple(str(item) for item in payload["key_fields"]),
         )
     if kind == "join":
         return JoinSpec(
@@ -242,16 +253,15 @@ def _operation_spec(payload: dict[str, Any]) -> Any:
         return UnionSpec(
             inputs=tuple(str(item) for item in payload["inputs"]),
             output_fields=tuple(str(item) for item in payload["output_fields"]),
-            identity_fields=tuple(str(item) for item in payload.get("identity_fields") or ()),
+            identity_fields=tuple(
+                str(item) for item in payload.get("identity_fields") or ()
+            ),
         )
     if kind == "aggregate":
         return AggregateSpec(
             input_relation=str(payload["input_relation"]),
             group_by=tuple(str(item) for item in payload.get("group_by") or ()),
             aggregations=tuple(_aggregation(item) for item in payload["aggregations"]),
-            carry_fields=tuple(
-                _project_field(item) for item in payload.get("carry_fields") or ()
-            ),
         )
     if kind == "rank":
         return ResolvedRankSpec(
@@ -286,9 +296,7 @@ def _compute_expression(payload: dict[str, Any]):
             output_id=str(output["output_id"]),
         )
     if set(payload) == {"negate"}:
-        return ResolvedComputeNegation(
-            operand=_compute_expression(payload["negate"])
-        )
+        return ResolvedComputeNegation(operand=_compute_expression(payload["negate"]))
     if set(payload) == {"operator", "left", "right"}:
         return ResolvedComputeBinary(
             operator=ComputeBinaryOperator(str(payload["operator"])),
@@ -315,11 +323,7 @@ def _join_key(payload: dict[str, Any]) -> JoinKey:
 def _project_field(payload: dict[str, Any]) -> ProjectField:
     return ProjectField(
         source=str(payload["source"]),
-        output=(
-            str(payload["output"])
-            if payload.get("output") is not None
-            else None
-        ),
+        output=str(payload.get("output") or ""),
     )
 
 

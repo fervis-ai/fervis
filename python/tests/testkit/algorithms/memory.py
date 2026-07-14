@@ -3,12 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from fervis.memory.conversation_context import expand_activated_memory_cards
-from fervis.memory.activation import (
-    activate_memory,
-    activated_entity_id_rows,
-    ActivatedInput,
-    UseAs,
-)
 from fervis.memory.addresses import fact_address_from_payload
 from fervis.memory.prior_requests import prior_requests_from_artifact
 from fervis.memory.artifacts import (
@@ -20,7 +14,6 @@ from fervis.memory.projection import (
     fact_artifacts_from_context,
     project_conversation_memory,
 )
-from fervis.memory.prompt_contract import planner_memory_contract
 from fervis.lookup.memory.projection import project_lookup_memory
 from fervis.lookup.memory.projection import project_conversation_memory_cards
 from fervis.lookup.memory.available_values import (
@@ -49,10 +42,12 @@ from fervis.lookup.outcomes.model import (
     UndefinedOperationRef,
     UndefinedReasonCode,
 )
-from fervis.lookup.answer_program.render_spec import (
-    RenderRelationOutput,
-    RenderScalarOutput,
-    RenderSpec,
+from fervis.lookup.answer_program.result_projection import (
+    EntityKeyProjection,
+    EntityKeyProjectionComponent,
+    RelationResultOutput,
+    ScalarResultOutput,
+    ResultProjection,
 )
 
 from tests.testkit.assertions import (
@@ -62,43 +57,6 @@ from tests.testkit.assertions import (
     subset_mismatches,
 )
 from tests.testkit.serialization import portable_value
-
-
-def run_memory_activate_case(payload: dict[str, Any]) -> list[str]:
-    input_payload = payload["input"]
-    try:
-        memory = activate_memory(
-            artifacts=fact_artifacts_from_context(
-                input_payload["conversation_context"]
-            ),
-            requests=tuple(
-                ActivatedInput(
-                    id=item["id"],
-                    from_artifact_id=item["from_artifact_id"],
-                    from_address=item["from_address"],
-                    use_as=UseAs(item["use_as"]),
-                    target_binding_id=item["target_binding_id"],
-                    requested_scope=dict(item.get("requested_scope") or {}),
-                )
-                for item in input_payload.get("requests") or ()
-            ),
-        )
-    except ValueError as exc:
-        if expects_rejection(payload["expect"]):
-            return status_mismatches(
-                actual_status="rejected",
-                expected=payload["expect"],
-            )
-        return [f"unexpected error: {exc}"]
-    if expects_rejection(payload["expect"]):
-        return status_mismatches(actual_status="accepted", expected=payload["expect"])
-    return subset_mismatches(
-        actual={
-            "activated": memory.to_dict(),
-            "entity_id_rows": list(activated_entity_id_rows(memory)),
-        },
-        expected_subset=payload["expect"]["result_contains"],
-    )
 
 
 def run_memory_build_artifact_case(payload: dict[str, Any]) -> list[str]:
@@ -253,25 +211,25 @@ def run_memory_lineage_memory_artifacts_case(payload: dict[str, Any]) -> list[st
 
     input_payload = payload["input"]
     rows = tuple(
-            MemoryArtifactRow(
-                memory_artifact_id=str(item["memory_artifact_id"]),
-                run_id=str(item["run_id"]),
-                produced_by_step_id=str(
-                    item.get("produced_by_step_id") or f"{item['run_id']}.step"
-                ),
-                source_kind=MemoryArtifactSourceKind(str(item["source_kind"])),
-                payload_schema=str(item["payload_schema"]),
-                payload_schema_rev=int(item["payload_schema_rev"]),
-                payload_json=dict(item["payload_json"]),
-                requested_fact_id=(
-                    str(item["requested_fact_id"])
-                    if item.get("requested_fact_id")
-                    else None
-                ),
-                fact_result_id=(
-                    str(item["fact_result_id"]) if item.get("fact_result_id") else None
-                ),
-            )
+        MemoryArtifactRow(
+            memory_artifact_id=str(item["memory_artifact_id"]),
+            run_id=str(item["run_id"]),
+            produced_by_step_id=str(
+                item.get("produced_by_step_id") or f"{item['run_id']}.step"
+            ),
+            source_kind=MemoryArtifactSourceKind(str(item["source_kind"])),
+            payload_schema=str(item["payload_schema"]),
+            payload_schema_rev=int(item["payload_schema_rev"]),
+            payload_json=dict(item["payload_json"]),
+            requested_fact_id=(
+                str(item["requested_fact_id"])
+                if item.get("requested_fact_id")
+                else None
+            ),
+            fact_result_id=(
+                str(item["fact_result_id"]) if item.get("fact_result_id") else None
+            ),
+        )
         for item in input_payload["memory_artifacts"]
     )
     try:
@@ -313,16 +271,27 @@ class _FixtureMemoryArtifactQuery:
 
 def run_memory_outcome_address_case(payload: dict[str, Any]) -> list[str]:
     address = fact_result_outcome_address(_fact_result(payload["input"]["fact_result"]))
+    address_payload = None if address is None else address.to_dict()
     return subset_mismatches(
-        actual={"address": address.to_dict()},
+        actual={"address": address_payload},
         expected_subset=payload["expect"]["result_contains"],
     )
 
 
 def run_memory_answer_addresses_case(payload: dict[str, Any]) -> list[str]:
-    addresses = fact_result_answer_addresses(
-        _fact_result(payload["input"]["fact_result"])
-    )
+    try:
+        addresses = fact_result_answer_addresses(
+            _fact_result(payload["input"]["fact_result"])
+        )
+    except ValueError as exc:
+        if expects_rejection(payload["expect"]):
+            return status_mismatches(
+                actual_status="rejected",
+                expected=payload["expect"],
+            )
+        return [f"unexpected error: {exc}"]
+    if expects_rejection(payload["expect"]):
+        return status_mismatches(actual_status="accepted", expected=payload["expect"])
     return subset_mismatches(
         actual={
             "address_count": len(addresses),
@@ -382,12 +351,12 @@ def run_memory_project_conversation_case(payload: dict[str, Any]) -> list[str]:
 def run_memory_lookup_projection_case(payload: dict[str, Any]) -> list[str]:
     memory = project_lookup_memory(payload["input"]["conversation_context"])
     relation_field_types = {
-        relation.id: dict(relation.field_types) for relation in memory.relations
+        relation.id: dict(relation.field_types or {}) for relation in memory.relations
     }
     relation_answer_outputs = {
         relation.id: {
             field_id: list(output_ids)
-            for field_id, output_ids in relation.field_answer_output_ids.items()
+            for field_id, output_ids in (relation.field_answer_output_ids or {}).items()
         }
         for relation in memory.relations
     }
@@ -397,10 +366,12 @@ def run_memory_lookup_projection_case(payload: dict[str, Any]) -> list[str]:
                 "id": relation.id,
                 "rows": list(relation.rows),
                 "grain_keys": list(relation.grain_keys),
-                "field_types": dict(relation.field_types),
+                "field_types": dict(relation.field_types or {}),
                 "field_answer_output_ids": {
                     field_id: list(output_ids)
-                    for field_id, output_ids in relation.field_answer_output_ids.items()
+                    for field_id, output_ids in (
+                        relation.field_answer_output_ids or {}
+                    ).items()
                 },
                 "completeness": _completeness_dict(relation.completeness),
             }
@@ -410,13 +381,7 @@ def run_memory_lookup_projection_case(payload: dict[str, Any]) -> list[str]:
         "relation_answer_outputs": relation_answer_outputs,
         "memory_values_by_field": _memory_values_by_field(memory.prompt_context),
         "identity_values": [item.to_dict() for item in memory.identity_values],
-        "identity_sets": [
-            {
-                **item.to_dict(),
-                "values": list(item.values),
-            }
-            for item in memory.identity_sets
-        ],
+        "identity_sets": [item.to_dict() for item in memory.identity_sets],
         "prompt_context": memory.prompt_context,
         "prompt_context_keys": sorted((memory.prompt_context or {}).keys()),
     }
@@ -435,10 +400,7 @@ def _excludes_from(
     excludes_from: dict[str, list[str]],
 ) -> dict[str, dict[str, bool]]:
     return {
-        field: {
-            text: text not in repr(actual.get(field))
-            for text in excluded_values
-        }
+        field: {text: text not in repr(actual.get(field)) for text in excluded_values}
         for field, excluded_values in excludes_from.items()
     }
 
@@ -450,21 +412,8 @@ def run_memory_identity_projection_case(payload: dict[str, Any]) -> list[str]:
     return subset_mismatches(
         actual={
             "identity_values": [item.to_dict() for item in projection.identity_values],
-            "identity_sets": [
-                {
-                    **item.to_dict(),
-                    "values": list(item.values),
-                }
-                for item in projection.identity_sets
-            ],
+            "identity_sets": [item.to_dict() for item in projection.identity_sets],
         },
-        expected_subset=payload["expect"]["result_contains"],
-    )
-
-
-def run_memory_planner_contract_case(payload: dict[str, Any]) -> list[str]:
-    return subset_mismatches(
-        actual={"contract": planner_memory_contract(payload["input"]["memory_frame"])},
         expected_subset=payload["expect"]["result_contains"],
     )
 
@@ -625,17 +574,32 @@ def _impossible(payload: dict[str, Any]) -> Impossible:
 
 def _answer(payload: dict[str, Any]) -> AnswerResult:
     return AnswerResult(
-        render_spec=RenderSpec(
+        result_projection=ResultProjection(
             relation_outputs=tuple(
-                RenderRelationOutput(
+                RelationResultOutput(
                     id=item["id"],
                     relation_id=item["relation_id"],
-                    field_id=item["field_id"],
+                    field_id=str(item.get("field_id") or ""),
+                    entity_key=(
+                        EntityKeyProjection(
+                            entity_kind=str(item["entity_key"]["entity_kind"]),
+                            key_id=str(item["entity_key"]["key_id"]),
+                            components=tuple(
+                                EntityKeyProjectionComponent(
+                                    component_id=str(component["component_id"]),
+                                    field_id=str(component["field_id"]),
+                                )
+                                for component in item["entity_key"]["components"]
+                            ),
+                        )
+                        if item.get("entity_key")
+                        else None
+                    ),
                 )
                 for item in payload.get("relation_outputs") or ()
             ),
             scalar_outputs=tuple(
-                RenderScalarOutput(
+                ScalarResultOutput(
                     id=item["id"],
                     scalar_id=item["scalar_id"],
                 )
@@ -654,7 +618,6 @@ def _answer(payload: dict[str, Any]) -> AnswerResult:
                         item.get("field_answer_output_ids") or {}
                     ).items()
                 },
-                identity_type=item.get("identity_type") or "",
             )
             for item in payload.get("relations") or ()
         ),

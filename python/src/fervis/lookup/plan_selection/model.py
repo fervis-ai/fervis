@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 from typing import Any
 
 from fervis.lookup.relation_catalog import RelationCatalog
@@ -11,6 +11,8 @@ from fervis.lookup.fact_plan.fact_plan import PlanImpossible
 from fervis.lookup.fact_planning.plan_shapes import ALL_PLAN_SHAPES
 from fervis.lookup.question_contract import QuestionContract, RequestedFact
 from fervis.lookup.turn_prompts.context import HostPromptContext
+from fervis.lookup.source_binding.compiler_ir import SourceAppliedFilter
+from fervis.lookup.source_binding.candidates.model import SourceCandidateRegistry
 
 
 class SourceAlignment(StrEnum):
@@ -20,12 +22,21 @@ class SourceAlignment(StrEnum):
 
 
 @dataclass(frozen=True)
+class OperationEvidence:
+    kind: str
+    evidence_id: str
+    field_id: str
+    row_path_id: str = ""
+    evidence_type: str = ""
+
+
+@dataclass(frozen=True)
 class PlanSelectionRequest:
     question: str
     question_contract: QuestionContract
     requested_facts: tuple[RequestedFact, ...]
     relation_catalog: RelationCatalog
-    source_candidate_payload: dict[str, Any]
+    source_candidates: SourceCandidateRegistry
     conversation_context: dict[str, Any]
     host: HostPromptContext = field(default_factory=HostPromptContext)
 
@@ -42,7 +53,9 @@ class SourceStrategyMember:
     source_relation_id: str = ""
     calendar_id: str = ""
     field_ids: tuple[str, ...] = ()
-    operation_evidence: tuple[dict[str, Any], ...] = ()
+    answer_output_ids: tuple[str, ...] = ()
+    operation_evidence: tuple[OperationEvidence, ...] = ()
+    applied_filters: tuple[SourceAppliedFilter, ...] = ()
     source_interface: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
@@ -125,12 +138,6 @@ class PlanSelectionSet:
             for plan in self.plan_selections
             if plan.requested_fact_id == requested_fact_id
         )
-
-    def plan_selection_for(self, requested_fact_id: str) -> SelectedSourceStrategy:
-        matches = list(self.plan_selections_for(requested_fact_id))
-        if len(matches) != 1:
-            raise ValueError("expected exactly one plan selection for requested fact")
-        return matches[0]
 
 
 @dataclass(frozen=True)
@@ -228,14 +235,6 @@ class BoundPlanSelectionSet:
         if not self.plan_selections:
             raise ValueError("bound plan selection set requires at least one plan")
 
-    def plan_shape_for(self, requested_fact_id: str) -> str:
-        matches = self.plan_shapes_for(requested_fact_id)
-        if len(matches) != 1:
-            raise ValueError(
-                "expected exactly one aligned plan shape for requested fact"
-            )
-        return matches[0]
-
     def plan_shapes_for(self, requested_fact_id: str) -> tuple[str, ...]:
         return tuple(
             dict.fromkeys(
@@ -262,12 +261,6 @@ class BoundPlanSelectionSet:
                 for source_binding_id in plan.source_binding_ids
             )
         )
-
-    def single_source_binding_id_for(self, requested_fact_id: str) -> str | None:
-        source_binding_ids = self.source_binding_ids_for(requested_fact_id)
-        if len(source_binding_ids) != 1:
-            return None
-        return source_binding_ids[0]
 
     def required_answer_output_ids_for(self, requested_fact_id: str) -> tuple[str, ...]:
         output = tuple(

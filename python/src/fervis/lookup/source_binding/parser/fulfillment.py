@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Literal
+from typing_extensions import assert_never
 
 from fervis.lookup.source_binding import provider_contract as provider_output
 from fervis.lookup.source_binding.candidates import SourceCandidate
-from fervis.lookup.source_binding.model import SourceFulfillment
+from fervis.lookup.source_binding.candidates import fulfillment_preserves_row_grain
+from fervis.lookup.source_binding.candidates.contracts import (
+    EvidenceItem,
+    EntityEvidence,
+    FulfillmentSlot,
+    FulfillmentSupportSet,
+)
+from fervis.lookup.source_binding.model import (
+    SourceEvidenceItem,
+    SourceFulfillment,
+)
 from fervis.lookup.source_binding.parser.candidate_access import (
     candidate_evidence_ids,
     candidate_metric_measure_evidence_ids,
@@ -20,7 +31,7 @@ from fervis.lookup.source_binding.parser.metric_fit import (
     plan_shape_uses_row_count_as_metric,
     source_metric_fit_bases,
 )
-from fervis.lookup.source_binding.parser_common import _dict, _text
+from fervis.lookup.source_binding.parser_common import _text
 
 
 __all__ = [
@@ -34,29 +45,30 @@ MetricFitReviews = dict[str, dict[str, dict[str, str]]]
 def fulfillment_row_source_id(
     fulfillments: tuple[SourceFulfillment, ...],
     *,
-    evidence_items: tuple[Any, ...],
+    evidence_items: tuple[SourceEvidenceItem, ...],
 ) -> str:
-    evidence_ids = {
+    field_evidence_ids = {
         evidence_id
         for fulfillment in fulfillments
-        for evidence_id in (
-            *fulfillment.metric_measure_evidence_ids,
-            *fulfillment.row_count_basis_evidence_ids,
-            *fulfillment.group_key_evidence_ids,
-        )
+        for evidence_id in fulfillment.field_evidence_ids()
     }
     row_source_ids = {
         item.row_source_id
         for item in evidence_items
-        if item.evidence_id in evidence_ids and item.row_source_id
+        if item.evidence_id in field_evidence_ids and item.row_source_id
     }
+    row_source_ids.update(
+        fulfillment.entity_evidence.row_source_id
+        for fulfillment in fulfillments
+        if fulfillment.entity_evidence is not None
+    )
     if len(row_source_ids) != 1:
         return ""
     return next(iter(row_source_ids))
 
 
 def parse_source_fulfillments(
-    raw_fulfillment_decisions: Any,
+    raw_fulfillment_decisions: dict[str, provider_output.FulfillmentDecisionOutput],
     *,
     requested_fact_id: str,
     answer_output_ids: set[str],
@@ -68,7 +80,7 @@ def parse_source_fulfillments(
 ) -> tuple[SourceFulfillment, ...]:
     output: list[SourceFulfillment] = []
     seen_support_set_ids: set[str] = set()
-    raw_decisions = _dict(raw_fulfillment_decisions, "fulfillment_decisions")
+    raw_decisions = raw_fulfillment_decisions
     if not answer_output_ids:
         if raw_decisions:
             raise ValueError("binding target does not allow answer fulfillment")
@@ -114,7 +126,7 @@ def parse_source_fulfillments(
 
 
 def _parse_source_fulfillment_decision(
-    raw_value: Any,
+    raw: provider_output.FulfillmentDecisionOutput,
     *,
     requested_fact_id: str,
     answer_output_id: str,
@@ -122,7 +134,6 @@ def _parse_source_fulfillment_decision(
     plan_shape: str,
     metric_fit_reviews_by_requested_output: MetricFitReviews,
 ) -> SourceFulfillment:
-    raw = provider_output.FulfillmentDecisionOutput.parse(raw_value)
     support_set_id = _source_fulfillment_support_set_id(
         _text(raw.fulfillment_choice_id),
         answer_output_id=answer_output_id,
@@ -135,6 +146,9 @@ def _parse_source_fulfillment_decision(
     )
     selected_metric_measure_evidence_ids = tuple(
         dict.fromkeys(_slot_evidence_ids(slots, key="metric_measure_evidence"))
+    )
+    selected_value_evidence_ids = tuple(
+        dict.fromkeys(_slot_evidence_ids(slots, key="value_evidence"))
     )
     selected_row_count_basis_evidence_ids = tuple(
         dict.fromkeys(_slot_evidence_ids(slots, key="row_count_basis_evidence"))
@@ -187,23 +201,23 @@ def _parse_source_fulfillment_decision(
                 )
             )
         )
-        selected_group_key_evidence_ids = tuple(
-            dict.fromkeys(_slot_evidence_ids(slots, key="group_key_evidence"))
-        )
-    else:
-        selected_group_key_evidence_ids = _slot_evidence_ids(
-            slots,
-            key="group_key_evidence",
+    entity_evidence = _slot_entity_evidence(slots)
+    if plan_shape == "ranked_rows" and not fulfillment_preserves_row_grain(
+        candidate,
+        support_set_id,
+    ):
+        raise ValueError(
+            "ranked_rows entity fulfillment does not identify source row grain"
         )
     return SourceFulfillment(
         requested_fact_id=requested_fact_id,
         answer_output_id=answer_output_id,
         match_basis_explanation=_text(raw.match_basis_explanation),
         fulfillment_support_set_id=support_set_id,
+        entity_evidence=entity_evidence,
+        value_evidence_ids=selected_value_evidence_ids,
         metric_measure_evidence_ids=selected_metric_measure_evidence_ids,
         row_count_basis_evidence_ids=selected_row_count_basis_evidence_ids,
-        scope_evidence_ids=_slot_evidence_ids(slots, key="scope_evidence"),
-        group_key_evidence_ids=selected_group_key_evidence_ids,
         metric_fit_bases=source_metric_fit_bases(
             requested_fact_id=requested_fact_id,
             answer_output_id=answer_output_id,
@@ -309,9 +323,9 @@ def _candidate_has_model_selectable_fulfillment(
     answer_output_id: str,
 ) -> bool:
     return any(
-        str(support_set.get("fulfillment_choice_id") or "")
+        support_set.fulfillment_choice_id
         for support_set in _candidate_fulfillment_support_sets_by_id(candidate).values()
-        if str(support_set.get("answer_output_id") or "") == answer_output_id
+        if support_set.answer_output_id == answer_output_id
     )
 
 
@@ -320,44 +334,31 @@ def _source_fulfillment_support_set_slots(
     *,
     answer_output_id: str,
     candidate: SourceCandidate,
-) -> tuple[dict[str, Any], ...]:
+) -> tuple[FulfillmentSlot, ...]:
     support_set = _candidate_fulfillment_support_sets_by_id(candidate).get(
         support_set_id
     )
     if support_set is None:
         raise ValueError("source fulfillment references unknown support set")
-    if str(support_set.get("answer_output_id") or "") != answer_output_id:
+    if support_set.answer_output_id != answer_output_id:
         raise ValueError("source fulfillment support set mismatches answer output")
-    selected_slots = [
-        slot
-        for slot in support_set.get("fulfillment_slots") or ()
-        if isinstance(slot, dict)
-    ]
+    selected_slots = support_set.fulfillment_slots
     evidence_ids = tuple(
         evidence_id
-        for key in (
-            "metric_measure_evidence",
-            "row_count_basis_evidence",
-            "group_key_evidence",
-        )
-        for evidence_id in _slot_evidence_ids(tuple(selected_slots), key=key)
+        for key in _EVIDENCE_SLOT_KEYS
+        for evidence_id in _slot_evidence_ids(selected_slots, key=key)
     )
     if not evidence_ids:
         raise ValueError("source fulfillment slot requires evidence")
     available = candidate_evidence_ids(candidate)
     all_slot_evidence = {
         evidence_id
-        for key in (
-            "metric_measure_evidence",
-            "row_count_basis_evidence",
-            "scope_evidence",
-            "group_key_evidence",
-        )
-        for evidence_id in _slot_evidence_ids(tuple(selected_slots), key=key)
+        for key in _EVIDENCE_SLOT_KEYS
+        for evidence_id in _slot_evidence_ids(selected_slots, key=key)
     }
     if all_slot_evidence - available:
         raise ValueError("source fulfillment slot references unknown evidence")
-    return tuple(selected_slots)
+    return selected_slots
 
 
 def _source_fulfillment_support_set_id(
@@ -371,47 +372,85 @@ def _source_fulfillment_support_set_id(
     )
     if support_set is None:
         raise ValueError("source fulfillment references unknown choice")
-    support_set_id = str(support_set.get("fulfillment_support_set_id") or "")
+    support_set_id = support_set.fulfillment_support_set_id
     if not support_set_id:
         raise ValueError("source fulfillment choice is missing internal support set")
     return support_set_id
 
 
+_EvidenceSlotKey = Literal[
+    "metric_measure_evidence",
+    "value_evidence",
+    "row_count_basis_evidence",
+    "entity_evidence",
+]
+_EVIDENCE_SLOT_KEYS: tuple[_EvidenceSlotKey, ...] = (
+    "metric_measure_evidence",
+    "value_evidence",
+    "row_count_basis_evidence",
+    "entity_evidence",
+)
+
+
 def _slot_evidence_ids(
-    slots: tuple[dict[str, Any], ...], *, key: str
+    slots: tuple[FulfillmentSlot, ...],
+    *,
+    key: _EvidenceSlotKey,
 ) -> tuple[str, ...]:
     return tuple(
-        evidence_id
+        item.evidence_id
         for slot in slots
-        for item in slot.get(key) or ()
-        if isinstance(item, dict)
-        for evidence_id in (str(item.get("evidence_id") or ""),)
-        if evidence_id
+        for item in _slot_evidence_items(slot, key=key)
+        if item.evidence_id
     )
+
+
+def _slot_evidence_items(
+    slot: FulfillmentSlot,
+    *,
+    key: _EvidenceSlotKey,
+) -> tuple[EvidenceItem, ...]:
+    if key == "metric_measure_evidence":
+        return slot.metric_measure_evidence
+    if key == "value_evidence":
+        return slot.value_evidence
+    if key == "row_count_basis_evidence":
+        return slot.row_count_basis_evidence
+    if key == "entity_evidence":
+        return slot.entity_evidence
+    assert_never(key)
+
+
+def _slot_entity_evidence(
+    slots: tuple[FulfillmentSlot, ...],
+) -> EntityEvidence | None:
+    items = tuple(item for slot in slots for item in slot.entity_evidence)
+    if not items:
+        return None
+    if len(items) != 1:
+        raise ValueError("source fulfillment requires one entity evidence choice")
+    item = items[0]
+    return item
 
 
 def _candidate_fulfillment_support_sets_by_id(
     candidate: SourceCandidate,
-) -> dict[str, dict[str, Any]]:
-    payload = getattr(candidate, "payload", None)
+) -> dict[str, FulfillmentSupportSet]:
     return {
         support_set_id: item
-        for item in (payload or {}).get("fulfillment_support_sets") or ()
-        if isinstance(item, dict)
-        for support_set_id in (str(item.get("fulfillment_support_set_id") or ""),)
+        for item in candidate.fulfillment_support_sets
+        for support_set_id in (item.fulfillment_support_set_id,)
         if support_set_id
     }
 
 
 def _candidate_fulfillment_support_sets_by_choice_id(
     candidate: SourceCandidate,
-) -> dict[tuple[str, str], dict[str, Any]]:
-    payload = getattr(candidate, "payload", None)
+) -> dict[tuple[str, str], FulfillmentSupportSet]:
     return {
         (answer_output_id, choice_id): item
-        for item in (payload or {}).get("fulfillment_support_sets") or ()
-        if isinstance(item, dict)
-        for answer_output_id in (str(item.get("answer_output_id") or ""),)
-        for choice_id in (str(item.get("fulfillment_choice_id") or ""),)
+        for item in candidate.fulfillment_support_sets
+        for answer_output_id in (item.answer_output_id,)
+        for choice_id in (item.fulfillment_choice_id,)
         if answer_output_id and choice_id
     }

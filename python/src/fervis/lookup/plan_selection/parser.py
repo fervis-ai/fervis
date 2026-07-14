@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from enum import Enum
+from typing import TypeVar
 
 from fervis.lookup.relation_catalog.selection import (
     catalog_selection_evidence_ref,
@@ -26,29 +27,28 @@ from fervis.lookup.plan_selection.model import (
     PlanSelectionSet,
     PlanSelectionRequest,
     PlanSelectionResult,
+    SourceStrategyMember,
 )
+from fervis.lookup.source_binding.candidates.model import SourceCandidateRegistry
 from fervis.lookup.plan_selection import provider_contract as provider_output
 
 
 def parse_plan_selection(
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
     request: PlanSelectionRequest,
 ) -> PlanSelectionResult:
     output = provider_output.PlanSelectionOutput.parse(payload)
-    outcome = provider_output.SourceAlignmentReviewsOutput.parse(output.outcome)
-    kind = _text(outcome.kind)
+    outcome = output.outcome
+    kind = _required_text(outcome.kind)
     if kind != "source_alignment_reviews":
         raise ValueError(f"unsupported plan selection outcome: {kind}")
-    raw_reviews = _dict(
-        outcome.reviews_by_requested_fact,
-        "reviews_by_requested_fact",
-    )
+    reviews_by_fact = outcome.reviews_by_requested_fact
     fact_ids = {fact.id for fact in request.requested_facts}
-    if set(raw_reviews) != fact_ids:
+    if set(reviews_by_fact) != fact_ids:
         raise ValueError("source alignment reviews must cover every requested fact")
     strategies_by_fact = source_strategies_by_fact(
-        request.source_candidate_payload,
+        request.source_candidates,
         requested_facts=request.requested_facts,
         relation_catalog=request.relation_catalog,
         shape_specs_for_family=plan_selection_shape_specs_for_family,
@@ -61,13 +61,21 @@ def parse_plan_selection(
             candidate.source_candidate_id
             for candidate in candidates_by_fact.get(fact.id, ())
         )
-        if not source_candidate_ids and _raw_source_candidate_ids_for_fact(
-            request.source_candidate_payload,
-            requested_fact_id=fact.id,
-        ):
-            raise ValueError("source alignment produced no executable source strategy")
+        if not source_candidate_ids:
+            raw_read_ids = _raw_source_candidate_read_ids_for_fact(
+                request.source_candidates,
+                requested_fact_id=fact.id,
+            )
+            if raw_read_ids:
+                blocked_facts.append(
+                    _blocked_fact_from_unexecutable_candidates(
+                        requested_fact_id=fact.id,
+                        read_ids=raw_read_ids,
+                    )
+                )
+                continue
         aligned_source_ids, basis_by_source_id = _aligned_source_reviews(
-            _dict(raw_reviews.get(fact.id), f"reviews_by_requested_fact.{fact.id}"),
+            reviews_by_fact[fact.id].named(provider_output.SourceAlignmentReviewOutput),
             source_candidate_ids=source_candidate_ids,
         )
         if not aligned_source_ids:
@@ -118,26 +126,24 @@ def parse_plan_selection(
 
 
 def _aligned_source_reviews(
-    raw_reviews: dict[str, Any],
+    reviews: dict[str, provider_output.SourceAlignmentReviewOutput],
     *,
     source_candidate_ids: tuple[str, ...],
 ) -> tuple[set[str], dict[str, str]]:
-    if set(raw_reviews) != set(source_candidate_ids):
+    if set(reviews) != set(source_candidate_ids):
         raise ValueError("source alignment must review every shown source candidate")
     aligned_source_ids: set[str] = set()
     basis_by_source_id: dict[str, str] = {}
     for source_candidate_id in source_candidate_ids:
-        raw = provider_output.SourceAlignmentReviewOutput.parse(
-            raw_reviews.get(source_candidate_id)
-        )
-        reviewed_source_candidate_id = _text(raw.source_candidate_id)
+        review = reviews[source_candidate_id]
+        reviewed_source_candidate_id = _required_text(review.source_candidate_id)
         if reviewed_source_candidate_id != source_candidate_id:
             raise ValueError("source alignment source_candidate_id must match key")
-        basis = _text(raw.basis)
+        basis = _required_text(review.basis)
         basis_by_source_id[source_candidate_id] = basis
         alignment = _enum(
             SourceAlignment,
-            raw.source_alignment,
+            _required_text(review.source_alignment),
             "source_alignment",
         )
         if alignment in {
@@ -151,7 +157,7 @@ def _aligned_source_reviews(
 def _blocked_fact_from_unaligned_reviews(
     *,
     requested_fact_id: str,
-    source_candidates: tuple[Any, ...],
+    source_candidates: tuple[SourceStrategyMember, ...],
     basis_by_source_id: dict[str, str],
 ) -> BlockedFact:
     reviewed_read_ids = tuple(
@@ -178,60 +184,47 @@ def _blocked_fact_from_unaligned_reviews(
     )
 
 
-def _raw_source_candidate_ids_for_fact(
-    payload: dict[str, Any],
+def _raw_source_candidate_read_ids_for_fact(
+    catalog: SourceCandidateRegistry,
     *,
     requested_fact_id: str,
 ) -> tuple[str, ...]:
-    output: list[str] = []
-    for fact_sources in payload.get("requested_fact_sources") or ():
-        if not isinstance(fact_sources, dict):
-            continue
-        if str(fact_sources.get("requested_fact_id") or "") != requested_fact_id:
-            continue
-        for context in fact_sources.get("source_contexts") or ():
-            if not isinstance(context, dict):
-                continue
-            output.extend(
-                str(candidate.get("source_candidate_id") or "").strip()
-                for candidate in context.get("source_options") or ()
-                if isinstance(candidate, dict)
-                and str(candidate.get("source_candidate_id") or "").strip()
-            )
-    return tuple(dict.fromkeys(output))
+    return tuple(
+        dict.fromkeys(
+            candidate.read_id
+            for candidate in catalog.candidates_for(requested_fact_id)
+            if candidate.read_id
+        )
+    )
 
 
-def _dict(value: Any, path: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError(f"{path} must be an object")
-    return value
+def _blocked_fact_from_unexecutable_candidates(
+    *,
+    requested_fact_id: str,
+    read_ids: tuple[str, ...],
+) -> BlockedFact:
+    return BlockedFact(
+        requested_fact_id=requested_fact_id,
+        basis=BlockedFactBasis.CATALOG_ACCESS,
+        evidence_refs=tuple(read_evidence_ref(read_id) for read_id in read_ids),
+        reviewed_read_ids=read_ids,
+        nearest_fields=(),
+        explanation="Selected reads expose no executable evidence for the answer.",
+    )
 
 
-def _dicts(value: Any) -> tuple[dict[str, Any], ...]:
-    if value is None:
-        return ()
-    if not isinstance(value, list):
-        raise ValueError("expected array of objects")
-    if not all(isinstance(item, dict) for item in value):
-        raise ValueError("expected array of objects")
-    return tuple(value)
+def _required_text(value: str) -> str:
+    text = value.strip()
+    if not text:
+        raise ValueError("plan selection requires non-empty text")
+    return text
 
 
-def _strings(value: Any, path: str = "value") -> tuple[str, ...]:
-    if not isinstance(value, list):
-        raise ValueError(f"{path} must be an array")
-    output = tuple(_text(item) for item in value)
-    if not all(output):
-        raise ValueError(f"{path} must contain non-empty strings")
-    return output
+_EnumT = TypeVar("_EnumT", bound=Enum)
 
 
-def _enum(enum_type: Any, value: Any, path: str) -> Any:
+def _enum(enum_type: type[_EnumT], value: str, path: str) -> _EnumT:
     try:
         return enum_type(value)
     except ValueError as exc:
         raise ValueError(f"{path} has invalid value") from exc
-
-
-def _text(value: Any) -> str:
-    return str(value or "").strip()

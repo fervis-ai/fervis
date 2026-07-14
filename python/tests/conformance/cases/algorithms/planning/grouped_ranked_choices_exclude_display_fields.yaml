@@ -16,7 +16,6 @@ input:
       - field_id: location_id
         type: uuid
         roles: [identity]
-        identity: {entity_ref: location, identity_field: location_id, primary_key: true, stable: true}
       - field_id: location_name
         type: string
       - field_id: calculated_pay
@@ -27,8 +26,13 @@ input:
       - {evidence_id: source_1.data.calculated_pay, field_id: calculated_pay, row_cardinality: many}
     fulfillments:
       - answer_output_id: answer_1
-        group_key_evidence_ids:
-          - source_1.data.location_id
+        entity_evidence:
+          type: entity_reference
+          reference_id: location_reference
+          target_key_id: location_primary
+          target_entity_kind: location
+          components:
+            - {component_id: location_id, field_evidence_id: source_1.data.location_id, field_id: location_id}
         metric_measure_evidence_ids:
           - source_1.data.calculated_pay
 expect:

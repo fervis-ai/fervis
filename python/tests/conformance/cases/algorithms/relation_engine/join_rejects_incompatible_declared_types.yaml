@@ -1,0 +1,22 @@
+id: join_rejects_incompatible_declared_types
+kind: algorithm
+algorithm: execution.relation_engine
+description: Join equality rejects operands whose declared field types are incompatible.
+input:
+  relations:
+    - id: flags
+      rows: [{flag: true}]
+      field_types: {flag: boolean}
+    - id: counts
+      rows: [{count: 1}]
+      field_types: {count: integer}
+  operations:
+    - id: join
+      output_relation: joined
+      spec:
+        kind: join
+        left: flags
+        right: counts
+        join_keys: [{left: flag, right: count}]
+expect:
+  result_contains: {status: rejected}

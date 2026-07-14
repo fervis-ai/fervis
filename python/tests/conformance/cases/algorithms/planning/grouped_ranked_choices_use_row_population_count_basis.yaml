@@ -17,14 +17,18 @@ input:
       - field_id: store_id
         type: uuid
         roles: [identity]
-        identity: {entity_ref: store, identity_field: store_id, primary_key: true, stable: true}
     evidence:
       - {evidence_id: source_1.data.store_id, field_id: store_id, row_cardinality: many}
       - {evidence_id: row_population.data, field_id: data, type: row_population, row_cardinality: many, row_source_id: api:list_orders:data}
     fulfillments:
       - answer_output_id: answer_1
-        group_key_evidence_ids:
-          - source_1.data.store_id
+        entity_evidence:
+          type: entity_reference
+          reference_id: store_reference
+          target_key_id: store_primary
+          target_entity_kind: store
+          components:
+            - {component_id: store_id, field_evidence_id: source_1.data.store_id, field_id: store_id}
         row_count_basis_evidence_ids:
           - row_population.data
 expect:

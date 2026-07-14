@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -9,10 +10,10 @@ from fervis.lookup.relation_catalog import (
     EndpointRead,
     RelationCatalog,
     RelationDataAccessPort,
-    source_field_has_primary_stable_identity,
 )
-from fervis.lookup.relation_catalog.selection import (
-    EntityTargetResolverSelection,
+from fervis.lookup.relation_catalog.parameter_values import (
+    CatalogParameterValueError,
+    parse_catalog_parameter_value,
 )
 from fervis.lookup.source_reads.response import (
     EndpointResponseError,
@@ -38,26 +39,45 @@ from fervis.lookup.grounding.model import (
     GroundingIssue,
     GroundingTerminalKind,
     GroundingRequestedFactCard,
+    ExpectedInputIdentity,
     InputBindingOption,
+    InputBindingPurpose,
+    InputBindingResultKind,
     InputBindingRoute,
-    InputBindingCompatibility,
+    InputBindingKeyComponent,
+    InputBindingSelection,
     KnownInputBindingTask,
     ResolverOutputFieldCard,
     ResolverQueryParamCard,
+    ResolvedInputBinding,
 )
 from fervis.lookup.fact_plan.row_sources import (
     RowSource,
+    RowSourceCandidateKey,
     RowSourceCatalog,
     RowSourceField,
     RowSourceKind,
     RowSourceParam,
     RowSourceParamSemantics,
 )
-from fervis.lookup.answer_program.values import FactValue, IdentityValuePayload
+from fervis.lookup.answer_program.values import (
+    FactValue,
+    IdentityValuePayload,
+    NamedValuePayload,
+    ValueFilterOperator,
+)
+from fervis.lookup.canonical_data import (
+    EntityKeyComponentValue,
+    EntityKeyValue,
+    RuntimeScalar,
+    RuntimeValue,
+    canonical_runtime_json,
+)
 from fervis.lookup.question_contract import (
     QuestionContract,
     RequestedFact,
     RequestedFactKnownInput,
+    RequestedFactLiteralInput,
 )
 
 from .values import _grounded_value_id, _normalize_lookup_text, _symbol
@@ -76,36 +96,42 @@ class _ResolvedReferenceTasks:
 @dataclass(frozen=True)
 class _ResolvedLookupRow:
     row: dict[str, Any]
+    matched_field_id: str = ""
     matched_field_ref: str = ""
     matched_field_path: str = ""
+    matched_value: RuntimeScalar = None
+    matched_collection_member: bool = False
 
 
 @dataclass(frozen=True)
 class _LookupField:
+    id: str
     ref: str
     path: str
     relative_path: str
 
 
-@dataclass
-class _ExecutedReferenceRoutes:
-    values_by_identity: dict[tuple[str, str, str], FactValue]
-    uses_by_identity: dict[tuple[str, str, str], GroundedInputUse]
-    certifications_by_identity: dict[
-        tuple[str, str, str], GroundedValueCertification
-    ]
-    route_issues: list[GroundingIssue]
+@dataclass(frozen=True)
+class _LookupMatch:
+    field: _LookupField
+    value: RuntimeScalar
+    collection_member: bool = False
 
 
-def _reference_binding_tasks(
+def reference_input_binding_tasks(
     question_contract: QuestionContract,
     *,
     resolver_row_sources: RowSourceCatalog,
+    expected_input_identities: Mapping[str, ExpectedInputIdentity] | None = None,
 ) -> tuple[KnownInputBindingTask, ...]:
     tasks: list[KnownInputBindingTask] = []
+    expected_identities = expected_input_identities or {}
     facts_by_id = {fact.id: fact for fact in question_contract.requested_facts}
     for known, requested_fact_ids in _reference_known_input_bindings(question_contract):
-        if not known.is_reference_value:
+        if (
+            not isinstance(known, RequestedFactLiteralInput)
+            or not known.is_reference_value
+        ):
             continue
         requested_fact_id = requested_fact_ids[0] if requested_fact_ids else ""
         requested_facts = tuple(
@@ -117,6 +143,7 @@ def _reference_binding_tasks(
         options = _reference_binding_options(
             known,
             resolver_row_sources=resolver_row_sources,
+            expected_identity=expected_identities.get(known.id),
         )
         if not options:
             tasks.append(
@@ -126,6 +153,7 @@ def _reference_binding_tasks(
                     known_input_kind=known.kind.value,
                     requested_fact_id=requested_fact_id,
                     options=(),
+                    field_label_text=known.field_label_text,
                     known_input_description=known.value_meaning_hint,
                     lookup_text=known.resolved_value_text,
                     applies_to_requested_fact_ids=requested_fact_ids,
@@ -139,6 +167,7 @@ def _reference_binding_tasks(
             known_input_kind=known.kind.value,
             requested_fact_id=requested_fact_id,
             options=options,
+            field_label_text=known.field_label_text,
             known_input_description=known.value_meaning_hint,
             lookup_text=known.resolved_value_text,
             applies_to_requested_fact_ids=requested_fact_ids,
@@ -191,9 +220,10 @@ def _reference_known_input_bindings(
 
 
 def _reference_binding_options(
-    known: RequestedFactKnownInput,
+    known: RequestedFactLiteralInput,
     *,
     resolver_row_sources: RowSourceCatalog,
+    expected_identity: ExpectedInputIdentity | None,
 ) -> tuple[InputBindingOption, ...]:
     route_options: list[InputBindingOption] = []
     resolvers = tuple(
@@ -203,55 +233,162 @@ def _reference_binding_options(
     )
     option_index = 1
     for resolver_source in resolvers:
-        for return_field in _resolver_identity_fields(resolver_source):
-            return_identity = return_field.identity
-            if return_identity is None:
-                continue
+        for resolver_return in _resolver_return_fields(resolver_source):
             for lookup_param, lookup_fields in _resolver_lookup_groups(
                 resolver_source,
-                return_field=return_field,
+                resolver_return=resolver_return,
             ):
                 route = InputBindingRoute(
                     known_input_id=known.id,
                     resolver_row_source_id=resolver_source.id,
                     resolver_read_id=resolver_source.read_id,
                     resolver_endpoint_name=resolver_source.label,
+                    resolver_description=resolver_source.description,
                     resolver_resource_names=resolver_source.resource_names,
                     lookup_param_id=lookup_param.id if lookup_param is not None else "",
                     lookup_param_ref=(
                         lookup_param.param_ref if lookup_param is not None else ""
                     ),
+                    lookup_param_type=(
+                        lookup_param.type.value
+                        if lookup_param is not None
+                        else "string"
+                    ),
                     lookup_field_ids=tuple(field.id for field in lookup_fields),
                     lookup_field_refs=(
                         tuple(field.field_ref for field in lookup_fields)
                     ),
-                    return_field_id=return_field.id,
-                    return_field_ref=return_field.field_ref,
-                    identity_type=return_identity.entity_ref,
-                    identity_field=return_identity.identity_field,
+                    canonical_lookup_field_refs=tuple(
+                        field.field_ref
+                        for field in _canonical_identity_lookup_fields(
+                            resolver_source,
+                            lookup_fields=lookup_fields,
+                        )
+                    ),
+                    entity_kind=resolver_return.entity_kind,
+                    key_id=resolver_return.key_id,
+                    key_components=tuple(
+                        InputBindingKeyComponent(
+                            component_id=component.id,
+                            field_id=component.field_id,
+                            field_ref=resolver_source.field(
+                                component.field_id
+                            ).field_ref,
+                        )
+                        for component in resolver_return.key.components
+                    ),
+                    context_field_ids=resolver_return.context_field_ids,
                     display=_binding_path(
                         resolver_source=resolver_source,
                         lookup_param=lookup_param,
                         lookup_fields=lookup_fields,
-                        return_field=return_field,
+                        return_fields=resolver_return.fields,
                     ),
                     query_params=_resolver_query_param_cards(resolver_source),
                     selected_output_fields=_resolver_selected_output_field_cards(
                         resolver_source,
                         lookup_fields=lookup_fields,
-                        return_field=return_field,
+                        return_fields=resolver_return.fields,
                     ),
                 )
+                if not _route_matches_expected_identity(
+                    route,
+                    expected=expected_identity,
+                ):
+                    continue
                 route_options.append(
                     InputBindingOption(
                         id=f"bind_{_symbol(known.id)}_{option_index}",
                         known_input_id=known.id,
                         path=route.display,
+                        purpose=_binding_purpose(
+                            resolver_source,
+                            lookup_param=lookup_param,
+                            resolver_return=resolver_return,
+                        ),
                         route=route,
                     )
                 )
                 option_index += 1
     return tuple(route_options)
+
+
+def _route_matches_expected_identity(
+    route: InputBindingRoute,
+    *,
+    expected: ExpectedInputIdentity | None,
+) -> bool:
+    if expected is None:
+        return True
+    return (
+        route.entity_kind == expected.entity_kind
+        and route.key_id == expected.key_id
+        and tuple(component.component_id for component in route.key_components)
+        == expected.key_component_ids
+    )
+
+
+def reference_binding_row_sources(
+    *,
+    full_row_sources: RowSourceCatalog,
+    resolver_row_sources: RowSourceCatalog,
+) -> RowSourceCatalog:
+    resolver_entity_kinds = {
+        key.entity_kind
+        for source in resolver_row_sources.sources
+        for key in source.candidate_keys
+        if key.primary and key.stable
+    }
+    validation_sources = tuple(
+        source
+        for source in full_row_sources.sources
+        if _source_validates_one_of(source, entity_kinds=resolver_entity_kinds)
+    )
+    sources: list[RowSource] = []
+    source_ids: set[str] = set()
+    for source in (*resolver_row_sources.sources, *validation_sources):
+        if source.id in source_ids:
+            continue
+        source_ids.add(source.id)
+        sources.append(source)
+    return RowSourceCatalog(sources=tuple(sources))
+
+
+def _source_validates_one_of(
+    source: RowSource,
+    *,
+    entity_kinds: set[str],
+) -> bool:
+    return any(
+        str(param.source) == "path"
+        and param.entity_target is not None
+        and param.entity_target.entity_kind in entity_kinds
+        and any(
+            key.entity_kind == param.entity_target.entity_kind
+            and key.id == param.entity_target.key_id
+            and any(
+                component.id == param.entity_target.component_id
+                for component in key.components
+            )
+            for key in source.candidate_keys
+        )
+        for param in source.params
+    )
+
+
+def _binding_purpose(
+    source: RowSource,
+    *,
+    lookup_param: RowSourceParam | None,
+    resolver_return: _ResolverReturnField,
+) -> InputBindingPurpose:
+    if (
+        lookup_param is not None
+        and str(lookup_param.source) == "path"
+        and _param_targets_resolver_key(lookup_param, resolver_return)
+    ):
+        return InputBindingPurpose.IDENTITY_VALIDATION
+    return InputBindingPurpose.REFERENCE_GROUNDING
 
 
 def _resolve_reference_tasks(
@@ -316,36 +453,56 @@ def _resolve_reference_tasks(
     )
 
 
-def _resolver_identity_fields(source: RowSource) -> tuple[RowSourceField, ...]:
+@dataclass(frozen=True)
+class _ResolverReturnField:
+    key: RowSourceCandidateKey
+    fields: tuple[RowSourceField, ...]
+    entity_kind: str
+    key_id: str
+    context_field_ids: tuple[str, ...]
+
+
+def _resolver_return_fields(source: RowSource) -> tuple[_ResolverReturnField, ...]:
     return tuple(
-        field
-        for field in source.fields
-        if source_field_has_primary_stable_identity(field)
-        and field.identity is not None
-        and field.identity.entity_ref
-        and field.identity.identity_field
-        and _identity_field_belongs_to_row_resource(source, field)
+        _ResolverReturnField(
+            key=key,
+            fields=tuple(
+                source.field(component.field_id) for component in key.components
+            ),
+            entity_kind=key.entity_kind,
+            key_id=key.id,
+            context_field_ids=_resolver_identity_context_field_ids(source, key=key),
+        )
+        for key in source.candidate_keys
+        if key.primary and key.stable
     )
 
 
-def _identity_field_belongs_to_row_resource(
+def _resolver_identity_context_field_ids(
     source: RowSource,
-    field: RowSourceField,
-) -> bool:
-    if field.identity is None or not source.resource_names:
-        return True
-    return field.identity.entity_ref in set(source.resource_names)
+    *,
+    key: RowSourceCandidateKey,
+) -> tuple[str, ...]:
+    alternate_key_field_ids = (
+        component.field_id
+        for candidate in source.candidate_keys
+        if candidate.entity_kind == key.entity_kind
+        and candidate.id != key.id
+        and candidate.stable
+        for component in candidate.components
+    )
+    return tuple(dict.fromkeys((*key.context_field_ids, *alternate_key_field_ids)))
 
 
 def _resolver_lookup_groups(
     source: RowSource,
     *,
-    return_field: RowSourceField,
+    resolver_return: _ResolverReturnField,
 ) -> tuple[tuple[RowSourceParam | None, tuple[RowSourceField, ...]], ...]:
     groups: list[tuple[RowSourceParam | None, tuple[RowSourceField, ...]]] = list(
         _identity_param_lookup_groups(
             source,
-            return_field=return_field,
+            resolver_return=resolver_return,
         )
     )
     if any(param.required and param.default is None for param in source.params):
@@ -359,101 +516,66 @@ def _resolver_lookup_groups(
             and param.semantics != RowSourceParamSemantics.RESPONSE_SHAPE
         )
     )
-    text_fields = _identity_lookup_fields(source, return_field=return_field)
-    if not text_fields:
-        return tuple(groups)
-    groups.extend(
-        (param, fields)
-        for param in text_params
-        if (fields := _lookup_fields_for_param(param, fields=text_fields))
-    )
-    groups.append((None, text_fields))
+    text_fields = _resolver_text_lookup_fields(source)
+    groups.extend((param, text_fields) for param in text_params)
+    if text_fields:
+        groups.append((None, text_fields))
     return tuple(groups)
 
 
 def _identity_param_lookup_groups(
     source: RowSource,
     *,
-    return_field: RowSourceField,
+    resolver_return: _ResolverReturnField,
 ) -> tuple[tuple[RowSourceParam, tuple[RowSourceField, ...]], ...]:
     return tuple(
-        (param, (return_field,))
+        (param, resolver_return.fields)
         for param in source.params
-        if _param_carries_same_identity(param, return_field)
+        if _param_targets_resolver_key(param, resolver_return)
         and param.semantics != RowSourceParamSemantics.RESPONSE_SHAPE
     )
 
 
-def _param_carries_same_identity(
+def _param_targets_resolver_key(
     param: RowSourceParam,
-    field: RowSourceField,
+    resolver_return: _ResolverReturnField,
 ) -> bool:
-    param_identity = param.identity
-    field_identity = field.identity
+    target = param.entity_target
     return (
-        param_identity is not None
-        and field_identity is not None
-        and param_identity.entity_ref == field_identity.entity_ref
-        and param_identity.identity_field == field_identity.identity_field
+        len(resolver_return.key.components) == 1
+        and target is not None
+        and target.entity_kind == resolver_return.entity_kind
+        and target.key_id == resolver_return.key_id
+        and target.component_id == resolver_return.key.components[0].id
     )
 
 
-def _identity_lookup_fields(
+def _resolver_text_lookup_fields(
+    source: RowSource,
+) -> tuple[RowSourceField, ...]:
+    return tuple(field for field in source.fields if field.can_carry_lookup_text)
+
+
+def _canonical_identity_lookup_fields(
     source: RowSource,
     *,
-    return_field: RowSourceField,
+    lookup_fields: tuple[RowSourceField, ...],
 ) -> tuple[RowSourceField, ...]:
-    identity = return_field.identity
-    if identity is None:
-        return ()
-    fields: list[RowSourceField] = [return_field]
-    seen = {return_field.id}
-    display_fields = set(identity.display_fields)
-    if display_fields:
-        for field in source.fields:
-            if field.id in seen:
-                continue
-            if not _field_can_carry_lookup_text(field):
-                continue
-            if field.id not in display_fields and field.field_ref not in display_fields:
-                continue
-            seen.add(field.id)
-            fields.append(field)
-        return tuple(fields)
-    for field in source.fields:
-        if field.id in seen:
-            continue
-        if not _field_can_carry_lookup_text(field):
-            continue
-        if not _same_identity_object(field.path, return_field.path):
-            continue
-        seen.add(field.id)
-        fields.append(field)
-    return tuple(fields)
-
-
-def _field_can_carry_lookup_text(field: RowSourceField) -> bool:
-    return field.can_carry_lookup_text
-
-
-def _same_identity_object(field_path: str, return_field_path: str) -> bool:
-    return _parent_object_path(field_path) == _parent_object_path(return_field_path)
-
-
-def _parent_object_path(field_path: str) -> str:
-    parts = tuple(part for part in str(field_path or "").split(".") if part)
-    if len(parts) <= 1:
-        return ""
-    return ".".join(parts[:-1])
-
-
-def _lookup_fields_for_param(
-    param: RowSourceParam,
-    *,
-    fields: tuple[RowSourceField, ...],
-) -> tuple[RowSourceField, ...]:
-    del param
-    return fields
+    related_entity_field_ids = {
+        *(
+            component.local_field_id
+            for ref in source.entity_references
+            for component in ref.components
+        ),
+        *(
+            field_id
+            for ref in source.entity_references
+            for field_id in ref.context_field_ids
+        ),
+    }
+    return tuple(
+        field for field in lookup_fields if field.id not in related_entity_field_ids
+    )
 
 
 def _binding_path(
@@ -461,7 +583,7 @@ def _binding_path(
     resolver_source: RowSource,
     lookup_param: RowSourceParam | None,
     lookup_fields: tuple[RowSourceField, ...],
-    return_field: RowSourceField,
+    return_fields: tuple[RowSourceField, ...],
 ) -> str:
     lookup_label = (
         " / ".join(field.label for field in lookup_fields)
@@ -470,7 +592,7 @@ def _binding_path(
     )
     return (
         f"{resolver_source.label}.{lookup_label} -> "
-        f"{resolver_source.label}.{return_field.label}"
+        f"{resolver_source.label}.{' + '.join(field.label for field in return_fields)}"
     )
 
 
@@ -498,16 +620,12 @@ def _resolver_selected_output_field_cards(
     source: RowSource,
     *,
     lookup_fields: tuple[RowSourceField, ...],
-    return_field: RowSourceField,
+    return_fields: tuple[RowSourceField, ...],
 ) -> tuple[ResolverOutputFieldCard, ...]:
     selected_refs = {
-        return_field.field_ref,
+        *(field.field_ref for field in return_fields),
         *(field.field_ref for field in lookup_fields),
     }
-    for field in source.fields:
-        if field.identity is not None:
-            selected_refs.add(field.field_ref)
-            selected_refs.update(field.identity.display_fields)
     cards: list[ResolverOutputFieldCard] = []
     for field in source.fields:
         if not (
@@ -522,37 +640,34 @@ def _resolver_selected_output_field_cards(
                 field_path=field.path,
                 type=field.type.value,
                 choices=field.choices,
-                identity=field.identity,
             )
         )
     return tuple(cards)
 
 
-def _execute_reference_compatibilities(
+def _execute_reference_selections(
     *,
-    compatibilities: tuple[InputBindingCompatibility, ...],
+    selections: tuple[InputBindingSelection, ...],
     tasks: tuple[KnownInputBindingTask, ...],
-    resolver_selections: tuple[EntityTargetResolverSelection, ...] = (),
     full_catalog: RelationCatalog,
     resolver_row_sources: RowSourceCatalog,
     data_access_port: RelationDataAccessPort,
     source_read_lineage: SourceReadLineageScope | None = None,
 ) -> CanonicalInputLedger:
-    options = {option.id: (task, option) for task in tasks for option in task.options}
-    compatibilities_by_input = {
-        compatibility.known_input_id: compatibility for compatibility in compatibilities
+    selections_by_input = {
+        selection.known_input_id: selection for selection in selections
     }
     values: list[FactValue] = []
     uses: list[GroundedInputUse] = []
     issues: list[GroundingIssue] = []
     certifications: list[GroundedValueCertification] = []
     for task in tasks:
-        compatibility = compatibilities_by_input.get(task.known_input_id)
-        if compatibility is None:
+        selection = selections_by_input.get(task.known_input_id)
+        if selection is None:
             issues.append(_unsupported_reference_issue(task))
             continue
-        compatible_option_ids = compatibility.binding_option_ids
-        if not compatible_option_ids:
+        binding = selection.binding
+        if binding is None:
             issues.append(
                 _unsupported_reference_issue(
                     task,
@@ -560,11 +675,9 @@ def _execute_reference_compatibilities(
                 )
             )
             continue
-        task_ledger = _execute_compatible_reference_options(
+        task_ledger = _execute_selected_reference_option(
             task=task,
-            compatible_option_ids=compatible_option_ids,
-            options=options,
-            resolver_selections=resolver_selections,
+            binding=binding,
             full_catalog=full_catalog,
             resolver_row_sources=resolver_row_sources,
             data_access_port=data_access_port,
@@ -582,287 +695,53 @@ def _execute_reference_compatibilities(
     )
 
 
-def _execute_compatible_reference_options(
+def _execute_selected_reference_option(
     *,
     task: KnownInputBindingTask,
-    compatible_option_ids: tuple[str, ...],
-    options: dict[str, tuple[KnownInputBindingTask, InputBindingOption]],
-    resolver_selections: tuple[EntityTargetResolverSelection, ...] = (),
+    binding: ResolvedInputBinding,
     full_catalog: RelationCatalog,
     resolver_row_sources: RowSourceCatalog,
     data_access_port: RelationDataAccessPort,
     source_read_lineage: SourceReadLineageScope | None = None,
 ) -> CanonicalInputLedger:
-    if resolver_selections:
-        return _execute_compatible_reference_options_by_resolver_priority(
-            task=task,
-            compatible_option_ids=compatible_option_ids,
-            options=options,
-            resolver_selections=resolver_selections,
-            full_catalog=full_catalog,
-            resolver_row_sources=resolver_row_sources,
-            data_access_port=data_access_port,
-            source_read_lineage=source_read_lineage,
-        )
-    executed = _execute_reference_route_options(
+    options = {option.id: option for option in task.options}
+    option = options.get(binding.option_id)
+    if option is None:
+        raise ValueError("selected grounding option references wrong input")
+    if option.route is None:
+        return CanonicalInputLedger(issues=(_unsupported_reference_issue(task),))
+    certification_method = (
+        GroundedValueCertificationMethod.IDENTITY_VALIDATION_READ
+        if option.purpose is InputBindingPurpose.IDENTITY_VALIDATION
+        else GroundedValueCertificationMethod.RESOLVER_SOURCE_READ
+    )
+    return _execute_reference_route(
         task=task,
-        compatible_option_ids=compatible_option_ids,
-        options=options,
+        route=option.route,
+        input_value=binding.input_value,
+        result_kind=binding.result_kind,
+        matched_field_ref=binding.matched_field_ref,
+        source_read_key=binding.option_id,
         full_catalog=full_catalog,
         resolver_row_sources=resolver_row_sources,
         data_access_port=data_access_port,
         source_read_lineage=source_read_lineage,
-    )
-    return _single_identity_reference_ledger(task=task, executed=executed)
-
-
-def _execute_reference_route_options(
-    *,
-    task: KnownInputBindingTask,
-    compatible_option_ids: tuple[str, ...],
-    options: dict[str, tuple[KnownInputBindingTask, InputBindingOption]],
-    full_catalog: RelationCatalog,
-    resolver_row_sources: RowSourceCatalog,
-    data_access_port: RelationDataAccessPort,
-    source_read_lineage: SourceReadLineageScope | None,
-) -> _ExecutedReferenceRoutes:
-    executed = _empty_executed_reference_routes()
-    for option_id in compatible_option_ids:
-        option_task, option = options[option_id]
-        if option_task.known_input_id != task.known_input_id:
-            raise ValueError("compatible grounding option references wrong input")
-        if option.route is None:
-            executed.route_issues.append(_unsupported_reference_issue(task))
-            continue
-        ledger = _execute_reference_route(
-            task=task,
-            route=option.route,
-            source_read_key=option.id,
-            full_catalog=full_catalog,
-            resolver_row_sources=resolver_row_sources,
-            data_access_port=data_access_port,
-            source_read_lineage=source_read_lineage,
-        )
-        _merge_reference_route_ledger(executed, ledger)
-    return executed
-
-
-def _empty_executed_reference_routes() -> _ExecutedReferenceRoutes:
-    return _ExecutedReferenceRoutes(
-        values_by_identity={},
-        uses_by_identity={},
-        certifications_by_identity={},
-        route_issues=[],
+        certification_method=certification_method,
     )
 
 
-def _merge_reference_route_ledger(
-    executed: _ExecutedReferenceRoutes,
-    ledger: CanonicalInputLedger,
-) -> None:
-    uses_by_value_id = {use.value_id: use for use in ledger.uses}
-    certifications_by_value_id = {
-        certification.value_id: certification for certification in ledger.certifications
-    }
-    for value in ledger.values:
-        key = _identity_value_key(value)
-        if key is None:
-            continue
-        executed.values_by_identity.setdefault(key, value)
-        use = uses_by_value_id.get(value.id)
-        if use is not None:
-            executed.uses_by_identity.setdefault(key, use)
-        certification = certifications_by_value_id.get(value.id)
-        if certification is not None:
-            executed.certifications_by_identity.setdefault(key, certification)
-    executed.route_issues.extend(ledger.issues)
-
-
-def _single_identity_reference_ledger(
-    *,
-    task: KnownInputBindingTask,
-    executed: _ExecutedReferenceRoutes,
-) -> CanonicalInputLedger:
-    ambiguous_route_issues = _dedupe_grounding_issues(
-        issue
-        for issue in executed.route_issues
-        if issue.kind == GroundingTerminalKind.AMBIGUOUS_REFERENCE
-    )
-    if ambiguous_route_issues:
-        return CanonicalInputLedger(issues=ambiguous_route_issues)
-    if not executed.values_by_identity:
-        return CanonicalInputLedger(
-            issues=(
-                tuple(executed.route_issues)
-                if executed.route_issues
-                else (_unsupported_reference_issue(task),)
-            )
-        )
-    if len(executed.values_by_identity) > 1:
-        return CanonicalInputLedger(
-            issues=(
-                _ambiguous_reference_issue(
-                    task,
-                    values=tuple(executed.values_by_identity.values()),
-                    message="resolver returned multiple canonical identity matches",
-                ),
-            )
-        )
-    return CanonicalInputLedger(
-        values=tuple(executed.values_by_identity.values()),
-        uses=tuple(executed.uses_by_identity.values()),
-        certifications=tuple(executed.certifications_by_identity.values()),
-    )
-
-
-def _execute_compatible_reference_options_by_resolver_priority(
-    *,
-    task: KnownInputBindingTask,
-    compatible_option_ids: tuple[str, ...],
-    options: dict[str, tuple[KnownInputBindingTask, InputBindingOption]],
-    resolver_selections: tuple[EntityTargetResolverSelection, ...],
-    full_catalog: RelationCatalog,
-    resolver_row_sources: RowSourceCatalog,
-    data_access_port: RelationDataAccessPort,
-    source_read_lineage: SourceReadLineageScope | None = None,
-) -> CanonicalInputLedger:
-    route_options = _compatible_route_options(
-        task=task,
-        compatible_option_ids=compatible_option_ids,
-        options=options,
-    )
-    issues: list[GroundingIssue] = []
-    ambiguous_candidates: dict[str, GroundingCandidate] = {}
-    ambiguity_seen = False
-    for priority_group in _resolver_priority_groups(
-        task=task,
-        route_options=route_options,
-        resolver_selections=resolver_selections,
-    ):
-        ledger = _execute_compatible_reference_options(
-            task=task,
-            compatible_option_ids=tuple(option.id for option in priority_group),
-            options=options,
-            full_catalog=full_catalog,
-            resolver_row_sources=resolver_row_sources,
-            data_access_port=data_access_port,
-            source_read_lineage=source_read_lineage,
-        )
-        if ledger.issues:
-            issues.extend(ledger.issues)
-            if any(
-                issue.kind == GroundingTerminalKind.AMBIGUOUS_REFERENCE
-                for issue in ledger.issues
-            ):
-                ambiguity_seen = True
-                _collect_issue_candidates(ambiguous_candidates, ledger.issues)
-            continue
-        if len(ledger.values) == 1:
-            if ambiguity_seen:
-                _collect_value_candidates(ambiguous_candidates, ledger.values)
-                continue
-            return ledger
-        if len(ledger.values) > 1:
-            ambiguity_seen = True
-            _collect_value_candidates(ambiguous_candidates, ledger.values)
-    if ambiguity_seen:
-        return CanonicalInputLedger(
-            issues=(
-                _ambiguous_reference_issue(
-                    task,
-                    values=(),
-                    candidate_options=tuple(ambiguous_candidates.values()),
-                    message="resolver returned multiple canonical identity matches",
-                ),
-            )
-        )
-    return CanonicalInputLedger(
-        issues=tuple(issues) if issues else (_unsupported_reference_issue(task),)
-    )
-
-
-def _collect_issue_candidates(
-    output: dict[str, GroundingCandidate],
-    issues: tuple[GroundingIssue, ...],
-) -> None:
-    for issue in issues:
-        for option in issue.candidate_options:
-            output.setdefault(option.id, option)
-
-
-def _collect_value_candidates(
-    output: dict[str, GroundingCandidate],
-    values: tuple[FactValue, ...],
-) -> None:
-    for value in values:
-        candidate = _identity_candidate(value)
-        output.setdefault(candidate.id, candidate)
-
-
-def _compatible_route_options(
-    *,
-    task: KnownInputBindingTask,
-    compatible_option_ids: tuple[str, ...],
-    options: dict[str, tuple[KnownInputBindingTask, InputBindingOption]],
-) -> tuple[InputBindingOption, ...]:
-    output: list[InputBindingOption] = []
-    for option_id in compatible_option_ids:
-        option_task, option = options[option_id]
-        if option_task.known_input_id != task.known_input_id:
-            raise ValueError("compatible grounding option references wrong input")
-        output.append(option)
-    return tuple(output)
-
-
-def _resolver_priority_groups(
-    *,
-    task: KnownInputBindingTask,
-    route_options: tuple[InputBindingOption, ...],
-    resolver_selections: tuple[EntityTargetResolverSelection, ...],
-) -> tuple[tuple[InputBindingOption, ...], ...]:
-    selected_read_ids = _selected_resolver_read_ids(
-        task=task,
-        resolver_selections=resolver_selections,
-    )
-    if not selected_read_ids:
-        return (route_options,)
-    grouped: list[tuple[InputBindingOption, ...]] = []
-    seen: set[str] = set()
-    for read_id in selected_read_ids:
-        group = tuple(
-            option
-            for option in route_options
-            if option.route is not None and option.route.resolver_read_id == read_id
-        )
-        if group:
-            grouped.append(group)
-            seen.add(read_id)
-    remainder = tuple(
-        option
-        for option in route_options
-        if option.route is None or option.route.resolver_read_id not in seen
-    )
-    if remainder:
-        grouped.append(remainder)
-    return tuple(grouped)
-
-
-def _selected_resolver_read_ids(
-    *,
-    task: KnownInputBindingTask,
-    resolver_selections: tuple[EntityTargetResolverSelection, ...],
-) -> tuple[str, ...]:
-    for selection in resolver_selections:
-        if selection.target_id == task.known_input_id:
-            return selection.selected_read_ids
-    return ()
-
-
-def _identity_value_key(value: FactValue) -> tuple[str, str, str] | None:
+def _grounded_value_key(value: FactValue) -> tuple[str, ...]:
     payload = value.payload
-    if not isinstance(payload, IdentityValuePayload):
-        return None
-    return (payload.identity_type, payload.identity_field, str(payload.value))
+    if isinstance(payload, IdentityValuePayload):
+        return (
+            "identity",
+            payload.entity_kind,
+            payload.key_id,
+            canonical_runtime_json(payload.key.component_values()),
+        )
+    if isinstance(payload, NamedValuePayload):
+        return ("named", payload.matched_field_ref, payload.text)
+    return (value.kind.value, value.id)
 
 
 def _unsupported_reference_issue(
@@ -879,24 +758,6 @@ def _unsupported_reference_issue(
         known_input_description=task.known_input_description,
         proof_refs=(f"known_input:{task.known_input_id}",),
     )
-
-
-def _dedupe_grounding_issues(issues: Any) -> tuple[GroundingIssue, ...]:
-    output: list[GroundingIssue] = []
-    seen: set[tuple[object, ...]] = set()
-    for issue in issues:
-        key = (
-            issue.kind,
-            issue.known_input_id,
-            issue.requested_fact_id,
-            issue.message,
-            issue.candidates,
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        output.append(issue)
-    return tuple(output)
 
 
 def _ambiguous_reference_issue(
@@ -931,13 +792,20 @@ def _identity_candidate(value: FactValue) -> GroundingCandidate:
     resolver_endpoint_name = (
         value.source_refs[1] if len(value.source_refs) > 1 else resolver_read_id
     )
+    single_component = (
+        payload.key.components[0] if len(payload.key.components) == 1 else None
+    )
     return GroundingCandidate(
         id=_identity_candidate_ref(value),
         label=_identity_candidate_label(value),
-        entity_kind=payload.identity_type,
-        matched_label=payload.display_value or value.label or payload.value,
-        matched_field=payload.identity_field,
-        matched_value=payload.value,
+        key=payload.key,
+        matched_label=payload.display_value or value.label,
+        matched_field=(
+            single_component.component_id if single_component is not None else ""
+        ),
+        matched_value=(
+            str(single_component.value) if single_component is not None else ""
+        ),
         resolver_read_id=resolver_read_id,
         resolver_label=_title_words(resolver_read_id or resolver_endpoint_name),
     )
@@ -947,22 +815,27 @@ def _identity_candidate_ref(value: FactValue) -> str:
     payload = value.payload
     if not isinstance(payload, IdentityValuePayload):
         return value.id
-    return f"{payload.identity_type}:{payload.identity_field}:{payload.value}"
+    return f"{payload.entity_kind}:{payload.key_id}:{canonical_runtime_json(payload.key.component_values())}"
 
 
 def _identity_candidate_label(value: FactValue) -> str:
     payload = value.payload
     if not isinstance(payload, IdentityValuePayload):
         return value.label or value.id
-    identity_label = payload.identity_type.replace("_", " ").title()
-    display = payload.display_value or value.label or str(payload.value)
-    return f"{identity_label}: {display} [{payload.identity_field}={payload.value}]"
+    identity_label = payload.entity_kind.replace("_", " ").title()
+    display = (
+        payload.display_value or value.label or str(payload.key.component_values())
+    )
+    components = ", ".join(
+        f"{component.component_id}={component.value}"
+        for component in payload.key.components
+    )
+    return f"{identity_label}: {display} [{components}]"
 
 
 def _title_words(value: str) -> str:
     return " ".join(
-        word.capitalize()
-        for word in value.replace("_", " ").replace("-", " ").split()
+        word.capitalize() for word in value.replace("_", " ").replace("-", " ").split()
     )
 
 
@@ -970,17 +843,26 @@ def _execute_reference_route(
     *,
     task: KnownInputBindingTask,
     route: InputBindingRoute,
+    input_value: str | int | float | bool,
+    result_kind: InputBindingResultKind,
+    matched_field_ref: str = "",
     source_read_key: str,
     full_catalog: RelationCatalog,
     resolver_row_sources: RowSourceCatalog,
     data_access_port: RelationDataAccessPort,
     source_read_lineage: SourceReadLineageScope | None = None,
+    certification_method: GroundedValueCertificationMethod = (
+        GroundedValueCertificationMethod.RESOLVER_SOURCE_READ
+    ),
 ) -> CanonicalInputLedger:
     resolver_source = resolver_row_sources.source(route.resolver_row_source_id)
     resolver_read = full_catalog.read(route.resolver_read_id)
     rows = _resolved_lookup_rows(
         task=task,
         route=route,
+        input_value=input_value,
+        result_kind=result_kind,
+        matched_field_ref=matched_field_ref,
         resolver_read=resolver_read,
         resolver_source=resolver_source,
         data_access_port=data_access_port,
@@ -1000,42 +882,39 @@ def _execute_reference_route(
                     proof_refs=(f"known_input:{task.known_input_id}",),
                     resolver_read_id=route.resolver_read_id,
                     resolver_endpoint_name=route.resolver_endpoint_name,
-                    resolver_field_id=route.return_field_id,
-                    identity_field=route.identity_field,
+                    resolver_field_id=" ".join(
+                        component.field_id for component in route.key_components
+                    ),
+                    identity_field=" ".join(
+                        component.component_id for component in route.key_components
+                    ),
                 ),
             )
         )
-    values: list[FactValue] = []
-    uses: list[GroundedInputUse] = []
-    certifications: list[GroundedValueCertification] = []
-    values_by_identity: dict[tuple[str, str, str], FactValue] = {}
-    uses_by_identity: dict[tuple[str, str, str], GroundedInputUse] = {}
-    certifications_by_identity: dict[
-        tuple[str, str, str], GroundedValueCertification
-    ] = {}
+    values_by_key: dict[tuple[str, ...], FactValue] = {}
+    uses_by_key: dict[tuple[str, ...], tuple[GroundedInputUse, ...]] = {}
+    certifications_by_key: dict[tuple[str, ...], GroundedValueCertification] = {}
     for resolved in rows:
         fact_value = _fact_value_from_resolved_row(
             task=task,
             route=route,
             resolver_source=resolver_source,
             resolved=resolved,
+            result_kind=result_kind,
         )
         if fact_value is None:
             continue
-        values.append(fact_value)
         use = _grounded_input_use(task=task, route=route, value=fact_value)
-        uses.append(use)
         certification = _resolver_source_read_certification(
             value=fact_value,
             route=route,
+            method=certification_method,
         )
-        certifications.append(certification)
-        key = _identity_value_key(fact_value)
-        if key is not None:
-            values_by_identity.setdefault(key, fact_value)
-            uses_by_identity.setdefault(key, use)
-            certifications_by_identity.setdefault(key, certification)
-    if not values:
+        key = _grounded_value_key(fact_value)
+        values_by_key.setdefault(key, fact_value)
+        uses_by_key.setdefault(key, use)
+        certifications_by_key.setdefault(key, certification)
+    if not values_by_key:
         return CanonicalInputLedger(
             issues=(
                 GroundingIssue(
@@ -1048,31 +927,29 @@ def _execute_reference_route(
                     proof_refs=(f"known_input:{task.known_input_id}",),
                     resolver_read_id=route.resolver_read_id,
                     resolver_endpoint_name=route.resolver_endpoint_name,
-                    resolver_field_id=route.return_field_id,
-                    identity_field=route.identity_field,
+                    resolver_field_id=" ".join(
+                        component.field_id for component in route.key_components
+                    ),
+                    identity_field=" ".join(
+                        component.component_id for component in route.key_components
+                    ),
                 ),
             )
         )
-    if len(values_by_identity) > 1:
+    if len(values_by_key) > 1:
         return CanonicalInputLedger(
             issues=(
                 _ambiguous_reference_issue(
                     task,
-                    values=tuple(values_by_identity.values()),
-                    message="resolver returned multiple canonical identity matches",
+                    values=tuple(values_by_key.values()),
+                    message="resolver returned multiple canonical matches",
                 ),
             )
         )
-    if values_by_identity:
-        return CanonicalInputLedger(
-            values=tuple(values_by_identity.values()),
-            uses=tuple(uses_by_identity.values()),
-            certifications=tuple(certifications_by_identity.values()),
-        )
     return CanonicalInputLedger(
-        values=tuple(values),
-        uses=tuple(uses),
-        certifications=tuple(certifications),
+        values=tuple(values_by_key.values()),
+        uses=tuple(use for uses in uses_by_key.values() for use in uses),
+        certifications=tuple(certifications_by_key.values()),
     )
 
 
@@ -1080,10 +957,11 @@ def _resolver_source_read_certification(
     *,
     value: FactValue,
     route: InputBindingRoute,
+    method: GroundedValueCertificationMethod,
 ) -> GroundedValueCertification:
     return GroundedValueCertification(
         value_id=value.id,
-        method=GroundedValueCertificationMethod.RESOLVER_SOURCE_READ,
+        method=method,
         authority_refs=(route.resolver_read_id,),
         lineage_refs=tuple(value.proof_refs),
     )
@@ -1094,13 +972,33 @@ def _grounded_input_use(
     task: KnownInputBindingTask,
     route: InputBindingRoute,
     value: FactValue,
-) -> GroundedInputUse:
-    return GroundedInputUse(
-        id=f"use_{_symbol(task.known_input_id)}_{_symbol(value.id)}",
-        value_id=value.id,
-        row_source_id=route.resolver_row_source_id,
-        param_id=route.return_field_id,
-        field_id=route.return_field_id,
+) -> tuple[GroundedInputUse, ...]:
+    field_ids = tuple(component.field_id for component in route.key_components)
+    if isinstance(value.payload, NamedValuePayload):
+        field_ids = tuple(
+            (
+                candidate_id
+                for candidate_id, candidate_ref in zip(
+                    route.lookup_field_ids,
+                    route.lookup_field_refs,
+                    strict=True,
+                )
+                if candidate_ref == value.payload.matched_field_ref
+            ),
+        )
+    return tuple(
+        GroundedInputUse(
+            id=(
+                f"use_{_symbol(task.known_input_id)}_"
+                f"{_symbol(value.id)}_{_symbol(field_id)}"
+            ),
+            value_id=value.id,
+            row_source_id=route.resolver_row_source_id,
+            param_id=field_id,
+            field_id=field_id,
+            entity_kind=route.entity_kind,
+        )
+        for field_id in field_ids
     )
 
 
@@ -1110,32 +1008,29 @@ def _fact_value_from_resolved_row(
     route: InputBindingRoute,
     resolver_source: RowSource,
     resolved: _ResolvedLookupRow,
+    result_kind: InputBindingResultKind,
 ) -> FactValue | None:
-    row = resolved.row
-    value = path_value(
-        row,
-        relative_response_path(
-            resolver_source.field(route.return_field_id).path,
-            resolver_source.row_path,
-        ),
-        missing=_MISSING,
+    if result_kind is InputBindingResultKind.MATCHED_VALUE:
+        return _named_value_from_resolved_match(
+            task=task, route=route, resolved=resolved
+        )
+    key = _entity_key_from_resolved_row(
+        route=route,
+        resolver_source=resolver_source,
+        row=resolved.row,
     )
-    if value in (_MISSING, None, ""):
+    if key is None:
         return None
     value_id = _grounded_identity_value_id(
         known_input_id=task.known_input_id,
-        identity_type=route.identity_type,
-        identity_field=route.identity_field,
-        value=str(value),
+        key=key,
     )
     return FactValue.identity(
         id=value_id,
         known_input_id=task.known_input_id,
-        identity_type=route.identity_type,
-        identity_field=route.identity_field,
-        value=str(value),
+        key=key,
         display_value=_display_value(
-            row,
+            resolved.row,
             route=route,
             resolver_source=resolver_source,
         ),
@@ -1147,20 +1042,85 @@ def _fact_value_from_resolved_row(
     )
 
 
+def _entity_key_from_resolved_row(
+    *,
+    route: InputBindingRoute,
+    resolver_source: RowSource,
+    row: Mapping[str, RuntimeValue],
+) -> EntityKeyValue | None:
+    components: list[EntityKeyComponentValue] = []
+    for component in route.key_components:
+        value = path_value(
+            row,
+            relative_response_path(
+                resolver_source.field(component.field_id).path,
+                resolver_source.row_path,
+            ),
+            missing=_MISSING,
+        )
+        if value in (_MISSING, None, ""):
+            return None
+        components.append(
+            EntityKeyComponentValue(
+                component_id=component.component_id,
+                value=value,
+            )
+        )
+    return EntityKeyValue(
+        entity_kind=route.entity_kind,
+        key_id=route.key_id,
+        components=tuple(components),
+    )
+
+
+def _named_value_from_resolved_match(
+    *,
+    task: KnownInputBindingTask,
+    route: InputBindingRoute,
+    resolved: _ResolvedLookupRow,
+) -> FactValue | None:
+    if resolved.matched_value is None:
+        return None
+    text = str(resolved.matched_value)
+    value_id = _grounded_value_id(
+        "_".join(
+            (
+                _symbol(task.known_input_id),
+                _symbol(resolved.matched_field_ref),
+                _symbol(text),
+            )
+        )
+    )
+    return FactValue.named(
+        id=value_id,
+        known_input_id=task.known_input_id,
+        text=text,
+        reference_text=task.lookup_text,
+        matched_field_ref=resolved.matched_field_ref,
+        matched_field_path=resolved.matched_field_path,
+        filter_operator=(
+            ValueFilterOperator.CONTAINS
+            if resolved.matched_collection_member
+            else ValueFilterOperator.EQUALS
+        ),
+        proof_refs=(f"known_input:{task.known_input_id}",),
+        source_refs=(route.resolver_read_id, route.resolver_endpoint_name),
+        applies_to_requested_fact_ids=_task_requested_fact_ids(task),
+    )
+
+
 def _grounded_identity_value_id(
     *,
     known_input_id: str,
-    identity_type: str,
-    identity_field: str,
-    value: str,
+    key: EntityKeyValue,
 ) -> str:
     return _grounded_value_id(
         "_".join(
             (
                 _symbol(known_input_id),
-                _symbol(identity_type),
-                _symbol(identity_field),
-                _symbol(value),
+                _symbol(key.entity_kind),
+                _symbol(key.key_id),
+                _symbol(canonical_runtime_json(key.component_values())),
             )
         )
     )
@@ -1178,6 +1138,9 @@ def _resolved_lookup_rows(
     *,
     task: KnownInputBindingTask,
     route: InputBindingRoute,
+    input_value: str | int | float | bool,
+    result_kind: InputBindingResultKind,
+    matched_field_ref: str,
     resolver_read: EndpointRead,
     resolver_source: RowSource,
     data_access_port: RelationDataAccessPort,
@@ -1186,8 +1149,13 @@ def _resolved_lookup_rows(
 ) -> tuple[_ResolvedLookupRow, ...]:
     output: list[_ResolvedLookupRow] = []
     seen_rows: set[str] = set()
-    lookup_text = task.lookup_text
-    args = {route.lookup_param_ref: lookup_text} if route.lookup_param_ref else {}
+    args = _typed_lookup_args(
+        input_value,
+        route=route,
+        resolver_read=resolver_read,
+    )
+    if args is None:
+        return ()
     require_catalog_endpoint_for_lineage(
         source_read_lineage=source_read_lineage,
         endpoint_name=resolver_read.endpoint_name,
@@ -1244,7 +1212,8 @@ def _resolved_lookup_rows(
         rows,
         route=route,
         resolver_source=resolver_source,
-        text=lookup_text,
+        text=input_value,
+        matched_field_ref=matched_field_ref,
     ):
         key = repr(sorted(resolved.row.items()))
         if key in seen_rows:
@@ -1254,28 +1223,67 @@ def _resolved_lookup_rows(
     return tuple(output)
 
 
+def _typed_lookup_args(
+    lookup_value: str | int | float | bool,
+    *,
+    route: InputBindingRoute,
+    resolver_read: EndpointRead,
+) -> dict[str, object] | None:
+    if not route.lookup_param_ref:
+        return {}
+    lookup_param = next(
+        (
+            param
+            for param in resolver_read.params
+            if param.ref == route.lookup_param_ref
+        ),
+        None,
+    )
+    if lookup_param is None:
+        raise ValueError("grounding route references unknown lookup parameter")
+    try:
+        value = parse_catalog_parameter_value(
+            lookup_value,
+            type_name=lookup_param.type,
+            choices=lookup_param.choices,
+        )
+    except CatalogParameterValueError:
+        return None
+    return {route.lookup_param_ref: value}
+
+
 def _exact_lookup_rows(
     rows: tuple[dict[str, Any], ...],
     *,
     route: InputBindingRoute,
     resolver_source: RowSource,
-    text: str,
+    text: str | int | float | bool,
+    matched_field_ref: str = "",
 ) -> tuple[_ResolvedLookupRow, ...]:
     if not route.lookup_field_ids:
         return tuple(_ResolvedLookupRow(row=row) for row in rows)
     lookup_fields = _lookup_fields_for_route(route, resolver_source=resolver_source)
+    if matched_field_ref:
+        lookup_fields = tuple(
+            field for field in lookup_fields if field.ref == matched_field_ref
+        )
+        if not lookup_fields:
+            raise ValueError("grounding selected an unknown lookup field")
     expected = _normalize_lookup_text(text)
     output: list[_ResolvedLookupRow] = []
     for row in rows:
         matches = _lookup_field_matches(row, lookup_fields, expected=expected)
-        if len(matches) != 1:
+        if not matches:
             continue
         matched = matches[0]
         output.append(
             _ResolvedLookupRow(
                 row=row,
-                matched_field_ref=matched.ref,
-                matched_field_path=matched.path,
+                matched_field_id=matched.field.id,
+                matched_field_ref=matched.field.ref,
+                matched_field_path=matched.field.path,
+                matched_value=matched.value,
+                matched_collection_member=matched.collection_member,
             )
         )
     return tuple(output)
@@ -1288,6 +1296,7 @@ def _lookup_fields_for_route(
 ) -> tuple[_LookupField, ...]:
     return tuple(
         _LookupField(
+            id=field.id,
             ref=field.field_ref,
             path=field.path,
             relative_path=relative_response_path(field.path, resolver_source.row_path),
@@ -1302,13 +1311,47 @@ def _lookup_field_matches(
     lookup_fields: tuple[_LookupField, ...],
     *,
     expected: str,
-) -> tuple[_LookupField, ...]:
-    return tuple(
-        field
-        for field in lookup_fields
-        if _normalize_lookup_text(path_value(row, field.relative_path, missing=""))
-        == expected
-    )
+) -> tuple[_LookupMatch, ...]:
+    matches: list[_LookupMatch] = []
+    for field in lookup_fields:
+        value = path_value(row, field.relative_path, missing="")
+        matched, matched_value, collection_member = _matching_lookup_value(
+            value,
+            expected=expected,
+        )
+        if not matched:
+            continue
+        matches.append(
+            _LookupMatch(
+                field=field,
+                value=matched_value,
+                collection_member=collection_member,
+            )
+        )
+    return tuple(matches)
+
+
+def _matching_lookup_value(
+    value: RuntimeValue,
+    *,
+    expected: str,
+) -> tuple[bool, RuntimeScalar, bool]:
+    if isinstance(value, list | tuple):
+        matched = next(
+            (
+                item
+                for item in value
+                if not isinstance(item, list | tuple | Mapping)
+                and _normalize_lookup_text(item) == expected
+            ),
+            None,
+        )
+        return matched is not None, matched, True
+    if isinstance(value, Mapping):
+        return False, None, False
+    if _normalize_lookup_text(value) == expected:
+        return True, value, False
+    return False, None, False
 
 
 def _display_value(
@@ -1317,15 +1360,9 @@ def _display_value(
     route: InputBindingRoute,
     resolver_source: RowSource,
 ) -> str:
-    return_field = resolver_source.field(route.return_field_id)
-    if return_field.identity is None:
-        return ""
     parts: list[str] = []
-    for display_field in return_field.identity.display_fields:
-        field = _field_by_id_or_ref(
-            display_field,
-            resolver_source=resolver_source,
-        )
+    for context_field_id in route.context_field_ids:
+        field = resolver_source.field(context_field_id)
         value = path_value(
             row,
             relative_response_path(field.path, resolver_source.row_path),
@@ -1334,14 +1371,3 @@ def _display_value(
         if value not in ("", None):
             parts.append(str(value))
     return " ".join(parts).strip()
-
-
-def _field_by_id_or_ref(
-    field_id_or_ref: str,
-    *,
-    resolver_source: RowSource,
-) -> RowSourceField:
-    for field in resolver_source.fields:
-        if field.id == field_id_or_ref or field.field_ref == field_id_or_ref:
-            return field
-    raise ValueError(f"resolver display field is unavailable: {field_id_or_ref}")

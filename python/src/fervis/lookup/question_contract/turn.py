@@ -25,7 +25,6 @@ from fervis.lookup.question_contract.prompt import (
     QuestionContractTurnPrompt,
 )
 from fervis.lookup.turn_prompts import build_turn_prompt_context
-from fervis.lookup.turn_prompts.context import active_clarification_context
 
 
 @dataclass(frozen=True)
@@ -78,9 +77,7 @@ def generate_question_contract(
             payload=output.arguments,
             question_context=request.current_question,
             question_context_texts=_question_contract_context_texts(request),
-            current_question_context_texts=(
-                _question_contract_active_clarification_texts(request)
-            ),
+            current_question_context_texts=(),
             conversation_resolution=request.conversation_resolution,
         )
         if isinstance(result.outcome, QuestionContract):
@@ -98,7 +95,7 @@ def generate_question_contract(
         ) from exc
     artifact = replace(
         output.artifact,
-        parsed_payload=result.outcome.to_model_dict(),
+        parsed_payload=result.to_model_dict(),
     )
     return QuestionContractTurnResult(
         result=result,
@@ -111,34 +108,9 @@ def generate_question_contract(
 def _question_contract_context_texts(
     request: QuestionContractRequest,
 ) -> tuple[str, ...]:
-    output = list(
+    output = tuple(
         request.conversation_resolution.context_texts()
         if request.conversation_resolution is not None
         else ()
     )
-    active = active_clarification_context(
-        request.conversation_context,
-        current_question=request.current_question,
-    )
-    if active is not None:
-        output.append(active.original_question)
-        for exchange in active.exchanges:
-            output.extend(exchange.questions)
-            output.append(exchange.answer)
-    return tuple(dict.fromkeys(text for text in output if str(text or "").strip()))
-
-
-def _question_contract_active_clarification_texts(
-    request: QuestionContractRequest,
-) -> tuple[str, ...]:
-    active = active_clarification_context(
-        request.conversation_context,
-        current_question=request.current_question,
-    )
-    if active is None:
-        return ()
-    output: list[str] = [active.original_question]
-    for exchange in active.exchanges:
-        output.extend(exchange.questions)
-        output.append(exchange.answer)
     return tuple(dict.fromkeys(text for text in output if str(text or "").strip()))

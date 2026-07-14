@@ -10,8 +10,37 @@ from fervis.lookup.source_binding.plan_targets import (
     source_binding_fact_field_id,
     source_binding_fact_id_from_field,
 )
+from fervis.lookup.turn_prompts.context import HostPromptContext
+from fervis.lookup.source_binding import (
+    SourceBindingRequest,
+    SourceCandidateDiscoveryRequest,
+    source_candidate_discovery_registry,
+)
 
 from tests.lookup.prompt_sections import prompt_section_payload
+
+
+def source_binding_request(**kwargs: Any) -> SourceBindingRequest:
+    discovery_request = SourceCandidateDiscoveryRequest(
+        question=kwargs["question"],
+        question_contract=kwargs["question_contract"],
+        requested_facts=kwargs["requested_facts"],
+        relation_catalog=kwargs["relation_catalog"],
+        catalog_selection=kwargs["catalog_selection"],
+        same_scope_relation_catalog=kwargs.get("same_scope_relation_catalog"),
+        memory_inputs=kwargs.get("memory_inputs", {}),
+        active_memory_ids=kwargs.get("active_memory_ids", ()),
+        available_values=kwargs.get("available_values", ()),
+        available_value_uses=kwargs.get("available_value_uses", ()),
+        read_eligibility=kwargs.get("read_eligibility"),
+        conversation_context=kwargs.get("conversation_context", {}),
+        conversation_resolution=kwargs.get("conversation_resolution"),
+        host=kwargs.get("host") or HostPromptContext(),
+    )
+    kwargs["source_candidates"] = source_candidate_discovery_registry(
+        discovery_request
+    )
+    return SourceBindingRequest(**kwargs)
 
 
 @dataclass(frozen=True)
@@ -81,6 +110,62 @@ def source_fulfills_fields_for_candidate(
             "fulfillment_choice_id": support_set_id,
         }
     return output
+
+
+def source_fulfills_keys_for_candidate(
+    candidate: dict[str, Any],
+    *,
+    key_ids_by_answer_output: dict[str, str],
+    row_path_ids_by_answer_output: dict[str, str] | None = None,
+) -> dict[str, dict[str, Any]]:
+    choices = (
+        _candidate_binding_surface(candidate).get("fulfillment_support_sets") or ()
+    )
+    output: dict[str, dict[str, Any]] = {}
+    row_path_ids = row_path_ids_by_answer_output or {}
+    for answer_output_id, key_id in key_ids_by_answer_output.items():
+        matching_choice_ids = [
+            str(choice.get("fulfillment_choice_id") or "")
+            for choice in choices
+            if isinstance(choice, dict)
+            and str(choice.get("answer_output_id") or "") == answer_output_id
+            and _choice_targets_entity_key(
+                choice,
+                key_id=key_id,
+                row_path_id=row_path_ids.get(answer_output_id, ""),
+            )
+        ]
+        if len(matching_choice_ids) != 1:
+            raise AssertionError(
+                f"candidate key choice not found for {answer_output_id}:{key_id}"
+            )
+        choice_id = matching_choice_ids[0]
+        output[answer_output_id] = {
+            "match_basis_explanation": (
+                f"{answer_output_id} is fulfilled by declared candidate key {key_id}."
+            ),
+            "fulfillment_choice_id": choice_id,
+        }
+    return output
+
+
+def _choice_targets_entity_key(
+    choice: dict[str, Any],
+    *,
+    key_id: str,
+    row_path_id: str,
+) -> bool:
+    return any(
+        (
+            str(item.get("key_id") or item.get("target_key_id") or "") == key_id
+            or str(item.get("entity_key") or "").endswith(f".{key_id}")
+        )
+        and (not row_path_id or str(item.get("row_path_id") or "") == row_path_id)
+        for slot in choice.get("fulfillment_slots") or ()
+        if isinstance(slot, dict)
+        for item in slot.get("entity_evidence") or ()
+        if isinstance(item, dict)
+    )
 
 
 def source_fulfills_by_row_population_for_candidate(
@@ -222,7 +307,7 @@ def _candidate_field_ids(candidate: dict[str, Any]) -> set[str]:
 
 def _candidate_fulfillment_field_ids(candidate: dict[str, Any]) -> set[str]:
     return {
-        str(item.get("field_id") or "")
+        field_id
         for support_set in (
             _candidate_binding_surface(candidate).get("fulfillment_support_sets") or ()
         )
@@ -230,7 +315,8 @@ def _candidate_fulfillment_field_ids(candidate: dict[str, Any]) -> set[str]:
         for slot in support_set.get("fulfillment_slots") or ()
         if isinstance(slot, dict)
         for item in _slot_evidence_items(slot)
-        if isinstance(item, dict) and str(item.get("field_id") or "")
+        if isinstance(item, dict)
+        for field_id in _evidence_field_ids(item)
     }
 
 
@@ -335,25 +421,25 @@ def _support_set_match_score(
         for item in slot.get("row_count_basis_evidence") or ()
         if isinstance(item, dict)
     )
-    expected_is_group_key = any(
+    expected_is_entity = any(
         item.get("evidence_id") in expected_evidence_ids
         for slot in slots
-        for item in slot.get("group_key_evidence") or ()
+        for item in slot.get("entity_evidence") or ()
         if isinstance(item, dict)
     )
     has_count_basis = any(slot.get("row_count_basis_evidence") for slot in slots)
     has_metric = any(slot.get("metric_measure_evidence") for slot in slots)
-    has_group_key = any(slot.get("group_key_evidence") for slot in slots)
+    has_entity = any(slot.get("entity_evidence") for slot in slots)
     if expected_is_metric:
         return (
             3,
             int(has_count_basis),
-            -int(has_group_key),
+            -int(has_entity),
         )
     if expected_is_count_basis:
-        return (3, int(has_count_basis), -int(has_group_key))
-    if expected_is_group_key:
-        return (2, int(has_group_key), -int(has_metric))
+        return (3, int(has_count_basis), -int(has_entity))
+    if expected_is_entity:
+        return (2, int(has_entity), -int(has_metric))
     return (1, 0, -len(slots))
 
 
@@ -371,8 +457,11 @@ def _candidate_evidence_id(candidate: dict[str, Any], *, field_id: str) -> str:
                     continue
                 candidate_field_id = str(item.get("field_id") or "")
                 evidence_id = str(item.get("evidence_id") or "")
-                if candidate_field_id == field_id or candidate_field_id.endswith(
-                    f".{field_id}"
+                candidate_field_ids = _evidence_field_ids(item)
+                if (
+                    candidate_field_id == field_id
+                    or candidate_field_id.endswith(f".{field_id}")
+                    or field_id in candidate_field_ids
                 ):
                     return evidence_id
     for item in _candidate_binding_surface(candidate).get("evidence_items") or ():
@@ -430,7 +519,6 @@ def _source_binding_payload_from_fact_plan_raw(
     }
 
 
-_NON_OUTPUT_SOURCE_ROLES = frozenset({"observed"})
 _SOURCE_BINDING_INVOCATION_FIELDS = frozenset(
     {
         "binding_target_id",
@@ -605,6 +693,17 @@ def _source_binding_invocation_for_override(
 
 def _first_source_binding_payload_from_prompt(prompt: str) -> dict[str, Any]:
     payload = _source_candidate_prompt_payload(prompt)
+    metric_fit = _metric_fit_contract_from_prompt(prompt)
+    fitting_metric_ids_by_fact = {
+        requested_fact_id: {
+            evidence_id
+            for evidence_id, review in reviews.items()
+            if review.get("interpretation") == "FITS_REQUESTED_ANSWER"
+        }
+        for requested_fact_id, reviews in metric_fit[
+            "fit_basis_interpretations"
+        ].items()
+    }
     source_invocations: list[dict[str, Any]] = []
     for fact_sources in payload.get("requested_fact_sources") or ():
         if not isinstance(fact_sources, dict):
@@ -612,12 +711,18 @@ def _first_source_binding_payload_from_prompt(prompt: str) -> dict[str, Any]:
         candidate = _first_source_option_with_support_set(fact_sources)
         if not candidate:
             continue
-        support_set = _first_fulfillment_support_set(candidate)
-        answer_output_id = str(support_set.get("answer_output_id") or "answer_1")
         requested_fact_id = _required_prompt_text(
             fact_sources,
             key="requested_fact_id",
         )
+        support_set = _first_fulfillment_support_set(
+            candidate,
+            fitting_metric_ids=fitting_metric_ids_by_fact.get(
+                requested_fact_id,
+                set(),
+            ),
+        )
+        answer_output_id = str(support_set.get("answer_output_id") or "answer_1")
         source_candidate_id = _candidate_id(candidate)
         source_invocations.append(
             {
@@ -669,14 +774,31 @@ def _first_source_option_with_support_set(
     return None
 
 
-def _first_fulfillment_support_set(candidate: dict[str, Any]) -> dict[str, Any]:
-    for support_set in (
-        _candidate_binding_surface(candidate).get("fulfillment_support_sets") or ()
-    ):
-        if isinstance(support_set, dict) and str(
-            support_set.get("fulfillment_choice_id") or ""
-        ):
-            return support_set
+def _first_fulfillment_support_set(
+    candidate: dict[str, Any],
+    *,
+    fitting_metric_ids: set[str] | None = None,
+) -> dict[str, Any]:
+    support_sets = tuple(
+        support_set
+        for support_set in (
+            _candidate_binding_surface(candidate).get("fulfillment_support_sets") or ()
+        )
+        if isinstance(support_set, dict)
+        and str(support_set.get("fulfillment_choice_id") or "")
+    )
+    if fitting_metric_ids:
+        for support_set in support_sets:
+            evidence_ids = {
+                evidence_id
+                for slot in support_set.get("fulfillment_slots") or ()
+                if isinstance(slot, dict)
+                for evidence_id in _slot_evidence_ids(slot)
+            }
+            if evidence_ids & fitting_metric_ids:
+                return support_set
+    if support_sets:
+        return support_sets[0]
     return {}
 
 
@@ -1028,9 +1150,9 @@ def _required_target_text(payload: dict[str, Any], key: str) -> str:
 
 
 def _target_answer_output_ids(payload: dict[str, Any]) -> tuple[str, ...]:
-    raw_values = payload.get("answer_output_ids")
+    raw_values = payload.get("required_answer_output_ids")
     if not isinstance(raw_values, list | tuple):
-        raise AssertionError("binding target requires answer_output_ids")
+        raise AssertionError("binding target requires required_answer_output_ids")
     output: list[str] = []
     for raw_value in raw_values:
         if not isinstance(raw_value, str) or not raw_value:
@@ -1711,10 +1833,8 @@ def _answer_source_field_ids(answer: dict[str, Any]) -> set[str]:
     if isinstance(output_field, dict) and str(output_field.get("field_id") or ""):
         output.add(str(output_field["field_id"]))
     metric = answer.get("metric")
-    if isinstance(metric, dict):
-        for key in ("field_id", "record_id_field_id"):
-            if str(metric.get(key) or ""):
-                output.add(str(metric[key]))
+    if isinstance(metric, dict) and str(metric.get("field_id") or ""):
+        output.add(str(metric["field_id"]))
     return output
 
 
@@ -2035,19 +2155,16 @@ def extract_source_bindings(
             raise AssertionError(
                 f"source candidate evidence missing for {source_candidate_id}"
             )
-        requires_fulfillment = _source_role_requires_fulfillment(
-            answer,
-            source_role=source_role,
-        )
-        binding_target_id = _binding_target_id_for_candidate(
+        binding_target = _binding_target_for_candidate(
             prompt,
             requested_fact_id=requested_fact_id,
             source_candidate_id=source_candidate_id,
             source_role=source_role,
             plan_shape=_required_prompt_text(answer, key="pattern"),
-            requires_fulfillment=requires_fulfillment,
             allow_equivalent_targets=True,
         )
+        binding_target_id = binding_target.binding_target_id
+        requires_fulfillment = binding_target.requires_answer_fulfillment
         candidate_evidence_ids = source_field_ids[source_candidate_id]
         selected_evidence_ids: tuple[str, ...] = ()
         if requires_fulfillment:
@@ -2131,17 +2248,6 @@ def extract_source_bindings(
                     source_role=f"value_{index}",
                 )
     return bindings, replacements
-
-
-def _source_role_requires_fulfillment(
-    answer: dict[str, Any],
-    *,
-    source_role: str,
-) -> bool:
-    return not (
-        _required_prompt_text(answer, key="pattern") == "set_difference"
-        and source_role in _NON_OUTPUT_SOURCE_ROLES
-    )
 
 
 def _source_candidate_id_for_requested_fact(
@@ -2553,8 +2659,6 @@ def _answer_output_field_ids_for_output(
     metric = answer.get("metric")
     if isinstance(metric, dict) and str(metric.get("field_id") or ""):
         return [str(metric["field_id"])]
-    if isinstance(metric, dict) and str(metric.get("record_id_field_id") or ""):
-        return [str(metric["record_id_field_id"])]
     return output_fields
 
 
@@ -2668,11 +2772,14 @@ def _aggregate_choice_evidence_for_answer_output(
                 item
                 for slot in support_set.get("fulfillment_slots") or ()
                 if isinstance(slot, dict)
-                for item in slot.get("group_key_evidence") or ()
+                for key in ("entity_evidence", "value_evidence")
+                for item in slot.get(key) or ()
                 if isinstance(item, dict)
             )
             group_field_ids = {
-                str(item.get("field_id") or "") for item in evidence_items
+                str(field_id)
+                for item in evidence_items
+                for field_id in _evidence_field_ids(item)
             }
             if not expected_group_fields <= group_field_ids:
                 continue
@@ -2720,12 +2827,13 @@ def _aggregate_choice_evidence_for_answer_output(
         if not has_metric:
             continue
         group_field_ids = {
-            str(item.get("field_id") or "")
+            str(field_id)
             for slot in support_set.get("fulfillment_slots") or ()
             if isinstance(slot, dict)
-            for key in ("group_key_evidence",)
+            for key in ("entity_evidence", "value_evidence")
             for item in slot.get(key) or ()
             if isinstance(item, dict)
+            for field_id in _evidence_field_ids(item)
         }
         selected = tuple(
             str(item.get("evidence_id") or "")
@@ -2906,23 +3014,39 @@ def _metric_fit_contract_from_prompt(
         requested_fact_id = str(requested_fact.get("requested_fact_id") or "")
         if not requested_fact_id:
             continue
-        for candidate in requested_fact.get("metric_candidates") or ():
+        metric_candidates = tuple(
+            candidate
+            for candidate in requested_fact.get("metric_candidates") or ()
+            if isinstance(candidate, dict)
+        )
+        has_declared_measure = any(
+            str(candidate.get("field_type") or "") != "row_population"
+            for candidate in metric_candidates
+        )
+        for candidate in metric_candidates:
             if not isinstance(candidate, dict):
                 continue
             evidence_id = str(candidate.get("metric_evidence_id") or "")
             if not evidence_id:
                 continue
+            fits = not (
+                has_declared_measure
+                and str(candidate.get("field_type") or "") == "row_population"
+            )
+            fit_text = "fitting" if fits else "not fitting"
             bases.setdefault(requested_fact_id, {})[evidence_id] = {
                 "metric_meaning": (
                     f"{evidence_id} is treated as metric evidence in this test fixture."
                 ),
                 "fit_basis": (
-                    f"{evidence_id} is treated as fitting the requested answer in this "
+                    f"{evidence_id} is treated as {fit_text} the requested answer in this "
                     "test fixture."
                 ),
             }
             interpretations.setdefault(requested_fact_id, {})[evidence_id] = {
-                "interpretation": "FITS_REQUESTED_ANSWER",
+                "interpretation": (
+                    "FITS_REQUESTED_ANSWER" if fits else "DOES_NOT_FIT_REQUESTED_ANSWER"
+                ),
             }
     return {
         "metric_fit_bases": bases,
@@ -2935,9 +3059,9 @@ def _slot_evidence_items(slot: dict[str, Any]) -> tuple[dict[str, Any], ...]:
         item
         for key in (
             "metric_measure_evidence",
+            "value_evidence",
             "row_count_basis_evidence",
-            "scope_evidence",
-            "group_key_evidence",
+            "entity_evidence",
         )
         for item in slot.get(key) or ()
         if isinstance(item, dict)
@@ -3812,11 +3936,6 @@ def _fulfillment_choice_from_xml(node: ElementTree.Element) -> dict[str, Any]:
         "answer_output_id": node.attrib.get("answer_output", ""),
         "fulfillment_slots": (
             {
-                "scope_evidence": tuple(
-                    _fulfillment_evidence_from_xml(evidence)
-                    for evidence in node.findall("evidence")
-                    if evidence.attrib.get("kind") == "scope"
-                ),
                 "metric_measure_evidence": tuple(
                     _fulfillment_evidence_from_xml(evidence)
                     for evidence in node.findall("evidence")
@@ -3827,10 +3946,16 @@ def _fulfillment_choice_from_xml(node: ElementTree.Element) -> dict[str, Any]:
                     for evidence in node.findall("evidence")
                     if evidence.attrib.get("kind") == "row_count_basis"
                 ),
-                "group_key_evidence": tuple(
+                "value_evidence": tuple(
                     _fulfillment_evidence_from_xml(evidence)
                     for evidence in node.findall("evidence")
-                    if evidence.attrib.get("kind") == "group_key"
+                    if evidence.attrib.get("kind") == "value"
+                ),
+                "entity_evidence": tuple(
+                    _fulfillment_evidence_from_xml(evidence)
+                    for evidence in node.findall("evidence")
+                    if evidence.attrib.get("kind")
+                    in {"candidate_key", "entity_reference"}
                 ),
             },
         ),
@@ -3838,13 +3963,33 @@ def _fulfillment_choice_from_xml(node: ElementTree.Element) -> dict[str, Any]:
 
 
 def _fulfillment_evidence_from_xml(node: ElementTree.Element) -> dict[str, Any]:
-    return {
+    output = {
         "evidence_id": node.attrib.get("evidence_id", ""),
         "field_id": node.attrib.get("field", ""),
         "label": node.attrib.get("label", ""),
         "row_path_id": node.attrib.get("row_path", ""),
         "type": node.attrib.get("type", ""),
+        "entity_key": node.attrib.get("entity_key", ""),
     }
+    if node.attrib.get("kind") in {"candidate_key", "entity_reference"}:
+        output["components"] = [
+            {"component_id": field_id.strip(), "field_id": field_id.strip()}
+            for field_id in node.attrib.get("field", "").split(",")
+            if field_id.strip()
+        ]
+    return output
+
+
+def _evidence_field_ids(item: dict[str, Any]) -> tuple[str, ...]:
+    component_field_ids = tuple(
+        str(component.get("field_id") or "")
+        for component in item.get("components") or ()
+        if isinstance(component, dict) and str(component.get("field_id") or "")
+    )
+    if component_field_ids:
+        return component_field_ids
+    field_id = str(item.get("field_id") or "")
+    return (field_id,) if field_id else ()
 
 
 def _source_options_for_fact_sources(
@@ -3963,9 +4108,9 @@ def _add_candidate_field_ids(
         if isinstance(slot, dict)
         for key in (
             "metric_measure_evidence",
+            "value_evidence",
             "row_count_basis_evidence",
-            "scope_evidence",
-            "group_key_evidence",
+            "entity_evidence",
         )
         for item in slot.get(key) or ()
         if isinstance(item, dict) and str(item.get("evidence_id") or "")
@@ -4106,9 +4251,9 @@ def _add_candidate_evidence_items(
             if isinstance(slot, dict)
             for key in (
                 "metric_measure_evidence",
+                "value_evidence",
                 "row_count_basis_evidence",
-                "scope_evidence",
-                "group_key_evidence",
+                "entity_evidence",
             )
             for item in slot.get(key) or ()
             if isinstance(item, dict)
@@ -4413,9 +4558,10 @@ def _normalize_grouped_ranked_rank(answer: dict[str, Any]) -> None:
 def _matching_group_candidate(
     choice: dict[str, Any],
     expected_group_fields: set[str],
-) -> dict[str, str]:
+) -> dict[str, Any]:
     for group in choice["groups"]:
-        if not expected_group_fields or group["field"] in expected_group_fields:
+        group_fields = set(group.get("fields") or ())
+        if not expected_group_fields or group_fields == expected_group_fields:
             return group
     return {}
 
@@ -4464,7 +4610,11 @@ def _grouped_ranked_choices_from_prompt(prompt: str) -> tuple[dict[str, Any], ..
                 "source_binding_id": source_match.group(1),
                 "groups": tuple(
                     {
-                        "field": attrs.get("field", ""),
+                        "fields": tuple(
+                            field_id
+                            for field_id in attrs.get("fields", "").split()
+                            if field_id
+                        ),
                     }
                     for attrs in _xml_tag_attrs(body, "group")
                 ),

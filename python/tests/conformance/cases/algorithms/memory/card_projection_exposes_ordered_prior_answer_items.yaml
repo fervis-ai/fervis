@@ -21,6 +21,7 @@ input:
                 answer_outputs:
                   - id: answer_1
                     description: product name
+                    role: ANSWER_VALUE
                 used_question_inputs: []
         addresses:
           - address: relation.answer_rows

@@ -21,11 +21,13 @@ input:
                 answer_outputs:
                   - id: answer_1
                     description: answer
+                    role: ANSWER_VALUE
                 used_question_inputs: []
         addresses:
           - address: entity.staff_1
             kind: entity
             resource: staff
+            keyId: primary_key
             referenceText: Staff One
             identity: {staff_key: staff-1}
       - artifactId: turn_2
@@ -41,11 +43,13 @@ input:
                 answer_outputs:
                   - id: answer_1
                     description: answer
+                    role: ANSWER_VALUE
                 used_question_inputs: []
         addresses:
           - address: entity.staff_1
             kind: entity
             resource: staff
+            keyId: primary_key
             referenceText: Staff One
             identity: {staff_key: staff-1}
 expect:

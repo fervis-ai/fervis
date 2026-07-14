@@ -93,21 +93,22 @@ describe("Ledger app actions", () => {
     const answerClarification = vi.fn(async () => completedAfterClarificationState);
     render(<App initialClient={createInteractiveClient({ answerClarification })} />);
 
-    fireEvent.click(await screen.findByText("run_clarify"));
+    fireEvent.click(
+      await screen.findByText("How many sales happened at the matching store?")
+    );
     fireEvent.click(await screen.findByRole("radio", { name: "BBS Outlet" }));
     fireEvent.click(screen.getByRole("button", { name: "Send clarification" }));
 
     expect(await screen.findByText("18 in-person sales happened this month.")).toBeInTheDocument();
-    expect(answerClarification).toHaveBeenCalledWith("q_sales", {
+    expect(answerClarification).toHaveBeenCalledWith("q_choice_clarification", {
       clarificationId: "clar_store",
-      question: "BBS Outlet",
+      responseText: "BBS Outlet",
       selectedOptionId: "store:store_id:70707070-0000-0000-0001-000000000002",
-      triggerKind: "clarification_response",
-      baseRunId: "run_clarify"
+      runId: "run_clarify"
     } satisfies ClarificationResponseRequest);
   });
 
-  it("shows immediate focus feedback while clarification creates the next run", async () => {
+  it("shows immediate focus feedback while clarification resumes the run", async () => {
     const answerClarification = vi.fn(
       () =>
         new Promise<QuestionStatePayload>(() => {
@@ -116,7 +117,9 @@ describe("Ledger app actions", () => {
     );
     render(<App initialClient={createInteractiveClient({ answerClarification })} />);
 
-    fireEvent.click(await screen.findByText("run_clarify"));
+    fireEvent.click(
+      await screen.findByText("How many sales happened at the matching store?")
+    );
     fireEvent.click(await screen.findByRole("radio", { name: "ABC Mall" }));
     fireEvent.click(screen.getByRole("button", { name: "Send clarification" }));
 
@@ -128,8 +131,9 @@ describe("Ledger app actions", () => {
   it("does not expose transport mechanics inside clarification cards", async () => {
     render(<App initialClient={createInteractiveClient({})} />);
 
-    fireEvent.click(await screen.findByText("run_clarify"));
-
+    fireEvent.click(
+      await screen.findByText("How many sales happened at the matching store?")
+    );
     expect(await screen.findByText("Which matching store should I use?")).toBeInTheDocument();
     expect(screen.queryByText(/POST \/questions/)).not.toBeInTheDocument();
     expect(screen.queryByText(/triggerKind/)).not.toBeInTheDocument();
@@ -151,9 +155,8 @@ describe("Ledger app actions", () => {
     expect(await screen.findByText("March 2026 sales were 14.")).toBeInTheDocument();
     expect(answerClarification).toHaveBeenCalledWith("q_clarification", {
       clarificationId: "clar_period",
-      question: "March 2026",
-      triggerKind: "clarification_response",
-      baseRunId: "run_clarify_text"
+      responseText: "March 2026",
+      runId: "run_clarify_text"
     } satisfies ClarificationResponseRequest);
   });
 

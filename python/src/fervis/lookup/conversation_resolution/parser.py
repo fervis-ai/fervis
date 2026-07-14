@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
-from typing import Any, assert_never
+from fervis.types.enums import StrEnum
+from typing import Callable, TypeVar
+from typing_extensions import assert_never
 
 from fervis.memory.conversation_context import (
     ConversationContextFrame,
@@ -14,14 +15,12 @@ from fervis.memory.conversation_context import (
 from fervis.lookup.conversation_resolution import provider_contract as output
 from fervis.lookup.conversation_resolution.model import (
     CandidateInterpretation,
-    CarriedFrameArgument,
     ContextAnchorSource,
     ConversationFrameCall,
     ConversationResolution,
     ConversationResolutionResult,
     CurrentSpanSource,
-    FrameArgument,
-    FrameArgumentKind,
+    FrameParameterRef,
     FramePartSource,
     ResolutionSource,
     ResolutionSourceKind,
@@ -34,6 +33,7 @@ from fervis.lookup.conversation_resolution.model import (
 from fervis.lookup.conversation_resolution.tools import (
     CONVERSATION_RESOLUTION_TOOL_NAME,
 )
+from fervis.lookup.provider_contract import ProviderObject
 
 
 _VALUE_PART_KINDS = frozenset(
@@ -49,7 +49,7 @@ _FIXED_SHAPE_PART_KINDS = frozenset(ConversationFramePartKind) - _VALUE_PART_KIN
 def parse_conversation_resolution(
     *,
     tool_name: str,
-    payload: dict[str, Any],
+    payload: dict[str, object],
     current_question: str,
     context_sources: tuple[ConversationContextSource, ...] = (),
     context_frames: tuple[ConversationContextFrame, ...] = (),
@@ -57,12 +57,9 @@ def parse_conversation_resolution(
     if tool_name != CONVERSATION_RESOLUTION_TOOL_NAME:
         raise ValueError("unknown conversation resolution tool")
     item = output.ConversationResolutionOutput.parse(payload)
-    if item.kind != "conversation_resolution":
+    if _required_text(item.kind) != "conversation_resolution":
         raise ValueError("invalid conversation resolution kind")
-    current_question_text = _required_string(
-        item.current_question_text,
-        path="current_question_text",
-    )
+    current_question_text = _required_text(item.current_question_text)
     if current_question_text != current_question:
         raise ValueError("current_question_text must exactly match current question")
     context = _ParseContext.from_inputs(
@@ -112,32 +109,18 @@ class _ParsedOutcome:
     unresolved: UnresolvedResolution
 
 
-def _parse_outcome(raw: object, *, context: _ParseContext) -> _ParsedOutcome:
-    payload = _required_dict(raw, path="outcome")
-    kind = _OutcomeKind(_required_string(payload.get("kind"), path="outcome.kind"))
+def _parse_outcome(value: ProviderObject, *, context: _ParseContext) -> _ParsedOutcome:
+    kind = _OutcomeKind(value.discriminator("kind"))
     if kind is _OutcomeKind.RESOLVED:
-        item = output.ResolvedOutcomeOutput.parse(payload)
-        resolution_basis = _required_string(
-            item.resolution_basis,
-            path="outcome.resolution_basis",
-        )
-        contextualized_question = _required_string(
-            item.contextualized_question,
-            path="outcome.contextualized_question",
-        )
+        item = value.parse_as(output.ResolvedOutcomeOutput)
+        resolution_basis = _required_text(item.resolution_basis)
+        contextualized_question = _required_text(item.contextualized_question)
         clauses = _resolved_clauses(
             item.clauses,
             contextualized_question=contextualized_question,
             context=context,
         )
-        values_by_id = {
-            value.value_id: value for clause in clauses for value in clause.values
-        }
-        frame_call = _frame_call(
-            item.frame_call,
-            values_by_id=values_by_id,
-            context=context,
-        )
+        frame_call = _derived_frame_call(clauses, context=context)
         return _ParsedOutcome(
             resolution_basis=resolution_basis,
             contextualized_question=contextualized_question,
@@ -149,13 +132,21 @@ def _parse_outcome(raw: object, *, context: _ParseContext) -> _ParsedOutcome:
                 candidate_interpretations=(),
             ),
         )
-    if kind in {_OutcomeKind.MULTIPLE_MEANINGS, _OutcomeKind.MISSING_INPUT}:
+    if kind is _OutcomeKind.MULTIPLE_MEANINGS:
         return _ParsedOutcome(
             resolution_basis="",
             contextualized_question="",
             clauses=(),
             frame_call=None,
-            unresolved=_unresolved_outcome(payload, kind=kind, context=context),
+            unresolved=_unresolved_outcome(value, kind=kind, context=context),
+        )
+    if kind is _OutcomeKind.MISSING_INPUT:
+        return _ParsedOutcome(
+            resolution_basis="",
+            contextualized_question="",
+            clauses=(),
+            frame_call=None,
+            unresolved=_unresolved_outcome(value, kind=kind, context=context),
         )
     assert_never(kind)
 
@@ -219,8 +210,16 @@ class _ParseContext:
         )
 
 
-def _unique_by_id(items, *, identity, label: str):
-    output = {}
+_ItemT = TypeVar("_ItemT")
+
+
+def _unique_by_id(
+    items: tuple[_ItemT, ...],
+    *,
+    identity: Callable[[_ItemT], str],
+    label: str,
+) -> dict[str, _ItemT]:
+    output: dict[str, _ItemT] = {}
     for item in items:
         item_id = identity(item)
         if item_id in output:
@@ -230,7 +229,7 @@ def _unique_by_id(items, *, identity, label: str):
 
 
 def _resolved_clauses(
-    raw: object,
+    items: tuple[output.ResolvedClauseOutput, ...],
     *,
     contextualized_question: str,
     context: _ParseContext,
@@ -242,31 +241,29 @@ def _resolved_clauses(
             contextualized_question=contextualized_question,
             context=context,
         )
-        for index, item in enumerate(_required_dicts(raw, path="clauses"))
+        for index, item in enumerate(items)
     )
     return clauses
 
 
 def _resolved_clause(
-    raw: object,
+    item: output.ResolvedClauseOutput,
     *,
     path: str,
     contextualized_question: str,
     context: _ParseContext,
 ) -> ResolvedConversationClause:
-    item = output.ResolvedClauseOutput.parse(raw)
-    current_clause_text = _required_string(
-        item.current_clause_text,
-        path=f"{path}.current_clause_text",
-    )
-    occurrence = _positive_int(item.occurrence, path=f"{path}.occurrence")
+    current_clause_text = _required_text(item.current_clause_text)
+    occurrence = item.occurrence
+    if occurrence < 1:
+        raise ValueError(f"{path}.occurrence must be a positive integer")
     _require_occurrence(
         text=current_clause_text,
         occurrence=occurrence,
         source=context.current_question,
         path=f"{path}.current_clause_text",
     )
-    resolved_text = _required_string(item.resolved_text, path=f"{path}.resolved_text")
+    resolved_text = _required_text(item.resolved_text)
     if resolved_text not in contextualized_question:
         raise ValueError(f"{path}.resolved_text must occur in contextualized_question")
     values = tuple(
@@ -276,9 +273,7 @@ def _resolved_clause(
             current_clause_text=current_clause_text,
             context=context,
         )
-        for index, value in enumerate(
-            _required_dicts(item.values, path=f"{path}.values")
-        )
+        for index, value in enumerate(item.values)
     )
     return ResolvedConversationClause(
         current_clause_text=current_clause_text,
@@ -291,31 +286,23 @@ def _resolved_clause(
                 context=context,
                 allowed_kinds=_FIXED_SHAPE_PART_KINDS,
             )
-            for index, retained in enumerate(
-                _required_dicts(
-                    item.retained_frame_parts,
-                    path=f"{path}.retained_frame_parts",
-                )
-            )
+            for index, retained in enumerate(item.retained_frame_parts)
         ),
         values=values,
     )
 
 
 def _resolved_value(
-    raw: object,
+    item: output.ResolvedValueOutput,
     *,
     path: str,
     current_clause_text: str,
     context: _ParseContext,
 ) -> ResolvedConversationValue:
-    item = output.ResolvedValueOutput.parse(raw)
     return ResolvedConversationValue(
-        value_id=_required_string(item.value_id, path=f"{path}.value_id"),
-        resolved_text=_required_string(
-            item.resolved_text,
-            path=f"{path}.resolved_text",
-        ),
+        value_id=_required_text(item.value_id),
+        resolved_text=_required_text(item.resolved_text),
+        frame_parameter=_frame_parameter_ref(item.frame_parameter, context=context),
         sources=tuple(
             _resolution_source(
                 source,
@@ -323,28 +310,25 @@ def _resolved_value(
                 current_clause_text=current_clause_text,
                 context=context,
             )
-            for index, source in enumerate(
-                _required_dicts(item.sources, path=f"{path}.sources")
-            )
+            for index, source in enumerate(item.sources)
         ),
     )
 
 
 def _resolution_source(
-    raw: object,
+    value: ProviderObject,
     *,
     path: str,
     current_clause_text: str,
     context: _ParseContext,
 ) -> ResolutionSource:
-    source = _required_dict(raw, path=path)
-    kind = ResolutionSourceKind(
-        _required_string(source.get("kind"), path=f"{path}.kind")
-    )
+    kind = ResolutionSourceKind(value.discriminator("kind"))
     if kind is ResolutionSourceKind.CURRENT_SPAN:
-        item = output.CurrentSpanSourceOutput.parse(source)
-        text = _required_string(item.text, path=f"{path}.text")
-        occurrence = _positive_int(item.occurrence, path=f"{path}.occurrence")
+        current_span = value.parse_as(output.CurrentSpanSourceOutput)
+        text = _required_text(current_span.text)
+        occurrence = current_span.occurrence
+        if occurrence < 1:
+            raise ValueError(f"{path}.occurrence must be a positive integer")
         _require_occurrence(
             text=text,
             occurrence=occurrence,
@@ -353,26 +337,33 @@ def _resolution_source(
         )
         return CurrentSpanSource(text=text, occurrence=occurrence)
     if kind is ResolutionSourceKind.CONTEXT_ANCHOR:
-        item = output.ContextAnchorSourceOutput.parse(source)
-        source_id = _required_string(item.source_id, path=f"{path}.source_id")
+        context_anchor = value.parse_as(output.ContextAnchorSourceOutput)
+        source_id = _required_text(context_anchor.source_id)
         source_contract = context.source_contracts.get(source_id)
         if source_contract is None:
             raise ValueError(f"{path}.source_id is not available")
-        memory_id = _required_string(item.memory_id, path=f"{path}.memory_id")
-        source_text = _required_string(item.source_text, path=f"{path}.source_text")
-        if not any(
-            anchor.memory_id == memory_id and anchor.text == source_text
+        anchor_id = _required_text(context_anchor.anchor_id)
+        matching_anchors = tuple(
+            anchor
             for anchor in source_contract.meaning_anchors
-        ):
+            if anchor.anchor_id == anchor_id
+        )
+        if len(matching_anchors) != 1:
             raise ValueError(f"{path} does not reference a visible context anchor")
+        source_text = matching_anchors[0].text
         return ContextAnchorSource(
             source_id=source_id,
-            memory_id=memory_id,
+            anchor_id=anchor_id,
             source_text=source_text,
+            memory_ids=(
+                (anchor_id,)
+                if anchor_id in source_contract.source_memory_ids
+                else ()
+            ),
         )
     if kind is ResolutionSourceKind.FRAME_PART:
         return _frame_part_source(
-            source,
+            value.parse_as(output.FramePartSourceOutput),
             path=path,
             context=context,
             allowed_kinds=_VALUE_PART_KINDS,
@@ -381,115 +372,135 @@ def _resolution_source(
 
 
 def _frame_part_source(
-    raw: object,
+    item: output.FramePartSourceOutput,
     *,
     path: str,
     context: _ParseContext,
     allowed_kinds: frozenset[ConversationFramePartKind],
 ) -> FramePartSource:
-    item = output.FramePartSourceOutput.parse(raw)
-    frame_id = _required_string(item.frame_id, path=f"{path}.frame_id")
+    frame_id = _required_text(item.frame_id)
     frame = context.frames.get(frame_id)
     if frame is None:
         raise ValueError(f"{path}.frame_id is not available")
-    part_id = _required_string(item.part_id, path=f"{path}.part_id")
+    part_id = _required_text(item.part_id)
     part = next((part for part in frame.parts if part.part_id == part_id), None)
     if part is None or part.kind not in allowed_kinds:
         raise ValueError(f"{path}.part_id is not available for this role")
     return FramePartSource(frame_id=frame_id, part_id=part_id)
 
 
-def _frame_call(
-    raw: object,
+def _frame_parameter_ref(
+    value: ProviderObject,
     *,
-    values_by_id: dict[str, ResolvedConversationValue],
     context: _ParseContext,
-) -> ConversationFrameCall | None:
-    item = _required_dict(raw, path="frame_call")
-    kind = _required_string(item.get("kind"), path="frame_call.kind")
+) -> FrameParameterRef | None:
+    kind = value.discriminator("kind")
     if kind == "none":
-        output.NoFrameCallOutput.parse(item)
+        value.parse_as(output.NoFrameParameterOutput)
         return None
-    if kind != "call":
-        raise ValueError("unsupported frame_call.kind")
-    call = output.FrameCallOutput.parse(item)
-    frame_id = _required_string(call.frame_id, path="frame_call.frame_id")
+    if kind != "parameter":
+        raise ValueError("unsupported frame_parameter.kind")
+    parameter = value.parse_as(output.FrameParameterOutput)
+    frame_id = _required_text(parameter.frame_id)
     frame = context.frames.get(frame_id)
     if frame is None or frame.callable is None:
-        raise ValueError("frame_call does not reference a callable frame")
-    arguments = tuple(
-        _frame_argument(
-            argument,
-            path=f"frame_call.arguments[{index}]",
-            values_by_id=values_by_id,
-        )
-        for index, argument in enumerate(
-            _required_dicts(call.arguments, path="frame_call.arguments")
-        )
-    )
-    expected = {parameter.parameter_id for parameter in frame.callable.parameters}
-    actual = {argument.parameter_id for argument in arguments}
-    if len(actual) != len(arguments) or actual != expected:
-        raise ValueError("frame_call must bind every callable parameter exactly once")
-    return ConversationFrameCall(frame_id=frame_id, arguments=arguments)
+        raise ValueError("frame parameter does not reference a callable frame")
+    parameter_id = _required_text(parameter.parameter_id)
+    available_ids = {
+        item.parameter_id for item in frame.callable.parameters
+    }
+    if parameter_id not in available_ids:
+        raise ValueError("frame parameter is not available")
+    return FrameParameterRef(frame_id=frame_id, parameter_id=parameter_id)
 
 
-def _frame_argument(
-    raw: object,
+def _derived_frame_call(
+    clauses: tuple[ResolvedConversationClause, ...],
     *,
-    path: str,
-    values_by_id: dict[str, ResolvedConversationValue],
-) -> FrameArgument:
-    item = _required_dict(raw, path=path)
-    kind = FrameArgumentKind(_required_string(item.get("kind"), path=f"{path}.kind"))
-    if kind is FrameArgumentKind.CARRY:
-        value = output.CarriedFrameArgumentOutput.parse(item)
-        return CarriedFrameArgument(
-            parameter_id=_required_string(
-                value.parameter_id,
-                path=f"{path}.parameter_id",
+    context: _ParseContext,
+) -> ConversationFrameCall | None:
+    values = tuple(value for clause in clauses for value in clause.values)
+    retained_parts = {
+        (part.frame_id, part.part_id)
+        for clause in clauses
+        for part in clause.retained_frame_parts
+    }
+    calls = tuple(
+        call
+        for frame in context.frames.values()
+        if (
+            call := _complete_frame_call(
+                frame,
+                values=values,
+                retained_parts=retained_parts,
             )
         )
-    if kind is FrameArgumentKind.RESOLVED_VALUE:
-        value = output.ResolvedValueFrameArgumentOutput.parse(item)
-        value_id = _required_string(value.value_id, path=f"{path}.value_id")
-        if value_id not in values_by_id:
-            raise ValueError(f"{path}.value_id is not a resolved value")
-        return ResolvedValueFrameArgument(
-            parameter_id=_required_string(
-                value.parameter_id,
-                path=f"{path}.parameter_id",
-            ),
-            value_id=value_id,
+        is not None
+    )
+    if len(calls) > 1:
+        raise ValueError("resolved values match more than one callable frame")
+    return calls[0] if calls else None
+
+
+def _complete_frame_call(
+    frame: ConversationContextFrame,
+    *,
+    values: tuple[ResolvedConversationValue, ...],
+    retained_parts: set[tuple[str, str]],
+) -> ConversationFrameCall | None:
+    signature = frame.callable
+    if signature is None:
+        return None
+    fixed_part_ids = {
+        part.part_id for part in frame.parts if part.kind in _FIXED_SHAPE_PART_KINDS
+    }
+    retained_part_ids = {
+        part_id for frame_id, part_id in retained_parts if frame_id == frame.frame_id
+    }
+    if not fixed_part_ids.issubset(retained_part_ids):
+        return None
+    bindings = tuple(
+        (value, value.frame_parameter)
+        for value in values
+        if value.frame_parameter is not None
+        and value.frame_parameter.frame_id == frame.frame_id
+    )
+    if len(bindings) != len(values):
+        return None
+    expected_ids = {parameter.parameter_id for parameter in signature.parameters}
+    actual_ids = {parameter.parameter_id for _, parameter in bindings}
+    if len(actual_ids) != len(bindings) or actual_ids != expected_ids:
+        return None
+    values_by_parameter_id = {
+        parameter.parameter_id: value for value, parameter in bindings
+    }
+    arguments = tuple(
+        ResolvedValueFrameArgument(
+            parameter_id=parameter.parameter_id,
+            value_id=values_by_parameter_id[parameter.parameter_id].value_id,
         )
-    assert_never(kind)
+        for parameter in signature.parameters
+    )
+    return ConversationFrameCall(frame_id=frame.frame_id, arguments=arguments)
 
 
 def _unresolved_outcome(
-    raw: object,
+    value: ProviderObject,
     *,
     kind: _OutcomeKind,
     context: _ParseContext,
 ) -> UnresolvedResolution:
-    item = output.UnresolvedOutcomeOutput.parse(raw)
+    item = value.parse_as(output.UnresolvedOutcomeOutput)
     resolution = UnresolvedResolution(
         unresolved_kind=kind.value,
-        why_unresolved=_required_string(
-            item.why_unresolved,
-            path="outcome.why_unresolved",
-        ),
+        why_unresolved=_required_text(item.why_unresolved),
         candidate_interpretations=tuple(
             _candidate_interpretation(
                 candidate,
                 path=f"outcome.candidate_interpretations[{index}]",
                 context=context,
             )
-            for index, candidate in enumerate(
-                _required_dicts(
-                    item.candidate_interpretations,
-                    path="outcome.candidate_interpretations",
-                )
-            )
+            for index, candidate in enumerate(item.candidate_interpretations)
         ),
     )
     if kind is _OutcomeKind.MULTIPLE_MEANINGS:
@@ -498,32 +509,23 @@ def _unresolved_outcome(
 
 
 def _candidate_interpretation(
-    raw: object,
+    item: output.CandidateInterpretationOutput,
     *,
     path: str,
     context: _ParseContext,
 ) -> CandidateInterpretation:
-    item = output.CandidateInterpretationOutput.parse(raw)
     context_evidence = tuple(
         _source_evidence(
             evidence,
             path=f"{path}.context_evidence[{index}]",
             context=context,
         )
-        for index, evidence in enumerate(
-            _required_dicts(
-                item.context_evidence,
-                path=f"{path}.context_evidence",
-            )
-        )
+        for index, evidence in enumerate(item.context_evidence)
     )
     if any(evidence.source_id == "current_question" for evidence in context_evidence):
         raise ValueError(f"{path}.context_evidence must cite prior context")
     return CandidateInterpretation(
-        contextualized_question=_required_string(
-            item.contextualized_question,
-            path=f"{path}.contextualized_question",
-        ),
+        contextualized_question=_required_text(item.contextualized_question),
         context_evidence=context_evidence,
     )
 
@@ -543,20 +545,16 @@ def _require_distinct_context_evidence(
 
 
 def _source_evidence(
-    raw: object,
+    item: output.SourceEvidenceOutput,
     *,
     path: str,
     context: _ParseContext,
 ) -> SourceEvidence:
-    item = output.SourceEvidenceOutput.parse(raw)
-    source_id = _required_string(item.source_id, path=f"{path}.source_id")
+    source_id = _required_text(item.source_id)
     source = context.sources.get(source_id)
     if source is None:
         raise ValueError(f"{path}.source_id is not available")
-    exact_texts = _string_array(
-        item.exact_source_texts,
-        path=f"{path}.exact_source_texts",
-    )
+    exact_texts = tuple(_required_text(text) for text in item.exact_source_texts)
     for index, text in enumerate(exact_texts):
         _require_occurrence(
             text=text,
@@ -581,10 +579,10 @@ def _used_sources(
                 _append_unique(source_ids, frame_source_id)
         for value in clause.values:
             for source in value.sources:
-                if source.kind is ResolutionSourceKind.CONTEXT_ANCHOR:
-                    _append_unique(source_ids, source.source_id)
-                elif source.kind is ResolutionSourceKind.FRAME_PART:
-                    for frame_source_id in context.frames[source.frame_id].source_ids:
+                for source_id in source.context_source_references():
+                    _append_unique(source_ids, source_id)
+                for frame_id, _ in source.frame_part_references():
+                    for frame_source_id in context.frames[frame_id].source_ids:
                         _append_unique(source_ids, frame_source_id)
     if frame_call is not None:
         for source_id in context.frames[frame_call.frame_id].source_ids:
@@ -617,18 +615,18 @@ def _used_memory_ids(
 ) -> tuple[str, ...]:
     del unresolved
     memory_ids = [
-        source.memory_id
+        memory_id
         for clause in clauses
         for value in clause.values
         for source in value.sources
-        if source.kind is ResolutionSourceKind.CONTEXT_ANCHOR
+        for memory_id in source.memory_references()
     ]
     frame_ids = {
-        source.frame_id
+        frame_id
         for clause in clauses
         for value in clause.values
         for source in value.sources
-        if source.kind is ResolutionSourceKind.FRAME_PART
+        for frame_id, _ in source.frame_part_references()
     }
     frame_ids.update(
         retained.frame_id
@@ -675,38 +673,7 @@ def _occurrence_count(source: str, text: str) -> int:
         start = index + len(text)
 
 
-def _required_dict(raw: object, *, path: str) -> dict[str, Any]:
-    if not isinstance(raw, dict):
-        raise ValueError(f"{path} must be an object")
-    return raw
-
-
-def _required_dicts(raw: object, *, path: str) -> tuple[dict[str, Any], ...]:
-    if not isinstance(raw, list):
-        raise ValueError(f"{path} must be an array")
-    return tuple(
-        _required_dict(item, path=f"{path}[{index}]") for index, item in enumerate(raw)
-    )
-
-
-def _required_string(raw: object, *, path: str, allow_empty: bool = False) -> str:
-    if not isinstance(raw, str):
-        raise ValueError(f"{path} must be a string")
-    if not allow_empty and not raw.strip():
-        raise ValueError(f"{path} must not be empty")
-    return raw
-
-
-def _positive_int(raw: object, *, path: str) -> int:
-    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
-        raise ValueError(f"{path} must be a positive integer")
-    return raw
-
-
-def _string_array(raw: object, *, path: str) -> tuple[str, ...]:
-    if not isinstance(raw, list):
-        raise ValueError(f"{path} must be an array")
-    return tuple(
-        _required_string(item, path=f"{path}[{index}]")
-        for index, item in enumerate(raw)
-    )
+def _required_text(value: str) -> str:
+    if not value.strip():
+        raise ValueError("conversation resolution requires non-empty text")
+    return value

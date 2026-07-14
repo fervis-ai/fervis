@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import assert_never
+from typing_extensions import assert_never
 
-from fervis.lookup.answer_program.codec import (
-    ANSWER_PROGRAM_SCHEMA_REVISION,
-    canonical_contract_fingerprint,
-)
+from fervis.lookup.answer_program.codec import canonical_contract_fingerprint
 from fervis.lookup.answer_program.model import (
+    ANSWER_PROGRAM_SCHEMA_REVISION,
     AnswerProgram,
     FunctionSemanticVersion,
     ProgramCompatibility,
@@ -164,6 +162,7 @@ def verify_program_compatibility(
         if current_fingerprint != pin.fingerprint:
             raise VerificationError("incompatible_source_contract")
 
+
 def _is_exact_manifest(
     compatibility: ProgramCompatibility,
     *,
@@ -226,15 +225,15 @@ def _current_source_fingerprint(
     memory_relations: tuple[RelationRows, ...],
 ) -> str:
     if key.kind is SourceContractKind.CATALOG_READ:
-        current = catalog.read(key.source_id)
+        return canonical_contract_fingerprint(catalog.read(key.source_id))
     elif key.kind is SourceContractKind.GENERATED_SOURCE:
-        current = row_sources.source(key.source_id)
+        return canonical_contract_fingerprint(row_sources.source(key.source_id))
     elif key.kind is SourceContractKind.MEMORY_RELATION:
-        current = next(
+        relation = next(
             relation
             for relation in memory_relations
             if memory_row_source_id(relation.id) == key.source_id
         )
+        return canonical_contract_fingerprint(relation)
     else:
         assert_never(key.kind)
-    return canonical_contract_fingerprint(current)

@@ -206,9 +206,10 @@ def test_fervis_doctor_marks_shape_probe_skipped_when_flask_auth_blocks_all_prob
 
     checks = _checks(json.loads(stdout.getvalue()))
     assert checks["source.response_conformance"]["status"] == "skipped"
-    assert "requires configured host read credentials" in checks[
-        "source.response_conformance"
-    ]["message"]
+    assert (
+        "requires configured host read credentials"
+        in checks["source.response_conformance"]["message"]
+    )
     fix = checks["source.response_conformance"]["fix"]
     assert isinstance(fix, dict)
     assert fix["kind"] == "command"

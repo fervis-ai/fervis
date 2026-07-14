@@ -14,6 +14,7 @@ input:
           - address: entity.staff.jane
             kind: entity
             resource: staff
+            keyId: primary_key
             referenceText: Jane Doe
             identity: {staff_key: staff-1}
   used_memory_ids: [turn_1.entity.staff.jane]
@@ -22,4 +23,7 @@ expect:
     activatedMemory:
       turn_1.entity.staff.jane:
         kind: entity_identity
-        canonical_id: staff-1
+        entity_key:
+          entity_kind: staff
+          key_id: primary_key
+          components: {staff_key: staff-1}

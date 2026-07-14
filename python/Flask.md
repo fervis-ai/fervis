@@ -10,8 +10,8 @@ This checklist must not change business logic or host API functionality; its sol
 - [ ] 0.3 Keep the local copy until Fervis doctor, host tests, smoke tests, and runtime ask all pass.
 
 ## Step 1: Select the route-contract surface.
-- [ ] 1.1 Confirm the Fervis CLI will run with Python 3.11 or newer; run `python --version`, `python3.12 --version`, or `uv python list`.
-- [ ] 1.2 Use a project-local Python 3.11+ environment for Fervis commands when the host app itself runs on an older Python version.
+- [ ] 1.1 Confirm the Fervis CLI will run with Python 3.10 or newer; run `python --version`, `python3.12 --version`, or `uv python list`.
+- [ ] 1.2 Use a project-local Python 3.10+ environment for Fervis commands when the host app itself runs on an older Python version.
 - [ ] 1.3 Check whether the app already exposes OpenAPI/Swagger, `flask-smorest`, `flask-apispec`, `flask-restx`, `Flask-AppBuilder`, `flask-rest-jsonapi-next`, Connexion, or RESTPlus.
 - [ ] 1.4 Keep the existing surface when one exists.
 - [ ] 1.5 Treat Connexion and RESTPlus apps as OpenAPI/Swagger apps when they expose a Swagger document.
@@ -39,6 +39,7 @@ This checklist must not change business logic or host API functionality; its sol
 - [ ] 3.4 Mark collection responses with `many=True` or an OpenAPI array schema.
 - [ ] 3.5 Name operations semantically, such as `list_orders` or `get_order`.
 - [ ] 3.6 Declare every `request.args` parameter and every `Schema().dump(...)` response shape in route metadata.
+- [ ] 3.7 When Fervis must group or join entity-valued rows, declare the relation's guaranteed candidate keys and entity references in the GET operation's `x-fervis` extension. Never infer a key or reference from an `id`-shaped name.
 
 ## Step 4: Add smorest contracts when no existing surface exists.
 - [ ] 4.1 Create a Marshmallow schema such as `OrderSchema` with fields like `id = fields.Int(required=True)`.
@@ -57,6 +58,7 @@ This checklist must not change business logic or host API functionality; its sol
 - [ ] 6.3 Confirm list endpoints use an array schema.
 - [ ] 6.4 Rename generic operation IDs like `get` or `wrapper` to semantic names such as `list_orders`, `get_order`, or `list_inventory_items`, using the route's business resource name.
 - [ ] 6.5 Expose the generated OpenAPI/Swagger document before running doctor.
+- [ ] 6.6 Preserve any `x-fervis` relational metadata on the GET operation when regenerating OpenAPI or Swagger.
 
 ## Step 7: Fix doctor blockers.
 - [ ] 7.1 Add a response schema when doctor reports missing response fields.

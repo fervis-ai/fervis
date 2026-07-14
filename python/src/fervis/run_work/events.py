@@ -28,15 +28,6 @@ class CollectingQuestionRunEventSink:
         self.events.append(dict(event))
 
 
-class ForwardingQuestionRunEventSink:
-    def __init__(self, *sinks: QuestionRunEventSink) -> None:
-        self._sinks = tuple(sinks)
-
-    def emit(self, event: QuestionRunEventPayload) -> None:
-        for sink in self._sinks:
-            sink.emit(event)
-
-
 def run_accepted_event(
     *,
     conversation_id: str,
@@ -91,16 +82,6 @@ def run_terminal_event(
             "answer": answer,
             "result_data": result_data or {},
         }
-    if status == "NEEDS_CLARIFICATION":
-        clarifications = _actionable_clarifications(result_data)
-        return {
-            "event": "run.needs_clarification",
-            "conversation_id": conversation_id or "",
-            "question_id": question_id or "",
-            "run_id": run_id,
-            "status": status,
-            "clarifications": clarifications,
-        }
     if status == "QUEUED":
         return {
             "event": "run.queued",
@@ -109,17 +90,71 @@ def run_terminal_event(
             "conversation_id": conversation_id or "",
             "status": status,
         }
+    if status == "FAILED":
+        return {
+            "event": "run.failed",
+            "run_id": run_id,
+            "question_id": question_id or "",
+            "conversation_id": conversation_id or "",
+            "status": status,
+            "error": {
+                "code": error or "runtime_ask_failed",
+                "message": error or "runtime ask failed",
+                "retryable": False,
+            },
+        }
+    raise ValueError(f"run terminal event does not support status {status}")
+
+
+def run_result_event(
+    *,
+    status: str,
+    run_id: str,
+    question_id: str,
+    conversation_id: str,
+    answer: str | None = None,
+    result_data: dict[str, object] | None = None,
+    error: str | None = None,
+) -> dict[str, object]:
+    if status == "WAITING_FOR_CLARIFICATION":
+        return run_waiting_for_clarification_event(
+            run_id=run_id,
+            question_id=question_id,
+            conversation_id=conversation_id,
+            result_data=result_data or {},
+        )
+    if status == "RUNNING":
+        return run_accepted_event(
+            conversation_id=conversation_id,
+            question_id=question_id,
+            run_id=run_id,
+            status=status,
+        )
+    return run_terminal_event(
+        status=status,
+        run_id=run_id,
+        question_id=question_id,
+        conversation_id=conversation_id,
+        answer=answer,
+        result_data=result_data,
+        error=error,
+    )
+
+
+def run_waiting_for_clarification_event(
+    *,
+    run_id: str,
+    question_id: str,
+    conversation_id: str,
+    result_data: dict[str, object],
+) -> dict[str, object]:
     return {
-        "event": "run.failed",
+        "event": "run.waiting_for_clarification",
+        "conversation_id": conversation_id,
+        "question_id": question_id,
         "run_id": run_id,
-        "question_id": question_id or "",
-        "conversation_id": conversation_id or "",
-        "status": status,
-        "error": {
-            "code": error or "runtime_ask_failed",
-            "message": error or "runtime ask failed",
-            "retryable": False,
-        },
+        "status": "WAITING_FOR_CLARIFICATION",
+        "clarifications": _actionable_clarifications(result_data),
     }
 
 
@@ -128,22 +163,22 @@ def _actionable_clarifications(
 ) -> list[dict[str, object]]:
     raw = result_data_clarifications(result_data)
     if not raw:
-        raise ValueError("NEEDS_CLARIFICATION terminal event requires clarifications")
+        raise ValueError("clarification wait requires clarifications")
     clarifications: list[dict[str, object]] = []
     for item in raw:
         if not isinstance(item, Mapping):
             raise ValueError(
-                "NEEDS_CLARIFICATION terminal event requires clarification objects"
+                "clarification wait requires clarification objects"
             )
         clarification = dict(item)
         clarification_id = str(clarification.get("id") or "").strip()
         if not clarification_id:
             raise ValueError(
-                "NEEDS_CLARIFICATION terminal event requires clarification id"
+                "clarification wait requires clarification id"
             )
         if not str(clarification.get("question") or "").strip():
             raise ValueError(
-                "NEEDS_CLARIFICATION terminal event requires clarification question"
+                "clarification wait requires clarification question"
             )
         clarifications.append(clarification)
     return clarifications

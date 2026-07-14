@@ -3,24 +3,170 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
+from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
 import json
 import math
-from typing import Any
+from typing import Any, Mapping, TypeAlias
 from uuid import UUID
+
+
+RuntimeScalar: TypeAlias = (
+    None | bool | int | float | str | Decimal | date | datetime | time | UUID | Enum
+)
+RuntimeValue: TypeAlias = (
+    RuntimeScalar
+    | tuple["RuntimeValue", ...]
+    | list["RuntimeValue"]
+    | Mapping[str, "RuntimeValue"]
+)
+
+
+@dataclass(frozen=True)
+class EntityKeyComponentValue:
+    component_id: str
+    value: RuntimeValue
+
+    def __post_init__(self) -> None:
+        if not self.component_id:
+            raise ValueError("entity key component requires component id")
+        if self.value is None:
+            raise ValueError("entity key component requires a non-null value")
+
+
+@dataclass(frozen=True)
+class EntityKeyValue:
+    entity_kind: str
+    key_id: str
+    components: tuple[EntityKeyComponentValue, ...]
+
+    def __post_init__(self) -> None:
+        if not self.entity_kind or not self.key_id or not self.components:
+            raise ValueError("entity key value is incomplete")
+        component_ids = tuple(component.component_id for component in self.components)
+        if len(set(component_ids)) != len(component_ids):
+            raise ValueError("entity key value repeats a component")
+
+    def component_values(self) -> dict[str, RuntimeValue]:
+        return {
+            component.component_id: component.value for component in self.components
+        }
+
+    def component_value(self, component_id: str) -> RuntimeValue:
+        matches = tuple(
+            component.value
+            for component in self.components
+            if component.component_id == component_id
+        )
+        if len(matches) != 1:
+            raise ValueError("entity key does not contain the requested component")
+        return matches[0]
+
+
+def entity_key_value(
+    entity_kind: str,
+    key_id: str,
+    components: Mapping[str, RuntimeValue],
+) -> EntityKeyValue:
+    return EntityKeyValue(
+        entity_kind=entity_kind,
+        key_id=key_id,
+        components=tuple(
+            EntityKeyComponentValue(component_id=component_id, value=value)
+            for component_id, value in components.items()
+        ),
+    )
+
+
+def entity_key_to_payload(key: EntityKeyValue) -> dict[str, object]:
+    return {
+        "entity_kind": key.entity_kind,
+        "key_id": key.key_id,
+        "components": [
+            {
+                "component_id": component.component_id,
+                "value": runtime_value_to_payload(component.value),
+            }
+            for component in key.components
+        ],
+    }
+
+
+def entity_key_from_payload(value: object) -> EntityKeyValue:
+    if not isinstance(value, Mapping):
+        raise ValueError("entity key payload must be an object")
+    entity_kind = value.get("entity_kind")
+    key_id = value.get("key_id")
+    components = value.get("components")
+    if not isinstance(entity_kind, str) or not entity_kind:
+        raise ValueError("entity key payload requires entity_kind")
+    if not isinstance(key_id, str) or not key_id:
+        raise ValueError("entity key payload requires key_id")
+    if not isinstance(components, list) or not components:
+        raise ValueError("entity key payload requires components")
+    parsed_components: list[EntityKeyComponentValue] = []
+    for component in components:
+        if not isinstance(component, Mapping):
+            raise ValueError("entity key component payload must be an object")
+        component_id = component.get("component_id")
+        if not isinstance(component_id, str) or not component_id:
+            raise ValueError("entity key component payload requires component_id")
+        parsed_components.append(
+            EntityKeyComponentValue(
+                component_id=component_id,
+                value=runtime_value_from_payload(component.get("value")),
+            )
+        )
+    return EntityKeyValue(
+        entity_kind=entity_kind,
+        key_id=key_id,
+        components=tuple(parsed_components),
+    )
+
+
+ResultValue: TypeAlias = RuntimeValue | EntityKeyValue
+
+
+def parse_runtime_value(value: object) -> RuntimeValue:
+    """Close one external value over the deterministic runtime algebra."""
+
+    if value is None or isinstance(
+        value,
+        (bool, int, str, Decimal, date, datetime, time, UUID, Enum),
+    ):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise TypeError("runtime numbers must be finite")
+        return value
+    if isinstance(value, tuple):
+        return tuple(parse_runtime_value(item) for item in value)
+    if isinstance(value, list):
+        return [parse_runtime_value(item) for item in value]
+    if isinstance(value, Mapping):
+        if any(not isinstance(key, str) for key in value):
+            raise TypeError("runtime object keys must be strings")
+        return {
+            key: parse_runtime_value(item)
+            for key, item in value.items()
+            if isinstance(key, str)
+        }
+    raise TypeError(f"unsupported runtime value {type(value).__name__}")
 
 
 def canonical_runtime_json(value: object) -> str:
     return json.dumps(
-        _canonical_runtime_value(value),
+        runtime_value_to_payload(value),
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
     )
 
 
-def _canonical_runtime_value(value: object) -> Any:
+def runtime_value_to_payload(value: object) -> Any:
+    """Encode a closed runtime value into its canonical JSON transport shape."""
+
     if isinstance(value, float) and not math.isfinite(value):
         raise TypeError("runtime numbers must be finite")
     if value is None or type(value) in {bool, int, float, str}:
@@ -40,17 +186,45 @@ def _canonical_runtime_value(value: object) -> Any:
     if isinstance(value, Enum):
         return {
             "$enum": type(value).__name__,
-            "value": _canonical_runtime_value(value.value),
+            "value": runtime_value_to_payload(value.value),
         }
     if type(value) is tuple:
-        return {"$tuple": [_canonical_runtime_value(item) for item in value]}
+        return {"$tuple": [runtime_value_to_payload(item) for item in value]}
     if type(value) is list:
-        return [_canonical_runtime_value(item) for item in value]
+        return [runtime_value_to_payload(item) for item in value]
     if type(value) is dict:
         if any(type(key) is not str for key in value):
             raise TypeError("runtime object keys must be strings")
         return {
-            str(key): _canonical_runtime_value(item)
-            for key, item in value.items()
+            str(key): runtime_value_to_payload(item) for key, item in value.items()
         }
     raise TypeError(f"unsupported runtime value {type(value).__name__}")
+
+
+def runtime_value_from_payload(value: object) -> RuntimeValue:
+    """Decode a canonical runtime transport payload at a persistence boundary."""
+
+    if isinstance(value, list):
+        return [runtime_value_from_payload(item) for item in value]
+    if not isinstance(value, Mapping):
+        return parse_runtime_value(value)
+    if set(value) == {"$decimal"}:
+        return Decimal(str(value["$decimal"]))
+    if set(value) == {"$datetime"}:
+        return datetime.fromisoformat(str(value["$datetime"]))
+    if set(value) == {"$date"}:
+        return date.fromisoformat(str(value["$date"]))
+    if set(value) == {"$time"}:
+        return time.fromisoformat(str(value["$time"]))
+    if set(value) == {"$uuid"}:
+        return UUID(str(value["$uuid"]))
+    if set(value) == {"$tuple"}:
+        items = value["$tuple"]
+        if not isinstance(items, list):
+            raise TypeError("runtime tuple payload must contain an array")
+        return tuple(runtime_value_from_payload(item) for item in items)
+    if set(value) == {"$enum", "value"}:
+        return runtime_value_from_payload(value["value"])
+    return {
+        str(key): runtime_value_from_payload(item) for key, item in value.items()
+    }

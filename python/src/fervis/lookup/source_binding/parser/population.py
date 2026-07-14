@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any
-
 from fervis.lookup.source_binding.compiler_ir import (
     DraftEndpointParamBinding,
     DraftRelationSource,
@@ -13,7 +11,9 @@ from fervis.lookup.source_binding.compiler_ir import (
 from fervis.lookup.answer_program.relations import SourceKind
 from fervis.lookup.source_binding import provider_contract as provider_output
 from fervis.lookup.source_binding.model import AnswerPopulation, SourceBindingRequest
-from fervis.lookup.source_binding.parser_common import _dict, _required_strings, _text
+from fervis.lookup.source_binding.candidates import SourceCandidate
+from fervis.lookup.source_binding.candidates.model import CandidatePopulationBinding
+from fervis.lookup.source_binding.parser_common import _text
 from fervis.lookup.source_binding.population_bindings import PopulationBindingIndex
 
 
@@ -24,13 +24,12 @@ __all__ = [
 
 
 def parse_answer_population(
-    raw_value: Any,
+    raw: provider_output.AnswerPopulationOutput,
     *,
     request: SourceBindingRequest,
     requested_fact_id: str,
-    candidate: Any,
-) -> tuple[AnswerPopulation, dict[str, Any]]:
-    raw = provider_output.AnswerPopulationOutput.parse(raw_value)
+    candidate: SourceCandidate,
+) -> tuple[AnswerPopulation, CandidatePopulationBinding]:
     population_binding_id = _text(raw.population_binding_id)
     binding = _candidate_population_binding(
         population_binding_id,
@@ -54,32 +53,27 @@ def parse_answer_population(
 
 def bound_relation_source(
     *,
-    candidate: Any,
-    population_binding: dict[str, Any],
+    candidate: SourceCandidate,
+    population_binding: CandidatePopulationBinding,
     param_binding_sets: tuple[tuple[DraftEndpointParamBinding, ...], ...],
     population_choices: tuple[DraftRelationSourcePopulationChoice, ...],
     row_source_id: str = "",
-) -> tuple[Any, tuple[Any, ...]]:
+) -> tuple[DraftRelationSource | None, tuple[DraftRelationSource, ...]]:
     if (
-        str(population_binding.get("kind") or "") == "exact_row_set"
-        and str(getattr(candidate, "kind", "") or "") == "prior_answer_rows"
+        population_binding.kind == "exact_row_set"
+        and candidate.kind == "prior_answer_rows"
     ):
-        basis = _dict(population_binding.get("basis"), "answer_population.basis")
-        memory_relation_id = _text(basis.get("memory_relation_id"))
         return (
             DraftRelationSource(
                 kind=SourceKind.MEMORY_READ,
-                memory_relation_id=memory_relation_id,
+                memory_relation_id=population_binding.memory_relation_id,
                 population_choices=population_choices,
-                proof_refs=_required_strings(
-                    basis.get("proof_refs"),
-                    "answer_population.basis.proof_refs",
-                ),
+                proof_refs=population_binding.proof_refs,
             ),
             (),
         )
     source = candidate.source
-    source_invocations: tuple[Any, ...] = ()
+    source_invocations: tuple[DraftRelationSource, ...] = ()
     if source is not None:
         source_invocations = tuple(
             replace(
@@ -97,15 +91,9 @@ def bound_relation_source(
 def _candidate_population_binding(
     population_binding_id: str,
     *,
-    candidate: Any,
-) -> dict[str, Any]:
-    bindings = {
-        binding_id: item
-        for item in getattr(candidate, "population_bindings", ())
-        if isinstance(item, dict)
-        for binding_id in (str(item.get("population_binding_id") or ""),)
-        if binding_id
-    }
+    candidate: SourceCandidate,
+) -> CandidatePopulationBinding:
+    bindings = {item.id: item for item in candidate.population_bindings if item.id}
     binding = bindings.get(population_binding_id)
     if binding is None:
         raise ValueError("answer population references unknown population binding")

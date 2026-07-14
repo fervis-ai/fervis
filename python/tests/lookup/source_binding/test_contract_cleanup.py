@@ -23,7 +23,7 @@ def test_no_deleted_source_binding_escape_hatches_in_runtime_contracts():
         / "model_io"
         / "providers"
         / "anthropic_adapter"
-        / "source_binding_transport"
+        / "source_binding_transport",
     ]
     deleted_terms = (
         "SourceInvocationSelectionTurnPrompt",

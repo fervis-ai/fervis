@@ -39,4 +39,3 @@ class CancelOrderAPIView(APIView):
         order.status = "cancelled"
         order.save(update_fields=["status"])
         return Response(OrderSerializer(order).data, status=status.HTTP_200_OK)
-

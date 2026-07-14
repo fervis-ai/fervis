@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Any, Mapping
 
 from fervis.lookup.errors import ErrorCode
+from fervis.lookup.canonical_data import runtime_value_to_payload
 from fervis.lookup.clarification import clarification_payload
 from fervis.lineage.enums import (
     AnswerValueKind,
@@ -48,10 +49,11 @@ from fervis.lookup.outcomes.model import (
 )
 from fervis.lookup.outcomes.terminal_details import fact_result_terminal_details
 from fervis.lookup.answer_rendering import RenderedFact
+from fervis.lookup.answer_program.result_projection import EntityKeyValue, ResultValue
 from fervis.lookup.orchestration.result import LookupResult
 from fervis.lookup.orchestration.request import (
+    LineagePorts,
     LookupRequest,
-    LookupRuntimePorts,
 )
 from fervis.memory.artifacts import FactOutcome
 from fervis.lookup.memory.lineage_artifacts import (
@@ -59,6 +61,7 @@ from fervis.lookup.memory.lineage_artifacts import (
     terminal_memory_artifacts,
 )
 from fervis.lookup.lineage.errors import LineagePersistenceUnavailable
+from fervis.lookup.lineage.steps import LineageRuntimeStepSink
 
 
 TERMINAL_FACT_PAYLOAD_SCHEMA = "fervis.fact_terminal"
@@ -151,7 +154,7 @@ def runtime_error_terminal_result(
 def record_runtime_error_lineage(
     *,
     request: LookupRequest,
-    ports: LookupRuntimePorts,
+    ports: LineagePorts,
     failed_step_id: str | None,
     error_code: str,
     message: str,
@@ -174,7 +177,7 @@ def record_runtime_error_lineage(
 def record_lookup_result_lineage(
     *,
     request: LookupRequest,
-    ports: LookupRuntimePorts,
+    ports: LineagePorts,
     fact_result: FactResult,
     rendered: RenderedFact,
     answer: str,
@@ -185,12 +188,25 @@ def record_lookup_result_lineage(
     render_step_id: str | None,
     proof_graph: Any,
     answer_plan: Any,
-    proof_node_refs_by_render_output_id: dict[str, tuple[str, ...]],
+    proof_node_refs_by_result_output_id: dict[str, tuple[str, ...]],
     grounded_values: tuple[Any, ...] = (),
     extra_fact_addresses: tuple[Any, ...] = (),
     known_input_step_id: str | None = None,
     conversation_resolution_activation: dict[str, Any] | None = None,
 ) -> None:
+    if isinstance(fact_result.outcome, NeedsClarification):
+        record_clarification_wait_lineage(
+            request=request,
+            ports=ports,
+            fact_result=fact_result,
+            step_id=(
+                render_step_id
+                or execute_step_id
+                or compile_step_id
+                or question_contract_step_id
+            ),
+        )
+        return
     if isinstance(fact_result.outcome, AnswerResult):
         record_answered_result_lineage(
             request=request,
@@ -205,7 +221,7 @@ def record_lookup_result_lineage(
             render_step_id=render_step_id,
             proof_graph=proof_graph,
             answer_plan=answer_plan,
-            proof_node_refs_by_render_output_id=proof_node_refs_by_render_output_id,
+            proof_node_refs_by_result_output_id=proof_node_refs_by_result_output_id,
             grounded_values=grounded_values,
             extra_fact_addresses=extra_fact_addresses,
             known_input_step_id=known_input_step_id,
@@ -226,10 +242,31 @@ def record_lookup_result_lineage(
     )
 
 
+def record_clarification_wait_lineage(
+    *,
+    request: LookupRequest,
+    ports: LineagePorts,
+    fact_result: FactResult,
+    step_id: str | None,
+) -> None:
+    sink = _lineage_sink(ports)
+    if sink is None:
+        return
+    if step_id is None:
+        raise ValueError("clarification wait requires a producing step")
+    clarifications = _clarification_requests(
+        run_id=request.run_id,
+        fact_result=fact_result,
+        step_id=step_id,
+    )
+    for clarification in clarifications:
+        sink.recorder.record_clarification_request(clarification)
+
+
 def record_answered_result_lineage(
     *,
     request: LookupRequest,
-    ports: LookupRuntimePorts,
+    ports: LineagePorts,
     fact_result: FactResult,
     rendered: RenderedFact,
     answer: str,
@@ -240,7 +277,7 @@ def record_answered_result_lineage(
     render_step_id: str | None,
     proof_graph: Any,
     answer_plan: Any,
-    proof_node_refs_by_render_output_id: dict[str, tuple[str, ...]],
+    proof_node_refs_by_result_output_id: dict[str, tuple[str, ...]],
     grounded_values: tuple[Any, ...] = (),
     extra_fact_addresses: tuple[Any, ...] = (),
     known_input_step_id: str | None = None,
@@ -259,6 +296,9 @@ def record_answered_result_lineage(
         proof_graph=proof_graph,
         answer_plan=answer_plan,
     )
+    assert question_contract_step_id is not None
+    assert compile_step_id is not None
+    assert render_step_id is not None
 
     run_id = request.run_id
     result = RunResultWrite(
@@ -271,13 +311,16 @@ def record_answered_result_lineage(
             run_id=run_id,
             fact=fact,
             question_contract_step_id=question_contract_step_id,
+            clarification_lineage_refs=(
+                question_contract.clarification_lineage_refs
+            ),
         )
         for fact in question_contract.requested_facts
     )
     evidence_refs_by_fact_key = _evidence_refs_by_fact_key(
         answer_plan=answer_plan,
         proof_graph=proof_graph,
-        proof_node_refs_by_render_output_id=proof_node_refs_by_render_output_id,
+        proof_node_refs_by_result_output_id=proof_node_refs_by_result_output_id,
     )
     fact_results = _fact_results(
         run_id=run_id,
@@ -316,7 +359,7 @@ def record_answered_result_lineage(
         answer_plan=answer_plan,
         fact_result=fact_result,
         rendered=rendered,
-        proof_node_refs_by_render_output_id=proof_node_refs_by_render_output_id,
+        proof_node_refs_by_result_output_id=proof_node_refs_by_result_output_id,
     )
     if not outputs:
         raise ValueError("answered lineage requires answer outputs")
@@ -359,7 +402,7 @@ def record_answered_result_lineage(
 def record_terminal_result_lineage(
     *,
     request: LookupRequest,
-    ports: LookupRuntimePorts,
+    ports: LineagePorts,
     fact_result: FactResult,
     question_contract: Any,
     question_contract_step_id: str | None,
@@ -391,21 +434,6 @@ def record_terminal_result_lineage(
         produced_by_step_id=render_step_id or question_contract_step_id,
         fact_result=fact_result,
     )
-    clarification_fact_result_id_by_fact_key = {
-        requested_fact.fact_key: terminal_fact.fact_result_id
-        for requested_fact, terminal_fact in zip(
-            requested_facts,
-            fact_results,
-            strict=True,
-        )
-        if terminal_fact.result_kind is FactResultKind.NEEDS_CLARIFICATION
-    }
-    clarifications = _clarification_requests(
-        run_id=run_id,
-        fact_result=fact_result,
-        fact_result_id_by_fact_key=clarification_fact_result_id_by_fact_key,
-        terminal_step_id=render_step_id or question_contract_step_id,
-    )
     memory_artifacts = terminal_memory_artifacts(
         run_id=run_id,
         fact_result=fact_result,
@@ -431,7 +459,6 @@ def record_terminal_result_lineage(
             requested_facts=requested_facts,
             fact_results=fact_results,
             proof_graphs=proofs,
-            clarifications=clarifications,
             memory_artifacts=memory_artifacts,
         )
     )
@@ -459,6 +486,9 @@ def _terminal_requested_facts(
             run_id=run_id,
             fact=fact,
             question_contract_step_id=produced_by_step_id,
+            clarification_lineage_refs=(
+                question_contract.clarification_lineage_refs
+            ),
         )
         for fact in question_contract.requested_facts
         if _terminal_applies_to_requested_fact(fact_result, fact.id)
@@ -488,8 +518,6 @@ def _terminal_fact_results(
             payload_schema_rev=TERMINAL_FACT_PAYLOAD_SCHEMA_REV,
             payload_json=_terminal_fact_result_payload(
                 fact_result,
-                run_id=run_id,
-                requested_fact_id=fact.fact_key,
             ),
         )
         for fact in requested_facts
@@ -498,19 +526,7 @@ def _terminal_fact_results(
 
 def _terminal_fact_result_payload(
     fact_result: FactResult,
-    *,
-    run_id: str,
-    requested_fact_id: str,
 ) -> dict[str, object]:
-    outcome = fact_result.outcome
-    if isinstance(outcome, NeedsClarification):
-        return {
-            "clarificationIds": [
-                _clarification_request_id(run_id, item)
-                for item in outcome.clarifications
-                if _clarification_applies_to_requested_fact(item, requested_fact_id)
-            ],
-        }
     return dict(fact_result_terminal_details(fact_result) or {})
 
 
@@ -543,24 +559,19 @@ def _clarification_requests(
     *,
     run_id: str,
     fact_result: FactResult,
-    fact_result_id_by_fact_key: dict[str, str],
-    terminal_step_id: str | None,
+    step_id: str,
 ) -> tuple[ClarificationRequestWrite, ...]:
     outcome = fact_result.outcome
     if not isinstance(outcome, NeedsClarification):
         return ()
     clarifications: list[ClarificationRequestWrite] = []
     for item in outcome.clarifications:
-        fact_result_id = fact_result_id_by_fact_key.get(item.requested_fact_id)
-        if fact_result_id is None and terminal_step_id is None:
-            raise ValueError("clarification lineage requires a fact result or step id")
         clarification_id = _clarification_request_id(run_id, item)
         clarifications.append(
             ClarificationRequestWrite(
                 clarification_id=clarification_id,
                 run_id=run_id,
-                fact_result_id=fact_result_id,
-                step_id=None if fact_result_id is not None else terminal_step_id,
+                step_id=step_id,
                 payload_json=clarification_payload(replace(item, id=clarification_id)),
             )
         )
@@ -571,20 +582,8 @@ def _clarification_request_id(run_id: str, item: Any) -> str:
     return lineage_id("clarification", run_id, item.id)
 
 
-def _clarification_applies_to_requested_fact(
-    item: Any,
-    requested_fact_id: str,
-) -> bool:
-    return (
-        item.requested_fact_id == requested_fact_id
-        or item.requested_fact_id == "question_contract"
-    )
-
-
 def _terminal_fact_result_kind(fact_result: FactResult) -> FactResultKind:
     outcome = fact_result.outcome
-    if isinstance(outcome, NeedsClarification):
-        return FactResultKind.NEEDS_CLARIFICATION
     if isinstance(outcome, Impossible):
         return FactResultKind.IMPOSSIBLE
     if isinstance(outcome, NoData):
@@ -604,12 +603,6 @@ def _terminal_applies_to_requested_fact(
 
 def _terminal_requested_fact_ids(fact_result: FactResult) -> set[str]:
     outcome = fact_result.outcome
-    if isinstance(outcome, NeedsClarification):
-        return {
-            item.requested_fact_id
-            for item in outcome.clarifications
-            if item.requested_fact_id and item.requested_fact_id != "question_contract"
-        }
     if isinstance(outcome, Impossible):
         return {
             item.requested_fact_id
@@ -626,12 +619,9 @@ def _terminal_requested_fact_ids(fact_result: FactResult) -> set[str]:
 def _terminal_proof_refs(fact_result: FactResult) -> tuple[str, ...]:
     outcome = fact_result.outcome
     refs = list(getattr(outcome, "proof_refs", ()))
-    if isinstance(outcome, NeedsClarification):
-        for item in outcome.clarifications:
-            refs.extend(evidence.id for evidence in item.evidence)
     if isinstance(outcome, Impossible):
-        for item in outcome.blocked_requirements:
-            refs.extend(item.proof_refs)
+        for requirement in outcome.blocked_requirements:
+            refs.extend(requirement.proof_refs)
     if isinstance(outcome, NoData):
         refs.extend(outcome.empty_relation.proof_refs)
     if isinstance(outcome, Undefined):
@@ -639,7 +629,7 @@ def _terminal_proof_refs(fact_result: FactResult) -> tuple[str, ...]:
     return tuple(dict.fromkeys(ref for ref in refs if ref))
 
 
-def _lineage_sink(ports: LookupRuntimePorts) -> Any:
+def _lineage_sink(ports: LineagePorts) -> LineageRuntimeStepSink | None:
     sink = ports.lineage_step_sink
     if sink is None and getattr(ports, "lineage_required", False):
         raise LineagePersistenceUnavailable(
@@ -702,7 +692,7 @@ def _evidence_refs_by_fact_key(
     *,
     answer_plan: Any,
     proof_graph: Any,
-    proof_node_refs_by_render_output_id: dict[str, tuple[str, ...]],
+    proof_node_refs_by_result_output_id: dict[str, tuple[str, ...]],
 ) -> dict[str, list[str]]:
     payload = read_execution_proof_graph_payload(
         payload_schema=EXECUTION_PROOF_GRAPH_SCHEMA,
@@ -713,7 +703,7 @@ def _evidence_refs_by_fact_key(
     roots_by_fact_key: dict[str, list[str]] = {}
     for fulfillment in answer_plan.fulfillment:
         roots_by_fact_key.setdefault(fulfillment.requested_fact_id, []).extend(
-            proof_node_refs_by_render_output_id.get(fulfillment.render_output_id, ())
+            proof_node_refs_by_result_output_id.get(fulfillment.result_output_id, ())
         )
     for fact_key, roots in roots_by_fact_key.items():
         projected = project_proof_payload(
@@ -776,6 +766,7 @@ def _requested_fact_write(
     run_id: str,
     fact: Any,
     question_contract_step_id: str,
+    clarification_lineage_refs: tuple[str, ...],
 ) -> RequestedFactWrite:
     answer_expression = getattr(fact, "answer_expression", None)
     answer_expression_family = getattr(answer_expression, "family", "")
@@ -791,6 +782,7 @@ def _requested_fact_write(
             "answer_outputs": [
                 output.to_model_dict() for output in fact.answer_outputs
             ],
+            "clarification_lineage_refs": list(clarification_lineage_refs),
         },
     )
 
@@ -803,7 +795,7 @@ def _answer_outputs(
     answer_plan: Any,
     fact_result: FactResult,
     rendered: RenderedFact,
-    proof_node_refs_by_render_output_id: dict[str, tuple[str, ...]],
+    proof_node_refs_by_result_output_id: dict[str, tuple[str, ...]],
 ) -> tuple[AnswerOutputWrite, ...]:
     return tuple(
         AnswerOutputWrite(
@@ -826,7 +818,7 @@ def _answer_outputs(
             answer_plan=answer_plan,
             fact_result=fact_result,
             rendered=rendered,
-            proof_node_refs_by_render_output_id=proof_node_refs_by_render_output_id,
+            proof_node_refs_by_result_output_id=proof_node_refs_by_result_output_id,
         )
     )
 
@@ -836,26 +828,26 @@ def _fulfilled_output_values(
     answer_plan: Any,
     fact_result: FactResult,
     rendered: RenderedFact,
-    proof_node_refs_by_render_output_id: dict[str, tuple[str, ...]],
+    proof_node_refs_by_result_output_id: dict[str, tuple[str, ...]],
 ) -> tuple[tuple[Any, AnswerValueKind, dict[str, Any], list[str]], ...]:
     values: list[tuple[Any, AnswerValueKind, dict[str, Any], list[str]]] = []
     for fulfillment in answer_plan.fulfillment:
         value_kind, value_json = _execution_lineage_value(
             fact_result,
-            fulfillment.render_output_id,
+            fulfillment.result_output_id,
         )
         if value_kind is None:
-            value = _rendered_value_for_key(rendered, fulfillment.render_output_id)
+            value = _rendered_value_for_key(rendered, fulfillment.result_output_id)
             value_kind, value_json = _lineage_value(value)
         proof_refs = list(
-            proof_node_refs_by_render_output_id.get(
-                fulfillment.render_output_id,
+            proof_node_refs_by_result_output_id.get(
+                fulfillment.result_output_id,
                 (),
             )
         )
         if not proof_refs:
             raise ValueError(
-                f"answered lineage missing proof node refs for render output {fulfillment.render_output_id!r}"
+                f"answered lineage missing proof node refs for result output {fulfillment.result_output_id!r}"
             )
         values.append(
             (
@@ -870,47 +862,31 @@ def _fulfilled_output_values(
 
 def _execution_lineage_value(
     fact_result: FactResult,
-    render_output_id: str,
+    result_output_id: str,
 ) -> tuple[AnswerValueKind | None, dict[str, Any]]:
     outcome = fact_result.outcome
-    if not isinstance(outcome, AnswerResult) or outcome.render_spec is None:
+    if not isinstance(outcome, AnswerResult):
         return None, {}
-    for output in outcome.render_spec.relation_outputs:
-        if output.id != render_output_id:
+    for relation_output in outcome.result_projection.relation_outputs:
+        if relation_output.id != result_output_id:
             continue
-        return _relation_output_lineage_value(outcome, output)
-    for output in outcome.render_spec.scalar_outputs:
-        if output.id != render_output_id:
+        values = tuple(
+            row.values[result_output_id]
+            for row in outcome.projected_rows
+            if result_output_id in row.values
+        )
+        return _projected_lineage_values(values)
+    for scalar_output in outcome.result_projection.scalar_outputs:
+        if scalar_output.id != result_output_id:
             continue
-        if outcome.scalars and output.scalar_id in outcome.scalars:
-            return _lineage_value(outcome.scalars[output.scalar_id])
+        if outcome.scalars and scalar_output.scalar_id in outcome.scalars:
+            return _lineage_value(outcome.scalars[scalar_output.scalar_id])
     return None, {}
 
 
-def _relation_output_lineage_value(
-    outcome: AnswerResult,
-    output: Any,
+def _projected_lineage_values(
+    values: tuple[ResultValue, ...],
 ) -> tuple[AnswerValueKind | None, dict[str, Any]]:
-    relation = next(
-        (item for item in outcome.relations if item.id == output.relation_id),
-        None,
-    )
-    if relation is None:
-        return None, {}
-    values = [row[output.field_id] for row in relation.rows if output.field_id in row]
-    if (
-        len(values) == 1
-        and relation.identity_type
-        and output.field_id in relation.grain_keys
-    ):
-        return (
-            AnswerValueKind.ENTITY,
-            {
-                "kind": "entity",
-                "entity_type": relation.identity_type,
-                "entity_id": str(values[0]),
-            },
-        )
     if len(values) == 1:
         return _lineage_value(values[0])
     if values:
@@ -930,6 +906,8 @@ def _rendered_value_for_key(rendered: RenderedFact, key: str) -> object:
 
 
 def _lineage_value(value: object) -> tuple[AnswerValueKind, dict[str, Any]]:
+    if isinstance(value, EntityKeyValue):
+        return AnswerValueKind.ENTITY, _entity_key_json(value)
     if isinstance(value, bool):
         return AnswerValueKind.BOOLEAN, {"kind": "boolean", "value": value}
     if isinstance(value, int | float | Decimal) and not isinstance(value, bool):
@@ -948,10 +926,23 @@ def _lineage_value(value: object) -> tuple[AnswerValueKind, dict[str, Any]]:
 
 
 def _json_safe(value: object) -> object:
-    if isinstance(value, Decimal):
-        return str(value)
+    if isinstance(value, EntityKeyValue):
+        return _entity_key_json(value)
     if isinstance(value, Mapping):
         return {str(key): _json_safe(item) for key, item in value.items()}
     if isinstance(value, list | tuple):
         return [_json_safe(item) for item in value]
-    return value
+    return runtime_value_to_payload(value)
+
+
+def _entity_key_json(value: EntityKeyValue) -> dict[str, object]:
+    components = {
+        component.component_id: _json_safe(component.value)
+        for component in value.components
+    }
+    return {
+        "kind": "entity",
+        "entity_kind": value.entity_kind,
+        "key_id": value.key_id,
+        "components": components,
+    }

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import pytest
+
 from fervis.lookup.clarification import (
     AmbiguousQuestionInterpretation,
     ClarificationEvidence,
     ClarificationEvidenceKind,
-    ClarificationOption,
+    ConversationInterpretationCandidate,
+    ConversationInterpretationEvidence,
     clarification_from_payload,
     clarification_payload,
     clarify,
@@ -17,16 +20,26 @@ def test_clarification_payload_round_trips_ambiguous_interpretation() -> None:
             clarification_id="clarify_period",
             requested_fact_id="question_contract",
             source_text="last March",
-            options=(
-                ClarificationOption(
+            candidates=(
+                ConversationInterpretationCandidate(
                     id="period_2025",
-                    label="March 2025",
-                    value="2025-03",
+                    contextualized_question="March 2025",
+                    source_evidence=(
+                        ConversationInterpretationEvidence(
+                            source_id="question_contract",
+                            exact_source_texts=("last March",),
+                        ),
+                    ),
                 ),
-                ClarificationOption(
+                ConversationInterpretationCandidate(
                     id="period_2026",
-                    label="March 2026",
-                    value="2026-03",
+                    contextualized_question="March 2026",
+                    source_evidence=(
+                        ConversationInterpretationEvidence(
+                            source_id="question_contract",
+                            exact_source_texts=("last March",),
+                        ),
+                    ),
                 ),
             ),
             evidence=(
@@ -38,4 +51,26 @@ def test_clarification_payload_round_trips_ambiguous_interpretation() -> None:
         )
     )
 
-    assert clarification_from_payload(clarification_payload(clarification)) == clarification
+    assert (
+        clarification_from_payload(clarification_payload(clarification))
+        == clarification
+    )
+
+
+@pytest.mark.parametrize("missing_key", ("owner", "continuation"))
+def test_clarification_payload_rejects_incomplete_owner_spec(
+    missing_key: str,
+) -> None:
+    clarification = clarify(
+        AmbiguousQuestionInterpretation(
+            clarification_id="clarify_period",
+            requested_fact_id="question_contract",
+            source_text="last March",
+            accepts_free_text=True,
+        )
+    )
+    payload = clarification_payload(clarification)
+    del payload[missing_key]
+
+    with pytest.raises(ValueError):
+        clarification_from_payload(payload)

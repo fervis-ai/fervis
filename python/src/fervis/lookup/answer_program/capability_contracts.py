@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 
 from fervis.lookup.answer_program.values import (
     ParameterBinding,
@@ -14,7 +14,7 @@ from fervis.lookup.answer_program.values import (
 
 
 class CapabilityKind(StrEnum):
-    NARROW_POPULATION = "narrow_population"
+    NARROW_COUNT = "narrow_population"
 
 
 @dataclass(frozen=True)
@@ -28,7 +28,7 @@ class NarrowPopulationCapability:
     proof_refs: tuple[str, ...]
     function_semantics_version: str = "1"
     kind: CapabilityKind = field(
-        default=CapabilityKind.NARROW_POPULATION,
+        default=CapabilityKind.NARROW_COUNT,
         init=False,
     )
 
@@ -54,9 +54,7 @@ class NarrowPopulationCapability:
             self.operator is not ValueFilterOperator.IN
             or self.parameter.value_type is not ParameterValueType.STRING_SET
         ):
-            raise ValueError(
-                "population capability requires string-set membership"
-            )
+            raise ValueError("population capability requires string-set membership")
         if not self.parameter.required:
             raise ValueError("structural capability parameter must be required")
         if not self.parameter.semantic_control_ref:
@@ -80,7 +78,9 @@ class NarrowPopulationCapability:
             not isinstance(self.function_semantics_version, str)
             or not self.function_semantics_version
         ):
-            raise ValueError("population capability requires function semantics version")
+            raise ValueError(
+                "population capability requires function semantics version"
+            )
 
 
 @dataclass(frozen=True)

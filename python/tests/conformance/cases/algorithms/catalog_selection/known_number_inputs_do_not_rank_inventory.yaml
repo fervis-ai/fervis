@@ -20,6 +20,7 @@ input:
       description: sales total
       answer_outputs:
         - id: sales_total
+          role: ANSWER_VALUE
       known_inputs:
         - id: context_inventory
           kind: literal_text

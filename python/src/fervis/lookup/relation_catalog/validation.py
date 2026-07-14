@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from collections.abc import Iterable
 
 from fervis.lookup.relation_catalog.model import (
     CatalogParam,
@@ -17,27 +18,25 @@ from fervis.lookup.relation_catalog.parameter_values import (
 from fervis.lookup.relation_catalog.row_paths import infer_field_row_path_id
 
 
+_UNRESOLVED_CATALOG_TYPES = frozenset({"any", "pk", "unknown"})
+
+
 class CatalogValidationError(ValueError):
     pass
 
 
-def validate_relation_catalog(catalog: RelationCatalog) -> RelationCatalog:
+def parse_relation_catalog(catalog: RelationCatalog) -> RelationCatalog:
     _validate_unique(
         (read.id for read in catalog.reads),
         label="read id",
     )
     _validate_catalog_facts(catalog)
     parsed_reads = tuple(_validate_read(read) for read in catalog.reads)
-    return replace(catalog, reads=parsed_reads)
-
-
-def parse_relation_catalog_values(catalog: RelationCatalog) -> RelationCatalog:
-    """Parse declared endpoint values without applying unrelated catalog policy."""
-
-    return replace(
-        catalog,
-        reads=tuple(_parse_read_values(read) for read in catalog.reads),
-    )
+    parsed_catalog = replace(catalog, reads=parsed_reads)
+    _validate_candidate_key_authorities(parsed_catalog)
+    _validate_entity_references(parsed_catalog)
+    _validate_parameter_targets(parsed_catalog)
+    return parsed_catalog
 
 
 def _validate_catalog_facts(catalog: RelationCatalog) -> None:
@@ -61,15 +60,15 @@ def _validate_read(read: EndpointRead) -> EndpointRead:
     if not read.endpoint_name:
         raise CatalogValidationError(f"read {read_id} endpoint name is required")
     resource_names = tuple(
-        str(value).strip()
-        for value in read.resource_names
-        if str(value).strip()
+        str(value).strip() for value in read.resource_names if str(value).strip()
     )
     if not resource_names:
         raise CatalogValidationError(f"read {read_id} resource names are required")
     _validate_params(read)
     _validate_row_paths(read)
     _validate_fields(read)
+    _validate_candidate_keys(read)
+    _validate_local_entity_references(read)
     _validate_read_facts(read)
     _validate_pagination(read)
     return _parse_read_values(read)
@@ -148,6 +147,278 @@ def _validate_fields(read: EndpointRead) -> None:
                 )
 
 
+def _validate_candidate_keys(read: EndpointRead) -> None:
+    _validate_unique(
+        ((key.entity_kind, key.id) for key in read.candidate_keys),
+        label=f"read {read.id} candidate key identity",
+    )
+    fields_by_ref = {field.ref: field for field in read.fields}
+    for key in read.candidate_keys:
+        if not key.id:
+            raise CatalogValidationError(f"read {read.id} candidate key id is required")
+        if not key.entity_kind:
+            raise CatalogValidationError(
+                f"read {read.id} candidate key entity kind is required"
+            )
+        if not key.components:
+            raise CatalogValidationError(
+                f"read {read.id} candidate key fields are required"
+            )
+        _validate_unique(
+            (component.id for component in key.components),
+            label=f"read {read.id} candidate key {key.id} component id",
+        )
+        field_refs = tuple(component.field_ref for component in key.components)
+        if any(
+            not component.id or not component.field_ref for component in key.components
+        ):
+            raise CatalogValidationError(
+                f"read {read.id} candidate key components are incomplete"
+            )
+        unknown_refs = set((*field_refs, *key.context_field_refs)) - set(fields_by_ref)
+        if unknown_refs:
+            raise CatalogValidationError(
+                f"read {read.id} candidate key references unknown field"
+            )
+        row_path_ids = {
+            infer_field_row_path_id(
+                fields_by_ref[field_ref],
+                row_paths=read.row_paths,
+            )
+            for field_ref in field_refs
+        }
+        if len(row_path_ids) != 1:
+            raise CatalogValidationError(
+                f"read {read.id} candidate key crosses relation grains"
+            )
+        key_row_path_id = next(iter(row_path_ids))
+        if any(
+            infer_field_row_path_id(
+                fields_by_ref[field_ref],
+                row_paths=read.row_paths,
+            )
+            != key_row_path_id
+            for field_ref in key.context_field_refs
+        ):
+            raise CatalogValidationError(
+                f"read {read.id} candidate key context crosses relation grains"
+            )
+
+
+def _validate_local_entity_references(read: EndpointRead) -> None:
+    _validate_unique(
+        (reference.id for reference in read.entity_references),
+        label=f"read {read.id} entity reference id",
+    )
+    fields_by_ref = {field.ref: field for field in read.fields}
+    for reference in read.entity_references:
+        if (
+            not reference.id
+            or not reference.target_entity_kind
+            or not reference.target_key_id
+        ):
+            raise CatalogValidationError(
+                f"read {read.id} entity reference identity is required"
+            )
+        if not reference.components:
+            raise CatalogValidationError(
+                f"read {read.id} entity reference components are required"
+            )
+        _validate_unique(
+            (component.target_component_id for component in reference.components),
+            label=f"read {read.id} entity reference {reference.id} target component",
+        )
+        local_refs = tuple(
+            component.local_field_ref for component in reference.components
+        )
+        if any(
+            not component.target_component_id or not component.local_field_ref
+            for component in reference.components
+        ):
+            raise CatalogValidationError(
+                f"read {read.id} entity reference components are incomplete"
+            )
+        unknown_refs = set((*local_refs, *reference.context_field_refs)) - set(
+            fields_by_ref
+        )
+        if unknown_refs:
+            raise CatalogValidationError(
+                f"read {read.id} entity reference references unknown field"
+            )
+        row_path_ids = {
+            infer_field_row_path_id(
+                fields_by_ref[field_ref],
+                row_paths=read.row_paths,
+            )
+            for field_ref in local_refs
+        }
+        if len(row_path_ids) != 1:
+            raise CatalogValidationError(
+                f"read {read.id} entity reference crosses relation grains"
+            )
+        reference_row_path_id = next(iter(row_path_ids))
+        if any(
+            infer_field_row_path_id(
+                fields_by_ref[field_ref],
+                row_paths=read.row_paths,
+            )
+            != reference_row_path_id
+            for field_ref in reference.context_field_refs
+        ):
+            raise CatalogValidationError(
+                f"read {read.id} entity reference context crosses relation grains"
+            )
+
+
+def _validate_entity_references(catalog: RelationCatalog) -> None:
+    keys = _candidate_key_contracts(catalog)
+    for read in catalog.reads:
+        fields_by_ref = {field.ref: field for field in read.fields}
+        for reference in read.entity_references:
+            target = keys.get((reference.target_entity_kind, reference.target_key_id))
+            if target is None:
+                raise CatalogValidationError(
+                    f"read {read.id} entity reference targets unknown candidate key"
+                )
+            target_components = target[0]
+            mapped_component_ids = tuple(
+                component.target_component_id for component in reference.components
+            )
+            if set(mapped_component_ids) != set(target_components):
+                raise CatalogValidationError(
+                    f"read {read.id} entity reference does not map the complete target key"
+                )
+            for component in reference.components:
+                local_type = fields_by_ref[component.local_field_ref].type
+                target_type = target_components[component.target_component_id]
+                if not _catalog_types_compatible(local_type, target_type):
+                    raise CatalogValidationError(
+                        f"read {read.id} entity reference component type mismatch"
+                    )
+
+
+def _validate_parameter_targets(catalog: RelationCatalog) -> None:
+    keys = _candidate_key_contracts(catalog)
+    for read in catalog.reads:
+        for param in read.params:
+            target = param.entity_target
+            if target is None:
+                continue
+            key = keys.get((target.entity_kind, target.key_id))
+            if key is None:
+                raise CatalogValidationError(
+                    f"read {read.id} param {param.ref} targets unknown candidate key"
+                )
+            target_type = key[0].get(target.component_id)
+            if target_type is None:
+                raise CatalogValidationError(
+                    f"read {read.id} param {param.ref} targets unknown key component"
+                )
+            if not _catalog_types_compatible(param.type, target_type):
+                raise CatalogValidationError(
+                    f"read {read.id} param {param.ref} target type mismatch"
+                )
+
+
+def _catalog_types_compatible(left: str, right: str) -> bool:
+    return (
+        left == right
+        or left in _UNRESOLVED_CATALOG_TYPES
+        or right in _UNRESOLVED_CATALOG_TYPES
+    )
+
+
+def _candidate_key_contracts(
+    catalog: RelationCatalog,
+) -> dict[tuple[str, str], tuple[dict[str, str], bool, bool]]:
+    contracts: dict[tuple[str, str], tuple[dict[str, str], bool, bool]] = {}
+    for authority in catalog.candidate_key_authorities:
+        identity = (authority.entity_kind, authority.id)
+        contract = (
+            {component.id: component.type for component in authority.components},
+            authority.primary,
+            authority.stable,
+        )
+        existing = contracts.get(identity)
+        contracts[identity] = (
+            contract
+            if existing is None
+            else _merge_candidate_key_contracts(existing, contract)
+        )
+    for read in catalog.reads:
+        fields_by_ref = {field.ref: field for field in read.fields}
+        for key in read.candidate_keys:
+            identity = (key.entity_kind, key.id)
+            contract = (
+                {
+                    component.id: fields_by_ref[component.field_ref].type
+                    for component in key.components
+                },
+                key.primary,
+                key.stable,
+            )
+            existing = contracts.get(identity)
+            contracts[identity] = (
+                contract
+                if existing is None
+                else _merge_candidate_key_contracts(existing, contract)
+            )
+    return contracts
+
+
+def _validate_candidate_key_authorities(catalog: RelationCatalog) -> None:
+    for authority in catalog.candidate_key_authorities:
+        if not authority.id or not authority.entity_kind or not authority.components:
+            raise CatalogValidationError("candidate key authority is incomplete")
+        component_ids = tuple(component.id for component in authority.components)
+        if any(not component.id or not component.type for component in authority.components):
+            raise CatalogValidationError(
+                "candidate key authority component is incomplete"
+            )
+        if len(set(component_ids)) != len(component_ids):
+            raise CatalogValidationError(
+                "candidate key authority component ids must be unique"
+            )
+    _candidate_key_contracts(catalog)
+
+
+def _merge_candidate_key_contracts(
+    left: tuple[dict[str, str], bool, bool],
+    right: tuple[dict[str, str], bool, bool],
+) -> tuple[dict[str, str], bool, bool]:
+    left_components, left_primary, left_stable = left
+    right_components, right_primary, right_stable = right
+    if (
+        set(left_components) != set(right_components)
+        or left_primary != right_primary
+        or left_stable != right_stable
+    ):
+        raise CatalogValidationError(
+            "candidate key authority is inconsistent across reads"
+        )
+    component_types = {
+        component_id: _resolved_catalog_type(
+            left_components[component_id],
+            right_components[component_id],
+        )
+        for component_id in left_components
+    }
+    return component_types, left_primary, left_stable
+
+
+def _resolved_catalog_type(left: str, right: str) -> str:
+    if not _catalog_types_compatible(left, right):
+        raise CatalogValidationError(
+            "candidate key authority is inconsistent across reads"
+        )
+    if (
+        left in _UNRESOLVED_CATALOG_TYPES
+        and right not in _UNRESOLVED_CATALOG_TYPES
+    ):
+        return right
+    return left
+
+
 def _validate_read_facts(read: EndpointRead) -> None:
     read_id = read.id
     field_refs = {item.ref for item in read.fields}
@@ -219,7 +490,7 @@ def _parse_read_values(read: EndpointRead) -> EndpointRead:
     return replace(read, params=parsed_params, fields=parsed_fields)
 
 
-def _validate_unique(values: object, *, label: str) -> None:
+def _validate_unique(values: Iterable[object], *, label: str) -> None:
     seen: set[str] = set()
     for value in values:
         item = str(value or "")

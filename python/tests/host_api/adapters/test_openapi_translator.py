@@ -3,6 +3,107 @@ from __future__ import annotations
 from fervis.host_api.adapters.openapi import endpoint_contracts_from_openapi
 
 
+def test_openapi_contract_translation_preserves_declared_nested_relation_identity() -> (
+    None
+):
+    contracts = endpoint_contracts_from_openapi(
+        {
+            "openapi": "3.1.0",
+            "paths": {
+                "/api/items/": {
+                    "get": {
+                        "operationId": "list_items",
+                        "x-fervis": {
+                            "pagination": {
+                                "kind": "page_number",
+                                "positionQueryParam": "page",
+                                "pageSizeQueryParam": "per_page",
+                                "resultsPath": "data",
+                                "pageSize": 50,
+                                "maxPageSize": 1000,
+                                "totalPath": "count",
+                            },
+                            "candidateKeys": [
+                                {
+                                    "keyId": "primary_key",
+                                    "entityKind": "item",
+                                    "components": [
+                                        {
+                                            "componentId": "item_id",
+                                            "fieldPath": "data.id",
+                                        }
+                                    ],
+                                    "primary": True,
+                                }
+                            ],
+                            "entityReferences": [
+                                {
+                                    "referenceId": "owner_reference",
+                                    "targetEntityKind": "user",
+                                    "targetKeyId": "primary_key",
+                                    "components": [
+                                        {
+                                            "targetComponentId": "user_id",
+                                            "localFieldPath": "data.owner_id",
+                                        }
+                                    ],
+                                }
+                            ],
+                        },
+                        "responses": {
+                            "200": {
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "data": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "id": {"type": "string"},
+                                                            "owner_id": {
+                                                                "type": "string"
+                                                            },
+                                                        },
+                                                    },
+                                                },
+                                                "count": {"type": "integer"},
+                                            },
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                    }
+                }
+            },
+        },
+        source_name="inventory",
+        import_path="app.main:app#openapi",
+        path_prefixes=("/api/",),
+        framework_kind="fastapi",
+        source_namespace_kind="fastapi_app",
+        source_namespace_path=("inventory",),
+    )
+
+    contract = contracts[0]
+    assert [(field.path, field.type) for field in contract.response_fields] == [
+        ("data", "array"),
+        ("data.id", "string"),
+        ("data.owner_id", "string"),
+        ("count", "integer"),
+    ]
+    assert contract.candidate_keys[0].components[0].field_path == "data.id"
+    assert contract.pagination is not None
+    assert contract.pagination.position_query_param == "page"
+    assert contract.pagination.results_path == "data"
+    assert (
+        contract.entity_references[0].components[0].local_field_path == "data.owner_id"
+    )
+
+
 def test_openapi3_contract_translation_extracts_read_shape() -> None:
     contracts = endpoint_contracts_from_openapi(
         {
@@ -265,6 +366,72 @@ def test_openapi_contract_translation_treats_path_params_as_required() -> None:
     assert [(param.name, param.required) for param in contracts[0].path_params] == [
         ("order_id", True)
     ]
+
+
+def test_openapi_path_parameter_does_not_inherit_response_identity() -> None:
+    contracts = endpoint_contracts_from_openapi(
+        {
+            "openapi": "3.1.0",
+            "paths": {
+                "/api/warehouses/{warehouse_id}": {
+                    "get": {
+                        "operationId": "get_warehouse",
+                        "parameters": [
+                            {
+                                "name": "warehouse_id",
+                                "in": "path",
+                                "schema": {"type": "integer"},
+                            }
+                        ],
+                        "x-fervis": {
+                            "candidateKeys": [
+                                {
+                                    "keyId": "primary_key",
+                                    "entityKind": "warehouse",
+                                    "components": [
+                                        {
+                                            "componentId": "warehouse_id",
+                                            "fieldPath": "warehouse.warehouse_id",
+                                        }
+                                    ],
+                                    "primary": True,
+                                }
+                            ]
+                        },
+                        "responses": {
+                            "200": {
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "warehouse": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "warehouse_id": {
+                                                            "type": "integer"
+                                                        }
+                                                    },
+                                                }
+                                            },
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                    }
+                }
+            },
+        },
+        source_name="warehouses",
+        import_path="app:app#openapi",
+        path_prefixes=("/api/",),
+        framework_kind="flask",
+        source_namespace_kind="flask_blueprint",
+        source_namespace_path=("warehouses",),
+    )
+
+    assert contracts[0].path_params[0].entity_target is None
 
 
 def test_openapi_contract_translation_merges_simple_all_of_object_schema() -> None:

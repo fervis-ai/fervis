@@ -34,6 +34,8 @@ def source_binding_fact_id_from_field(field_id: str) -> str | None:
         return None
     requested_fact_id = field_id.removeprefix(_FACT_BINDING_FIELD_PREFIX)
     return requested_fact_id or None
+
+
 @dataclass(frozen=True)
 class SourceBindingTarget:
     binding_target_id: str
@@ -182,9 +184,7 @@ def _visible_plans_by_family(
             plans_by_family.setdefault(
                 (plan.requested_fact_id, plan.plan_shape), []
             ).append(plan)
-    frozen_families = {
-        key: tuple(plans) for key, plans in plans_by_family.items()
-    }
+    frozen_families = {key: tuple(plans) for key, plans in plans_by_family.items()}
     return frozen_families
 
 
@@ -276,12 +276,6 @@ def source_binding_target_index(
     )
 
 
-def source_binding_targets(
-    request: SourceBindingRequest,
-) -> tuple[SourceBindingTarget, ...]:
-    return source_binding_target_index(request).targets
-
-
 def source_binding_targets_for_plan_selection(
     plan_selection: PlanSelectionSet,
     *,
@@ -346,7 +340,7 @@ def _target_for_requirement(
     requirement_id: str,
     shape_spec: PlanSelectionShapeSpec | None,
 ) -> tuple[SourceBindingTarget, SourceBindingTargetCompatibility]:
-    answer_output_ids = ()
+    answer_output_ids: tuple[str, ...] = ()
     if _requires_answer_fulfillment(
         requirement_id,
         shape_spec=shape_spec,
@@ -408,17 +402,7 @@ def source_binding_member_requirement_ids(
 def _member_answer_output_ids(
     member: SourceStrategyMember,
 ) -> tuple[str, ...]:
-    source_interface = member.source_interface
-    if not isinstance(source_interface, dict):
-        return ()
-    return tuple(
-        dict.fromkeys(
-            answer_output_id
-            for raw in source_interface.get("answer_output_ids") or ()
-            for answer_output_id in (str(raw or ""),)
-            if answer_output_id
-        )
-    )
+    return member.answer_output_ids
 
 
 def _requires_answer_fulfillment(

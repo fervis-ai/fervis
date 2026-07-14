@@ -25,8 +25,8 @@ from .terminal import record_runtime_error_result, terminal_result_for_run
 from .transaction import sql_connection, sql_transaction
 
 INLINE_RUN_LEASE_SECONDS = 300
-TERMINAL_SUCCEEDED_STATUSES = frozenset({"COMPLETED", "NEEDS_CLARIFICATION"})
-ACTIVE_STATUSES = ("QUEUED", "RUNNING")
+TERMINAL_SUCCEEDED_STATUSES = frozenset({"COMPLETED"})
+ACTIVE_STATUSES = ("QUEUED", "RUNNING", "WAITING_FOR_CLARIFICATION")
 
 
 class ActiveRunConflict(Exception):
@@ -55,8 +55,11 @@ class SQLRunWorkItem:
     spec: RunExecutionSpec
     read_context_ref: ReadContextRef
     idempotency_key: str | None
+    idempotency_authority_ref: str
+    idempotency_scope: str
     attempt_count: int
     active_attempt: int
+    max_attempts: int
     lease_owner: str | None
     lease_expires_at: datetime | None
     last_error: str
@@ -80,22 +83,33 @@ class SQLWorkItemQueue:
         self,
         *,
         tenant_id: str,
+        principal_id: str,
+        read_context_ref: ReadContextRef,
         conversation_id: str | None,
         idempotency_key: str | None,
+        idempotency_scope: str,
     ) -> SQLRunWorkItem | None:
         if not idempotency_key:
             return None
         statement = sa.select(self.table).where(
             self.table.c.tenant_id == tenant_id,
+            self.table.c.user_id == principal_id,
             self.table.c.idempotency_key == idempotency_key,
+            self.table.c.idempotency_scope == idempotency_scope,
         )
         if conversation_id is not None:
             statement = statement.where(self.table.c.conversation_id == conversation_id)
         with sql_connection(self.engine) as connection:
-            row = connection.execute(
-                statement.order_by(self.table.c.created_at)
-            ).first()
-        return _work_item(row)
+            rows = connection.execute(statement.order_by(self.table.c.created_at)).all()
+        return next(
+            (
+                item
+                for row in rows
+                for item in (_work_item(row),)
+                if item is not None and item.read_context_ref == read_context_ref
+            ),
+            None,
+        )
 
     def get_work_item_for_run(self, run_id: str) -> SQLRunWorkItem:
         with sql_connection(self.engine) as connection:
@@ -106,6 +120,25 @@ class SQLWorkItemQueue:
         if item is None:
             raise LookupError(f"Fervis run work item not found: {run_id}")
         return item
+
+    def supersede_waiting_run(self, run_id: str) -> None:
+        with sql_transaction(self.engine) as connection:
+            result = connection.execute(
+                self.table.update()
+                .where(
+                    self.table.c.run_id == run_id,
+                    self.table.c.status == "WAITING_FOR_CLARIFICATION",
+                )
+                .values(
+                    status="SUPERSEDED",
+                    lease_owner=None,
+                    lease_expires_at=None,
+                    next_attempt_at=None,
+                    completed_at=now_utc(),
+                )
+            )
+        if result.rowcount != 1:
+            raise ValueError("clarification does not belong to a waiting run")
 
     def enqueue_run_work_item(
         self,
@@ -158,6 +191,8 @@ class SQLWorkItemQueue:
                     submission.principal.read_context_ref.to_storage_dict()
                 ),
                 "idempotency_key": submission.idempotency_key or None,
+                "idempotency_authority_ref": submission.idempotency_authority_ref,
+                "idempotency_scope": submission.idempotency_scope,
                 "attempt_count": 1 if inline else 0,
                 "active_attempt": 1 if inline else 0,
                 "max_attempts": 2,
@@ -332,8 +367,99 @@ class SQLWorkItemQueue:
                 active_attempt=active_attempt,
             )
 
+    def wait_for_clarification(
+        self,
+        *,
+        run_id: str,
+        worker_id: str,
+        active_attempt: int,
+    ) -> SQLRunWorkItem:
+        now = now_utc()
+        with sql_transaction(self.engine) as connection:
+            result = connection.execute(
+                sa.update(self.table)
+                .where(
+                    self.table.c.run_id == run_id,
+                    self.table.c.status == "RUNNING",
+                    self.table.c.lease_owner == worker_id,
+                    self.table.c.active_attempt == active_attempt,
+                )
+                .values(
+                    status="WAITING_FOR_CLARIFICATION",
+                    completed_at=None,
+                    lease_owner=None,
+                    lease_expires_at=None,
+                    last_error="",
+                    updated_at=now,
+                )
+            )
+            if result.rowcount != 1:
+                raise StaleRunLease(
+                    run_id=run_id,
+                    worker_id=worker_id,
+                    active_attempt=active_attempt,
+                )
+            item = self._find_by_run(connection, run_id)
+        if item is None:
+            raise LookupError(f"Fervis run work item not found: {run_id}")
+        return item
+
+    def resume_from_clarification(
+        self,
+        *,
+        run_id: str,
+        spec: RunExecutionSpec,
+        execution_mode: str,
+    ) -> SQLRunWorkItem:
+        inline = execution_mode == "inline"
+        now = now_utc()
+        with sql_transaction(self.engine) as connection:
+            current = self._find_by_run(connection, run_id)
+            if current is None or current.status != "WAITING_FOR_CLARIFICATION":
+                raise ValueError("clarification does not belong to a resumable run")
+            next_attempt = current.attempt_count + 1
+            result = connection.execute(
+                sa.update(self.table)
+                .where(
+                    self.table.c.run_id == run_id,
+                    self.table.c.status == "WAITING_FOR_CLARIFICATION",
+                )
+                .values(
+                    status="RUNNING" if inline else "QUEUED",
+                    spec_kind=execution_spec_kind(spec).value,
+                    execution_spec=normalize_json_value(
+                        execution_spec_to_storage_dict(spec)
+                    ),
+                    attempt_count=next_attempt if inline else current.attempt_count,
+                    active_attempt=next_attempt if inline else 0,
+                    max_attempts=max(current.max_attempts, next_attempt + 1),
+                    lease_owner="inline" if inline else None,
+                    lease_expires_at=(
+                        now + timedelta(seconds=INLINE_RUN_LEASE_SECONDS)
+                        if inline
+                        else None
+                    ),
+                    next_attempt_at=None,
+                    completed_at=None,
+                    last_error="",
+                    updated_at=now,
+                )
+            )
+            if result.rowcount != 1:
+                raise ValueError("clarification run changed while resuming")
+            item = self._find_by_run(connection, run_id)
+        if item is None:
+            raise LookupError(f"Fervis run work item not found: {run_id}")
+        return item
+
     def queue_counts(self) -> dict[str, int]:
-        counts = {"QUEUED": 0, "RUNNING": 0, "COMPLETED": 0, "FAILED": 0}
+        counts = {
+            "QUEUED": 0,
+            "RUNNING": 0,
+            "WAITING_FOR_CLARIFICATION": 0,
+            "COMPLETED": 0,
+            "FAILED": 0,
+        }
         now = now_utc()
         with sql_connection(self.engine) as connection:
             rows = connection.execute(
@@ -487,7 +613,9 @@ class SQLWorkItemQueue:
         row = connection.execute(
             sa.select(self.table).where(
                 self.table.c.tenant_id == submission.tenant_id,
-                self.table.c.conversation_id == submission.conversation_id,
+                self.table.c.idempotency_authority_ref
+                == submission.idempotency_authority_ref,
+                self.table.c.idempotency_scope == submission.idempotency_scope,
                 self.table.c.idempotency_key == submission.idempotency_key,
             )
         ).first()
@@ -553,8 +681,11 @@ def _work_item(row) -> SQLRunWorkItem | None:
             values["read_context_ref"] or {}
         ),
         idempotency_key=values["idempotency_key"],
+        idempotency_authority_ref=str(values["idempotency_authority_ref"] or ""),
+        idempotency_scope=str(values["idempotency_scope"] or ""),
         attempt_count=int(values["attempt_count"]),
         active_attempt=int(values["active_attempt"]),
+        max_attempts=int(values["max_attempts"]),
         lease_owner=values["lease_owner"],
         lease_expires_at=values["lease_expires_at"],
         last_error=str(values["last_error"] or ""),

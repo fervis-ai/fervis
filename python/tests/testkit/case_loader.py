@@ -33,7 +33,9 @@ def load_all_conformance_cases(root: Path = CASE_ROOT) -> tuple[ConformanceCase,
     validator = Draft202012Validator(schema)
     _validate_portable_fixtures()
     cases = []
-    for path in sorted((*root.rglob("*.json"), *root.rglob("*.yaml"), *root.rglob("*.yml"))):
+    for path in sorted(
+        (*root.rglob("*.json"), *root.rglob("*.yaml"), *root.rglob("*.yml"))
+    ):
         payload = _resolve_local_refs(_load_case(path), source_path=path)
         validator.validate(payload)
         _lint_case(payload, path=path)
@@ -50,9 +52,7 @@ def _validate_portable_fixtures() -> None:
 
 def _resolve_local_refs(value: Any, *, source_path: Path) -> Any:
     if isinstance(value, list):
-        return [
-            _resolve_local_refs(item, source_path=source_path) for item in value
-        ]
+        return [_resolve_local_refs(item, source_path=source_path) for item in value]
     if not isinstance(value, dict):
         return value
     if "$ref" not in value:
@@ -75,7 +75,9 @@ def _resolve_local_refs(value: Any, *, source_path: Path) -> Any:
         for raw_token in pointer.removeprefix("/").split("/") if pointer else ():
             token = raw_token.replace("~1", "/").replace("~0", "~")
             if not isinstance(selected, dict) or token not in selected:
-                raise ValueError(f"portable fixture pointer does not exist: {reference}")
+                raise ValueError(
+                    f"portable fixture pointer does not exist: {reference}"
+                )
             selected = selected[token]
     return _resolve_local_refs(selected, source_path=fixture_path)
 

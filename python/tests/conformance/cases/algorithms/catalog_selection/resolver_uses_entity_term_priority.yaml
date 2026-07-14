@@ -9,10 +9,14 @@ input:
     reads:
       - id: buyer_list
         endpoint_name: list_buyer_list
-        fields: [{ref: buyer.field.id, type: uuid, identity: {entity_ref: buyer, identity_field: buyer_id, primary_key: true}}]
+        resource_names: [buyer]
+        fields: [{ref: buyer.field.id, type: uuid}]
+        candidate_keys: [{id: primary_key, entity_kind: buyer, primary: true, components: [{id: buyer_id, field_ref: buyer.field.id}]}]
       - id: staff_list
         endpoint_name: list_staff_list
-        fields: [{ref: staff.field.id, type: uuid, identity: {entity_ref: staff, identity_field: staff_id, primary_key: true}}]
+        resource_names: [staff]
+        fields: [{ref: staff.field.id, type: uuid}]
+        candidate_keys: [{id: primary_key, entity_kind: staff, primary: true, components: [{id: staff_id, field_ref: staff.field.id}]}]
   entity_targets:
     - target_id: entity_1
       catalog_search_terms: [staff, buyer]

@@ -125,7 +125,8 @@ Only run `fervis runtime ask` after doctor passes.
 `host_api/` exposes framework-neutral contracts:
 
 - `EndpointContract` describes method, path template, params, capabilities,
-  response shape, and relation metadata.
+  response shape, and relation metadata, including declared candidate keys and
+  entity references.
 - `CatalogEndpointContract` records framework endpoint identity observed during
   introspection.
 - `ReadContextRef` is the persisted non-secret host-owned handle used to
@@ -164,6 +165,12 @@ Django/DRF and FastAPI primarily use runtime framework artifacts to describe
 routes and execute reads. Static source inspection is only for safe init/mount
 edits, not catalog truth.
 
+Framework introspection may expose identity only when framework or model
+metadata establishes the complete candidate key or foreign-key relationship.
+A path parameter's name, type, or position is not identity authority, and a
+response model must not inherit identity from an unrelated model merely because
+they share a base class.
+
 Flask has less native introspection. Fervis supports Flask runtime route
 discovery plus contract surfaces such as OpenAPI/Swagger, Marshmallow-backed
 schemas, JSON:API metadata, and Flask-AppBuilder metadata. A configured Flask
@@ -179,7 +186,7 @@ interface request
 -> Question + immutable QuestionRun
 -> queued RunWork
 -> LookupService
--> terminalization
+-> answer, factual terminal, visible failure, or waiting for clarification
 -> interface projection
 ```
 
@@ -245,9 +252,9 @@ typed resolved meaning, never a freehand integrated rewrite.
 
 Lineage recording is interleaved throughout the run, not appended after the
 answer. Model turns, endpoint snapshots, source reads, compile steps, execution,
-facts, clarification, and terminal results record their canonical artifacts as
-they occur. Required lineage is fail-closed: a successful factual answer cannot
-outlive failure to persist its audit truth.
+facts, clarification requests and responses, and terminal results record their
+canonical artifacts as they occur. Required lineage is fail-closed: a successful
+factual answer cannot outlive failure to persist its audit truth.
 
 ## Model Turn Boundaries
 
@@ -290,6 +297,12 @@ operations, fact materialization, rendering, and proof construction. The first
 answer, a callable-frame continuation, and a deterministic rerun all use this
 same path.
 
+An entity-valued result carries its declared entity kind, candidate-key ID, and
+complete key components. Verification preserves that exact authority through
+relation operations and rejects result projections that rename the entity kind,
+key, or components. Human-facing display fields are not substitutes for this
+computational identity.
+
 A deterministic rerun uses no model calls. It may reuse the same bindings, apply
 a typed binding patch, or apply a capability declared by the program. It still
 reads current evidence, so deterministic means stable execution meaning—not a
@@ -314,6 +327,8 @@ Conversation
   -> Question
     -> QuestionRun
       -> RunStep
+        -> ClarificationRequest
+          -> ClarificationResponse
       -> ModelCall / ModelCallUsage / RunArtifact
       -> CatalogEndpoint / SourceRead
       -> ProgramInvocation (BindingSet / BindingPatch)
@@ -322,7 +337,6 @@ Conversation
       -> RequestedFact
         -> FactResult
           -> ExecutionProofGraph
-          -> ClarificationRequest
           -> AnswerOutput
       -> RunResult
         -> Answer
@@ -333,11 +347,15 @@ Conversation
 ```
 
 `QuestionRun` identity, execution kind, trigger, and ancestry are immutable once
-written. A clarification response and a deterministic rerun create new runs on
-the same `Question`; an ordinary conversational follow-up creates a new
+written. A clarification makes the current run wait. Selecting a stored typed
+option resumes another execution attempt inside that run. Prose answering an
+unresolved grounding request supersedes the suspended work and starts a
+model-assisted successor run whose trigger records that clarification response.
+A deterministic rerun creates a new
+run on the same `Question`; an ordinary conversational follow-up creates a new
 `Question` in the same conversation. Retriable worker or provider execution
-attempts may remain within one run and are distinguished by attempt metadata;
-they do not rewrite question, run, or invocation identity.
+attempts remain within one run and are distinguished by attempt metadata; they
+do not rewrite question, run, or invocation identity.
 
 `QuestionRun.kind` answers whether the run began from natural language or a
 closed program invocation. It intentionally groups full compilation and
@@ -353,12 +371,24 @@ truth.
 
 ## Clarification And Memory
 
-Clarification is a continuation of the same question. The runtime records a
-`needs_clarification` fact result, structured clarification details, a
-`ClarificationRequest`, and then a new run when the user answers.
+Clarification is a waiting state, not a terminal fact result. The producing step records a structured
+`ClarificationRequest`; run work enters `WAITING_FOR_CLARIFICATION` without writing a
+`RunResult`, `FactResult`, or answer. A selected backend-issued option is a typed
+resolution: its `ClarificationResponse` belongs to that request and run, requeues
+the same run, and begins its next attempt. Free prose is not a typed grounding
+decision. It supersedes the suspended work item and starts a successor
+`QuestionRun`; conversation resolution receives the prose as the current utterance
+and the original question plus every clarification question and answer in order as
+one attributed `active_clarification` context source. Each exchange retains its
+clarification-response identity for lineage. Later exchanges extend the chain;
+they do not replace earlier exchanges or carry a prior Question Contract or
+model-authored integrated question.
+
 Clarification question text, options, and client-facing display are projections
-of the structured clarification payload; lineage and storage must preserve the
-payload rather than reducing it to prose.
+of the structured clarification payload. Lineage preserves the payload rather
+than reducing it to prose. A selected option carries its canonical value and
+grounding authority into the resumed attempt. Prose follows the ordinary semantic
+pipeline from conversation resolution; it is never injected directly into grounding.
 
 Memory is not a shortcut around proof. Successful prior requests project typed
 context sources and backend-owned canonical frames. A frame separates fixed
@@ -470,7 +500,7 @@ adapters, persistence, CLI wiring, provider boundaries, and migration behavior.
 Answer-program compilation, canonicalization, patching, instantiation,
 invocation, question lifecycle, and projection are language-neutral boundaries
 and belong in conformance cases. Live goldsets prove model-assisted composition
-against real host APIs; repeated full-case runs are entropy tests for model
+against real host APIs; repeated full-case runs are stability tests for model
 stability, not deterministic `QuestionRun` reruns.
 
 Prompt-rule tests should check required sections, schema fields, IDs, and

@@ -1,0 +1,55 @@
+id: scripted_pattern_aggregate_by_scalar_group
+description: A grouped aggregate preserves an ordinary scalar dimension without inventing entity identity.
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: How much is the metric total by status?
+  question_contract:
+    fact_description: metric total by status
+    subject_text: status
+    answer_expression_family: grouped_aggregate
+    group_key:
+      description: status
+      domain: SOURCE_RESULT_VALUES
+    answer_outputs:
+      - {description: metric total, role: MEASURED_VALUE}
+    resource_terms: [metric]
+  catalog:
+    reads:
+      - id: metric_read
+        endpoint_name: metric_read
+        resource_names: [metric]
+        row_paths:
+          - {id: data, path: data, cardinality: many}
+        fields:
+          - {ref: field.status, path: data.status, row_path_id: data, type: string}
+          - {ref: field.metric_total, path: data.metric_total, row_path_id: data, type: decimal}
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers:
+        - requested_fact_id: fact_1
+          pattern: aggregate_by_group
+          source_hint: {kind: read, read_id: metric_read}
+          aggregate_choice:
+            group_field_ids: [status]
+            metric_field_id: metric_total
+            metric_function: sum
+  read_eligibility:
+    - requested_fact_id: fact_1
+      read_id: metric_read
+      answer_value_fields: [status]
+      measured_value_fields: [metric_total]
+      group_key_fields: [status]
+  responses:
+    metric_read:
+      data:
+        - {status: completed, metric_total: "10.00"}
+        - {status: placed, metric_total: "20.00"}
+expect:
+  result_contains:
+    status: COMPLETED
+    rendered_rows:
+      - {group_key: completed, answer_1: "10.00"}
+      - {group_key: placed, answer_1: "20.00"}

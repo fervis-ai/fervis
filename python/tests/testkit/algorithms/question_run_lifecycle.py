@@ -1,15 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 from fervis.lineage.enums import ProgramInvocationKind
 
 from fervis.questions import (
     AskRequest,
+    ClarificationResponseRequest,
     ExecutionMode,
     QuestionPrincipal,
     RerunQuestionRequest,
 )
+from fervis.lookup.clarification.payload import clarification_from_payload
 from fervis.questions.contracts import QuestionLifecycleError
 from fervis.lookup.answer_program.codec import decode_answer_program
 from fervis.lookup.answer_program.persistence import (
@@ -17,11 +19,13 @@ from fervis.lookup.answer_program.persistence import (
     parse_stored_program_invocation,
     program_invocation,
 )
-from fervis.questions.service import QuestionService
+from fervis.questions.service import QuestionService, clarification_successor_run
+from fervis.lookup.clarification.model import ConversationResolutionResponse
 from fervis.questions.execution_specs import execution_spec_kind
 from fervis.run_work import FailQueuedRunRequest, QueuedRunRequest
 from fervis.questions.ports import (
     AuthorizedQuestionAccess,
+    ClarificationRunResponse,
     LookupExecutionRequest,
     LookupExecutionResult,
     ParsedQuestionRunSubmission,
@@ -29,7 +33,12 @@ from fervis.questions.ports import (
     QuestionRunSubmissionKind,
     QuestionRunSubmissionResult,
     QueuedRun,
+    ResolveQuestionRunSpec,
     RunSubmission,
+)
+from fervis.lookup.clarification.response import (
+    clarification_response_payload,
+    parse_clarification_response,
 )
 from tests.testkit.answer_program_contracts import (
     binding_patch_from_payload,
@@ -51,7 +60,109 @@ def run_question_run_lifecycle_case(payload: dict[str, Any]) -> list[str]:
     scenario = str(input_payload["scenario"])
     if scenario == "ask":
         return _run_ask_case(payload)
+    if scenario == "clarification_resume":
+        return _run_clarification_resume_case(payload)
     return [f"unsupported question-run lifecycle scenario: {scenario}"]
+
+
+def _run_clarification_resume_case(payload: dict[str, Any]) -> list[str]:
+    input_payload = payload["input"]
+    lineage = _InMemoryLineage()
+    runs = _InMemoryRuns(lineage=lineage)
+    clarification_payload = dict(input_payload["clarification"])
+    lookup = _FakeLookup(
+        {
+            "status": "WAITING_FOR_CLARIFICATION",
+            "result_data": {
+                "kind": "needs_clarification",
+                "details": {"clarifications": [clarification_payload]},
+            },
+        }
+    )
+    service = QuestionService(
+        lineage=lineage,
+        runs=runs,
+        lookup=lookup,
+        program=lookup,
+        ids=_DeterministicIds(),
+        adapter_ref="conformance",
+        runtime_version="test-runtime",
+    )
+    first = service.ask(
+        AskRequest(
+            question=str(input_payload["question"]),
+            principal=_principal(input_payload),
+            execution_mode=ExecutionMode.INLINE,
+        )
+    )
+    runs.pending_clarifications[str(clarification_payload["id"])] = (
+        clarification_payload
+    )
+    lookup.result_payload = dict(input_payload["resumed_lookup_result"])
+    resumed = service.respond_to_clarification(
+        ClarificationResponseRequest(
+            question_id=first.question_id,
+            run_id=first.run_id,
+            clarification_id=str(clarification_payload["id"]),
+            response_text=str(input_payload["response_text"]),
+            principal=_principal(input_payload),
+            execution_mode=ExecutionMode.INLINE,
+            selected_option_id=str(input_payload.get("selected_option_id") or ""),
+        )
+    )
+    actual = {
+        "first_result": _result_payload(first),
+        "resumed_result": _result_payload(resumed),
+        "suspended_run_status": runs.runs[first.run_id].status,
+        "run_count": lineage.run_count,
+        "question_count": lineage.question_count,
+        "clarification_response_count": runs.clarification_response_count,
+        "lookup_call_count": len(lookup.calls),
+        "resumed_original_question": (
+            lookup.calls[-1].question if lookup.calls else None
+        ),
+        "resumed_has_clarification_response": bool(
+            lookup.calls and lookup.calls[-1].clarification_responses
+        ),
+        "resumed_clarification": _resumed_clarification_summary(lookup),
+    }
+    return subset_mismatches(
+        actual=actual,
+        expected_subset=payload["expect"]["result_contains"],
+    )
+
+
+def _resumed_clarification_summary(lookup: "_FakeLookup") -> dict[str, object] | None:
+    if not lookup.calls or not lookup.calls[-1].clarification_responses:
+        return None
+    response = lookup.calls[-1].clarification_responses[-1]
+    payload = clarification_response_payload(response)
+    kind = str(payload["kind"])
+    summary: dict[str, object] = {
+        "owner": kind.removesuffix("_catalog_input")
+        .removesuffix("_identity")
+        .removesuffix("_text"),
+        "continuation_kind": kind,
+        "dispatch_count": 1,
+    }
+    if kind in {"conversation_resolution", "question_contract"}:
+        summary["attributed_source"] = payload["source"]
+    if kind == "conversation_resolution" and payload.get("annotation") is not None:
+        summary["annotation"] = payload["annotation"]
+    if kind == "grounding_identity":
+        summary["closed_target"] = {
+            "knownInputId": payload["knownInputId"],
+            "optionId": dict(payload["option"])["id"],
+        }
+    if kind.endswith("_catalog_input"):
+        target = dict(payload["target"])
+        summary["closed_target"] = {
+            "rowSourceId": target["row_source_id"],
+            "paramId": target["param_id"],
+            "valueType": target["value_type"],
+            "value": payload["value"],
+        }
+    return summary
 
 
 def _run_portable_rerun_eligibility_case(
@@ -65,9 +176,7 @@ def _run_portable_rerun_eligibility_case(
         initial_revision_count = len(runs.revision_ids)
         initial_queue_count = len(runs.runs)
         try:
-            service.rerun_question(
-                _portable_rerun_request(attempt["command"])
-            )
+            service.rerun_question(_portable_rerun_request(attempt["command"]))
         except QuestionLifecycleError as exc:
             outcome = {
                 "id": str(attempt["id"]),
@@ -99,12 +208,8 @@ def _run_portable_rerun_eligibility_case(
 
 def _run_portable_rerun_case(payload: dict[str, Any]) -> list[str]:
     input_payload = payload["input"]
-    service, runs, lineage, execution = _portable_rerun_state(
-        input_payload["state"]
-    )
-    result = service.rerun_question(
-        _portable_rerun_request(input_payload["command"])
-    )
+    service, runs, lineage, execution = _portable_rerun_state(input_payload["state"])
+    result = service.rerun_question(_portable_rerun_request(input_payload["command"]))
     created = runs.runs[result.run_id]
     invocation = runs.stored_invocations[result.run_id]
     base_run_id = str(input_payload["command"]["base_run_id"])
@@ -203,9 +308,7 @@ def _portable_rerun_request(payload: dict[str, Any]) -> RerunQuestionRequest:
         question_id=str(payload["question_id"]),
         base_run_id=str(payload["base_run_id"]),
         patch=(
-            binding_patch_from_payload(payload["patch"])
-            if "patch" in payload
-            else None
+            binding_patch_from_payload(payload["patch"]) if "patch" in payload else None
         ),
         capability_application=(
             capability_application_from_payload(payload["capability_application"])
@@ -406,9 +509,9 @@ class _InMemoryLineage:
                 )
                 + 1
             )
-            self.question_counts_by_conversation[
-                record.question.conversation_id
-            ] = sequence
+            self.question_counts_by_conversation[record.question.conversation_id] = (
+                sequence
+            )
             self.question_count += 1
             self.first_question_sequence = self.first_question_sequence or sequence
         self.run_count += 1
@@ -445,10 +548,10 @@ class _InMemoryRuns:
     lineage: _InMemoryLineage
     runs: dict[str, QueuedRun] = field(default_factory=dict)
     questions: dict[str, AuthorizedQuestionAccess] = field(default_factory=dict)
-    stored_invocations: dict[str, StoredProgramInvocation] = field(
-        default_factory=dict
-    )
+    stored_invocations: dict[str, StoredProgramInvocation] = field(default_factory=dict)
     revision_ids: set[str] = field(default_factory=set)
+    pending_clarifications: dict[str, dict[str, Any]] = field(default_factory=dict)
+    clarification_response_count: int = 0
 
     def get_question(
         self,
@@ -496,15 +599,21 @@ class _InMemoryRuns:
     def find_idempotent_run(
         self,
         *,
-        authority,
+        principal,
         conversation_id: str | None,
         idempotency_key: str | None,
     ) -> QueuedRun | None:
         return self._idempotent_run(
-            tenant_id=authority.tenant_id,
-            read_context_ref=authority.read_context_ref,
+            tenant_id=principal.tenant_id,
+            principal_id=principal.principal_id,
+            read_context_ref=principal.read_context_ref,
             conversation_id=conversation_id,
             idempotency_key=idempotency_key,
+            idempotency_scope=(
+                f"conversation:{conversation_id}"
+                if conversation_id is not None
+                else "new_conversation"
+            ),
         )
 
     def submit_question_run_atomically(
@@ -518,9 +627,11 @@ class _InMemoryRuns:
         record = parsed.record
         existing = self._idempotent_run(
             tenant_id=submission.tenant_id,
+            principal_id=submission.principal.principal_id,
             read_context_ref=submission.principal.read_context_ref,
             conversation_id=submission.conversation_id,
             idempotency_key=submission.idempotency_key,
+            idempotency_scope=submission.idempotency_scope,
         )
         if existing is not None:
             return QuestionRunSubmissionResult(
@@ -542,12 +653,14 @@ class _InMemoryRuns:
                 conversation_id=record.question.conversation_id,
                 tenant_id=record.question.tenant_id,
             )
-            self.questions[record.question.question_id] = AuthorizedQuestionAccess._issue(
-                question_id=record.question.question_id,
-                conversation_id=record.question.conversation_id,
-                tenant_id=record.question.tenant_id,
-                original_question=record.question.question,
-                read_context_ref=submission.principal.read_context_ref,
+            self.questions[record.question.question_id] = (
+                AuthorizedQuestionAccess._issue(
+                    question_id=record.question.question_id,
+                    conversation_id=record.question.conversation_id,
+                    tenant_id=record.question.tenant_id,
+                    original_question=record.question.question,
+                    read_context_ref=submission.principal.read_context_ref,
+                )
             )
         self.lineage.record_question_run(record)
         if record.program_revision is not None:
@@ -580,13 +693,92 @@ class _InMemoryRuns:
             run=run,
         )
 
+    def respond_to_clarification_atomically(
+        self,
+        resume: ClarificationRunResponse,
+    ) -> QuestionRunSubmissionResult:
+        current = self.runs[resume.run_id]
+        payload = self.pending_clarifications[resume.clarification_id]
+        spec = current.submission.spec
+        if not isinstance(spec, ResolveQuestionRunSpec):
+            raise ValueError("clarification can resume only a question lookup")
+        response = parse_clarification_response(
+            clarification_from_payload(payload),
+            response_id=resume.response_id,
+            response_text=resume.response_text,
+            selected_option_id=resume.selected_option_id,
+            suspended_question_text=spec.question,
+        )
+        if (
+            isinstance(response, ConversationResolutionResponse)
+            and response.annotation is not None
+        ):
+            submission, record = clarification_successor_run(
+                current.submission,
+                response=resume,
+                annotation=response,
+            )
+            self.runs[resume.run_id] = replace(current, status="SUPERSEDED")
+            self.lineage.record_question_run(record)
+            active_attempt = 1
+        else:
+            submission = replace(
+                current.submission,
+                spec=replace(
+                    spec,
+                    clarification_responses=(
+                        *spec.clarification_responses,
+                        response,
+                    ),
+                ),
+                execution_mode=resume.execution_mode,
+            )
+            active_attempt = 2
+        queued = QueuedRun(
+            submission=submission,
+            status=(
+                "RUNNING" if resume.execution_mode is ExecutionMode.INLINE else "QUEUED"
+            ),
+            active_attempt=active_attempt,
+        )
+        self.runs[submission.run_id] = queued
+        self.clarification_response_count += 1
+        return QuestionRunSubmissionResult(
+            kind=QuestionRunSubmissionKind.CREATED,
+            run=queued,
+        )
+
+    def wait_for_clarification(
+        self,
+        *,
+        run_id: str,
+        worker_id: str,
+        active_attempt: int,
+    ) -> QueuedRun:
+        del worker_id, active_attempt
+        current = self.runs[run_id]
+        clarifications = list(self.pending_clarifications.values())
+        result_data = {
+            "kind": "needs_clarification",
+            "details": {"clarifications": clarifications},
+        }
+        waiting = replace(
+            current,
+            status="WAITING_FOR_CLARIFICATION",
+            result_data=result_data,
+        )
+        self.runs[run_id] = waiting
+        return waiting
+
     def _idempotent_run(
         self,
         *,
         tenant_id: str,
+        principal_id: str,
         read_context_ref,
         conversation_id: str | None,
         idempotency_key: str | None,
+        idempotency_scope: str,
     ) -> QueuedRun | None:
         if not idempotency_key:
             return None
@@ -594,12 +786,14 @@ class _InMemoryRuns:
             submission = run.submission
             if (
                 submission.tenant_id == tenant_id
+                and submission.principal.principal_id == principal_id
                 and submission.principal.read_context_ref == read_context_ref
                 and (
                     conversation_id is None
                     or submission.conversation_id == conversation_id
                 )
                 and submission.idempotency_key == idempotency_key
+                and submission.idempotency_scope == idempotency_scope
             ):
                 return run
         return None

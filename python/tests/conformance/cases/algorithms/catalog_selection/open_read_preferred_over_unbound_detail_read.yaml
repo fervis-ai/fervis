@@ -16,12 +16,17 @@ input:
             source: path
             type: uuid
             required: true
-            identity: {entity_ref: sale, identity_field: sale_id, primary_key: true, stable: true}
+            entity_target: {entity_kind: sale, key_id: primary_key, component_id: sale_id}
         fields:
           - ref: field.sale_id
             type: uuid
           - ref: field.status
             type: string
+        candidate_keys:
+          - id: primary_key
+            entity_kind: sale
+            primary: true
+            components: [{id: sale_id, field_ref: field.sale_id}]
       - id: sale_list
         endpoint_name: list_sales
         resource_names: [sale]
@@ -35,6 +40,7 @@ input:
       description: whether completed sales exist
       answer_outputs:
         - id: fact_1
+          role: ANSWER_VALUE
   resource_name_matches:
     - requested_fact_id: fact_1
       answer_output_resource_lineage:
@@ -46,4 +52,3 @@ input:
 expect:
   result_contains:
     selected_read_ids: [sale_list]
-

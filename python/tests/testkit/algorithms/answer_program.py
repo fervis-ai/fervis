@@ -27,6 +27,7 @@ from fervis.lookup.answer_program.instantiation import (
     instantiate_answer_program,
 )
 from fervis.lookup.answer_program.invocation import RuntimePorts, invoke_answer_program
+from fervis.lookup.answer_program.instantiation import _instantiate_operations
 from fervis.lookup.answer_program.revisions import (
     apply_capability,
     canonical_capability_application_json,
@@ -46,6 +47,15 @@ from tests.testkit.answer_program_contracts import (
     fact_value_from_payload,
 )
 from fervis.lookup.answer_program.values import ConstantRef
+from fervis.lookup.answer_program.values import BindingSet, FactValue, LiteralType
+from fervis.lookup.answer_program.operations import (
+    Operation,
+    RankSpec,
+    SortDirection,
+    SortKey,
+    TiePolicy,
+)
+from fervis.lookup.plan_execution.operation_runtime import ResolvedRankSpec
 from tests.testkit.catalog import catalog_from_payload
 from tests.testkit.question_contract import question_contract_from_payload
 from tests.testkit.serialization import portable_value
@@ -53,9 +63,7 @@ from tests.testkit.serialization import portable_value
 
 def run_answer_program_canonicalize_case(payload: dict[str, Any]) -> list[str]:
     input_payload = payload["input"]
-    programs = tuple(
-        decode_answer_program(item) for item in input_payload["programs"]
-    )
+    programs = tuple(decode_answer_program(item) for item in input_payload["programs"])
     canonical = tuple(canonicalize_answer_program(program) for program in programs)
     canonical_payloads = tuple(
         canonical_answer_program_payload(program) for program in canonical
@@ -66,8 +74,7 @@ def run_answer_program_canonicalize_case(payload: dict[str, Any]) -> list[str]:
         for item in input_payload.get("binding_sets") or ()
     )
     patches = tuple(
-        binding_patch_from_payload(item)
-        for item in input_payload.get("patches") or ()
+        binding_patch_from_payload(item) for item in input_payload.get("patches") or ()
     )
     binding_jsons = tuple(canonical_binding_set_json(item) for item in binding_sets)
     patch_jsons = tuple(canonical_binding_patch_json(item) for item in patches)
@@ -215,9 +222,7 @@ def run_answer_program_apply_capability_case(
     input_payload = payload["input"]
     program = decode_answer_program(input_payload["program"])
     bindings = binding_set_from_payload(input_payload)
-    application = capability_application_from_payload(
-        input_payload["application"]
-    )
+    application = capability_application_from_payload(input_payload["application"])
     try:
         revision = apply_capability(
             program=program,
@@ -248,9 +253,7 @@ def run_answer_program_apply_capability_case(
             "compatibility_unchanged": (
                 revision.program.compatibility == program.compatibility
             ),
-            "compatibility": _compatibility_payload(
-                revision.program.compatibility
-            ),
+            "compatibility": _compatibility_payload(revision.program.compatibility),
             "program": canonical_answer_program_payload(revision.program),
             "bindings": binding_payload(revision.bindings),
             "reads": 0,
@@ -299,9 +302,7 @@ def run_answer_program_invoke_case(payload: dict[str, Any]) -> list[str]:
                         "rows": portable_value(relation.rows),
                         "row_count": relation.completeness.row_count,
                         "snapshot_hash": relation.evidence.snapshot_hash,
-                        "scope_fingerprint": (
-                            relation.completeness.scope_fingerprint
-                        ),
+                        "scope_fingerprint": (relation.completeness.scope_fingerprint),
                         "proof_refs": list(relation.completeness.proof_refs),
                     }
                     for relation in execution.relations
@@ -314,12 +315,8 @@ def run_answer_program_invoke_case(payload: dict[str, Any]) -> list[str]:
                         "population_constraints": [
                             {
                                 "id": constraint.id,
-                                "included_values": list(
-                                    constraint.included_values
-                                ),
-                                "excluded_values": list(
-                                    constraint.excluded_values
-                                ),
+                                "included_values": list(constraint.included_values),
+                                "excluded_values": list(constraint.excluded_values),
                             }
                             for constraint in fact.population_constraints
                         ],
@@ -349,6 +346,46 @@ def run_answer_program_invoke_case(payload: dict[str, Any]) -> list[str]:
     )
 
 
+def run_answer_program_rank_limit_case(payload: dict[str, Any]) -> list[str]:
+    input_payload = payload["input"]
+    limit = ConstantRef(
+        constant_id="rank_limit",
+        version_ref="fixture-v1",
+        value=FactValue.literal(
+            id="rank_limit",
+            literal_type=LiteralType.NUMBER,
+            value=str(input_payload["value"]),
+        ),
+    )
+    operations, _inputs = _instantiate_operations(
+        AnswerProgram(
+            operations=(
+                Operation(
+                    id="rank",
+                    spec=RankSpec(
+                        input_relation="rows",
+                        order_by=(
+                            SortKey(field="value", direction=SortDirection.DESC),
+                        ),
+                        tie_policy=TiePolicy.FIELD,
+                        limit=limit,
+                        tie_breakers=(
+                            SortKey(field="id", direction=SortDirection.ASC),
+                        ),
+                    ),
+                    output_relation="ranked",
+                ),
+            ),
+        ),
+        bindings=BindingSet(),
+    )
+    resolved = operations[0].spec
+    return _mismatches(
+        payload,
+        actual={"limit": resolved.limit if isinstance(resolved, ResolvedRankSpec) else None},
+    )
+
+
 def run_answer_program_instantiate_case(payload: dict[str, Any]) -> list[str]:
     attempts: list[dict[str, Any]] = []
     for attempt in payload["input"]["attempts"]:
@@ -357,9 +394,7 @@ def run_answer_program_instantiate_case(payload: dict[str, Any]) -> list[str]:
         if "compatibility" in attempt:
             program = replace(
                 program,
-                compatibility=_compatibility_from_payload(
-                    attempt["compatibility"]
-                ),
+                compatibility=_compatibility_from_payload(attempt["compatibility"]),
             )
         try:
             execution = instantiate_answer_program(

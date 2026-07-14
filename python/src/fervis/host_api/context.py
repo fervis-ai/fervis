@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timezone as datetime_timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fervis.host_api.contracts.authority import ReadAuthority
@@ -23,7 +23,7 @@ class HostContext:
     timezone: str = "UTC"
 
     def today(self, *, now: datetime | None = None) -> date:
-        current = now or datetime.now(UTC)
+        current = now or datetime.now(datetime_timezone.utc)
         try:
             timezone = ZoneInfo(self.timezone)
         except ZoneInfoNotFoundError as exc:
@@ -37,6 +37,9 @@ class HostApiContext:
 
     adapter: HostApiAdapter
     host_context: HostContext = field(default_factory=HostContext)
+
+    def close(self) -> None:
+        self.adapter.close()
 
     def describe_sources(self) -> tuple[EndpointContract, ...]:
         return self.adapter.describe_sources()

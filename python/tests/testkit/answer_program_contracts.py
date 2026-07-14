@@ -17,6 +17,7 @@ from fervis.lookup.answer_program import (
     canonical_fact_value,
 )
 from fervis.lookup.answer_program.values import FactValue, LiteralType
+from fervis.lookup.canonical_data import entity_key_value
 
 
 def parameter_declarations_from_payload(
@@ -116,24 +117,30 @@ def fact_value_from_payload(
         "source_refs": tuple(str(item) for item in payload.get("source_refs") or ()),
         "known_input_id": str(payload.get("known_input_id") or ""),
         "applies_to_requested_fact_ids": tuple(
-            str(item)
-            for item in payload.get("applies_to_requested_fact_ids") or ()
+            str(item) for item in payload.get("applies_to_requested_fact_ids") or ()
         ),
     }
     if kind == "identity":
         return FactValue.identity(
             **common,
-            identity_type=str(payload["identity_type"]),
-            identity_field=str(payload["identity_field"]),
-            value=str(payload["value"]),
+            key=entity_key_value(
+                str(payload["entity_kind"]),
+                str(payload["key_id"]),
+                {str(payload["key_component_id"]): str(payload["value"])},
+            ),
             display_value=str(payload.get("display_value") or ""),
         )
     if kind == "identity_set":
         return FactValue.identity_set(
             **common,
-            identity_type=str(payload["identity_type"]),
-            identity_field=str(payload["identity_field"]),
-            values=tuple(str(value) for value in payload.get("values") or ()),
+            keys=tuple(
+                entity_key_value(
+                    str(payload["entity_kind"]),
+                    str(payload["key_id"]),
+                    {str(payload["key_component_id"]): str(value)},
+                )
+                for value in payload.get("values") or ()
+            ),
             display_value=str(payload.get("display_value") or ""),
         )
     if kind == "named":

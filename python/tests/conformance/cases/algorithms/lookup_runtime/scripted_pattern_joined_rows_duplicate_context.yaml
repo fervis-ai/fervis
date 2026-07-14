@@ -11,7 +11,9 @@ input:
     fact_description: item quantities with staff names
     subject_text: item quantities with staff names
     answer_expression_family: list_rows
-    answer_outputs: [staff_name, quantity]
+    answer_outputs:
+      - {description: staff_name, role: ANSWER_VALUE}
+      - {description: quantity, role: ANSWER_VALUE}
     resource_terms: [item, product]
   catalog:
     reads:
@@ -26,6 +28,10 @@ input:
           - {ref: field.items.item_id, path: data.item_id, row_path_id: data, type: string}
           - {ref: field.items.staff_id, path: data.staff_id, row_path_id: data, type: string}
           - {ref: field.items.quantity, path: data.quantity, row_path_id: data, type: number}
+        candidate_keys:
+          - id: item_key
+            entity_kind: item
+            components: [{id: item_id, field_ref: field.items.item_id}]
       - id: products_read
         endpoint_name: products_read
         resource_names: [product]
@@ -37,6 +43,10 @@ input:
           - {ref: field.products.item_id, path: data.item_id, row_path_id: data, type: string}
           - {ref: field.products.staff_id, path: data.staff_id, row_path_id: data, type: string}
           - {ref: field.products.staff_name, path: data.staff_name, row_path_id: data, type: string}
+        candidate_keys:
+          - id: item_key
+            entity_kind: item
+            components: [{id: item_id, field_ref: field.products.item_id}]
   fact_plan:
     outcome:
       kind: fact_plan
@@ -48,13 +58,11 @@ input:
             source: {kind: read, read_id: items_read}
             fields:
               - {field_id: item_id}
-              - {field_id: staff_id}
               - {field_id: quantity}
           right:
             source: {kind: read, read_id: products_read}
             fields:
               - {field_id: item_id}
-              - {field_id: staff_id}
               - {field_id: staff_name}
           join_keys:
             - {left_field_id: item_id, right_field_id: item_id}
@@ -73,4 +81,4 @@ expect:
     status: COMPLETED
     rendered_rows:
       - staff_name: Amani
-        quantity: 3
+        quantity: "3"

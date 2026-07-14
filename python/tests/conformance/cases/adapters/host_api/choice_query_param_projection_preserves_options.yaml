@@ -12,8 +12,14 @@ input:
       path_template: /records/
       view_class: tests.RecordView
       resource_names: [record, activity record]
-      paginated: true
-      primary_key_fields: [data.id]
+      pagination:
+        kind: offset
+        position_query_param: after
+        page_size_query_param: batch
+        results_path: data
+        page_size: 25
+        max_page_size: 100
+        continuation_path: pagination.has_more
       query_params:
         - name: status
           type: choice

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from types import SimpleNamespace
+from uuid import UUID
 
 import pytest
 
@@ -16,6 +17,7 @@ from fervis.lineage.enums import (
 )
 from fervis.lineage.recorder import (
     AnsweredRunResultWrite,
+    ClarificationRequestWrite,
     FactualTerminalRunResultWrite,
     RunStepWrite,
     RuntimeErrorResultWrite,
@@ -40,10 +42,12 @@ from fervis.lookup.outcomes.model import (
     NoData,
     OutcomeKind,
 )
-from fervis.lookup.answer_program.render_spec import (
-    RenderRelationOutput,
-    RenderScalarOutput,
-    RenderSpec,
+from fervis.lookup.answer_program.result_projection import (
+    EntityKeyProjection,
+    EntityKeyProjectionComponent,
+    RelationResultOutput,
+    ScalarResultOutput,
+    ResultProjection,
 )
 from fervis.lookup.answer_program.model import AnswerProgram, FactFulfillment
 from fervis.lookup.question_contract import (
@@ -53,7 +57,6 @@ from fervis.lookup.question_contract import (
     RequestedFactAnswerExpressionFamily,
     RequestedFactAnswerOutput,
 )
-from fervis.lookup.turn_prompts.context import active_clarification_context
 from fervis.lookup.answer_rendering import RenderedFact
 from fervis.lookup.lineage.results import (
     LineagePersistenceUnavailable,
@@ -84,7 +87,13 @@ def test_answered_lineage_records_only_fulfilled_answer_outputs() -> None:
             rows=({"answer_1": "staff_1", "support_label": "Ada"},),
         ),
         answer="staff_1",
-        question_contract=_question_contract({"fact_1": "answer_1"}),
+        question_contract=_question_contract(
+            {"fact_1": "answer_1"},
+            clarification_lineage_refs=(
+                "clarification_response:response_1",
+                "clarification_response:response_2",
+            ),
+        ),
         question_contract_step_id="step_contract",
         compile_step_id="step_compile",
         execute_step_id="step_execute",
@@ -95,11 +104,11 @@ def test_answered_lineage_records_only_fulfilled_answer_outputs() -> None:
                 FactFulfillment(
                     requested_fact_id="fact_1",
                     answer_output_id="answer_1",
-                    render_output_id="answer_1",
+                    result_output_id="answer_1",
                 ),
             )
         ),
-        proof_node_refs_by_render_output_id={
+        proof_node_refs_by_result_output_id={
             "answer_1": ("answer_output:fact_1:answer_1",),
         },
     )
@@ -107,6 +116,12 @@ def test_answered_lineage_records_only_fulfilled_answer_outputs() -> None:
     answered = recorder.answered_results[0]
     assert [output.output_key for output in answered.outputs] == ["answer_1"]
     assert answered.outputs[0].proof_node_refs_json == ["answer_output:fact_1:answer_1"]
+    assert answered.requested_facts[0].answer_requests_json[
+        "clarification_lineage_refs"
+    ] == [
+        "clarification_response:response_1",
+        "clarification_response:response_2",
+    ]
 
 
 def test_answered_lineage_records_memory_artifact_from_fact_addresses() -> None:
@@ -116,9 +131,9 @@ def test_answered_lineage_records_memory_artifact_from_fact_addresses() -> None:
         ports=_ports(recorder),
         fact_result=FactResult(
             outcome=AnswerResult(
-                render_spec=RenderSpec(
+                result_projection=ResultProjection(
                     scalar_outputs=(
-                        RenderScalarOutput(id="answer_1", scalar_id="answer_1"),
+                        ScalarResultOutput(id="answer_1", scalar_id="answer_1"),
                     )
                 ),
                 scalars={"answer_1": 14},
@@ -141,11 +156,11 @@ def test_answered_lineage_records_memory_artifact_from_fact_addresses() -> None:
                 FactFulfillment(
                     requested_fact_id="fact_1",
                     answer_output_id="answer_1",
-                    render_output_id="answer_1",
+                    result_output_id="answer_1",
                 ),
             )
         ),
-        proof_node_refs_by_render_output_id={
+        proof_node_refs_by_result_output_id={
             "answer_1": ("answer_output:fact_1:answer_1",),
         },
         conversation_resolution_activation={
@@ -166,7 +181,7 @@ def test_answered_lineage_records_memory_artifact_from_fact_addresses() -> None:
         {
             "address": "value.answer_1",
             "kind": "value",
-            "value": {"type": "decimal", "value": "14"},
+                "value": {"type": "decimal", "value": 14},
             "derivation": {
                 "source": "operation_output",
                 "answer_output_ids": ["answer_1"],
@@ -179,28 +194,89 @@ def test_answered_lineage_records_memory_artifact_from_fact_addresses() -> None:
     ] == {"activated_memory_ids": ["artifact_old.value.total"]}
 
 
-def test_answered_lineage_records_entity_output_from_execution_relation() -> None:
+@pytest.mark.parametrize(
+    ("staff_ids", "expected_kind", "expected_value"),
+    (
+        (
+            ("staff_1",),
+            AnswerValueKind.ENTITY,
+            {
+                "kind": "entity",
+                "entity_kind": "staff",
+                "key_id": "primary_key",
+                "components": {"id": "staff_1"},
+            },
+        ),
+        (
+            ("staff_1", "staff_2"),
+            AnswerValueKind.LIST,
+            {
+                "kind": "list",
+                "values": [
+                    {
+                        "kind": "entity",
+                        "entity_kind": "staff",
+                        "key_id": "primary_key",
+                        "components": {"id": "staff_1"},
+                    },
+                    {
+                        "kind": "entity",
+                        "entity_kind": "staff",
+                        "key_id": "primary_key",
+                        "components": {"id": "staff_2"},
+                    },
+                ],
+            },
+        ),
+        (
+            (UUID("93939393-0000-0000-0003-000000000003"),),
+            AnswerValueKind.ENTITY,
+            {
+                "kind": "entity",
+                "entity_kind": "staff",
+                "key_id": "primary_key",
+                "components": {
+                    "id": {
+                        "$uuid": "93939393-0000-0000-0003-000000000003"
+                    }
+                },
+            },
+        ),
+    ),
+)
+def test_answered_lineage_records_entity_output_from_execution_relation(
+    staff_ids: tuple[str | UUID, ...],
+    expected_kind: AnswerValueKind,
+    expected_value: dict[str, object],
+) -> None:
     recorder = _Recorder()
     record_answered_result_lineage(
         request=_request("run_entity_output"),
         ports=_ports(recorder),
         fact_result=FactResult(
             outcome=AnswerResult(
-                render_spec=RenderSpec(
+                result_projection=ResultProjection(
                     relation_outputs=(
-                        RenderRelationOutput(
+                        RelationResultOutput(
                             id="answer_1",
                             relation_id="result",
-                            field_id="staff_id",
+                            entity_key=EntityKeyProjection(
+                                entity_kind="staff",
+                                key_id="primary_key",
+                                components=(
+                                    EntityKeyProjectionComponent(
+                                        component_id="id",
+                                        field_id="staff_id",
+                                    ),
+                                ),
+                            ),
                         ),
                     )
                 ),
                 relations=(
                     RelationRows(
                         id="result",
-                        rows=({"staff_id": "staff_1"},),
-                        grain_keys=("staff_id",),
-                        identity_type="staff",
+                        rows=tuple({"staff_id": staff_id} for staff_id in staff_ids),
                     ),
                 ),
                 proof_refs=("source_read:read_1",),
@@ -208,9 +284,9 @@ def test_answered_lineage_records_entity_output_from_execution_relation() -> Non
         ),
         rendered=RenderedFact(
             kind=OutcomeKind.ANSWER,
-            rows=({"answer_1": "staff_1"},),
+            rows=tuple({"answer_1": staff_id} for staff_id in staff_ids),
         ),
-        answer="staff_1",
+        answer="\n".join(str(staff_id) for staff_id in staff_ids),
         question_contract=_question_contract({"fact_1": "answer_1"}),
         question_contract_step_id="step_contract",
         compile_step_id="step_compile",
@@ -222,23 +298,19 @@ def test_answered_lineage_records_entity_output_from_execution_relation() -> Non
                 FactFulfillment(
                     requested_fact_id="fact_1",
                     answer_output_id="answer_1",
-                    render_output_id="answer_1",
+                    result_output_id="answer_1",
                 ),
             )
         ),
-        proof_node_refs_by_render_output_id={
+        proof_node_refs_by_result_output_id={
             "answer_1": ("answer_output:fact_1:answer_1",),
         },
     )
 
     output = recorder.answered_results[0].outputs[0]
 
-    assert output.value_kind is AnswerValueKind.ENTITY
-    assert output.value_json == {
-        "kind": "entity",
-        "entity_type": "staff",
-        "entity_id": "staff_1",
-    }
+    assert output.value_kind is expected_kind
+    assert output.value_json == expected_value
 
 
 def test_answered_lineage_links_each_output_to_its_requested_fact() -> None:
@@ -272,16 +344,16 @@ def test_answered_lineage_links_each_output_to_its_requested_fact() -> None:
                 FactFulfillment(
                     requested_fact_id="fact_1",
                     answer_output_id="answer_1",
-                    render_output_id="answer_1",
+                    result_output_id="answer_1",
                 ),
                 FactFulfillment(
                     requested_fact_id="fact_2",
                     answer_output_id="answer_2",
-                    render_output_id="answer_2",
+                    result_output_id="answer_2",
                 ),
             )
         ),
-        proof_node_refs_by_render_output_id={
+        proof_node_refs_by_result_output_id={
             "answer_1": ("answer_output:fact_1:answer_1",),
             "answer_2": ("answer_output:fact_2:answer_2",),
         },
@@ -320,6 +392,7 @@ def test_answered_lineage_memory_artifacts_are_requested_fact_scoped() -> None:
     known_input = FactAddress.entity(
         address="entity.area.london",
         resource="area",
+        key_id="primary_key",
         reference_text="London",
         identity={"area_id": "area_1"},
     )
@@ -328,10 +401,10 @@ def test_answered_lineage_memory_artifacts_are_requested_fact_scoped() -> None:
         ports=_ports(recorder),
         fact_result=FactResult(
             outcome=AnswerResult(
-                render_spec=RenderSpec(
+                result_projection=ResultProjection(
                     scalar_outputs=(
-                        RenderScalarOutput(id="answer_1", scalar_id="answer_1"),
-                        RenderScalarOutput(id="answer_2", scalar_id="answer_2"),
+                        ScalarResultOutput(id="answer_1", scalar_id="answer_1"),
+                        ScalarResultOutput(id="answer_2", scalar_id="answer_2"),
                     )
                 ),
                 scalars={"answer_1": 14, "answer_2": 9},
@@ -359,16 +432,16 @@ def test_answered_lineage_memory_artifacts_are_requested_fact_scoped() -> None:
                 FactFulfillment(
                     requested_fact_id="fact_1",
                     answer_output_id="answer_1",
-                    render_output_id="answer_1",
+                    result_output_id="answer_1",
                 ),
                 FactFulfillment(
                     requested_fact_id="fact_2",
                     answer_output_id="answer_2",
-                    render_output_id="answer_2",
+                    result_output_id="answer_2",
                 ),
             )
         ),
-        proof_node_refs_by_render_output_id={
+        proof_node_refs_by_result_output_id={
             "answer_1": ("answer_output:fact_1:answer_1",),
             "answer_2": ("answer_output:fact_2:answer_2",),
         },
@@ -426,12 +499,12 @@ def test_answered_lineage_memory_artifacts_are_requested_fact_scoped() -> None:
     }
 
 
-def test_answered_lineage_rejects_missing_fulfillment_render_output() -> None:
+def test_answered_lineage_rejects_missing_fulfillment_result_output() -> None:
     recorder = _Recorder()
 
     with pytest.raises(ValueError, match="render output 'answer_1' is unavailable"):
         record_answered_result_lineage(
-            request=_request("run_missing_render_output"),
+            request=_request("run_missing_result_output"),
             ports=_ports(recorder),
             fact_result=_answer_result(),
             rendered=RenderedFact(
@@ -450,17 +523,17 @@ def test_answered_lineage_rejects_missing_fulfillment_render_output() -> None:
                     FactFulfillment(
                         requested_fact_id="fact_1",
                         answer_output_id="answer_1",
-                        render_output_id="answer_1",
+                        result_output_id="answer_1",
                     ),
                 )
             ),
-            proof_node_refs_by_render_output_id={
+            proof_node_refs_by_result_output_id={
                 "answer_1": ("answer_output:fact_1:answer_1",),
             },
         )
 
 
-def test_terminal_lineage_records_clarification_result() -> None:
+def test_clarification_lineage_waits_without_terminal_result() -> None:
     recorder = _Recorder()
     record_lookup_result_lineage(
         request=_request("run_needs_clarification"),
@@ -489,25 +562,13 @@ def test_terminal_lineage_records_clarification_result() -> None:
         render_step_id="step_render",
         proof_graph=None,
         answer_plan=None,
-        proof_node_refs_by_render_output_id={},
+        proof_node_refs_by_result_output_id={},
     )
 
-    terminal = recorder.terminal_results[0]
-    assert terminal.result.result_kind is RunResultKind.FACTUAL_TERMINAL
-    assert terminal.fact_results[0].result_kind is FactResultKind.NEEDS_CLARIFICATION
-    clarification = terminal.clarifications[0]
-    assert clarification.fact_result_id == terminal.fact_results[0].fact_result_id
+    assert recorder.terminal_results == []
+    clarification = recorder.clarifications[0]
+    assert clarification.step_id == "step_render"
     assert clarification.clarification_id == clarification.payload_json["id"]
-    assert terminal.fact_results[0].payload_json == {
-        "clarificationIds": [clarification.clarification_id],
-    }
-    memory_artifact = _single_memory_artifact(
-        terminal.memory_artifacts,
-        source_kind=MemoryArtifactSourceKind.FACT_RESULT,
-    )
-    assert memory_artifact.payload_json["addresses"][0]["clarificationQuestions"] == [
-        "Which area should I use?"
-    ]
 
 
 def test_terminal_lineage_records_execution_proof_graph_for_no_data() -> None:
@@ -534,7 +595,7 @@ def test_terminal_lineage_records_execution_proof_graph_for_no_data() -> None:
         render_step_id="step_render",
         proof_graph=_proof_graph("answer_1"),
         answer_plan=None,
-        proof_node_refs_by_render_output_id={},
+        proof_node_refs_by_result_output_id={},
     )
 
     terminal = recorder.terminal_results[0]
@@ -548,7 +609,7 @@ def test_terminal_lineage_records_execution_proof_graph_for_no_data() -> None:
     assert terminal.proof_graphs[0].payload_json["nodes"]
 
 
-def test_terminal_lineage_memory_artifacts_are_requested_fact_scoped() -> None:
+def test_clarification_wait_records_each_structured_request() -> None:
     recorder = _Recorder()
     record_lookup_result_lineage(
         request=_request("run_multi_clarification"),
@@ -591,32 +652,18 @@ def test_terminal_lineage_memory_artifacts_are_requested_fact_scoped() -> None:
         render_step_id="step_render",
         proof_graph=None,
         answer_plan=None,
-        proof_node_refs_by_render_output_id={},
+        proof_node_refs_by_result_output_id={},
     )
 
-    payloads_by_fact_result = {
-        artifact.fact_result_id: artifact.payload_json
-        for artifact in recorder.terminal_results[0].memory_artifacts
-        if artifact.source_kind is MemoryArtifactSourceKind.FACT_RESULT
-    }
-    fact_key_by_requested_fact_id = {
-        fact.requested_fact_id: fact.fact_key
-        for fact in recorder.terminal_results[0].requested_facts
-    }
-    fact_result_id_by_fact_key = {
-        fact_key_by_requested_fact_id[fact.requested_fact_id]: fact.fact_result_id
-        for fact in recorder.terminal_results[0].fact_results
-    }
-
-    assert payloads_by_fact_result[fact_result_id_by_fact_key["fact_1"]]["addresses"][
-        0
-    ]["clarificationQuestions"] == ["Which area should I use?"]
-    assert payloads_by_fact_result[fact_result_id_by_fact_key["fact_2"]]["addresses"][
-        0
-    ]["clarificationQuestions"] == ["Which metric should I use?"]
+    assert recorder.terminal_results == []
+    assert [item.payload_json["requestedFactId"] for item in recorder.clarifications] == [
+        "fact_1",
+        "fact_2",
+    ]
+    assert {item.step_id for item in recorder.clarifications} == {"step_render"}
 
 
-def test_pre_contract_terminal_lineage_records_run_scoped_clarification_memory() -> (
+def test_pre_contract_clarification_is_a_run_step_wait() -> (
     None
 ):
     recorder = _Recorder()
@@ -647,53 +694,13 @@ def test_pre_contract_terminal_lineage_records_run_scoped_clarification_memory()
         render_step_id="step_render",
         proof_graph=None,
         answer_plan=None,
-        proof_node_refs_by_render_output_id={},
+        proof_node_refs_by_result_output_id={},
     )
 
-    terminal = recorder.terminal_results[0]
-    assert terminal.requested_facts == ()
-    assert terminal.fact_results == ()
-    memory_artifact = _single_memory_artifact(
-        terminal.memory_artifacts,
-        source_kind=MemoryArtifactSourceKind.RUN_TERMINAL,
-    )
-    assert memory_artifact.payload_json["addresses"][0]["clarificationQuestions"] == [
-        "Which London should I use?"
-    ]
-
-
-def test_active_clarification_context_ignores_addressless_terminal_artifacts() -> None:
-    request_artifact = {
-        "artifactId": "mem_requested_fact_1",
-        "sourceKind": "requested_fact",
-        "outcome": "needs_clarification",
-        "sourceQuestion": "How much did we make yesterday?",
-        "provenance": {"question_contract": {"answer_requests": []}},
-    }
-    clarification_artifact = {
-        "artifactId": "mem_fact_result_1",
-        "sourceKind": "fact_result",
-        "outcome": "needs_clarification",
-        "sourceQuestion": "How much did we make yesterday?",
-        "addresses": [
-            {
-                "address": "outcome.needs_clarification",
-                "kind": "outcome",
-                "terminal": "needs_clarification",
-                "clarificationQuestions": ["Which location?"],
-            }
-        ],
-    }
-
-    context = active_clarification_context(
-        {"factArtifacts": [request_artifact, clarification_artifact]},
-        current_question="ABC Mall",
-    )
-
-    assert context is not None
-    assert len(context.exchanges) == 1
-    assert context.exchanges[0].questions == ("Which location?",)
-    assert context.exchanges[0].answer == "ABC Mall"
+    assert recorder.terminal_results == []
+    clarification = recorder.clarifications[0]
+    assert clarification.step_id == "step_render"
+    assert clarification.payload_json["question"] == "Which London should I use?"
 
 
 def test_lineage_required_rejects_missing_sink() -> None:
@@ -718,11 +725,11 @@ def test_lineage_required_rejects_missing_sink() -> None:
                     FactFulfillment(
                         requested_fact_id="fact_1",
                         answer_output_id="answer_1",
-                        render_output_id="answer_1",
+                        result_output_id="answer_1",
                     ),
                 )
             ),
-            proof_node_refs_by_render_output_id={
+            proof_node_refs_by_result_output_id={
                 "answer_1": ("answer_output:fact_1:answer_1",),
             },
         )
@@ -780,9 +787,9 @@ def test_rendering_lineage_failure_fails_closed_with_runtime_error_result() -> N
         ports=_ports(recorder, run_id="run_lineage_failure"),
         fact_result=FactResult(
             outcome=AnswerResult(
-                render_spec=RenderSpec(
+                result_projection=ResultProjection(
                     scalar_outputs=(
-                        RenderScalarOutput(id="answer_1", scalar_id="answer_1"),
+                        ScalarResultOutput(id="answer_1", scalar_id="answer_1"),
                     )
                 ),
                 scalars={"answer_1": 14},
@@ -801,11 +808,11 @@ def test_rendering_lineage_failure_fails_closed_with_runtime_error_result() -> N
                 FactFulfillment(
                     requested_fact_id="fact_1",
                     answer_output_id="answer_1",
-                    render_output_id="answer_1",
+                    result_output_id="answer_1",
                 ),
             )
         ),
-        proof_node_refs_by_render_output_id={
+        proof_node_refs_by_result_output_id={
             "answer_1": ("answer_output:fact_1:answer_1",),
         },
     )
@@ -863,9 +870,9 @@ def test_lineage_failure_terminal_still_returns_failed_result_when_error_write_f
         ),
         fact_result=FactResult(
             outcome=AnswerResult(
-                render_spec=RenderSpec(
+                result_projection=ResultProjection(
                     scalar_outputs=(
-                        RenderScalarOutput(id="answer_1", scalar_id="answer_1"),
+                        ScalarResultOutput(id="answer_1", scalar_id="answer_1"),
                     )
                 ),
                 scalars={"answer_1": 14},
@@ -884,11 +891,11 @@ def test_lineage_failure_terminal_still_returns_failed_result_when_error_write_f
                 FactFulfillment(
                     requested_fact_id="fact_1",
                     answer_output_id="answer_1",
-                    render_output_id="answer_1",
+                    result_output_id="answer_1",
                 ),
             )
         ),
-        proof_node_refs_by_render_output_id={
+        proof_node_refs_by_result_output_id={
             "answer_1": ("answer_output:fact_1:answer_1",),
         },
     )
@@ -903,6 +910,7 @@ class _Recorder:
     terminal_results: list[FactualTerminalRunResultWrite] = field(default_factory=list)
     runtime_errors: list[RuntimeErrorResultWrite] = field(default_factory=list)
     steps: list[RunStepWrite] = field(default_factory=list)
+    clarifications: list[ClarificationRequestWrite] = field(default_factory=list)
 
     def record_step(self, step: RunStepWrite) -> RunStepWrite:
         self.steps.append(step)
@@ -928,6 +936,13 @@ class _Recorder:
     ) -> RuntimeErrorResultWrite:
         self.runtime_errors.append(runtime_error)
         return runtime_error
+
+    def record_clarification_request(
+        self,
+        clarification: ClarificationRequestWrite,
+    ) -> ClarificationRequestWrite:
+        self.clarifications.append(clarification)
+        return clarification
 
 
 class _FailingAnsweredRecorder(_Recorder):
@@ -998,7 +1013,11 @@ def _answer_result() -> FactResult:
     return FactResult(outcome=AnswerResult(proof_refs=("source_read:read_1",)))
 
 
-def _question_contract(answer_output_id_by_fact_id: dict[str, str]) -> QuestionContract:
+def _question_contract(
+    answer_output_id_by_fact_id: dict[str, str],
+    *,
+    clarification_lineage_refs: tuple[str, ...] = (),
+) -> QuestionContract:
     return QuestionContract(
         requested_facts=tuple(
             RequestedFact(
@@ -1008,11 +1027,12 @@ def _question_contract(answer_output_id_by_fact_id: dict[str, str]) -> QuestionC
                     family=RequestedFactAnswerExpressionFamily.SCALAR_VALUE,
                 ),
                 answer_outputs=(
-                    RequestedFactAnswerOutput(id=answer_output_id),
+                    RequestedFactAnswerOutput(id=answer_output_id, role="ANSWER_VALUE"),
                 ),
             )
             for fact_id, answer_output_id in answer_output_id_by_fact_id.items()
         ),
+        clarification_lineage_refs=clarification_lineage_refs,
     )
 
 

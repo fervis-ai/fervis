@@ -12,11 +12,6 @@ input:
         - ref: stores.field.store_id
           path: store_id
           type: uuid
-          identity:
-            entity_ref: store
-            identity_field: store_id
-            primary_key: true
-            stable: true
         - ref: stores.field.status
           path: status
           type: choice
@@ -34,11 +29,6 @@ input:
         - ref: orders.field.order_id
           path: order_id
           type: uuid
-          identity:
-            entity_ref: order
-            identity_field: order_id
-            primary_key: true
-            stable: true
         - ref: orders.field.amount
           path: amount
           type: decimal

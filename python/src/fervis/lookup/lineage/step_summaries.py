@@ -229,28 +229,24 @@ def _query_enrichment_semantic_items(
 
 
 def _grounding_semantic_items(payload: dict[str, Any]) -> tuple[StepSemanticItem, ...]:
-    reviews = _dict_or_empty(payload.get("known_input_binding_reviews"))
+    bindings = _dict_or_empty(payload.get("known_input_bindings"))
     items: list[StepSemanticItem] = []
-    for input_id, raw_review in reviews.items():
-        review = _dict_or_empty(raw_review)
-        for option_id, raw_option in _dict_or_empty(
-            review.get("option_reviews")
-        ).items():
-            option = _dict_or_empty(raw_option)
-            basis = _text(option.get("because"))
-            if not basis:
-                continue
-            items.append(
-                StepSemanticItem(
-                    kind="resolver_candidate",
-                    payload={
-                        "input_id": str(input_id),
-                        "resolver_read_id": "",
-                        "resolver_label": "",
-                        "basis": basis,
-                    },
-                )
+    for input_id, raw_binding in bindings.items():
+        binding = _dict_or_empty(raw_binding)
+        basis = _text(binding.get("selection_basis"))
+        if not basis:
+            continue
+        items.append(
+            StepSemanticItem(
+                kind="resolver_candidate",
+                payload={
+                    "input_id": str(input_id),
+                    "resolver_read_id": "",
+                    "resolver_label": "",
+                    "basis": basis,
+                },
             )
+        )
     return tuple(items)
 
 
@@ -314,10 +310,15 @@ def _grounding_result_semantic_item(
             kind="identity_set",
             value=(
                 payload.display_value
-                or f"{len(payload.values)} {payload.identity_type} identities"
+                or f"{len(payload.keys)} {payload.entity_kind} identities"
             ),
             label=value.label,
-            detail=payload.identity_field,
+            detail=(
+                f"{payload.key_id}."
+                + "+".join(
+                    component.component_id for component in payload.keys[0].components
+                )
+            ),
         )
     if not isinstance(payload, IdentityValuePayload):
         return None
@@ -332,10 +333,16 @@ def _grounding_result_semantic_item(
             "input_text": _text(getattr(known_input, "text", "")),
             "resolver_read_id": resolver_read_id,
             "resolver_label": _title_words(resolver_read_id or resolver_endpoint_name),
-            "entity_kind": payload.identity_type,
-            "matched_field": payload.identity_field,
-            "matched_value": payload.value,
-            "matched_label": payload.display_value or value.label or payload.value,
+            "entity_kind": payload.entity_kind,
+            "key_id": payload.key_id,
+            "key_components": [
+                {
+                    "component_id": component.component_id,
+                    "value": str(component.value),
+                }
+                for component in payload.key.components
+            ],
+            "matched_label": payload.display_value or value.label,
         },
     )
 

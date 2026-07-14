@@ -16,17 +16,17 @@ input:
       - row_path_id: data
         row_source_id: rs_source_1_data
         cardinality: many
+        candidate_keys:
+          - key_id: store_key
+            entity_kind: store
+            components:
+              - {component_id: store_id, field_id: store_id}
         evidence_items:
           - evidence_id: source_1.data.store_id
             field_id: store_id
             row_path_id: data
             type: uuid
             roles: [identity]
-            identity:
-              entity_ref: store
-              identity_field: store_id
-              primary_key: true
-              stable: true
           - evidence_id: source_1.data.hours
             field_id: hours
             row_path_id: data
@@ -43,11 +43,6 @@ input:
         row_path_id: data
         type: uuid
         roles: [identity]
-        identity:
-          entity_ref: store
-          identity_field: store_id
-          primary_key: true
-          stable: true
       - evidence_id: source_1.data.hours
         field_id: hours
         row_path_id: data
@@ -60,5 +55,5 @@ input:
         type: decimal
 expect:
   result_contains:
-    group_key_fields:
+    entity_fields:
       store_id: true

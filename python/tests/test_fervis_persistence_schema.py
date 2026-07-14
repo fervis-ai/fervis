@@ -80,11 +80,11 @@ def test_fresh_schema_matches_program_and_run_contract() -> None:
         "fervis_program_invocation": {
             "invocation_id",
             "run_id",
-                "program_id",
-                "bindings_json",
-                "kind",
-                "base_invocation_id",
-                "patch_id",
+            "program_id",
+            "bindings_json",
+            "kind",
+            "base_invocation_id",
+            "patch_id",
             "binding_patch_json",
             "revision_id",
             "created_at",
@@ -108,6 +108,8 @@ def test_fresh_schema_matches_program_and_run_contract() -> None:
             "spec_kind",
             "execution_spec",
             "idempotency_key",
+            "idempotency_authority_ref",
+            "idempotency_scope",
             "attempt_count",
             "active_attempt",
             "max_attempts",
@@ -128,10 +130,10 @@ def test_fresh_schema_matches_program_and_run_contract() -> None:
     } == expected_columns
 
 
-def test_initial_revision_fingerprint_matches_current_metadata() -> None:
+def test_head_revision_fingerprint_matches_current_metadata() -> None:
     assert (
         schema.metadata_fingerprint()
-        == "0f709421843a2bd09b9e40cbdce435ed781a0ec637fdeea01e91833786e462a5"
+        == "4c4c314a09147c1e3ba61f56476b6b7a0d516b155d6e1c3c779ddafff3041d5e"
     )
     schema.assert_head_schema_fingerprint_is_current()
 
@@ -154,8 +156,7 @@ def test_persistence_metadata_preserves_runtime_constraint_names() -> None:
 def test_persistence_metadata_preserves_indexed_runtime_fields() -> None:
     work_item = schema.metadata.tables["fervis_run_work_item"]
     index_columns = {
-        tuple(column.name for column in index.columns)
-        for index in work_item.indexes
+        tuple(column.name for column in index.columns) for index in work_item.indexes
     }
 
     assert ("status", "next_attempt_at", "created_at") in index_columns

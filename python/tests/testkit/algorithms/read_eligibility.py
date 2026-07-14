@@ -37,7 +37,9 @@ from tests.testkit.values import fact_value_from_payload
 def run_read_eligibility_parse_case(payload: dict[str, Any]) -> list[str]:
     request = _request_from_input(payload["input"])
     try:
-        result = parse_read_eligibility(dict(payload["input"]["payload"]), request=request)
+        result = parse_read_eligibility(
+            dict(payload["input"]["payload"]), request=request
+        )
     except ValueError as exc:
         if expects_rejection(payload["expect"]):
             return status_mismatches(
@@ -120,9 +122,7 @@ def run_read_eligibility_cards_case(payload: dict[str, Any]) -> list[str]:
     card_payload = read_eligibility_candidate_surface(request).card_payload
     card = card_payload["requested_fact_read_candidates"][0]["read_candidates"][0]
     actual = {
-        "first_response_row_evidence_token": card["response_rows"][0][
-            "evidence_token"
-        ],
+        "first_response_row_evidence_token": card["response_rows"][0]["evidence_token"],
         "field_evidence_tokens_by_field_id": {
             field["field_id"]: field["evidence_token"]
             for row in card["response_rows"]
@@ -135,8 +135,7 @@ def run_read_eligibility_cards_case(payload: dict[str, Any]) -> list[str]:
             for group in card_payload.get("requested_fact_read_candidates") or ()
             if isinstance(group, dict)
             for candidate in group.get("read_candidates") or ()
-            if isinstance(candidate, dict)
-            and candidate.get("applicable_known_inputs")
+            if isinstance(candidate, dict) and candidate.get("applicable_known_inputs")
         },
     }
     return subset_mismatches(

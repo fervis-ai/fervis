@@ -31,7 +31,7 @@ input:
   answer_subject:
     subject_text: sales
     instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
-  answer_outputs: [{description: sales count, role: ROW_POPULATION}]
+  answer_outputs: [{description: sales count, role: ROW_COUNT}]
   used_input_refs: [location]
   answer_requests_count: 1
 expect:

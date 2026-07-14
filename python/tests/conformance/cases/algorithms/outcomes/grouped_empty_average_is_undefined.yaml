@@ -19,7 +19,7 @@ input:
         group_by: [group_id]
         aggregations:
           - {function: avg, input_field: amount, output_field: avg_amount}
-  render_outputs:
+  result_outputs:
     - {id: avg_amount, relation_id: result, field_id: avg_amount}
 expect:
   result_contains:

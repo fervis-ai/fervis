@@ -12,7 +12,7 @@ input:
       rows:
         - {name: Alpha, total: "125.00"}
       completeness: {status: complete, source_kind: api_read, set_kind: unknown, proof_refs: [read:rows]}
-  render_outputs:
+  result_outputs:
     - {id: name, relation_id: rows, field_id: name, label: Location}
     - {id: total, relation_id: rows, field_id: total, label: Sales total}
 expect:

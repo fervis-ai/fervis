@@ -26,7 +26,7 @@ input:
                       - {test_id: subject, kind: SUBJECT_IDENTITY, polarity: MUST_PASS, test_question: "Is this a sale?", owned_question_input_refs: []}
                       - {test_id: normal_instance_guard, kind: NORMAL_INSTANCE_GUARD, polarity: MUST_PASS, test_question: "Is this an ordinary sale?", owned_question_input_refs: []}
                   answer_outputs:
-                    - {id: answer_1, description: count of sales, role: ROW_POPULATION}
+                    - {id: answer_1, description: count of sales, role: ROW_COUNT}
                   used_question_inputs: [q1]
           addresses:
             - address: value.time
@@ -54,7 +54,7 @@ input:
                       - {test_id: sale_identity, kind: SUBJECT_IDENTITY, polarity: MUST_PASS, test_question: "Does this represent a sale?", owned_question_input_refs: []}
                       - {test_id: normal_instance_guard_sales, kind: NORMAL_INSTANCE_GUARD, polarity: MUST_PASS, test_question: "Is this an ordinary sale?", owned_question_input_refs: []}
                   answer_outputs:
-                    - {id: sales_total, description: count of sales made today, role: ROW_POPULATION}
+                    - {id: sales_total, description: count of sales made today, role: ROW_COUNT}
                   used_question_inputs: [time_today]
           addresses:
             - address: value.time
@@ -67,10 +67,9 @@ expect:
       - &canonical_frame
         - answer_shape:
             expression_family: scalar_aggregate
-            output_roles: [ROW_POPULATION]
+            output_roles: [ROW_COUNT]
           parts:
             - {part_id: subject, kind: answer_subject}
             - {part_id: "output:1", kind: answer_output}
             - {part_id: "input:time_scope:1", kind: time_scope}
-            - {part_id: "population:normal_instance_guard:1", kind: population_constraint}
       - *canonical_frame

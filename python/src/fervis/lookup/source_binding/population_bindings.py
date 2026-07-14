@@ -15,6 +15,8 @@ from fervis.lookup.source_binding.model import (
     SourceBindingRequest,
     SourceCandidateDiscoveryRequest,
 )
+from fervis.lookup.source_binding.candidates.model import SourceCandidate
+from fervis.lookup.source_binding.candidates.contracts import JsonObject, JsonValue
 
 
 @dataclass(frozen=True)
@@ -37,14 +39,14 @@ class PopulationBindingIndex:
     ) -> "PopulationBindingIndex":
         return cls(row_set_requirements=_row_set_requirements(request))
 
-    def bindings_for_candidate(
+    def bindings_for_card(
         self,
-        candidate: Any,
+        candidate: JsonObject,
         *,
         requested_fact_id: str = "",
     ) -> tuple[dict[str, Any], ...]:
-        candidate_id = _candidate_id(candidate)
-        relation_id = _candidate_memory_relation_id(candidate)
+        candidate_id = str(candidate.get("source_candidate_id") or "")
+        relation_id = str(candidate.get("memory_relation_id") or "")
         row_set_bindings = tuple(
             _exact_row_set_binding(candidate_id, row_set)
             for row_set in self.row_set_requirements
@@ -57,7 +59,7 @@ class PopulationBindingIndex:
             return row_set_bindings
         if row_set_bindings:
             return row_set_bindings
-        if _candidate_kind(candidate) == "same_scope_api_read":
+        if str(candidate.get("kind") or "") == "same_scope_api_read":
             return (_prior_scope_replay_binding(candidate_id, candidate),)
         return (_candidate_population_binding(candidate_id),)
 
@@ -65,17 +67,10 @@ class PopulationBindingIndex:
         self,
         *,
         requested_fact_id: str,
-        candidate: Any,
+        candidate: SourceCandidate,
         population_binding_id: str,
     ) -> None:
-        allowed = {
-            str(item.get("population_binding_id") or "")
-            for item in self.bindings_for_candidate(
-                candidate,
-                requested_fact_id=requested_fact_id,
-            )
-            if isinstance(item, dict)
-        }
+        allowed = {item.id for item in candidate.population_bindings}
         if population_binding_id not in allowed:
             raise ValueError(
                 "answer population is not admissible for requested fact population"
@@ -107,13 +102,13 @@ def _exact_row_set_binding(
 
 def _prior_scope_replay_binding(
     candidate_id: str,
-    candidate: Any,
+    candidate: JsonObject,
 ) -> dict[str, Any]:
     return {
         "population_binding_id": f"pop.{candidate_id}.prior_scope_replay",
         "kind": "prior_scope_replay",
         "basis": {
-            "memory_relation_id": _candidate_memory_relation_id(candidate),
+            "memory_relation_id": str(candidate.get("memory_relation_id") or ""),
             "bound_params": list(_prior_scope_bound_params(candidate)),
         },
     }
@@ -210,57 +205,17 @@ def _conversation_resolution_row_set_requirements(
     return tuple(output)
 
 
-def _candidate_id(candidate: Any) -> str:
-    if isinstance(candidate, dict):
-        return str(candidate.get("source_candidate_id") or "")
-    return str(getattr(candidate, "id", "") or "")
-
-
-def _candidate_kind(candidate: Any) -> str:
-    if isinstance(candidate, dict):
-        return str(candidate.get("kind") or "")
-    return str(getattr(candidate, "kind", "") or "")
-
-
-def _candidate_memory_relation_id(candidate: Any) -> str:
-    if isinstance(candidate, dict):
-        return str(candidate.get("memory_relation_id") or "")
-    payload = getattr(candidate, "payload", None)
-    if isinstance(payload, dict):
-        memory_relation_id = str(payload.get("memory_relation_id") or "")
-        if memory_relation_id:
-            return memory_relation_id
-    source = getattr(candidate, "source", None)
-    return str(getattr(source, "memory_relation_id", "") or "")
-
-
-def _prior_scope_bound_params(candidate: Any) -> tuple[dict[str, str], ...]:
-    typed_sets = tuple(getattr(candidate, "applied_param_binding_sets", ()) or ())
-    if typed_sets:
-        return _prior_scope_bound_params_from_binding_sets(typed_sets)
-    typed_bindings = tuple(getattr(candidate, "applied_param_bindings", ()) or ())
-    if typed_bindings:
-        return tuple(
-            _prior_scope_bound_param_from_binding(binding) for binding in typed_bindings
-        )
-    if not isinstance(candidate, dict):
-        candidate = getattr(candidate, "payload", None) or {}
-    direct = tuple(
-        item for item in candidate.get("bound_params") or () if isinstance(item, dict)
-    )
+def _prior_scope_bound_params(candidate: JsonObject) -> tuple[dict[str, str], ...]:
+    direct = tuple(item for item in _json_objects(candidate.get("bound_params")))
     if direct:
         return tuple(_prior_scope_bound_param(item) for item in direct)
     invocations = tuple(
-        item
-        for item in candidate.get("source_invocations") or ()
-        if isinstance(item, dict)
+        item for item in _json_objects(candidate.get("source_invocations"))
     )
     output: list[dict[str, str]] = []
     seen: set[tuple[str, str, str]] = set()
     for invocation in invocations:
-        for item in invocation.get("bound_params") or ():
-            if not isinstance(item, dict):
-                continue
+        for item in _json_objects(invocation.get("bound_params")):
             param = _prior_scope_bound_param(item)
             key = (param["param_id"], param["source"], param["value"])
             if key in seen:
@@ -270,33 +225,17 @@ def _prior_scope_bound_params(candidate: Any) -> tuple[dict[str, str], ...]:
     return tuple(output)
 
 
+def _json_objects(value: JsonValue | None) -> tuple[JsonObject, ...]:
+    if isinstance(value, dict):
+        return (value,)
+    if not isinstance(value, list):
+        return ()
+    return tuple(item for item in value if isinstance(item, dict))
+
+
 def _prior_scope_bound_param(item: dict[str, Any]) -> dict[str, str]:
     return {
         "param_id": str(item.get("param_id") or ""),
         "source": str(item.get("source") or "prior_scope"),
         "value": str(item.get("value") or ""),
     }
-
-
-def _prior_scope_bound_param_from_binding(binding: Any) -> dict[str, str]:
-    return {
-        "param_id": str(getattr(binding, "param_id", "") or ""),
-        "source": "prior_scope",
-        "value": str(getattr(binding, "value", "") or ""),
-    }
-
-
-def _prior_scope_bound_params_from_binding_sets(
-    binding_sets: tuple[tuple[Any, ...], ...],
-) -> tuple[dict[str, str], ...]:
-    output: list[dict[str, str]] = []
-    seen: set[tuple[str, str, str]] = set()
-    for bindings in binding_sets:
-        for binding in bindings:
-            param = _prior_scope_bound_param_from_binding(binding)
-            key = (param["param_id"], param["source"], param["value"])
-            if key in seen:
-                continue
-            seen.add(key)
-            output.append(param)
-    return tuple(output)

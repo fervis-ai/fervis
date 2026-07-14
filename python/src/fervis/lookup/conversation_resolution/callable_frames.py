@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import assert_never
 
 from fervis.lookup.answer_program.contracts import (
     BindingProvenance,
@@ -27,6 +26,7 @@ from fervis.lookup.question_contract import (
     RequestedFactLiteralInput,
     RequestedFactRowSetReferenceInput,
 )
+from fervis.lookup.grounding.model import ExpectedInputIdentity
 from fervis.memory.conversation_context import (
     ConversationCallableSignature,
     ConversationMemoryCardProjection,
@@ -58,6 +58,20 @@ class CallableFrameProgram:
             for parameter_id, value_id in self.arguments_by_parameter_id.items()
             if value_id
         )
+
+    @property
+    def expected_input_identities(self) -> dict[str, ExpectedInputIdentity]:
+        expected: dict[str, ExpectedInputIdentity] = {}
+        for parameter_id, value_id in self.arguments_by_parameter_id.items():
+            if not value_id:
+                continue
+            binding = self.base.bindings.get(parameter_id)
+            if binding is None:
+                raise ValueError("callable frame parameter is not bound")
+            identity = _expected_input_identity(binding.value)
+            if identity is not None:
+                expected[_known_input_id(parameter_id)] = identity
+        return expected
 
 
 def load_callable_frame_program(
@@ -109,9 +123,7 @@ def callable_frame_bindings(
     grounded_values: tuple[FactValue, ...],
 ) -> BindingSet:
     values_by_input_id = {
-        value.known_input_id: value
-        for value in grounded_values
-        if value.known_input_id
+        value.known_input_id: value for value in grounded_values if value.known_input_id
     }
     bindings: list[ParameterBinding] = []
     for base_binding in prepared.base.bindings.bindings:
@@ -130,6 +142,7 @@ def callable_frame_bindings(
                     prepared.program,
                     parameter_id=base_binding.parameter_id,
                     value=value,
+                    base_value=base_binding.value,
                 ),
                 provenance=BindingProvenance(
                     kind=BindingProvenanceKind.QUESTION_INPUT,
@@ -148,11 +161,13 @@ def _parameter_value(
     *,
     parameter_id: str,
     value: FactValue,
+    base_value: FactValue,
 ) -> FactValue:
     declaration = next(
         parameter for parameter in program.parameters if parameter.id == parameter_id
     )
     actual = parameter_value_type(value)
+    _require_matching_identity(value, expected=_expected_input_identity(base_value))
     if actual is declaration.value_type:
         return value
     match declaration.value_type, value.payload:
@@ -160,14 +175,43 @@ def _parameter_value(
             return replace(
                 value,
                 payload=IdentitySetValuePayload(
-                    identity_type=identity.identity_type,
-                    identity_field=identity.identity_field,
-                    values=(identity.value,),
+                    keys=(identity.key,),
                     display_value=identity.display_value,
                 ),
             )
         case _:
             raise ValueError("frame argument does not match its program parameter")
+
+
+def _expected_input_identity(value: FactValue) -> ExpectedInputIdentity | None:
+    match value.payload:
+        case IdentityValuePayload() | IdentitySetValuePayload() as identity:
+            return ExpectedInputIdentity(
+                entity_kind=identity.entity_kind,
+                key_id=identity.key_id,
+                key_component_ids=tuple(
+                    component.component_id
+                    for component in (
+                        identity.key.components
+                        if isinstance(identity, IdentityValuePayload)
+                        else identity.keys[0].components
+                    )
+                ),
+            )
+        case _:
+            return None
+
+
+def _require_matching_identity(
+    value: FactValue,
+    *,
+    expected: ExpectedInputIdentity | None,
+) -> None:
+    if expected is None:
+        return
+    actual = _expected_input_identity(value)
+    if actual != expected:
+        raise ValueError("frame argument has the wrong canonical identity")
 
 
 def _verify_program_signature(
@@ -188,7 +232,9 @@ def _verify_program_signature(
         if parameter.id.startswith("question.")
     }
     if signature_parameter_ids != question_parameter_ids:
-        raise ValueError("callable signature does not match program question parameters")
+        raise ValueError(
+            "callable signature does not match program question parameters"
+        )
     if not signature_parameter_ids.issubset(bindings.parameter_ids):
         raise ValueError("callable program has an unbound question parameter")
 
@@ -226,27 +272,29 @@ def _invocation_question_input(
     resolved = inputs_by_ref.get(f"conversation.{value_id}")
     if resolved is None:
         raise ValueError("frame argument does not identify a compiled input")
-    match known, resolved:
-        case RequestedFactLiteralInput(), ResolvedLiteralQuestionInput():
-            if resolved.role is not known.role:
-                raise ValueError("frame argument has the wrong input role")
-            return replace(
-                known,
-                source=KnownInputSource.CONVERSATION_RESOLUTION,
-                text=resolved.value_source_text,
-                resolved_value_text=resolved.resolved_value_text,
-                resolved_input_ref=resolved.input_ref,
-                field_label_text=resolved.field_label_text or known.field_label_text,
-                value_meaning_hint=(
-                    resolved.value_meaning_hint or known.value_meaning_hint
-                ),
-            )
-        case RequestedFactRowSetReferenceInput(), _:
+    match known:
+        case RequestedFactLiteralInput():
+            match resolved:
+                case ResolvedLiteralQuestionInput():
+                    if resolved.role is not known.role:
+                        raise ValueError("frame argument has the wrong input role")
+                    return replace(
+                        known,
+                        source=KnownInputSource.CONVERSATION_RESOLUTION,
+                        text=resolved.value_source_text,
+                        resolved_value_text=resolved.resolved_value_text,
+                        resolved_input_ref=resolved.input_ref,
+                        field_label_text=(
+                            resolved.field_label_text or known.field_label_text
+                        ),
+                        value_meaning_hint=(
+                            resolved.value_meaning_hint or known.value_meaning_hint
+                        ),
+                    )
+                case ResolvedRowSetQuestionInput():
+                    raise ValueError("callable frames cannot replace row-set inputs")
+        case RequestedFactRowSetReferenceInput():
             raise ValueError("callable frames cannot replace row-set inputs")
-        case _, ResolvedRowSetQuestionInput():
-            raise ValueError("callable frames cannot replace row-set inputs")
-        case _:
-            assert_never(known)
 
 
 def _known_input_id(parameter_id: str) -> str:

@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 from fervis.lookup.turn_prompts.projections import source_alignment_reviews_xml
 from fervis.lookup.relation_catalog import (
     CatalogField,
@@ -14,6 +16,7 @@ from fervis.lookup.question_contract import (
     RequestedFact,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
+    ResultSelectionKind,
     RequestedFactGroupKey,
     RequestedFactAnswerOutput,
     RequestedFactLiteralInput,
@@ -37,11 +40,13 @@ from fervis.lookup.plan_selection import (
     PlanSelectionTurnPrompt,
     parse_plan_selection,
 )
+from fervis.lookup.plan_selection.family_specs import PlanSelectionShapeSpec
 from fervis.lookup.plan_selection.source_strategies import source_strategies_by_fact
 from fervis.lookup.fact_plan.fact_plan import (
     BlockedFactBasis,
     PlanImpossible,
 )
+from fervis.lookup.source_binding.candidates import parse_source_candidate_registry
 
 
 def PlanSelectionRequest(**kwargs) -> _PlanSelectionRequest:
@@ -55,6 +60,10 @@ def PlanSelectionRequest(**kwargs) -> _PlanSelectionRequest:
         kwargs["relation_catalog"] = _relation_catalog_for_source_candidate_payload(
             source_candidate_payload
         )
+    kwargs["source_candidates"] = parse_source_candidate_registry(
+        source_candidate_payload
+    )
+    del kwargs["source_candidate_payload"]
     return _PlanSelectionRequest(**kwargs)
 
 
@@ -110,23 +119,62 @@ def test_source_alignment_prompt_groups_sources_inside_requested_fact():
     assert fact_payload["fact_text"] == (
         "staff member with the highest compensation this month"
     )
-    assert [item["source_candidate_id"] for item in fact_payload["source_candidates"]] == [
+    assert [
+        item["source_candidate_id"] for item in fact_payload["source_candidates"]
+    ] == [
         "source_1",
         "source_2",
     ]
     assert "plan_shape" not in xml
-    assert "<source_candidate id=\"source_1\"" in xml
-    assert "<source_candidate id=\"source_2\"" in xml
-    assert xml.index("<requested_fact id=\"fact_1\">") < xml.index(
-        "<source_candidate id=\"source_1\""
+    assert '<source_candidate id="source_1"' in xml
+    assert '<source_candidate id="source_2"' in xml
+    assert xml.index('<requested_fact id="fact_1">') < xml.index(
+        '<source_candidate id="source_1"'
     )
+
+
+def test_source_alignment_prompt_preserves_backend_applied_filter():
+    request = _two_source_alignment_request()
+    source_candidate_payload = deepcopy(request.source_candidates.prompt_payload)
+    source = source_candidate_payload["requested_fact_sources"][0][
+        "source_contexts"
+    ][0]["source_options"][0]
+    source["applied_filters"] = [
+        {
+            "known_input_id": "qi_1",
+            "field_ids": ["staff_id"],
+            "kind": "identity",
+            "display_value": "Nadia Wanjiku",
+        }
+    ]
+    filtered_request = PlanSelectionRequest(
+        question=request.question,
+        question_contract=request.question_contract,
+        requested_facts=request.requested_facts,
+        relation_catalog=request.relation_catalog,
+        source_candidate_payload=source_candidate_payload,
+        conversation_context={},
+    )
+
+    payload = PlanSelectionTurnPrompt(
+        filtered_request
+    ).source_alignment_candidates_payload()
+    candidate = payload["requested_fact_source_candidates"][0][
+        "source_candidates"
+    ][0]
+
+    assert candidate["applied_filters"] == source["applied_filters"]
+    xml = source_alignment_reviews_xml(payload)
+    assert '<filter field_ids="staff_id"' in xml
+    assert 'known_input_id="qi_1"' in xml
+    assert 'display_value="Nadia Wanjiku"' in xml
 
 
 def test_source_alignment_reviews_forward_aligned_contributors_without_narrowing_support():
     request = _two_source_alignment_request()
-    source_payload = request.source_candidate_payload["requested_fact_sources"][0][
-        "source_contexts"
-    ][0]["source_options"][0]
+    source_payload = request.source_candidates.prompt_payload["requested_fact_sources"][
+        0
+    ]["source_contexts"][0]["source_options"][0]
     original_support_set_ids = _support_set_ids(
         source_payload["binding_surface"]["fulfillment_support_sets"]
     )
@@ -155,7 +203,7 @@ def test_source_alignment_reviews_forward_aligned_contributors_without_narrowing
     ).outcome
 
     filtered = filter_prompt_payload_by_plan_selection(
-        request.source_candidate_payload,
+        request.source_candidates.prompt_payload,
         SourceBindingRequest(
             question=request.question,
             question_contract=request.question_contract,
@@ -163,6 +211,7 @@ def test_source_alignment_reviews_forward_aligned_contributors_without_narrowing
             relation_catalog=request.relation_catalog,
             catalog_selection=None,
             plan_selection=plan_selection,
+            source_candidates=request.source_candidates,
         ),
     )
 
@@ -173,9 +222,12 @@ def test_source_alignment_reviews_forward_aligned_contributors_without_narrowing
         "source_1",
         "source_2",
     ]
-    assert _support_set_ids(
-        filtered_sources[0]["binding_surface"]["fulfillment_support_sets"]
-    ) == original_support_set_ids
+    assert (
+        _support_set_ids(
+            filtered_sources[0]["binding_surface"]["fulfillment_support_sets"]
+        )
+        == original_support_set_ids
+    )
 
 
 def test_source_alignment_reviews_exclude_not_aligned_sources():
@@ -205,7 +257,7 @@ def test_source_alignment_reviews_exclude_not_aligned_sources():
     ).outcome
 
     filtered = filter_prompt_payload_by_plan_selection(
-        request.source_candidate_payload,
+        request.source_candidates.prompt_payload,
         SourceBindingRequest(
             question=request.question,
             question_contract=request.question_contract,
@@ -213,6 +265,7 @@ def test_source_alignment_reviews_exclude_not_aligned_sources():
             relation_catalog=request.relation_catalog,
             catalog_selection=None,
             plan_selection=plan_selection,
+            source_candidates=request.source_candidates,
         ),
     )
 
@@ -261,7 +314,9 @@ def test_source_alignment_reviews_derive_impossible_when_no_source_is_aligned():
 
 def test_plan_selection_schema_exposes_only_source_alignment_reviews():
     request = _two_source_alignment_request()
-    schema_text = str(PlanSelectionTurnPrompt(request).response_contract().provider_schema)
+    schema_text = str(
+        PlanSelectionTurnPrompt(request).response_contract().provider_schema
+    )
 
     assert "source_alignment_reviews" in schema_text
     assert "blocked_facts" not in schema_text
@@ -290,8 +345,10 @@ def test_source_alignment_parser_derives_aligned_source_strategy():
         request=request,
     )
 
-    plan = result.outcome.plan_selection_for("fact_1")
+    plans = result.outcome.plan_selections_for("fact_1")
+    plan = next(item for item in plans if item.plan_shape == "ranked_aggregate")
 
+    assert {item.plan_shape for item in plans} == {"ranked_rows", "ranked_aggregate"}
     assert plan.plan_shape == "ranked_aggregate"
     assert plan.source_strategy_id == source_strategy["source_strategy_id"]
     assert plan.required_answer_output_ids == ("answer_1",)
@@ -304,8 +361,92 @@ def test_source_alignment_parser_derives_aligned_source_strategy():
     }
     assert plan.source_members[0].source_interface["answer_output_ids"] == ["answer_1"]
     assert set(
-        _source_interface_response_row_field_ids(plan.source_members[0].source_interface)
+        _source_interface_response_row_field_ids(
+            plan.source_members[0].source_interface
+        )
     ) >= {"location_id", "amount"}
+
+
+def test_source_strategies_keep_viable_source_and_prune_empty_output_coverage():
+    fact = RequestedFact(
+        id="fact_1",
+        description="staff identifier",
+        answer_expression=RequestedFactAnswerExpression(
+            family=RequestedFactAnswerExpressionFamily.SCALAR_VALUE,
+        ),
+        answer_outputs=(
+            RequestedFactAnswerOutput(
+                id="answer_1", description="staff identifier", role="ANSWER_VALUE"
+            ),
+        ),
+    )
+    viable_support = _candidate_key_support_set(
+        "support.source_viable.answer_1.staff_id",
+        answer_output_id="answer_1",
+        slot_id="slot.source_viable.answer_1.staff_id",
+        evidence_id="source_viable.data.staff_id",
+        field_id="staff_id",
+        entity_kind="staff",
+        key_id="staff_key",
+    )
+    source_candidate_payload = {
+        "requested_fact_sources": [
+            {
+                "requested_fact_id": "fact_1",
+                "source_contexts": [
+                    {
+                        "context_id": "fact_1:sources",
+                        "source_options": [
+                            {
+                                "source_candidate_id": "source_viable",
+                                "kind": "new_api_read",
+                                "read_id": "list_staff",
+                                "fields": [{"field_id": "staff_id", "type": "uuid"}],
+                                "fulfillment_support_sets": [viable_support],
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+        "value_source_candidates": [
+            {
+                "source_candidate_id": "source_empty",
+                "kind": "value",
+                "value_id": "prior_staff_id",
+                "fulfillment_support_sets": [],
+                "applies_to_requested_facts": ["fact_1"],
+            }
+        ],
+    }
+    request = PlanSelectionRequest(
+        question="Which staff identifier?",
+        question_contract=QuestionContract(requested_facts=(fact,)),
+        requested_facts=(fact,),
+        relation_catalog=RelationCatalog(reads=()),
+        source_candidate_payload=source_candidate_payload,
+        conversation_context={},
+    )
+
+    strategies = source_strategies_by_fact(
+        request.source_candidates,
+        requested_facts=request.requested_facts,
+        relation_catalog=request.relation_catalog,
+        shape_specs_for_family=lambda _family: (
+            PlanSelectionShapeSpec(
+                "direct_field_value",
+                ("primary",),
+                intrinsic_source_requirements=frozenset(("primary",)),
+            ),
+        ),
+    )["fact_1"]
+
+    assert strategies
+    assert {
+        member.source_candidate_id
+        for strategy in strategies
+        for member in strategy.source_members
+    } == {"source_viable"}
 
 
 def test_plan_selection_prompt_projects_source_strategies():
@@ -335,10 +476,13 @@ def test_grouped_ranked_candidates_project_exact_canonical_operation_bundles():
         description="store with the highest sales this month",
         answer_expression=RequestedFactAnswerExpression(
             family=RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+            selection_kind=ResultSelectionKind.LIMITED_RESULTS,
+            limit_input_ref="limit",
         ),
         answer_outputs=(
             RequestedFactAnswerOutput(
                 id="answer_1",
+                role="ANSWER_VALUE",
                 description="store with the highest sales",
             ),
         ),
@@ -367,20 +511,14 @@ def test_grouped_ranked_candidates_project_exact_canonical_operation_bundles():
                                         {"field_id": "count"},
                                     ],
                                     "fulfillment_support_sets": [
-                                        _group_key_support_set(
+                                        _candidate_key_support_set(
                                             "support.source_1.answer_1.location_id",
                                             answer_output_id="answer_1",
                                             slot_id="slot.source_1.answer_1.location_id",
                                             evidence_id="source_1.data.location_id",
                                             field_id="location_id",
-                                            roles=("identity",),
-                                        ),
-                                        _group_key_support_set(
-                                            "support.source_1.answer_1.label",
-                                            answer_output_id="answer_1",
-                                            slot_id="slot.source_1.answer_1.label",
-                                            evidence_id="source_1.data.label",
-                                            field_id="label",
+                                            entity_kind="location",
+                                            key_id="location_key",
                                         ),
                                         _metric_support_set(
                                             "support.source_1.answer_1.amount",
@@ -408,24 +546,24 @@ def test_grouped_ranked_candidates_project_exact_canonical_operation_bundles():
     )
 
     payload = PlanSelectionTurnPrompt(request).plan_selection_candidates_payload()
-    source_strategies = payload["requested_fact_source_strategies"][0]["source_strategies"]
+    source_strategies = payload["requested_fact_source_strategies"][0][
+        "source_strategies"
+    ]
 
-    source_members = [plan["source_members"][0] for plan in source_strategies]
+    ranked_aggregate_strategies = [
+        plan for plan in source_strategies if plan["plan_shape"] == "ranked_aggregate"
+    ]
+    source_members = [
+        plan["source_members"][0] for plan in ranked_aggregate_strategies
+    ]
     assert all("fulfillment_support_set_ids" not in member for member in source_members)
-    assert {
-        _operation_field_ids(member)
-        for member in source_members
-    } == {
+    assert {_operation_field_ids(member) for member in source_members} == {
         ("location_id", "amount"),
         ("location_id", "count"),
-        ("label", "amount"),
-        ("label", "count"),
     }
     assert [_response_row_field_ids(member) for member in source_members] == [
-        ["location_id", "label", "amount", "count"],
-        ["location_id", "label", "amount", "count"],
-        ["location_id", "label", "amount", "count"],
-        ["location_id", "label", "amount", "count"],
+        ["location_id", "amount", "count", "label"],
+        ["location_id", "amount", "count", "label"],
     ]
 
 
@@ -435,14 +573,18 @@ def test_aggregate_operation_plan_selection_surfaces_each_valid_metric_operation
         description="staff person with the highest sales total",
         answer_expression=RequestedFactAnswerExpression(
             family=RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+            selection_kind=ResultSelectionKind.LIMITED_RESULTS,
+            limit_input_ref="limit",
         ),
         answer_outputs=(
             RequestedFactAnswerOutput(
                 id="answer_1",
+                role="ANSWER_VALUE",
                 description="staff person who made the most sales",
             ),
             RequestedFactAnswerOutput(
                 id="answer_2",
+                role="ANSWER_VALUE",
                 description="sales total for that staff person",
             ),
         ),
@@ -465,12 +607,14 @@ def test_aggregate_operation_plan_selection_surfaces_each_valid_metric_operation
                                     "kind": "new_api_read",
                                     "read_id": "list_sale_list",
                                     "fulfillment_support_sets": [
-                                        _group_key_support_set(
+                                        _candidate_key_support_set(
                                             "support.source_1.answer_1.staff_id",
                                             answer_output_id="answer_1",
                                             slot_id="slot.source_1.answer_1.staff_id",
                                             evidence_id="source_1.data.staff_id",
                                             field_id="staff_id",
+                                            entity_kind="staff",
+                                            key_id="staff_key",
                                         ),
                                         _metric_support_set(
                                             "support.source_1.answer_2.count",
@@ -498,7 +642,7 @@ def test_aggregate_operation_plan_selection_surfaces_each_valid_metric_operation
     )
 
     strategies = source_strategies_by_fact(
-        request.source_candidate_payload,
+        request.source_candidates,
         requested_facts=request.requested_facts,
         relation_catalog=request.relation_catalog,
         shape_specs_for_family=plan_selection_shape_specs_for_family,
@@ -561,7 +705,7 @@ def test_plan_selection_keeps_closed_key_grouped_count_as_one_operation():
             RequestedFactAnswerOutput(
                 id="answer_sales_count",
                 description="sales count",
-                role="ROW_POPULATION",
+                role="ROW_COUNT",
             ),
         ),
     )
@@ -587,7 +731,7 @@ def test_plan_selection_keeps_closed_key_grouped_count_as_one_operation():
                                         {"field_id": "sale_id", "type": "uuid"},
                                     ],
                                     "fulfillment_support_sets": [
-                                        _group_key_support_set(
+                                        _candidate_key_support_set(
                                             "support.source_1.answer_staff.staff_id",
                                             answer_output_id="answer_staff",
                                             slot_id="slot.source_1.answer_staff.staff_id",
@@ -621,13 +765,15 @@ def test_plan_selection_keeps_closed_key_grouped_count_as_one_operation():
     )
 
     strategies = source_strategies_by_fact(
-        request.source_candidate_payload,
+        request.source_candidates,
         requested_facts=request.requested_facts,
         relation_catalog=request.relation_catalog,
         shape_specs_for_family=plan_selection_shape_specs_for_family,
     )["fact_1"]
     aggregate_by_group_strategies = [
-        strategy for strategy in strategies if strategy.plan_shape == "aggregate_by_group"
+        strategy
+        for strategy in strategies
+        if strategy.plan_shape == "aggregate_by_group"
     ]
 
     assert len(aggregate_by_group_strategies) == 1
@@ -651,7 +797,11 @@ def test_plan_selection_projects_operation_evidence_without_operation_bundle_cho
     payload = PlanSelectionTurnPrompt(request).plan_selection_candidates_payload()
 
     fact_payload = payload["requested_fact_source_strategies"][0]
-    source_strategies = fact_payload["source_strategies"]
+    source_strategies = [
+        strategy
+        for strategy in fact_payload["source_strategies"]
+        if strategy["plan_shape"] == "ranked_aggregate"
+    ]
     assert len(source_strategies) == 6
     assert {
         _operation_field_ids(strategy["source_members"][0])
@@ -671,22 +821,28 @@ def test_plan_selection_projects_operation_evidence_without_operation_bundle_cho
         )
         for strategy in source_strategies
     )
-    assert all(strategy["plan_shape"] == "ranked_aggregate" for strategy in source_strategies)
+    assert all(
+        strategy["plan_shape"] == "ranked_aggregate" for strategy in source_strategies
+    )
     assert all(member["source_candidate_id"] == "source_1" for member in source_members)
     assert all("fulfillment_support_sets" not in member for member in source_members)
-    assert all({
-        "staff_id",
-        "amount",
-        "calculated_pay",
-        "commission",
-    } <= set(_response_row_field_ids(member)) for member in source_members)
+    assert all(
+        {
+            "staff_id",
+            "amount",
+            "calculated_pay",
+            "commission",
+        }
+        <= set(_response_row_field_ids(member))
+        for member in source_members
+    )
 
 
 def test_source_alignment_filter_preserves_all_support_sets_for_aligned_source():
     request = _ranked_multi_metric_plan_selection_request()
-    source_payload = request.source_candidate_payload["requested_fact_sources"][0][
-        "source_contexts"
-    ][0]["source_options"][0]
+    source_payload = request.source_candidates.prompt_payload["requested_fact_sources"][
+        0
+    ]["source_contexts"][0]["source_options"][0]
     original_support_set_ids = _support_set_ids(
         source_payload["binding_surface"]["fulfillment_support_sets"]
     )
@@ -709,7 +865,7 @@ def test_source_alignment_filter_preserves_all_support_sets_for_aligned_source()
     ).outcome
 
     filtered = filter_prompt_payload_by_plan_selection(
-        request.source_candidate_payload,
+        request.source_candidates.prompt_payload,
         SourceBindingRequest(
             question=request.question,
             question_contract=request.question_contract,
@@ -717,15 +873,17 @@ def test_source_alignment_filter_preserves_all_support_sets_for_aligned_source()
             relation_catalog=request.relation_catalog,
             catalog_selection=None,
             plan_selection=plan_selection,
+            source_candidates=request.source_candidates,
         ),
     )
 
     filtered_source = filtered["requested_fact_sources"][0]["source_contexts"][0][
         "source_options"
     ][0]
-    assert _support_set_ids(
-        filtered_source["binding_surface"]["fulfillment_support_sets"]
-    ) == original_support_set_ids
+    assert (
+        _support_set_ids(filtered_source["binding_surface"]["fulfillment_support_sets"])
+        == original_support_set_ids
+    )
 
 
 def test_plan_selection_payload_preserves_relation_member_roles():
@@ -735,7 +893,7 @@ def test_plan_selection_payload_preserves_relation_member_roles():
         answer_expression=RequestedFactAnswerExpression(
             family=RequestedFactAnswerExpressionFamily.SET_DIFFERENCE,
         ),
-        answer_outputs=(RequestedFactAnswerOutput(id="answer_1"),),
+        answer_outputs=(RequestedFactAnswerOutput(id="answer_1", role="ANSWER_VALUE"),),
     )
     request = PlanSelectionRequest(
         question="Which products were not sold this month?",
@@ -755,12 +913,14 @@ def test_plan_selection_payload_preserves_relation_member_roles():
                                     "kind": "new_api_read",
                                     "read_id": "list_products",
                                     "fulfillment_support_sets": [
-                                        _group_key_support_set(
-                                            "support.products.answer_1.name",
+                                        _candidate_key_support_set(
+                                            "support.products.answer_1.product_id",
                                             answer_output_id="answer_1",
-                                            slot_id="slot.products.name",
-                                            evidence_id="source_products.data.name",
-                                            field_id="name",
+                                            slot_id="slot.products.product_id",
+                                            evidence_id="source_products.data.product_id",
+                                            field_id="product_id",
+                                            entity_kind="product",
+                                            key_id="product_key",
                                         )
                                     ],
                                     "fields": [
@@ -773,7 +933,7 @@ def test_plan_selection_payload_preserves_relation_member_roles():
                                     "kind": "new_api_read",
                                     "read_id": "list_sales",
                                     "fulfillment_support_sets": [
-                                        _group_key_support_set(
+                                        _candidate_key_support_set(
                                             "support.sales.answer_1.product_id",
                                             answer_output_id="answer_1",
                                             slot_id="slot.sales.product_id",
@@ -781,6 +941,8 @@ def test_plan_selection_payload_preserves_relation_member_roles():
                                                 "source_sales.data.product_id"
                                             ),
                                             field_id="product_id",
+                                            entity_kind="product",
+                                            key_id="product_key",
                                         )
                                     ],
                                     "fields": [{"field_id": "product_id"}],
@@ -795,7 +957,9 @@ def test_plan_selection_payload_preserves_relation_member_roles():
     )
 
     payload = PlanSelectionTurnPrompt(request).plan_selection_candidates_payload()
-    source_strategy = payload["requested_fact_source_strategies"][0]["source_strategies"][0]
+    source_strategy = payload["requested_fact_source_strategies"][0][
+        "source_strategies"
+    ][0]
 
     assert [
         (member["requirement_ids"], member["source_candidate_id"])
@@ -816,7 +980,18 @@ def test_plan_selection_candidates_are_limited_to_answer_expression_family():
         for item in payload["requested_fact_source_strategies"][0]["source_strategies"]
     }
 
-    assert candidate_shapes == {"ranked_aggregate"}
+    assert candidate_shapes == {"ranked_rows", "ranked_aggregate"}
+
+
+def test_ranked_selection_exposes_both_catalog_aware_physical_shapes():
+    specs = plan_selection_shape_specs_for_family(
+        RequestedFactAnswerExpressionFamily.RANKED_SELECTION
+    )
+
+    assert tuple(spec.plan_shape for spec in specs) == (
+        "ranked_rows",
+        "ranked_aggregate",
+    )
 
 
 def test_relation_source_strategies_reject_intrinsic_only_value_sources():
@@ -825,8 +1000,9 @@ def test_relation_source_strategies_reject_intrinsic_only_value_sources():
         description="store rows",
         answer_expression=RequestedFactAnswerExpression(
             family=RequestedFactAnswerExpressionFamily.LIST_ROWS,
+            selection_kind=ResultSelectionKind.ALL_RESULTS,
         ),
-        answer_outputs=(RequestedFactAnswerOutput(id="answer_1"),),
+        answer_outputs=(RequestedFactAnswerOutput(id="answer_1", role="ANSWER_VALUE"),),
     )
     request = PlanSelectionRequest(
         question="Which stores are open?",
@@ -840,6 +1016,7 @@ def test_relation_source_strategies_reject_intrinsic_only_value_sources():
                     "source_candidate_id": "value_1",
                     "kind": "value",
                     "value_id": "value_1",
+                    "applies_to_requested_facts": ["fact_1"],
                 }
             ],
         },
@@ -848,7 +1025,9 @@ def test_relation_source_strategies_reject_intrinsic_only_value_sources():
 
     payload = PlanSelectionTurnPrompt(request).plan_selection_candidates_payload()
 
-    assert payload["requested_fact_source_strategies"][0]["source_strategies"] == []
+    strategies = payload["requested_fact_source_strategies"][0]["source_strategies"]
+
+    assert all(strategy["plan_shape"] != "ranked_aggregate" for strategy in strategies)
 
 
 def test_scalar_count_candidates_keep_one_row_population_grain_per_candidate():
@@ -861,6 +1040,7 @@ def test_scalar_count_candidates_keep_one_row_population_grain_per_candidate():
         answer_outputs=(
             RequestedFactAnswerOutput(
                 id="answer_1",
+                role="ANSWER_VALUE",
                 description="shift count",
             ),
         ),
@@ -902,8 +1082,7 @@ def test_scalar_count_candidates_keep_one_row_population_grain_per_candidate():
                                                 "row.data_deposits"
                                             ),
                                             evidence_id=(
-                                                "source_1.data.deposits."
-                                                "cash_deposit_id"
+                                                "source_1.data.deposits.cash_deposit_id"
                                             ),
                                             row_path_id="data.deposits",
                                             field_id="cash_deposit_id",
@@ -943,6 +1122,7 @@ def test_plan_selection_summary_explains_count_vs_measured_value_candidates():
         answer_outputs=(
             RequestedFactAnswerOutput(
                 id="answer_1",
+                role="ANSWER_VALUE",
                 description="Amount of cash deposited",
             ),
         ),
@@ -982,14 +1162,12 @@ def test_plan_selection_summary_explains_count_vs_measured_value_candidates():
                                             "fulfillment_slots": [
                                                 {
                                                     "fulfillment_slot_id": (
-                                                        "slot.source_1.answer_1."
-                                                        "metric"
+                                                        "slot.source_1.answer_1.metric"
                                                     ),
                                                     "metric_measure_evidence": [
                                                         {
                                                             "evidence_id": (
-                                                                "source_1.data."
-                                                                "amount"
+                                                                "source_1.data.amount"
                                                             ),
                                                             "field_id": "amount",
                                                             "row_path_id": "data",
@@ -997,7 +1175,7 @@ def test_plan_selection_summary_explains_count_vs_measured_value_candidates():
                                                         },
                                                         {
                                                             "evidence_id": (
-                                                                "source_1.data." "fees"
+                                                                "source_1.data.fees"
                                                             ),
                                                             "field_id": "fees",
                                                             "row_path_id": "data",
@@ -1039,7 +1217,7 @@ def test_scalar_count_candidates_drop_non_executable_row_population_grains():
         answer_expression=RequestedFactAnswerExpression(
             family=RequestedFactAnswerExpressionFamily.SCALAR_AGGREGATE,
         ),
-        answer_outputs=(RequestedFactAnswerOutput(id="answer_1"),),
+        answer_outputs=(RequestedFactAnswerOutput(id="answer_1", role="ANSWER_VALUE"),),
     )
     request = PlanSelectionRequest(
         question="How many sales happened this month?",
@@ -1115,7 +1293,7 @@ def test_scalar_count_candidates_keep_executable_row_population_grain():
         answer_expression=RequestedFactAnswerExpression(
             family=RequestedFactAnswerExpressionFamily.SCALAR_AGGREGATE,
         ),
-        answer_outputs=(RequestedFactAnswerOutput(id="answer_1"),),
+        answer_outputs=(RequestedFactAnswerOutput(id="answer_1", role="ANSWER_VALUE"),),
     )
     request = PlanSelectionRequest(
         question="How many detail rows exist?",
@@ -1177,14 +1355,17 @@ def test_list_rows_candidate_keeps_answer_value_support_with_row_context():
         description="staff and sales amount",
         answer_expression=RequestedFactAnswerExpression(
             family=RequestedFactAnswerExpressionFamily.LIST_ROWS,
+            selection_kind=ResultSelectionKind.ALL_RESULTS,
         ),
         answer_outputs=(
             RequestedFactAnswerOutput(
                 id="answer_1",
+                role="ANSWER_VALUE",
                 description="staff name",
             ),
             RequestedFactAnswerOutput(
                 id="answer_2",
+                role="ANSWER_VALUE",
                 description="sales amount",
             ),
         ),
@@ -1286,7 +1467,7 @@ def test_source_binding_preserves_support_sets_for_aligned_source_candidate():
     ).outcome
 
     filtered = filter_prompt_payload_by_plan_selection(
-        request.source_candidate_payload,
+        request.source_candidates.prompt_payload,
         SourceBindingRequest(
             question=request.question,
             question_contract=request.question_contract,
@@ -1294,6 +1475,7 @@ def test_source_binding_preserves_support_sets_for_aligned_source_candidate():
             relation_catalog=request.relation_catalog,
             catalog_selection=None,
             plan_selection=plan_selection,
+            source_candidates=request.source_candidates,
         ),
     )
 
@@ -1348,6 +1530,7 @@ def test_source_binding_filters_top_level_value_candidate_support_sets():
                 "source_candidate_id": "value_1",
                 "kind": "value",
                 "value_id": "value_1",
+                "applies_to_requested_facts": ["fact_1"],
                 "fulfillment_support_sets": [
                     selected_support_set,
                     stale_support_set,
@@ -1386,6 +1569,7 @@ def test_source_binding_filters_top_level_value_candidate_support_sets():
             relation_catalog=RelationCatalog(reads=()),
             catalog_selection=None,
             plan_selection=plan_selection,
+            source_candidates=parse_source_candidate_registry(payload),
         ),
     )
 
@@ -1431,8 +1615,10 @@ def test_grouped_ranked_candidates_reject_cross_row_grain_operation_bundle():
         description="staff who earned the most compensation",
         answer_expression=RequestedFactAnswerExpression(
             family=RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+            selection_kind=ResultSelectionKind.LIMITED_RESULTS,
+            limit_input_ref="limit",
         ),
-        answer_outputs=(RequestedFactAnswerOutput(id="answer_1"),),
+        answer_outputs=(RequestedFactAnswerOutput(id="answer_1", role="ANSWER_VALUE"),),
     )
     request = PlanSelectionRequest(
         question="Which staff earned the most compensation this month?",
@@ -1457,14 +1643,15 @@ def test_grouped_ranked_candidates_reject_cross_row_grain_operation_bundle():
                                         {"field_id": "total_paid", "type": "decimal"},
                                     ],
                                     "fulfillment_support_sets": [
-                                        _group_key_support_set(
+                                        _candidate_key_support_set(
                                             "support.source_1.answer_1.staff_id",
                                             answer_output_id="answer_1",
                                             slot_id="slot.source_1.answer_1.staff_id",
                                             evidence_id=("source_1.staffs.staff_id"),
                                             field_id="staff_id",
                                             row_path_id="staffs",
-                                            roles=("identity",),
+                                            entity_kind="staff",
+                                            key_id="staff_key",
                                         ),
                                         _row_count_support_set(
                                             "support.source_1.answer_1.root_count",
@@ -1486,7 +1673,9 @@ def test_grouped_ranked_candidates_reject_cross_row_grain_operation_bundle():
 
     payload = PlanSelectionTurnPrompt(request).plan_selection_candidates_payload()
 
-    assert payload["requested_fact_source_strategies"][0]["source_strategies"] == []
+    strategies = payload["requested_fact_source_strategies"][0]["source_strategies"]
+
+    assert all(strategy["plan_shape"] != "ranked_aggregate" for strategy in strategies)
 
 
 def test_grouped_ranked_candidates_reject_collection_group_coordinates():
@@ -1495,8 +1684,10 @@ def test_grouped_ranked_candidates_reject_collection_group_coordinates():
         description="store with the highest sales this month",
         answer_expression=RequestedFactAnswerExpression(
             family=RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+            selection_kind=ResultSelectionKind.LIMITED_RESULTS,
+            limit_input_ref="limit",
         ),
-        answer_outputs=(RequestedFactAnswerOutput(id="answer_1"),),
+        answer_outputs=(RequestedFactAnswerOutput(id="answer_1", role="ANSWER_VALUE"),),
     )
     request = PlanSelectionRequest(
         question="Which store has the highest sales this month?",
@@ -1516,14 +1707,13 @@ def test_grouped_ranked_candidates_reject_collection_group_coordinates():
                                     "kind": "new_api_read",
                                     "read_id": "list_store_list",
                                     "fulfillment_support_sets": [
-                                        _group_key_support_set(
+                                        _value_support_set(
                                             "support.source_1.answer_1.hours",
                                             answer_output_id="answer_1",
                                             slot_id="slot.source_1.answer_1.hours",
                                             evidence_id="source_1.data.hours",
                                             field_id="hours",
                                             row_path_id="data",
-                                            type="json",
                                         ),
                                         _metric_support_set(
                                             "support.source_1.answer_1.amount",
@@ -1545,7 +1735,9 @@ def test_grouped_ranked_candidates_reject_collection_group_coordinates():
 
     payload = PlanSelectionTurnPrompt(request).plan_selection_candidates_payload()
 
-    assert payload["requested_fact_source_strategies"][0]["source_strategies"] == []
+    strategies = payload["requested_fact_source_strategies"][0]["source_strategies"]
+
+    assert all(strategy["plan_shape"] != "ranked_aggregate" for strategy in strategies)
 
 
 def test_grouped_operation_candidate_combines_multiple_identity_outputs_with_metric():
@@ -1586,42 +1778,44 @@ def test_grouped_operation_candidate_combines_multiple_identity_outputs_with_met
                                     "kind": "new_api_read",
                                     "read_id": "sales_read",
                                     "fields": [
-                                        {"field_id": "staff_name", "type": "string"},
+                                        {"field_id": "staff_id", "type": "uuid"},
                                         {
-                                            "field_id": "snapshot_merch_name",
-                                            "type": "string",
+                                            "field_id": "merch_id",
+                                            "type": "uuid",
                                         },
                                         {
-                                            "field_id": "snapshot_shade_name",
-                                            "type": "string",
+                                            "field_id": "shade_id",
+                                            "type": "uuid",
                                         },
                                         {"field_id": "amount", "type": "decimal"},
                                     ],
                                     "fulfillment_support_sets": [
-                                        _group_key_support_set(
+                                        _candidate_key_support_set(
                                             "support.source_1.answer_1.staff",
                                             answer_output_id="answer_1",
                                             slot_id="slot.source_1.answer_1.staff",
-                                            evidence_id="source_1.data.staff_name",
-                                            field_id="staff_name",
+                                            evidence_id="source_1.data.staff_id",
+                                            field_id="staff_id",
+                                            entity_kind="staff",
+                                            key_id="staff_key",
                                         ),
-                                        _group_key_support_set(
+                                        _candidate_key_support_set(
                                             "support.source_1.answer_2.product",
                                             answer_output_id="answer_2",
                                             slot_id="slot.source_1.answer_2.product",
-                                            evidence_id=(
-                                                "source_1.data.snapshot_merch_name"
-                                            ),
-                                            field_id="snapshot_merch_name",
+                                            evidence_id=("source_1.data.merch_id"),
+                                            field_id="merch_id",
+                                            entity_kind="merch",
+                                            key_id="merch_key",
                                         ),
-                                        _group_key_support_set(
+                                        _candidate_key_support_set(
                                             "support.source_1.answer_3.shade",
                                             answer_output_id="answer_3",
                                             slot_id="slot.source_1.answer_3.shade",
-                                            evidence_id=(
-                                                "source_1.data.snapshot_shade_name"
-                                            ),
-                                            field_id="snapshot_shade_name",
+                                            evidence_id=("source_1.data.shade_id"),
+                                            field_id="shade_id",
+                                            entity_kind="shade",
+                                            key_id="shade_key",
                                         ),
                                         _metric_support_set(
                                             "support.source_1.answer_4.amount",
@@ -1647,7 +1841,7 @@ def test_grouped_operation_candidate_combines_multiple_identity_outputs_with_met
         for item in payload["requested_fact_source_strategies"][0]["source_strategies"]
         if item["plan_shape"] == "aggregate_by_group"
         and _response_row_field_ids(item["source_members"][0])
-        == ["staff_name", "snapshot_merch_name", "snapshot_shade_name", "amount"]
+        == ["staff_id", "merch_id", "shade_id", "amount"]
     )
     source_member = source_strategy["source_members"][0]
 
@@ -1656,9 +1850,9 @@ def test_grouped_operation_candidate_combines_multiple_identity_outputs_with_met
         "answer_4",
     }
     assert _response_row_field_ids(source_member) == [
-        "staff_name",
-        "snapshot_merch_name",
-        "snapshot_shade_name",
+        "staff_id",
+        "merch_id",
+        "shade_id",
         "amount",
     ]
 
@@ -1673,6 +1867,7 @@ def test_plan_selection_prompt_projects_value_candidates_as_selectable_options()
         answer_outputs=(
             RequestedFactAnswerOutput(
                 id="answer_1",
+                role="ANSWER_VALUE",
                 description="difference",
             ),
         ),
@@ -1689,9 +1884,9 @@ def test_plan_selection_prompt_projects_value_candidates_as_selectable_options()
                     "source_candidate_id": "value_1",
                     "kind": "value",
                     "value_id": "value_1",
+                    "applies_to_requested_facts": ["fact_1"],
                     "type": "number",
                     "value": 42,
-                    "applies_to_requested_facts": ["fact_1"],
                 }
             ],
         },
@@ -1717,6 +1912,7 @@ def test_plan_selection_projects_computed_scalar_from_two_distinct_values():
         answer_outputs=(
             RequestedFactAnswerOutput(
                 id="answer_1",
+                role="ANSWER_VALUE",
                 description="difference",
             ),
         ),
@@ -1772,6 +1968,7 @@ def test_plan_selection_keeps_value_source_role_when_value_has_fulfillment_suppo
         answer_outputs=(
             RequestedFactAnswerOutput(
                 id="answer_1",
+                role="ANSWER_VALUE",
                 description="known total",
             ),
         ),
@@ -1816,7 +2013,9 @@ def test_plan_selection_keeps_value_source_role_when_value_has_fulfillment_suppo
 
     payload = PlanSelectionTurnPrompt(request).plan_selection_candidates_payload()
 
-    source_strategy = payload["requested_fact_source_strategies"][0]["source_strategies"][0]
+    source_strategy = payload["requested_fact_source_strategies"][0][
+        "source_strategies"
+    ][0]
     assert source_strategy["source_members"][0]["source_candidate_id"] == "value_1"
     assert "row_path_ids" not in source_strategy["source_members"][0]
 
@@ -1827,10 +2026,13 @@ def _plan_selection_request() -> PlanSelectionRequest:
         description="store with the highest sales this month",
         answer_expression=RequestedFactAnswerExpression(
             family=RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+            selection_kind=ResultSelectionKind.LIMITED_RESULTS,
+            limit_input_ref="limit",
         ),
         answer_outputs=(
             RequestedFactAnswerOutput(
                 id="answer_1",
+                role="ANSWER_VALUE",
                 description="store with the highest sales",
             ),
         ),
@@ -1851,16 +2053,19 @@ def _ranked_multi_metric_plan_selection_request() -> PlanSelectionRequest:
         description="staff member with the highest compensation this month",
         answer_expression=RequestedFactAnswerExpression(
             family=RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+            selection_kind=ResultSelectionKind.LIMITED_RESULTS,
+            limit_input_ref="limit",
         ),
         answer_outputs=(
             RequestedFactAnswerOutput(
                 id="answer_1",
+                role="ANSWER_VALUE",
                 description="staff member with the highest compensation",
             ),
         ),
     )
     support_sets = [
-        _group_key_support_set(
+        _candidate_key_support_set(
             "support.source_1.answer_1.location_id",
             answer_output_id="answer_1",
             slot_id="slot.source_1.answer_1.location_id",
@@ -1869,7 +2074,7 @@ def _ranked_multi_metric_plan_selection_request() -> PlanSelectionRequest:
             row_path_id="shift_compensation",
             type="uuid",
         ),
-        _group_key_support_set(
+        _candidate_key_support_set(
             "support.source_1.answer_1.staff_id",
             answer_output_id="answer_1",
             slot_id="slot.source_1.answer_1.staff_id",
@@ -1954,11 +2159,11 @@ def _ranked_multi_metric_plan_selection_request() -> PlanSelectionRequest:
 
 def _two_source_alignment_request() -> PlanSelectionRequest:
     request = _ranked_multi_metric_plan_selection_request()
-    shift_compensation_source = request.source_candidate_payload[
+    shift_compensation_source = request.source_candidates.prompt_payload[
         "requested_fact_sources"
     ][0]["source_contexts"][0]["source_options"][0]
     payroll_support_sets = [
-        _group_key_support_set(
+        _candidate_key_support_set(
             "support.source_2.answer_1.staff_id",
             answer_output_id="answer_1",
             slot_id="slot.source_2.answer_1.staff_id",
@@ -2032,8 +2237,11 @@ def _source_candidate_payload() -> dict[str, object]:
                     "fulfillment_slot_id": "slot.row",
                     "row_count_basis_evidence": [
                         {
+                            "evidence_id": "row_population.row_source.data",
                             "type": "row_population",
                             "row_path_id": "data",
+                            "row_source_id": "row_source.data",
+                            "row_cardinality": "many",
                             "field_id": "data",
                         }
                     ],
@@ -2062,26 +2270,21 @@ def _source_candidate_payload() -> dict[str, object]:
             "fulfillment_slots": [
                 {
                     "fulfillment_slot_id": "slot.source_3.answer_1.group",
-                    "group_key_evidence": [
+                    "entity_evidence": [
                         {
-                            "evidence_id": ("source_3.data.location_id"),
-                            "field_id": "location_id",
+                            "evidence_id": "source_3.data.key.location_key",
+                            "type": "candidate_key",
+                            "key_id": "location_key",
+                            "entity_kind": "location",
+                            "components": [
+                                {
+                                    "component_id": "location_id",
+                                    "field_id": "location_id",
+                                    "field_evidence_id": "source_3.data.location_id",
+                                }
+                            ],
                             "row_path_id": "data",
-                        }
-                    ],
-                }
-            ],
-        },
-        {
-            "fulfillment_support_set_id": ("support.source_3.fact_1.scope"),
-            "fulfillment_slots": [
-                {
-                    "fulfillment_slot_id": "slot.scope",
-                    "scope_evidence": [
-                        {
-                            "evidence_id": ("source_3.data.sold_at"),
-                            "field_id": "sold_at",
-                            "row_path_id": "data",
+                            "row_source_id": "row_source.data",
                         }
                     ],
                 }
@@ -2198,7 +2401,7 @@ def _metric_support_set(
     }
 
 
-def _group_key_support_set(
+def _value_support_set(
     support_set_id: str,
     *,
     answer_output_id: str,
@@ -2206,26 +2409,61 @@ def _group_key_support_set(
     evidence_id: str,
     field_id: str,
     row_path_id: str = "data",
-    roles: tuple[str, ...] = (),
-    type: str = "",
 ) -> dict[str, object]:
-    evidence = {
-        "evidence_id": evidence_id,
-        "field_id": field_id,
-    }
-    if row_path_id:
-        evidence["row_path_id"] = row_path_id
-    if roles:
-        evidence["roles"] = list(roles)
-    if type:
-        evidence["type"] = type
     return {
         "fulfillment_support_set_id": support_set_id,
         "answer_output_id": answer_output_id,
         "fulfillment_slots": [
             {
                 "fulfillment_slot_id": slot_id,
-                "group_key_evidence": [evidence],
+                "value_evidence": [
+                    {
+                        "evidence_id": evidence_id,
+                        "field_id": field_id,
+                        "row_path_id": row_path_id,
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def _candidate_key_support_set(
+    support_set_id: str,
+    *,
+    answer_output_id: str,
+    slot_id: str,
+    evidence_id: str,
+    field_id: str,
+    row_path_id: str = "data",
+    entity_kind: str = "entity",
+    key_id: str = "",
+    type: str = "",
+) -> dict[str, object]:
+    del type
+    resolved_key_id = key_id or f"{field_id}_key"
+    evidence = {
+        "evidence_id": f"{evidence_id}.key.{resolved_key_id}",
+        "type": "candidate_key",
+        "key_id": resolved_key_id,
+        "entity_kind": entity_kind,
+        "components": [
+            {
+                "component_id": field_id,
+                "field_id": field_id,
+                "field_evidence_id": evidence_id,
+            }
+        ],
+        "row_path_id": row_path_id,
+        "row_source_id": f"row_source.{row_path_id}",
+    }
+    return {
+        "fulfillment_support_set_id": support_set_id,
+        "answer_output_id": answer_output_id,
+        "fulfillment_slots": [
+            {
+                "fulfillment_slot_id": slot_id,
+                "entity_evidence": [evidence],
             }
         ],
     }
@@ -2370,19 +2608,32 @@ def _candidate_support_evidence(
     candidate: dict[str, object],
 ) -> tuple[dict[str, object], ...]:
     return tuple(
-        evidence
+        {**evidence, "field_id": field_id}
         for support_set in candidate.get("fulfillment_support_sets") or ()
         if isinstance(support_set, dict)
         for slot in support_set.get("fulfillment_slots") or ()
         if isinstance(slot, dict)
         for key in (
             "metric_measure_evidence",
-            "scope_evidence",
-            "group_key_evidence",
+            "value_evidence",
+            "entity_evidence",
             "row_count_basis_evidence",
         )
         for evidence in slot.get(key) or ()
-        if isinstance(evidence, dict) and evidence.get("field_id")
+        if isinstance(evidence, dict)
+        for field_id in _support_evidence_field_ids(evidence)
+        if field_id
+    )
+
+
+def _support_evidence_field_ids(evidence: dict[str, object]) -> tuple[str, ...]:
+    field_id = str(evidence.get("field_id") or "")
+    if field_id:
+        return (field_id,)
+    return tuple(
+        str(component.get("field_id") or "")
+        for component in evidence.get("components") or ()
+        if isinstance(component, dict) and str(component.get("field_id") or "")
     )
 
 
@@ -2393,7 +2644,10 @@ def _evidence_path(
     default_row_path_id: str,
 ) -> str:
     explicit_path = str(
-        evidence.get("field_path") or evidence.get("response_path") or evidence.get("path") or ""
+        evidence.get("field_path")
+        or evidence.get("response_path")
+        or evidence.get("path")
+        or ""
     )
     if explicit_path:
         return explicit_path

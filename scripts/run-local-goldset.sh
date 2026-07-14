@@ -22,7 +22,7 @@ Options:
   --ledger-dir PATH       Output directory for per-case ledgers and command output.
   --python PATH           Python executable. Defaults to <project-root>/.venv/bin/python.
   --wait-seconds SECONDS  Per-case wait timeout. Defaults to 300.
-  --determinism-runs N    Independent full executions per case. Defaults to 1.
+  --stable-runs N         Required independent successful runs per case. Defaults to 1.
   --enforce-structured-determinism
                           Require identical structured results across repeats.
   --attempts N            Attempts for retryable provider failures. Defaults to 1.
@@ -35,6 +35,17 @@ EOF
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+load_env_file() {
+  local env_file="$1"
+  if [[ ! -f "$env_file" ]]; then
+    return 0
+  fi
+  set -a
+  # shellcheck disable=SC1090
+  . "$env_file"
+  set +a
+}
+
 case_ids="${FERVIS_GOLDSET_CASE_IDS:-}"
 project_root="${FERVIS_HOST_PROJECT_ROOT:-}"
 suite_ref="${FERVIS_GOLDSET_SUITE:-}"
@@ -44,7 +55,7 @@ database_url="${FERVIS_LOCAL_DATABASE_URL:-}"
 ledger_dir=""
 python_bin=""
 wait_seconds="300"
-determinism_runs="1"
+stable_runs="1"
 enforce_structured_determinism="0"
 attempts="1"
 retry_provider_failures="0"
@@ -92,8 +103,8 @@ while [[ $# -gt 0 ]]; do
       wait_seconds="${2:-}"
       shift 2
       ;;
-    --determinism-runs)
-      determinism_runs="${2:-}"
+    --stable-runs)
+      stable_runs="${2:-}"
       shift 2
       ;;
     --enforce-structured-determinism)
@@ -133,12 +144,8 @@ if [[ -z "$project_root" || ! -d "$project_root" ]]; then
   exit 2
 fi
 
-if [[ -f "$project_root/.env" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  . "$project_root/.env"
-  set +a
-fi
+load_env_file "$project_root/.env"
+load_env_file "$repo_root/.env"
 
 case_ids="${case_ids:-${FERVIS_GOLDSET_CASE_IDS:-}}"
 suite_ref="${suite_ref:-${FERVIS_GOLDSET_SUITE:-}}"
@@ -255,7 +262,7 @@ PY
   (
     cd "$project_root"
     FERVIS_GOLDSET_CASE_IDS="$case_id" "$python_bin" -P - \
-      "$ledger_file" "$wait_seconds" "$determinism_runs" \
+      "$ledger_file" "$wait_seconds" "$stable_runs" \
       "$enforce_structured_determinism" "$attempts" \
       "$retry_provider_failures" "$retry_sleep_seconds" <<'PY'
 from __future__ import annotations
@@ -266,7 +273,7 @@ from fervis.interfaces.cli.main import main
 (
     ledger_file,
     wait_seconds,
-    determinism_runs,
+    stable_runs,
     enforce_structured_determinism,
     attempts,
     retry_provider_failures,
@@ -279,8 +286,8 @@ args = [
     ledger_file,
     "--wait-seconds",
     wait_seconds,
-    "--determinism-runs",
-    determinism_runs,
+    "--stable-runs",
+    stable_runs,
     "--attempts",
     attempts,
     "--retry-sleep-seconds",
@@ -294,7 +301,7 @@ raise SystemExit(
     main(tuple(args))
 )
 PY
-  ) >"$stdout_file" 2>"$stderr_file"
+  ) >"$stdout_file" 2> >(tee "$stderr_file" >&2)
   exit_code=$?
   set -e
 
@@ -308,8 +315,35 @@ import sys
 case_id, exit_code, stdout_file, stderr_file = sys.argv[1:5]
 stdout_path = pathlib.Path(stdout_file)
 stderr_path = pathlib.Path(stderr_file)
+
+
+def command_envelope(text):
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    decoder = json.JSONDecoder()
+    envelope = None
+    for index, character in enumerate(text):
+        if character != "{":
+            continue
+        try:
+            candidate, _ = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            continue
+        if (
+            isinstance(candidate, dict)
+            and candidate.get("command") == "goldset.run"
+            and candidate.get("payload_schema") == "fervis-goldset-run.v0.1"
+        ):
+            envelope = candidate
+    if envelope is None:
+        raise ValueError("goldset command envelope not found")
+    return envelope
+
+
 try:
-    payload = json.loads(stdout_path.read_text())
+    payload = command_envelope(stdout_path.read_text())
     result = payload["payload"]["cases"][0]
     answer = result.get("answer")
     if str(result.get("status")) == "passed" and str(exit_code) == "0":
@@ -320,15 +354,21 @@ try:
         print(f"PASS: {answer}{suffix}")
     else:
         message = result.get("message") or answer or f"exit={exit_code}"
-        print(f"FAIL: {message}")
+        run_id = result.get("run_id") or "unavailable"
+        print(f"FAIL (run_id: {run_id}): {message}")
 except Exception as exc:
     print(f"FAIL: parse_error={exc}; exit={exit_code}")
     if stdout_path.exists():
         print(stdout_path.read_text()[-1200:])
 
 stderr = stderr_path.read_text() if stderr_path.exists() else ""
-if stderr.strip():
-    print(f"STDERR {case_id}: {stderr.strip()[-1200:]}")
+diagnostics = "\n".join(
+    line
+    for line in stderr.splitlines()
+    if not line.startswith("STABILITY RUN ")
+).strip()
+if diagnostics:
+    print(f"STDERR {case_id}: {diagnostics[-1200:]}")
 PY
 
   if [[ "$exit_code" -ne 0 ]]; then

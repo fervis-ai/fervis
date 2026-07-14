@@ -245,7 +245,14 @@ export const completedRunFixture = {
   answer: "18 in-person sales happened this month.",
   resultData: {
     kind: "answer",
-    outputs: [{ key: "total_count", valueKind: "number", value: "18" }]
+    outputs: [
+      {
+        key: "total_count",
+        valueKind: "number",
+        value: { kind: "number", value: "18" },
+        displayValue: "18"
+      }
+    ]
   },
   explanation: explanationFixture,
   steps: [
@@ -316,7 +323,14 @@ export const completedContinuedRunFixture = {
   answer: "5 sales happened at Pivot Mall today.",
   resultData: {
     kind: "answer",
-    outputs: [{ key: "total_count", valueKind: "number", value: "5" }]
+    outputs: [
+      {
+        key: "total_count",
+        valueKind: "number",
+        value: { kind: "number", value: "5" },
+        displayValue: "5"
+      }
+    ]
   }
 } as const;
 
@@ -335,7 +349,7 @@ export const runningContinuedRunFixture = {
 export const clarificationRunFixture = {
   ...completedRunFixture,
   runId: "run_clarify",
-  status: "NEEDS_CLARIFICATION",
+  status: "WAITING_FOR_CLARIFICATION",
   answer: null,
   resultData: {
     kind: "needs_clarification",
@@ -345,6 +359,12 @@ export const clarificationRunFixture = {
           id: "clar_store",
           need: "target_reference",
           reason: "multiple_matching_entities",
+          owner: "grounding",
+          continuation: {
+            kind: "grounding",
+            knownInputId: "input_store",
+            acceptsFreeText: false
+          },
           question: "Which matching store should I use?",
           requestedFactId: "rf_sales_count",
           subjects: [
@@ -414,7 +434,7 @@ export const clarificationRunFixture = {
       kind: "provide_clarification",
       description: "Continue the same question by answering the clarification.",
       command:
-        'fervis runtime ask "<answer>" --question-id q_sales --base-run-id run_clarify --clarification-id clar_store',
+        'fervis runtime ask "<answer>" --question-id q_sales --run-id run_clarify --clarification-id clar_store',
       request: null
     }
   ]
@@ -430,6 +450,12 @@ export const freeTextClarificationRunFixture = {
           id: "clar_period",
           need: "question_interpretation",
           reason: "ambiguous_interpretation",
+          owner: "conversation_resolution",
+          continuation: {
+            kind: "conversation_resolution",
+            candidates: [],
+            acceptsFreeText: true
+          },
           question: "Which March should I use?",
           requestedFactId: "rf_sales_count",
           subjects: [

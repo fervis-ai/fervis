@@ -14,6 +14,7 @@ input:
         description: sales for specified staff member
         answer_outputs:
           - id: answer_1
+            role: ANSWER_VALUE
         known_inputs:
           - id: staff_id
             kind: literal_text

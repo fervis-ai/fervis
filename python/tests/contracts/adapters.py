@@ -21,6 +21,7 @@ from fervis.run_work.queue.django.models import RunWorkItem
 from fervis.run_work.queue.django.queue import claim_run_work_items
 from fervis.lineage.django.recorder import DjangoLineageRecorder
 from fervis.lineage.enums import RunResultKind
+from fervis.lineage.enums import RunStepKey, RunStepKind
 from fervis.lineage.models import (
     AnswerOutput,
     AnswerPresentation,
@@ -29,6 +30,7 @@ from fervis.lineage.models import (
     RunResult,
 )
 from fervis.lineage.recorder_core import LineageRecorder
+from fervis.lineage.recorder import ClarificationRequestWrite, RunStepWrite
 from fervis.project import discover_project
 from fervis.project.configuration import load_fervis_project_config
 from fervis.project.persistence.schema import metadata
@@ -52,6 +54,73 @@ from tests.testkit.terminal_lineage import (
     TerminalAnswerWriter,
     make_terminal_answer_writer,
 )
+
+_CLARIFICATION_PAYLOAD: dict[str, object] = {
+    "id": "clarification_area",
+    "need": "target_reference",
+    "reason": "multiple_matching_entities",
+    "owner": "grounding",
+    "continuation": {
+        "kind": "grounding",
+        "knownInputId": "area_input",
+        "acceptsFreeText": False,
+    },
+    "requestedFactId": "fact_1",
+    "question": "Which matching area should I use?",
+    "subjects": [
+        {
+            "kind": "question_input",
+            "id": "area_input",
+            "label": "area",
+            "sourceText": "selected area",
+            "options": [
+                {
+                    "id": "area_nairobi",
+                    "label": "Nairobi",
+                    "entityKind": "area",
+                    "keyId": "area_id",
+                    "keyComponents": [
+                        {"componentId": "id", "value": "area_1"}
+                    ],
+                    "matchedField": "id",
+                    "matchedValue": "area_1",
+                    "resolverReadId": "list_areas",
+                }
+            ],
+        }
+    ],
+    "evidence": [
+        {"kind": "resolver_read", "id": "list_areas", "readId": "list_areas"}
+    ],
+}
+
+
+def _clarification_writer(recorder):
+    def write(request: LookupExecutionRequest, payload: dict[str, object]) -> None:
+        attempt = request.active_attempt or 1
+        step_id = f"{request.run_id}.clarification.{attempt}"
+        recorder.record_step(
+            RunStepWrite(
+                step_id=step_id,
+                run_id=request.run_id,
+                sequence=(attempt - 1) * 10_000 + 1,
+                step_key=RunStepKey.GROUNDING,
+                kind=RunStepKind.DETERMINISTIC,
+                input_summary_json={},
+                output_summary_json={},
+                error_json={},
+            )
+        )
+        recorder.record_clarification_request(
+            ClarificationRequestWrite(
+                clarification_id=str(payload["id"]),
+                run_id=request.run_id,
+                step_id=step_id,
+                payload_json=payload,
+            )
+        )
+
+    return write
 
 
 @dataclass(frozen=True)
@@ -109,8 +178,12 @@ class ScriptedLookup(QuestionLookupPort):
     error: str = "lookup_failed"
     answer: str = "42"
     result_data: dict[str, object] = field(default_factory=lambda: {"value": 42})
+    clarification_payload: dict[str, object] = field(
+        default_factory=lambda: dict(_CLARIFICATION_PAYLOAD)
+    )
     calls: list[LookupExecutionRequest] = field(default_factory=list)
     terminal_answer_writer: TerminalAnswerWriter | None = None
+    clarification_writer: Callable[[LookupExecutionRequest, dict[str, object]], None] | None = None
 
     def complete_without_terminal(self, *, answer: str = "42") -> None:
         self.mode = "complete_without_terminal"
@@ -119,6 +192,7 @@ class ScriptedLookup(QuestionLookupPort):
     def complete_with_terminal(self, *, answer: str = "42") -> None:
         self.mode = "complete_with_terminal"
         self.answer = answer
+        self.result_data = {"value": answer}
 
     def fail_result_without_terminal(self, *, error: str = "lookup_failed") -> None:
         self.mode = "failed_without_terminal"
@@ -127,6 +201,18 @@ class ScriptedLookup(QuestionLookupPort):
     def raise_error(self, *, error: str = "provider timeout") -> None:
         self.mode = "raise"
         self.error = error
+
+    def needs_clarification(
+        self,
+        *,
+        payload: dict[str, object] | None = None,
+    ) -> None:
+        self.mode = "needs_clarification"
+        self.clarification_payload = dict(payload or _CLARIFICATION_PAYLOAD)
+        self.result_data = {
+            "kind": "needs_clarification",
+            "details": {"clarifications": [self.clarification_payload]},
+        }
 
     def run_lookup(
         self,
@@ -142,6 +228,15 @@ class ScriptedLookup(QuestionLookupPort):
             return LookupExecutionResult(
                 status="FAILED",
                 error=self.error,
+                terminal_lineage_recorded=False,
+            )
+        if self.mode == "needs_clarification":
+            if self.clarification_writer is None:
+                raise RuntimeError("clarification writer is not configured")
+            self.clarification_writer(request, self.clarification_payload)
+            return LookupExecutionResult(
+                status="NEEDS_CLARIFICATION",
+                result_data=dict(self.result_data),
                 terminal_lineage_recorded=False,
             )
         terminal_lineage_recorded = self.mode == "complete_with_terminal"
@@ -203,6 +298,9 @@ def sql_adapter(tmp_path: Path) -> ContractAdapter:
     lookup.terminal_answer_writer = make_terminal_answer_writer(
         LineageRecorder(SQLLineageRecorderStore(bundle.engine))
     )
+    lookup.clarification_writer = _clarification_writer(
+        LineageRecorder(SQLLineageRecorderStore(bundle.engine))
+    )
     return ContractAdapter(
         name="sql",
         questions=bundle.questions,
@@ -217,7 +315,8 @@ def sql_adapter(tmp_path: Path) -> ContractAdapter:
 def django_adapter(tmp_path: Path) -> ContractAdapter:
     del tmp_path
     lookup = ScriptedLookup(
-        terminal_answer_writer=make_terminal_answer_writer(DjangoLineageRecorder())
+        terminal_answer_writer=make_terminal_answer_writer(DjangoLineageRecorder()),
+        clarification_writer=_clarification_writer(DjangoLineageRecorder()),
     )
     questions = QuestionService(
         lineage=DjangoQuestionLineagePort(),
@@ -395,7 +494,7 @@ class DjangoProbe:
         return {
             "status": "COMPLETED"
             if result.result_kind == RunResultKind.ANSWERED.value
-            else "NEEDS_CLARIFICATION",
+            else "WAITING_FOR_CLARIFICATION",
             "answer": answer_text,
             "result_data": result_data,
             "error": None,

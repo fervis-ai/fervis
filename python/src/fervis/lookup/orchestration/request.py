@@ -20,10 +20,20 @@ if TYPE_CHECKING:
         ProgramInvocationBinding,
     )
     from fervis.lookup.fact_planning.request import RuntimeValueContext
+    from fervis.lookup.lineage.steps import LineageRuntimeStepSink
+    from fervis.lookup.clarification.model import ClarificationOwnerResponse
 
 
 class LookupProgressSink(Protocol):
     def emit(self, event: Mapping[str, object]) -> None: ...
+
+
+class LineagePorts(Protocol):
+    @property
+    def lineage_step_sink(self) -> LineageRuntimeStepSink | None: ...
+
+    @property
+    def lineage_required(self) -> bool: ...
 
 
 @dataclass(frozen=True)
@@ -40,6 +50,7 @@ class LookupRequest:
     runtime_values: RuntimeValueContext | None = None
     host: HostPromptContext = field(default_factory=HostPromptContext)
     active_attempt: int | None = None
+    clarification_responses: tuple[ClarificationOwnerResponse, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -49,7 +60,7 @@ class LookupRuntimePorts:
     planner_model_port: Any
     program_invocation_binding: ProgramInvocationBinding | None = None
     prior_program_invocations: PriorProgramInvocationReader | None = None
-    lineage_step_sink: Any = None
+    lineage_step_sink: LineageRuntimeStepSink | None = None
     progress_sink: LookupProgressSink | None = None
     lineage_required: bool = False
     clock: Any = None

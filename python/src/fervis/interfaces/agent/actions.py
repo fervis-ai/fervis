@@ -101,17 +101,37 @@ def edit_config_action() -> dict[str, object]:
     }
 
 
-def add_schema_metadata_action(endpoint_name: str) -> dict[str, object]:
+def add_schema_metadata_action(
+    endpoint_name: str,
+    *,
+    framework_kind: str,
+) -> dict[str, object]:
     return {
         "kind": "add_schema_metadata",
         "endpoint": endpoint_name,
-        "description": (
+        "description": _schema_metadata_description(framework_kind),
+    }
+
+
+def _schema_metadata_description(framework_kind: str) -> str:
+    if framework_kind == "fastapi":
+        return (
+            "Declare this FastAPI route's response through response_model or an "
+            "equivalent precise return annotation, then rerun fervis catalog."
+        )
+    if framework_kind == "django":
+        return (
+            "Declare this Django REST Framework endpoint's response through its "
+            "serializer contract, then rerun fervis catalog."
+        )
+    if framework_kind == "flask":
+        return (
             "Expose this endpoint's response/query contract through a supported "
             "Flask surface: OpenAPI/Swagger, Marshmallow metadata, JSON:API "
             "resource/schema metadata, or Flask-AppBuilder metadata. For plain "
             "Flask routes, follow github.com/fervis-ai/fervis/python/flask/AGENTS.md."
-        ),
-    }
+        )
+    return "Declare this host endpoint's response contract, then rerun fervis catalog."
 
 
 def fix_schema_cardinality_action(endpoint_name: str) -> dict[str, object]:
@@ -243,7 +263,7 @@ def provide_clarification_action(
     conversation_id: str,
     *,
     question_id: str | None = None,
-    base_run_id: str | None = None,
+    run_id: str | None = None,
     clarification_id: str | None = None,
     tenant_id: str | None = None,
     principal_id: str | None = None,
@@ -254,12 +274,12 @@ def provide_clarification_action(
     tenant = tenant_id or "<tenant_id>"
     principal = principal_id or "<principal_id>"
     question = question_id or "<question_id>"
-    base_run = base_run_id or "<base_run_id>"
+    run = run_id or "<run_id>"
     required_inputs = ["answer"]
     if question_id is None:
         required_inputs.append("question_id")
-    if base_run_id is None:
-        required_inputs.append("base_run_id")
+    if run_id is None:
+        required_inputs.append("run_id")
     if tenant_id is None:
         required_inputs.append("tenant_id")
     if principal_id is None:
@@ -268,13 +288,13 @@ def provide_clarification_action(
         "kind": "provide_clarification",
         "conversation_id": conversation_id,
         "question_id": question_id or "",
-        "base_run_id": base_run_id or "",
+        "run_id": run_id or "",
         "clarification_id": clarification_value,
         "command": render_command(
             commands.runtime_ask(
                 Placeholder("answer", quoted=True),
                 question_id=question,
-                base_run_id=base_run,
+                run_id=run,
                 clarification_id=clarification_value,
                 conversation_id=conversation_id,
                 tenant_id=tenant,

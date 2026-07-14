@@ -9,7 +9,6 @@ from fervis.interfaces.agent.actions import (
     inspect_question_action,
     provide_clarification_action,
 )
-from fervis.lineage.enums import RunTriggerKind
 
 
 def test_fervis_django_urls_expose_question_lifecycle_routes() -> None:
@@ -500,9 +499,8 @@ def test_common_question_interface_continues_question_for_clarification_response
     response = interface.create_question_run(
         "question-1",
         {
-            "question": "ABC Mall",
-            "triggerKind": "clarification_response",
-            "baseRunId": "run-1",
+            "responseText": "ABC Mall",
+            "runId": "run-1",
             "clarificationId": "clar-1",
             "selectedOptionId": "store:abc",
         },
@@ -513,10 +511,45 @@ def test_common_question_interface_continues_question_for_clarification_response
     assert response.status_code == 202
     assert response.payload["latestRunId"] == "run-2"
     assert request.question_id == "question-1"
-    assert request.trigger_kind is RunTriggerKind.CLARIFICATION_RESPONSE
-    assert request.base_run_id == "run-1"
-    assert request.trigger_clarification_response_id == "clar-1"
-    assert request.trigger_clarification_selected_option_id == "store:abc"
+    assert request.run_id == "run-1"
+    assert request.clarification_id == "clar-1"
+    assert request.selected_option_id == "store:abc"
+
+
+def test_common_question_interface_accepts_selected_clarification_option() -> None:
+    from fervis.interfaces.common.questions import InterfacePrincipal
+    from fervis.questions import AskResult
+
+    questions = _FakeQuestions(
+        AskResult(
+            status="RUNNING",
+            conversation_id="conv-1",
+            question_id="question-1",
+            run_id="run-1",
+        ),
+        question={
+            "questionId": "question-1",
+            "latestRunId": "run-1",
+            "conversationId": "conv-1",
+            "status": "RUNNING",
+        },
+    )
+    interface = _question_interface(questions)
+
+    response = interface.create_question_run(
+        "question-1",
+        {
+            "runId": "run-1",
+            "clarificationId": "clar-1",
+            "selectedOptionId": "store:abc",
+        },
+        principal=InterfacePrincipal(principal_id="user-1", tenant_id="tenant-1"),
+    )
+
+    request = questions.continue_requests[0]
+    assert response.status_code == 202
+    assert request.response_text == ""
+    assert request.selected_option_id == "store:abc"
 
 
 def test_common_question_interface_parses_typed_deterministic_rerun() -> None:
@@ -655,9 +688,7 @@ def test_common_question_interface_parses_declared_capability_application() -> N
     assert application.capability_id == "filter_by_sale_channel"
     assert application.binding.parameter_id == "semantic.sale_channels"
     assert canonical_fact_value(application.binding.value) == ["STORE"]
-    assert application.binding.provenance.refs == (
-        "capability:filter_by_sale_channel",
-    )
+    assert application.binding.provenance.refs == ("capability:filter_by_sale_channel",)
 
 
 def test_common_question_interface_adds_transport_neutral_clarification_follow_up_actions() -> (
@@ -670,7 +701,7 @@ def test_common_question_interface_adds_transport_neutral_clarification_follow_u
 
     questions = _FakeQuestions(
         AskResult(
-            status="NEEDS_CLARIFICATION",
+            status="WAITING_FOR_CLARIFICATION",
             conversation_id="conv-1",
             question_id="question-1",
             run_id="run-1",
@@ -679,7 +710,7 @@ def test_common_question_interface_adds_transport_neutral_clarification_follow_u
             "questionId": "question-1",
             "latestRunId": "run-1",
             "conversationId": "conv-1",
-            "status": "NEEDS_CLARIFICATION",
+            "status": "WAITING_FOR_CLARIFICATION",
             "resultData": {
                 "kind": "needs_clarification",
                 "details": {
@@ -702,15 +733,14 @@ def test_common_question_interface_adds_transport_neutral_clarification_follow_u
             "kind": "provide_clarification",
             "questionId": "question-1",
             "conversationId": "conv-1",
-            "baseRunId": "run-1",
+            "runId": "run-1",
             "clarificationId": "clar-1",
             "request": {
                 "method": "POST",
                 "path": "/questions/question-1/runs/",
                 "body": {
-                    "question": "<clarification-answer>",
-                    "triggerKind": "clarification_response",
-                    "baseRunId": "run-1",
+                    "responseText": "<clarification-answer>",
+                    "runId": "run-1",
                     "clarificationId": "clar-1",
                     "selectedOptionId": "<selected-option-id>",
                 },
@@ -786,6 +816,49 @@ def test_fervis_fastapi_router_exposes_question_lifecycle_routes() -> None:
         ("GET", "/fervis/questions/{question_id}/runs/"),
         ("GET", "/fervis/questions/{question_id}/runs/{run_id}/"),
     }
+
+
+def test_fastapi_integration_closes_question_interface_with_host_lifespan() -> None:
+    from contextlib import asynccontextmanager
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from fervis import FervisConfig, HostConfig, ModelConfig, RuntimeRoutes
+    from fervis.fastapi import FastAPIIntegration
+
+    events: list[str] = []
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        del app
+        events.append("host_started")
+        yield
+        events.append("host_stopped")
+
+    class CloseableQuestionInterface(_FakeQuestionInterface):
+        def close(self) -> None:
+            events.append("fervis_closed")
+
+    app = FastAPI(lifespan=lifespan)
+    integration = FastAPIIntegration(
+        config=FervisConfig(
+            host=HostConfig(timezone="UTC"),
+            routes=RuntimeRoutes(prefix="/fervis/"),
+            model=ModelConfig(
+                default_provider="openai",
+                default_model_key="gpt-5.4-mini",
+            ),
+            sources=[],
+        )
+    )
+    integration.mount(app, question_interface=CloseableQuestionInterface())
+
+    with TestClient(app) as client:
+        response = client.get("/fervis/")
+        assert response.status_code == 200
+        assert events == ["host_started"]
+
+    assert events == ["host_started", "fervis_closed", "host_stopped"]
 
 
 def test_fervis_fastapi_router_requires_question_interface() -> None:
@@ -1229,11 +1302,11 @@ def test_agent_run_event_projection_adds_follow_up_actions_once() -> None:
 
     assert agent_run_event(
         {
-            "event": "run.needs_clarification",
+            "event": "run.waiting_for_clarification",
             "conversation_id": "conv-1",
             "question_id": "question-1",
             "run_id": "run-1",
-            "status": "NEEDS_CLARIFICATION",
+            "status": "WAITING_FOR_CLARIFICATION",
             "clarifications": [
                 {
                     "id": "clar-1",
@@ -1247,7 +1320,7 @@ def test_agent_run_event_projection_adds_follow_up_actions_once() -> None:
         provide_clarification_action(
             "conv-1",
             question_id="question-1",
-            base_run_id="run-1",
+            run_id="run-1",
             clarification_id="clar-1",
             tenant_id="tenant-1",
             principal_id="user-1",
@@ -1283,30 +1356,30 @@ def test_agent_run_event_projection_requires_actionable_clarification() -> None:
 
     with pytest.raises(
         ValueError,
-        match="run.needs_clarification event requires clarifications",
+        match="run.waiting_for_clarification event requires clarifications",
     ):
         agent_run_event(
             {
-                "event": "run.needs_clarification",
+                "event": "run.waiting_for_clarification",
                 "conversation_id": "conv-1",
                 "question_id": "question-1",
                 "run_id": "run-1",
-                "status": "NEEDS_CLARIFICATION",
+                "status": "WAITING_FOR_CLARIFICATION",
                 "clarifications": [],
             },
         )
 
     with pytest.raises(
         ValueError,
-        match="run.needs_clarification event requires clarification question",
+        match="run.waiting_for_clarification event requires clarification question",
     ):
         agent_run_event(
             {
-                "event": "run.needs_clarification",
+                "event": "run.waiting_for_clarification",
                 "conversation_id": "conv-1",
                 "question_id": "question-1",
                 "run_id": "run-1",
-                "status": "NEEDS_CLARIFICATION",
+                "status": "WAITING_FOR_CLARIFICATION",
                 "clarifications": [{"id": "clar-1"}],
             },
         )
@@ -1365,11 +1438,13 @@ class _FakeQuestions:
             raise AssertionError("questions.ask should not be called")
         return self.result
 
-    def continue_question(self, request, *, event_sink=None):
+    def respond_to_clarification(self, request, *, event_sink=None):
         del event_sink
         self.continue_requests.append(request)
         if self.result is None:
-            raise AssertionError("questions.continue_question should not be called")
+            raise AssertionError(
+                "questions.respond_to_clarification should not be called"
+            )
         return self.result
 
     def rerun_question(self, request, *, event_sink=None):

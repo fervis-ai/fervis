@@ -1,7 +1,7 @@
-id: project_to_identity_collapses_rows
-description: Project-to-identity collapses source rows to the declared identity and preserves stable carried fields.
+id: project_to_key_collapses_rows
+description: Project-to-key collapses source rows to the declared relational key without carrying presentation fields.
 migrates:
-  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_project_to_identity_collapses_rows_to_declared_identity
+  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_project_to_key_collapses_rows_to_declared_identity
 kind: algorithm
 algorithm: execution.relation_engine
 input:
@@ -17,15 +17,13 @@ input:
     - id: subject_rows
       output_relation: subject_rows
       spec:
-        kind: project_to_identity
+        kind: project_to_key
         input_relation: source_rows
-        identity_fields: [subject_id]
-        fields:
-          - {source: subject_label}
+        key_fields: [subject_id]
 expect:
   result_contains:
     subject_rows:
       grain_keys: [subject_id]
       rows:
-        - {subject_id: red, subject_label: Red}
-        - {subject_id: pink, subject_label: Pink}
+        - {subject_id: red}
+        - {subject_id: pink}

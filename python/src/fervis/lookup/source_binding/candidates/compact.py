@@ -1,8 +1,5 @@
 """Compact source-binding candidate prompt projection."""
 
-from fervis.lookup.operation_families.grouped_ranked.canonical_groups import (
-    prefer_canonical_group_support_sets,
-)
 from fervis.lookup.turn_prompts.projections import ApiReadResponseShapeProjector
 from fervis.lookup.question_contract import (
     RequestedFact,
@@ -15,10 +12,10 @@ from .row_predicates import candidate_row_path_ids
 
 
 _FULFILLMENT_EVIDENCE_KEYS = (
-    "scope_evidence",
     "metric_measure_evidence",
+    "value_evidence",
     "row_count_basis_evidence",
-    "group_key_evidence",
+    "entity_evidence",
 )
 
 
@@ -229,25 +226,11 @@ def _visible_support_sets(
     *,
     requested_fact: RequestedFact | None,
 ) -> tuple[dict[str, Any], ...]:
-    support_sets = tuple(
+    return tuple(
         item
         for item in candidate.get("fulfillment_support_sets") or ()
         if isinstance(item, dict)
     )
-    if _prefers_canonical_group_support(requested_fact):
-        return prefer_canonical_group_support_sets(support_sets)
-    return support_sets
-
-
-def _prefers_canonical_group_support(
-    requested_fact: RequestedFact | None,
-) -> bool:
-    if requested_fact is None or requested_fact.answer_expression is None:
-        return False
-    return requested_fact.answer_expression.family in {
-        RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
-        RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
-    }
 
 
 def _visible_fulfillment_choice_id(
@@ -309,15 +292,15 @@ def _visible_fulfillment_slots(
             )
             if key in slot and slot[key] not in (None, "", [], ())
         }
-        for key in _visible_fulfillment_role_keys(requested_fact):
+        answer_output_id = str(slot.get("answer_output_id") or "")
+        for key in _visible_fulfillment_role_keys(
+            requested_fact,
+            answer_output_id=answer_output_id,
+        ):
             visible_role_evidence = [
                 item
                 for item in slot.get(key) or ()
                 if isinstance(item, dict)
-                and not (
-                    key == "group_key_evidence"
-                    and str(item.get("type") or "").lower() == "row_population"
-                )
                 and (
                     not visible_evidence_ids
                     or str(item.get("evidence_id") or "") in visible_evidence_ids
@@ -331,10 +314,7 @@ def _visible_fulfillment_slots(
                 slot_output[key] = visible_role_evidence
             else:
                 slot_output.pop(key, None)
-        if not any(
-            slot_output.get(key)
-            for key in _FULFILLMENT_EVIDENCE_KEYS
-        ):
+        if not any(slot_output.get(key) for key in _FULFILLMENT_EVIDENCE_KEYS):
             continue
         output.append(slot_output)
     return output
@@ -342,20 +322,47 @@ def _visible_fulfillment_slots(
 
 def _visible_fulfillment_role_keys(
     requested_fact: RequestedFact | None,
+    *,
+    answer_output_id: str,
 ) -> tuple[str, ...]:
     family = (
         requested_fact.answer_expression.family
         if requested_fact is not None and requested_fact.answer_expression is not None
         else None
     )
-    if family == RequestedFactAnswerExpressionFamily.RANKED_SELECTION:
-        return ("scope_evidence", "group_key_evidence")
-    return (
-        "scope_evidence",
-        "metric_measure_evidence",
-        "row_count_basis_evidence",
-        "group_key_evidence",
+    answer_output_role = _answer_output_role(
+        requested_fact,
+        answer_output_id=answer_output_id,
     )
+    if (
+        family == RequestedFactAnswerExpressionFamily.RANKED_SELECTION
+        and answer_output_role != "MEASURED_VALUE"
+    ):
+        return ("entity_evidence", "value_evidence")
+    return (
+        "metric_measure_evidence",
+        "value_evidence",
+        "row_count_basis_evidence",
+        "entity_evidence",
+    )
+
+
+def _answer_output_role(
+    requested_fact: RequestedFact | None,
+    *,
+    answer_output_id: str,
+) -> str:
+    if requested_fact is None:
+        return ""
+    answer_output = next(
+        (
+            output
+            for output in requested_fact.support_answer_outputs
+            if output.id == answer_output_id
+        ),
+        None,
+    )
+    return answer_output.role if answer_output is not None else ""
 
 
 def _requested_fact_for_context(

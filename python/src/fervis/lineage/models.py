@@ -768,17 +768,8 @@ class ClarificationRequest(models.Model):
         on_delete=models.PROTECT,
         related_name="clarification_requests",
     )
-    fact_result = models.ForeignKey(
-        FactResult,
-        null=True,
-        blank=True,
-        on_delete=models.PROTECT,
-        related_name="clarification_requests",
-    )
     step = models.ForeignKey(
         RunStep,
-        null=True,
-        blank=True,
         on_delete=models.PROTECT,
         related_name="clarification_requests",
     )

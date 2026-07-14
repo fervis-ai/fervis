@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass
 
 from fervis.interfaces.agent.actions import run_doctor_probe_action
 from fervis.host_api.context import HostApiContext
 from fervis.host_api.contracts import EndpointContract
 from fervis.host_api.contracts.authority import ReadAuthority, ReadContextRef
-from fervis.host_api.contracts.probe import (
-    belongs_to_source,
-    is_probeable_get_contract,
-)
+from fervis.host_api.contracts.probe import is_probeable_get_contract
 from fervis.host_api.contracts.read import ReadInvocation
 from fervis.project.configuration import LoadedFervisConfig
 from fervis.project.discovery import ProjectInspection
@@ -87,7 +85,17 @@ def _read_probe_checks(
                 project=project,
                 loaded_config=loaded_config,
             )
-            contracts = context.describe_sources()
+            with closing(context):
+                contracts = context.describe_sources()
+                return [
+                    _read_probe_check(
+                        context=context,
+                        contracts=contracts,
+                        source_name=source_name,
+                        authority=ReadAuthority.from_read_context(read_context_ref),
+                    )
+                    for source_name in _source_names(loaded_config)
+                ]
     except Exception as exc:
         return [
             AuthProbeCheck(
@@ -96,18 +104,6 @@ def _read_probe_checks(
                 message=f"Auth probe could not load configured source contracts: {exc}",
             )
         ]
-    return [
-        _read_probe_check(
-            context=context,
-            contracts=contracts,
-            source_name=source_name,
-            authority=ReadAuthority(
-                tenant_id=read_context_ref.tenant_key or "default",
-                read_context_ref=read_context_ref,
-            ),
-        )
-        for source_name in _source_names(loaded_config)
-    ]
 
 
 def _read_probe_check(
@@ -205,14 +201,6 @@ def _probe_read_context_ref(
     if framework == "flask":
         return ReadContextRef(scheme="flask_principal", key=key)
     raise ValueError(f"Unsupported auth framework for read-context probe: {framework}")
-
-
-def _belongs_to_source(
-    contract: EndpointContract,
-    *,
-    source_name: str,
-) -> bool:
-    return belongs_to_source(contract, source_name=source_name)
 
 
 def _source_names(loaded_config: LoadedFervisConfig) -> tuple[str, ...]:

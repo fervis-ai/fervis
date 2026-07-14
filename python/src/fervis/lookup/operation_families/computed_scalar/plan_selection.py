@@ -12,5 +12,6 @@ PLAN_SELECTION_SHAPES = (
         "computed_scalar",
         ("value_1", "value_2"),
         distinct_members=True,
+        complete_answer_fulfillment_requirements=frozenset(),
     ),
 )

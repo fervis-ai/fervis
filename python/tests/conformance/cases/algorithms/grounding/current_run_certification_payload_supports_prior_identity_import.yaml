@@ -24,8 +24,9 @@ input:
     value_meaning_hint: staff member
     role: reference_value
     resolved_canonical_identity:
-      identity_type: staff
-      identity_field: staff_id
+      entity_kind: staff
+      key_id: primary_key
+      key_component_id: staff_id
       value: staff_abc
       authority_refs: [prior_source_read:staff:list:row_1]
       lineage_refs: [memory:turn_1.entity.staff.alice]
@@ -34,8 +35,9 @@ expect:
     values:
       - id: grounded_input_staff
         kind: identity
-        identity_type: staff
-        identity_field: staff_id
+        entity_kind: staff
+        key_id: primary_key
+        key_component_id: staff_id
         value: staff_abc
         display_value: Alice Smith
         proof_refs:

@@ -7,6 +7,7 @@ requested_facts:
     answer_outputs:
       - id: answer_1
         description: number of in-person sales
+        role: ANSWER_VALUE
 catalog:
   reads:
     - id: list_sales_summary

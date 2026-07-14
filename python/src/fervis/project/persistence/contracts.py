@@ -3,12 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
-from pathlib import Path
-from typing import Protocol
-
-from fervis.project.configuration import LoadedFervisConfig
-from fervis.project.discovery import ProjectInspection
+from fervis.types.enums import StrEnum
 
 
 class MigrationStatus(StrEnum):
@@ -66,19 +61,3 @@ class MigrationResult:
         if self.error:
             payload["error"] = self.error
         return payload
-
-
-class PersistenceBackend(Protocol):
-    target: ResolvedPersistenceTarget
-    target_revision: str
-
-    def inspect(self) -> list[PersistenceCheck]: ...
-
-    def migrate(self) -> MigrationResult: ...
-
-
-@dataclass(frozen=True)
-class PersistenceRequest:
-    project: ProjectInspection
-    loaded_config: LoadedFervisConfig
-    project_root: Path

@@ -7,6 +7,7 @@ algorithm: execution.endpoint_response
 input:
   row_path: orders.items
   parent_row_path: orders
+  parent_cardinality: many
   cardinality: many
   body:
     orders:
@@ -26,4 +27,3 @@ expect:
         name: Item B
       - order_id: order_2
         name: Item C
-

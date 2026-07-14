@@ -68,11 +68,7 @@ def apply_capability(
     application: CapabilityApplication,
 ) -> ProgramRevision:
     capability = next(
-        (
-            item
-            for item in program.capabilities
-            if item.id == application.capability_id
-        ),
+        (item for item in program.capabilities if item.id == application.capability_id),
         None,
     )
     if capability is None:
@@ -126,9 +122,7 @@ def apply_capability(
                             controller_kind=(
                                 PopulationChoiceControllerKind.ROW_PREDICATE
                             ),
-                            controller_id=(
-                                capability.parameter.semantic_control_ref
-                            ),
+                            controller_id=(capability.parameter.semantic_control_ref),
                             field_id=capability.field_id,
                             requested_fact_ids=capability.requested_fact_ids,
                             selection_expr=ParameterRef(
@@ -158,9 +152,7 @@ def apply_capability(
                         function_key=key,
                         version=FUNCTION_SEMANTIC_VERSION,
                     )
-                    for key in compatibility_requirements(
-                        revised_graph
-                    ).function_keys
+                    for key in compatibility_requirements(revised_graph).function_keys
                 ),
             ),
         )
@@ -189,9 +181,7 @@ def verify_capability_declarations(program: AnswerProgram) -> None:
             "invalid_capability_declaration",
             "program contains duplicate capability ids",
         )
-    declared_parameter_ids = tuple(
-        item.parameter.id for item in program.capabilities
-    )
+    declared_parameter_ids = tuple(item.parameter.id for item in program.capabilities)
     if len(set(declared_parameter_ids)) != len(declared_parameter_ids):
         raise AnswerProgramContractError(
             "invalid_capability_declaration",
@@ -211,11 +201,7 @@ def verify_capability_declarations(program: AnswerProgram) -> None:
                 "capability parameter already exists",
             )
         relation = next(
-            (
-                item
-                for item in program.relations
-                if item.id == capability.relation_id
-            ),
+            (item for item in program.relations if item.id == capability.relation_id),
             None,
         )
         if relation is None:
@@ -224,11 +210,7 @@ def verify_capability_declarations(program: AnswerProgram) -> None:
                 "capability relation is unavailable",
             )
         field = next(
-            (
-                item
-                for item in relation.fields
-                if item.field_id == capability.field_id
-            ),
+            (item for item in relation.fields if item.field_id == capability.field_id),
             None,
         )
         if field is None or FieldBindingRole.PREDICATE not in field.roles:
@@ -241,6 +223,8 @@ def verify_capability_declarations(program: AnswerProgram) -> None:
                 "invalid_capability_declaration",
                 "capability semantic effect references an unknown fact",
             )
+
+
 def canonical_capability_application_json(
     application: CapabilityApplication,
 ) -> str:
@@ -271,6 +255,8 @@ def _verify_application_preconditions(
             "capability_input_mismatch",
             "capability binding does not target its declared parameter",
         )
+
+
 def program_revision_id(
     *,
     base_program_id: str,

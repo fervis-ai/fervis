@@ -64,6 +64,10 @@ def test_lookup_cutover_renders_scalar_memory_values_in_source_binding_prompt():
     plan = FactPlan(outcome=_plan_clarification("follow_up"))
     planner = _PlannerPort(
         plan,
+        question_contract=_question_contract_for(
+            "rf_answer",
+            description="percentage increase from the prior sales total",
+        ),
         conversation_resolution=lambda prompt: (
             _conversation_resolution_payload_using_memory(
                 prompt,
@@ -71,7 +75,14 @@ def test_lookup_cutover_renders_scalar_memory_values_in_source_binding_prompt():
                 actual_text="that",
             )
         ),
-        query_enrichment=_query_enrichment_payload(),
+        query_enrichment=_query_enrichment_payload(("metric",)),
+        read_eligibility_retention_specs=(
+            ReadEligibilityRetentionSpec(
+                requested_fact_id="rf_answer",
+                read_id="metric_read",
+                measured_value_fields=("metric_total",),
+            ),
+        ),
     )
 
     result = run_lookup_question(
@@ -80,7 +91,7 @@ def test_lookup_cutover_renders_scalar_memory_values_in_source_binding_prompt():
             conversation_context={"factArtifacts": [artifact.to_dict()]},
         ),
         LookupRuntimePorts(
-            relation_catalog_port=_CatalogPort(_catalog(_clarification_read())),
+            relation_catalog_port=_CatalogPort(_catalog(_metric_read("metric_read"))),
             data_access_port=_DataAccessPort({}),
             planner_model_port=planner,
         ),
@@ -90,59 +101,6 @@ def test_lookup_cutover_renders_scalar_memory_values_in_source_binding_prompt():
     assert result.error == "planning_failed"
     source_binding_prompt = _source_binding_prompt(planner)
     assert "125" in source_binding_prompt
-
-
-def test_lookup_cutover_projects_terminal_outcome_memory_into_resolution_prompt():
-    artifact = build_fact_artifact(
-        artifact_id="run_needs_location",
-        outcome=FactOutcome.NEEDS_CLARIFICATION,
-        addresses=(
-            FactAddress.outcome(
-                address="outcome.needs_location",
-                terminal=FactOutcome.NEEDS_CLARIFICATION.value,
-                clarification_questions=("location",),
-            ),
-        ),
-        source_question="Which location should I use?",
-    )
-    planner = _RawPlannerPort(
-        _pattern_fact_plan_payload(
-            requested_fact_id="fact_1",
-            answer_output_ids=("answer_1",),
-            read_id="metric_read",
-            output_fields=({"field_id": "metric_total"},),
-        ),
-        question_contract=_question_contract_for(
-            "fact_1",
-            description="metric total",
-            binding_target_ids=("answer_1",),
-        ),
-        conversation_resolution=lambda prompt: (
-            _conversation_resolution_payload_using_memory(
-                prompt,
-                contextualized_question="What is the metric total for ABC?",
-                actual_text="ABC",
-            )
-        ),
-    )
-
-    result = run_lookup_question(
-        LookupRequest(
-            question="ABC",
-            conversation_context={"factArtifacts": [artifact.to_dict()]},
-        ),
-        LookupRuntimePorts(
-            relation_catalog_port=_CatalogPort(_metric_catalog()),
-            data_access_port=_DataAccessPort(
-                {"metric_read": {"data": [{"metric_total": "125.00"}]}}
-            ),
-            planner_model_port=planner,
-        ),
-    )
-
-    assert result.status in {"COMPLETED", "FAILED"}
-    assert "Active clarification context:" in planner.prompts[1]
-    assert "Which location should I use?" in planner.prompts[1]
 
 
 def test_lookup_cutover_renders_memory_relation_fields_in_fact_plan_prompt():
@@ -174,8 +132,8 @@ def test_lookup_cutover_renders_memory_relation_fields_in_fact_plan_prompt():
                 relation="relation.items",
                 grain={"sku": "SKU-1"},
                 values={
-                    "sku": {"type": "string", "value": "SKU-1"},
-                    "quantity": {"type": "number", "value": 7},
+                    "sku": FactAddressValue(type="string", value="SKU-1"),
+                    "quantity": FactAddressValue(type="number", value=7),
                 },
             ),
         ),

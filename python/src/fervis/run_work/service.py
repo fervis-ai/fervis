@@ -24,7 +24,7 @@ from .events import (
     NullQuestionRunEventSink,
     QuestionRunEventSink,
     run_progress_event,
-    run_terminal_event,
+    run_result_event,
 )
 
 
@@ -63,6 +63,9 @@ class RunWorkService:
                 events=events,
             )
             return result
+        active_attempt = request.active_attempt
+        if active_attempt is None:
+            raise ValueError("active_attempt is required for queued run work")
         try:
             stage, message = _run_start_progress(queued.submission.spec)
             events.emit(
@@ -74,7 +77,7 @@ class RunWorkService:
             )
             lookup_result = self._execute_submission(
                 queued.submission,
-                active_attempt=request.active_attempt,
+                active_attempt=active_attempt,
                 event_sink=events,
             )
         except Exception as exc:
@@ -93,7 +96,7 @@ class RunWorkService:
                 result_data=None,
                 error=error,
                 worker_id=request.worker_id,
-                active_attempt=request.active_attempt,
+                active_attempt=active_attempt,
             )
             result = _queued_result(terminal)
             _emit_queued_result_events(
@@ -101,6 +104,23 @@ class RunWorkService:
                 conversation_id=queued.submission.conversation_id,
                 question_id=queued.submission.question_id,
                 events=events,
+            )
+            return result
+        if lookup_result.status == "NEEDS_CLARIFICATION":
+            waiting = self.runs.wait_for_clarification(
+                run_id=queued.submission.run_id,
+                worker_id=request.worker_id,
+                active_attempt=active_attempt,
+            )
+            result = _queued_result(waiting)
+            events.emit(
+                run_result_event(
+                    status=result.status,
+                    run_id=result.run_id,
+                    conversation_id=queued.submission.conversation_id,
+                    question_id=queued.submission.question_id,
+                    result_data=dict(result.result_data or {}),
+                )
             )
             return result
         lookup_result = self._ensure_terminal_lineage_or_failure(
@@ -114,7 +134,7 @@ class RunWorkService:
             result_data=lookup_result.result_data,
             error=lookup_result.error,
             worker_id=request.worker_id,
-            active_attempt=request.active_attempt,
+                active_attempt=active_attempt,
         )
         result = _queued_result(terminal)
         _emit_queued_result_events(
@@ -180,6 +200,7 @@ class RunWorkService:
                 max_budget_usd=spec.max_budget_usd,
                 max_thinking_tokens=spec.max_thinking_tokens,
                 active_attempt=active_attempt,
+                clarification_responses=spec.clarification_responses,
             ),
             progress_sink=event_sink,
         )
@@ -326,7 +347,7 @@ def _emit_queued_result_events(
     events: QuestionRunEventSink,
 ) -> None:
     events.emit(
-        run_terminal_event(
+        run_result_event(
             status=result.status,
             run_id=result.run_id,
             question_id=question_id,

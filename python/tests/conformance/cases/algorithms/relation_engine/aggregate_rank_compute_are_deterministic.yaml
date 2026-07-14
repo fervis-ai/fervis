@@ -12,6 +12,7 @@ input:
         - {group_id: a, amount: "5"}
         - {group_id: b, amount: "20"}
       grain_keys: [group_id, amount]
+      field_types: {group_id: string, amount: decimal}
       completeness: {status: complete, source_kind: api_read, set_kind: unknown}
   operations:
     - id: totals

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
+from fervis.types.enums import StrEnum
 from typing import Any, TypeAlias
 
 from fervis.memory.conversation_context import (
@@ -11,6 +11,9 @@ from fervis.memory.conversation_context import (
     ConversationContextSource,
 )
 from fervis.lookup.turn_prompts.context import HostPromptContext
+from fervis.lookup.clarification.model import (
+    ConversationResolutionResponse,
+)
 
 
 class ResolutionSourceKind(StrEnum):
@@ -45,36 +48,45 @@ class CurrentSpanSource:
     def uses_prior_context(self) -> bool:
         return False
 
+    def context_source_references(self) -> tuple[str, ...]:
+        return ()
+
 
 @dataclass(frozen=True)
 class ContextAnchorSource:
     source_id: str
-    memory_id: str
+    anchor_id: str
     source_text: str
+    memory_ids: tuple[str, ...] = ()
     kind: ResolutionSourceKind = ResolutionSourceKind.CONTEXT_ANCHOR
 
     def __post_init__(self) -> None:
-        if not self.source_id.strip() or not self.memory_id.strip():
+        if not self.source_id.strip() or not self.anchor_id.strip():
             raise ValueError("context-anchor source requires stable identity")
         if not self.source_text.strip():
             raise ValueError("context-anchor source requires copied source text")
+        if any(not memory_id.strip() for memory_id in self.memory_ids):
+            raise ValueError("context-anchor memory ids must be non-empty")
 
     def to_model_dict(self) -> dict[str, str]:
         return {
             "kind": self.kind.value,
             "source_id": self.source_id,
-            "memory_id": self.memory_id,
+            "anchor_id": self.anchor_id,
             "source_text": self.source_text,
         }
 
     def memory_references(self) -> tuple[str, ...]:
-        return (self.memory_id,)
+        return self.memory_ids
 
     def frame_part_references(self) -> tuple[tuple[str, str], ...]:
         return ()
 
     def uses_prior_context(self) -> bool:
         return True
+
+    def context_source_references(self) -> tuple[str, ...]:
+        return (self.source_id,)
 
 
 @dataclass(frozen=True)
@@ -103,8 +115,28 @@ class FramePartSource:
     def uses_prior_context(self) -> bool:
         return True
 
+    def context_source_references(self) -> tuple[str, ...]:
+        return ()
+
 
 ResolutionSource: TypeAlias = CurrentSpanSource | ContextAnchorSource | FramePartSource
+
+
+@dataclass(frozen=True)
+class FrameParameterRef:
+    frame_id: str
+    parameter_id: str
+
+    def __post_init__(self) -> None:
+        if not self.frame_id.strip() or not self.parameter_id.strip():
+            raise ValueError("frame parameter reference requires stable identity")
+
+    def to_model_dict(self) -> dict[str, str]:
+        return {
+            "kind": "parameter",
+            "frame_id": self.frame_id,
+            "parameter_id": self.parameter_id,
+        }
 
 
 @dataclass(frozen=True)
@@ -112,6 +144,7 @@ class ResolvedConversationValue:
     value_id: str
     resolved_text: str
     sources: tuple[ResolutionSource, ...]
+    frame_parameter: FrameParameterRef | None = None
 
     def __post_init__(self) -> None:
         if not self.value_id.strip() or not self.resolved_text.strip():
@@ -123,6 +156,11 @@ class ResolvedConversationValue:
         return {
             "value_id": self.value_id,
             "resolved_text": self.resolved_text,
+            "frame_parameter": (
+                self.frame_parameter.to_model_dict()
+                if self.frame_parameter is not None
+                else {"kind": "none"}
+            ),
             "sources": [source.to_model_dict() for source in self.sources],
         }
 
@@ -332,9 +370,10 @@ class ConversationResolution:
             raise ValueError("resolved question contains duplicate value ids")
         if self.frame_call is not None:
             referenced_values = {
-                argument.value_id
+                value_id
                 for argument in self.frame_call.arguments
-                if argument.kind is FrameArgumentKind.RESOLVED_VALUE
+                for value_id in (argument.resolved_value_ref(),)
+                if value_id
             }
             if not referenced_values.issubset(value_ids):
                 raise ValueError("frame call references an unknown resolved value")
@@ -398,3 +437,4 @@ class ConversationResolutionRequest:
     host: HostPromptContext = field(default_factory=HostPromptContext)
     context_sources: tuple[ConversationContextSource, ...] = ()
     context_frames: tuple[ConversationContextFrame, ...] = ()
+    clarification_responses: tuple[ConversationResolutionResponse, ...] = ()

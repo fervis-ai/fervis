@@ -1,0 +1,43 @@
+id: question_contract_clarification_resumes_same_run
+description: A question-contract response is attributed only to its declared model turn while the original question and run remain unchanged.
+kind: algorithm
+algorithm: questions.lifecycle
+input:
+  scenario: clarification_resume
+  tenant_id: tenant_1
+  principal_id: user_1
+  question: Show me the performance for this quarter.
+  clarification:
+    id: clarify_question_contract_1
+    need: answer_metric
+    reason: missing_answer_metric
+    owner: question_contract
+    continuation:
+      kind: question_contract
+      missingItemId: clarify_question_contract_1
+      expectedValueKind: answer_definition
+    requestedFactId: question_contract
+    question: Which performance metric should I calculate?
+    subjects:
+      - kind: metric_phrase
+        id: clarify_question_contract_1
+        label: metric
+        sourceText: performance
+        options: []
+    evidence: []
+  response_text: Use net revenue.
+  resumed_lookup_result: {status: COMPLETED, answer: "$42", result_data: {value: 42}}
+expect:
+  result_contains:
+    resumed_result: {status: COMPLETED, run_id: run_1, answer: "$42"}
+    question_count: 1
+    run_count: 1
+    resumed_original_question: Show me the performance for this quarter.
+    resumed_clarification:
+      owner: question_contract
+      continuation_kind: question_contract
+      dispatch_count: 1
+      attributed_source:
+        responseId: clarification_response_1
+        clarificationId: clarify_question_contract_1
+        exactUserText: Use net revenue.

@@ -31,6 +31,7 @@ from fervis.lookup.answer_program.values import (
     TimeComponent,
     ValueComponent,
 )
+from fervis.lookup.canonical_data import entity_key_value
 from fervis.lookup.fact_planning.value_validation import verify_value_contract
 from fervis.lookup.answer_program import (
     BindingProvenance,
@@ -115,19 +116,17 @@ def run_value_uses_case(payload: dict[str, Any]) -> list[str]:
             if source.read_id
         }
         parameters = {item.id: item for item in parameter_declarations}
-        bindings = {
-            item.parameter_id: item for item in binding_set.bindings
-        }
+        bindings = {item.parameter_id: item for item in binding_set.bindings}
         relations = tuple(
-                _relation(
-                    item,
-                    parameter_ids=parameter_ids,
-                    grounded_bindings_by_read_id=grounded_bindings_by_read_id,
-                    input_context=input_context,
-                    parameters=parameters,
-                    bindings=bindings,
-                )
-                for item in input_payload.get("relations") or ()
+            _relation(
+                item,
+                parameter_ids=parameter_ids,
+                grounded_bindings_by_read_id=grounded_bindings_by_read_id,
+                input_context=input_context,
+                parameters=parameters,
+                bindings=bindings,
+            )
+            for item in input_payload.get("relations") or ()
         )
         compiled_inputs = compiled_program_inputs(
             parameters=parameters,
@@ -175,6 +174,16 @@ def run_value_contract_case(payload: dict[str, Any]) -> list[str]:
 
 def _value(payload: dict[str, Any]) -> FactValue:
     kind = str(payload["kind"])
+    if kind == "identity":
+        return FactValue.identity(
+            id=str(payload["id"]),
+            key=entity_key_value(
+                str(payload["entity_kind"]),
+                str(payload["key_id"]),
+                {str(payload["key_component_id"]): str(payload["value"])},
+            ),
+            proof_refs=tuple(payload.get("proof_refs") or ()),
+        )
     if kind == "named":
         return FactValue.named(
             id=str(payload["id"]),
@@ -205,9 +214,7 @@ def _relation(
     payload: dict[str, Any],
     *,
     parameter_ids: dict[str, str],
-    grounded_bindings_by_read_id: dict[
-        str, tuple[DraftEndpointParamBinding, ...]
-    ],
+    grounded_bindings_by_read_id: dict[str, tuple[DraftEndpointParamBinding, ...]],
     input_context: CompilerInputContext,
     parameters: dict[str, ParameterDeclaration],
     bindings: dict[str, ParameterBinding],
@@ -233,9 +240,7 @@ def _relation_source(
     *,
     relation_id: str,
     parameter_ids: dict[str, str],
-    grounded_bindings_by_read_id: dict[
-        str, tuple[DraftEndpointParamBinding, ...]
-    ],
+    grounded_bindings_by_read_id: dict[str, tuple[DraftEndpointParamBinding, ...]],
 ) -> DraftRelationSource:
     read_id = str(payload.get("read_id") or "")
     return DraftRelationSource(
@@ -254,9 +259,7 @@ def _relation_source(
                             str(ref) for ref in item.get("proof_refs") or ()
                         ),
                     ),
-                    proof_refs=tuple(
-                        str(ref) for ref in item.get("proof_refs") or ()
-                    ),
+                    proof_refs=tuple(str(ref) for ref in item.get("proof_refs") or ()),
                 )
                 for item in payload.get("param_bindings") or ()
             ),
@@ -391,9 +394,7 @@ def _compiled_payload(compiled: Any) -> dict[str, Any]:
                 "param_ref": item.param_ref,
                 "value": item.value,
                 "proof_refs": [
-                    ref
-                    for ref in item.proof_refs
-                    if not ref.startswith("row_source:")
+                    ref for ref in item.proof_refs if not ref.startswith("row_source:")
                 ],
             }
             for item in compiled.endpoint_args
@@ -403,7 +404,9 @@ def _compiled_payload(compiled: Any) -> dict[str, Any]:
                 "relation_id": item.relation_id,
                 "field_id": item.field_id,
                 "operator": item.operator.value,
-                "value": list(item.value) if isinstance(item.value, tuple) else item.value,
+                "value": list(item.value)
+                if isinstance(item.value, tuple)
+                else item.value,
                 "proof_refs": list(item.proof_refs),
             }
             for item in compiled.row_filters

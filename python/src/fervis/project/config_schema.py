@@ -430,15 +430,17 @@ def _require_mapping(
     payload: dict[str, object],
     key: str,
 ) -> dict[str, object]:
-    if not isinstance(payload.get(key), dict):
+    value = payload.get(key)
+    if not isinstance(value, dict):
         raise ValueError(f"Fervis config {key} must be an object.")
-    return payload[key]
+    return value
 
 
 def _require_list(payload: dict[str, object], key: str) -> list[object]:
-    if not isinstance(payload.get(key), list):
+    value = payload.get(key)
+    if not isinstance(value, list):
         raise ValueError(f"Fervis config {key} must be a list.")
-    return payload[key]
+    return value
 
 
 def _require_string_list(payload: dict[str, object], key: str) -> None:

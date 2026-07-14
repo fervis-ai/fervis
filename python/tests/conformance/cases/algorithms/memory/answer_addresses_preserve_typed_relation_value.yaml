@@ -1,0 +1,27 @@
+id: answer_addresses_preserve_typed_relation_value
+description: Answer-row memory preserves the canonical runtime type of a scalar result.
+kind: algorithm
+algorithm: memory.answer_addresses
+input:
+  fact_result:
+    outcome:
+      kind: answer
+      relation_outputs:
+        - id: is_active
+          relation_id: staff_rows
+          field_id: is_active
+      relations:
+        - id: staff_rows
+          rows:
+            - is_active: true
+          field_types:
+            is_active: boolean
+expect:
+  result_contains:
+    addresses:
+      - address: relation.staff_rows
+      - address: row.staff_rows.1
+        values:
+          is_active:
+            type: boolean
+            value: true

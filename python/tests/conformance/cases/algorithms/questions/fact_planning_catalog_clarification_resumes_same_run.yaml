@@ -1,0 +1,46 @@
+id: fact_planning_catalog_clarification_resumes_same_run
+description: A fact-planning catalog input response retains its planning requirement and resumes the same run.
+kind: algorithm
+algorithm: questions.lifecycle
+input:
+  scenario: clarification_resume
+  tenant_id: tenant_1
+  principal_id: user_1
+  question: Compare orders using the selected lifecycle.
+  clarification:
+    id: clarification_lifecycle
+    need: catalog_input
+    reason: missing_required_value
+    owner: fact_planning
+    continuation:
+      kind: fact_planning_catalog_input
+      requestedFactId: fact_1
+      planningRequirementId: missing_lifecycle
+      target:
+        rowSourceId: orders_read
+        paramId: lifecycle
+        paramRef: query.lifecycle
+        valueType: string
+        choices: []
+    requestedFactId: fact_1
+    question: Which lifecycle should I use?
+    subjects:
+      - kind: catalog_input
+        id: orders_read.lifecycle
+        label: lifecycle
+        sourceText: ""
+        options: []
+    evidence:
+      - {kind: catalog_input, id: "required_input:orders_read.lifecycle"}
+  response_text: completed
+  resumed_lookup_result: {status: COMPLETED, answer: "7", result_data: {value: 7}}
+expect:
+  result_contains:
+    resumed_result: {status: COMPLETED, run_id: run_1, answer: "7"}
+    question_count: 1
+    run_count: 1
+    resumed_clarification:
+      owner: fact_planning
+      continuation_kind: fact_planning_catalog_input
+      dispatch_count: 1
+      closed_target: {rowSourceId: orders_read, paramId: lifecycle, valueType: string, value: completed}

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from enum import Enum
+from typing import TypeVar
+from fervis.lookup.provider_contract import ProviderObject
 
 from fervis.lookup.relation_catalog import RelationCatalog
 from fervis.lookup.fact_planning.blocked_evidence import (
@@ -35,7 +37,7 @@ from fervis.lookup.plan_execution.relations import RelationRows
 
 
 def parse_fact_plan(
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
     bound_sources: tuple[BoundSource, ...] = (),
     source_binding_ids_by_requested_fact_id: Mapping[str, tuple[str, ...]],
@@ -46,6 +48,7 @@ def parse_fact_plan(
     question_contract: QuestionContract,
     memory_relations: tuple[RelationRows, ...] = (),
     input_context: CompilerInputContext,
+    selected_source_strategy_ids: tuple[str, ...] = (),
 ) -> FactPlan:
     requested_fact_ids = tuple(fact.id for fact in question_contract.requested_facts)
     evidence_resolver = _bound_source_evidence_resolver(
@@ -53,23 +56,27 @@ def parse_fact_plan(
         relation_catalog=relation_catalog,
     )
     output = provider_output.FactPlanOutput.parse(payload)
-    outcome = _dict(output.outcome, "outcome")
-    kind = _enum(PlanOutcomeKind, outcome.get("kind"), "outcome.kind")
+    outcome = output.outcome
+    kind = _enum(
+        PlanOutcomeKind,
+        outcome.discriminator("kind"),
+        "outcome.kind",
+    )
     if kind == PlanOutcomeKind.FACT_PLAN:
-        provider_output.FactPlanAnswerOutput.parse(outcome)
+        answer_output = outcome.parse_as(provider_output.FactPlanAnswerOutput)
         if relation_catalog is None:
             raise ValueError("answer-program compilation requires relation catalog")
         draft, draft_bindings = _answer_plan(
-                outcome,
-                bound_sources=bound_sources,
-                source_binding_ids_by_requested_fact_id=(
-                    source_binding_ids_by_requested_fact_id
-                ),
-                source_binding_ids_by_requirement_by_requested_fact_id=(
-                    source_binding_ids_by_requirement_by_requested_fact_id
-                ),
-                input_context=input_context,
-            )
+            answer_output,
+            bound_sources=bound_sources,
+            source_binding_ids_by_requested_fact_id=(
+                source_binding_ids_by_requested_fact_id
+            ),
+            source_binding_ids_by_requirement_by_requested_fact_id=(
+                source_binding_ids_by_requirement_by_requested_fact_id
+            ),
+            input_context=input_context,
+        )
         program, bindings = compile_answer_program(
             draft,
             question_contract=question_contract,
@@ -82,20 +89,17 @@ def parse_fact_plan(
             bindings=bindings,
         )
     if kind == PlanOutcomeKind.NEEDS_CLARIFICATION:
-        clarification = provider_output.PlanClarificationOutput.parse(outcome)
+        clarification = outcome.parse_as(provider_output.PlanClarificationOutput)
         return FactPlan(
             outcome=PlanClarification(
                 missing_catalog_inputs=tuple(
                     _missing_catalog_input(item)
-                    for item in _required_dicts(
-                        clarification.missing_catalog_inputs,
-                        "missing_catalog_inputs",
-                    )
+                    for item in clarification.missing_catalog_inputs
                 )
             )
         )
     if kind == PlanOutcomeKind.IMPOSSIBLE:
-        impossible = provider_output.PlanImpossibleOutput.parse(outcome)
+        impossible = outcome.parse_as(provider_output.PlanImpossibleOutput)
         return FactPlan(
             outcome=PlanImpossible(
                 blocked_facts=tuple(
@@ -103,11 +107,9 @@ def parse_fact_plan(
                         item,
                         evidence_resolver=evidence_resolver,
                         requested_fact_ids=requested_fact_ids,
+                        selected_source_strategy_ids=selected_source_strategy_ids,
                     )
-                    for item in _required_dicts(
-                        impossible.blocked_facts,
-                        "blocked_facts",
-                    )
+                    for item in impossible.blocked_facts
                 )
             )
         )
@@ -115,7 +117,7 @@ def parse_fact_plan(
 
 
 def _answer_plan(
-    payload: dict[str, Any],
+    payload: provider_output.FactPlanAnswerOutput,
     *,
     bound_sources: tuple[BoundSource, ...],
     source_binding_ids_by_requested_fact_id: Mapping[str, tuple[str, ...]],
@@ -124,30 +126,29 @@ def _answer_plan(
     ],
     input_context: CompilerInputContext,
 ) -> tuple[AnswerProgram, BindingSet]:
-    if "values" in payload:
-        raise ValueError("fact plan values are not model-authored")
-    if "answers" in payload:
-        return compile_pattern_answer_program(
-            payload,
-            bound_sources=bound_sources,
-            source_binding_ids_by_requested_fact_id=(
-                source_binding_ids_by_requested_fact_id
-            ),
-                source_binding_ids_by_requirement_by_requested_fact_id=(
-                    source_binding_ids_by_requirement_by_requested_fact_id
-                ),
-                input_context=input_context,
-            )
-    raise ValueError("fact plan answers must be a list")
+    answers = tuple(
+        provider_output.parse_pattern_answer(answer) for answer in payload.answers
+    )
+    return compile_pattern_answer_program(
+        answers,
+        bound_sources=bound_sources,
+        source_binding_ids_by_requested_fact_id=(
+            source_binding_ids_by_requested_fact_id
+        ),
+        source_binding_ids_by_requirement_by_requested_fact_id=(
+            source_binding_ids_by_requirement_by_requested_fact_id
+        ),
+        input_context=input_context,
+    )
 
 
 def _blocked_fact(
-    raw: dict[str, Any],
+    payload: provider_output.BlockedFactOutput,
     *,
     evidence_resolver: dict[str, tuple[str, ...]],
     requested_fact_ids: tuple[str, ...],
+    selected_source_strategy_ids: tuple[str, ...],
 ) -> BlockedFact:
-    payload = provider_output.BlockedFactOutput.parse(raw)
     basis = _enum(BlockedFactBasis, payload.basis, "blocked_fact.basis")
     requested_fact_id = _text(payload.requested_fact_id)
     if requested_fact_ids and requested_fact_id not in set(requested_fact_ids):
@@ -156,15 +157,16 @@ def _blocked_fact(
         requested_fact_id=requested_fact_id,
         basis=basis,
         evidence_refs=canonical_blocked_evidence_refs(
-            _required_strings(payload.evidence_refs, "evidence_refs"),
+            payload.evidence_refs,
             source_evidence_refs=evidence_resolver,
             requested_fact_ids=requested_fact_ids,
+            non_catalog_evidence_refs=selected_source_strategy_ids,
         ),
-        reviewed_read_ids=tuple(_strings(payload.reviewed_read_ids)),
+        reviewed_read_ids=payload.reviewed_read_ids or (),
         nearest_fields=tuple(
-            _blocked_fact_field(item) for item in _dicts(payload.nearest_fields)
+            _blocked_fact_field(item) for item in payload.nearest_fields or ()
         ),
-        explanation=_text(payload.explanation),
+        explanation=(payload.explanation or "").strip(),
     )
 
 
@@ -181,85 +183,49 @@ def _bound_source_evidence_resolver(
     )
 
 
-def _blocked_fact_field(raw: dict[str, Any]) -> BlockedFactField:
-    payload = provider_output.BlockedFactFieldOutput.parse(raw)
+def _blocked_fact_field(
+    payload: provider_output.BlockedFactFieldOutput,
+) -> BlockedFactField:
     return BlockedFactField(
         read_id=_text(payload.read_id),
         field_id=_text(payload.field_id),
     )
 
 
-def _missing_catalog_input(raw: dict[str, Any]) -> MissingCatalogInput:
+def _missing_catalog_input(raw: ProviderObject) -> MissingCatalogInput:
     kind = _enum(
         MissingCatalogInputKind,
-        raw.get("kind"),
+        raw.discriminator("kind"),
         "missing_catalog_input.kind",
     )
     if kind == MissingCatalogInputKind.REQUIRED_INPUT:
-        payload = provider_output.MissingCatalogRequiredInputOutput.parse(raw)
+        required_input = raw.parse_as(provider_output.MissingCatalogRequiredInputOutput)
         return MissingCatalogRequiredInput(
-            id=_text(payload.id),
-            requested_fact_id=_text(payload.requested_fact_id),
-            required_catalog_input_id=_text(payload.required_catalog_input_id),
+            id=_text(required_input.id),
+            requested_fact_id=_text(required_input.requested_fact_id),
+            required_catalog_input_id=_text(required_input.required_catalog_input_id),
         )
     if kind == MissingCatalogInputKind.CHOICE_INPUT:
-        payload = provider_output.MissingCatalogChoiceInputOutput.parse(raw)
+        choice_input = raw.parse_as(provider_output.MissingCatalogChoiceInputOutput)
         return MissingCatalogChoiceInput(
-            id=_text(payload.id),
-            requested_fact_id=_text(payload.requested_fact_id),
+            id=_text(choice_input.id),
+            requested_fact_id=_text(choice_input.requested_fact_id),
             required_catalog_choice_input_id=_text(
-                payload.required_catalog_choice_input_id
+                choice_input.required_catalog_choice_input_id
             ),
         )
     raise ValueError(f"unsupported missing catalog input: {kind.value}")
 
 
-def _enum(enum_type: type, value: Any, label: str):
+_EnumT = TypeVar("_EnumT", bound=Enum)
+
+
+def _enum(enum_type: type[_EnumT], value: str, label: str) -> _EnumT:
     try:
         return enum_type(str(value))
     except ValueError as exc:
         raise ValueError(f"{label} has unsupported value: {value!r}") from exc
 
 
-def _dict(value: Any, label: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError(f"{label} must be an object")
-    return dict(value)
-
-
-def _dicts(value: Any) -> tuple[dict[str, Any], ...]:
-    if value is None:
-        return ()
-    if not isinstance(value, list):
-        raise ValueError("expected list of objects")
-    return tuple(_dict(item, "list item") for item in value)
-
-
-def _required_dicts(value: Any, label: str) -> tuple[dict[str, Any], ...]:
-    if not isinstance(value, list):
-        raise ValueError(f"{label} must be a list")
-    return tuple(_dict(item, label) for item in value)
-
-
-def _strings(value: Any) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if not isinstance(value, list):
-        raise ValueError("expected list of strings")
-    return tuple(_text(item) for item in value)
-
-
-def _required_strings(value: Any, label: str) -> tuple[str, ...]:
-    if not isinstance(value, list):
-        raise ValueError(f"{label} must be a list")
-    return tuple(_text(item) for item in value)
-
-
-def _text(value: Any) -> str:
-    return str(value or "").strip()
-
-
-def _int(value: Any) -> int:
-    if value is None or value == "":
-        return 0
-    return int(value)
+def _text(value: str) -> str:
+    return value.strip()

@@ -4,16 +4,30 @@ from __future__ import annotations
 
 from typing import Any
 
-from fervis.lookup.answer_program.relations import RelationSourceReviewScopeDecision, ReviewScopeDecisionKind as RelationReviewScopeDecisionKind
-from fervis.lookup.question_contract import AnswerPopulationMembershipTestKind, AnswerPopulationMembershipTestPolarity, NormalInstanceExplicitOverrideReason
+from fervis.lookup.answer_program.relations import (
+    RelationSourceReviewScopeDecision,
+    ReviewScopeDecisionKind as RelationReviewScopeDecisionKind,
+)
+from fervis.lookup.question_contract import (
+    AnswerPopulationMembershipTestKind,
+    AnswerPopulationMembershipTestPolarity,
+    NormalInstanceExplicitOverrideReason,
+)
 from fervis.lookup.source_binding import provider_contract as provider_output
-from fervis.lookup.source_binding.membership_tests import membership_test_key, membership_tests_by_key
-from fervis.lookup.source_binding.normal_instance_roles import NORMAL_INSTANCE_NO_EXCLUDED_ROLE, NORMAL_INSTANCE_UNKNOWN_EXCLUDED_ROLE
+from fervis.lookup.source_binding.membership_tests import (
+    membership_test_key,
+    membership_tests_by_key,
+)
+from fervis.lookup.source_binding.normal_instance_roles import (
+    NORMAL_INSTANCE_NO_EXCLUDED_ROLE,
+    NORMAL_INSTANCE_UNKNOWN_EXCLUDED_ROLE,
+)
 from fervis.lookup.source_binding.param_values import canonical_param_value
-from fervis.lookup.source_binding.parser_common import _dict, _required_dicts, _text
+from fervis.lookup.source_binding.parser_common import _text
 from fervis.lookup.source_binding.review_scope import ReviewScopeDecision
 from fervis.lookup.source_binding.review_surface import FiniteChoiceReviewAxis
 from fervis.lookup.source_binding.model import SourceBindingRequest
+from fervis.lookup.provider_contract import ProviderObject
 
 
 __all__ = [
@@ -79,28 +93,23 @@ def relation_review_scope_decisions(
 
 
 def review_finite_choice_sets(
-    raw_reviews: Any,
+    review: provider_output.FiniteChoiceParamReviewOutput,
     *,
     axis: FiniteChoiceReviewAxis,
     tests_by_id: dict[str, Any],
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     param_id = axis.axis_id
-    raw_review = provider_output.FiniteChoiceParamReviewOutput.parse(raw_reviews)
     _validate_population_test_basis(
-        raw_review.population_test_basis,
+        review.population_test_basis,
         tests_by_id=tests_by_id,
         path=f"finite_choice_param_reviews.{param_id}.population_test_basis",
     )
-    reviews = _required_dicts(
-        raw_review.choice_reviews,
-        f"finite_choice_param_reviews.{param_id}.choice_reviews",
-    )
+    reviews = review.choice_reviews
     choices = axis.choices
     seen: set[str] = set()
     reviewed_effects: list[tuple[str, dict[str, str]]] = []
     choice_inclusions: dict[str, str] = {}
-    for raw_item in reviews:
-        raw = provider_output.FiniteChoiceReviewOutput.parse(raw_item)
+    for raw in reviews:
         choice = canonical_param_value(raw.choice_option_id)
         if choice not in choices:
             raise ValueError("finite choice review references unknown choice")
@@ -149,22 +158,50 @@ def review_finite_choice_sets(
         exclude_values.append(choice)
     if not include_values:
         raise ValueError("finite choice reviews must include at least one choice")
-    return tuple(include_values), tuple(exclude_values)
+    discharged_test_ids = discharged_membership_test_ids(
+        reviewed_effects,
+        included_values=tuple(include_values),
+        tests_by_id=tests_by_id,
+    )
+    return tuple(include_values), tuple(exclude_values), discharged_test_ids
+
+
+def discharged_membership_test_ids(
+    reviewed_effects: list[tuple[str, dict[str, str]]],
+    *,
+    included_values: tuple[str, ...],
+    tests_by_id: dict[str, Any],
+) -> tuple[str, ...]:
+    included = set(included_values)
+    discharged: list[str] = []
+    for test_id, test in tests_by_id.items():
+        required_effect = (
+            "SATISFIES_TEST"
+            if test.polarity == AnswerPopulationMembershipTestPolarity.MUST_PASS
+            else "CONFLICTS_WITH_TEST"
+        )
+        included_effects = tuple(
+            effects[test_id] for value, effects in reviewed_effects if value in included
+        )
+        if included_effects and all(
+            effect == required_effect for effect in included_effects
+        ):
+            discharged.append(test_id)
+    return tuple(discharged)
 
 
 def _validate_population_test_basis(
-    raw_basis: Any,
+    basis: dict[str, provider_output.PopulationTestBasisOutput],
     *,
     tests_by_id: dict[str, Any],
     path: str,
 ) -> None:
-    basis = _dict(raw_basis, path)
     if set(basis) != set(tests_by_id):
         raise ValueError(
             "finite choice population test basis must cover membership tests"
         )
     for test_id in tests_by_id:
-        item = provider_output.PopulationTestBasisOutput.parse(basis.get(test_id))
+        item = basis[test_id]
         if not _text(item.test_question).strip():
             raise ValueError("finite choice population test basis requires question")
         if not _text(item.role_scoped_test_question).strip():
@@ -188,13 +225,12 @@ def _active_membership_test_ids(
 
 
 def _population_test_effects(
-    raw_results: Any,
+    results: dict[str, ProviderObject],
     *,
     axis: FiniteChoiceReviewAxis,
     tests_by_id: dict[str, Any],
     path: str,
 ) -> dict[str, str]:
-    results = _dict(raw_results, path)
     seen: set[str] = set()
     effects: dict[str, str] = {}
     expected = set(tests_by_id)
@@ -207,52 +243,59 @@ def _population_test_effects(
         if test_id in seen:
             raise ValueError("duplicate finite choice population test result")
         seen.add(test_id)
-        raw = (
-            provider_output.NormalInstanceTestResultOutput.parse(raw_value)
-            if tests_by_id[test_id].kind
-            == AnswerPopulationMembershipTestKind.NORMAL_INSTANCE_GUARD
-            else provider_output.StandardPopulationTestResultOutput.parse(raw_value)
-        )
-        effect = _validate_normal_instance_test_effect(
-            raw,
-            test=tests_by_id[test_id],
-            axis=axis,
-            path=f"{path}.{test_id}",
-        )
-        if effect is None:
-            if not _text(raw.test_basis).strip():
-                raise ValueError("finite choice population test requires basis")
-            if not _text(raw.population_consequence).strip():
-                raise ValueError(
-                    "finite choice population test requires population consequence"
-                )
-            effect = _text(raw.test_effect)
-            if effect not in {
-                "SATISFIES_TEST",
-                "CONFLICTS_WITH_TEST",
-                "DOES_NOT_DECIDE_TEST",
-                "UNKNOWN_TEST_EFFECT",
-            }:
-                raise ValueError("unsupported finite choice population test effect")
+        test = tests_by_id[test_id]
+        if test.kind == AnswerPopulationMembershipTestKind.NORMAL_INSTANCE_GUARD:
+            normal_result = provider_output.NormalInstanceTestResultOutput.parse(
+                raw_value
+            )
+            effect = _validate_normal_instance_test_effect(
+                normal_result,
+                test=test,
+                axis=axis,
+                path=f"{path}.{test_id}",
+            )
+        else:
+            standard_result = provider_output.StandardPopulationTestResultOutput.parse(
+                raw_value
+            )
+            effect = _standard_population_test_effect(standard_result)
         effects[test_id] = effect
     return effects
 
 
+def _standard_population_test_effect(
+    result: provider_output.StandardPopulationTestResultOutput,
+) -> str:
+    if not _text(result.test_basis).strip():
+        raise ValueError("finite choice population test requires basis")
+    if not _text(result.population_consequence).strip():
+        raise ValueError(
+            "finite choice population test requires population consequence"
+        )
+    effect = _text(result.test_effect)
+    if effect not in {
+        "SATISFIES_TEST",
+        "CONFLICTS_WITH_TEST",
+        "DOES_NOT_DECIDE_TEST",
+        "UNKNOWN_TEST_EFFECT",
+    }:
+        raise ValueError("unsupported finite choice population test effect")
+    return effect
+
+
 def _validate_normal_instance_test_effect(
-    raw: Any,
+    raw: provider_output.NormalInstanceTestResultOutput,
     *,
     test: Any,
     axis: FiniteChoiceReviewAxis,
     path: str,
-) -> str | None:
-    if test.kind != AnswerPopulationMembershipTestKind.NORMAL_INSTANCE_GUARD:
-        return None
+) -> str:
     if test.polarity != AnswerPopulationMembershipTestPolarity.MUST_PASS:
         raise ValueError("normal instance review requires must-pass guard")
     profile = getattr(test, "normal_instance_profile", None)
     if profile is None:
         raise ValueError("normal instance review requires normal instance profile")
-    disposition = provider_output.NormalInstanceDispositionOutput.parse(raw.disposition)
+    disposition = raw.disposition
     if not _text(raw.role_match_basis).strip():
         raise ValueError("normal instance role match requires reason")
     role_effect = _normal_instance_role_match_effect(
@@ -344,15 +387,12 @@ def _validate_normal_instance_test_effect_consistency(
 
 
 def _normal_instance_override_evidence(
-    raw: Any,
+    items: tuple[provider_output.NormalInstanceOverrideEvidenceOutput, ...],
     *,
     path: str,
 ) -> tuple[dict[str, str], ...]:
-    if not isinstance(raw, list):
-        raise ValueError("normal instance review requires override evidence")
     output: list[dict[str, str]] = []
-    for item in raw:
-        evidence = provider_output.NormalInstanceOverrideEvidenceOutput.parse(item)
+    for evidence in items:
         source_text = _text(evidence.source_text)
         if not source_text.strip():
             raise ValueError(

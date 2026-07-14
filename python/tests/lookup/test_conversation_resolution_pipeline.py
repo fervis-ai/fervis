@@ -7,6 +7,7 @@ from tests.lookup.orchestrator._helpers import *  # noqa: F403
 from fervis.memory.addresses import (
     EvidenceRef,
     FactAddress,
+    FactAddressValue,
     RelationSourceKind,
 )
 from fervis.memory.artifacts import (
@@ -19,8 +20,16 @@ from fervis.model_io.providers.bootstrap import (
     reset_provider_bootstrap_for_tests,
 )
 from fervis.lookup.orchestration import pipeline as lookup_pipeline
+from fervis.lookup.conversation_resolution import compile_conversation_resolution
+from fervis.lookup.conversation_resolution.model import (
+    ConversationResolution,
+    CurrentSpanSource,
+    FrameParameterRef,
+    FramePartSource,
+    ResolvedConversationClause,
+    ResolvedConversationValue,
+)
 from fervis.lookup.memory.projection import project_conversation_memory_cards
-from fervis.lookup.turn_prompts.context import active_clarification_context
 
 
 _PROVIDER_PREFS = {"provider": "anthropic", "modelKey": "FAKE"}
@@ -60,18 +69,18 @@ def _memory_attribution_response(
     selected_anchors = tuple(
         anchor
         for anchor in anchors
-        if str(getattr(anchor, "memory_id", "")) == selected_memory_id
+        if str(getattr(anchor, "anchor_id", "")) == selected_memory_id
     )
     values: list[dict[str, object]] = [
         {
             "value_id": f"context_value_{index}",
             "resolved_text": str(getattr(anchor, "text")),
+            "frame_parameter": {"kind": "none"},
             "sources": [
                 {
                     "kind": "context_anchor",
                     "source_id": str(getattr(selected, "source_id")),
-                    "memory_id": str(getattr(anchor, "memory_id")),
-                    "source_text": str(getattr(anchor, "text")),
+                    "anchor_id": str(getattr(anchor, "anchor_id")),
                 }
             ],
         }
@@ -115,7 +124,6 @@ def _memory_attribution_response(
                     "values": values,
                 }
             ],
-            "frame_call": {"kind": "none"},
         },
     }
 
@@ -141,7 +149,6 @@ def _standalone_attribution_response(
                     "values": [],
                 }
             ],
-            "frame_call": {"kind": "none"},
         },
     }
 
@@ -174,7 +181,7 @@ def _clause_resolution_conversation_response(
     entity_anchor = next(
         anchor
         for anchor in entity_selected.meaning_anchors
-        if anchor.memory_id == entity_memory_id
+        if anchor.anchor_id == entity_memory_id
     )
     clauses = payload["outcome"]["clauses"]
     assert isinstance(clauses, list)
@@ -184,12 +191,12 @@ def _clause_resolution_conversation_response(
         {
             "value_id": "entity_value",
             "resolved_text": "Alice Smith",
+            "frame_parameter": {"kind": "none"},
             "sources": [
                 {
                     "kind": "context_anchor",
                     "source_id": entity_selected.source_id,
-                    "memory_id": entity_anchor.memory_id,
-                    "source_text": entity_anchor.text,
+                    "anchor_id": entity_anchor.anchor_id,
                 }
             ],
         }
@@ -251,7 +258,7 @@ def _memory_context() -> dict[str, object]:
                 address="row.sale_1",
                 relation="relation.sales_rows",
                 identity={"sale_key": "sale-1"},
-                values={"amount": {"type": "decimal", "value": "100.00"}},
+                values={"amount": FactAddressValue(type="decimal", value="100.00")},
             ),
         ),
     )
@@ -270,6 +277,7 @@ def _memory_context_with_prior_sales_and_location_identity(
                 answer_outputs=(
                     RequestedFactAnswerOutput(
                         id="answer_1",
+                        role="ANSWER_VALUE",
                     ),
                 ),
             ),
@@ -316,7 +324,7 @@ def _memory_context_with_prior_sales_and_location_identity(
                 address="row.sales.1",
                 relation="relation.sales",
                 identity={"sale_id": "sale-1"},
-                values={"sale_amount": {"type": "decimal", "value": "10.00"}},
+                values={"sale_amount": FactAddressValue(type="decimal", value="10.00")},
                 evidence=EvidenceRef(step_ids=("read:sales_read",)),
             ),
         ),
@@ -329,6 +337,7 @@ def _memory_context_with_prior_sales_and_location_identity(
             FactAddress.entity(
                 address="entity.location.abc",
                 resource="location",
+                key_id="primary_key",
                 reference_text="ABC Mall",
                 identity={"location_id": "loc_stale_memory"},
             ),
@@ -373,7 +382,7 @@ def _memory_context_with_selected_and_unselected_memory() -> dict[str, object]:
                 address="row.sales.1",
                 relation="relation.sales",
                 identity={"sale_id": "sale-1"},
-                values={"sale_amount": {"type": "decimal", "value": "10.00"}},
+                values={"sale_amount": FactAddressValue(type="decimal", value="10.00")},
                 evidence=EvidenceRef(step_ids=("read:sales_read",)),
             ),
         ),
@@ -415,7 +424,12 @@ def _memory_context_with_selected_and_unselected_memory() -> dict[str, object]:
                 address="row.secret_sales.1",
                 relation="relation.secret_sales",
                 identity={"sale_id": "secret-sale-1"},
-                values={"secret_amount": {"type": "decimal", "value": "999.00"}},
+                values={
+                    "secret_amount": FactAddressValue(
+                        type="decimal",
+                        value="999.00",
+                    )
+                },
                 evidence=EvidenceRef(step_ids=("read:secret_sales_read",)),
             ),
         ),
@@ -474,6 +488,7 @@ def _memory_context_with_staff_identities() -> dict[str, object]:
             FactAddress.entity(
                 address="entity.staff.alice",
                 resource="staff",
+                key_id="primary_key",
                 reference_text="Alice Smith",
                 identity={"staff_id": "staff_alice"},
             ),
@@ -487,6 +502,7 @@ def _memory_context_with_staff_identities() -> dict[str, object]:
             FactAddress.entity(
                 address="entity.staff.jane",
                 resource="staff",
+                key_id="primary_key",
                 reference_text="Jane Doe",
                 identity={"staff_id": "staff_jane"},
             ),
@@ -502,6 +518,8 @@ def _memory_context_with_prior_staff_sales_request() -> dict[str, object]:
         source_question="How much did Alice Smith sell today?",
         source_answer="Alice Smith sold 100 today.",
         provenance={
+            "runId": "run_staff_sales",
+            "programRequestedFactIds": ["fact_1"],
             "question_contract": {
                 "question_inputs": [
                     {
@@ -532,6 +550,7 @@ def _memory_context_with_prior_staff_sales_request() -> dict[str, object]:
                             {
                                 "id": "answer_1",
                                 "description": "total sales amount",
+                                "role": "ANSWER_VALUE",
                             }
                         ],
                         "used_question_inputs": [
@@ -546,6 +565,7 @@ def _memory_context_with_prior_staff_sales_request() -> dict[str, object]:
             FactAddress.entity(
                 address="entity.grounded_fact_1_entity_1",
                 resource="staff",
+                key_id="primary_key",
                 reference_text="Alice Smith",
                 identity={"staff_id": "staff_alice"},
                 evidence=EvidenceRef(
@@ -564,6 +584,135 @@ def _memory_context_with_prior_staff_sales_request() -> dict[str, object]:
         ),
     )
     return {"factArtifacts": [artifact.to_dict()]}
+
+
+def test_subject_change_preserves_prior_canonical_identity() -> None:
+    projection = project_conversation_memory_cards(
+        _memory_context_with_prior_staff_sales_request(),
+        current_question="Where did Alice Smith work on her first two shifts?",
+    )
+    frame = projection.context_frames[0]
+    assert frame.callable is not None
+    parameter = next(
+        item
+        for item in frame.callable.parameters
+        if item.kind.value == "entity_identity"
+    )
+    resolution = ConversationResolution(
+        current_question_text="Where did Alice Smith work on her first two shifts?",
+        resolution_basis="The repeated name refers to the verified prior identity.",
+        contextualized_question="Where did Alice Smith work on her first two shifts?",
+        clauses=(
+            ResolvedConversationClause(
+                current_clause_text="Where did Alice Smith work on her first two shifts?",
+                occurrence=1,
+                resolved_text="Where did Alice Smith work on her first two shifts?",
+                retained_frame_parts=(),
+                values=(
+                    ResolvedConversationValue(
+                        value_id="staff",
+                        resolved_text="Alice Smith",
+                        frame_parameter=FrameParameterRef(
+                            frame_id=frame.frame_id,
+                            parameter_id=parameter.parameter_id,
+                        ),
+                        sources=(
+                            CurrentSpanSource(text="Alice Smith", occurrence=1),
+                            FramePartSource(
+                                frame_id=frame.frame_id,
+                                part_id=parameter.part_id,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    compiled = compile_conversation_resolution(
+        resolution,
+        memory_projection=projection,
+        context_sources=projection.context_sources,
+    )
+
+    identity = compiled.identity_inputs()[0].canonical_identity
+    assert identity is not None
+    assert identity.key.entity_kind == "staff"
+    assert identity.key.key_id == "primary_key"
+    assert identity.key.component_value("staff_id") == "staff_alice"
+    prompt_payload = str(compiled.to_prompt_payload())
+    assert "canonical_identity" not in prompt_payload
+    assert "staff_alice" not in prompt_payload
+
+
+def test_subject_change_retains_operation_without_old_subject_policy() -> None:
+    projection = project_conversation_memory_cards(
+        {
+            "factArtifacts": [
+                build_fact_artifact(
+                    artifact_id="turn_locations",
+                    outcome=FactOutcome.ANSWERED,
+                    source_question="How many locations do we have?",
+                    provenance={
+                        "question_contract": {
+                            "question_inputs": [],
+                            "answer_requests": [
+                                {
+                                    "id": "fact_1",
+                                    "answer_fact": "number of locations",
+                                    "answer_expression": {
+                                        "family": "scalar_aggregate"
+                                    },
+                                    "answer_subject": _answer_subject_payload(
+                                        "locations"
+                                    ),
+                                    "answer_population": {
+                                        "population_label": "locations",
+                                        "counted_unit": "location",
+                                        "membership_tests": [
+                                            {
+                                                "test_id": "subject_identity",
+                                                "kind": "SUBJECT_IDENTITY",
+                                                "polarity": "MUST_PASS",
+                                                "test_question": (
+                                                    "Is this a location?"
+                                                ),
+                                                "owned_question_input_refs": [],
+                                            },
+                                            {
+                                                "test_id": "normal_instance_guard",
+                                                "kind": "NORMAL_INSTANCE_GUARD",
+                                                "polarity": "MUST_PASS",
+                                                "test_question": (
+                                                    "Is this an ordinary location?"
+                                                ),
+                                                "owned_question_input_refs": [],
+                                            },
+                                        ],
+                                    },
+                                    "answer_outputs": [
+                                        {
+                                            "id": "answer_1",
+                                            "description": "count of locations",
+                                            "role": "ROW_COUNT",
+                                        }
+                                    ],
+                                    "used_question_inputs": [],
+                                }
+                            ],
+                        }
+                    },
+                ).to_dict()
+            ]
+        },
+        current_question="What about stores?",
+    )
+
+    parts_by_id = {
+        part.part_id: part for part in projection.context_frames[0].parts
+    }
+    assert parts_by_id["output:1"].text == "row count"
+    assert tuple(parts_by_id) == ("subject", "output:1")
 
 
 def _memory_context_with_prior_numeric_slots() -> dict[str, object]:
@@ -601,6 +750,7 @@ def _memory_context_with_prior_numeric_slots() -> dict[str, object]:
                             {
                                 "id": "answer_1",
                                 "description": "staff sales ranking",
+                                "role": "ANSWER_VALUE",
                             }
                         ],
                         "used_question_inputs": [
@@ -629,22 +779,6 @@ def _memory_context_with_prior_numeric_slots() -> dict[str, object]:
     return {"factArtifacts": [artifact.to_dict()]}
 
 
-def _memory_context_with_active_clarification() -> dict[str, object]:
-    clarification = build_fact_artifact(
-        artifact_id="prior_clarification",
-        outcome=FactOutcome.NEEDS_CLARIFICATION,
-        source_question="How much sales did we make yesterday?",
-        addresses=(
-            FactAddress.outcome(
-                address="outcome.needs_clarification",
-                terminal=FactOutcome.NEEDS_CLARIFICATION.value,
-                clarification_questions=("Which store do you mean?",),
-            ),
-        ),
-    )
-    return {"factArtifacts": [clarification.to_dict()]}
-
-
 def _sales_read() -> EndpointRead:
     return EndpointRead(
         id="sales_read",
@@ -656,10 +790,10 @@ def _sales_read() -> EndpointRead:
                 name="location_id",
                 source=ParamSource.QUERY,
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref="location",
-                    identity_field="location_id",
-                    primary_key=True,
+                entity_target=EntityKeyComponentTarget(
+                    entity_kind="location",
+                    key_id="primary_key",
+                    component_id="location_id",
                 ),
             ),
         ),
@@ -673,17 +807,22 @@ def _sales_read() -> EndpointRead:
                 path="data.sale_id",
                 row_path_id="data",
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref="sale",
-                    identity_field="sale_id",
-                    primary_key=True,
-                ),
             ),
             CatalogField(
                 ref="field.sale_amount",
                 path="data.sale_amount",
                 row_path_id="data",
                 type="number",
+            ),
+        ),
+        candidate_keys=(
+            CandidateKey(
+                id="primary_key",
+                entity_kind="sale",
+                components=(
+                    CandidateKeyComponent(id="sale_id", field_ref="field.sale_id"),
+                ),
+                primary=True,
             ),
         ),
         pagination=PaginationMetadata(
@@ -742,10 +881,10 @@ def _secret_sales_read() -> EndpointRead:
                 name="location_id",
                 source=ParamSource.QUERY,
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref="location",
-                    identity_field="location_id",
-                    primary_key=True,
+                entity_target=EntityKeyComponentTarget(
+                    entity_kind="location",
+                    key_id="primary_key",
+                    component_id="location_id",
                 ),
             ),
         ),
@@ -759,17 +898,25 @@ def _secret_sales_read() -> EndpointRead:
                 path="data.sale_id",
                 row_path_id="data",
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref="sale",
-                    identity_field="sale_id",
-                    primary_key=True,
-                ),
             ),
             CatalogField(
                 ref="field.secret_amount",
                 path="data.secret_amount",
                 row_path_id="data",
                 type="number",
+            ),
+        ),
+        candidate_keys=(
+            CandidateKey(
+                id="primary_key",
+                entity_kind="sale",
+                components=(
+                    CandidateKeyComponent(
+                        id="sale_id",
+                        field_ref="field.secret_sale_id",
+                    ),
+                ),
+                primary=True,
             ),
         ),
         pagination=PaginationMetadata(
@@ -790,10 +937,10 @@ def _staff_sales_read() -> EndpointRead:
                 name="staff_id",
                 source=ParamSource.QUERY,
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref="staff",
-                    identity_field="staff_id",
-                    primary_key=True,
+                entity_target=EntityKeyComponentTarget(
+                    entity_kind="staff",
+                    key_id="primary_key",
+                    component_id="staff_id",
                 ),
             ),
             CatalogParam(
@@ -810,17 +957,25 @@ def _staff_sales_read() -> EndpointRead:
                 path="data.staff_id",
                 row_path_id="data",
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref="staff",
-                    identity_field="staff_id",
-                    primary_key=True,
-                ),
             ),
             CatalogField(
                 ref="field.amount",
                 path="data.amount",
                 row_path_id="data",
                 type="number",
+            ),
+        ),
+        entity_references=(
+            EntityReference(
+                id="staff_reference",
+                target_entity_kind="staff",
+                target_key_id="primary_key",
+                components=(
+                    EntityReferenceComponent(
+                        target_component_id="staff_id",
+                        local_field_ref="field.staff_id",
+                    ),
+                ),
             ),
         ),
         pagination=PaginationMetadata(
@@ -850,12 +1005,6 @@ def _staff_list_read() -> EndpointRead:
                 path="data.staff_id",
                 row_path_id="data",
                 type="string",
-                identity=IdentityMetadata(
-                    entity_ref="staff",
-                    identity_field="staff_id",
-                    primary_key=True,
-                    stable=True,
-                ),
             ),
             CatalogField(
                 ref="field.name",
@@ -864,9 +1013,50 @@ def _staff_list_read() -> EndpointRead:
                 type="string",
             ),
         ),
+        candidate_keys=(
+            CandidateKey(
+                id="primary_key",
+                entity_kind="staff",
+                components=(
+                    CandidateKeyComponent(id="staff_id", field_ref="field.staff_id"),
+                ),
+                primary=True,
+                context_field_refs=("field.name",),
+            ),
+        ),
         pagination=PaginationMetadata(
             mode=PaginationMode.NONE,
             completeness_policy=CompletenessPolicy.COMPLETE,
+        ),
+    )
+
+
+def _location_list_read() -> EndpointRead:
+    return EndpointRead(
+        id="location_list_read",
+        endpoint_name="list_location_list",
+        resource_names=("location",),
+        row_paths=(RowPath(id="data", path="data", cardinality=RowCardinality.MANY),),
+        fields=(
+            CatalogField(
+                ref="location.field.location_id",
+                path="data.location_id",
+                row_path_id="data",
+                type="string",
+            ),
+        ),
+        candidate_keys=(
+            CandidateKey(
+                id="primary_key",
+                entity_kind="location",
+                components=(
+                    CandidateKeyComponent(
+                        id="location_id",
+                        field_ref="location.field.location_id",
+                    ),
+                ),
+                primary=True,
+            ),
         ),
     )
 
@@ -1237,7 +1427,7 @@ def test_pipeline_passes_raw_question_and_typed_resolution_to_question_contract(
                 selected_memory_id="turn_1.relation.sales_rows",
                 contextualized_question="How much money did we make the day before yesterday?",
             ),
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="money made the day before yesterday",
                 answer_subject="money",
                 parts=("total money",),
@@ -1286,7 +1476,7 @@ def test_pipeline_does_not_pass_memory_cards_to_question_contract_prompt():
                 selected_memory_id="turn_1.relation.sales_rows",
                 contextualized_question="How much money did the prior sales make?",
             ),
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="money made by prior sales",
                 answer_subject="money",
                 parts=("total money",),
@@ -1328,7 +1518,7 @@ def test_standalone_resolution_is_backend_pass_through_without_model_rewrite():
                 question="How much money did we make yesterday?",
                 conversation_context=_memory_context_with_staff_identities(),
             ),
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="money made yesterday",
                 answer_subject="money",
                 answer_expression_family="list_rows",
@@ -1363,7 +1553,7 @@ def test_standalone_resolution_is_backend_pass_through_without_model_rewrite():
 
     assert result.status == "COMPLETED", (result, planner.tool_names)
     question_contract_prompt = planner.prompts[
-        planner.tool_names.index("submit_answer_request_contract")
+        planner.tool_names.index("submit_question_contract_outcome")
     ]
     assert (
         "Current question:\nHow much money did we make yesterday?"
@@ -1381,7 +1571,7 @@ def test_standalone_referential_question_does_not_activate_or_expose_memory():
                 question="How much did she sell yesterday?",
                 conversation_context=_memory_context_with_staff_identities(),
             ),
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="her sales yesterday",
                 answer_subject="she",
                 parts=("sales amount",),
@@ -1403,7 +1593,9 @@ def test_standalone_referential_question_does_not_activate_or_expose_memory():
             provider_preferences=_PROVIDER_PREFS,
         ),
         LookupRuntimePorts(
-            relation_catalog_port=_CatalogPort(_catalog(_staff_sales_read())),
+            relation_catalog_port=_CatalogPort(
+                _catalog(_staff_sales_read(), _staff_list_read())
+            ),
             data_access_port=_DataAccessPort(
                 {
                     "staff_sales_read": {
@@ -1416,7 +1608,7 @@ def test_standalone_referential_question_does_not_activate_or_expose_memory():
     )
 
     question_contract_prompt = planner.prompts[
-        planner.tool_names.index("submit_answer_request_contract")
+        planner.tool_names.index("submit_question_contract_outcome")
     ]
     assert (
         "Current question:\nHow much did she sell yesterday?"
@@ -1430,111 +1622,6 @@ def test_standalone_referential_question_does_not_activate_or_expose_memory():
         assert "turn_alice" not in source_binding_prompt
         assert "staff_alice" not in source_binding_prompt
         assert "Alice Smith" not in source_binding_prompt
-
-
-def test_active_clarification_requires_clause_resolution_not_standalone():
-    standalone_planner = _ToolNamePlannerPort(
-        responses={
-            CONVERSATION_RESOLUTION_TOOL_NAME: {
-                "kind": "conversation_resolution",
-            },
-            "submit_answer_request_contract": _question_contract_response(
-                subject="ABC Mall",
-                parts=("ABC Mall",),
-            ),
-        }
-    )
-
-    standalone_result = run_lookup_question(
-        LookupRequest(
-            question="ABC Mall",
-            run_id="run_active_clarification_standalone_wrong",
-            conversation_context=_memory_context_with_active_clarification(),
-            provider_preferences=_PROVIDER_PREFS,
-        ),
-        LookupRuntimePorts(
-            relation_catalog_port=_CatalogPort(_catalog(_metric_read("metric_read"))),
-            data_access_port=_DataAccessPort({}),
-            planner_model_port=standalone_planner,
-        ),
-    )
-
-    assert standalone_result.status == "FAILED"
-    assert standalone_planner.tool_names == [CONVERSATION_RESOLUTION_TOOL_NAME]
-
-    resolved_planner = _ToolNamePlannerPort(
-        responses={
-            CONVERSATION_RESOLUTION_TOOL_NAME: _memory_attribution_response(
-                question="ABC Mall",
-                conversation_context=_memory_context_with_active_clarification(),
-                selected_memory_id="prior_clarification.outcome.needs_clarification",
-                contextualized_question="How much sales did we make at ABC Mall yesterday?",
-            ),
-            "submit_answer_request_contract": _question_contract_response(
-                subject="sales at ABC Mall yesterday",
-                answer_subject="sales",
-                answer_expression_family="list_rows",
-                parts=("sales amount",),
-            ),
-            "submit_query_enrichment": _query_enrichment_payload(("sales",)),
-            "submit_pattern_fact_plan": _pattern_fact_plan_payload(
-                requested_fact_id="fact_1",
-                answer_output_ids=("answer_1",),
-                read_id="sales_total_read",
-                output_fields=({"field_id": "metric_total", "label": "answer_1"},),
-            ),
-        }
-    )
-
-    resolved_result = run_lookup_question(
-        LookupRequest(
-            question="ABC Mall",
-            run_id="run_active_clarification_clause_resolution",
-            conversation_context=_memory_context_with_active_clarification(),
-            provider_preferences=_PROVIDER_PREFS,
-        ),
-        LookupRuntimePorts(
-            relation_catalog_port=_CatalogPort(
-                _catalog(_sales_metric_read("sales_total_read"))
-            ),
-            data_access_port=_DataAccessPort(
-                {"sales_total_read": {"data": [{"metric_total": "12"}]}}
-            ),
-            planner_model_port=resolved_planner,
-        ),
-    )
-
-    assert resolved_result.status == "COMPLETED", (
-        resolved_result,
-        resolved_planner.tool_names,
-        resolved_planner.prompts,
-    )
-    question_contract_prompt = resolved_planner.prompts[
-        resolved_planner.tool_names.index("submit_answer_request_contract")
-    ]
-    assert "Current question:\nABC Mall" in question_contract_prompt
-    assert "Conversation resolution context:" in question_contract_prompt
-    assert "Prior question:" not in question_contract_prompt
-    assert "Clarification answer:" not in question_contract_prompt
-
-
-def test_active_clarification_memory_card_includes_clarification_question():
-    projection = project_conversation_memory_cards(
-        _memory_context_with_active_clarification(),
-        current_question="ABC Mall",
-    )
-
-    card = next(
-        card for card in projection.cards if card.kind == "clarification_answer"
-    )
-    assert (
-        card.display
-        == "How much sales did we make yesterday? Clarification needed: Which store do you mean?"
-    )
-    assert card.details == {
-        "clarification_question": "Which store do you mean?",
-        "question_being_clarified": "How much sales did we make yesterday?",
-    }
 
 
 def test_activated_memory_does_not_hide_current_question_source_candidates(monkeypatch):
@@ -1561,7 +1648,7 @@ def test_activated_memory_does_not_hide_current_question_source_candidates(monke
         ),
         LookupRuntimePorts(
             relation_catalog_port=_CatalogPort(
-                _catalog(_sales_read(), _inventory_read())
+                _catalog(_sales_read(), _inventory_read(), _location_list_read())
             ),
             data_access_port=_DataAccessPort(
                 {
@@ -1577,7 +1664,7 @@ def test_activated_memory_does_not_hide_current_question_source_candidates(monke
 
     assert result.status == "COMPLETED", (result, planner.tool_names)
     for tool_name in (
-        "submit_answer_request_contract",
+        "submit_question_contract_outcome",
         "submit_query_enrichment",
         "submit_source_binding",
     ):
@@ -1586,7 +1673,7 @@ def test_activated_memory_does_not_hide_current_question_source_candidates(monke
             "Current question:\nFor those sales, show the amount; also show current inventory."
             in prompt
         )
-        if tool_name == "submit_answer_request_contract":
+        if tool_name == "submit_question_contract_outcome":
             assert "Conversation resolution context:" in prompt
         assert "For the prior sales, show sale amount." not in prompt
     for tool_name in ("submit_source_alignment_reviews", "submit_pattern_fact_plan"):
@@ -1612,7 +1699,6 @@ def test_activated_memory_does_not_hide_current_question_source_candidates(monke
         for candidate in candidates_by_fact.get("fact_2", [])
     )
     assert catalog_requests
-    assert all(not request.active_memory_signals for request in catalog_requests)
     assert all(
         not _catalog_request_has_active_memory_value(request)
         for request in catalog_requests
@@ -1628,7 +1714,7 @@ def test_source_binding_prompt_excludes_unactivated_memory_context():
                 selected_memory_id="turn_selected_sales.relation.sales",
                 contextualized_question="Show sale amount for the prior sales.",
             ),
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="the prior sales",
                 answer_subject="sales",
                 answer_expression_family="list_rows",
@@ -1653,7 +1739,11 @@ def test_source_binding_prompt_excludes_unactivated_memory_context():
         ),
         LookupRuntimePorts(
             relation_catalog_port=_CatalogPort(
-                _catalog(_sales_read(), _secret_sales_read())
+                _catalog(
+                    _sales_read(),
+                    _secret_sales_read(),
+                    _location_list_read(),
+                )
             ),
             data_access_port=_DataAccessPort(
                 {
@@ -1700,7 +1790,7 @@ def test_source_binding_prompt_uses_only_current_run_grounded_values():
                 contextualized_question="Show orders above 50.",
                 source_containing="50",
             ),
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="orders above 50",
                 answer_subject="orders",
                 answer_expression_family="list_rows",
@@ -1780,7 +1870,7 @@ def test_runtime_expands_selected_memory_through_activation_chokepoint(monkeypat
                 selected_memory_id="turn_selected_sales.relation.sales",
                 contextualized_question="Show sale amount for the prior sales.",
             ),
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="the prior sales",
                 answer_subject="sales",
                 parts=("sale amount",),
@@ -1803,7 +1893,9 @@ def test_runtime_expands_selected_memory_through_activation_chokepoint(monkeypat
             provider_preferences=_PROVIDER_PREFS,
         ),
         LookupRuntimePorts(
-            relation_catalog_port=_CatalogPort(_catalog(_sales_read())),
+            relation_catalog_port=_CatalogPort(
+                _catalog(_sales_read(), _location_list_read())
+            ),
             data_access_port=_DataAccessPort(
                 {
                     "sales_read": {
@@ -1833,9 +1925,9 @@ def test_selected_prior_request_outputs_reach_question_contract():
                     entity_memory_id=entity_memory_id,
                 )
             ),
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject="total sales amount for Alice Smith yesterday",
-                answer_subject="Alice Smith",
+                answer_subject="sales",
                 answer_expression_family="computed_scalar",
                 parts=("total sales amount",),
                 question_inputs=(
@@ -1914,7 +2006,7 @@ def test_selected_prior_request_outputs_reach_question_contract():
 
     assert result.status == "COMPLETED", (result, planner.tool_names)
     question_contract_prompt = planner.prompts[
-        planner.tool_names.index("submit_answer_request_contract")
+        planner.tool_names.index("submit_question_contract_outcome")
     ]
     assert prior_memory_id not in question_contract_prompt
     assert '"resolved_values"' in question_contract_prompt
@@ -1936,7 +2028,7 @@ def test_clause_resolution_prior_answer_frame_reaches_question_contract():
                 contextualized_question=contextualized_question,
                 prior_request_memory_id=prior_memory_id,
             ),
-            "submit_answer_request_contract": _question_contract_response(
+            "submit_question_contract_outcome": _question_contract_response(
                 subject=("total sales amount for products Alice Smith sold yesterday"),
                 answer_subject="she",
                 answer_expression_family="computed_scalar",
@@ -2016,7 +2108,7 @@ def test_clause_resolution_prior_answer_frame_reaches_question_contract():
     )
 
     question_contract_prompt = planner.prompts[
-        planner.tool_names.index("submit_answer_request_contract")
+        planner.tool_names.index("submit_question_contract_outcome")
     ]
     assert (
         "Current question:\nAnd how much did she make yesterday?"
@@ -2040,7 +2132,9 @@ def test_question_scoped_active_memory_is_available_as_explicit_candidate_contex
             provider_preferences=_PROVIDER_PREFS,
         ),
         LookupRuntimePorts(
-            relation_catalog_port=_CatalogPort(_catalog(_sales_read())),
+            relation_catalog_port=_CatalogPort(
+                _catalog(_sales_read(), _location_list_read())
+            ),
             data_access_port=_DataAccessPort(
                 {
                     "sales_read": {
@@ -2072,40 +2166,63 @@ def test_question_scoped_active_memory_is_available_as_explicit_candidate_contex
     )
 
 
-def test_active_clarification_context_uses_chronological_artifacts():
-    answered = build_fact_artifact(
-        artifact_id="turn_answered",
-        outcome=FactOutcome.ANSWERED,
-        source_question="What were sales yesterday?",
-        addresses=(
-            FactAddress.value(
-                address="value.total",
-                value={"type": "number", "value": "10.00"},
-            ),
+def _tool_response(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    if tool_name == "submit_question_contract_outcome":
+        arguments = _question_contract_decision(arguments)
+    return {
+        "answer": json.dumps(
+            {"tool": tool_name, "arguments": arguments},
+            default=str,
         ),
-    )
-    clarification = build_fact_artifact(
-        artifact_id="turn_clarification",
-        outcome=FactOutcome.NEEDS_CLARIFICATION,
-        source_question="How much money did we make yesterday?",
-        addresses=(
-            FactAddress.outcome(
-                address="outcome.needs_clarification",
-                terminal="needs_clarification",
-                clarification_questions=("Which location?",),
-            ),
-        ),
-    )
+        "usage": {
+            "inputTokens": 1,
+            "outputTokens": 1,
+            "thinkingTokens": 0,
+            "costUsd": 0,
+        },
+    }
 
-    context = active_clarification_context(
-        {"factArtifacts": [answered.to_dict(), clarification.to_dict()]},
-        current_question="ABC Mall",
-    )
 
-    assert context is not None
-    assert context.original_question == "How much money did we make yesterday?"
-    assert context.exchanges[0].questions == ("Which location?",)
-    assert context.exchanges[0].answer == "ABC Mall"
+def _candidate_binding_surface(candidate: dict[str, Any]) -> dict[str, Any]:
+    surface = candidate.get("binding_surface")
+    if isinstance(surface, dict):
+        return surface
+    if candidate.get("kind") not in {"new_api_read", "same_scope_api_read"}:
+        return candidate
+    output = {
+        key: candidate[key]
+        for key in (
+            "applied_filters",
+            "bound_params",
+            "source_invocations",
+            "population_bindings",
+            "params",
+            "population_roles",
+        )
+        if key in candidate
+    }
+    if "fulfillment_choices" in candidate:
+        output["fulfillment_support_sets"] = candidate["fulfillment_choices"]
+    fields = [
+        field
+        for row in candidate.get("response_rows") or ()
+        if isinstance(row, dict)
+        for field in row.get("fields") or ()
+        if isinstance(field, dict)
+    ]
+    if fields:
+        output["fields"] = fields
+    return output
+
+
+def _candidate_read_id(candidate: dict[str, Any]) -> str:
+    read_id = str(candidate.get("read_id") or "")
+    if read_id:
+        return read_id
+    read_contract = candidate.get("read_contract")
+    if isinstance(read_contract, dict):
+        return str(read_contract.get("read_id") or "")
+    return ""
 
 
 @dataclass
@@ -2149,7 +2266,7 @@ class _TwoFactActiveMemoryPlannerPort:
                     source_containing="sales",
                 ),
             )
-        if tool_name == "submit_answer_request_contract":
+        if tool_name == "submit_question_contract_outcome":
             return _tool_response(
                 tool_name,
                 {
@@ -2165,7 +2282,12 @@ class _TwoFactActiveMemoryPlannerPort:
                                 description="the prior sales",
                                 subject_text="sales",
                             ),
-                            "answer_outputs": [{"description": "sale amount"}],
+                            "answer_outputs": [
+                                {
+                                    "description": "sale amount",
+                                    "role": "ANSWER_VALUE",
+                                }
+                            ],
                             "used_question_inputs": [],
                         },
                         {
@@ -2176,7 +2298,12 @@ class _TwoFactActiveMemoryPlannerPort:
                                 description="current inventory",
                                 subject_text="inventory",
                             ),
-                            "answer_outputs": [{"description": "inventory count"}],
+                            "answer_outputs": [
+                                {
+                                    "description": "inventory count",
+                                    "role": "ANSWER_VALUE",
+                                }
+                            ],
                             "used_question_inputs": [],
                         },
                     ],
@@ -2250,49 +2377,49 @@ class _TwoFactActiveMemoryPlannerPort:
                     "bindings_for_fact_1": {
                         "plan_shape": "list_rows",
                         "primary": {
-                                    "binding_target_id": source_binding_target_id_for_candidate(
-                                        prompt,
-                                        requested_fact_id="fact_1",
-                                        source_candidate_id=str(
-                                            prior_sales["source_candidate_id"]
-                                        ),
-                                        plan_shape="list_rows",
-                                    ),
-                                    "answer_population": source_candidate_answer_population(
-                                        prompt,
-                                        source_candidate_id=str(
-                                            prior_sales["source_candidate_id"]
-                                        ),
-                                    ),
-                                    "fulfillment_decisions": source_fulfills_for_candidate(
-                                        prior_sales,
-                                        field_ids=("sale_amount",),
-                                    ),
-                                    "param_decisions": {},
+                            "binding_target_id": source_binding_target_id_for_candidate(
+                                prompt,
+                                requested_fact_id="fact_1",
+                                source_candidate_id=str(
+                                    prior_sales["source_candidate_id"]
+                                ),
+                                plan_shape="list_rows",
+                            ),
+                            "answer_population": source_candidate_answer_population(
+                                prompt,
+                                source_candidate_id=str(
+                                    prior_sales["source_candidate_id"]
+                                ),
+                            ),
+                            "fulfillment_decisions": source_fulfills_for_candidate(
+                                prior_sales,
+                                field_ids=("sale_amount",),
+                            ),
+                            "param_decisions": {},
                         },
                     },
                     "bindings_for_fact_2": {
                         "plan_shape": "list_rows",
                         "primary": {
-                                    "binding_target_id": source_binding_target_id_for_candidate(
-                                        prompt,
-                                        requested_fact_id="fact_2",
-                                        source_candidate_id=str(
-                                            inventory["source_candidate_id"]
-                                        ),
-                                        plan_shape="list_rows",
-                                    ),
-                                    "answer_population": source_candidate_answer_population(
-                                        prompt,
-                                        source_candidate_id=str(
-                                            inventory["source_candidate_id"]
-                                        ),
-                                    ),
-                                    "fulfillment_decisions": source_fulfills_for_candidate(
-                                        inventory,
-                                        field_ids=("inventory_count",),
-                                    ),
-                                    "param_decisions": {},
+                            "binding_target_id": source_binding_target_id_for_candidate(
+                                prompt,
+                                requested_fact_id="fact_2",
+                                source_candidate_id=str(
+                                    inventory["source_candidate_id"]
+                                ),
+                                plan_shape="list_rows",
+                            ),
+                            "answer_population": source_candidate_answer_population(
+                                prompt,
+                                source_candidate_id=str(
+                                    inventory["source_candidate_id"]
+                                ),
+                            ),
+                            "fulfillment_decisions": source_fulfills_for_candidate(
+                                inventory,
+                                field_ids=("inventory_count",),
+                            ),
+                            "param_decisions": {},
                         },
                     },
                 }
@@ -2403,7 +2530,7 @@ class _TwoSalesFactActiveMemoryPlannerPort:
                     source_containing="sales",
                 ),
             )
-        if tool_name == "submit_answer_request_contract":
+        if tool_name == "submit_question_contract_outcome":
             return _tool_response(
                 tool_name,
                 {
@@ -2419,7 +2546,12 @@ class _TwoSalesFactActiveMemoryPlannerPort:
                                 description="the prior sales",
                                 subject_text="sales",
                             ),
-                            "answer_outputs": [{"description": "sale amount"}],
+                            "answer_outputs": [
+                                {
+                                    "description": "sale amount",
+                                    "role": "ANSWER_VALUE",
+                                }
+                            ],
                             "used_question_inputs": [],
                         },
                         {
@@ -2430,7 +2562,12 @@ class _TwoSalesFactActiveMemoryPlannerPort:
                                 description="sale id",
                                 subject_text="sale id",
                             ),
-                            "answer_outputs": [{"description": "sale id"}],
+                            "answer_outputs": [
+                                {
+                                    "description": "sale id",
+                                    "role": "ANSWER_VALUE",
+                                }
+                            ],
                             "used_question_inputs": [],
                         },
                     ],
@@ -2503,49 +2640,45 @@ class _TwoSalesFactActiveMemoryPlannerPort:
                     "bindings_for_fact_1": {
                         "plan_shape": "list_rows",
                         "primary": {
-                                    "binding_target_id": source_binding_target_id_for_candidate(
-                                        prompt,
-                                        requested_fact_id="fact_1",
-                                        source_candidate_id=str(
-                                            prior_sales["source_candidate_id"]
-                                        ),
-                                        plan_shape="list_rows",
-                                    ),
-                                    "answer_population": source_candidate_answer_population(
-                                        prompt,
-                                        source_candidate_id=str(
-                                            prior_sales["source_candidate_id"]
-                                        ),
-                                    ),
-                                    "fulfillment_decisions": source_fulfills_for_candidate(
-                                        prior_sales,
-                                        field_ids=("sale_amount",),
-                                    ),
-                                    "param_decisions": {},
+                            "binding_target_id": source_binding_target_id_for_candidate(
+                                prompt,
+                                requested_fact_id="fact_1",
+                                source_candidate_id=str(
+                                    prior_sales["source_candidate_id"]
+                                ),
+                                plan_shape="list_rows",
+                            ),
+                            "answer_population": source_candidate_answer_population(
+                                prompt,
+                                source_candidate_id=str(
+                                    prior_sales["source_candidate_id"]
+                                ),
+                            ),
+                            "fulfillment_decisions": source_fulfills_for_candidate(
+                                prior_sales,
+                                field_ids=("sale_amount",),
+                            ),
+                            "param_decisions": {},
                         },
                     },
                     "bindings_for_fact_2": {
                         "plan_shape": "list_rows",
                         "primary": {
-                                    "binding_target_id": source_binding_target_id_for_candidate(
-                                        prompt,
-                                        requested_fact_id="fact_2",
-                                        source_candidate_id=str(
-                                            sale_id["source_candidate_id"]
-                                        ),
-                                        plan_shape="list_rows",
-                                    ),
-                                    "answer_population": source_candidate_answer_population(
-                                        prompt,
-                                        source_candidate_id=str(
-                                            sale_id["source_candidate_id"]
-                                        ),
-                                    ),
-                                    "fulfillment_decisions": source_fulfills_for_candidate(
-                                        sale_id,
-                                        field_ids=("sale_id",),
-                                    ),
-                                    "param_decisions": {},
+                            "binding_target_id": source_binding_target_id_for_candidate(
+                                prompt,
+                                requested_fact_id="fact_2",
+                                source_candidate_id=str(sale_id["source_candidate_id"]),
+                                plan_shape="list_rows",
+                            ),
+                            "answer_population": source_candidate_answer_population(
+                                prompt,
+                                source_candidate_id=str(sale_id["source_candidate_id"]),
+                            ),
+                            "fulfillment_decisions": source_fulfills_for_candidate(
+                                sale_id,
+                                field_ids=("sale_id",),
+                            ),
+                            "param_decisions": {},
                         },
                     },
                 }
@@ -2623,60 +2756,3 @@ class _TwoSalesFactActiveMemoryPlannerPort:
                 },
             )
         raise AssertionError(f"unexpected tool: {tool_name}")
-
-
-def _tool_response(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "answer": json.dumps(
-            {"tool": tool_name, "arguments": arguments},
-            default=str,
-        ),
-        "usage": {
-            "inputTokens": 1,
-            "outputTokens": 1,
-            "thinkingTokens": 0,
-            "costUsd": 0,
-        },
-    }
-
-
-def _candidate_binding_surface(candidate: dict[str, Any]) -> dict[str, Any]:
-    surface = candidate.get("binding_surface")
-    if isinstance(surface, dict):
-        return surface
-    if candidate.get("kind") not in {"new_api_read", "same_scope_api_read"}:
-        return candidate
-    output = {
-        key: candidate[key]
-        for key in (
-            "applied_filters",
-            "bound_params",
-            "source_invocations",
-            "population_bindings",
-            "params",
-            "population_roles",
-        )
-        if key in candidate
-    }
-    if "fulfillment_choices" in candidate:
-        output["fulfillment_support_sets"] = candidate["fulfillment_choices"]
-    fields = [
-        field
-        for row in candidate.get("response_rows") or ()
-        if isinstance(row, dict)
-        for field in row.get("fields") or ()
-        if isinstance(field, dict)
-    ]
-    if fields:
-        output["fields"] = fields
-    return output
-
-
-def _candidate_read_id(candidate: dict[str, Any]) -> str:
-    read_id = str(candidate.get("read_id") or "")
-    if read_id:
-        return read_id
-    read_contract = candidate.get("read_contract")
-    if isinstance(read_contract, dict):
-        return str(read_contract.get("read_id") or "")
-    return ""

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fervis.lookup.relation_catalog import (
-    IdentityMetadata,
+    EntityKeyComponentTarget,
     ParamSource,
     RelationCatalog,
 )
@@ -42,6 +42,7 @@ from fervis.lookup.answer_program.values import (
     LiteralValuePayload,
     NamedValuePayload,
     TimeValuePayload,
+    ValueFilterOperator,
     ValueKind,
     known_input_id_for_value,
 )
@@ -272,6 +273,39 @@ def _result_grain_payloads(sources: tuple[RowSource, ...]) -> list[dict[str, Any
                 for field in source.fields
                 if _field_belongs_to_source_grain(source, field)
             ],
+            "candidate_keys": [
+                {
+                    "key_id": key.id,
+                    "entity_kind": key.entity_kind,
+                    "components": [
+                        {
+                            "component_id": component.id,
+                            "field_id": component.field_id,
+                        }
+                        for component in key.components
+                    ],
+                    "primary": key.primary,
+                    "stable": key.stable,
+                    "context_field_ids": list(key.context_field_ids),
+                }
+                for key in source.candidate_keys
+            ],
+            "entity_references": [
+                {
+                    "reference_id": reference.id,
+                    "target_entity_kind": reference.target_entity_kind,
+                    "target_key_id": reference.target_key_id,
+                    "components": [
+                        {
+                            "component_id": component.target_component_id,
+                            "field_id": component.local_field_id,
+                        }
+                        for component in reference.components
+                    ],
+                    "context_field_ids": list(reference.context_field_ids),
+                }
+                for reference in source.entity_references
+            ],
         }
         if parent_grain_id:
             item["parent_grain_id"] = parent_grain_id
@@ -369,13 +403,6 @@ def _field_payload(
         payload["label"] = field.label
     if field.description:
         payload["description"] = field.description
-    if field.identity is not None:
-        payload["identity"] = {
-            "entity_ref": field.identity.entity_ref,
-            "identity_field": field.identity.identity_field,
-            "primary_key": field.identity.primary_key,
-            "stable": field.identity.stable,
-        }
     if field.answer_output_ids:
         payload["answer_output_ids"] = list(field.answer_output_ids)
     return payload
@@ -484,9 +511,9 @@ def _param_has_bindable_value(
 ) -> bool:
     if param.choices:
         return True
-    if param.identity is not None:
+    if param.entity_target is not None:
         return any(
-            _value_matches_identity_param(value, identity=param.identity)
+            _value_matches_entity_target(value, target=param.entity_target)
             for value in available_values
         )
     if param.type in {"date", "datetime"}:
@@ -519,8 +546,11 @@ def _operation_value_payload(value: FactValue) -> dict[str, object]:
     ):
         payload.update(
             {
-                "identity_type": value.payload.identity_type,
-                "identity_field": value.payload.identity_field,
+                "entity_kind": value.payload.entity_kind,
+                "key_id": value.payload.key_id,
+                "key_components": [
+                    component.component_id for component in value.payload.key.components
+                ],
                 "display_value": value.payload.display_value or value.label,
             }
         )
@@ -534,9 +564,13 @@ def _operation_value_payload(value: FactValue) -> dict[str, object]:
     ):
         payload.update(
             {
-                "identity_type": value.payload.identity_type,
-                "identity_field": value.payload.identity_field,
-                "count": len(value.payload.values),
+                "entity_kind": value.payload.entity_kind,
+                "key_id": value.payload.key_id,
+                "key_components": [
+                    component.component_id
+                    for component in value.payload.keys[0].components
+                ],
+                "count": len(value.payload.keys),
                 "display_value": value.payload.display_value or value.label,
             }
         )
@@ -559,24 +593,40 @@ def _operation_value_payload(value: FactValue) -> dict[str, object]:
         )
     elif value.kind == ValueKind.NAMED and isinstance(value.payload, NamedValuePayload):
         payload["text"] = value.payload.text
+        if value.payload.filter_operator is not ValueFilterOperator.EQUALS:
+            payload["operator"] = value.payload.filter_operator.value
+        if value.payload.matched_field_ref:
+            payload["matched_field_ref"] = value.payload.matched_field_ref
+        if value.payload.matched_field_path:
+            payload["matched_field_path"] = value.payload.matched_field_path
     return payload
 
 
-def _value_matches_identity_param(
+def _value_matches_entity_target(
     value: FactValue,
     *,
-    identity: IdentityMetadata,
+    target: EntityKeyComponentTarget,
 ) -> bool:
     if value.kind == ValueKind.IDENTITY and isinstance(
         value.payload, IdentityValuePayload
     ):
-        payload = value.payload
+        return (
+            value.payload.entity_kind == target.entity_kind
+            and value.payload.key_id == target.key_id
+            and target.component_id
+            in {component.component_id for component in value.payload.key.components}
+        )
     elif value.kind == ValueKind.IDENTITY_SET and isinstance(
         value.payload, IdentitySetValuePayload
     ):
-        payload = value.payload
+        return (
+            value.payload.entity_kind == target.entity_kind
+            and value.payload.key_id == target.key_id
+            and all(
+                target.component_id
+                in {component.component_id for component in key.components}
+                for key in value.payload.keys
+            )
+        )
     else:
         return False
-    return bool(
-        identity.identity_field and payload.identity_field == identity.identity_field
-    ) or bool(identity.entity_ref and payload.identity_type == identity.entity_ref)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fervis.host_api.contracts.authority import ReadContextRef
+from fervis.host_api.contracts.authority import ReadAuthority, ReadContextRef
 from fervis.interfaces.common.questions import InterfacePrincipal
 from fervis.interfaces.common.read_contexts import (
     read_context_ref_from_dependency_principal,
@@ -27,16 +27,21 @@ def principal_from_request(
         require_read_context=require_read_context,
     )
     principal_id = str(read_context_ref.key or "anonymous")
+    delegated_credential = (
+        None
+        if delegated_credential_capture is None
+        else delegated_credential_capture(request)
+    )
+    authority = ReadAuthority.from_read_context(
+        read_context_ref,
+        delegated_credential=delegated_credential,
+    )
     return InterfacePrincipal(
         principal_id=principal_id,
-        tenant_id="default",
+        tenant_id=authority.tenant_id,
         raw=request,
         read_context_ref=read_context_ref,
-        delegated_credential=(
-            None
-            if delegated_credential_capture is None
-            else delegated_credential_capture(request)
-        ),
+        delegated_credential=delegated_credential,
     )
 
 

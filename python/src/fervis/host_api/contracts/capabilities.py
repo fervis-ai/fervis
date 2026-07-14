@@ -3,8 +3,28 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
-from typing import Any
+from fervis.types.enums import StrEnum
+from typing import Protocol
+
+
+class _NamedContract(Protocol):
+    @property
+    def name(self) -> str: ...
+
+
+class _ResponseFieldContract(_NamedContract, Protocol):
+    @property
+    def path(self) -> str: ...
+
+
+class _CandidateKeyComponent(Protocol):
+    @property
+    def field_path(self) -> str: ...
+
+
+class _CandidateKey(Protocol):
+    @property
+    def components(self) -> tuple[_CandidateKeyComponent, ...]: ...
 
 
 class CapabilityKind(StrEnum):
@@ -25,11 +45,10 @@ class CapabilitySource(StrEnum):
 
 @dataclass(frozen=True)
 class RequiredCapability:
-    kind: CapabilityKind | str
+    kind: CapabilityKind
     role: str
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "kind", CapabilityKind(str(self.kind)))
         object.__setattr__(self, "role", _normalize_role(self.role))
 
     def to_public_dict(self) -> dict[str, str]:
@@ -38,14 +57,12 @@ class RequiredCapability:
 
 @dataclass(frozen=True)
 class EndpointCapability:
-    kind: CapabilityKind | str
+    kind: CapabilityKind
     role: str
-    source: CapabilitySource | str = CapabilitySource.SCHEMA_GENERATED
+    source: CapabilitySource = CapabilitySource.SCHEMA_GENERATED
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "kind", CapabilityKind(str(self.kind)))
         object.__setattr__(self, "role", _normalize_role(self.role))
-        object.__setattr__(self, "source", CapabilitySource(str(self.source)))
 
     def satisfies(self, required: RequiredCapability) -> bool:
         return self.kind == required.kind and self.role == required.role
@@ -63,7 +80,7 @@ class EndpointCapabilities:
     items: tuple[EndpointCapability, ...] = field(default_factory=tuple)
 
     def has(self, kind: CapabilityKind | str, role: str) -> bool:
-        required = RequiredCapability(kind, role)
+        required = RequiredCapability(CapabilityKind(str(kind)), role)
         return any(item.satisfies(required) for item in self.items)
 
     def missing(
@@ -81,21 +98,21 @@ class EndpointCapabilities:
 
 def capabilities_from_schema(
     *,
-    path_params: tuple[Any, ...],
-    query_params: tuple[Any, ...],
-    response_fields: tuple[Any, ...],
-    primary_key_fields: tuple[str, ...] = (),
+    path_params: tuple[_NamedContract, ...],
+    query_params: tuple[_NamedContract, ...],
+    response_fields: tuple[_ResponseFieldContract, ...],
+    candidate_keys: tuple[_CandidateKey, ...] = (),
 ) -> EndpointCapabilities:
     items: list[EndpointCapability] = []
-    primary_keys = {
-        str(field or "").strip() for field in primary_key_fields if str(field).strip()
-    }
+    identifier_fields = _candidate_key_field_names(candidate_keys)
     for param in (*path_params, *query_params):
         name = str(getattr(param, "name", "") or "")
         if not name:
             continue
         kind = (
-            CapabilityKind.IDENTIFIER if name in primary_keys else CapabilityKind.FILTER
+            CapabilityKind.IDENTIFIER
+            if name in identifier_fields
+            else CapabilityKind.FILTER
         )
         items.append(
             EndpointCapability(
@@ -116,7 +133,7 @@ def capabilities_from_schema(
                         source=CapabilitySource.SCHEMA_GENERATED,
                     )
                 )
-        if _field_has_identity(field_contract, primary_keys=primary_keys):
+        if _field_is_identifier(field_contract, identifier_fields=identifier_fields):
             items.append(
                 EndpointCapability(
                     CapabilityKind.IDENTIFIER,
@@ -127,14 +144,31 @@ def capabilities_from_schema(
     return EndpointCapabilities(tuple(dict.fromkeys(items)))
 
 
-def _field_has_identity(field_contract: Any, *, primary_keys: set[str]) -> bool:
-    identity = getattr(field_contract, "identity", None)
-    if isinstance(identity, dict) and identity:
-        return True
-    name = str(getattr(field_contract, "name", "") or "").strip()
-    path = str(getattr(field_contract, "path", "") or "").strip()
+def _candidate_key_field_names(
+    candidate_keys: tuple[_CandidateKey, ...],
+) -> set[str]:
+    paths = {
+        component.field_path.strip()
+        for key in candidate_keys
+        for component in key.components
+        if component.field_path.strip()
+    }
+    return {*paths, *(path.rsplit(".", 1)[-1] for path in paths)}
+
+
+def _field_is_identifier(
+    field_contract: _ResponseFieldContract,
+    *,
+    identifier_fields: set[str],
+) -> bool:
+    name = field_contract.name.strip()
+    path = field_contract.path.strip()
     leaf = path.rsplit(".", 1)[-1] if path else ""
-    return name in primary_keys or leaf in primary_keys
+    return (
+        name in identifier_fields
+        or path in identifier_fields
+        or leaf in identifier_fields
+    )
 
 
 def _normalize_role(value: str) -> str:

@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
-from fervis.host_api.adapters.fastapi.loading import (
-    fastapi_openapi_schema,
-    import_fastapi_app,
-)
+from fastapi import FastAPI
+
+from fervis.host_api.adapters.fastapi.loading import import_fastapi_app
+from fervis.host_api.adapters.fastapi.routes import effective_api_routes
 
 from .common import BlockedPatch
 
@@ -19,7 +18,6 @@ def fastapi_source_path_prefixes(
 ) -> tuple[str, ...] | BlockedPatch:
     try:
         app = import_fastapi_app(import_path, project_root=root)
-        schema = fastapi_openapi_schema(app, import_path=import_path)
     except Exception as exc:
         return BlockedPatch(
             "config/fervis.json",
@@ -32,7 +30,7 @@ def fastapi_source_path_prefixes(
 
     prefixes = {
         prefix
-        for path in _get_paths(schema)
+        for path in _get_paths(app)
         if (prefix := _source_prefix_from_path(path)) != "/"
     }
     if not prefixes:
@@ -40,20 +38,17 @@ def fastapi_source_path_prefixes(
             "config/fervis.json",
             (
                 "Could not identify FastAPI GET source prefixes from the "
-                "runtime OpenAPI schema. Retry with explicit `--path-prefixes`."
+                "runtime route registry. Retry with explicit `--path-prefixes`."
             ),
         )
     return tuple(sorted(prefixes))
 
 
-def _get_paths(schema: dict[str, Any]) -> tuple[str, ...]:
-    paths = schema.get("paths")
-    if not isinstance(paths, dict):
-        return ()
+def _get_paths(app: FastAPI) -> tuple[str, ...]:
     return tuple(
-        str(path)
-        for path, methods in paths.items()
-        if isinstance(methods, dict) and "get" in methods
+        route.path
+        for route in effective_api_routes(app)
+        if "GET" in (route.methods or set())
     )
 
 

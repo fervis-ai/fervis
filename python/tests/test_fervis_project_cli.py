@@ -327,9 +327,7 @@ def test_fervis_config_get_and_set_patch_active_environment_scalar(
     )
     schema = _config_schema(root)
     schema["environments"]["qa-branch"] = {
-        "models": {
-            "default": {"provider": "openai", "model_key": "gpt-5.4-mini"}
-        },
+        "models": {"default": {"provider": "openai", "model_key": "gpt-5.4-mini"}},
         "persistence": {"kind": "sqlite", "path": ".fervis/qa.sqlite3"},
     }
     _write_schema_config(root, schema)
@@ -389,9 +387,10 @@ def test_fervis_config_set_uses_discovered_config_path(tmp_path: Path) -> None:
 
     assert exit_code == 0
     assert not (root / "config" / "fervis.json").exists()
-    assert json.loads(custom_path.read_text(encoding="utf-8"))["host"][
-        "organization_name"
-    ] == "Custom Shop"
+    assert (
+        json.loads(custom_path.read_text(encoding="utf-8"))["host"]["organization_name"]
+        == "Custom Shop"
+    )
 
 
 def test_fervis_config_set_blocks_model_policy_scalar_edits(tmp_path: Path) -> None:
@@ -424,9 +423,7 @@ def test_fervis_config_set_blocks_model_policy_scalar_edits(tmp_path: Path) -> N
         }
     ]
     assert _config_schema(root)["models"] == {
-        "providers": [
-            {"name": "openai", "allowed_model_keys": ["gpt-5.4-mini"]}
-        ],
+        "providers": [{"name": "openai", "allowed_model_keys": ["gpt-5.4-mini"]}],
     }
 
 
@@ -611,9 +608,7 @@ def test_fervis_model_use_can_target_explicit_environment(tmp_path: Path) -> Non
     )
     schema = _config_schema(root)
     schema["environments"]["ci"] = {
-        "models": {
-            "default": {"provider": "openai", "model_key": "gpt-5.4-mini"}
-        },
+        "models": {"default": {"provider": "openai", "model_key": "gpt-5.4-mini"}},
         "persistence": {"kind": "sqlite", "path": ".fervis/ci.sqlite3"},
     }
     _write_schema_config(root, schema)
@@ -823,8 +818,7 @@ def test_fervis_doctor_reports_missing_host_dependency_for_catalog(
         )
 
     monkeypatch.setattr(
-        "fervis.host_api.adapters.fastapi.catalog."
-        "get_fastapi_endpoint_contracts",
+        "fervis.host_api.adapters.fastapi.catalog.get_fastapi_endpoint_contracts",
         raise_missing_dependency,
     )
     stdout = StringIO()
@@ -861,8 +855,7 @@ def test_fervis_doctor_reports_config_fix_for_missing_source_root(
         )
 
     monkeypatch.setattr(
-        "fervis.host_api.adapters.fastapi.catalog."
-        "get_fastapi_endpoint_contracts",
+        "fervis.host_api.adapters.fastapi.catalog.get_fastapi_endpoint_contracts",
         raise_missing_source,
     )
     stdout = StringIO()
@@ -898,8 +891,7 @@ def test_fervis_doctor_reports_migrate_fix_when_fastapi_catalog_needs_storage(
         )
 
     monkeypatch.setattr(
-        "fervis.host_api.adapters.fastapi.catalog."
-        "get_fastapi_endpoint_contracts",
+        "fervis.host_api.adapters.fastapi.catalog.get_fastapi_endpoint_contracts",
         raise_persistence_not_ready,
     )
     stdout = StringIO()
@@ -1286,6 +1278,42 @@ def test_fervis_init_patches_fastapi_mount(tmp_path: Path) -> None:
     }
 
 
+def test_fervis_init_mounts_after_module_level_route_registration(
+    tmp_path: Path,
+) -> None:
+    root = _fastapi_project(tmp_path)
+    main_path = root / "app" / "main.py"
+    main_path.write_text(
+        "from fastapi import APIRouter, FastAPI\n\n"
+        "app = FastAPI()\n"
+        "router = APIRouter()\n\n"
+        "@router.get('/records/')\n"
+        "def list_records():\n"
+        "    return []\n\n"
+        "app.include_router(router)\n",
+        encoding="utf-8",
+    )
+
+    exit_code = run_init_command(
+        (
+            "init",
+            "--framework",
+            "fastapi",
+            "--path-prefixes",
+            "/records/",
+            "--yes",
+        ),
+        project=discover_project(root),
+        stdout=StringIO(),
+    )
+
+    updated = main_path.read_text(encoding="utf-8")
+    assert exit_code == 0
+    assert updated.index("app.include_router(router)") < updated.index(
+        "configured_fervis().mount(app)"
+    )
+
+
 def test_fervis_init_derives_fastapi_source_prefixes_from_runtime_app_routes(
     tmp_path: Path,
 ) -> None:
@@ -1627,13 +1655,13 @@ def test_fervis_doctor_validates_fastapi_entrypoint_independent_of_source_allowl
         "from fastapi import FastAPI\n"
         "from fervis import configured_fervis\n"
         "from pydantic import BaseModel\n\n"
-        "class Order(BaseModel):\n"
-        "    id: str\n\n"
-        "app = FastAPI()\n"
-        "configured_fervis().mount(app)\n\n"
-        "@app.get('/orders/', response_model=list[Order])\n"
-        "def list_orders():\n"
-        "    return []\n",
+            "class Order(BaseModel):\n"
+            "    id: str\n\n"
+            "app = FastAPI()\n"
+            "@app.get('/orders/', response_model=list[Order])\n"
+            "def list_orders():\n"
+            "    return []\n\n"
+            "configured_fervis().mount(app)\n",
         encoding="utf-8",
     )
     schema = _valid_schema("fastapi")
@@ -3633,11 +3661,10 @@ def test_fervis_init_places_fastapi_import_after_future_import(
     assert lines.index("from fervis import configured_fervis") > lines.index(
         "from __future__ import annotations"
     )
-    assert (
-        lines.index("configured_fervis().mount(app)")
-        == lines.index("app = FastAPI()") + 1
+    assert lines.index("configured_fervis().mount(app)") > lines.index(
+        "def get_health():"
     )
-    assert lines.index("configured_fervis().mount(app)") < lines.index("OTHER = 1")
+    assert lines.index("configured_fervis().mount(app)") > lines.index("OTHER = 1")
 
 
 def test_fervis_init_preserves_existing_fastapi_routes(tmp_path: Path) -> None:
@@ -4224,6 +4251,79 @@ def test_fervis_doctor_validates_generated_config(tmp_path: Path) -> None:
     assert not (root / ".fervis" / "fervis.sqlite3").exists()
 
 
+def test_fervis_doctor_requires_host_api_domain_context(tmp_path: Path) -> None:
+    root = _fastapi_project(tmp_path)
+    run_init_command(
+        ("init", "--framework", "fastapi", "--yes"),
+        project=discover_project(root),
+        stdout=StringIO(),
+    )
+
+    missing_stdout = StringIO()
+    run_doctor_command(
+        ("doctor",),
+        project=discover_project(root),
+        stdout=missing_stdout,
+    )
+    missing_checks = {
+        check["id"]: check
+        for check in json.loads(missing_stdout.getvalue())["payload"]["checks"]
+    }
+
+    assert missing_checks["host.organization_name"] == {
+        "id": "host.organization_name",
+        "status": "failed",
+        "message": "host.organization_name must identify the host organization.",
+        "fix": edit_config_action(),
+    }
+    assert missing_checks["host.about_api"] == {
+        "id": "host.about_api",
+        "status": "failed",
+        "message": (
+            "host.about_api must describe the API domain and the factual questions "
+            "it supports."
+        ),
+        "fix": edit_config_action(),
+    }
+
+    run_config_command(
+        ("config", "set", "host.organization_name", "Example"),
+        project=discover_project(root),
+        stdout=StringIO(),
+    )
+    run_config_command(
+        (
+            "config",
+            "set",
+            "host.about_api",
+            "The Example API helps operators work with orders and inventory.",
+        ),
+        project=discover_project(root),
+        stdout=StringIO(),
+    )
+    configured_stdout = StringIO()
+    run_doctor_command(
+        ("doctor",),
+        project=discover_project(root),
+        stdout=configured_stdout,
+    )
+    configured_checks = {
+        check["id"]: check
+        for check in json.loads(configured_stdout.getvalue())["payload"]["checks"]
+    }
+
+    assert configured_checks["host.organization_name"] == {
+        "id": "host.organization_name",
+        "status": "passed",
+        "message": "Host organization is named.",
+    }
+    assert configured_checks["host.about_api"] == {
+        "id": "host.about_api",
+        "status": "passed",
+        "message": "Host API domain and factual-question scope are described.",
+    }
+
+
 def test_fervis_doctor_validates_fastapi_mount(
     tmp_path: Path,
 ) -> None:
@@ -4251,6 +4351,7 @@ def test_fervis_doctor_validates_fastapi_mount(
     assert checks["persistence.migrations"]["status"] == "failed"
     assert checks["persistence.migrations"]["fix"] == run_migrate_action()
     assert envelope["next_actions"] == [
+        edit_config_action(),
         run_migrate_action(),
         configure_auth_action(framework="fastapi"),
     ]
@@ -4281,7 +4382,7 @@ def test_fervis_migrate_creates_sqlite_store_and_unblocks_doctor(
     assert migrate_envelope["payload"]["target"] == "sqlite"
     assert migrate_envelope["payload"]["location"] == ".fervis/fervis.sqlite3"
     assert migrate_envelope["payload"]["status"] == "applied"
-    assert migrate_envelope["payload"]["target_revision"] == "fervis.0001"
+    assert migrate_envelope["payload"]["target_revision"] == "fervis.0003"
     assert migrate_envelope["next_actions"] == [run_doctor_action()]
     assert (root / ".fervis" / "fervis.sqlite3").is_file()
     with sqlite3.connect(root / ".fervis" / "fervis.sqlite3") as connection:
@@ -4306,6 +4407,7 @@ def test_fervis_migrate_creates_sqlite_store_and_unblocks_doctor(
     assert second_envelope["payload"]["status"] == "up_to_date"
     assert second_envelope["payload"]["already_applied"] is True
 
+    _configure_host_context(root)
     _configure_fastapi_auth(root)
     doctor_stdout = StringIO()
     doctor_exit_code = run_doctor_command(
@@ -4339,11 +4441,12 @@ def test_fervis_migrate_cli_outcome_unblocks_doctor(tmp_path: Path) -> None:
         "--transport-mode",
         "in_process",
     )
-    doctor = _run_fervis(root, "doctor", "--probe-read-context-key", "user_7")
 
     assert init.returncode == 0
     assert migrate.returncode == 0
     assert auth.returncode == 0
+    _configure_host_context(root)
+    doctor = _run_fervis(root, "doctor", "--probe-read-context-key", "user_7")
     assert doctor.returncode == 0
     migrate_envelope = json.loads(migrate.stdout)
     doctor_envelope = json.loads(doctor.stdout)
@@ -4382,6 +4485,7 @@ def test_fervis_migrate_supports_explicit_database_url_target(
     assert envelope["payload"]["status"] == "applied"
     assert database_path.is_file()
 
+    _configure_host_context(root)
     _configure_fastapi_auth(root)
     doctor_stdout = StringIO()
     doctor_exit_code = run_doctor_command(
@@ -4701,8 +4805,7 @@ def test_fervis_doctor_and_migrate_detect_partial_index_predicate_drift(
     )
     assert migrate_envelope["payload"]["status"] == "failed"
     assert (
-        "fervis_work_active_conversation_unique"
-        in migrate_envelope["payload"]["error"]
+        "fervis_work_active_conversation_unique" in migrate_envelope["payload"]["error"]
     )
 
 
@@ -4811,8 +4914,7 @@ def _flask_project(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     (root / "app.py").write_text(
-        "from flask import Flask\n\n"
-        "app = Flask(__name__)\n",
+        "from flask import Flask\n\napp = Flask(__name__)\n",
         encoding="utf-8",
     )
     return root
@@ -4828,6 +4930,17 @@ def _write_schema_config(root: Path, schema: dict[str, object]) -> None:
         json.dumps(schema, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def _configure_host_context(root: Path) -> None:
+    schema = _config_schema(root)
+    host = schema["host"]
+    assert isinstance(host, dict)
+    host["organization_name"] = "Example"
+    host["about_api"] = (
+        "The Example API helps operators work with business and operational records."
+    )
+    _write_schema_config(root, schema)
 
 
 def _valid_schema(framework: str) -> dict[str, object]:
@@ -4858,9 +4971,7 @@ def _valid_schema(framework: str) -> dict[str, object]:
         },
         "routes": {"prefix": prefix},
         "models": {
-            "providers": [
-                {"name": "openai", "allowed_model_keys": ["gpt-5.4-mini"]}
-            ],
+            "providers": [{"name": "openai", "allowed_model_keys": ["gpt-5.4-mini"]}],
         },
         "sources": [source],
         "environments": {
@@ -4979,11 +5090,7 @@ def _patch_fastapi_mount(root: Path) -> None:
             1,
         )
     if "configured_fervis().mount(app)" not in content:
-        content = content.replace(
-            "app = FastAPI()\n",
-            "app = FastAPI()\nconfigured_fervis().mount(app)\n",
-            1,
-        )
+        content = content.rstrip() + "\n\nconfigured_fervis().mount(app)\n"
     main_path.write_text(content, encoding="utf-8")
 
 
@@ -5034,10 +5141,10 @@ def _insert_minimal_run(connection, *, run_id: str, run_number: int) -> None:
         text(
             "INSERT INTO fervis_question_run "
             "(run_id, question_id, run_number, kind, trigger_kind, base_run_id, "
-            "trigger_clarification_response_id, adapter_ref, "
-            "runtime_version, created_at) "
-            "VALUES (:run_id, :question_id, 1, 'model_assisted', 'initial', NULL, '', "
-            "'test', 'test', '2026-06-23T00:00:00')"
+            "trigger_clarification_response_id, adapter_ref, runtime_version, "
+            "created_at) "
+            "VALUES (:run_id, :question_id, 1, 'model_assisted', 'initial', NULL, "
+            "'', 'test', 'test', '2026-06-23T00:00:00')"
         ),
         {"run_id": run_id, "question_id": question_id},
     )

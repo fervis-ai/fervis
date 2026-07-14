@@ -40,7 +40,9 @@ input:
     fact_description: prior item quantities
     subject_text: quantities
     answer_expression_family: list_rows
-    answer_outputs: [sku, quantity]
+    answer_outputs:
+      - {description: sku, role: ANSWER_VALUE}
+      - {description: quantity, role: ANSWER_VALUE}
   catalog:
     reads: []
   fact_plan:

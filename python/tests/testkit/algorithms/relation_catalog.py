@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from fervis.lookup.relation_catalog import validate_relation_catalog
+from fervis.lookup.relation_catalog import CatalogValidationError, parse_relation_catalog
+from fervis.lookup.relation_catalog.selection import relation_catalog_for_read_ids
 from fervis.lookup.fact_planning.required_inputs import required_inputs
 from fervis.lookup.fact_plan.row_sources import (
     build_row_source_catalog,
@@ -12,6 +13,7 @@ from fervis.lookup.fact_plan.row_sources import (
 
 from tests.testkit.assertions import (
     expects_rejection,
+    rejection_mismatches,
     status_mismatches,
     subset_mismatches,
 )
@@ -21,11 +23,19 @@ from tests.testkit.catalog import catalog_from_payload
 def run_relation_catalog_case(payload: dict[str, Any]) -> list[str]:
     catalog = catalog_from_payload(payload["input"]["catalog"])
     try:
-        catalog = validate_relation_catalog(catalog)
-    except Exception as exc:
+        catalog = parse_relation_catalog(catalog)
+        selected_read_ids = tuple(
+            str(item) for item in payload["input"].get("selected_read_ids") or ()
+        )
+        if selected_read_ids:
+            catalog = relation_catalog_for_read_ids(
+                catalog,
+                read_ids=selected_read_ids,
+            )
+    except CatalogValidationError as exc:
         if expects_rejection(payload["expect"]):
-            return status_mismatches(
-                actual_status="rejected",
+            return rejection_mismatches(
+                actual_code="invalid_relation_catalog",
                 expected=payload["expect"],
             )
         return [f"unexpected error: {exc}"]
@@ -34,7 +44,9 @@ def run_relation_catalog_case(payload: dict[str, Any]) -> list[str]:
     row_sources = build_row_source_catalog(catalog)
     expected = payload["expect"]["result_contains"]
     source = _source_for_expected(row_sources, expected)
-    api_sources = [item for item in row_sources.sources if item.kind.value == "api_read"]
+    api_sources = [
+        item for item in row_sources.sources if item.kind.value == "api_read"
+    ]
     prompt_sources = row_source_prompt_payload(row_sources)["row_sources"]
     prompt_api_sources = [
         item for item in prompt_sources if item.get("kind") == "api_read"
@@ -52,6 +64,47 @@ def run_relation_catalog_case(payload: dict[str, Any]) -> list[str]:
             }
             for field in source.fields
         },
+        "candidate_keys": [
+            {
+                "id": key.id,
+                "entity_kind": key.entity_kind,
+                "components": [
+                    {"id": component.id, "field_id": component.field_id}
+                    for component in key.components
+                ],
+                "primary": key.primary,
+                "stable": key.stable,
+                "context_field_ids": list(key.context_field_ids),
+            }
+            for key in source.candidate_keys
+        ],
+        "candidate_key_authorities": [
+            {
+                "id": authority.id,
+                "entity_kind": authority.entity_kind,
+                "components": [
+                    {"id": component.id, "type": component.type}
+                    for component in authority.components
+                ],
+            }
+            for authority in catalog.candidate_key_authorities
+        ],
+        "entity_references": [
+            {
+                "id": reference.id,
+                "target_entity_kind": reference.target_entity_kind,
+                "target_key_id": reference.target_key_id,
+                "components": [
+                    {
+                        "target_component_id": component.target_component_id,
+                        "local_field_id": component.local_field_id,
+                    }
+                    for component in reference.components
+                ],
+                "context_field_ids": list(reference.context_field_ids),
+            }
+            for reference in source.entity_references
+        ],
         "params": {
             param.id: {
                 "param_ref": param.param_ref,

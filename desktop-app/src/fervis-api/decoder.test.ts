@@ -81,7 +81,14 @@ describe("Fervis API boundary decoder", () => {
       answer: "1",
       resultData: {
         kind: "answer",
-        outputs: [{ key: "answer_1", valueKind: "number", value: "1" }]
+        outputs: [
+          {
+            key: "answer_1",
+            valueKind: "number",
+            value: { kind: "number", value: "1" },
+            displayValue: "1"
+          }
+        ]
       },
       error: ""
     });
@@ -105,7 +112,7 @@ describe("Fervis API boundary decoder", () => {
     const decoded = decodeQuestionState({
       questionId: "q_clarify",
       conversationId: "conv_clarify",
-      status: "NEEDS_CLARIFICATION",
+      status: "WAITING_FOR_CLARIFICATION",
       primaryRunId: "run_clarify",
       latestRunId: "run_clarify",
       activeRunId: null,
@@ -119,6 +126,12 @@ describe("Fervis API boundary decoder", () => {
               id: "clarification_1",
               need: "answer_metric",
               reason: "missing_answer_metric",
+              owner: "question_contract",
+              continuation: {
+                kind: "question_contract",
+                missingItemId: "clarification_1",
+                expectedValueKind: "answer_definition"
+              },
               question: "Which metric should I use?",
               requestedFactId: "fact_1",
               subjects: [
@@ -174,7 +187,7 @@ describe("Fervis API boundary decoder", () => {
           revisionId: null,
           questionId: "q_clarify",
           conversationId: "conv_clarify",
-          status: "NEEDS_CLARIFICATION",
+          status: "WAITING_FOR_CLARIFICATION",
           answer: null,
           resultData: {
             kind: "needs_clarification",
@@ -184,6 +197,12 @@ describe("Fervis API boundary decoder", () => {
                   id: "clarification_1",
                   need: "target_reference",
                   reason: "unresolved_reference",
+                  owner: "grounding",
+                  continuation: {
+                    kind: "grounding",
+                    knownInputId: "q1",
+                    acceptsFreeText: true
+                  },
                   question: "Which staff identifier do you mean?",
                   requestedFactId: "fact_1",
                   subjects: [
@@ -371,7 +390,7 @@ describe("Fervis API boundary decoder", () => {
     const decoded = decodeQuestionState({
       questionId: "q_clarify",
       conversationId: "conv_clarify",
-      status: "NEEDS_CLARIFICATION",
+      status: "WAITING_FOR_CLARIFICATION",
       primaryRunId: "run_clarify",
       latestRunId: "run_clarify",
       activeRunId: null,
@@ -385,6 +404,12 @@ describe("Fervis API boundary decoder", () => {
               id: "clarification_1",
               need: "answer_metric",
               reason: "missing_answer_metric",
+              owner: "question_contract",
+              continuation: {
+                kind: "question_contract",
+                missingItemId: "clarification_1",
+                expectedValueKind: "answer_definition"
+              },
               question: "Which metric should I use?",
               requestedFactId: "fact_1",
               subjects: [
@@ -406,15 +431,14 @@ describe("Fervis API boundary decoder", () => {
           kind: "provide_clarification",
           questionId: "q_clarify",
           conversationId: "conv_clarify",
-          baseRunId: "run_clarify",
+          runId: "run_clarify",
           clarificationId: "clarification_1",
           request: {
             method: "POST",
             path: "/questions/q_clarify/runs/",
             body: {
-              question: "<clarification-answer>",
-              triggerKind: "clarification_response",
-              baseRunId: "run_clarify",
+              responseText: "<clarification-answer>",
+              runId: "run_clarify",
               clarificationId: "clarification_1"
             }
           }

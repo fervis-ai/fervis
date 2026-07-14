@@ -1,0 +1,12 @@
+id: explicit_requested_property_is_complete_answer_definition
+description: An explicitly requested property is a complete factual output, not a missing answer definition.
+kind: algorithm
+algorithm: question_contract.prompt
+input:
+  current_question: What is the current state of item code REF-42?
+  contains:
+    - A named property requested for a subject is a complete answer definition
+expect:
+  result_contains:
+    contains:
+      A named property requested for a subject is a complete answer definition: true

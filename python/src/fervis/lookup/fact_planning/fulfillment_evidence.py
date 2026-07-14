@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Callable
 
 from fervis.lookup.source_binding import BoundSource, SourceFulfillment
 
 
 def value_evidence_ids_for_plan(
-    fulfillment: SourceFulfillment | Any,
+    fulfillment: SourceFulfillment,
 ) -> tuple[str, ...]:
     """Evidence that can satisfy the answer value/measure for a plan.
 
@@ -16,37 +16,41 @@ def value_evidence_ids_for_plan(
     substitute identity evidence for a measured value.
     """
 
-    metric_ids = tuple(getattr(fulfillment, "metric_measure_evidence_ids", ()) or ())
+    metric_ids = fulfillment.metric_measure_evidence_ids
     if metric_ids:
         return metric_ids
-    count_ids = tuple(getattr(fulfillment, "row_count_basis_evidence_ids", ()) or ())
+    count_ids = fulfillment.row_count_basis_evidence_ids
     if count_ids:
         return count_ids
-    return tuple(getattr(fulfillment, "group_key_evidence_ids", ()) or ())
+    value_ids = fulfillment.value_evidence_ids
+    if value_ids:
+        return value_ids
+    return entity_field_evidence_ids(fulfillment)
 
 
 def required_fulfillment_evidence_ids(
-    fulfillment: SourceFulfillment | Any,
+    fulfillment: SourceFulfillment,
     *,
     plan_shape: str,
 ) -> tuple[str, ...]:
     """Evidence the fact plan must use for the selected operation shape."""
 
-    metric_ids = tuple(getattr(fulfillment, "metric_measure_evidence_ids", ()) or ())
-    count_ids = tuple(getattr(fulfillment, "row_count_basis_evidence_ids", ()) or ())
-    group_ids = group_key_evidence_ids(fulfillment)
+    metric_ids = fulfillment.metric_measure_evidence_ids
+    count_ids = fulfillment.row_count_basis_evidence_ids
+    direct_value_ids = fulfillment.value_evidence_ids
+    entity_field_ids = entity_field_evidence_ids(fulfillment)
     if plan_shape in {"aggregate_by_group", "ranked_aggregate"}:
         value_ids = metric_ids or count_ids
     elif plan_shape == "aggregate_scalar":
         value_ids = metric_ids or count_ids
     else:
-        value_ids = metric_ids or group_ids
+        value_ids = metric_ids or direct_value_ids or entity_field_ids
     return tuple(
         dict.fromkeys(
             (
                 *value_ids,
                 *(
-                    group_ids
+                    entity_field_ids
                     if plan_shape in {"aggregate_by_group", "ranked_aggregate"}
                     else ()
                 ),
@@ -55,14 +59,21 @@ def required_fulfillment_evidence_ids(
     )
 
 
-def group_key_evidence_ids(fulfillment: SourceFulfillment | Any) -> tuple[str, ...]:
-    return tuple(getattr(fulfillment, "group_key_evidence_ids", ()) or ())
+def entity_field_evidence_ids(
+    fulfillment: SourceFulfillment,
+) -> tuple[str, ...]:
+    entity_evidence = fulfillment.entity_evidence
+    if entity_evidence is None:
+        return ()
+    return tuple(
+        component.field_evidence_id for component in entity_evidence.components
+    )
 
 
 def row_count_basis_evidence_ids(
-    fulfillment: SourceFulfillment | Any,
+    fulfillment: SourceFulfillment,
 ) -> tuple[str, ...]:
-    return tuple(getattr(fulfillment, "row_count_basis_evidence_ids", ()) or ())
+    return fulfillment.row_count_basis_evidence_ids
 
 
 def field_ids_by_answer_output_from_evidence(
@@ -145,7 +156,7 @@ def evidence_is_compatible_with_plan_shape(
         "aggregate_by_group",
         "ranked_aggregate",
     }:
-        return row_cardinality == "many"
+        return row_cardinality in {"one", "many"}
     if plan_shape == "direct_field_value":
         return row_cardinality == "one"
     return True

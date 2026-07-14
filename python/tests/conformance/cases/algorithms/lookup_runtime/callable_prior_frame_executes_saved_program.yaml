@@ -39,7 +39,7 @@ input:
             subject_text: sales
             instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
           answer_outputs:
-          - {id: answer_1, description: answer_1}
+          - {id: answer_1, description: answer_1, role: ANSWER_VALUE}
           used_question_inputs: [store_ids]
   conversation_resolution:
     kind: conversation_resolution
@@ -52,23 +52,15 @@ input:
       - current_clause_text: What about Pivot Mall?
         occurrence: 1
         resolved_text: How many sales did we make at Pivot Mall?
-        retained_frame_parts: []
+        retained_frame_parts:
+        - {kind: frame_part, frame_id: request:1, part_id: subject}
+        - {kind: frame_part, frame_id: request:1, part_id: output:1}
         values:
         - value_id: pivot_mall
           resolved_text: Pivot Mall
+          frame_parameter: {kind: parameter, frame_id: request:1, parameter_id: question.store_ids}
           sources:
           - {kind: current_span, text: Pivot Mall, occurrence: 1}
-        - value_id: complete_question_meaning
-          resolved_text: How many sales did we make at Pivot Mall?
-          sources:
-          - {kind: frame_part, frame_id: request:1, part_id: input:entity_identity:1}
-      frame_call:
-        kind: call
-        frame_id: request:1
-        arguments:
-        - kind: resolved_value
-          parameter_id: question.store_ids
-          value_id: pivot_mall
   question_contract:
     fact_description: sales for a store
     subject_text: sales
@@ -78,12 +70,31 @@ input:
     entity_target_catalog_search_terms:
     - target_id: store_ids
       catalog_search_terms:
+      - {basis: A mall can be described as a location., term: location}
       - {basis: A mall is resolved through the store resource., term: store}
   grounding:
     compatible_resolver_reads:
-      store_ids: [stores]
+      store_ids: [locations, stores]
   catalog:
     reads:
+    - id: locations
+      endpoint_name: list_location_list
+      resource_names: [location]
+      params:
+      - {ref: locations.query.name, name: name, source: query, type: string}
+      row_paths:
+      - {id: results, path: results, cardinality: many}
+      fields:
+      - ref: locations.field.location_id
+        path: results.location_id
+        row_path_id: results
+        type: uuid
+      - ref: locations.field.name
+        path: results.name
+        row_path_id: results
+        type: string
+      candidate_keys:
+      - {id: primary_key, entity_kind: location, primary: true, components: [{id: location_id, field_ref: locations.field.location_id}], context_field_refs: [locations.field.name]}
     - id: stores
       endpoint_name: list_store_list
       resource_names: [store, mall]
@@ -96,11 +107,12 @@ input:
         path: results.store_id
         row_path_id: results
         type: uuid
-        identity: {entity_ref: store, identity_field: store_id, primary_key: true}
       - ref: stores.field.name
         path: results.name
         row_path_id: results
         type: string
+      candidate_keys:
+      - {id: primary_key, entity_kind: store, primary: true, components: [{id: store_id, field_ref: stores.field.store_id}], context_field_refs: [stores.field.name]}
     - id: sales
       endpoint_name: list_sale_list
       resource_names: [sale]
@@ -109,19 +121,24 @@ input:
         name: store_id
         source: query
         type: uuid
-        identity: {entity_ref: store, identity_field: store_id, primary_key: true}
+        entity_target: {entity_kind: store, key_id: primary_key, component_id: store_id}
       row_paths:
       - {id: results, path: results, cardinality: many}
       fields:
       - ref: sales.field.sale_id
         path: results.sale_id
         type: uuid
-        identity: {entity_ref: sale, identity_field: sale_id, primary_key: true}
       - ref: sales.field.store_id
         path: results.store_id
         type: uuid
-        identity: {entity_ref: store, identity_field: store_id, primary_key: true}
+      candidate_keys:
+      - {id: primary_key, entity_kind: sale, primary: true, components: [{id: sale_id, field_ref: sales.field.sale_id}]}
+      entity_references:
+      - {id: store_reference, target_entity_kind: store, target_key_id: primary_key, components: [{target_component_id: store_id, local_field_ref: sales.field.store_id}]}
   responses:
+    list_location_list:
+      results:
+      - {location_id: location_2, name: Pivot Mall}
     list_store_list:
       results:
       - {store_id: store_2, name: Pivot Mall}
@@ -140,4 +157,4 @@ expect:
     - submit_query_enrichment
     - submit_grounding
     invocation_kind: continue_prior_request
-    base_invocation_id: pi_f7ae88fc4df1a333b15d115507743f856eb93c2116c74a702ab6f08af7eb8b60
+    base_invocation_id: pi_cdcb84ce278a6911ed9041ad28c83997db469c239add21c2cfa543d6b1ab09f8

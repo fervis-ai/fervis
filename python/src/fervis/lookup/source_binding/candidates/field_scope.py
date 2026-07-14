@@ -7,13 +7,19 @@ from typing import Mapping, Protocol
 
 
 class ReadAssessmentLike(Protocol):
-    source_candidate_id: str
-    is_retained: bool
-    relevant_field_refs: tuple[str, ...]
+    @property
+    def source_candidate_id(self) -> str: ...
+
+    @property
+    def is_retained(self) -> bool: ...
+
+    @property
+    def relevant_field_refs(self) -> tuple[str, ...]: ...
 
 
 class ReadEligibilityResultLike(Protocol):
-    read_assessments: tuple[ReadAssessmentLike, ...]
+    @property
+    def read_assessments(self) -> tuple[ReadAssessmentLike, ...]: ...
 
 
 @dataclass(frozen=True)
@@ -51,9 +57,3 @@ class SourceBindingFieldScope:
         if candidate_id not in self.scoped_candidate_ids:
             return None
         return self.field_refs_by_candidate_id.get(candidate_id, frozenset())
-
-    def includes_field_ref(self, *, candidate_id: str, field_ref: str) -> bool:
-        field_refs = self.field_refs_for_candidate(candidate_id)
-        if field_refs is None:
-            return True
-        return field_ref in field_refs

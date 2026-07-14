@@ -20,6 +20,7 @@ input:
           - address: entity.answer_1
             kind: entity
             resource: store
+            keyId: primary_key
             referenceText: London CBD
             identity:
               store_id: store_1
@@ -38,6 +39,7 @@ input:
           - address: entity.answer_1
             kind: entity
             resource: store
+            keyId: primary_key
             referenceText: Other Store
             identity:
               store_id: store_other
@@ -52,6 +54,7 @@ expect:
           - address: entity.answer_1
             kind: entity
             resource: store
+            keyId: primary_key
             referenceText: London CBD
             identity:
               store_id: store_1

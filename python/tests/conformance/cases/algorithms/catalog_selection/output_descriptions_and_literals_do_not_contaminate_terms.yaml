@@ -22,6 +22,7 @@ input:
       answer_outputs:
         - id: answer_1
           description: Inventory quantity output
+          role: ANSWER_VALUE
       known_inputs:
         - id: literal_1
           kind: literal_text

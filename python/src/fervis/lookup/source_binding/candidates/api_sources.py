@@ -1,5 +1,9 @@
 """API-read source candidates for source binding."""
 
+from typing import TypedDict
+
+from fervis.lookup.source_binding.candidates.contracts import JsonValue
+
 from ._shared import Any, FactValue
 from .params import (
     _choice_labels,
@@ -7,6 +11,12 @@ from .params import (
     _param_binding_values,
     _param_omit_option,
 )
+
+
+class _DefaultParamBinding(TypedDict):
+    param_id: str
+    value: JsonValue
+    source: str
 
 
 def _api_candidate_payload(
@@ -60,19 +70,20 @@ def _api_candidate_payload(
 
 def _source_default_param_bindings(
     params: tuple[dict[str, Any], ...],
-) -> tuple[dict[str, str], ...]:
-    return tuple(
-        {
+) -> tuple[_DefaultParamBinding, ...]:
+    bindings: list[_DefaultParamBinding] = []
+    for param in params:
+        param_id = str(param.get("param_id") or "")
+        default_value = param.get("default")
+        if not param_id or default_value is None or not _should_bind_source_default(param):
+            continue
+        binding: _DefaultParamBinding = {
             "param_id": str(param.get("param_id") or ""),
-            "value": param.get("default"),
+            "value": default_value,
             "source": "source_default",
         }
-        for param in params
-        for param_id in (str(param.get("param_id") or ""),)
-        if param_id
-        and param.get("default") is not None
-        and _should_bind_source_default(param)
-    )
+        bindings.append(binding)
+    return tuple(bindings)
 
 
 def _should_bind_source_default(param: dict[str, Any]) -> bool:

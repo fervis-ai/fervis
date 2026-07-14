@@ -1,5 +1,6 @@
 from ._helpers import *  # noqa: F403
 
+
 def test_pattern_fact_planning_schema_scopes_answer_body_to_selected_shape():
     request = FactPlanRequest(
         question="How much did Alice make yesterday, and where did Alice work?",
@@ -11,6 +12,7 @@ def test_pattern_fact_planning_schema_scopes_answer_body_to_selected_shape():
                     answer_outputs=(
                         RequestedFactAnswerOutput(
                             id="answer_1",
+                            role="ANSWER_VALUE",
                             description="sales amount",
                         ),
                     ),
@@ -21,6 +23,7 @@ def test_pattern_fact_planning_schema_scopes_answer_body_to_selected_shape():
                     answer_outputs=(
                         RequestedFactAnswerOutput(
                             id="answer_1",
+                            role="ANSWER_VALUE",
                             description="work location",
                         ),
                     ),
@@ -85,7 +88,7 @@ def test_pattern_fact_planning_schema_scopes_answer_body_to_selected_shape():
                         requested_fact_id="fact_2",
                         answer_output_id="answer_1",
                         match_basis_explanation="location_name fulfills work location.",
-                        group_key_evidence_ids=("source_2.data.location_name",),
+                        value_evidence_ids=("source_2.data.location_name",),
                     ),
                 ),
             ),
@@ -144,13 +147,13 @@ def test_pattern_fact_planning_schema_scopes_answer_body_to_selected_shape():
                         "value": "sum",
                     },
                 },
-                    {
-                        "requested_fact_id": "fact_2",
-                        "answer_output_ids": ["answer_1"],
-                        "pattern": "list_rows",
-                        "source_binding_id": "sb_2",
-                        "output_fields": [{"field_id": "location_name"}],
-                    },
+                {
+                    "requested_fact_id": "fact_2",
+                    "answer_output_ids": ["answer_1"],
+                    "pattern": "list_rows",
+                    "source_binding_id": "sb_2",
+                    "output_fields": [{"field_id": "location_name"}],
+                },
             ],
         }
     }
@@ -177,6 +180,8 @@ def test_pattern_fact_planning_schema_scopes_answer_body_to_selected_shape():
     validate(instance=valid_payload, schema=schema)
     with pytest.raises(ValidationError):
         validate(instance=invalid_payload, schema=schema)
+
+
 def test_set_difference_schema_respects_selected_member_roles():
     request = FactPlanRequest(
         question="Which products were not sold?",
@@ -185,7 +190,9 @@ def test_set_difference_schema_respects_selected_member_roles():
                 RequestedFact(
                     id="fact_1",
                     description="products not sold",
-                    answer_outputs=(RequestedFactAnswerOutput(id="answer_1"),),
+                    answer_outputs=(
+                        RequestedFactAnswerOutput(id="answer_1", role="ANSWER_VALUE"),
+                    ),
                 ),
             )
         ),
@@ -195,19 +202,16 @@ def test_set_difference_schema_respects_selected_member_roles():
                 id="sb_products",
                 requested_fact_id="fact_1",
                 answer_population=_answer_population(),
-                source=DraftRelationSource(kind=SourceKind.API_READ, read_id="products"),
+                source=DraftRelationSource(
+                    kind=SourceKind.API_READ, read_id="products"
+                ),
                 cardinality="many",
                 available_field_ids=("product_id", "name"),
                 available_fields=(
                     SourceField(
                         field_id="product_id",
                         type="uuid",
-                        identity=IdentityMetadata(
-                            entity_ref="product",
-                            identity_field="product_id",
-                            primary_key=True,
-                            stable=True,
-                        ),
+                        roles=("identity", "output"),
                     ),
                     SourceField(field_id="name", type="string"),
                 ),
@@ -223,12 +227,7 @@ def test_set_difference_schema_respects_selected_member_roles():
                     SourceField(
                         field_id="product_id",
                         type="uuid",
-                        identity=IdentityMetadata(
-                            entity_ref="product",
-                            identity_field="product_id",
-                            primary_key=True,
-                            stable=True,
-                        ),
+                        roles=("identity", "output"),
                     ),
                 ),
             ),
@@ -285,7 +284,6 @@ def test_set_difference_schema_respects_selected_member_roles():
                     "candidate": {
                         "source_binding_id": "sb_products",
                         "identity_fields": ["product_id"],
-                        "output_fields": [{"field_id": "name"}],
                     },
                     "observed": {
                         "source_binding_id": "sb_sales",
@@ -306,7 +304,6 @@ def test_set_difference_schema_respects_selected_member_roles():
                     "candidate": {
                         "source_binding_id": "sb_sales",
                         "identity_fields": ["product_id"],
-                        "output_fields": [{"field_id": "product_id"}],
                     },
                     "observed": {
                         "source_binding_id": "sb_products",
@@ -321,7 +318,8 @@ def test_set_difference_schema_respects_selected_member_roles():
     with pytest.raises(ValidationError):
         validate(instance=swapped_payload, schema=schema)
 
-def test_set_difference_schema_limits_identity_fields_to_primary_identity_metadata():
+
+def test_set_difference_schema_limits_identity_fields_to_declared_identity_roles():
     request = FactPlanRequest(
         question="Which products were not sold?",
         question_contract=QuestionContract(
@@ -329,7 +327,9 @@ def test_set_difference_schema_limits_identity_fields_to_primary_identity_metada
                 RequestedFact(
                     id="fact_1",
                     description="products not sold",
-                    answer_outputs=(RequestedFactAnswerOutput(id="answer_1"),),
+                    answer_outputs=(
+                        RequestedFactAnswerOutput(id="answer_1", role="ANSWER_VALUE"),
+                    ),
                 ),
             )
         ),
@@ -339,19 +339,16 @@ def test_set_difference_schema_limits_identity_fields_to_primary_identity_metada
                 id="sb_products",
                 requested_fact_id="fact_1",
                 answer_population=_answer_population(),
-                source=DraftRelationSource(kind=SourceKind.API_READ, read_id="products"),
+                source=DraftRelationSource(
+                    kind=SourceKind.API_READ, read_id="products"
+                ),
                 cardinality="many",
                 available_field_ids=("product_id", "name", "stock_count"),
                 available_fields=(
                     SourceField(
                         field_id="product_id",
                         type="uuid",
-                        identity=IdentityMetadata(
-                            entity_ref="product",
-                            identity_field="product_id",
-                            primary_key=True,
-                            stable=True,
-                        ),
+                        roles=("identity", "output"),
                     ),
                     SourceField(field_id="name", type="string"),
                     SourceField(field_id="stock_count", type="integer"),
@@ -368,12 +365,7 @@ def test_set_difference_schema_limits_identity_fields_to_primary_identity_metada
                     SourceField(
                         field_id="product_id",
                         type="uuid",
-                        identity=IdentityMetadata(
-                            entity_ref="product",
-                            identity_field="product_id",
-                            primary_key=True,
-                            stable=True,
-                        ),
+                        roles=("identity", "output"),
                     ),
                     SourceField(field_id="name", type="string"),
                 ),
@@ -431,7 +423,6 @@ def test_set_difference_schema_limits_identity_fields_to_primary_identity_metada
                     "candidate": {
                         "source_binding_id": "sb_products",
                         "identity_fields": ["product_id"],
-                        "output_fields": [{"field_id": "name"}],
                     },
                     "observed": {
                         "source_binding_id": "sb_sales",
@@ -452,7 +443,6 @@ def test_set_difference_schema_limits_identity_fields_to_primary_identity_metada
                     "candidate": {
                         "source_binding_id": "sb_products",
                         "identity_fields": ["name"],
-                        "output_fields": [{"field_id": "name"}],
                     },
                     "observed": {
                         "source_binding_id": "sb_sales",
@@ -467,6 +457,7 @@ def test_set_difference_schema_limits_identity_fields_to_primary_identity_metada
     with pytest.raises(ValidationError):
         validate(instance=label_identity_payload, schema=schema)
 
+
 def test_joined_rows_schema_keeps_join_keys_outside_support_fields():
     request = FactPlanRequest(
         question="List products with sales.",
@@ -475,7 +466,9 @@ def test_joined_rows_schema_keeps_join_keys_outside_support_fields():
                 RequestedFact(
                     id="fact_1",
                     description="products and sales",
-                    answer_outputs=(RequestedFactAnswerOutput(id="answer_1"),),
+                    answer_outputs=(
+                        RequestedFactAnswerOutput(id="answer_1", role="ANSWER_VALUE"),
+                    ),
                 ),
             )
         ),
@@ -485,7 +478,9 @@ def test_joined_rows_schema_keeps_join_keys_outside_support_fields():
                 id="sb_products",
                 requested_fact_id="fact_1",
                 answer_population=_answer_population(),
-                source=DraftRelationSource(kind=SourceKind.API_READ, read_id="products"),
+                source=DraftRelationSource(
+                    kind=SourceKind.API_READ, read_id="products"
+                ),
                 cardinality="many",
                 available_field_ids=("product_id", "name"),
                 available_fields=(

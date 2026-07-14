@@ -98,7 +98,7 @@ def _capture_flask_g(principal: dict[str, object]) -> ReadContextRef:
 
 def _capture_flask_login(principal: dict[str, object]) -> ReadContextRef:
     try:
-        from flask_login import current_user
+        current_user = import_object("flask_login:current_user")
     except ImportError as exc:
         raise RuntimeError(
             "flask_login_current_user capture requires flask-login."

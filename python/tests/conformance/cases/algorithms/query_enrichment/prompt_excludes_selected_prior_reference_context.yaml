@@ -14,6 +14,7 @@ input:
         answer_outputs:
           - id: answer_1
             description: how much she made yesterday
+            role: ANSWER_VALUE
   excludes:
     - "Selected prior reference context:"
     - selected prior reference context

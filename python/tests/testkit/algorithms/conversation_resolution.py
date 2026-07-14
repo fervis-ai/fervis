@@ -6,6 +6,7 @@ from fervis.lookup.conversation_resolution import (
     CONVERSATION_RESOLUTION_TOOL_NAME,
     compile_conversation_resolution,
     parse_conversation_resolution,
+    ResolvedCanonicalIdentity,
     ResolvedLiteralQuestionInput,
     ResolvedRowSetQuestionInput,
 )
@@ -13,8 +14,10 @@ from fervis.lookup.conversation_resolution.compilation import (
     CompiledConversationResolution,
     CompiledResolvedClause,
     CompiledResolvedValue,
+    ResolvedIdentityInput,
 )
 from fervis.lookup.question_inputs import LiteralInputRole
+from fervis.lookup.canonical_data import entity_key_value
 from fervis.lookup.conversation_resolution.schema import (
     build_conversation_resolution_tool_schemas,
 )
@@ -48,6 +51,7 @@ def run_conversation_resolution_compile_case(payload: dict[str, Any]) -> list[st
     compiled = compile_conversation_resolution(
         resolution,
         memory_projection=projection,
+        context_sources=projection.context_sources,
     )
     actual = {
         "current_question_text": compiled.current_question_text,
@@ -59,8 +63,29 @@ def run_conversation_resolution_compile_case(payload: dict[str, Any]) -> list[st
             else {"kind": "none"}
         ),
         "uses_prior_context": compiled.uses_prior_context,
+        "canonical_identity_inputs": [
+            _canonical_identity_payload(item)
+            for item in compiled.identity_inputs()
+        ],
     }
     return _mismatches(actual, payload["expect"])
+
+
+def _canonical_identity_payload(item: ResolvedIdentityInput) -> dict[str, object]:
+    identity = item.canonical_identity
+    payload: dict[str, object] = {
+        "input_ref": item.input_ref,
+        "entity_kind": identity.key.entity_kind,
+        "key_id": identity.key.key_id,
+        "authority_refs": list(identity.authority_refs),
+    }
+    if len(identity.key.components) == 1:
+        component = identity.key.components[0]
+        payload["key_component_id"] = component.component_id
+        payload["value"] = component.value
+    else:
+        payload["components"] = identity.key.component_values()
+    return payload
 
 
 def run_conversation_resolution_schema_case(payload: dict[str, Any]) -> list[str]:
@@ -80,7 +105,9 @@ def run_conversation_resolution_schema_case(payload: dict[str, Any]) -> list[str
     source_branches = clause["properties"]["values"]["items"]["properties"]["sources"][
         "items"
     ]["oneOf"]
-    call_branches = resolved["properties"]["frame_call"]["oneOf"]
+    parameter_branches = clause["properties"]["values"]["items"]["properties"][
+        "frame_parameter"
+    ]["oneOf"]
     ambiguity = outcome_branches[1]
     ambiguity_candidate = ambiguity["properties"]["candidate_interpretations"]["items"]
     ambiguity_candidate_fields = ambiguity_candidate["properties"]
@@ -103,8 +130,9 @@ def run_conversation_resolution_schema_case(payload: dict[str, Any]) -> list[str
         "source_kinds": [
             branch["properties"]["kind"]["enum"][0] for branch in source_branches
         ],
-        "frame_call_kinds": [
-            branch["properties"]["kind"]["enum"][0] for branch in call_branches
+        "frame_parameter_kinds": [
+            branch["properties"]["kind"]["enum"][0]
+            for branch in parameter_branches
         ],
         "ambiguity_candidate_fields": sorted(ambiguity_candidate_fields),
         "ambiguity_evidence_source_ids": evidence_source_ids,
@@ -153,7 +181,7 @@ def _context_source(payload: dict[str, Any]) -> ConversationContextSource:
         ),
         meaning_anchors=tuple(
             ConversationMeaningAnchor(
-                memory_id=str(anchor["memory_id"]),
+                anchor_id=str(anchor["anchor_id"]),
                 text=str(anchor["text"]),
                 occurrence=int(anchor.get("occurrence") or 1),
                 kind=str(anchor["kind"]),
@@ -250,6 +278,30 @@ def compiled_conversation_resolution_from_payload(
 
 def _compiled_input(payload: dict[str, Any]):
     if str(payload["kind"]) == "literal_text":
+        canonical_identity_payload = payload.get("canonical_identity")
+        canonical_identity = (
+            ResolvedCanonicalIdentity(
+                key=entity_key_value(
+                    str(canonical_identity_payload["entity_kind"]),
+                    str(canonical_identity_payload["key_id"]),
+                    {
+                        str(canonical_identity_payload["key_component_id"]): str(
+                            canonical_identity_payload["value"]
+                        )
+                    },
+                ),
+                authority_refs=tuple(
+                    str(item)
+                    for item in canonical_identity_payload["authority_refs"]
+                ),
+                lineage_refs=tuple(
+                    str(item)
+                    for item in canonical_identity_payload["lineage_refs"]
+                ),
+            )
+            if isinstance(canonical_identity_payload, dict)
+            else None
+        )
         return ResolvedLiteralQuestionInput(
             input_ref=str(payload["input_ref"]),
             value_source_text=str(payload["value_source_text"]),
@@ -258,6 +310,7 @@ def _compiled_input(payload: dict[str, Any]):
             occurrence=int(payload.get("occurrence") or 1),
             field_label_text=str(payload.get("field_label_text") or ""),
             value_meaning_hint=str(payload.get("value_meaning_hint") or ""),
+            canonical_identity=canonical_identity,
         )
     return ResolvedRowSetQuestionInput(
         input_ref=str(payload["input_ref"]),

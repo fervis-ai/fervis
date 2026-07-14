@@ -27,11 +27,13 @@ input:
             answer_outputs:
             - id: answer_1
               description: answer
+              role: ANSWER_VALUE
             used_question_inputs: [fact_1_entity_1]
       addresses:
       - address: entity.grounded_fact_1_entity_1
         kind: entity
         resource: staff
+        keyId: primary_key
         referenceText: Staff One
         identity:
           staff_key: staff-1
@@ -57,11 +59,13 @@ input:
             answer_outputs:
             - id: answer_1
               description: answer
+              role: ANSWER_VALUE
             used_question_inputs: [fact_1_entity_1]
       addresses:
       - address: entity.grounded_fact_1_entity_1
         kind: entity
         resource: staff
+        keyId: primary_key
         referenceText: Staff One
         identity:
           staff_key: staff-1

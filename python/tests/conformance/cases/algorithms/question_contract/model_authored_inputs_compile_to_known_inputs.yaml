@@ -10,8 +10,11 @@ input:
     subject_text: stores
     instance_interpretation:
       kind: NORMAL_BUSINESS_INSTANCE
+  answer_expression:
+    family: ranked_selection
   answer_outputs:
   - description: sales total
+    role: ANSWER_VALUE
   question_inputs:
   - input_ref: store
     source: question_context

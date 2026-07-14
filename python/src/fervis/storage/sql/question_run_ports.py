@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy.engine import Engine
 
 from fervis.lineage.recorder_core import LineageRecorder
+from fervis.lineage.recorder import ClarificationResponseWrite
 from fervis.lineage.enums import QuestionRunKind, RunResultKind
 from fervis.host_api.contracts.authority import ReadAuthority, ReadContextRef
 from fervis.host_api.credentials import (
     delegated_credential_from_runtime_context,
 )
 from fervis.lineage.run_spine import (
-    ClarificationResponseStart as SpineClarificationResponseStart,
     QuestionRunSequenceStore,
     QuestionRunStart as SpineQuestionRunStart,
     QuestionRunStartRequest,
@@ -25,14 +26,20 @@ from fervis.project.persistence.schema import metadata
 from fervis.questions.contracts import ExecutionMode, QuestionPrincipal
 from fervis.questions.ports import (
     AuthorizedQuestionAccess,
+    ClarificationRunResponse,
     QueuedRun,
     QuestionRunRecord,
     ParsedQuestionRunSubmission,
     QuestionRunSubmissionKind,
     QuestionRunSubmissionResult,
     RunSubmission,
+    ResolveQuestionRunSpec,
 )
-from fervis.questions.service import QuestionService
+from fervis.lookup.clarification.response import parse_clarification_response
+from fervis.lookup.clarification import clarification_response_ref
+from fervis.lookup.clarification.payload import clarification_from_payload
+from fervis.lookup.clarification.model import ConversationResolutionResponse
+from fervis.questions.service import QuestionService, clarification_successor_run
 from fervis.lookup.answer_program.persistence import (
     StoredProgramInvocation,
     parse_stored_program_invocation,
@@ -45,7 +52,9 @@ from fervis.questions.projection import (
     project_question_runs,
     select_conversation_memory_runs,
 )
+from fervis.questions.clarification_state import pending_clarification_ids
 from fervis.run_work.service import RunWorkService
+from fervis.run_work.contracts import run_wall_clock_duration_ms
 
 from .lineage_query import SQLLineageQuery
 from .lineage_store import SQLLineageRecorderStore
@@ -294,14 +303,22 @@ class SQLQuestionLifecyclePort:
     def find_idempotent_run(
         self,
         *,
-        authority: ReadAuthority,
+        principal: QuestionPrincipal,
         conversation_id: str | None,
         idempotency_key: str | None,
     ) -> QueuedRun | None:
+        authority = ReadAuthority.from_principal(principal)
         item = self.queue.find_idempotent_work_item(
             tenant_id=authority.tenant_id,
+            principal_id=principal.principal_id,
+            read_context_ref=authority.read_context_ref,
             conversation_id=conversation_id,
             idempotency_key=idempotency_key,
+            idempotency_scope=(
+                f"conversation:{conversation_id}"
+                if conversation_id is not None
+                else "new_conversation"
+            ),
         )
         if item is not None and not conversation_is_authorized(
             self.engine,
@@ -350,6 +367,83 @@ class SQLQuestionLifecyclePort:
         return QuestionRunSubmissionResult(
             kind=QuestionRunSubmissionKind.CREATED,
             run=_queued_run_from_work_item(self.engine, enqueued.item),
+        )
+
+    def respond_to_clarification_atomically(
+        self,
+        resume: ClarificationRunResponse,
+    ) -> QuestionRunSubmissionResult:
+        authority = ReadAuthority.from_principal(resume.principal)
+        item = self.queue.get_work_item_for_run(resume.run_id)
+        if (
+            item.tenant_id != authority.tenant_id
+            or item.read_context_ref != authority.read_context_ref
+            or not question_is_authorized(
+                self.engine,
+                question_id=resume.question_id,
+                authority=authority,
+            )
+            or _question_id_for_run(self.engine, resume.run_id) != resume.question_id
+        ):
+            raise PermissionError("clarification does not belong to a resumable run")
+        clarification_payload = _clarification_payload(
+            self.engine,
+            run_id=resume.run_id,
+            clarification_id=resume.clarification_id,
+        )
+        if not isinstance(item.spec, ResolveQuestionRunSpec):
+            raise ValueError("clarification can resume only a question lookup")
+        response = parse_clarification_response(
+            clarification_from_payload(clarification_payload),
+            response_id=resume.response_id,
+            response_text=resume.response_text,
+            selected_option_id=resume.selected_option_id,
+            suspended_question_text=item.spec.question,
+        )
+        with sql_transaction(self.engine):
+            self.recorder.record_clarification_response(
+                ClarificationResponseWrite(
+                    response_id=resume.response_id,
+                    run_id=resume.run_id,
+                    clarification_id=resume.clarification_id,
+                    evidence_ref=clarification_response_ref(resume.response_id),
+                    response_text=resume.response_text,
+                    selected_option_id=resume.selected_option_id,
+                )
+            )
+            if not (
+                isinstance(response, ConversationResolutionResponse)
+                and response.annotation is not None
+            ):
+                resumed = self.queue.resume_from_clarification(
+                    run_id=resume.run_id,
+                    spec=replace(
+                        item.spec,
+                        clarification_responses=(
+                            *item.spec.clarification_responses,
+                            response,
+                        ),
+                    ),
+                    execution_mode=resume.execution_mode.value,
+                )
+            else:
+                current = _queued_run_from_work_item(self.engine, item).submission
+                submission, record = clarification_successor_run(
+                    current,
+                    response=resume,
+                    annotation=response,
+                )
+                self.queue.supersede_waiting_run(resume.run_id)
+                enqueued = self.queue.enqueue_run_work_item(submission=submission)
+                record_question_run_start(
+                    _spine_question_run_start(record),
+                    sequence_store=SQLQuestionRunSequenceStore(self.engine),
+                    recorder=self.recorder,
+                )
+                resumed = enqueued.item
+        return QuestionRunSubmissionResult(
+            kind=QuestionRunSubmissionKind.CREATED,
+            run=_queued_run_from_work_item(self.engine, resumed),
         )
 
     def load_executable_run(
@@ -417,6 +511,20 @@ class SQLQuestionLifecyclePort:
             self.engine,
             self.queue.get_work_item_for_run(run_id),
         )
+
+    def wait_for_clarification(
+        self,
+        *,
+        run_id: str,
+        worker_id: str,
+        active_attempt: int,
+    ) -> QueuedRun:
+        item = self.queue.wait_for_clarification(
+            run_id=run_id,
+            worker_id=worker_id,
+            active_attempt=active_attempt,
+        )
+        return _queued_run_from_work_item(self.engine, item)
 
 
 class SQLQuestionStateReaderPort:
@@ -649,6 +757,7 @@ class SQLQuestionStateReaderPort:
                 for row in rows
             )
         )
+
     def _latest_question_for_conversation(self, conversation_id: str):
         question = metadata.tables["fervis_question"]
         statement = (
@@ -761,6 +870,7 @@ class SQLQuestionStateReaderPort:
             return ""
         return question_id
 
+
 def _required_projected_run_state(
     projection: QuestionRunProjection,
     *,
@@ -856,9 +966,6 @@ def _spine_question_run_start(record: QuestionRunRecord) -> QuestionRunStartRequ
         )
     return QuestionRunStartRequest(
         question=question,
-        clarification_response=_spine_clarification_response(
-            record.clarification_response
-        ),
         run=SpineQuestionRunStart(
             question_id=record.run.question_id,
             run_id=record.run.run_id,
@@ -871,18 +978,6 @@ def _spine_question_run_start(record: QuestionRunRecord) -> QuestionRunStartRequ
                 record.run.trigger_clarification_response_id
             ),
         ),
-    )
-
-
-def _spine_clarification_response(response):
-    if response is None:
-        return None
-    return SpineClarificationResponseStart(
-        response_id=response.response_id,
-        run_id=response.run_id,
-        clarification_id=response.clarification_id,
-        response_text=response.response_text,
-        selected_option_id=response.selected_option_id,
     )
 
 
@@ -940,19 +1035,13 @@ def _stored_program_invocation(row: Any) -> StoredProgramInvocation:
         bindings_json=str(row.bindings_json),
         kind=str(row.kind),
         base_invocation_id=(
-            str(row.base_invocation_id)
-            if row.base_invocation_id is not None
-            else None
+            str(row.base_invocation_id) if row.base_invocation_id is not None else None
         ),
         patch_id=str(row.patch_id) if row.patch_id is not None else None,
         binding_patch_json=(
-            str(row.binding_patch_json)
-            if row.binding_patch_json is not None
-            else None
+            str(row.binding_patch_json) if row.binding_patch_json is not None else None
         ),
-        revision_id=(
-            str(row.revision_id) if row.revision_id is not None else None
-        ),
+        revision_id=(str(row.revision_id) if row.revision_id is not None else None),
     )
 
 
@@ -963,6 +1052,9 @@ def _queued_run_from_work_item(engine: Engine, item: SQLRunWorkItem) -> QueuedRu
         else None
     )
     spec = item.spec
+    result_data = (run_view or {}).get("resultData")
+    if result_data is None and item.status == "WAITING_FOR_CLARIFICATION":
+        result_data = _pending_clarification_result_data(engine, item.run_id)
     return QueuedRun(
         submission=RunSubmission(
             conversation_id=item.conversation_id,
@@ -982,12 +1074,15 @@ def _queued_run_from_work_item(engine: Engine, item: SQLRunWorkItem) -> QueuedRu
             if item.lease_owner == "inline"
             else ExecutionMode.QUEUED,
             idempotency_key=item.idempotency_key,
+            idempotency_authority_ref=item.idempotency_authority_ref,
+            idempotency_scope=item.idempotency_scope,
         ),
         status=str((run_view or {}).get("status") or item.status),
         answer=(run_view or {}).get("answer"),
-        result_data=(run_view or {}).get("resultData"),
+        result_data=result_data,
         error=(run_view or {}).get("error") or item.last_error or None,
         duration_ms=(run_view or {}).get("durationMs") or _duration_ms(item),
+        active_attempt=item.active_attempt if item.active_attempt > 0 else None,
     )
 
 
@@ -1001,9 +1096,10 @@ def _terminal_run_from_lineage(
 
 
 def _duration_ms(item: SQLRunWorkItem) -> int | None:
-    if item.started_at is None or item.completed_at is None:
-        return None
-    return max(0, int((item.completed_at - item.started_at).total_seconds() * 1000))
+    return run_wall_clock_duration_ms(
+        created_at=item.created_at,
+        completed_at=item.completed_at,
+    )
 
 
 def _question_id_for_run(engine: Engine, run_id: str) -> str:
@@ -1015,6 +1111,71 @@ def _question_id_for_run(engine: Engine, run_id: str) -> str:
     if value is None:
         raise RuntimeError(f"Fervis run has no lineage question: {run_id}")
     return str(value)
+
+
+def _clarification_payload(
+    engine: Engine,
+    *,
+    run_id: str,
+    clarification_id: str,
+) -> dict[str, Any]:
+    request = metadata.tables["fervis_clarification_request"]
+    response = metadata.tables["fervis_clarification_response"]
+    with sql_connection(engine) as connection:
+        value = connection.execute(
+            sa.select(request.c.payload_json).where(
+                request.c.run_id == run_id,
+                request.c.clarification_id == clarification_id,
+                ~sa.exists(
+                    sa.select(response.c.response_id).where(
+                        response.c.run_id == run_id,
+                        response.c.clarification_id == clarification_id,
+                    )
+                ),
+            )
+        ).scalar()
+    if not isinstance(value, dict):
+        raise ValueError("clarification does not belong to the waiting run")
+    return value
+
+
+def _pending_clarification_result_data(
+    engine: Engine,
+    run_id: str,
+) -> dict[str, Any]:
+    request = metadata.tables["fervis_clarification_request"]
+    response = metadata.tables["fervis_clarification_response"]
+    with sql_connection(engine) as connection:
+        request_rows = tuple(
+            connection.execute(
+                sa.select(request.c.clarification_id, request.c.payload_json)
+                .where(request.c.run_id == run_id)
+                .order_by(request.c.created_at, request.c.clarification_id)
+            )
+        )
+        response_ids = tuple(
+            str(value)
+            for value in connection.execute(
+                sa.select(response.c.clarification_id).where(
+                    response.c.run_id == run_id
+                )
+            ).scalars()
+        )
+    pending_ids = frozenset(
+        pending_clarification_ids(
+            tuple(str(row.clarification_id) for row in request_rows),
+            response_ids,
+        )
+    )
+    payloads = [
+        row.payload_json
+        for row in request_rows
+        if str(row.clarification_id) in pending_ids
+    ]
+    return {
+        "kind": "needs_clarification",
+        "details": {"clarifications": payloads},
+    }
 
 
 def _primary_run_ids_for_conversation(

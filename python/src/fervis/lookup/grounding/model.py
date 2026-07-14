@@ -2,22 +2,40 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from enum import StrEnum
 from typing import Any
+from dataclasses import dataclass, field
 
-from fervis.lookup.relation_catalog import IdentityMetadata
-from fervis.lookup.turn_prompts.context import HostPromptContext
 from fervis.lookup.answer_program.values import (
     FactValue,
     TimeComponent,
     ValueComponent,
 )
+from fervis.lookup.canonical_data import EntityKeyValue
+from fervis.lookup.turn_prompts.context import HostPromptContext
+from fervis.types.enums import StrEnum
 
 
-class LookupTextResolutionDecision(StrEnum):
-    CAN_RESOLVE_LOOKUP_TEXT = "CAN_RESOLVE_LOOKUP_TEXT"
-    CANNOT_RESOLVE_LOOKUP_TEXT = "CANNOT_RESOLVE_LOOKUP_TEXT"
+class InputBindingPurpose(StrEnum):
+    IDENTITY_VALIDATION = "identity_validation"
+    REFERENCE_GROUNDING = "reference_grounding"
+
+
+class InputBindingResultKind(StrEnum):
+    CANONICAL_IDENTITY = "canonical_identity"
+    MATCHED_VALUE = "matched_value"
+
+
+@dataclass(frozen=True)
+class ExpectedInputIdentity:
+    entity_kind: str
+    key_id: str
+    key_component_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.entity_kind or not self.key_id or not self.key_component_ids:
+            raise ValueError(
+                "expected input identity must name its complete candidate key"
+            )
 
 
 class GroundingTerminalKind(StrEnum):
@@ -29,8 +47,10 @@ class GroundingTerminalKind(StrEnum):
 
 
 class GroundedValueCertificationMethod(StrEnum):
+    IDENTITY_VALIDATION_READ = "identity_validation_read"
     RESOLVER_SOURCE_READ = "resolver_source_read"
     IMPORTED_PRIOR_IDENTITY = "imported_prior_identity"
+    CLARIFICATION_SELECTION = "clarification_selection"
 
 
 @dataclass(frozen=True)
@@ -67,7 +87,17 @@ class ResolverOutputFieldCard:
     field_path: str
     type: str
     choices: tuple[str, ...] = ()
-    identity: IdentityMetadata | None = None
+
+
+@dataclass(frozen=True)
+class InputBindingKeyComponent:
+    component_id: str
+    field_id: str
+    field_ref: str
+
+    def __post_init__(self) -> None:
+        if not self.component_id or not self.field_id or not self.field_ref:
+            raise ValueError("input binding key component is incomplete")
 
 
 @dataclass(frozen=True)
@@ -78,13 +108,16 @@ class InputBindingRoute:
     resolver_endpoint_name: str
     lookup_param_id: str
     lookup_param_ref: str
+    lookup_param_type: str
     lookup_field_ids: tuple[str, ...]
     lookup_field_refs: tuple[str, ...]
-    return_field_id: str
-    return_field_ref: str
-    identity_type: str
-    identity_field: str
+    canonical_lookup_field_refs: tuple[str, ...]
+    entity_kind: str
+    key_id: str
+    key_components: tuple[InputBindingKeyComponent, ...]
+    context_field_ids: tuple[str, ...]
     display: str
+    resolver_description: str = ""
     resolver_resource_names: tuple[str, ...] = ()
     query_params: tuple[ResolverQueryParamCard, ...] = ()
     selected_output_fields: tuple[ResolverOutputFieldCard, ...] = ()
@@ -104,6 +137,7 @@ class InputBindingOption:
     id: str
     known_input_id: str
     path: str
+    purpose: InputBindingPurpose
     route: InputBindingRoute | None = None
 
 
@@ -115,6 +149,7 @@ class KnownInputBindingTask:
     requested_fact_id: str
     options: tuple[InputBindingOption, ...]
     lookup_text: str
+    field_label_text: str = ""
     known_input_description: str = ""
     applies_to_requested_fact_ids: tuple[str, ...] = ()
     requested_facts: tuple[GroundingRequestedFactCard, ...] = ()
@@ -139,9 +174,17 @@ class KnownTimeResolutionTask:
 
 
 @dataclass(frozen=True)
-class InputBindingCompatibility:
+class ResolvedInputBinding:
+    option_id: str
+    input_value: str | int | float | bool
+    result_kind: InputBindingResultKind
+    matched_field_ref: str = ""
+
+
+@dataclass(frozen=True)
+class InputBindingSelection:
     known_input_id: str
-    binding_option_ids: tuple[str, ...]
+    binding: ResolvedInputBinding | None
 
 
 @dataclass(frozen=True)
@@ -160,39 +203,9 @@ class GroundingRequest:
 
 
 @dataclass(frozen=True)
-class GroundingCompatibilityResult:
-    compatibilities: tuple[InputBindingCompatibility, ...]
+class GroundingSelectionResult:
+    selections: tuple[InputBindingSelection, ...]
     time_resolutions: tuple[TimeResolutionIntent, ...] = ()
-
-
-def resolver_fit_question_for_option(
-    *,
-    task: KnownInputBindingTask,
-    option: InputBindingOption,
-) -> str:
-    return (
-        f"Can this resolver search lookup text "
-        f"'{task.lookup_text}' and return canonical "
-        f"API identity '{_option_identity_type(option)}' for target meaning "
-        f"'{task.known_input_description}'?"
-    )
-
-
-def option_has_targetable_identity(option: InputBindingOption) -> bool:
-    return bool(_targetable_identity_type(option))
-
-
-def _targetable_identity_type(option: InputBindingOption) -> str:
-    if option.route is not None:
-        return option.route.identity_type
-    return ""
-
-
-def _option_identity_type(option: InputBindingOption) -> str:
-    targetable = _targetable_identity_type(option)
-    if targetable:
-        return targetable
-    return "no_returned_identity"
 
 
 @dataclass(frozen=True)
@@ -202,6 +215,7 @@ class GroundedInputUse:
     row_source_id: str
     param_id: str
     field_id: str = ""
+    entity_kind: str = ""
     value_component: ValueComponent | TimeComponent = ValueComponent.VALUE
 
 
@@ -209,7 +223,7 @@ class GroundedInputUse:
 class GroundingCandidate:
     id: str
     label: str = ""
-    entity_kind: str = ""
+    key: EntityKeyValue | None = None
     matched_label: str = ""
     matched_field: str = ""
     matched_value: str = ""
@@ -244,7 +258,3 @@ class CanonicalInputLedger:
     uses: tuple[GroundedInputUse, ...] = ()
     issues: tuple[GroundingIssue, ...] = ()
     certifications: tuple[GroundedValueCertification, ...] = ()
-
-    @property
-    def ok(self) -> bool:
-        return not self.issues

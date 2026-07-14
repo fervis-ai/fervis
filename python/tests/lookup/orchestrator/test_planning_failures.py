@@ -12,7 +12,7 @@ def test_lookup_cutover_fails_closed_on_invalid_source_binding_output():
     )
     planner = _ToolNamePlannerPort(
         responses={
-            "submit_answer_request_contract": _question_contract_payload(
+            "submit_question_contract_outcome": _question_contract_payload(
                 _question_contract_for(
                     "fact_1",
                     description="metric total",

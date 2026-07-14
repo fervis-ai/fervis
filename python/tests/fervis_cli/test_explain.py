@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ._support import *  # noqa: F401,F403
 
+
 def test_fervis_explain_default_agent_view_is_structured_and_compact() -> None:
     stdout = StringIO()
 
@@ -36,7 +37,7 @@ def test_fervis_explain_default_agent_view_is_structured_and_compact() -> None:
         "source_read_count": 1,
         "step_count": 4,
     }
-    assert payload["index"]["answer_outputs"][0]["value"] == "staff:staff_9393"
+    assert payload["index"]["answer_outputs"][0]["value"] == "staff:staff_id=staff_9393"
     assert payload["index"]["answer_outputs"][0]["step_key"] == "source_binding"
     assert payload["index"]["source_reads"][0]["endpoint"] == (
         "retail_ops/list_shift_compensation_list"
@@ -75,14 +76,16 @@ def test_fervis_explain_answer_compact_view_is_signal_first() -> None:
     assert exit_code == 0
     rendered = stdout.getvalue()
     assert "Question question_1: Which staff earned the most this month?" in rendered
-    assert "Answer output answer_1: entity staff:staff_9393" in rendered
+    assert "Answer output answer_1: entity staff:staff_id=staff_9393" in rendered
     assert (
         "Answer presentation (default/text): "
         "Staff staff_9393 earned the most compensation."
     ) in rendered
     assert "Explicit inputs: June 2026" in rendered
     assert "Derived inputs: month=2026-06" in rendered
-    assert "      Source read: retail_ops/list_shift_compensation_list rows=3" in rendered
+    assert (
+        "      Source read: retail_ops/list_shift_compensation_list rows=3" in rendered
+    )
     assert "hash=sha256:source" in rendered
     assert "    Step 1: question_contract" in rendered
     assert "    Step 2: source_binding" in rendered
@@ -411,7 +414,9 @@ def test_fervis_explain_clarifications_include_followup_next_actions() -> None:
                         ],
                     }
                 ],
-                "evidence": [{"kind": "resolver_read", "id": "source_read:store_lookup"}],
+                "evidence": [
+                    {"kind": "resolver_read", "id": "source_read:store_lookup"}
+                ],
             },
             "fact_result_id": "fact_result_1",
             "step_id": "step_source_binding",
@@ -426,15 +431,13 @@ def test_fervis_explain_clarifications_include_followup_next_actions() -> None:
     )
 
     payload = _command_payload(stdout.getvalue(), command="explain")
-    clarification = payload["questions"][0]["runs"][0]["steps"][1][
-        "clarifications"
-    ][0]
+    clarification = payload["questions"][0]["runs"][0]["steps"][1]["clarifications"][0]
     assert exit_code == 0
     assert clarification["next_actions"] == [
         provide_clarification_action(
             "conversation_1",
             question_id="question_1",
-            base_run_id="run_1",
+            run_id="run_1",
             clarification_id="clar_1",
         )
     ]

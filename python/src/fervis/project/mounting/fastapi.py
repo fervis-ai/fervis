@@ -32,9 +32,10 @@ from .common import (
 )
 from .fastapi_sources import fastapi_source_path_prefixes
 from .source import (
-    insert_after_node,
     insert_before_node,
     insert_import_line,
+    newline_for,
+    rstrip_line_endings,
 )
 
 
@@ -379,6 +380,11 @@ def _plan_fastapi_entrypoint(
     import_problem = _fervis_import_problem(loaded.tree, path=relative_path)
     if import_problem is not None:
         return import_problem
+    if top_level_assignment_after_line(loaded.tree, "app", app_assignment.lineno):
+        return BlockedPatch(
+            relative_path,
+            "`app` is reassigned after `app = FastAPI(...)`; mount manually.",
+        )
     if _contains_any_fervis_mount_call(loaded.tree) and not _fastapi_mount_shape_valid(
         loaded.tree,
         app_assignment,
@@ -398,18 +404,13 @@ def _plan_fastapi_entrypoint(
             relative_path,
             "Top-level `configured_fervis` is rebound before the Fervis mount.",
         )
-    if top_level_assignment_after_line(loaded.tree, "app", app_assignment.lineno):
-        return BlockedPatch(
-            relative_path,
-            "`app` is reassigned after `app = FastAPI(...)`; mount manually.",
-        )
-
     updated = loaded.text
     if not _contains_fervis_mount_app_call(loaded.tree):
-        updated = insert_after_node(updated, app_assignment, FASTAPI_MOUNT)
-    updated = _ensure_config_fervis_import(updated, path=relative_path)
-    if isinstance(updated, BlockedPatch):
-        return updated
+        updated = _insert_entrypoint_mount(updated, loaded.tree)
+    imported = _ensure_config_fervis_import(updated, path=relative_path)
+    if isinstance(imported, BlockedPatch):
+        return imported
+    updated = imported
     return loaded.plan_validated(updated, validate=fastapi_entrypoint_contains_hooks)
 
 
@@ -468,9 +469,10 @@ def _plan_fastapi_factory(
     ):
         indent = " " * return_app.col_offset
         updated = insert_before_node(updated, return_app, f"{indent}{FASTAPI_MOUNT}")
-    updated = _ensure_config_fervis_import(updated, path=relative_path)
-    if isinstance(updated, BlockedPatch):
-        return updated
+    imported = _ensure_config_fervis_import(updated, path=relative_path)
+    if isinstance(imported, BlockedPatch):
+        return imported
+    updated = imported
     return loaded.plan_validated(
         updated,
         validate=lambda tree: _fastapi_factory_contains_hooks(tree, factory_name),
@@ -592,8 +594,9 @@ def _contains_fervis_mount_app_call(tree: ast.Module) -> bool:
 
 def _fervis_mount_app_call(tree: ast.Module) -> ast.Expr | None:
     for node in tree.body:
-        if _is_fervis_mount_app_expr(node):
-            return node
+        call = _as_fervis_mount_app_expr(node)
+        if call is not None:
+            return call
     return None
 
 
@@ -613,8 +616,9 @@ def _fervis_mount_after_app_assignment(
 ) -> ast.Expr | None:
     app_line = app_assignment.end_lineno or app_assignment.lineno
     for node in tree.body:
-        if node.lineno > app_line and _is_fervis_mount_app_expr(node):
-            return node
+        call = _as_fervis_mount_app_expr(node)
+        if node.lineno > app_line and call is not None:
+            return call
     return None
 
 
@@ -634,7 +638,48 @@ def _fastapi_mount_shape_valid(
     app_line = app_assignment.end_lineno or app_assignment.lineno
     if call.lineno <= app_line:
         return None
+    if not _entrypoint_mount_is_final(tree, call):
+        return None
     return call
+
+
+def _insert_entrypoint_mount(text: str, tree: ast.Module) -> str:
+    main_guard = _main_guard(tree)
+    if main_guard is not None:
+        return insert_before_node(text, main_guard, FASTAPI_MOUNT)
+    newline = newline_for(text)
+    source = rstrip_line_endings(text)
+    return f"{source}{newline}{newline}{FASTAPI_MOUNT}{newline}"
+
+
+def _entrypoint_mount_is_final(tree: ast.Module, call: ast.Expr) -> bool:
+    main_guard = _main_guard(tree)
+    if main_guard is not None:
+        guard_index = tree.body.index(main_guard)
+        return guard_index > 0 and tree.body[guard_index - 1] is call
+    return bool(tree.body) and tree.body[-1] is call
+
+
+def _main_guard(tree: ast.Module) -> ast.If | None:
+    guards = tuple(
+        node
+        for node in tree.body
+        if isinstance(node, ast.If) and _is_main_guard_test(node.test)
+    )
+    return guards[0] if len(guards) == 1 else None
+
+
+def _is_main_guard_test(test: ast.expr) -> bool:
+    return (
+        isinstance(test, ast.Compare)
+        and isinstance(test.left, ast.Name)
+        and test.left.id == "__name__"
+        and len(test.ops) == 1
+        and isinstance(test.ops[0], ast.Eq)
+        and len(test.comparators) == 1
+        and isinstance(test.comparators[0], ast.Constant)
+        and test.comparators[0].value == "__main__"
+    )
 
 
 def _fervis_mount_calls(tree: ast.Module) -> list[ast.Expr]:
@@ -650,11 +695,15 @@ def _fervis_mount_calls(tree: ast.Module) -> list[ast.Expr]:
 
 
 def _is_fervis_mount_app_expr(node: ast.AST) -> bool:
+    return _as_fervis_mount_app_expr(node) is not None
+
+
+def _as_fervis_mount_app_expr(node: ast.AST) -> ast.Expr | None:
     if not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call):
-        return False
+        return None
     call = node.value
     func = call.func
-    return (
+    valid = (
         isinstance(func, ast.Attribute)
         and func.attr == "mount"
         and is_configured_fervis_call(func.value)
@@ -663,6 +712,7 @@ def _is_fervis_mount_app_expr(node: ast.AST) -> bool:
         and isinstance(call.args[0], ast.Name)
         and call.args[0].id == "app"
     )
+    return node if valid else None
 
 
 def _contains_any_nested_fervis_mount_call(
@@ -685,7 +735,11 @@ def _factory_mount_shape_valid(
     returned_app: ast.Return,
 ) -> ast.Expr | None:
     del tree
-    calls = [node for node in factory.body if _is_fervis_mount_app_expr(node)]
+    calls = tuple(
+        call
+        for node in factory.body
+        if (call := _as_fervis_mount_app_expr(node)) is not None
+    )
     if len(calls) != 1:
         return None
     call = calls[0]

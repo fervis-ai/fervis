@@ -7,7 +7,7 @@ name = "fervis"
 version = "0.1.5"
 description = "Deterministic, auditable LLM answers over REST APIs."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [
   { name = "Fervis Labs" }
@@ -17,6 +17,7 @@ classifiers = [
   "Intended Audience :: Developers",
   "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -26,12 +27,14 @@ classifiers = [
 dependencies = [
   "alembic>=1.18,<2",
   "anthropic>=0.78,<1",
-  "cryptography>=44,<46",
+  "cryptography>=44,<49",
   "httpx>=0.28,<1",
-  "jsonschema>=4.26,<5",
+  "jsonschema>=4.23,<5",
   "openai>=1.59,<2",
   "requests>=2.32,<3",
   "SQLAlchemy>=2.0,<3",
+  "tomli>=2,<3",
+  "typing-extensions>=4.12,<5",
 ]
 
 [project.optional-dependencies]
@@ -40,6 +43,7 @@ django = [
   "djangorestframework>=3.15,<4",
 ]
 fastapi = [
+  "asgi-lifespan>=2.1,<3",
   "fastapi>=0.100,<1",
 ]
 flask = [
@@ -47,6 +51,7 @@ flask = [
   "Flask-Login>=0.6,<1",
 ]
 all = [
+  "asgi-lifespan>=2.1,<3",
   "Django>=4.2,<6",
   "djangorestframework>=3.15,<4",
   "fastapi>=0.100,<1",
@@ -54,6 +59,7 @@ all = [
   "Flask-Login>=0.6,<1",
 ]
 dev = [
+  "asgi-lifespan>=2.1,<3",
   "Django>=4.2,<6",
   "djangorestframework>=3.15,<4",
   "fastapi>=0.100,<1",
@@ -64,7 +70,10 @@ dev = [
   "PyYAML>=6,<7",
   "ruff>=0.8,<1",
   "mypy>=1.14,<2",
+  "types-jsonschema>=4.23,<5",
   "pre-commit>=4,<5",
+  "django-stubs>=5,<6",
+  "djangorestframework-stubs>=3.15,<4",
 ]
 
 [project.scripts]
@@ -104,7 +113,13 @@ pythonpath = [".", "src"]
 DJANGO_SETTINGS_MODULE = "tests.django_test_project.settings"
 django_find_project = false
 
+[tool.mypy]
+plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
+
+[tool.django-stubs]
+django_settings_module = "tests.django_test_project.settings"
+
 [tool.ruff]
 line-length = 88
 src = ["src", "tests"]
-target-version = "py311"
+target-version = "py310"

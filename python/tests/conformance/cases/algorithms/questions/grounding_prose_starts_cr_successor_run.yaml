@@ -1,0 +1,51 @@
+id: grounding_prose_starts_cr_successor_run
+description: Prose answering an unresolved grounding request starts a successor run and is interpreted by conversation resolution.
+kind: algorithm
+algorithm: questions.lifecycle
+input:
+  scenario: clarification_resume
+  tenant_id: tenant_1
+  principal_id: user_1
+  question: How many stores are in Nairobi?
+  clarification:
+    id: clarification_area
+    need: target_reference
+    reason: unresolved_reference
+    owner: grounding
+    continuation:
+      kind: grounding
+      knownInputId: area_input
+      acceptsFreeText: true
+    requestedFactId: fact_1
+    question: Which matching location or area should I use?
+    subjects:
+      - kind: question_input
+        id: area_input
+        label: area
+        sourceText: Nairobi
+        options: []
+    evidence: []
+  response_text: "Area: Nairobi"
+  resumed_lookup_result: {status: COMPLETED, answer: "28", result_data: {value: 28}}
+expect:
+  result_contains:
+    first_result: {status: WAITING_FOR_CLARIFICATION, run_id: run_1}
+    resumed_result: {status: COMPLETED, run_id: run_2, answer: "28"}
+    suspended_run_status: SUPERSEDED
+    question_count: 1
+    run_count: 2
+    clarification_response_count: 1
+    lookup_call_count: 2
+    resumed_original_question: "Area: Nairobi"
+    resumed_has_clarification_response: true
+    resumed_clarification:
+      owner: conversation_resolution
+      continuation_kind: conversation_resolution
+      dispatch_count: 1
+      attributed_source:
+        responseId: clarification_response_1
+        clarificationId: clarification_area
+        exactUserText: "Area: Nairobi"
+      annotation:
+        suspendedQuestionText: How many stores are in Nairobi?
+        clarificationQuestionText: I could not find area "Nairobi". Which area should I use?

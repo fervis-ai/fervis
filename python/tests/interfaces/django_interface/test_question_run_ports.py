@@ -1,4 +1,4 @@
-from datetime import UTC
+from datetime import timezone as datetime_timezone
 from types import SimpleNamespace
 
 import pytest
@@ -10,6 +10,7 @@ from django.utils import timezone
 from fervis.host_api.contracts.authority import ReadAuthority, ReadContextRef
 from fervis.interfaces.django import question_run_ports
 from fervis.run_work.queue.django.models import RunWorkItem
+from fervis.run_work.queue.django import queue as django_run_queue
 from fervis.run_work.queue.django.queue import (
     claim_run_work_items,
     mark_work_item_terminal,
@@ -19,23 +20,18 @@ from fervis.lineage.enums import (
     ProgramInvocationKind,
     QuestionRunKind,
     RunResultKind,
-    RunStepKind,
     RunTriggerKind,
 )
 from fervis.lineage.django.recorder import DjangoLineageRecorder
 from fervis.lineage.recorder import RunResultWrite
 from fervis.lineage.models import (
-    ClarificationRequest,
-    ClarificationResponse,
     Conversation,
     ProgramInvocation,
     ProgramRevision,
     Question,
     QuestionRun,
-    RunStep,
     RuntimeErrorDetail,
 )
-from fervis.lookup.clarification import ClarificationNeed, ClarificationReason
 from fervis.questions.contracts import (
     AskRequest,
     ExecutionMode,
@@ -415,7 +411,7 @@ def test_django_question_state_reader_lists_authorized_conversations(
             26,
             9,
             0,
-            tzinfo=UTC,
+            tzinfo=datetime_timezone.utc,
         )
     )
     Question.objects.filter(question_id="question_newer_first").update(
@@ -426,7 +422,7 @@ def test_django_question_state_reader_lists_authorized_conversations(
             27,
             10,
             0,
-            tzinfo=UTC,
+            tzinfo=datetime_timezone.utc,
         ),
     )
     Question.objects.filter(question_id="question_newer_latest").update(
@@ -437,7 +433,7 @@ def test_django_question_state_reader_lists_authorized_conversations(
             27,
             10,
             10,
-            tzinfo=UTC,
+            tzinfo=datetime_timezone.utc,
         ),
     )
     QuestionRun.objects.filter(run_id="run_newer_first").update(
@@ -447,7 +443,7 @@ def test_django_question_state_reader_lists_authorized_conversations(
             27,
             10,
             0,
-            tzinfo=UTC,
+            tzinfo=datetime_timezone.utc,
         )
     )
     QuestionRun.objects.filter(run_id="run_newer_latest").update(
@@ -457,7 +453,7 @@ def test_django_question_state_reader_lists_authorized_conversations(
             27,
             10,
             15,
-            tzinfo=UTC,
+            tzinfo=datetime_timezone.utc,
         )
     )
 
@@ -552,22 +548,48 @@ def test_django_question_projection_rejects_missing_work_state(
 def test_django_question_run_port_returns_idempotent_submission_without_lineage_duplication(
     api_client,
     fervis_foundation_reset,
+    monkeypatch,
 ):
     user = _seeded_user()
     port = DjangoQuestionLifecyclePort()
 
     first = port.submit_question_run_atomically(
-        submission=_submission(user=user, idempotency_key="same-key"),
+        submission=_submission(
+            user=user,
+            idempotency_key="same-key",
+            idempotency_scope="new_conversation",
+        ),
         record=_question_run_record(),
+    )
+    find_idempotent = django_run_queue.find_idempotent_work_item
+    lookup_count = 0
+
+    def miss_preinsert_lookup_once(**kwargs):
+        nonlocal lookup_count
+        lookup_count += 1
+        if lookup_count == 1:
+            return None
+        return find_idempotent(**kwargs)
+
+    monkeypatch.setattr(
+        django_run_queue,
+        "find_idempotent_work_item",
+        miss_preinsert_lookup_once,
     )
     second = port.submit_question_run_atomically(
         submission=_submission(
             user=user,
+            conversation_id="conversation_2",
             question_id="question_2",
             run_id="run_2",
             idempotency_key="same-key",
+            idempotency_scope="new_conversation",
         ),
-        record=_question_run_record(question_id="question_2", run_id="run_2"),
+        record=_question_run_record(
+            conversation_id="conversation_2",
+            question_id="question_2",
+            run_id="run_2",
+        ),
     )
 
     assert first.kind is QuestionRunSubmissionKind.CREATED
@@ -577,84 +599,6 @@ def test_django_question_run_port_returns_idempotent_submission_without_lineage_
     assert QuestionRun.objects.count() == 1
     assert RunWorkItem.objects.count() == 1
 
-
-@pytest.mark.django_db
-def test_django_question_run_port_persists_clarification_response_continuation(
-    api_client,
-    fervis_foundation_reset,
-):
-    user = _seeded_user()
-    port = DjangoQuestionLifecyclePort()
-    port.submit_question_run_atomically(
-        submission=_submission(user=user),
-        record=_question_run_record(),
-    )
-    RunWorkItem.objects.filter(run_id="run_1").update(status="FAILED")
-    run = QuestionRun.objects.get(run_id="run_1")
-    step = RunStep.objects.create(
-        step_id="step_1",
-        run=run,
-        sequence=1,
-        step_key="question_contract",
-        kind=RunStepKind.MODEL_TURN.value,
-    )
-    clarification = ClarificationRequest.objects.create(
-        clarification_id="clar_1",
-        run=run,
-        step=step,
-        need=ClarificationNeed.TARGET_REFERENCE.value,
-        reason=ClarificationReason.MULTIPLE_MATCHING_ENTITIES.value,
-        payload_json={
-            "id": "clar_1",
-            "need": "target_reference",
-            "reason": "multiple_matching_entities",
-            "requestedFactId": "question_contract",
-            "question": "Which matching store should I use?",
-            "subjects": [
-                {
-                    "kind": "question_input",
-                    "id": "store",
-                    "label": "store",
-                    "sourceText": "",
-                    "options": [],
-                }
-            ],
-            "evidence": [],
-        },
-    )
-    ClarificationResponse.objects.create(
-        response_id="clar_response_1",
-        run=run,
-        clarification=clarification,
-        evidence_ref="message:1",
-        response_text="ABC Mall",
-    )
-
-    result = port.submit_question_run_atomically(
-        submission=_submission(
-            user=user,
-            run_id="run_2",
-            question="ABC Mall",
-        ),
-        record=QuestionRunRecord(
-            run=QuestionRunStart(
-                question_id="question_1",
-                run_id="run_2",
-                kind=QuestionRunKind.MODEL_ASSISTED,
-                trigger_kind=RunTriggerKind.CLARIFICATION_RESPONSE,
-                adapter_ref="django_drf",
-                runtime_version="test-runtime",
-                base_run_id="run_1",
-                trigger_clarification_response_id="clar_response_1",
-            )
-        ),
-    )
-
-    continued = QuestionRun.objects.get(run_id="run_2")
-    assert result.kind is QuestionRunSubmissionKind.CREATED
-    assert continued.question_id == run.question_id
-    assert continued.base_run_id == "run_1"
-    assert continued.trigger_clarification_response_id == "clar_response_1"
 
 
 @pytest.mark.django_db
@@ -670,13 +614,7 @@ def test_django_question_run_port_finds_idempotent_run_without_memory_hydration(
     )
 
     existing = port.find_idempotent_run(
-        authority=ReadAuthority(
-            tenant_id="tenant_1",
-            read_context_ref=ReadContextRef(
-                scheme="django_principal",
-                key=str(user.pk),
-            ),
-        ),
+        principal=_submission(user=user).principal,
         conversation_id="conversation_1",
         idempotency_key="same-key",
     )
@@ -1138,6 +1076,7 @@ def _submission(
     run_id: str = "run_1",
     question: str = "How many stores are open?",
     idempotency_key: str | None = None,
+    idempotency_scope: str = "",
     execution_mode: ExecutionMode = ExecutionMode.QUEUED,
     read_context_ref: ReadContextRef | None = None,
 ) -> RunSubmission:
@@ -1151,9 +1090,9 @@ def _submission(
             principal_id=str(user.pk),
             tenant_id="tenant_1",
             raw=user,
-            read_context_ref=ReadContextRef(
-                scheme="django_principal", key=str(user.pk)
-            ) if read_context_ref is None else read_context_ref,
+            read_context_ref=ReadContextRef(scheme="django_principal", key=str(user.pk))
+            if read_context_ref is None
+            else read_context_ref,
         ),
         spec=ResolveQuestionRunSpec(
             question=question,
@@ -1166,6 +1105,7 @@ def _submission(
         ),
         execution_mode=execution_mode,
         idempotency_key=idempotency_key,
+        idempotency_scope=idempotency_scope,
     )
 
 

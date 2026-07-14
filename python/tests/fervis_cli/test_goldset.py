@@ -43,7 +43,9 @@ def test_fervis_goldset_run_loads_path_suite_and_writes_ledger(tmp_path: Path) -
 
     envelope = json.loads(stdout.getvalue())
     ledger_rows = [
-        json.loads(line) for line in ledger_path.read_text().splitlines() if line.strip()
+        json.loads(line)
+        for line in ledger_path.read_text().splitlines()
+        if line.strip()
     ]
     assert exit_code == 0
     assert envelope["schema"] == "fervis-command-result.v0.1"
@@ -131,7 +133,7 @@ def test_fervis_goldset_run_accepts_comma_separated_case_ids_and_model_override(
             "principal_1",
             "--model",
             "anthropic:claude-haiku-4-5-20251001",
-            "--determinism-runs",
+            "--stable-runs",
             "2",
         ),
         ports=_ports(questions=questions, question_run_follower=_Follower()),
@@ -358,7 +360,7 @@ def test_fervis_goldset_run_submits_setup_questions_in_same_conversation(
     envelope = json.loads(stdout.getvalue())
     assert exit_code == 0
     assert envelope["payload"]["passed_count"] == 1
-    assert [request.question for request in questions.requests] == [
+    assert [questions.requests[0].question, questions.requests[1].question] == [
         "Who is Nadia?",
         "How many sales happened this month?",
     ]
@@ -368,6 +370,7 @@ def test_fervis_goldset_run_submits_setup_questions_in_same_conversation(
 
 def test_fervis_goldset_run_enforces_duration_ratio_to_setup(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
     suite_path = _write_suite(
         tmp_path,
@@ -375,8 +378,13 @@ def test_fervis_goldset_run_enforces_duration_ratio_to_setup(
         metadata={"max_duration_ratio_to_setup": 0.5},
     )
     questions = _TimedConversationQuestions(
-        setup_duration_ms=1000,
-        target_duration_ms=500,
+        setup_duration_ms=9000,
+        target_duration_ms=9000,
+    )
+    wall_clock = iter((10.0, 11.0, 20.0, 20.5))
+    monkeypatch.setattr(
+        "fervis.evaluation.goldsets.runner.time.monotonic",
+        lambda: next(wall_clock),
     )
     stdout = StringIO()
 
@@ -407,55 +415,95 @@ def test_fervis_goldset_run_enforces_duration_ratio_to_setup(
     assert "Expected run duration 500ms" in case["message"]
 
 
-def test_fervis_goldset_run_answers_declared_clarifications() -> None:
+def test_fervis_goldset_run_answers_declared_clarifications(monkeypatch) -> None:
     questions = _ClarifyingQuestions()
     suite = _suite(
         clarification_answers=("BBS Mall",),
+    )
+    wall_clock = iter((5.0, 8.25))
+    monkeypatch.setattr(
+        "fervis.evaluation.goldsets.runner.time.monotonic",
+        lambda: next(wall_clock),
     )
 
     result = _run_suite(suite, questions=questions)
 
     assert result.passed_count == 1
-    assert [request.question for request in questions.requests] == [
+    assert result.cases[0].duration_ms == 3250
+    assert [questions.requests[0].question, questions.requests[1].response_text] == [
         "How many sales happened this month?",
         "BBS Mall",
     ]
     continuation = questions.requests[1]
-    assert continuation.base_run_id == "run_clarification"
-    assert continuation.trigger_clarification_response_id == "clarification_1"
-    assert continuation.runtime_context["caseId"] == "sales_count"
+    assert continuation.run_id == "run_clarification"
+    assert continuation.clarification_id == "clarification_1"
 
 
-def test_fervis_goldset_run_repeats_independent_determinism_runs() -> None:
+def test_fervis_goldset_run_requires_independent_stability_runs() -> None:
     questions = _DeterminismQuestions()
 
     result = _run_suite(
         _suite(),
         questions=questions,
-        determinism_runs=2,
+        stable_runs=2,
     )
 
     assert result.passed_count == 1
     assert len(questions.requests) == 2
     contexts = [request.runtime_context for request in questions.requests]
-    assert [context["determinismRun"] for context in contexts] == ["1", "2"]
-    assert {context["determinismRuns"] for context in contexts} == {"2"}
+    assert [context["stabilityRun"] for context in contexts] == ["1", "2"]
+    assert {context["stableRuns"] for context in contexts} == {"2"}
     assert len({context["goldsetRunId"] for context in contexts}) == 1
-    assert len(result.cases[0].details["determinism_runs"]) == 2
+    assert len(result.cases[0].details["stability_runs"]) == 2
 
 
-def test_fervis_goldset_run_fails_mixed_determinism_outcomes() -> None:
+def test_fervis_goldset_run_reports_each_stability_run_as_it_finishes(
+    tmp_path: Path,
+) -> None:
+    suite_path = _write_suite(tmp_path)
+    stderr = StringIO()
+
+    exit_code = run_fervis(
+        (
+            "goldset",
+            "run",
+            "--suite-path",
+            str(suite_path),
+            "--case-ids",
+            "sales_count",
+            "--tenant-id",
+            "tenant_1",
+            "--principal-id",
+            "principal_1",
+            "--stable-runs",
+            "2",
+        ),
+        ports=_ports(
+            questions=_DeterminismQuestions(),
+            question_run_follower=_Follower(),
+        ),
+        stdout=StringIO(),
+        stderr=stderr,
+    )
+
+    lines = stderr.getvalue().splitlines()
+    assert exit_code == 0
+    assert lines[0].startswith("STABILITY RUN 1/2 PASS (run_id: run_1): 42")
+    assert lines[1].startswith("STABILITY RUN 2/2 PASS (run_id: run_2): 42")
+
+
+def test_fervis_goldset_run_fails_mixed_stability_outcomes() -> None:
     questions = _DeterminismQuestions(answers=("42", "41"))
 
     result = _run_suite(
         _suite(),
         questions=questions,
-        determinism_runs=2,
+        stable_runs=2,
     )
 
     assert result.failed_count == 1
     assert result.cases[0].details["failure_class"] == "nondeterminism"
-    assert result.cases[0].message == "1/2 determinism runs passed."
+    assert result.cases[0].message == "1/2 stability runs passed."
 
 
 def test_fervis_goldset_run_can_require_identical_structured_results() -> None:
@@ -464,7 +512,7 @@ def test_fervis_goldset_run_can_require_identical_structured_results() -> None:
     result = _run_suite(
         _suite(),
         questions=questions,
-        determinism_runs=2,
+        stable_runs=2,
         enforce_structured_determinism=True,
     )
 
@@ -581,7 +629,7 @@ class _AnsweringQuestions:
         self.requests.append(request)
         return self.result
 
-    def continue_question(self, request, *, event_sink=None):
+    def respond_to_clarification(self, request, *, event_sink=None):
         raise AssertionError("goldset run should not continue questions directly")
 
 
@@ -600,7 +648,7 @@ class _ConversationQuestions:
             result_data={},
         )
 
-    def continue_question(self, request, *, event_sink=None):
+    def respond_to_clarification(self, request, *, event_sink=None):
         raise AssertionError("goldset run should not continue questions directly")
 
 
@@ -627,7 +675,7 @@ class _TimedConversationQuestions:
             duration_ms=self.durations[index - 1],
         )
 
-    def continue_question(self, request, *, event_sink=None):
+    def respond_to_clarification(self, request, *, event_sink=None):
         raise AssertionError("goldset run should not continue questions directly")
 
 
@@ -638,23 +686,21 @@ class _ClarifyingQuestions:
     def ask(self, request, *, event_sink=None):
         self.requests.append(request)
         return AskResult(
-            status="NEEDS_CLARIFICATION",
+            status="WAITING_FOR_CLARIFICATION",
             conversation_id="conversation_1",
             question_id="question_1",
             run_id="run_clarification",
             answer="Which store?",
-            result_data={
-                "details": {"clarifications": [{"id": "clarification_1"}]}
-            },
+            result_data={"details": {"clarifications": [{"id": "clarification_1"}]}},
         )
 
-    def continue_question(self, request, *, event_sink=None):
+    def respond_to_clarification(self, request, *, event_sink=None):
         self.requests.append(request)
         return AskResult(
             status="COMPLETED",
             conversation_id="conversation_1",
             question_id="question_1",
-            run_id="run_answer",
+            run_id="run_clarification",
             answer="42",
             result_data={"kind": "answer", "scalars": {"value": 42}},
         )
@@ -685,7 +731,7 @@ class _DeterminismQuestions:
             result_data={"kind": "answer", "scalars": {"value": result_value}},
         )
 
-    def continue_question(self, request, *, event_sink=None):
+    def respond_to_clarification(self, request, *, event_sink=None):
         raise AssertionError("determinism case should not continue")
 
 

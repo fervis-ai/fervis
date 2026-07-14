@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from fervis.lookup.source_binding.compiler_ir import (
     DraftRelationSourcePopulationChoice,
 )
 from fervis.lookup.answer_program.relations import PopulationChoiceControllerKind
 from fervis.lookup.source_binding import provider_contract as provider_output
+from fervis.lookup.source_binding.candidates.model import SourceCandidate
 from fervis.lookup.source_binding.model import SourceBindingRequest
 from fervis.lookup.source_binding.parser.membership_effects import (
     answer_population_tests_by_id,
@@ -16,8 +15,12 @@ from fervis.lookup.source_binding.parser.membership_effects import (
     relation_review_scope_decisions,
     review_finite_choice_sets,
 )
-from fervis.lookup.source_binding.parser.types import DerivedFiniteChoiceParamDecisions
-from fervis.lookup.source_binding.parser_common import _dict, _text
+from fervis.lookup.source_binding.parser.types import (
+    DerivedFiniteChoiceParamDecisions,
+    NormalizedParamDecision,
+    PopulationChoiceSet,
+)
+from fervis.lookup.source_binding.parser_common import _text
 from fervis.lookup.source_binding.review_scope import SourceBindingReviewScope
 from fervis.lookup.source_binding.review_surface import source_binding_review_surface
 
@@ -28,9 +31,9 @@ __all__ = [
 
 
 def derive_finite_choice_param_decisions(
-    raw_reviews: Any,
+    reviews: dict[str, provider_output.FiniteChoiceParamReviewOutput],
     *,
-    candidate: Any,
+    candidate: SourceCandidate,
     requested_fact_id: str,
     binding_target_id: str,
     request: SourceBindingRequest,
@@ -38,7 +41,6 @@ def derive_finite_choice_param_decisions(
     answer_population: provider_output.AnswerPopulationOutput,
     raw_param_decision_ids: tuple[str, ...],
 ) -> DerivedFiniteChoiceParamDecisions:
-    reviews = _dict(raw_reviews, "finite_choice_param_reviews")
     review_surface = source_binding_review_surface(candidate)
     scoped_test_ids_by_param = {
         param_id: test_ids
@@ -64,8 +66,9 @@ def derive_finite_choice_param_decisions(
         raise ValueError(
             "finite-choice population params must be derived from choice reviews"
         )
-    output: dict[str, dict[str, Any]] = {}
+    output: dict[str, NormalizedParamDecision] = {}
     population_choices: list[DraftRelationSourcePopulationChoice] = []
+    discharged_test_ids: list[str] = []
     population_roles_by_id = _candidate_population_roles_by_id(candidate)
     for param_id, axis in finite_choice_axes.items():
         out_of_scope_decisions = (
@@ -79,16 +82,18 @@ def derive_finite_choice_param_decisions(
             requested_fact_id=requested_fact_id,
             scoped_test_ids=scoped_test_ids_by_param[param_id],
         )
+        review = reviews[param_id]
         _controlled_population_role(
-            reviews.get(param_id),
+            review,
             population_roles_by_id=population_roles_by_id,
             path=f"finite_choice_param_reviews.{param_id}",
         )
-        include_values, exclude_values = review_finite_choice_sets(
-            reviews.get(param_id),
+        include_values, exclude_values, discharged = review_finite_choice_sets(
+            review,
             axis=axis,
             tests_by_id=tests_by_id,
         )
+        discharged_test_ids.extend(discharged)
         population_choices.append(
             DraftRelationSourcePopulationChoice(
                 controller_kind=PopulationChoiceControllerKind.QUERY_PARAM,
@@ -98,8 +103,7 @@ def derive_finite_choice_param_decisions(
                 included_values=include_values,
                 excluded_values=exclude_values,
                 parameter_id=(
-                    f"semantic.{requested_fact_id}.{binding_target_id}."
-                    f"param.{param_id}"
+                    f"semantic.{requested_fact_id}.{binding_target_id}.param.{param_id}"
                 ),
                 proof_refs=population_choice_proof_refs(
                     f"population_choice:{param_id}",
@@ -112,44 +116,46 @@ def derive_finite_choice_param_decisions(
         )
         if axis.can_be_omitted(include_values=include_values):
             continue
-        output[param_id] = {
-            "population_intent": _text(answer_population.intent_text),
-            "match_basis_explanation": (
+        output[param_id] = NormalizedParamDecision(
+            population_intent=_text(answer_population.intent_text),
+            match_basis_explanation=(
                 "Derived from finite_choice_param_reviews because at least one shown "
                 "choice does not satisfy the requested answer population tests."
             ),
-            "population_choice_set": {
-                "include_values": list(include_values),
-                "exclude_values": list(exclude_values),
-            },
-        }
+            population_choice_set=PopulationChoiceSet(
+                included_values=include_values,
+                excluded_values=exclude_values,
+            ),
+        )
     return DerivedFiniteChoiceParamDecisions(
         param_decisions=output,
         population_choices=tuple(population_choices),
+        discharged_membership_test_ids=tuple(dict.fromkeys(discharged_test_ids)),
     )
 
 
 def _controlled_population_role(
-    raw: Any,
+    review: provider_output.FiniteChoiceParamReviewOutput,
     *,
-    population_roles_by_id: dict[str, dict[str, Any]],
+    population_roles_by_id: dict[str, dict[str, str]],
     path: str,
-) -> dict[str, Any]:
+) -> dict[str, str]:
     if not population_roles_by_id:
         raise ValueError("finite choice population tests require population_roles")
-    role = provider_output.FiniteChoiceParamReviewOutput.parse(raw)
-    role_id = _text(role.controlled_population_role_id)
+    role_id = _text(review.controlled_population_role_id)
     expected = population_roles_by_id.get(role_id)
     if expected is None:
         raise ValueError("finite choice param references unknown role")
     if not role_id:
         raise ValueError("finite choice param requires role id")
-    if not _text(role.role_selection_basis).strip():
+    if not _text(review.role_selection_basis).strip():
         raise ValueError("finite choice param requires role selection basis")
     return expected
 
 
-def _candidate_population_roles_by_id(candidate: Any) -> dict[str, dict[str, Any]]:
+def _candidate_population_roles_by_id(
+    candidate: SourceCandidate,
+) -> dict[str, dict[str, str]]:
     return {
         role.role_id: {"role_kind": "", "role_text": ""}
         for role in source_binding_review_surface(candidate).population_roles

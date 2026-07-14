@@ -1,26 +1,28 @@
-"""Provider-output DTOs for read eligibility."""
+"""Typed provider-output contracts for read eligibility."""
 
 from __future__ import annotations
 
-from fervis.lookup.provider_contract import provider_output_type
+from dataclasses import dataclass
+
+from fervis.lookup.provider_contract import ProviderOutput
 
 
-ReadEligibilityOutput = provider_output_type(
-    "ReadEligibilityOutput",
-    ("requested_fact_assessments",),
-)
-RequestedFactAssessmentOutput = provider_output_type(
-    "RequestedFactAssessmentOutput",
-    ("requested_fact_id", "read_candidate_reviews"),
-)
-ReadCandidateReviewOutput = provider_output_type(
-    "ReadCandidateReviewOutput",
-    (
-        "source_candidate_id",
-        "read_id",
-        "relevant_row_path_tokens",
-        "relevant_field_tokens",
-        "retention_basis",
-        "retention_decision",
-    ),
-)
+@dataclass(frozen=True)
+class ReadCandidateReviewOutput(ProviderOutput):
+    source_candidate_id: str
+    read_id: str
+    relevant_row_path_tokens: tuple[str, ...]
+    relevant_field_tokens: tuple[str, ...]
+    retention_basis: str
+    retention_decision: str
+
+
+@dataclass(frozen=True)
+class RequestedFactAssessmentOutput(ProviderOutput):
+    requested_fact_id: str
+    read_candidate_reviews: tuple[ReadCandidateReviewOutput, ...]
+
+
+@dataclass(frozen=True)
+class ReadEligibilityOutput(ProviderOutput):
+    requested_fact_assessments: tuple[RequestedFactAssessmentOutput, ...]
