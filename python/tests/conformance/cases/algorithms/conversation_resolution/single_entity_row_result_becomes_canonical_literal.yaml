@@ -11,7 +11,7 @@ input:
       source_card_ids: [staff_card]
       source_memory_ids: [staff_rows]
       meaning_anchors:
-        - {memory_id: staff_rows, text: Nadia, occurrence: 1, kind: row_set, label: staff identity}
+        - {anchor_id: staff_rows, text: Nadia, occurrence: 1, kind: row_set, label: staff identity}
   memories:
     - memory_id: staff_rows
       kind: row_set
@@ -39,7 +39,7 @@ input:
               frame_parameter: {kind: none}
               sources:
                 - {kind: current_span, text: Nadia, occurrence: 1}
-                - {kind: context_anchor, source_id: prior_answer, memory_id: staff_rows, source_text: Nadia}
+                - {kind: context_anchor, source_id: prior_answer, anchor_id: staff_rows}
 expect:
   result_contains:
     question_contract_context:

@@ -11,7 +11,7 @@ input:
       source_card_ids: [identity_card]
       source_memory_ids: [nadia_identity]
       meaning_anchors:
-        - {memory_id: nadia_identity, text: Nadia Wanjiku, occurrence: 1, kind: entity_identity, label: verified employee}
+        - {anchor_id: nadia_identity, text: Nadia Wanjiku, occurrence: 1, kind: entity_identity, label: verified employee}
   payload:
     kind: conversation_resolution
     current_question_text: Where did Nadia Wanjiku work on her first two shifts?
@@ -30,7 +30,7 @@ input:
               frame_parameter: {kind: none}
               sources:
                 - {kind: current_span, text: Nadia Wanjiku, occurrence: 1}
-                - {kind: context_anchor, source_id: prior_answer, memory_id: nadia_identity, source_text: Nadia Wanjiku}
+                - {kind: context_anchor, source_id: prior_answer, anchor_id: nadia_identity}
 expect:
   result_contains:
     used_source_card_ids: [identity_card]

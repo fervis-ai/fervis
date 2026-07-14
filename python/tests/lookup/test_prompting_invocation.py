@@ -65,10 +65,10 @@ from fervis.lookup.plan_selection import (
 
 
 _APPROVED_CHARS = {
-    "question contract": (364, 17840, 26925),
+    "question contract": (364, 18074, 27161),
     "query enrichment": (364, 5185, 7408),
-    "grounding": (364, 6487, 8797),
-    "source binding": (364, 14698, 18234),
+    "grounding": (364, 6624, 9008),
+    "source binding": (364, 14486, 18017),
     "pattern fact planning": (364, 3497, 5311),
 }
 
@@ -133,6 +133,30 @@ def test_question_contract_prompt_states_relational_ownership_together():
     )
 
     assert ownership in invocation.prompt_text
+
+
+def test_source_binding_prompt_distinguishes_ranked_physical_operations():
+    invocation = next(
+        item for item in _turn_invocations() if item.turn_name == "source binding"
+    )
+
+    assert (
+        "ranked_rows ranks individual source rows without grouping or aggregation."
+        in invocation.prompt_text
+    )
+    assert (
+        "ranked_aggregate groups source rows by an entity key, aggregates a measure "
+        "within each group, and ranks the resulting groups."
+        in invocation.prompt_text
+    )
+    assert (
+        "A metric fits when it is the correct measure input to the requested "
+        "computation. Do not reject it merely because aggregation or another later "
+        "operation produces the final answer value."
+        in invocation.prompt_text
+    )
+    assert "directly yields the requested measure" not in invocation.prompt_text
+    assert "candidate's metric_operation" not in invocation.prompt_text
 
 
 def test_model_turn_invocations_render_expected_shared_frame():
@@ -200,6 +224,7 @@ def _turn_invocations():
                             lookup_param_type="string",
                             lookup_field_ids=("field.value",),
                             lookup_field_refs=("read_today.value",),
+                            canonical_lookup_field_refs=("read_today.value",),
                             entity_kind="calendar_value",
                             key_id="primary_key",
                             key_components=(

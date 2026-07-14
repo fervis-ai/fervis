@@ -11,6 +11,7 @@ class RunWorkStatus(models.TextChoices):
         "WAITING_FOR_CLARIFICATION",
         "Waiting for clarification",
     )
+    SUPERSEDED = "SUPERSEDED", "Superseded"
     COMPLETED = "COMPLETED", "Completed"
     FAILED = "FAILED", "Failed"
 

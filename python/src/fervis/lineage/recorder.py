@@ -94,11 +94,13 @@ class QuestionRunWrite:
     adapter_ref: str
     runtime_version: str
     base_run_id: str | None = None
+    trigger_clarification_response_id: str = ""
 
     def __post_init__(self) -> None:
         _require_optional_nonempty_str(self.base_run_id, "base_run_id")
         valid_pairings = {
             (QuestionRunKind.MODEL_ASSISTED, RunTriggerKind.INITIAL),
+            (QuestionRunKind.MODEL_ASSISTED, RunTriggerKind.CLARIFICATION_RESPONSE),
             (QuestionRunKind.MODEL_ASSISTED, RunTriggerKind.RETRY),
             (QuestionRunKind.DETERMINISTIC, RunTriggerKind.RERUN),
         }
@@ -106,8 +108,22 @@ class QuestionRunWrite:
             raise ValueError("invalid question run kind and trigger pairing")
         if self.trigger_kind is RunTriggerKind.INITIAL:
             _require_absent(self.base_run_id, "base_run_id")
+            _require_absent(
+                self.trigger_clarification_response_id,
+                "trigger_clarification_response_id",
+            )
             return
         _require_present(self.base_run_id, "base_run_id")
+        if self.trigger_kind is RunTriggerKind.CLARIFICATION_RESPONSE:
+            _require_present(
+                self.trigger_clarification_response_id,
+                "trigger_clarification_response_id",
+            )
+            return
+        _require_absent(
+            self.trigger_clarification_response_id,
+            "trigger_clarification_response_id",
+        )
 
 
 @dataclass(frozen=True)

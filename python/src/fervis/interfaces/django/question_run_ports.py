@@ -56,6 +56,7 @@ from fervis.host_api.credentials import (
 from fervis.lookup.orchestration.question_lookup_port import (
     LookupServiceQuestionLookupPort,
 )
+from fervis.lookup.clarification import clarification_response_ref
 from fervis.lookup.orchestration.question_program_port import AnswerProgramQuestionPort
 from fervis.lookup.orchestration.program_service import AnswerProgramService
 from fervis.host_api.context import get_host_api_context
@@ -83,7 +84,7 @@ from fervis.questions.projection import (
 from fervis.questions.clarification_state import pending_clarification_ids
 from fervis.questions.ports import (
     AuthorizedQuestionAccess,
-    ClarificationRunResume,
+    ClarificationRunResponse,
     QueuedRun,
     QuestionRunRecord,
     ParsedQuestionRunSubmission,
@@ -93,7 +94,8 @@ from fervis.questions.ports import (
     RunSubmission,
 )
 from fervis.lookup.clarification.response import parse_clarification_response
-from fervis.questions.service import QuestionService
+from fervis.lookup.clarification.model import ConversationResolutionResponse
+from fervis.questions.service import QuestionService, clarification_successor_run
 from fervis.run_work.service import RunWorkService
 from fervis.run_work.contracts import run_wall_clock_duration_ms
 
@@ -342,9 +344,9 @@ class DjangoQuestionLifecyclePort:
             run=_queued_run_from_work_item(enqueued.item),
         )
 
-    def resume_question_run_atomically(
+    def respond_to_clarification_atomically(
         self,
-        resume: ClarificationRunResume,
+        resume: ClarificationRunResponse,
     ) -> QuestionRunSubmissionResult:
         authority = ReadAuthority.from_principal(resume.principal)
         with transaction.atomic():
@@ -366,26 +368,54 @@ class DjangoQuestionLifecyclePort:
                 response_id=resume.response_id,
                 response_text=resume.response_text,
                 selected_option_id=resume.selected_option_id,
+                suspended_question_text=spec.question,
             )
-            resumed_spec = replace(
-                spec,
-                clarification_responses=(*spec.clarification_responses, response),
-            )
-            item.execution_spec = execution_spec_to_storage_dict(resumed_spec)
-            _resume_work_item(item, execution_mode=resume.execution_mode)
             DjangoLineageRecorder().record_clarification_response(
                 ClarificationResponseWrite(
                     response_id=resume.response_id,
                     run_id=resume.run_id,
                     clarification_id=resume.clarification_id,
-                    evidence_ref=f"clarification_response:{resume.response_id}",
+                    evidence_ref=clarification_response_ref(resume.response_id),
                     response_text=resume.response_text,
                     selected_option_id=resume.selected_option_id,
                 )
             )
+            if not (
+                isinstance(response, ConversationResolutionResponse)
+                and response.annotation is not None
+            ):
+                resumed_spec = replace(
+                    spec,
+                    clarification_responses=(
+                        *spec.clarification_responses,
+                        response,
+                    ),
+                )
+                item.execution_spec = execution_spec_to_storage_dict(resumed_spec)
+                _resume_work_item(item, execution_mode=resume.execution_mode)
+                queued_item = item
+            else:
+                current = _queued_run_from_work_item(item).submission
+                submission, record = clarification_successor_run(
+                    current,
+                    response=resume,
+                    annotation=response,
+                )
+                item.status = RunWorkStatus.SUPERSEDED
+                item.lease_owner = None
+                item.lease_expires_at = None
+                item.next_attempt_at = None
+                item.completed_at = timezone.now()
+                item.save()
+                enqueued = enqueue_run_work_item(submission=submission)
+                record_question_run_start(
+                    _spine_question_run_start(record),
+                    recorder=DjangoLineageRecorder(),
+                )
+                queued_item = enqueued.item
         return QuestionRunSubmissionResult(
             kind=QuestionRunSubmissionKind.CREATED,
-            run=_queued_run_from_work_item(item),
+            run=_queued_run_from_work_item(queued_item),
         )
 
     def load_executable_run(
@@ -906,6 +936,9 @@ def _spine_question_run_start(record: QuestionRunRecord) -> QuestionRunStartRequ
             adapter_ref=record.run.adapter_ref,
             runtime_version=record.run.runtime_version,
             base_run_id=record.run.base_run_id,
+            trigger_clarification_response_id=(
+                record.run.trigger_clarification_response_id
+            ),
         ),
     )
 
@@ -921,10 +954,7 @@ def _queued_run_from_work_item(
     ):
         run_view = get_run_view(item.run_id, tenant_id=item.tenant_id)
     result_data = (run_view or {}).get("resultData")
-    if (
-        result_data is None
-        and item.status == RunWorkStatus.WAITING_FOR_CLARIFICATION
-    ):
+    if result_data is None and item.status == RunWorkStatus.WAITING_FOR_CLARIFICATION:
         result_data = _pending_clarification_result_data(item.run_id)
     return QueuedRun(
         submission=_submission_from_work_item(item),
@@ -947,8 +977,9 @@ def _pending_clarification_result_data(run_id: str) -> dict[str, Any]:
     )
     response_ids = tuple(
         str(value)
-        for value in ClarificationResponse.objects.filter(run_id=run_id)
-        .values_list("clarification_id", flat=True)
+        for value in ClarificationResponse.objects.filter(run_id=run_id).values_list(
+            "clarification_id", flat=True
+        )
     )
     pending_ids = frozenset(
         pending_clarification_ids(
@@ -1029,7 +1060,7 @@ def _question_id_for_run(run_id: str) -> str:
 def _require_resumable_clarification(
     item: RunWorkItem,
     *,
-    resume: ClarificationRunResume,
+    resume: ClarificationRunResponse,
     authority: ReadAuthority,
 ) -> None:
     question_id = _question_id_for_run(resume.run_id)
@@ -1037,7 +1068,9 @@ def _require_resumable_clarification(
         item.status != RunWorkStatus.WAITING_FOR_CLARIFICATION
         or question_id != resume.question_id
         or item.tenant_id != authority.tenant_id
-        or not _read_context_ref_matches(item.read_context_ref, authority.read_context_ref)
+        or not _read_context_ref_matches(
+            item.read_context_ref, authority.read_context_ref
+        )
     ):
         raise PermissionError("clarification does not belong to a resumable run")
 

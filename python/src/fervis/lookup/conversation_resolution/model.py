@@ -55,26 +55,29 @@ class CurrentSpanSource:
 @dataclass(frozen=True)
 class ContextAnchorSource:
     source_id: str
-    memory_id: str
+    anchor_id: str
     source_text: str
+    memory_ids: tuple[str, ...] = ()
     kind: ResolutionSourceKind = ResolutionSourceKind.CONTEXT_ANCHOR
 
     def __post_init__(self) -> None:
-        if not self.source_id.strip() or not self.memory_id.strip():
+        if not self.source_id.strip() or not self.anchor_id.strip():
             raise ValueError("context-anchor source requires stable identity")
         if not self.source_text.strip():
             raise ValueError("context-anchor source requires copied source text")
+        if any(not memory_id.strip() for memory_id in self.memory_ids):
+            raise ValueError("context-anchor memory ids must be non-empty")
 
     def to_model_dict(self) -> dict[str, str]:
         return {
             "kind": self.kind.value,
             "source_id": self.source_id,
-            "memory_id": self.memory_id,
+            "anchor_id": self.anchor_id,
             "source_text": self.source_text,
         }
 
     def memory_references(self) -> tuple[str, ...]:
-        return (self.memory_id,)
+        return self.memory_ids
 
     def frame_part_references(self) -> tuple[tuple[str, str], ...]:
         return ()

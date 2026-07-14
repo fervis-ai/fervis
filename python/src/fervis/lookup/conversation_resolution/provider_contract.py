@@ -23,8 +23,7 @@ class CurrentSpanSourceOutput(ProviderOutput):
 class ContextAnchorSourceOutput(ProviderOutput):
     kind: str
     source_id: str
-    memory_id: str
-    source_text: str
+    anchor_id: str
 
 
 @dataclass(frozen=True)

@@ -100,9 +100,7 @@ class SQLWorkItemQueue:
         if conversation_id is not None:
             statement = statement.where(self.table.c.conversation_id == conversation_id)
         with sql_connection(self.engine) as connection:
-            rows = connection.execute(
-                statement.order_by(self.table.c.created_at)
-            ).all()
+            rows = connection.execute(statement.order_by(self.table.c.created_at)).all()
         return next(
             (
                 item
@@ -122,6 +120,25 @@ class SQLWorkItemQueue:
         if item is None:
             raise LookupError(f"Fervis run work item not found: {run_id}")
         return item
+
+    def supersede_waiting_run(self, run_id: str) -> None:
+        with sql_transaction(self.engine) as connection:
+            result = connection.execute(
+                self.table.update()
+                .where(
+                    self.table.c.run_id == run_id,
+                    self.table.c.status == "WAITING_FOR_CLARIFICATION",
+                )
+                .values(
+                    status="SUPERSEDED",
+                    lease_owner=None,
+                    lease_expires_at=None,
+                    next_attempt_at=None,
+                    completed_at=now_utc(),
+                )
+            )
+        if result.rowcount != 1:
+            raise ValueError("clarification does not belong to a waiting run")
 
     def enqueue_run_work_item(
         self,

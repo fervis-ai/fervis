@@ -7,6 +7,7 @@ from typing_extensions import assert_never
 
 from fervis.lookup.source_binding import provider_contract as provider_output
 from fervis.lookup.source_binding.candidates import SourceCandidate
+from fervis.lookup.source_binding.candidates import fulfillment_preserves_row_grain
 from fervis.lookup.source_binding.candidates.contracts import (
     EvidenceItem,
     EntityEvidence,
@@ -200,12 +201,20 @@ def _parse_source_fulfillment_decision(
                 )
             )
         )
+    entity_evidence = _slot_entity_evidence(slots)
+    if plan_shape == "ranked_rows" and not fulfillment_preserves_row_grain(
+        candidate,
+        support_set_id,
+    ):
+        raise ValueError(
+            "ranked_rows entity fulfillment does not identify source row grain"
+        )
     return SourceFulfillment(
         requested_fact_id=requested_fact_id,
         answer_output_id=answer_output_id,
         match_basis_explanation=_text(raw.match_basis_explanation),
         fulfillment_support_set_id=support_set_id,
-        entity_evidence=_slot_entity_evidence(slots),
+        entity_evidence=entity_evidence,
         value_evidence_ids=selected_value_evidence_ids,
         metric_measure_evidence_ids=selected_metric_measure_evidence_ids,
         row_count_basis_evidence_ids=selected_row_count_basis_evidence_ids,

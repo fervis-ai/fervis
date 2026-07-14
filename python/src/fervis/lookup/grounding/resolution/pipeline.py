@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fervis.lookup.relation_catalog import RelationCatalog
+from fervis.lookup.clarification import clarification_response_ref
 from fervis.lookup.conversation_resolution.compilation import (
     CompiledConversationResolution,
     ResolvedCanonicalIdentity,
@@ -55,7 +56,6 @@ from .references import (
 from .values import _dedupe_values, _grounded_value_id
 from fervis.lookup.clarification.model import (
     GroundingIdentityResponse,
-    GroundingTextResponse,
 )
 
 
@@ -104,9 +104,7 @@ def ground_question_inputs(
     host: HostPromptContext = HostPromptContext(),
     selected_input_ids: frozenset[str] | None = None,
     expected_input_identities: Mapping[str, ExpectedInputIdentity] | None = None,
-    clarification_responses: tuple[
-        GroundingIdentityResponse | GroundingTextResponse, ...
-    ] = (),
+    clarification_responses: tuple[GroundingIdentityResponse, ...] = (),
 ) -> GroundingOutput:
     values: list[FactValue] = []
     uses: list[GroundedInputUse] = []
@@ -127,9 +125,7 @@ def ground_question_inputs(
     )
     values.extend(clarified.values)
     certifications.extend(clarified.certifications)
-    clarified_input_ids = frozenset(
-        value.known_input_id for value in clarified.values
-    )
+    clarified_input_ids = frozenset(value.known_input_id for value in clarified.values)
 
     active_time_anchor_periods = _active_time_anchor_periods(
         conversation_context=dict(conversation_context or {}),
@@ -216,11 +212,6 @@ def ground_question_inputs(
                 time_tasks=time_tasks,
                 conversation_context=dict(conversation_context or {}),
                 host=host,
-                clarification_responses=tuple(
-                    response
-                    for response in clarification_responses
-                    if isinstance(response, GroundingTextResponse)
-                ),
             ),
             model_port=model_port,
             provider=provider,
@@ -277,14 +268,13 @@ def _selected(
 
 
 def _clarification_identity_imports(
-    responses: tuple[GroundingIdentityResponse | GroundingTextResponse, ...],
+    responses: tuple[GroundingIdentityResponse, ...],
     *,
     question_contract: QuestionContract,
 ) -> CanonicalInputLedger:
     ledgers = tuple(
         _clarification_identity_import(response, question_contract=question_contract)
         for response in responses
-        if isinstance(response, GroundingIdentityResponse)
     )
     return CanonicalInputLedger(
         values=tuple(value for ledger in ledgers for value in ledger.values),
@@ -318,7 +308,7 @@ def _clarification_identity_import(
         display_value=option.matched_label or option.label,
         proof_refs=(
             f"clarification:{answer.clarification_id}",
-            f"clarification_response:{answer.response_id}",
+            clarification_response_ref(answer.response_id),
         ),
         source_refs=(option.resolver_read_id,) if option.resolver_read_id else (),
         applies_to_requested_fact_ids=(answer.requested_fact_id,),
@@ -327,7 +317,7 @@ def _clarification_identity_import(
         value_id=value.id,
         method=GroundedValueCertificationMethod.CLARIFICATION_SELECTION,
         authority_refs=(option.resolver_read_id,) if option.resolver_read_id else (),
-        lineage_refs=(f"clarification_response:{answer.response_id}",),
+        lineage_refs=(clarification_response_ref(answer.response_id),),
     )
     return CanonicalInputLedger(
         values=(value,),

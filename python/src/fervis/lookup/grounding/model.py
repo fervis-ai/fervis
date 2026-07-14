@@ -11,7 +11,6 @@ from fervis.lookup.answer_program.values import (
     ValueComponent,
 )
 from fervis.lookup.canonical_data import EntityKeyValue
-from fervis.lookup.clarification.model import GroundingTextResponse
 from fervis.lookup.turn_prompts.context import HostPromptContext
 from fervis.types.enums import StrEnum
 
@@ -34,7 +33,9 @@ class ExpectedInputIdentity:
 
     def __post_init__(self) -> None:
         if not self.entity_kind or not self.key_id or not self.key_component_ids:
-            raise ValueError("expected input identity must name its complete candidate key")
+            raise ValueError(
+                "expected input identity must name its complete candidate key"
+            )
 
 
 class GroundingTerminalKind(StrEnum):
@@ -110,6 +111,7 @@ class InputBindingRoute:
     lookup_param_type: str
     lookup_field_ids: tuple[str, ...]
     lookup_field_refs: tuple[str, ...]
+    canonical_lookup_field_refs: tuple[str, ...]
     entity_kind: str
     key_id: str
     key_components: tuple[InputBindingKeyComponent, ...]
@@ -120,17 +122,6 @@ class InputBindingRoute:
     query_params: tuple[ResolverQueryParamCard, ...] = ()
     selected_output_fields: tuple[ResolverOutputFieldCard, ...] = ()
 
-    @property
-    def identity_lookup_field_ids(self) -> tuple[str, ...]:
-        identity_field_ids = {
-            *(component.field_id for component in self.key_components),
-            *self.context_field_ids,
-        }
-        return tuple(
-            field_id
-            for field_id in self.lookup_field_ids
-            if field_id in identity_field_ids
-        )
 
 @dataclass(frozen=True)
 class GroundingRequestedFactCard:
@@ -209,7 +200,6 @@ class GroundingRequest:
     time_tasks: tuple[KnownTimeResolutionTask, ...] = ()
     conversation_context: dict[str, Any] = field(default_factory=dict)
     host: HostPromptContext = field(default_factory=HostPromptContext)
-    clarification_responses: tuple[GroundingTextResponse, ...] = ()
 
 
 @dataclass(frozen=True)

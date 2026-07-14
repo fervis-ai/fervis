@@ -66,6 +66,7 @@ def test_fresh_schema_matches_program_and_run_contract() -> None:
             "kind",
             "trigger_kind",
             "base_run_id",
+            "trigger_clarification_response_id",
             "adapter_ref",
             "runtime_version",
             "created_at",
@@ -129,10 +130,10 @@ def test_fresh_schema_matches_program_and_run_contract() -> None:
     } == expected_columns
 
 
-def test_initial_revision_fingerprint_matches_current_metadata() -> None:
+def test_head_revision_fingerprint_matches_current_metadata() -> None:
     assert (
         schema.metadata_fingerprint()
-        == "8003327592f8a83cf29c6be1f655bce33419d7e47e501b9a5b26cb731f5c3dcb"
+        == "4c4c314a09147c1e3ba61f56476b6b7a0d516b155d6e1c3c779ddafff3041d5e"
     )
     schema.assert_head_schema_fingerprint_is_current()
 

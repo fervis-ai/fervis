@@ -88,6 +88,8 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                 (
                     "Author the contract for the complete factual intent in the current question.",
                     "The current question preserves the user's demand and discourse structure; conversation-resolution values supply context-dependent meaning.",
+                    "When active_clarification is present, interpret its original_question and ordered exchanges together, then author a new question contract from scratch.",
+                    "An active clarification supplies question context, not a prior question contract.",
                     "Treat each resolved value as a binding meaning commitment for its current clause.",
                     "Declared resolved question inputs are authoritative; copy them exactly when they constrain an answer request.",
                     "Do not reconstruct additional prior-turn inputs from conversation history.",

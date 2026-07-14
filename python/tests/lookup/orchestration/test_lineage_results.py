@@ -87,7 +87,13 @@ def test_answered_lineage_records_only_fulfilled_answer_outputs() -> None:
             rows=({"answer_1": "staff_1", "support_label": "Ada"},),
         ),
         answer="staff_1",
-        question_contract=_question_contract({"fact_1": "answer_1"}),
+        question_contract=_question_contract(
+            {"fact_1": "answer_1"},
+            clarification_lineage_refs=(
+                "clarification_response:response_1",
+                "clarification_response:response_2",
+            ),
+        ),
         question_contract_step_id="step_contract",
         compile_step_id="step_compile",
         execute_step_id="step_execute",
@@ -110,6 +116,12 @@ def test_answered_lineage_records_only_fulfilled_answer_outputs() -> None:
     answered = recorder.answered_results[0]
     assert [output.output_key for output in answered.outputs] == ["answer_1"]
     assert answered.outputs[0].proof_node_refs_json == ["answer_output:fact_1:answer_1"]
+    assert answered.requested_facts[0].answer_requests_json[
+        "clarification_lineage_refs"
+    ] == [
+        "clarification_response:response_1",
+        "clarification_response:response_2",
+    ]
 
 
 def test_answered_lineage_records_memory_artifact_from_fact_addresses() -> None:
@@ -1001,7 +1013,11 @@ def _answer_result() -> FactResult:
     return FactResult(outcome=AnswerResult(proof_refs=("source_read:read_1",)))
 
 
-def _question_contract(answer_output_id_by_fact_id: dict[str, str]) -> QuestionContract:
+def _question_contract(
+    answer_output_id_by_fact_id: dict[str, str],
+    *,
+    clarification_lineage_refs: tuple[str, ...] = (),
+) -> QuestionContract:
     return QuestionContract(
         requested_facts=tuple(
             RequestedFact(
@@ -1016,6 +1032,7 @@ def _question_contract(answer_output_id_by_fact_id: dict[str, str]) -> QuestionC
             )
             for fact_id, answer_output_id in answer_output_id_by_fact_id.items()
         ),
+        clarification_lineage_refs=clarification_lineage_refs,
     )
 
 

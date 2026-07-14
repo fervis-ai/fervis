@@ -13,26 +13,10 @@ def endpoint_resource_names(
 ) -> tuple[str, ...]:
     names = [
         *(_phrase(tag) for tag in tags),
-        _operation_phrase(operation_id),
+        _phrase(operation_id),
         _path_phrase(path_template),
     ]
     return tuple(dict.fromkeys(name for name in names if name))
-
-
-def _operation_phrase(operation_id: str) -> str:
-    words = list(_words(operation_id))
-    while words and words[0] in {
-        "list",
-        "get",
-        "read",
-        "retrieve",
-        "search",
-        "find",
-        "fetch",
-    }:
-        words = words[1:]
-    return _words_to_phrase(tuple(words))
-
 
 def _path_phrase(path_template: str) -> str:
     segments = [

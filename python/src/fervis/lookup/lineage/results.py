@@ -311,6 +311,9 @@ def record_answered_result_lineage(
             run_id=run_id,
             fact=fact,
             question_contract_step_id=question_contract_step_id,
+            clarification_lineage_refs=(
+                question_contract.clarification_lineage_refs
+            ),
         )
         for fact in question_contract.requested_facts
     )
@@ -483,6 +486,9 @@ def _terminal_requested_facts(
             run_id=run_id,
             fact=fact,
             question_contract_step_id=produced_by_step_id,
+            clarification_lineage_refs=(
+                question_contract.clarification_lineage_refs
+            ),
         )
         for fact in question_contract.requested_facts
         if _terminal_applies_to_requested_fact(fact_result, fact.id)
@@ -760,6 +766,7 @@ def _requested_fact_write(
     run_id: str,
     fact: Any,
     question_contract_step_id: str,
+    clarification_lineage_refs: tuple[str, ...],
 ) -> RequestedFactWrite:
     answer_expression = getattr(fact, "answer_expression", None)
     answer_expression_family = getattr(answer_expression, "family", "")
@@ -775,6 +782,7 @@ def _requested_fact_write(
             "answer_outputs": [
                 output.to_model_dict() for output in fact.answer_outputs
             ],
+            "clarification_lineage_refs": list(clarification_lineage_refs),
         },
     )
 

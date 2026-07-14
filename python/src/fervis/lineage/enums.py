@@ -14,6 +14,7 @@ class ConversationOriginKind(StrEnum):
 
 class RunTriggerKind(StrEnum):
     INITIAL = "initial"
+    CLARIFICATION_RESPONSE = "clarification_response"
     RETRY = "retry"
     RERUN = "rerun"
 

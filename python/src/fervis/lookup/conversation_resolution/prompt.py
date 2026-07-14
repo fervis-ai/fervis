@@ -6,9 +6,11 @@ from fervis.memory.conversation_context import (
     ConversationContextFrame,
     ConversationContextSource,
 )
-from fervis.lookup.conversation_resolution.model import (
-    ConversationResolutionRequest,
+from fervis.lookup.clarification.context import (
+    active_clarification,
+    clarification_context_source,
 )
+from fervis.lookup.conversation_resolution.model import ConversationResolutionRequest
 from fervis.lookup.conversation_resolution.schema import (
     build_conversation_resolution_tool_schemas,
 )
@@ -77,7 +79,11 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                 indent=2,
             ),
         ]
-        responses = self.request.clarification_responses
+        responses = tuple(
+            response
+            for response in self.request.clarification_responses
+            if response.candidate is not None
+        )
         if responses:
             sections.append(
                 builder.json_section(
@@ -97,7 +103,9 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                                         "source_evidence": [
                                             {
                                                 "source_id": item.source_id,
-                                                "exact_source_texts": list(item.exact_source_texts),
+                                                "exact_source_texts": list(
+                                                    item.exact_source_texts
+                                                ),
                                             }
                                             for item in response.candidate.source_evidence
                                         ],
@@ -130,6 +138,8 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                     "the resolved question and copy each clause exactly as resolved_text.",
                     "Use only the current question, visible context sources, and visible "
                     "context frames.",
+                    "An active_clarification context source contains the original question and every clarification question and answer in order. Resolve the current utterance using the complete chain.",
+                    "Each answer resolves the clarification question it follows. Later exchanges extend the established question context; they do not replace earlier exchanges.",
                 ),
             ),
             builder.instruction_block(
@@ -144,7 +154,7 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                     "write resolved_text as a complete standalone factual clause.",
                     "A resolved clause must retain every current constraint and every "
                     "prior meaning needed to answer it.",
-                    "Every meaning added to the resolved clause but absent from the "
+                    "Every value added to the resolved clause but absent from the "
                     "current clause must be represented by a resolved value with a "
                     "visible prior source.",
                     "Writing the complete text is part of the resolution task: use it "
@@ -154,23 +164,26 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Retained Frame Shape",
                 (
-                    "retained_frame_parts records fixed prior question meaning that "
-                    "the resolved clause still uses but the current clause omits.",
+                    "retained_frame_parts is the sole representation of fixed prior "
+                    "question shape that the resolved clause still uses but the "
+                    "current clause omits.",
                     "Select only retained subject, output, population, or grouping "
                     "parts. Do not select a part that explicit current meaning replaces.",
-                    "Fixed question shape belongs here, not in resolved values.",
+                    "Do not repeat retained frame meaning in resolved values.",
                 ),
             ),
             builder.instruction_block(
                 "Resolved Values",
                 (
-                    "Create a resolved value for every meaning needed to interpret the "
+                    "Create a resolved value for every value needed to interpret the "
                     "current clause that is established by a current span, context "
-                    "anchor, or prior frame part.",
+                    "anchor, or value-like prior frame part.",
                     "resolved_text states the value's standalone meaning.",
                     "A current_span source copies one exact occurrence from the current "
                     "clause. A context_anchor source copies one shown typed anchor. A "
                     "frame_part source carries one shown part of a prior question.",
+                    "Do not emit a resolved value established only by current_span; "
+                    "later interpretation already receives the current clause.",
                     "Do not emit a resolved value for prior meaning that explicit "
                     "current wording replaces. When only part of a prior frame part "
                     "remains relevant, resolved_text states only that retained meaning.",
@@ -181,9 +194,9 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
                     "Use every source that materially establishes the resolved value. "
                     "Current text and prior verified evidence may both support the same "
                     "value.",
-                    "Every contextual meaning integrated into the complete clause must "
-                    "also be represented as a resolved value; resolved values are the "
-                    "structured handoff to later interpretation.",
+                    "Resolved values are the structured handoff for values to later "
+                    "interpretation; retained frame shape is already represented by "
+                    "retained_frame_parts.",
                     "Do not classify values by linguistic operation or by whether they "
                     "are self-sufficient.",
                 ),
@@ -272,7 +285,16 @@ class ConversationResolutionTurnPrompt(TurnPromptBase):
 def conversation_resolution_context_sources(
     request: ConversationResolutionRequest,
 ) -> tuple[ConversationContextSource, ...]:
-    return request.context_sources
+    responses = tuple(
+        response
+        for response in request.clarification_responses
+        if response.annotation is not None
+    )
+    if not responses:
+        return request.context_sources
+    chain = active_clarification(responses)
+    source = clarification_context_source(chain)
+    return (*request.context_sources, source)
 
 
 def conversation_resolution_context_frames(

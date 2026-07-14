@@ -10,7 +10,7 @@ input:
       source_card_ids: [prior_card]
       source_memory_ids: [prior_request]
       meaning_anchors:
-        - {memory_id: prior_time, text: today, occurrence: 1, kind: time_scope, label: prior time}
+        - {anchor_id: prior_time, text: today, occurrence: 1, kind: time_scope, label: prior time}
   context_frames:
     - frame_id: request:1
       source_ids: [prior_question]

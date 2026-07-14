@@ -347,8 +347,11 @@ Conversation
 ```
 
 `QuestionRun` identity, execution kind, trigger, and ancestry are immutable once
-written. A clarification makes the current run wait; its typed response resumes
-another execution attempt inside that run. A deterministic rerun creates a new
+written. A clarification makes the current run wait. Selecting a stored typed
+option resumes another execution attempt inside that run. Prose answering an
+unresolved grounding request supersedes the suspended work and starts a
+model-assisted successor run whose trigger records that clarification response.
+A deterministic rerun creates a new
 run on the same `Question`; an ordinary conversational follow-up creates a new
 `Question` in the same conversation. Retriable worker or provider execution
 attempts remain within one run and are distinguished by attempt metadata; they
@@ -368,20 +371,24 @@ truth.
 
 ## Clarification And Memory
 
-Clarification is a waiting state inside the same question run, not a terminal fact
-result and not a child run. The producing step records a structured
+Clarification is a waiting state, not a terminal fact result. The producing step records a structured
 `ClarificationRequest`; run work enters `WAITING_FOR_CLARIFICATION` without writing a
-`RunResult`, `FactResult`, or answer. A typed `ClarificationResponse` belongs to
-that request and run, requeues the same run, and begins its next attempt. The run
-gets exactly one terminal result after it eventually answers, reaches another
-factual terminal, or fails visibly.
+`RunResult`, `FactResult`, or answer. A selected backend-issued option is a typed
+resolution: its `ClarificationResponse` belongs to that request and run, requeues
+the same run, and begins its next attempt. Free prose is not a typed grounding
+decision. It supersedes the suspended work item and starts a successor
+`QuestionRun`; conversation resolution receives the prose as the current utterance
+and the original question plus every clarification question and answer in order as
+one attributed `active_clarification` context source. Each exchange retains its
+clarification-response identity for lineage. Later exchanges extend the chain;
+they do not replace earlier exchanges or carry a prior Question Contract or
+model-authored integrated question.
 
 Clarification question text, options, and client-facing display are projections
 of the structured clarification payload. Lineage preserves the payload rather
 than reducing it to prose. A selected option carries its canonical value and
-grounding authority into the resumed attempt; the response fragment is not
-treated as a fresh natural-language question or reconstructed through
-conversation memory.
+grounding authority into the resumed attempt. Prose follows the ordinary semantic
+pipeline from conversation resolution; it is never injected directly into grounding.
 
 Memory is not a shortcut around proof. Successful prior requests project typed
 context sources and backend-owned canonical frames. A frame separates fixed

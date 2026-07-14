@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 from fervis.lookup.clarification.model import (
     CatalogInputTarget,
     Clarification,
+    ClarificationAnnotation,
     ClarificationOption,
     ClarificationOwnerResponse,
     ClarificationResponseSource,
@@ -19,13 +20,13 @@ from fervis.lookup.clarification.model import (
     FactPlanningCatalogInputResponse,
     GroundingContinuation,
     GroundingIdentityResponse,
-    GroundingTextResponse,
     QuestionContractContinuation,
     QuestionContractResponse,
     SourceBindingCatalogInputContinuation,
     SourceBindingCatalogInputResponse,
 )
 from fervis.lookup.canonical_data import entity_key_from_payload, entity_key_to_payload
+from fervis.lookup.clarification.render import render_clarification_question
 
 
 def clarification_response_payload(
@@ -36,7 +37,17 @@ def clarification_response_payload(
             "kind": "conversation_resolution",
             "source": _source_payload(response.source),
             "candidate": (
-                None if response.candidate is None else _candidate_payload(response.candidate)
+                None
+                if response.candidate is None
+                else _candidate_payload(response.candidate)
+            ),
+            "annotation": (
+                None
+                if response.annotation is None
+                else {
+                    "suspendedQuestionText": response.annotation.suspended_question_text,
+                    "clarificationQuestionText": response.annotation.clarification_question_text,
+                }
             ),
         }
     if isinstance(response, QuestionContractResponse):
@@ -54,13 +65,6 @@ def clarification_response_payload(
             "requestedFactId": response.requested_fact_id,
             "knownInputId": response.known_input_id,
             "option": _option_payload(response.option),
-        }
-    if isinstance(response, GroundingTextResponse):
-        return {
-            "kind": "grounding_text",
-            "source": _source_payload(response.source),
-            "requestedFactId": response.requested_fact_id,
-            "knownInputId": response.known_input_id,
         }
     if isinstance(response, SourceBindingCatalogInputResponse):
         return {
@@ -90,12 +94,18 @@ def clarification_response_from_payload(
     kind = _required_text(payload, "kind")
     if kind == "conversation_resolution":
         raw_candidate = payload.get("candidate")
+        raw_annotation = payload.get("annotation")
         return ConversationResolutionResponse(
             source=_source_from_payload(_mapping(payload, "source")),
             candidate=(
                 None
                 if raw_candidate is None
                 else _candidate_from_payload(_as_mapping(raw_candidate, "candidate"))
+            ),
+            annotation=(
+                None
+                if raw_annotation is None
+                else _annotation_from_payload(_as_mapping(raw_annotation, "annotation"))
             ),
         )
     if kind == "question_contract":
@@ -111,12 +121,6 @@ def clarification_response_from_payload(
             requested_fact_id=_required_text(payload, "requestedFactId"),
             known_input_id=_required_text(payload, "knownInputId"),
             option=_option_from_payload(_mapping(payload, "option")),
-        )
-    if kind == "grounding_text":
-        return GroundingTextResponse(
-            source=_source_from_payload(_mapping(payload, "source")),
-            requested_fact_id=_required_text(payload, "requestedFactId"),
-            known_input_id=_required_text(payload, "knownInputId"),
         )
     if kind == "source_binding_catalog_input":
         return SourceBindingCatalogInputResponse(
@@ -154,18 +158,37 @@ def _source_from_payload(payload: Mapping[str, object]) -> ClarificationResponse
     )
 
 
-def _candidate_payload(candidate: ConversationInterpretationCandidate) -> dict[str, object]:
+def _annotation_from_payload(
+    payload: Mapping[str, object],
+) -> ClarificationAnnotation:
+    return ClarificationAnnotation(
+        suspended_question_text=_required_text(payload, "suspendedQuestionText"),
+        clarification_question_text=_required_text(
+            payload,
+            "clarificationQuestionText",
+        ),
+    )
+
+
+def _candidate_payload(
+    candidate: ConversationInterpretationCandidate,
+) -> dict[str, object]:
     return {
         "id": candidate.id,
         "contextualizedQuestion": candidate.contextualized_question,
         "sourceEvidence": [
-            {"sourceId": item.source_id, "exactSourceTexts": list(item.exact_source_texts)}
+            {
+                "sourceId": item.source_id,
+                "exactSourceTexts": list(item.exact_source_texts),
+            }
             for item in candidate.source_evidence
         ],
     }
 
 
-def _candidate_from_payload(payload: Mapping[str, object]) -> ConversationInterpretationCandidate:
+def _candidate_from_payload(
+    payload: Mapping[str, object],
+) -> ConversationInterpretationCandidate:
     evidence = payload.get("sourceEvidence")
     if not isinstance(evidence, list):
         raise ValueError("candidate sourceEvidence must be a list")
@@ -174,7 +197,9 @@ def _candidate_from_payload(payload: Mapping[str, object]) -> ConversationInterp
         contextualized_question=_required_text(payload, "contextualizedQuestion"),
         source_evidence=tuple(
             ConversationInterpretationEvidence(
-                source_id=_required_text(_as_mapping(item, "sourceEvidence"), "sourceId"),
+                source_id=_required_text(
+                    _as_mapping(item, "sourceEvidence"), "sourceId"
+                ),
                 exact_source_texts=tuple(
                     _text_list(_as_mapping(item, "sourceEvidence"), "exactSourceTexts")
                 ),
@@ -186,7 +211,9 @@ def _candidate_from_payload(payload: Mapping[str, object]) -> ConversationInterp
 
 def _target_from_payload(payload: Mapping[str, object]) -> CatalogInputTarget:
     choices = payload.get("choices", ())
-    if not isinstance(choices, (list, tuple)) or any(not isinstance(item, str) for item in choices):
+    if not isinstance(choices, (list, tuple)) or any(
+        not isinstance(item, str) for item in choices
+    ):
         raise ValueError("catalog target choices must be text")
     return CatalogInputTarget(
         row_source_id=_required_text(payload, "row_source_id"),
@@ -266,6 +293,7 @@ def parse_clarification_response(
     response_id: str,
     response_text: str,
     selected_option_id: str = "",
+    suspended_question_text: str = "",
 ) -> ClarificationOwnerResponse:
     if not response_id.strip():
         raise ValueError("clarification response requires response_id")
@@ -304,10 +332,14 @@ def parse_clarification_response(
             )
         if not continuation.accepts_free_text:
             raise ValueError("grounding clarification requires a stored option")
-        return GroundingTextResponse(
+        return ConversationResolutionResponse(
             source=_source(clarification.id, response_id, response_text),
-            requested_fact_id=clarification.requested_fact_id,
-            known_input_id=continuation.known_input_id,
+            annotation=ClarificationAnnotation(
+                suspended_question_text=suspended_question_text,
+                clarification_question_text=render_clarification_question(
+                    clarification
+                ),
+            ),
         )
     if isinstance(continuation, SourceBindingCatalogInputContinuation):
         return SourceBindingCatalogInputResponse(
@@ -381,7 +413,9 @@ def _catalog_value(
             raise ValueError(
                 f"catalog clarification value must be {value_type}"
             ) from exc
-        if not number.is_finite() or (value_type == "integer" and number != number.to_integral()):
+        if not number.is_finite() or (
+            value_type == "integer" and number != number.to_integral()
+        ):
             raise ValueError(f"catalog clarification value must be {value_type}")
     if value_type == "boolean" and value.strip().casefold() not in {"true", "false"}:
         raise ValueError("catalog clarification value must be boolean")

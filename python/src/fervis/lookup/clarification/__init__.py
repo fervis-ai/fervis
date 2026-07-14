@@ -11,9 +11,19 @@ from fervis.lookup.clarification.causes import (
     TargetReferenceUnsupported,
     clarify,
 )
+from fervis.lookup.clarification.context import (
+    ActiveClarification,
+    ClarificationExchange,
+    active_clarification,
+    active_clarification_from_source,
+    clarification_context_source,
+    clarification_response_ref,
+    extend_clarification_chain,
+)
 from fervis.lookup.clarification.model import (
     CatalogInputTarget,
     Clarification,
+    ClarificationAnnotation,
     ClarificationEvidence,
     ClarificationEvidenceKind,
     ClarificationNeed,
@@ -32,7 +42,6 @@ from fervis.lookup.clarification.model import (
     FactPlanningCatalogInputResponse,
     GroundingContinuation,
     GroundingIdentityResponse,
-    GroundingTextResponse,
     QuestionContractContinuation,
     QuestionContractResponse,
     SourceBindingCatalogInputContinuation,
@@ -47,12 +56,15 @@ from fervis.lookup.clarification.render import render_clarification_question
 from fervis.lookup.clarification.response import parse_clarification_response
 
 __all__ = (
+    "ActiveClarification",
     "AmbiguousQuestionInterpretation",
     "CatalogInputTarget",
     "Clarification",
+    "ClarificationAnnotation",
     "ClarificationCause",
     "ClarificationEvidence",
     "ClarificationEvidenceKind",
+    "ClarificationExchange",
     "ClarificationNeed",
     "ClarificationOption",
     "ClarificationOwner",
@@ -69,7 +81,6 @@ __all__ = (
     "FactPlanningCatalogInputResponse",
     "GroundingContinuation",
     "GroundingIdentityResponse",
-    "GroundingTextResponse",
     "MissingAnswerMetric",
     "MissingCatalogChoice",
     "MissingCatalogRequiredValue",
@@ -80,10 +91,15 @@ __all__ = (
     "TargetReferenceAmbiguous",
     "TargetReferenceNotFound",
     "TargetReferenceUnsupported",
+    "active_clarification",
+    "active_clarification_from_source",
+    "clarification_context_source",
+    "clarification_response_ref",
     "clarification_from_payload",
     "clarification_payload",
     "clarifications_payload",
     "clarify",
+    "extend_clarification_chain",
     "parse_clarification_response",
     "render_clarification_question",
 )

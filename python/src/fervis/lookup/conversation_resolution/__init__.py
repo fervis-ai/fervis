@@ -30,7 +30,10 @@ from .model import (
     UnresolvedResolution,
 )
 from .parser import parse_conversation_resolution
-from .prompt import ConversationResolutionTurnPrompt
+from .prompt import (
+    ConversationResolutionTurnPrompt,
+    conversation_resolution_context_sources,
+)
 from .schema import build_conversation_resolution_tool_schemas
 from .tools import (
     CONVERSATION_RESOLUTION_TOOL_NAME,
@@ -74,6 +77,7 @@ __all__ = [
     "UnresolvedResolution",
     "build_conversation_resolution_tool_schemas",
     "compile_conversation_resolution",
+    "conversation_resolution_context_sources",
     "generate_conversation_resolution",
     "parse_conversation_resolution",
 ]

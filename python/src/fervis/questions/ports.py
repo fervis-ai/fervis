@@ -54,10 +54,11 @@ class QuestionRunStart:
     adapter_ref: str
     runtime_version: str
     base_run_id: str | None = None
+    trigger_clarification_response_id: str = ""
 
 
 @dataclass(frozen=True)
-class ClarificationRunResume:
+class ClarificationRunResponse:
     question_id: str
     run_id: str
     clarification_id: str
@@ -66,6 +67,9 @@ class ClarificationRunResume:
     selected_option_id: str
     principal: QuestionPrincipal
     execution_mode: ExecutionMode
+    successor_run_id: str
+    adapter_ref: str
+    runtime_version: str
 
 
 @dataclass(frozen=True)
@@ -173,7 +177,9 @@ def _idempotency_authority_ref(principal: QuestionPrincipal) -> str:
         sort_keys=True,
         separators=(",", ":"),
     )
-    return "idempotency-authority:sha256:" + hashlib.sha256(payload.encode()).hexdigest()
+    return (
+        "idempotency-authority:sha256:" + hashlib.sha256(payload.encode()).hexdigest()
+    )
 
 
 @dataclass(frozen=True)
@@ -442,9 +448,9 @@ class QuestionLifecyclePort(Protocol):
         record: QuestionRunRecord,
     ) -> QuestionRunSubmissionResult: ...
 
-    def resume_question_run_atomically(
+    def respond_to_clarification_atomically(
         self,
-        resume: ClarificationRunResume,
+        response: ClarificationRunResponse,
     ) -> QuestionRunSubmissionResult: ...
 
     def load_executable_run(

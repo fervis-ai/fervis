@@ -518,7 +518,11 @@ def _population_constraint_parts(
             "owned_question_input_refs",
             path=test_path,
         )
-        if test_kind == "SUBJECT_IDENTITY" or owned_input_refs:
+        if test_kind in {
+            "SUBJECT_IDENTITY",
+            "NORMAL_INSTANCE_GUARD",
+            "RAW_RECORD_GUARD",
+        } or owned_input_refs:
             continue
         parts.append(
             PriorRequestSemanticPart(

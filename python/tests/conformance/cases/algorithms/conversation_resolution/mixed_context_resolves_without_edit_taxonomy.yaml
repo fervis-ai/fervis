@@ -11,7 +11,7 @@ input:
       source_card_ids: [prior_card]
       source_memory_ids: [prior_request, prior_monday]
       meaning_anchors:
-        - {memory_id: prior_monday, text: Monday, occurrence: 1, kind: time_scope, label: prior day}
+        - {anchor_id: prior_monday, text: Monday, occurrence: 1, kind: time_scope, label: prior day}
   payload:
     kind: conversation_resolution
     current_question_text: What about Mombasa on that day?
@@ -35,7 +35,7 @@ input:
               frame_parameter: {kind: none}
               sources:
                 - {kind: current_span, text: that day, occurrence: 1}
-                - {kind: context_anchor, source_id: prior_question, memory_id: prior_monday, source_text: Monday}
+                - {kind: context_anchor, source_id: prior_question, anchor_id: prior_monday}
 expect:
   result_contains:
     contextualized_question: How many sales did we make in Mombasa on Monday?

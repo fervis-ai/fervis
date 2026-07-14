@@ -136,6 +136,11 @@ def parse_question_contract(
         outcome=QuestionContract(
             question_inputs=question_inputs,
             requested_facts=requested_facts,
+            clarification_lineage_refs=(
+                conversation_resolution.clarification_lineage_refs
+                if conversation_resolution is not None
+                else ()
+            ),
         )
     )
 

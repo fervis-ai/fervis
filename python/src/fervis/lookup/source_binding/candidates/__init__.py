@@ -1,6 +1,7 @@
 """Public source-binding candidate registry boundary."""
 
 from .model import SourceCandidate, SourceCandidateRegistry
+from .row_grain import fulfillment_preserves_row_grain
 from .registry_builder import parse_source_candidate_registry
 from .registry import (
     bound_sources_prompt_payload,
@@ -21,6 +22,7 @@ from .registry import (
 __all__ = [
     "SourceCandidate",
     "SourceCandidateRegistry",
+    "fulfillment_preserves_row_grain",
     "parse_source_candidate_registry",
     "bound_sources_prompt_payload",
     "same_scope_read_ids",
