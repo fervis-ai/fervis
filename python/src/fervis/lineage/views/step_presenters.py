@@ -15,6 +15,7 @@ from fervis.lineage.views.model import (
     SemanticKnownInputView,
     SemanticRequestedFactView,
     SemanticResolverCandidateView,
+    StepDecisionItemView,
     StepDecisionView,
     StepSemanticView,
 )
@@ -36,6 +37,17 @@ def step_decision_views(step: StepRow) -> tuple[StepDecisionView, ...]:
                     lines=tuple(item.text for item in items),
                     detail=detail,
                     is_explanation=any(item.is_explanation for item in items),
+                    items=tuple(
+                        StepDecisionItemView(
+                            text=item.text,
+                            is_explanation=item.is_explanation,
+                            path=item.path,
+                            subject=item.subject,
+                            disposition=item.disposition,
+                            basis=item.basis,
+                        )
+                        for item in items
+                    ),
                 )
             )
     return tuple(decisions)
@@ -172,9 +184,7 @@ def _conversation_clause(
     return SemanticConversationClauseView(
         current_clause_text=current_clause_text,
         resolved_text=resolved_text,
-        resolved_values=tuple(
-            _text(value) for value in resolved_values
-        ),
+        resolved_values=tuple(_text(value) for value in resolved_values),
     )
 
 

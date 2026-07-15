@@ -8,6 +8,7 @@ from .views import (
     QuestionCreateView,
     QuestionDetailView,
     QuestionRunDetailView,
+    QuestionRunAnswerQuestionView,
     QuestionRunListView,
 )
 
@@ -39,5 +40,10 @@ urlpatterns = [
         "questions/<str:question_id>/runs/<uuid:run_id>/",
         QuestionRunDetailView.as_view(),
         name="fervis-question-run-detail",
+    ),
+    path(
+        "questions/<str:question_id>/runs/<uuid:run_id>/ask/",
+        QuestionRunAnswerQuestionView.as_view(),
+        name="fervis-question-run-ask",
     ),
 ]

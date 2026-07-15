@@ -157,6 +157,7 @@ def run_answer_program_execution(
         error_json=lineage_error_json(execution_payload),
         catalog_endpoints=execution_lineage.catalog_endpoints,
         source_reads=execution_lineage.source_reads,
+        artifacts=execution_lineage.artifacts,
     )
     if execution.issue is not None or execution.fact_result is None:
         error_code = (
@@ -221,6 +222,7 @@ def _failed_execution(
         error_json=lineage_error_json(payload),
         catalog_endpoints=execution_lineage.catalog_endpoints,
         source_reads=execution_lineage.source_reads,
+        artifacts=execution_lineage.artifacts,
     )
     record_runtime_error_lineage(
         request=request,

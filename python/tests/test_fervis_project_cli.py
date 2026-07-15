@@ -80,7 +80,7 @@ def test_fervis_init_creates_config_and_patches_django_hooks(
     assert '"rest_framework",' in (root / "config" / "settings.py").read_text(
         encoding="utf-8"
     )
-    assert '"fervis.django",' in (root / "config" / "settings.py").read_text(
+    assert '"fervis.integrations.django",' in (root / "config" / "settings.py").read_text(
         encoding="utf-8"
     )
     settings_text = (root / "config" / "settings.py").read_text(encoding="utf-8")
@@ -1053,7 +1053,7 @@ def test_fervis_django_integration_urls_are_importable() -> None:
         ProviderConfig,
         RuntimeRoutes,
     )
-    from fervis.django import DjangoIntegration
+    from fervis.integrations.django import DjangoIntegration
 
     integration = DjangoIntegration(
         config=FervisConfig(
@@ -1087,7 +1087,7 @@ def test_fervis_fastapi_integration_mounts_router() -> None:
         ProviderConfig,
         RuntimeRoutes,
     )
-    from fervis.fastapi import FastAPIIntegration
+    from fervis.integrations.fastapi import FastAPIIntegration
 
     integration = FastAPIIntegration(
         config=FervisConfig(
@@ -2331,7 +2331,7 @@ def test_fervis_init_patches_django_installed_apps_without_existing_trailing_com
     assert exit_code == 0
     assert '"django.contrib.auth",' in text
     assert '"rest_framework",' in text
-    assert '"fervis.django",' in text
+    assert '"fervis.integrations.django",' in text
 
 
 def test_fervis_init_patches_django_installed_apps_with_starred_extension(
@@ -2359,7 +2359,7 @@ def test_fervis_init_patches_django_installed_apps_with_starred_extension(
     assert exit_code == 0
     assert "    *extra_apps,\n" in text
     assert '"rest_framework",' in text
-    assert '"fervis.django",' in text
+    assert '"fervis.integrations.django",' in text
 
 
 def test_fervis_init_blocks_nonempty_single_line_urlpatterns(
@@ -2493,7 +2493,7 @@ def test_fervis_init_allows_safe_installed_apps_mutations(
     text = settings_path.read_text(encoding="utf-8")
     assert exit_code == 0
     assert '"rest_framework",' in text
-    assert '"fervis.django",' in text
+    assert '"fervis.integrations.django",' in text
     assert "INSTALLED_APPS.append('local.app')" in text
     assert "INSTALLED_APPS.remove('debug_toolbar')" in text
 
@@ -2646,7 +2646,7 @@ def test_fervis_init_patches_active_django_settings_module(tmp_path: Path) -> No
     )
 
     assert exit_code == 0
-    assert '"fervis.django",' in (shop_dir / "settings.py").read_text(encoding="utf-8")
+    assert '"fervis.integrations.django",' in (shop_dir / "settings.py").read_text(encoding="utf-8")
     assert (
         "path(configured_fervis().routes.django_path, include(configured_fervis().urls))"
         in (shop_dir / "urls.py").read_text(encoding="utf-8")
@@ -2682,7 +2682,7 @@ def test_fervis_init_patches_package_django_settings_module(tmp_path: Path) -> N
     )
 
     assert exit_code == 0
-    assert '"fervis.django",' in (settings_dir / "__init__.py").read_text(
+    assert '"fervis.integrations.django",' in (settings_dir / "__init__.py").read_text(
         encoding="utf-8"
     )
     assert (
@@ -2856,7 +2856,7 @@ def test_fervis_init_patches_wrapped_django_urlpattern_list(
     urls_text = urls_path.read_text(encoding="utf-8")
     assert exit_code == 0
     assert '"rest_framework",' in settings_text
-    assert '"fervis.django",' in settings_text
+    assert '"fervis.integrations.django",' in settings_text
     assert "from django.conf.urls import include" in urls_text
     assert "from django.urls import path" in urls_text
     assert "_patterns = [\n" in urls_text
@@ -2978,7 +2978,7 @@ def test_fervis_doctor_rejects_inactive_django_urlconf_mount(tmp_path: Path) -> 
     settings_path.write_text(
         "INSTALLED_APPS = [\n"
         '    "rest_framework",\n'
-        '    "fervis.django",\n'
+        '    "fervis.integrations.django",\n'
         "]\n"
         'ROOT_URLCONF = "shop.urls"\n'
         'FERVIS_CONFIG = "config.fervis:fervis"\n',
@@ -3026,9 +3026,9 @@ def test_fervis_doctor_rejects_mutated_django_installed_apps(
     (root / "config" / "settings.py").write_text(
         "INSTALLED_APPS = [\n"
         '    "rest_framework",\n'
-        '    "fervis.django",\n'
+        '    "fervis.integrations.django",\n'
         "]\n"
-        "INSTALLED_APPS.remove('fervis.django')\n"
+        "INSTALLED_APPS.remove('fervis.integrations.django')\n"
         "ROOT_URLCONF = 'config.urls'\n"
         'FERVIS_CONFIG = "config.fervis:fervis"\n',
         encoding="utf-8",
@@ -3059,7 +3059,7 @@ def test_fervis_doctor_rejects_aliased_django_installed_apps_mutation(
     (root / "config" / "settings.py").write_text(
         "INSTALLED_APPS = [\n"
         '    "rest_framework",\n'
-        '    "fervis.django",\n'
+        '    "fervis.integrations.django",\n'
         "]\n"
         "apps = INSTALLED_APPS\n"
         "apps.clear()\n"
@@ -3093,7 +3093,7 @@ def test_fervis_doctor_rejects_destructured_django_installed_apps_alias(
     (root / "config" / "settings.py").write_text(
         "INSTALLED_APPS = [\n"
         '    "rest_framework",\n'
-        '    "fervis.django",\n'
+        '    "fervis.integrations.django",\n'
         "]\n"
         "apps, = (INSTALLED_APPS,)\n"
         "apps.clear()\n"
@@ -3127,7 +3127,7 @@ def test_fervis_doctor_rejects_dynamic_namespace_django_settings_mutation(
     (root / "config" / "settings.py").write_text(
         "INSTALLED_APPS = [\n"
         '    "rest_framework",\n'
-        '    "fervis.django",\n'
+        '    "fervis.integrations.django",\n'
         "]\n"
         "globals().update(INSTALLED_APPS=[])\n"
         "ROOT_URLCONF = 'config.urls'\n"
@@ -3160,7 +3160,7 @@ def test_fervis_doctor_rejects_django_installed_apps_subscript_write(
     (root / "config" / "settings.py").write_text(
         "INSTALLED_APPS = [\n"
         '    "rest_framework",\n'
-        '    "fervis.django",\n'
+        '    "fervis.integrations.django",\n'
         "]\n"
         "INSTALLED_APPS[:] = []\n"
         "ROOT_URLCONF = 'config.urls'\n"
@@ -3193,7 +3193,7 @@ def test_fervis_doctor_rejects_django_installed_apps_global_subscript_write(
     (root / "config" / "settings.py").write_text(
         "INSTALLED_APPS = [\n"
         '    "rest_framework",\n'
-        '    "fervis.django",\n'
+        '    "fervis.integrations.django",\n'
         "]\n"
         "globals()['INSTALLED_APPS'] = []\n"
         "ROOT_URLCONF = 'config.urls'\n"
@@ -3456,7 +3456,7 @@ def test_fervis_doctor_rejects_missing_django_fervis_config(tmp_path: Path) -> N
     (root / "config" / "settings.py").write_text(
         "INSTALLED_APPS = [\n"
         '    "rest_framework",\n'
-        '    "fervis.django",\n'
+        '    "fervis.integrations.django",\n'
         "]\n"
         "ROOT_URLCONF = 'config.urls'\n",
         encoding="utf-8",

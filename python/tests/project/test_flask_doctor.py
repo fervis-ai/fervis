@@ -16,7 +16,7 @@ def test_fervis_doctor_reports_route_only_flask_endpoints_not_ready(
     (root / "app.py").write_text(
         "from flask import Flask\n\n"
         "app = Flask(__name__)\n"
-        "from fervis.flask import configured_fervis\n"
+        "from fervis import configured_fervis\n"
         "configured_fervis().init_app(app)\n\n"
         "@app.get('/api/orders/')\n"
         "def list_orders():\n"
@@ -46,7 +46,7 @@ def test_fervis_doctor_accepts_openapi_backed_flask_endpoint(
     (root / "app.py").write_text(
         "from flask import Flask, jsonify\n\n"
         "app = Flask(__name__)\n"
-        "from fervis.flask import configured_fervis\n"
+        "from fervis import configured_fervis\n"
         "configured_fervis().init_app(app)\n\n"
         "@app.get('/api/orders/')\n"
         "def list_orders():\n"
@@ -84,7 +84,7 @@ def test_fervis_doctor_rejects_flask_endpoint_when_schema_cardinality_is_wrong(
     (root / "app.py").write_text(
         "from flask import Flask, jsonify\n\n"
         "app = Flask(__name__)\n"
-        "from fervis.flask import configured_fervis\n"
+        "from fervis import configured_fervis\n"
         "configured_fervis().init_app(app)\n\n"
         "@app.get('/api/orders/')\n"
         "def list_orders():\n"
@@ -130,7 +130,7 @@ def test_fervis_doctor_skips_shape_probe_for_flask_detail_route(
     (root / "app.py").write_text(
         "from flask import Flask, jsonify\n\n"
         "app = Flask(__name__)\n"
-        "from fervis.flask import configured_fervis\n"
+        "from fervis import configured_fervis\n"
         "configured_fervis().init_app(app)\n\n"
         "@app.get('/api/orders/<order_id>')\n"
         "def get_order(order_id):\n"
@@ -174,7 +174,7 @@ def test_fervis_doctor_marks_shape_probe_skipped_when_flask_auth_blocks_all_prob
     (root / "app.py").write_text(
         "from flask import Flask, jsonify\n\n"
         "app = Flask(__name__)\n"
-        "from fervis.flask import configured_fervis\n"
+        "from fervis import configured_fervis\n"
         "configured_fervis().init_app(app)\n\n"
         "@app.before_request\n"
         "def require_auth():\n"
@@ -223,7 +223,7 @@ def test_fervis_doctor_certifies_flask_factory_mount_from_runtime_app(
     _write_config(root, app_target="app:create_app")
     (root / "app.py").write_text(
         "from flask import Flask, jsonify\n"
-        "from fervis.flask import configured_fervis\n\n"
+        "from fervis import configured_fervis\n\n"
         "def create_app():\n"
         "    app = Flask(__name__)\n\n"
         "    @app.get('/api/orders/')\n"
@@ -262,7 +262,7 @@ def test_fervis_doctor_fails_flask_source_when_any_configured_route_lacks_contra
     (root / "app.py").write_text(
         "from flask import Flask, jsonify\n\n"
         "app = Flask(__name__)\n"
-        "from fervis.flask import configured_fervis\n"
+        "from fervis import configured_fervis\n"
         "configured_fervis().init_app(app)\n\n"
         "@app.get('/api/orders/')\n"
         "def list_orders():\n"

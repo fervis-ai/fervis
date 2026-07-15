@@ -43,7 +43,7 @@ from .source import (
 )
 
 
-DJANGO_APP = "fervis.django"
+DJANGO_APP = "fervis.integrations.django"
 FERVIS_DJANGO_RUNTIME_APPS = (
     "fervis.lineage",
     "fervis.run_work.queue.django",

@@ -82,6 +82,68 @@ describe("Fervis HTTP API client", () => {
     );
   });
 
+  it("requests disposable explanation audio with the established connection authority", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response("RIFFaudio", {
+          headers: { "Content-Type": "audio/wav" },
+          status: 200
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createFervisHttpClient({
+      authToken: "token-123",
+      baseUrl: "http://127.0.0.1:8000/fervis/"
+    });
+
+    const question = new Blob(["RIFFquestion"], { type: "audio/wav" });
+    const result = await client.askAboutAnswer("q/one", "run:one", question);
+
+    expect(result.type).toBe("audio/wav");
+    expect(result.size).toBe(9);
+    const request = fetchMock.mock.calls[0];
+    expect(request?.[0]).toBe(
+      "http://127.0.0.1:8000/fervis/questions/q%2Fone/runs/run%3Aone/ask/"
+    );
+    expect(request?.[1]?.method).toBe("POST");
+    const headers = new Headers(request?.[1]?.headers);
+    expect(headers.get("Accept")).toBe("audio/wav");
+    expect(headers.get("Content-Type")).toBe("audio/wav");
+    expect(headers.get("Authorization")).toBe("Bearer token-123");
+    expect(headers.has("Idempotency-Key")).toBe(false);
+    expect(request?.[1]?.body).toBe(question);
+  });
+
+  it("surfaces Ask API errors without treating JSON as audio", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              error: { message: "Explanation audio is not configured." }
+            }),
+            {
+              headers: { "Content-Type": "application/json" },
+              status: 503
+            }
+          )
+      )
+    );
+    const client = createFervisHttpClient({
+      authToken: "",
+      baseUrl: "http://127.0.0.1:8000/fervis"
+    });
+
+    await expect(
+      client.askAboutAnswer("q", "run", new Blob(["RIFFquestion"], { type: "audio/wav" }))
+    ).rejects.toMatchObject({
+      message: "Explanation audio is not configured.",
+      name: "FervisApiError",
+      status: 503
+    } satisfies Partial<FervisApiError>);
+  });
+
   it("submits typed deterministic reruns without model request fields", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       new Response(JSON.stringify(questionStateFixture), {

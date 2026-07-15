@@ -12,7 +12,7 @@ from fervis.interfaces.agent.actions import (
 
 
 def test_fervis_django_urls_expose_question_lifecycle_routes() -> None:
-    urls = importlib.import_module("fervis.django.urls")
+    urls = importlib.import_module("fervis.integrations.django.urls")
 
     names = {pattern.name for pattern in urls.urlpatterns}
     routes = {str(pattern.pattern) for pattern in urls.urlpatterns}
@@ -24,6 +24,7 @@ def test_fervis_django_urls_expose_question_lifecycle_routes() -> None:
         "questions/<str:question_id>/",
         "questions/<str:question_id>/runs/",
         "questions/<str:question_id>/runs/<uuid:run_id>/",
+        "questions/<str:question_id>/runs/<uuid:run_id>/ask/",
     }
     assert names == {
         "fervis-runtime-status",
@@ -32,6 +33,7 @@ def test_fervis_django_urls_expose_question_lifecycle_routes() -> None:
         "fervis-question-detail",
         "fervis-question-run-list",
         "fervis-question-run-detail",
+        "fervis-question-run-ask",
     }
 
 
@@ -43,6 +45,7 @@ def test_fervis_django_views_use_fervis_throttle_scope() -> None:
         QuestionCreateView,
         QuestionDetailView,
         QuestionRunDetailView,
+        QuestionRunAnswerQuestionView,
         QuestionRunListView,
     )
 
@@ -55,6 +58,7 @@ def test_fervis_django_views_use_fervis_throttle_scope() -> None:
             QuestionDetailView,
             QuestionRunListView,
             QuestionRunDetailView,
+            QuestionRunAnswerQuestionView,
         )
     } == {(FervisQuestionThrottle,)}
 
@@ -780,7 +784,7 @@ def test_fervis_fastapi_router_exposes_question_lifecycle_routes() -> None:
         ProviderConfig,
         RuntimeRoutes,
     )
-    from fervis.fastapi import FastAPIIntegration
+    from fervis.integrations.fastapi import FastAPIIntegration
 
     router = FastAPIIntegration(
         config=FervisConfig(
@@ -815,6 +819,10 @@ def test_fervis_fastapi_router_exposes_question_lifecycle_routes() -> None:
         ("GET", "/fervis/questions/{question_id}/"),
         ("GET", "/fervis/questions/{question_id}/runs/"),
         ("GET", "/fervis/questions/{question_id}/runs/{run_id}/"),
+        (
+            "POST",
+            "/fervis/questions/{question_id}/runs/{run_id}/ask/",
+        ),
     }
 
 
@@ -824,7 +832,7 @@ def test_fastapi_integration_closes_question_interface_with_host_lifespan() -> N
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from fervis import FervisConfig, HostConfig, ModelConfig, RuntimeRoutes
-    from fervis.fastapi import FastAPIIntegration
+    from fervis.integrations.fastapi import FastAPIIntegration
 
     events: list[str] = []
 
@@ -862,7 +870,7 @@ def test_fastapi_integration_closes_question_interface_with_host_lifespan() -> N
 
 
 def test_fervis_fastapi_router_requires_question_interface() -> None:
-    from fervis.fastapi import fervis_fastapi_router
+    from fervis.integrations.fastapi import fervis_fastapi_router
 
     try:
         fervis_fastapi_router()
@@ -875,7 +883,7 @@ def test_fervis_fastapi_router_requires_question_interface() -> None:
 def test_fervis_fastapi_router_denies_anonymous_questions_by_default() -> None:
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from fervis.fastapi import fervis_fastapi_router
+    from fervis.integrations.fastapi import fervis_fastapi_router
 
     interface = _FakeQuestionInterface()
     app = FastAPI()
@@ -905,7 +913,7 @@ def test_fervis_fastapi_router_uses_configured_common_question_interface() -> No
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from fervis.host_api.contracts.authority import ReadContextRef
-    from fervis.fastapi import fervis_fastapi_router
+    from fervis.integrations.fastapi import fervis_fastapi_router
 
     interface = _FakeQuestionInterface()
     app = FastAPI()
@@ -1054,7 +1062,7 @@ def test_fervis_fastapi_router_uses_configured_common_question_interface() -> No
 def test_fervis_fastapi_router_captures_configured_dependency_principal() -> None:
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from fervis.fastapi import fervis_fastapi_router
+    from fervis.integrations.fastapi import fervis_fastapi_router
 
     def current_user() -> dict[str, str]:
         return {"id": "dep-user-1"}
@@ -1105,7 +1113,7 @@ def test_fervis_fastapi_router_captures_configured_dependency_principal() -> Non
 def test_fervis_fastapi_router_fails_closed_when_subject_is_required() -> None:
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from fervis.fastapi import fervis_fastapi_router
+    from fervis.integrations.fastapi import fervis_fastapi_router
 
     interface = _FakeQuestionInterface()
     app = FastAPI()
@@ -1157,6 +1165,10 @@ def test_fervis_flask_blueprint_exposes_question_lifecycle_routes() -> None:
         ("GET", "/fervis/questions/<question_id>/runs/"),
         ("POST", "/fervis/questions/<question_id>/runs/"),
         ("GET", "/fervis/questions/<question_id>/runs/<run_id>/"),
+        (
+            "POST",
+            "/fervis/questions/<question_id>/runs/<run_id>/ask/",
+        ),
     }
 
 

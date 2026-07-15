@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from fervis.delivery.answer_question import (
+    AnswerQuestionDelivery,
+    AnswerQuestionGenerationError,
+    InvalidRecordedAnswerQuestion,
+    parse_recorded_answer_question,
+)
 from fervis.host_api.contracts.authority import ReadContextRef
 from fervis.host_api.contracts.credentials import DelegatedReadCredential
 from fervis.interfaces.common.admission import (
@@ -26,7 +33,11 @@ from fervis.interfaces.common.binding_patches import (
     capability_application_from_payload,
 )
 from fervis.questions.result_data import result_data_clarifications
+from fervis.questions.projection import QuestionRunStatus
 from fervis.run_work.events import QuestionRunEventSink
+
+
+logger = logging.getLogger(__name__)
 
 RERUN_TRIGGER = "rerun"
 
@@ -135,6 +146,11 @@ class QuestionLifecycle(Protocol):
 @dataclass(frozen=True)
 class QuestionInterface:
     questions: QuestionLifecycle
+    answer_questions: AnswerQuestionDelivery | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
     limits: AskRequestLimits = field(default_factory=AskRequestLimits)
     model_policy: ConfiguredModelPolicy = field(default_factory=ConfiguredModelPolicy)
     close_callback: Callable[[], None] | None = field(
@@ -335,6 +351,75 @@ class QuestionInterface:
             payload=_with_next_actions(run, principal),
         )
 
+    def answer_computation_question(
+        self,
+        question_id: str,
+        run_id: str,
+        *,
+        principal: InterfacePrincipal,
+        audio_data: bytes,
+        content_type: str,
+    ) -> QuestionInterfaceResponse:
+        run = self.questions.get_question_run(
+            question_id,
+            run_id,
+            principal=_question_principal(principal),
+        )
+        if run is None:
+            return QuestionInterfaceResponse(
+                status_code=404,
+                payload=_not_found_payload("fervis_run", run_id),
+            )
+        if str(run.get("status") or "") != QuestionRunStatus.COMPLETED.value:
+            return QuestionInterfaceResponse(
+                status_code=409,
+                payload=_interface_error_payload(
+                    error_type="conflict",
+                    code="fervis_run_not_askable",
+                    message="Ask is available after the run completes.",
+                    retryable=True,
+                ),
+            )
+        if self.answer_questions is None:
+            return QuestionInterfaceResponse(
+                status_code=503,
+                payload=_interface_error_payload(
+                    error_type="unavailable",
+                    code="fervis_answer_question_unavailable",
+                    message="Ask is not configured.",
+                    retryable=False,
+                ),
+            )
+        try:
+            question = parse_recorded_answer_question(
+                audio_data,
+                content_type=content_type,
+            )
+        except InvalidRecordedAnswerQuestion as exc:
+            return QuestionInterfaceResponse(
+                status_code=400,
+                payload=_interface_error_payload(
+                    error_type="validation_error",
+                    code="fervis_invalid_answer_question",
+                    message=str(exc),
+                    retryable=False,
+                ),
+            )
+        try:
+            audio = self.answer_questions.answer(run_id, question)
+        except AnswerQuestionGenerationError as exc:
+            logger.exception("Answer-question audio generation failed")
+            return QuestionInterfaceResponse(
+                status_code=502,
+                payload=_interface_error_payload(
+                    error_type="unavailable",
+                    code="fervis_answer_question_generation_failed",
+                    message=exc.public_message,
+                    retryable=True,
+                ),
+            )
+        return QuestionInterfaceResponse(status_code=200, payload=audio)
+
     def _create_request(
         self,
         payload: dict[str, Any],
@@ -383,7 +468,7 @@ class QuestionInterface:
             raise QuestionInterfaceValidationError(
                 field="__all__",
                 message="Payload must be an object.",
-        )
+            )
         _reject_unknown_fields(payload, allowed=_CONTINUE_QUESTION_KEYS)
         response_text = str(payload.get("responseText") or "").strip()
         selected_option_id = str(payload.get("selectedOptionId") or "").strip()
@@ -569,30 +654,44 @@ def _require_admitted_question_state(
 
 
 def _active_conflict_payload(result: AskResult) -> dict[str, Any]:
-    return {
-        "error": {
-            "type": "conflict",
-            "code": "fervis_question_already_active",
-            "message": "This conversation already has an active Fervis question run.",
-            "retryable": True,
-            "details": [],
-            "context": {
-                "questionId": result.question_id,
-                "activeRunId": result.active_run_id or result.run_id,
-            },
-        }
-    }
+    return _interface_error_payload(
+        error_type="conflict",
+        code="fervis_question_already_active",
+        message="This conversation already has an active Fervis question run.",
+        retryable=True,
+        context={
+            "questionId": result.question_id,
+            "activeRunId": result.active_run_id or result.run_id,
+        },
+    )
 
 
 def _not_found_payload(resource: str, identifier: str) -> dict[str, Any]:
+    return _interface_error_payload(
+        error_type="not_found",
+        code=f"{resource}_not_found",
+        message=f"{resource} was not found.",
+        retryable=False,
+        context={"id": identifier},
+    )
+
+
+def _interface_error_payload(
+    *,
+    error_type: str,
+    code: str,
+    message: str,
+    retryable: bool,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     return {
         "error": {
-            "type": "not_found",
-            "code": f"{resource}_not_found",
-            "message": f"{resource} was not found.",
-            "retryable": False,
+            "type": error_type,
+            "code": code,
+            "message": message,
+            "retryable": retryable,
             "details": [],
-            "context": {"id": identifier},
+            "context": context or {},
         }
     }
 

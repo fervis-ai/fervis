@@ -1,32 +1,53 @@
 import { useEffect, useState } from "react";
 
 import type { RunPayload } from "../../fervis-api/contracts";
+import type { FervisApiClient } from "../../fervis-api/client";
+import { AskAboutAnswerControl } from "./AskAboutAnswerControl";
 import { ExplanationProof } from "./evidence/ExplanationProof";
 import { InputsMatrix } from "./evidence/InputsMatrix";
 import type { ProofMode } from "./evidence/types";
 
 export function EvidencePanel({
   run,
-  defaultOpen
+  defaultOpen,
+  apiClient
 }: {
   readonly run: RunPayload;
   readonly defaultOpen: boolean;
+  readonly apiClient: FervisApiClient | null;
 }) {
   const [proofMode, setProofMode] = useState<ProofMode>("compact");
   const [isOpen, setIsOpen] = useState(defaultOpen);
+  const [isPlayingAnswer, setIsPlayingAnswer] = useState(false);
 
   useEffect(() => {
     setIsOpen(defaultOpen);
   }, [defaultOpen, run.runId]);
 
+  useEffect(() => {
+    if (isPlayingAnswer) {
+      setIsOpen(true);
+    }
+  }, [isPlayingAnswer]);
+
   return (
     <details
-      className="evidence-panel"
+      className={
+        isPlayingAnswer ? "evidence-panel answering" : "evidence-panel"
+      }
       open={isOpen}
       onToggle={(event) => setIsOpen(event.currentTarget.open)}
     >
       <summary>
         <span className="evidence-summary-label">Evidence</span>
+        {run.status === "COMPLETED" && apiClient !== null ? (
+          <AskAboutAnswerControl
+            apiClient={apiClient}
+            questionId={run.questionId}
+            runId={run.runId}
+            onPlaybackChange={setIsPlayingAnswer}
+          />
+        ) : null}
         <span className="evidence-summary-meta">{evidenceSummary(run)}</span>
       </summary>
       <div className="evidence-body">

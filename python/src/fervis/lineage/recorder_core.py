@@ -6,11 +6,13 @@ from contextlib import AbstractContextManager
 from typing import Protocol, TypeVar
 
 from fervis.lineage.enums import (
+    ArtifactKind,
     FactResultKind,
     ProofNodeKind,
     RunResultKind,
     RunStepKey,
     RunStepKind,
+    SourceReadStatus,
 )
 from fervis.lineage.payloads.execution_proof_graph import (
     ProofGraphPayload,
@@ -151,8 +153,9 @@ class LineageRecorder:
         step: RunStepWrite,
         catalog_endpoints: tuple[CatalogEndpointWrite, ...],
         source_reads: tuple[SourceReadWrite, ...],
+        artifacts: tuple[RunArtifactWrite, ...],
     ) -> RunStepWrite:
-        if catalog_endpoints or source_reads:
+        if catalog_endpoints or source_reads or artifacts:
             _require_source_read_step(
                 step_key=step.step_key.value,
                 kind=step.kind.value,
@@ -166,10 +169,19 @@ class LineageRecorder:
                 )
         for source_read in source_reads:
             _require_source_read_belongs_to_step(source_read, step)
+        for artifact in artifacts:
+            if artifact.run_id != step.run_id or artifact.step_id != step.step_id:
+                raise LineageRecorderConflict(
+                    f"artifact {artifact.artifact_id!r} does not belong to "
+                    f"step {step.step_id!r}"
+                )
+        _validate_source_response_artifacts(source_reads, artifacts)
         with self._store.transaction():
             self._record_idempotent(records.RUN_STEP, step)
             for catalog_endpoint in catalog_endpoints:
                 self._record_idempotent(records.CATALOG_ENDPOINT, catalog_endpoint)
+            for artifact in artifacts:
+                self._record_idempotent(records.RUN_ARTIFACT, artifact)
             for source_read in source_reads:
                 self._record_idempotent(records.SOURCE_READ, source_read)
         return step
@@ -595,6 +607,51 @@ def _require_source_read_belongs_to_step(
     if source_read.step_id != step.step_id:
         raise LineageRecorderConflict(
             f"source read {source_read.source_read_id!r} does not belong to step {step.step_id!r}"
+        )
+
+
+def _validate_source_response_artifacts(
+    source_reads: tuple[SourceReadWrite, ...],
+    artifacts: tuple[RunArtifactWrite, ...],
+) -> None:
+    artifacts_by_id = {artifact.artifact_id: artifact for artifact in artifacts}
+    if len(artifacts_by_id) != len(artifacts):
+        raise LineageRecorderConflict("source context has duplicate artifact ids")
+    referenced_artifact_ids: set[str] = set()
+    for source_read in source_reads:
+        if source_read.status is not SourceReadStatus.SUCCEEDED:
+            if source_read.artifact_id is not None:
+                raise LineageRecorderConflict(
+                    f"failed source read {source_read.source_read_id!r} cannot reference an artifact"
+                )
+            continue
+        if source_read.artifact_id is None:
+            raise LineageRecorderConflict(
+                f"successful source read {source_read.source_read_id!r} requires a source response artifact"
+            )
+        artifact = artifacts_by_id.get(source_read.artifact_id)
+        if artifact is None:
+            raise LineageRecorderConflict(
+                f"source read {source_read.source_read_id!r} references an unavailable artifact"
+            )
+        if source_read.artifact_id in referenced_artifact_ids:
+            raise LineageRecorderConflict(
+                f"source response artifact {source_read.artifact_id!r} must belong to one source read"
+            )
+        if artifact.artifact_kind is not ArtifactKind.SOURCE_RESPONSE:
+            raise LineageRecorderConflict(
+                f"source read {source_read.source_read_id!r} requires a source_response artifact"
+            )
+        if artifact.content_hash != source_read.response_hash:
+            raise LineageRecorderConflict(
+                f"source read {source_read.source_read_id!r} response hash does not match its artifact"
+            )
+        referenced_artifact_ids.add(source_read.artifact_id)
+    unreferenced = set(artifacts_by_id) - referenced_artifact_ids
+    if unreferenced:
+        raise LineageRecorderConflict(
+            "source context has unreferenced artifacts: "
+            + ", ".join(sorted(unreferenced))
         )
 
 

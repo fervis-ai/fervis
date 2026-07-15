@@ -660,6 +660,7 @@ def _run_grounding_phase(
                 step=grounding_step,
                 catalog_endpoints=grounding_lineage.catalog_endpoints,
                 source_reads=grounding_lineage.source_reads,
+                artifacts=grounding_lineage.artifacts,
             )
         return _runtime_error_terminal(
             state,
@@ -682,6 +683,7 @@ def _run_grounding_phase(
             step=grounding_step,
             catalog_endpoints=grounding_lineage.catalog_endpoints,
             source_reads=grounding_lineage.source_reads,
+            artifacts=grounding_lineage.artifacts,
         )
     state.grounding_usage = state.grounding.usage
     if prepare_answer_reads:

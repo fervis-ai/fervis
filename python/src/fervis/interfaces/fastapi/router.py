@@ -21,7 +21,7 @@ def fervis_fastapi_router(
     require_read_context: bool = True,
 ):
     from fastapi import APIRouter, Depends, Request
-    from fastapi.responses import JSONResponse
+    from fastapi.responses import JSONResponse, Response
 
     router = APIRouter()
     principal_dependency = principal_dependency or _anonymous_principal
@@ -121,6 +121,32 @@ def fervis_fastapi_router(
             principal=request_principal(request, dependency_principal),
         )
         return JSONResponse(status_code=response.status_code, content=response.payload)
+
+    @router.post("/questions/{question_id}/runs/{run_id}/ask/")
+    async def answer_computation_question(
+        question_id: str,
+        run_id: str,
+        request: Request,
+        dependency_principal=Depends(principal_dependency),
+    ):
+        response = question_interface.answer_computation_question(
+            question_id,
+            run_id,
+            principal=request_principal(request, dependency_principal),
+            audio_data=await request.body(),
+            content_type=request.headers.get("Content-Type", ""),
+        )
+        if response.status_code != 200:
+            return JSONResponse(
+                status_code=response.status_code,
+                content=response.payload,
+            )
+        audio = response.payload
+        return Response(
+            content=audio.data,
+            media_type=audio.content_type,
+            headers={"Cache-Control": "no-store"},
+        )
 
     return router
 

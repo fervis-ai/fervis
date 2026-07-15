@@ -22,7 +22,14 @@ from fervis.lineage.payloads.execution_proof_graph import (
     EXECUTION_PROOF_GRAPH_SCHEMA_REV,
 )
 from fervis.lineage.memory_artifacts import MemoryArtifactRow
-from fervis.lineage.step_summary import StepSemanticItem, step_semantic_json
+from fervis.lineage.step_summary import (
+    StepSemanticItem,
+    StepSummaryItem,
+    merge_step_summary_json,
+    step_semantic_json,
+)
+from fervis.lineage.views.agent import agent_lineage_view
+from fervis.lineage.views.detail import LineageRenderDetail
 from fervis.lineage.views.explain import ExplainView
 from fervis.lineage.views.explanation import answer_explanation_view
 from fervis.lineage.views.json_payload import view_json
@@ -169,6 +176,36 @@ def test_answer_explanation_json_exposes_semantic_step_contract() -> None:
         ],
         "conversationClauses": [],
     }
+
+
+def test_agent_lineage_exposes_semantics_and_structured_decision_basis() -> None:
+    lineage = AnswerLineageService(
+        _OverbroadLineageQuery(_lineage_rows_with_semantic_step())
+    ).for_answer("answer_1")
+
+    payload = agent_lineage_view(
+        lineage_timeline_view(lineage),
+        detail=LineageRenderDetail.VERBOSE,
+    )
+
+    step = payload["questions"][0]["runs"][0]["steps"][0]
+    assert step["semantic"]["knownInputs"][0] == {
+        "inputId": "fact_1_entity_1",
+        "text": "ABC Mall",
+        "kind": "literal_text",
+        "role": "reference_value",
+        "description": "store",
+        "resolvedValueText": "ABC Mall",
+    }
+    assert step["decisions"][0]["items"] == (
+        {
+            "text": "source_1: RETAIN - matches the requested sales measure.",
+            "is_explanation": True,
+            "subject": "source_1",
+            "disposition": "RETAIN",
+            "basis": "Matches the requested sales measure.",
+        },
+    )
 
 
 def test_answer_explanation_json_exposes_conversation_resolution_semantics() -> None:
@@ -439,35 +476,47 @@ def _lineage_rows_with_semantic_step() -> LineageRows:
                     1,
                     RunStepKey.QUESTION_CONTRACT,
                     RunStepKind.MODEL_TURN,
-                    output_summary_json=step_semantic_json(
-                        StepSemanticItem(
-                            kind="requested_fact",
-                            payload={
-                                "requested_fact_id": "fact_1",
-                                "description": "sales at ABC Mall this month",
-                            },
+                    output_summary_json=merge_step_summary_json(
+                        step_semantic_json(
+                            StepSemanticItem(
+                                kind="requested_fact",
+                                payload={
+                                    "requested_fact_id": "fact_1",
+                                    "description": "sales at ABC Mall this month",
+                                },
+                            ),
+                            StepSemanticItem(
+                                kind="known_input",
+                                payload={
+                                    "input_id": "fact_1_entity_1",
+                                    "text": "ABC Mall",
+                                    "kind": "literal_text",
+                                    "role": "reference_value",
+                                    "description": "store",
+                                    "resolved_value_text": "ABC Mall",
+                                },
+                            ),
+                            StepSemanticItem(
+                                kind="interpreted_input",
+                                payload={
+                                    "input_id": "fact_1_time_1",
+                                    "input_text": "this month",
+                                    "kind": "time",
+                                    "value": "2026-06-01 to 2026-06-30",
+                                    "label": "this month",
+                                    "detail": "month",
+                                },
+                            ),
                         ),
-                        StepSemanticItem(
-                            kind="known_input",
-                            payload={
-                                "input_id": "fact_1_entity_1",
-                                "text": "ABC Mall",
-                                "kind": "literal_text",
-                                "role": "reference_value",
-                                "description": "store",
-                                "resolved_value_text": "ABC Mall",
-                            },
-                        ),
-                        StepSemanticItem(
-                            kind="interpreted_input",
-                            payload={
-                                "input_id": "fact_1_time_1",
-                                "input_text": "this month",
-                                "kind": "time",
-                                "value": "2026-06-01 to 2026-06-30",
-                                "label": "this month",
-                                "detail": "month",
-                            },
+                        StepSummaryItem(
+                            text=(
+                                "source_1: RETAIN - matches the requested sales "
+                                "measure."
+                            ),
+                            is_explanation=True,
+                            subject="source_1",
+                            disposition="RETAIN",
+                            basis="Matches the requested sales measure.",
                         ),
                     ),
                 ),

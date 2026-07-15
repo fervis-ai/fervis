@@ -39,9 +39,11 @@ class _StepRecorder:
         step: RunStepWrite,
         catalog_endpoints: tuple[CatalogEndpointWrite, ...],
         source_reads: tuple[SourceReadWrite, ...],
+        artifacts: tuple[object, ...],
     ) -> RunStepWrite:
         del catalog_endpoints
         del source_reads
+        del artifacts
         self.steps.append(step)
         return step
 

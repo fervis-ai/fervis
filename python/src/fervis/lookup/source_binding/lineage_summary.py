@@ -64,6 +64,9 @@ def _metric_review_items_for_fact(
             StepSummaryItem(
                 text=f"{evidence_id}: {fit_basis} -> {decision}",
                 is_explanation=True,
+                subject=evidence_id,
+                disposition=decision,
+                basis=fit_basis,
                 path=(
                     "outcome",
                     "metric_fit_bases",
@@ -117,6 +120,9 @@ def _population_basis_item(value: object) -> StepSummaryItem | None:
         detail=StepSummaryDetail.VERBOSE,
         is_explanation=True,
         path=("answer_population", "match_basis_explanation"),
+        subject="answer_population",
+        disposition="selected",
+        basis=basis,
     )
 
 
@@ -175,6 +181,9 @@ def _basis_item(
         detail=StepSummaryDetail.VERBOSE,
         is_explanation=True,
         path=path,
+        subject=target_parts[0],
+        disposition=target_parts[1],
+        basis=basis,
     )
 
 

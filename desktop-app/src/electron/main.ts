@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, session } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,6 +29,17 @@ function createWindow(): void {
 }
 
 void app.whenReady().then(() => {
+  session.defaultSession.setPermissionRequestHandler(
+    (_webContents, permission, callback, details) => {
+      callback(
+        permission === "media" &&
+          "mediaTypes" in details &&
+          Array.isArray(details.mediaTypes) &&
+          details.mediaTypes.length === 1 &&
+          details.mediaTypes[0] === "audio"
+      );
+    }
+  );
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
