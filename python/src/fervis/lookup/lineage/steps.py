@@ -15,6 +15,7 @@ from fervis.lineage.recorder import (
     ModelCallAuditWrite,
     RunStepWrite,
     SourceReadWrite,
+    RunArtifactWrite,
 )
 from fervis.model_io.turn_artifacts import ModelTurnArtifact
 from fervis.lookup.orchestration.request import LineagePorts
@@ -121,6 +122,7 @@ class LineageRuntimeStepSink:
         error_json: dict[str, Any] | None = None,
         catalog_endpoints: tuple[CatalogEndpointWrite, ...] = (),
         source_reads: tuple[SourceReadWrite, ...] = (),
+        artifacts: tuple[RunArtifactWrite, ...] = (),
     ) -> RunStepWrite:
         return self._record_deterministic(
             step_key=RunStepKey.EXECUTE,
@@ -137,6 +139,7 @@ class LineageRuntimeStepSink:
             error_json=error_json or {},
             catalog_endpoints=catalog_endpoints,
             source_reads=source_reads,
+            artifacts=artifacts,
         )
 
     def record_step_source_context(
@@ -145,13 +148,15 @@ class LineageRuntimeStepSink:
         *,
         catalog_endpoints: tuple[CatalogEndpointWrite, ...],
         source_reads: tuple[SourceReadWrite, ...],
+        artifacts: tuple[RunArtifactWrite, ...],
     ) -> RunStepWrite:
-        if not catalog_endpoints and not source_reads:
+        if not catalog_endpoints and not source_reads and not artifacts:
             return step
         return self.recorder.record_step_with_source_context(
             step,
             catalog_endpoints,
             source_reads,
+            artifacts,
         )
 
     def execution_step_id(self) -> str:
@@ -234,6 +239,7 @@ class LineageRuntimeStepSink:
         error_json: dict[str, Any],
         catalog_endpoints: tuple[CatalogEndpointWrite, ...] = (),
         source_reads: tuple[SourceReadWrite, ...] = (),
+        artifacts: tuple[RunArtifactWrite, ...] = (),
     ) -> RunStepWrite:
         sequence = _attempt_sequence(
             base_sequence=_DETERMINISTIC_STEP_SEQUENCE[step_key],
@@ -248,11 +254,12 @@ class LineageRuntimeStepSink:
             output_summary_json=output_summary_json,
             error_json=error_json,
         )
-        if catalog_endpoints or source_reads:
+        if catalog_endpoints or source_reads or artifacts:
             return self.recorder.record_step_with_source_context(
                 step,
                 catalog_endpoints,
                 source_reads,
+                artifacts,
             )
         return self.recorder.record_step(step)
 
@@ -317,6 +324,7 @@ def record_execution_step(
     error_json: dict[str, Any] | None = None,
     catalog_endpoints: tuple[CatalogEndpointWrite, ...] = (),
     source_reads: tuple[SourceReadWrite, ...] = (),
+    artifacts: tuple[RunArtifactWrite, ...] = (),
 ) -> RunStepWrite | None:
     sink = _lineage_step_sink(ports)
     if sink is None:
@@ -329,6 +337,7 @@ def record_execution_step(
         error_json=error_json,
         catalog_endpoints=catalog_endpoints,
         source_reads=source_reads,
+        artifacts=artifacts,
     )
 
 
@@ -338,6 +347,7 @@ def record_step_source_context(
     step: RunStepWrite | None,
     catalog_endpoints: tuple[CatalogEndpointWrite, ...],
     source_reads: tuple[SourceReadWrite, ...],
+    artifacts: tuple[RunArtifactWrite, ...],
 ) -> RunStepWrite | None:
     if step is None:
         return None
@@ -348,6 +358,7 @@ def record_step_source_context(
         step,
         catalog_endpoints=catalog_endpoints,
         source_reads=source_reads,
+        artifacts=artifacts,
     )
 
 

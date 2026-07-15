@@ -248,6 +248,7 @@ def _step_json(
                 for decision in step.decisions
                 if include_step_decision(decision.detail, detail)
             ),
+            "semantic": view_json(step.semantic),
             "requested_facts": tuple(
                 _requested_fact_json(fact) for fact in step.requested_facts
             ),
@@ -274,11 +275,26 @@ def _step_json(
 
 
 def _decision_json(decision) -> dict[str, object]:
-    return {
-        "detail": decision.detail.value,
-        "is_explanation": decision.is_explanation,
-        "lines": decision.lines,
-    }
+    return _clean(
+        {
+            "detail": decision.detail.value,
+            "is_explanation": decision.is_explanation,
+            "lines": decision.lines,
+            "items": tuple(
+                _clean(
+                    {
+                        "text": item.text,
+                        "is_explanation": item.is_explanation,
+                        "path": item.path,
+                        "subject": item.subject,
+                        "disposition": item.disposition,
+                        "basis": item.basis,
+                    }
+                )
+                for item in decision.items
+            ),
+        }
+    )
 
 
 def _requested_fact_json(fact: TimelineRequestedFactView) -> dict[str, object]:
@@ -392,9 +408,7 @@ def _proof_inputs_json(proof: ExecutionProofView) -> dict[str, tuple[str, ...]]:
     inputs = {
         "explicit": _proof_contribution_labels(proof, ContributionOrigin.EXPLICIT),
         "derived": _proof_contribution_labels(proof, ContributionOrigin.DERIVED),
-        "contextual": _proof_contribution_labels(
-            proof, ContributionOrigin.CONTEXTUAL
-        ),
+        "contextual": _proof_contribution_labels(proof, ContributionOrigin.CONTEXTUAL),
     }
     return {key: value for key, value in inputs.items() if value}
 

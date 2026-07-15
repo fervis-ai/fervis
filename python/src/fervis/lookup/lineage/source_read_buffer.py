@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from fervis.lineage.recorder import CatalogEndpointWrite, SourceReadWrite
+from fervis.lineage.recorder import (
+    CatalogEndpointWrite,
+    RunArtifactWrite,
+    SourceReadWrite,
+)
 from fervis.lookup.lineage.source_reads import SourceReadLineageScope
 
 
@@ -12,6 +16,7 @@ from fervis.lookup.lineage.source_reads import SourceReadLineageScope
 class SourceReadLineageBuffer:
     catalog_endpoints: list[CatalogEndpointWrite] = field(default_factory=list)
     source_reads: list[SourceReadWrite] = field(default_factory=list)
+    artifacts: list[RunArtifactWrite] = field(default_factory=list)
 
     def record_catalog_endpoint(
         self,
@@ -23,6 +28,10 @@ class SourceReadLineageBuffer:
     def record_source_read(self, source_read: SourceReadWrite) -> SourceReadWrite:
         self.source_reads.append(source_read)
         return source_read
+
+    def record_artifact(self, artifact: RunArtifactWrite) -> RunArtifactWrite:
+        self.artifacts.append(artifact)
+        return artifact
 
 
 @dataclass(frozen=True)
@@ -49,6 +58,10 @@ class BufferedSourceReadLineage:
                 )
             by_key[key] = endpoint
         return tuple(by_key.values())
+
+    @property
+    def artifacts(self) -> tuple[RunArtifactWrite, ...]:
+        return tuple(self.buffer.artifacts) if self.buffer is not None else ()
 
 
 def buffered_source_read_lineage(

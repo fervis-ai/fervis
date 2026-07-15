@@ -7,14 +7,22 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
-from fervis.lineage.enums import SourceReadStatus
+from fervis.lineage.enums import ArtifactKind, SourceReadStatus
 from fervis.lineage.ports import SourceReadRecorderPort
-from fervis.lineage.recorder import CatalogEndpointWrite, SourceReadWrite
+from fervis.lineage.recorder import (
+    CatalogEndpointWrite,
+    RunArtifactWrite,
+    SourceReadWrite,
+)
+from fervis.lookup.canonical_data import canonical_runtime_json
 from fervis.lookup.relation_catalog import CatalogEndpointMetadata
 from fervis.lookup.source_reads.response import (
     SourceReadFailedError,
     SourceReadObservation,
 )
+
+
+MAX_SOURCE_RESPONSE_ARTIFACT_BYTES = 8_000_000
 
 
 def source_read_key_from_index(index: int) -> str:
@@ -37,6 +45,9 @@ class SourceReadLineageScope:
         ).hexdigest()[:24]
         return f"{self.source_read_id_prefix}_{digest}"
 
+    def artifact_id(self, source_read_key: str) -> str:
+        return f"{self.source_read_id(source_read_key)}_response"
+
 
 def record_source_read_observation(
     scope: SourceReadLineageScope | None,
@@ -46,6 +57,7 @@ def record_source_read_observation(
     catalog_endpoint: CatalogEndpointMetadata | None,
     args: dict[str, Any],
     observation: SourceReadObservation,
+    response_body: Any = None,
     completeness_json: dict[str, Any] | None = None,
 ) -> str | None:
     if scope is None:
@@ -57,6 +69,13 @@ def record_source_read_observation(
         catalog_endpoint=catalog_endpoint,
     )
     if observation.succeeded:
+        artifact = _source_response_artifact(
+            scope,
+            source_read_key=source_read_key,
+            response_body=response_body,
+            response_hash=observation.response_hash,
+        )
+        scope.recorder.record_artifact(artifact)
         scope.recorder.record_source_read(
             SourceReadWrite(
                 source_read_id=source_read_id,
@@ -68,6 +87,7 @@ def record_source_read_observation(
                 row_count=observation.row_count,
                 completeness_json=completeness_json or {"pageCount": 1},
                 response_hash=observation.response_hash,
+                artifact_id=artifact.artifact_id,
             )
         )
         return source_read_id
@@ -80,6 +100,29 @@ def record_source_read_observation(
         response_hash=observation.response_hash,
     )
     return source_read_id
+
+
+def _source_response_artifact(
+    scope: SourceReadLineageScope,
+    *,
+    source_read_key: str,
+    response_body: Any,
+    response_hash: str,
+) -> RunArtifactWrite:
+    content = canonical_runtime_json(response_body)
+    encoded = content.encode("utf-8")
+    if len(encoded) > MAX_SOURCE_RESPONSE_ARTIFACT_BYTES:
+        raise ValueError("source response exceeds the 8 MB lineage artifact limit")
+    return RunArtifactWrite(
+        artifact_id=scope.artifact_id(source_read_key),
+        run_id=scope.run_id,
+        step_id=scope.step_id,
+        artifact_kind=ArtifactKind.SOURCE_RESPONSE,
+        content_hash=response_hash,
+        content_type="application/json",
+        size_bytes=len(encoded),
+        content=content,
+    )
 
 
 def require_catalog_endpoint_for_lineage(

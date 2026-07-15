@@ -403,6 +403,12 @@ def _read_eligibility_step_summary(payload: dict[str, Any]) -> dict[str, object]
                 text=_read_eligibility_review_text(review),
                 detail=StepSummaryDetail.VERBOSE,
                 is_explanation=bool(_text(review.get("retention_basis"))),
+                subject=(
+                    f"{_text(review.get('source_candidate_id'))} "
+                    f"{_text(review.get('read_id'))}"
+                ).strip(),
+                disposition=_review_decision(review),
+                basis=_text(review.get("retention_basis")),
             )
             for review in reviews
         ),
@@ -447,7 +453,10 @@ def _plan_selection_step_summary(payload: dict[str, Any]) -> dict[str, object]:
             StepSummaryItem(
                 text=_plan_selection_review_text(review),
                 detail=StepSummaryDetail.VERBOSE,
-                is_explanation=bool(_text(review.get("basis"))),
+                is_explanation=bool(_plan_selection_basis(review)),
+                subject=_source_candidate_id(review),
+                disposition=_plan_selection_disposition(review),
+                basis=_plan_selection_basis(review),
             )
             for review in reviews
         ),
@@ -474,22 +483,27 @@ def _plan_selection_reviews(payload: dict[str, Any]) -> tuple[dict[str, Any], ..
 
 def _plan_selection_review_text(review: dict[str, Any]) -> str:
     source_candidate_id = _source_candidate_id(review) or "unknown_source"
-    alignment = (
-        _text(
-            review.get("source_alignment")
-            or review.get("alignment")
-            or review.get("disposition")
-        )
-        or "UNKNOWN"
+    alignment = _plan_selection_disposition(review) or "UNKNOWN"
+    basis = _plan_selection_basis(review)
+    if basis:
+        return f"{source_candidate_id}: {alignment} - {basis}"
+    return f"{source_candidate_id}: {alignment}"
+
+
+def _plan_selection_disposition(review: dict[str, Any]) -> str:
+    return _text(
+        review.get("source_alignment")
+        or review.get("alignment")
+        or review.get("disposition")
     )
-    basis = _text(
+
+
+def _plan_selection_basis(review: dict[str, Any]) -> str:
+    return _text(
         review.get("basis")
         or review.get("alignment_basis")
         or review.get("source_alignment_basis")
     )
-    if basis:
-        return f"{source_candidate_id}: {alignment} - {basis}"
-    return f"{source_candidate_id}: {alignment}"
 
 
 def _review_decision(review: dict[str, Any]) -> str:

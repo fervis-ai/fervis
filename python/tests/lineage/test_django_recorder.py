@@ -535,7 +535,20 @@ def test_django_lineage_recorder_records_execution_step_with_source_reads_idempo
             row_count=2,
             completeness_json={"complete": True},
             response_hash="sha256:stores",
+            artifact_id="artifact_source_response",
             args_json={"is_open": True},
+        ),
+    )
+    artifacts = (
+        RunArtifactWrite(
+            artifact_id="artifact_source_response",
+            run_id="run_1",
+            step_id="step_execute",
+            artifact_kind=ArtifactKind.SOURCE_RESPONSE,
+            content_hash="sha256:stores",
+            content="[]",
+            content_type="application/json",
+            size_bytes=2,
         ),
     )
 
@@ -545,15 +558,53 @@ def test_django_lineage_recorder_records_execution_step_with_source_reads_idempo
         step,
         catalog_endpoints,
         source_reads,
+        artifacts,
     )
     recorder.record_step_with_source_context(
         step,
         catalog_endpoints,
         source_reads,
+        artifacts,
     )
 
     assert RunStep.objects.filter(step_id="step_execute").count() == 1
     assert SourceRead.objects.filter(source_read_id="source_read_1").count() == 1
+
+
+def test_django_lineage_recorder_rejects_mismatched_source_response_artifact() -> None:
+    recorder: LineageRecorderPort = DjangoLineageRecorder()
+    _record_run_spine(recorder)
+    step = RunStepWrite(
+        step_id="step_execute",
+        run_id="run_1",
+        sequence=1,
+        step_key=RunStepKey.EXECUTE,
+        kind=RunStepKind.DETERMINISTIC,
+    )
+    source_read = SourceReadWrite(
+        source_read_id="source_read_1",
+        run_id="run_1",
+        step_id="step_execute",
+        catalog_endpoint_id=_CATALOG_ENDPOINT_ID,
+        status=SourceReadStatus.SUCCEEDED,
+        row_count=2,
+        completeness_json={"complete": True},
+        response_hash="sha256:stores",
+        artifact_id="artifact_source_response",
+    )
+    artifact = RunArtifactWrite(
+        artifact_id="artifact_source_response",
+        run_id="run_1",
+        step_id="step_execute",
+        artifact_kind=ArtifactKind.SOURCE_RESPONSE,
+        content_hash="sha256:different",
+        content="[]",
+        content_type="application/json",
+        size_bytes=2,
+    )
+
+    with pytest.raises(LineageRecorderConflict, match="response hash does not match"):
+        recorder.record_step_with_source_context(step, (), (source_read,), (artifact,))
 
 
 def test_django_lineage_recorder_rejects_source_read_artifact_from_other_step() -> None:
@@ -1031,12 +1082,12 @@ def test_django_lineage_recorder_persists_clarification_primitives() -> None:
                         {
                             "id": "area:1",
                             "label": "London",
-                                "entityKind": "area",
-                                "keyId": "primary_key",
-                                "keyComponents": [
-                                    {"componentId": "area_id", "value": "area:1"}
-                                ],
-                                "matchedField": "area_id",
+                            "entityKind": "area",
+                            "keyId": "primary_key",
+                            "keyComponents": [
+                                {"componentId": "area_id", "value": "area:1"}
+                            ],
+                            "matchedField": "area_id",
                             "matchedValue": "area:1",
                             "resolverReadId": "list_areas",
                         }

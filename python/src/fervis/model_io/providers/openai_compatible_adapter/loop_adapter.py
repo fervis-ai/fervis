@@ -126,12 +126,29 @@ def _openai_compatible_request_worker(
 
 
 def _client(payload: OpenAICompatibleRequestPayload):
-    assert openai_sdk is not None
-    return openai_sdk.OpenAI(
+    return openai_compatible_client(
         api_key=payload.api_key,
         base_url=payload.base_url,
         timeout=payload.timeout,
         max_retries=payload.max_retries,
+    )
+
+
+def openai_compatible_client(
+    *,
+    api_key: str | None,
+    base_url: str | None,
+    timeout: float,
+    max_retries: int,
+):
+    """Construct the configured OpenAI-compatible SDK client in one place."""
+
+    assert openai_sdk is not None
+    return openai_sdk.OpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        timeout=timeout,
+        max_retries=max_retries,
     )
 
 

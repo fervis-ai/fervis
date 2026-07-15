@@ -1,4 +1,5 @@
 import type { ThemeMode } from "../viewTypes";
+import { FervisMark } from "./FervisMark";
 
 export function TopBar({
   themeMode,
@@ -10,7 +11,7 @@ export function TopBar({
   return (
     <header className="topbar">
       <div className="brand">
-        <img alt="" src="/fervis-logo-sm.png" />
+        <FervisMark />
         <span>Fervis</span>
       </div>
       <div className="topbar-meta">desktop alpha</div>
@@ -36,4 +37,3 @@ function themeIcon(mode: ThemeMode): string {
   }
   return "◐";
 }
-

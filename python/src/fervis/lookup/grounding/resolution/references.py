@@ -1190,6 +1190,7 @@ def _resolved_lookup_rows(
         catalog_endpoint=resolver_read.catalog_endpoint,
         args=args,
         observation=observation,
+        response_body=body.get("responseBody"),
         completeness_json=source_read_completeness(body),
     )
     if not observation.succeeded:

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import uuid
 
+from django.http import HttpResponse
+from rest_framework.renderers import BaseRenderer, JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -28,6 +30,19 @@ class FervisAPIView(APIView):
         if isinstance(exc, api_errors.APIError):
             return _api_error_response(exc, self.request)
         return super().handle_exception(exc)
+
+
+class AnswerQuestionAudioRenderer(BaseRenderer):
+    """Declare the binary response type during DRF content negotiation."""
+
+    media_type = "audio/wav"
+    format = "wav"
+    charset = None
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        # Successful audio bypasses DRF rendering through HttpResponse. This path
+        # preserves the established JSON error envelope after negotiation.
+        return JSONRenderer().render(data, accepted_media_type, renderer_context)
 
 
 def _require_authenticated_subject(request) -> None:
@@ -144,6 +159,30 @@ class QuestionRunDetailView(FervisAPIView):
         if response.status_code == 404:
             raise api_errors.NotFound.for_resource("fervis_run", run_id)
         return _question_interface_response(response, request)
+
+
+class QuestionRunAnswerQuestionView(FervisAPIView):
+    renderer_classes = [JSONRenderer, AnswerQuestionAudioRenderer]
+
+    def post(self, request, question_id: str, run_id: str):
+        _require_authenticated_subject(request)
+
+        response = django_question_interface().answer_computation_question(
+            str(question_id),
+            str(run_id),
+            principal=_principal_from_request(request),
+            audio_data=request.body,
+            content_type=request.content_type or "",
+        )
+        if response.status_code != 200:
+            return _question_interface_response(response, request)
+        audio = response.payload
+        return HttpResponse(
+            audio.data,
+            status=200,
+            content_type=audio.content_type,
+            headers={"Cache-Control": "no-store"},
+        )
 
 
 def _question_interface_response(
