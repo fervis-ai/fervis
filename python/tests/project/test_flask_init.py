@@ -62,7 +62,7 @@ def test_fervis_init_patches_flask_app_object_and_writes_json_config(
         }
     ]
     text = app_path.read_text(encoding="utf-8")
-    assert "from fervis.flask import configured_fervis" in text
+    assert "from fervis import configured_fervis" in text
     assert "configured_fervis().init_app(app)" in text
 
 
@@ -98,7 +98,7 @@ def test_fervis_init_patches_explicit_flask_app_object_from_factory_call(
     assert exit_code == 0
     assert envelope["payload"]["blocked_edits"] == []
     assert app_path.read_text(encoding="utf-8") == (
-        "from fervis.flask import configured_fervis\n"
+        "from fervis import configured_fervis\n"
         "from service import create_app\n\n"
         "CONFIG = object()\n"
         "app = create_app(CONFIG)\n"
@@ -166,7 +166,7 @@ def test_fervis_init_patches_simple_flask_app_factory(tmp_path: Path) -> None:
     assert exit_code == 0
     assert envelope["payload"]["blocked_edits"] == []
     text = app_path.read_text(encoding="utf-8")
-    assert "from fervis.flask import configured_fervis" in text
+    assert "from fervis import configured_fervis" in text
     assert "    configured_fervis().init_app(app)\n    return app" in text
 
 

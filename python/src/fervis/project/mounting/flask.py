@@ -31,7 +31,7 @@ from .common import (
 from .source import insert_after_node, insert_before_node, insert_import_line
 
 
-FLASK_IMPORT = "from fervis.flask import configured_fervis"
+FLASK_IMPORT = "from fervis import configured_fervis"
 FLASK_MOUNT = "configured_fervis().init_app(app)"
 
 
@@ -172,12 +172,12 @@ def flask_entrypoint_contains_hooks(tree: ast.Module) -> bool:
     mount_call = _flask_mount_after_app_assignment(tree, app_assignment)
     return (
         mount_call is not None
-        and import_before(tree, "fervis.flask", "configured_fervis", mount_call.lineno)
+        and import_before(tree, "fervis", "configured_fervis", mount_call.lineno)
         and not top_level_name_shadowed_before_line(
             tree,
             "configured_fervis",
             mount_call.lineno,
-            allowed_import=("fervis.flask", "configured_fervis"),
+            allowed_import=("fervis", "configured_fervis"),
         )
         and not top_level_assignment_after_line(tree, "app", app_assignment.lineno)
     )
@@ -203,7 +203,7 @@ def _plan_flask_app_object(
         loaded.tree,
         "configured_fervis",
         app_assignment.lineno,
-        allowed_import=("fervis.flask", "configured_fervis"),
+        allowed_import=("fervis", "configured_fervis"),
     ):
         return BlockedPatch(
             relative_path,
@@ -364,7 +364,7 @@ def flask_factory_contains_hooks(
         return False
     mount_call = _flask_mount_before_return(factory)
     return mount_call is not None and import_before(
-        tree, "fervis.flask", "configured_fervis", mount_call.lineno
+        tree, "fervis", "configured_fervis", mount_call.lineno
     )
 
 
@@ -450,7 +450,7 @@ def _is_configured_fervis_result(node: ast.AST) -> bool:
 
 def _fervis_import_problem(tree: ast.Module, *, path: str) -> BlockedPatch | None:
     for node in tree.body:
-        if not isinstance(node, ast.ImportFrom) or node.module != "fervis.flask":
+        if not isinstance(node, ast.ImportFrom) or node.module != "fervis":
             continue
         imported_names = {alias.name for alias in node.names}
         if "configured_fervis" not in imported_names:
@@ -470,7 +470,7 @@ def _ensure_config_fervis_import(text: str, *, path: str) -> str | BlockedPatch:
     import_problem = _fervis_import_problem(tree, path=path)
     if import_problem is not None:
         return import_problem
-    if has_import(tree, "fervis.flask", "configured_fervis"):
+    if has_import(tree, "fervis", "configured_fervis"):
         return text
     return insert_import_line(text, FLASK_IMPORT)
 

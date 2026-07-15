@@ -17,11 +17,8 @@ from .integration import (
     DatabaseUrlPersistence,
     DjangoDatabasePersistence,
     DjangoAppSource,
-    DjangoIntegration,
     FastAPIAppSource,
-    FastAPIIntegration,
     FlaskAppSource,
-    FlaskIntegration,
     FervisConfig,
     HostConfig,
     ModelConfig,
@@ -30,6 +27,7 @@ from .integration import (
     RuntimeRoutes,
     SQLitePersistence,
 )
+from fervis.integrations import FrameworkIntegration, create_framework_integration
 from fervis.model_io.models import ModelRef
 from fervis.model_io.providers.specs import supported_provider_specs
 
@@ -136,10 +134,10 @@ def _integration_from_schema(
     project: ProjectInspection,
     config_path: Path,
     active_environment: ActiveEnvironment,
-) -> DjangoIntegration | FastAPIIntegration | FlaskIntegration:
+) -> FrameworkIntegration:
     framework = str(schema.get("framework") or "")
     if framework == "django":
-        return DjangoIntegration(config=config)
+        return create_framework_integration("django", config=config)
     if framework == "flask":
         return _flask_integration_from_schema(
             schema,
@@ -164,8 +162,8 @@ def _flask_integration_from_schema(
     project: ProjectInspection,
     config_path: Path,
     active_environment: ActiveEnvironment,
-) -> FlaskIntegration:
-    integration: FlaskIntegration
+) -> FrameworkIntegration:
+    integration: FrameworkIntegration
 
     def question_interface_factory() -> QuestionInterface:
         loaded = LoadedFervisConfig(
@@ -184,7 +182,8 @@ def _flask_integration_from_schema(
         config_path=config_path,
         active_environment=active_environment,
     )
-    integration = FlaskIntegration(
+    configured = create_framework_integration(
+        "flask",
         config=config,
         question_interface_factory=question_interface_factory,
         read_context_capture=host_api_adapter.capture_read_context,
@@ -194,6 +193,7 @@ def _flask_integration_from_schema(
             active_environment=active_environment,
         ),
     )
+    integration = configured
     return integration
 
 
@@ -204,8 +204,8 @@ def _fastapi_integration_from_schema(
     project: ProjectInspection,
     config_path: Path,
     active_environment: ActiveEnvironment,
-) -> FastAPIIntegration:
-    integration: FastAPIIntegration
+) -> FrameworkIntegration:
+    integration: FrameworkIntegration
 
     def question_interface_factory() -> QuestionInterface:
         loaded = LoadedFervisConfig(
@@ -228,7 +228,8 @@ def _fastapi_integration_from_schema(
         project,
         active_environment=active_environment,
     )
-    integration = FastAPIIntegration(
+    configured = create_framework_integration(
+        "fastapi",
         config=config,
         question_interface_factory=question_interface_factory,
         read_context_capture=host_api_adapter.capture_read_context,
@@ -237,6 +238,7 @@ def _fastapi_integration_from_schema(
         principal_id_attr=principal.id_attr if principal else "id",
         require_read_context=principal is not None,
     )
+    integration = configured
     return integration
 
 

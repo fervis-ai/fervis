@@ -161,6 +161,19 @@ Fervis currently has first-class Python adapters for:
 - FastAPI;
 - Flask.
 
+`integrations/` is the public framework boundary. Each framework package owns
+its configured integration object and registers it through the framework-neutral
+`FrameworkIntegration` contract. Project configuration resolves integrations
+through that registry instead of extending a central framework-class switch.
+Host applications normally use the generic `configured_fervis()` API; explicit
+framework imports live under `fervis.integrations.<framework>`.
+
+The registry resolves built-in integration packages lazily. A new in-tree
+framework therefore adds its own integration package and registration without
+adding another top-level `fervis.<framework>` namespace. Framework-specific
+catalog, transport, and HTTP implementations remain behind the existing
+`host_api/` and `interfaces/` ports rather than leaking into the core runtime.
+
 Django/DRF and FastAPI primarily use runtime framework artifacts to describe
 routes and execute reads. Static source inspection is only for safe init/mount
 edits, not catalog truth.
@@ -473,9 +486,10 @@ Next actions should be minimal, usually one action and never noisy.
 ## Package Map
 
 ```text
-django/                     Django public integration imports
-fastapi/                    FastAPI public integration imports
-flask/                      Flask public integration imports
+integrations/               Public framework integrations and registry
+integrations/django/        Django integration object and declarative URLs
+integrations/fastapi/       FastAPI integration object and public route factory
+integrations/flask/         Flask integration object and public blueprint factory
 project/                    Config, init, doctor, mounting, persistence
 host_api/                   Framework-neutral API contracts and adapters
 questions/                  Question lifecycle ports and orchestration boundary
