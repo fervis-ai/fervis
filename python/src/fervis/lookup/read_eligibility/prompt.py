@@ -15,6 +15,7 @@ from fervis.lookup.read_eligibility.surface import (
     read_eligibility_candidate_surface,
 )
 from fervis.lookup.read_eligibility.model import ReadEligibilityRequest
+from fervis.lookup.read_eligibility.input_bindings import interpretation_question
 from fervis.lookup.read_eligibility.schema import build_read_eligibility_schema
 from fervis.model_io.structured_output.specs import required_tool_spec
 
@@ -40,9 +41,8 @@ class ReadEligibilityTurnPrompt(TurnPromptBase):
         builder: TurnPromptBuilder,
     ) -> tuple[PromptSection, ...]:
         return (
-            builder.json_section("Requested facts:", self.requested_facts_payload()),
             builder.text_section(
-                "Candidate API reads:",
+                "Read eligibility context:",
                 api_read_cards_xml(self.candidate_surface().card_payload),
             ),
         )
@@ -55,14 +55,28 @@ class ReadEligibilityTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Task Boundary",
                 (
-                    "Decide only whether each shown API read should remain available for later turns.",
-                    "Retain a read when it exposes row or field evidence that could be directly consumed by later turns for the requested fact.",
-                    "Drop a read only when it is clearly unrelated to the requested fact.",
+                    "First, interpret each named input in the complete requested-fact context and select one shown canonical identity.",
+                    "Decide which shown API reads expose useful source evidence for the requested fact, treating every selected canonical identity as fixed.",
+                    "Retain a read when its rows or fields can contribute to the requested fact.",
+                    "Drop a read when it is clearly unrelated to the requested fact.",
                     "Drop a read when it is only related context, audit/detail data, telemetry, receipt data, verification evidence, or an indirect helper.",
-                    "When a direct answer input read is incomplete, retain it. Later turns decide source binding, filters, metrics, and execution.",
-                    "When a candidate shows applicable_known_inputs, treat them as backend-resolved references that can narrow that read for the requested fact.",
+                    "Use the fact's known inputs when deciding whether a read could contribute to that fact.",
                     "Do not require the read to contain the final answer, a precomputed aggregate, a precomputed ranking, or a final display row.",
-                    "Do not decide which read is best, bind params, choose enum values, write formulas, select metrics, or validate operation legality.",
+                ),
+            ),
+            builder.instruction_block(
+                "Canonical Interpretation",
+                (
+                    "Interpret each named input before assessing any candidate read. Use its supplied text, field-label approximation, value-meaning hint, and complete requested fact together.",
+                    'For each named input, copy interpretation_question exactly, then write the `because` field as: "{input} denotes one {entity kind} because {requested-fact and resolver-card evidence}." Replace each template term with concrete text. Do not discuss whether a candidate read is attractive or should be retained.',
+                    "Then select exactly one shown canonical_option_id whose result has the entity kind stated in because. That selection fixes what the input means for this requested fact. Copy the ID exactly. Do not invent, combine, reconsider, or replace resolver bindings, fields, keys, values, or joins while assessing reads.",
+                ),
+            ),
+            builder.instruction_block(
+                "Read Assessment Under Fixed Identities",
+                (
+                    "Assess every candidate read under the selected canonical interpretations. A candidate read cannot reinterpret a named input or select another resolver.",
+                    "The selected canonical option fixes the named input's meaning while every candidate read is assessed. Text match fields are evidence for that identity; they are not computation values. This turn does not choose an application target.",
                 ),
             ),
             builder.instruction_block(
@@ -74,14 +88,12 @@ class ReadEligibilityTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Retention Rules",
                 (
-                    "Retain row-level reads that expose rows that later turns could count, list, filter, group, rank, or aggregate for the requested fact.",
+                    "Retain row-level reads that expose rows the requested fact may count, list, filter, group, rank, or aggregate.",
                     "Retain summary/report reads when returned values may answer or measure the requested fact.",
-                    "Retain broader row populations when input params or returned discriminator fields can narrow those rows later.",
-                    "Retain broader row populations when applicable_known_inputs show that a resolved question input applies through a response field.",
                     "Do not reject a read only because its endpoint resource name is broader than the requested subject.",
                     "For example, location rows with a type field may remain useful for a store question.",
                     "Do not retain reads whose only basis is that they might help validate, explain, audit, enrich, or provide context for another answer-bearing read.",
-                    "For RETAIN, retention_basis describes the rows and fields this read exposes for later turns. It must not rate, rank, or compare retained reads.",
+                    "For RETAIN, retention_basis describes the rows and fields that make the read relevant to the requested fact. It must not rate, rank, or compare retained reads.",
                     "Do not claim a retained read directly answers the requested fact unless the shown response fields alone contain the requested answer value or measure.",
                     "For RETAIN, relevant_field_tokens is the answer-changing computation support set for the requested fact, not all useful fields on a retained read.",
                     "Include a field only if its value can change the computed answer by establishing the requested row grain or identity, applying a requested filter/time/status/discriminator, grouping, ranking, joining, deduplicating, or supplying a requested measure.",
@@ -92,9 +104,11 @@ class ReadEligibilityTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Output Shape",
                 (
-                    "For each requested_fact, copy requested_fact_id in the same order shown.",
-                    "Write one read_candidate_reviews item for every shown read_candidate for that requested_fact, in the same order shown.",
-                    "Inside each read_candidate_reviews item, copy source_candidate_id and read_id from that read_candidate.",
+                    "In requested_fact_assessments, use every shown requested_fact id as a key.",
+                    "In canonical_inputs, use every shown known_input id as a key. Copy interpretation_question, write because, and select one shown canonical_option_id.",
+                    "In read_candidate_reviews, use every shown source_candidate id for that requested fact as a key.",
+                    "For RETAIN, first cite relevant_row_path_tokens and relevant_field_tokens, then write retention_basis.",
+                    "For DROP, do not write relevant_row_path_tokens or relevant_field_tokens.",
                     "relevant_row_path_tokens cites zero or more response_rows evidence_token values from the same read_candidate.",
                     "relevant_field_tokens cites zero or more response_rows.fields evidence_token values from the same read_candidate.",
                     "retention_basis explains which rows and fields justify retaining the read, or why the read provides no useful source evidence.",
@@ -105,8 +119,8 @@ class ReadEligibilityTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Validity",
                 (
-                    "Copy requested_fact_id, source_candidate_id, read_id, and evidence_token values verbatim from the prompt.",
-                    "Every evidence_token must be copied from the same read_candidate identified by read_candidate_reviews.source_candidate_id.",
+                    "Copy every requested_fact, known_input, source_candidate, canonical_option_id, and evidence_token exactly from the prompt.",
+                    "Every evidence_token must come from the read_candidate keyed by its read_candidate_reviews entry.",
                     "Do not invent endpoints, params, output fields, catalog facts, or IDs.",
                     "Do not use host-domain assumptions that are not in requested facts, conversation context, or API read cards.",
                 ),
@@ -125,33 +139,19 @@ class ReadEligibilityTurnPrompt(TurnPromptBase):
             tool_specs=(
                 required_tool_spec(
                     tool_name=READ_ELIGIBILITY_TOOL_NAME,
-                    tool_description="Submit API read retention assessments.",
+                    tool_description=(
+                        "Submit canonical-input selections and API read retention assessments."
+                    ),
                     input_schema=self._schema(),
                 ),
             )
         )
 
-    def requested_facts_payload(self) -> dict[str, object]:
-        return {
-            "requested_facts": [
-                {
-                    "requested_fact_id": fact.id,
-                    "description": fact.description,
-                    "answer_request": fact.answer_request_model_dict(),
-                    "answer_outputs": [
-                        {
-                            "answer_output_id": output.id,
-                            "description": output.description,
-                        }
-                        for output in fact.answer_outputs
-                    ],
-                }
-                for fact in self.request.requested_facts
-            ]
-        }
-
     def _schema(self) -> dict[str, object]:
         return build_read_eligibility_schema(
+            canonical_options_by_requested_fact_id=(
+                self._canonical_options_by_requested_fact_id()
+            ),
             candidate_reviews_by_requested_fact_id=(
                 self._candidate_reviews_by_requested_fact_id()
             ),
@@ -176,3 +176,44 @@ class ReadEligibilityTurnPrompt(TurnPromptBase):
             requested_fact_id: tuple(candidate_reviews)
             for requested_fact_id, candidate_reviews in reviews_by_fact_id.items()
         }
+
+    def _canonical_options_by_requested_fact_id(
+        self,
+    ) -> dict[str, tuple[dict[str, object], ...]]:
+        specs_by_fact: dict[str, list[dict[str, object]]] = {
+            fact.id: [] for fact in self.request.requested_facts
+        }
+        options = self.candidate_surface().canonical_options
+        for fact in self.request.requested_facts:
+            known_inputs_by_id = {item.id: item for item in fact.known_inputs}
+            known_input_ids = tuple(
+                dict.fromkeys(
+                    option.known_input_id
+                    for option in options
+                    if option.requested_fact_id == fact.id
+                )
+            )
+            for known_input_id in known_input_ids:
+                known_input = known_inputs_by_id[known_input_id]
+                matching = tuple(
+                    option
+                    for option in options
+                    if option.requested_fact_id == fact.id
+                    and option.known_input_id == known_input_id
+                )
+                specs_by_fact[fact.id].append(
+                    {
+                        "known_input_id": matching[0].known_input_token,
+                        "interpretation_question": interpretation_question(
+                            known_input_text=known_input.text,
+                            answer_fact=fact.description,
+                        ),
+                        "canonical_options": tuple(
+                            {
+                                "canonical_option_id": option.id,
+                            }
+                            for option in matching
+                        ),
+                    }
+                )
+        return {key: tuple(value) for key, value in specs_by_fact.items()}

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from tests.lookup.source_binding_helpers import source_binding_request
+from tests.lookup.source_binding_helpers import (
+    resolved_input_applications_for_target,
+    satisfying_source_population_test_results_for_target,
+    source_binding_request,
+)
 
 from copy import deepcopy
 from dataclasses import replace
@@ -63,9 +67,9 @@ from fervis.lookup.question_contract import (
     RequestedFactLiteralInput,
 )
 from fervis.lookup.read_eligibility import (
-    ReadAssessment,
+    RetainedReadAssessment,
     ReadEligibilityRequest,
-    ReadEligibilityResult,
+    ResolvedRetainedReadSet,
 )
 from fervis.lookup.read_eligibility.surface import (
     read_eligibility_candidate_surface,
@@ -1063,6 +1067,13 @@ def run_source_binding_row_predicate_parse_case(payload: dict[str, Any]) -> list
     outcome = _source_binding_outcome(
         request,
         candidate,
+        param_decisions=_param_decisions_from_case(
+            candidate,
+            payload["input"].get("param_decisions") or {},
+        ),
+        resolved_input_applications=(
+            payload["input"].get("resolved_input_applications") or ()
+        ),
         row_predicate_reviews=(
             {}
             if payload["input"].get("omit_row_predicate_reviews")
@@ -1136,6 +1147,13 @@ def run_source_binding_finite_choice_parse_case(payload: dict[str, Any]) -> list
     outcome = _source_binding_outcome(
         request,
         candidate,
+        param_decisions=_param_decisions_from_case(
+            candidate,
+            payload["input"].get("param_decisions") or {},
+        ),
+        resolved_input_applications=(
+            payload["input"].get("resolved_input_applications") or ()
+        ),
         finite_choice_param_reviews={
             "status": _finite_choice_review_from_case(
                 payload["input"],
@@ -1314,6 +1332,13 @@ def run_source_binding_parse_case(payload: dict[str, Any]) -> list[str]:
             finite_choice_param_reviews=_finite_choice_reviews_for_candidate(
                 candidate,
                 payload["input"].get("choices") or {},
+            ),
+            param_decisions=_param_decisions_from_case(
+                candidate,
+                payload["input"].get("param_decisions") or {},
+            ),
+            resolved_input_applications=(
+                payload["input"].get("resolved_input_applications") or ()
             ),
         )
     }
@@ -1534,21 +1559,30 @@ def _source_invocation_for_metric_candidate(
     *,
     requested_fact_id: str,
 ) -> dict[str, Any]:
+    binding_target = _binding_target_for_candidate(
+        request,
+        requested_fact_id=requested_fact_id,
+        source_candidate_id=str(candidate["source_candidate_id"]),
+    )
+    prompt_text = _source_binding_prompt_text(request)
     return {
-        "binding_target_id": _binding_target_id_for_candidate(
-            request,
-            requested_fact_id=requested_fact_id,
-            source_candidate_id=str(candidate["source_candidate_id"]),
-        ),
+        "binding_target_id": binding_target.binding_target_id,
         "answer_population": {
             "population_binding_id": _binding_surface(candidate)["population_bindings"][
                 0
             ]["population_binding_id"],
             "intent_text": f"{requested_fact_id} population",
             "match_basis_explanation": "The selected source matches this requested fact.",
+            "population_test_results": (
+                satisfying_source_population_test_results_for_target(
+                    prompt_text,
+                    binding_target_id=binding_target.binding_target_id,
+                )
+            ),
         },
         "fulfillment_decisions": _fulfillment_decisions(candidate, field_id="amount"),
         "param_decisions": {},
+        "resolved_input_applications": [],
         "row_predicate_reviews": {},
         "finite_choice_param_reviews": {},
     }
@@ -1601,7 +1635,6 @@ def _boolean_row_predicate_request() -> SourceBindingRequest:
             requested_facts=(fact,),
             catalog_selection=catalog_selection,
             conversation_context={},
-            available_values=(),
         )
     ).candidate_scopes[0]
     return source_binding_request(
@@ -1627,8 +1660,8 @@ def _boolean_row_predicate_request() -> SourceBindingRequest:
                 ),
             )
         ),
-        read_eligibility=ReadEligibilityResult(
-            read_assessments=(
+        read_eligibility=ResolvedRetainedReadSet(
+            retained_reads=(
                 _read_assessment(
                     scope=scope,
                     requested_fact_id="fact_1",
@@ -1730,7 +1763,6 @@ def _source_binding_request(
         )
     if mode == "scoped_review_selectable_owned_inputs":
         return _scoped_review_owned_input_request(
-            bind_owned_input=False,
             include_time_input=True,
         )
     if mode == "scoped_review_owned_input_choice_only":
@@ -1813,7 +1845,6 @@ def _result_limit_source_param_request() -> SourceBindingRequest:
             requested_facts=(fact,),
             catalog_selection=catalog_selection,
             conversation_context={},
-            available_values=(value,),
         )
     ).candidate_scopes[0]
     plan = _plan_for_sources(
@@ -1821,8 +1852,8 @@ def _result_limit_source_param_request() -> SourceBindingRequest:
         source_candidate_ids=(scope.source_candidate_id,),
         plan_shape="ranked_aggregate",
     )
-    read_eligibility = ReadEligibilityResult(
-        read_assessments=(
+    read_eligibility = ResolvedRetainedReadSet(
+        retained_reads=(
             _read_assessment(
                 scope=scope,
                 requested_fact_id=fact.id,
@@ -1910,7 +1941,6 @@ def _nested_population_roles_request() -> SourceBindingRequest:
             requested_facts=(fact,),
             catalog_selection=catalog_selection,
             conversation_context={},
-            available_values=(),
         )
     ).candidate_scopes[0]
     return source_binding_request(
@@ -1923,8 +1953,8 @@ def _nested_population_roles_request() -> SourceBindingRequest:
             requested_fact_id="fact_1",
             source_candidate_ids=(scope.source_candidate_id,),
         ),
-        read_eligibility=ReadEligibilityResult(
-            read_assessments=(
+        read_eligibility=ResolvedRetainedReadSet(
+            retained_reads=(
                 _read_assessment(
                     scope=scope,
                     requested_fact_id="fact_1",
@@ -2051,7 +2081,6 @@ def _yaml_prompt_surface_request(payload: dict[str, Any]) -> SourceBindingReques
                 requested_facts=(fact,),
                 catalog_selection=catalog_selection,
                 conversation_context={},
-                available_values=(),
             )
         ).candidate_scopes
     }
@@ -2089,8 +2118,8 @@ def _yaml_prompt_surface_request(payload: dict[str, Any]) -> SourceBindingReques
                 )
             ),
         ),
-        read_eligibility=ReadEligibilityResult(
-            read_assessments=tuple(
+        read_eligibility=ResolvedRetainedReadSet(
+            retained_reads=tuple(
                 _read_assessment(
                     scope=scopes_by_read_id[read_id],
                     requested_fact_id=fact.id,
@@ -2146,7 +2175,6 @@ def _source_filter_request(*, filter_basis: str) -> SourceBindingRequest:
             requested_facts=(fact,),
             catalog_selection=catalog_selection,
             conversation_context={},
-            available_values=(),
         )
     ).candidate_scopes
     sales_scope = scopes[0]
@@ -2156,31 +2184,21 @@ def _source_filter_request(*, filter_basis: str) -> SourceBindingRequest:
         if filter_basis == "plan_selection"
         else (sales_scope.source_candidate_id, refund_scope.source_candidate_id)
     )
-    read_assessments = (
+    retained_reads = [
         _read_assessment(
             scope=sales_scope,
             requested_fact_id="fact_1",
             read_id="sales",
-        ),
-        (
+        )
+    ]
+    if filter_basis == "plan_selection":
+        retained_reads.append(
             _read_assessment(
                 scope=refund_scope,
                 requested_fact_id="fact_1",
                 read_id="refunds",
             )
-            if filter_basis == "plan_selection"
-            else ReadAssessment(
-                source_candidate_id=refund_scope.source_candidate_id,
-                source_candidate_signature=refund_scope.source_candidate_signature,
-                requested_fact_id="fact_1",
-                read_id="refunds",
-                relevant_row_path_ids=(),
-                relevant_field_refs=(),
-                retention_decision="DROP",
-                retention_basis="Refunds are not sales.",
-            )
-        ),
-    )
+        )
     return source_binding_request(
         question="How many sales happened?",
         question_contract=QuestionContract(requested_facts=(fact,)),
@@ -2191,7 +2209,9 @@ def _source_filter_request(*, filter_basis: str) -> SourceBindingRequest:
             requested_fact_id="fact_1",
             source_candidate_ids=selected_source_ids,
         ),
-        read_eligibility=ReadEligibilityResult(read_assessments=read_assessments),
+        read_eligibility=ResolvedRetainedReadSet(
+            retained_reads=tuple(retained_reads)
+        ),
     )
 
 
@@ -2239,8 +2259,8 @@ def _read_assessment(
     read_id: str,
     relevant_row_path_ids: tuple[str, ...] = ("root",),
     relevant_field_refs: tuple[str, ...] | None = None,
-) -> ReadAssessment:
-    return ReadAssessment(
+) -> RetainedReadAssessment:
+    return RetainedReadAssessment(
         source_candidate_id=scope.source_candidate_id,
         source_candidate_signature=scope.source_candidate_signature,
         requested_fact_id=requested_fact_id,
@@ -2251,7 +2271,6 @@ def _read_assessment(
             if relevant_field_refs is not None
             else tuple(scope.field_refs_by_evidence_token.values())
         ),
-        retention_decision="RETAIN",
         retention_basis=f"{read_id} rows can answer the requested fact.",
     )
 
@@ -2414,7 +2433,6 @@ def _choice_param_request(
             requested_facts=(fact,),
             catalog_selection=catalog_selection,
             conversation_context={},
-            available_values=(),
         )
     ).candidate_scopes[0]
     return source_binding_request(
@@ -2440,8 +2458,8 @@ def _choice_param_request(
                 ),
             )
         ),
-        read_eligibility=ReadEligibilityResult(
-            read_assessments=(
+        read_eligibility=ResolvedRetainedReadSet(
+            retained_reads=(
                 _read_assessment(
                     scope=scope,
                     requested_fact_id="fact_1",
@@ -2735,7 +2753,6 @@ def _scoped_review_owned_input_request(
             requested_facts=(fact,),
             catalog_selection=catalog_selection,
             conversation_context={},
-            available_values=available_values,
         )
     ).candidate_scopes[0]
     return source_binding_request(
@@ -2749,20 +2766,9 @@ def _scoped_review_owned_input_request(
             source_candidate_ids=(scope.source_candidate_id,),
         ),
         available_values=available_values,
-        available_value_uses=(
-            (
-                GroundedInputUse(
-                    id="grounded_staff_id",
-                    value_id="staff_identity_1",
-                    row_source_id=api_row_source_id("sales", "root"),
-                    param_id="staff_id",
-                ),
-            )
-            if bind_owned_input
-            else ()
-        ),
-        read_eligibility=ReadEligibilityResult(
-            read_assessments=(
+        available_value_uses=(),
+        read_eligibility=ResolvedRetainedReadSet(
+            retained_reads=(
                 _read_assessment(
                     scope=scope,
                     requested_fact_id="fact_1",
@@ -2822,7 +2828,6 @@ def _row_count_request() -> SourceBindingRequest:
             requested_facts=(fact,),
             catalog_selection=catalog_selection,
             conversation_context={},
-            available_values=(),
         )
     ).candidate_scopes[0]
     return source_binding_request(
@@ -2848,8 +2853,8 @@ def _row_count_request() -> SourceBindingRequest:
                 ),
             )
         ),
-        read_eligibility=ReadEligibilityResult(
-            read_assessments=(
+        read_eligibility=ResolvedRetainedReadSet(
+            retained_reads=(
                 _read_assessment(
                     scope=scope,
                     requested_fact_id="fact_1",
@@ -2951,7 +2956,6 @@ def _reused_answer_output_metric_support_request() -> SourceBindingRequest:
                 requested_facts=facts,
                 catalog_selection=catalog_selection,
                 conversation_context={},
-                available_values=(),
             )
         ).candidate_scopes
     }
@@ -2975,8 +2979,8 @@ def _reused_answer_output_metric_support_request() -> SourceBindingRequest:
                 ),
             )
         ),
-        read_eligibility=ReadEligibilityResult(
-            read_assessments=(
+        read_eligibility=ResolvedRetainedReadSet(
+            retained_reads=(
                 _read_assessment(
                     scope=sales_scope,
                     requested_fact_id="fact_sales",
@@ -3063,7 +3067,6 @@ def _filtered_response_shape_variant_request() -> SourceBindingRequest:
             requested_facts=(fact,),
             catalog_selection=original_selection,
             conversation_context={},
-            available_values=(),
         )
     )
     cards = original_surface.card_payload
@@ -3096,8 +3099,8 @@ def _filtered_response_shape_variant_request() -> SourceBindingRequest:
             requested_fact_id="fact_1",
             source_candidate_ids=(status_scope.source_candidate_id,),
         ),
-        read_eligibility=ReadEligibilityResult(
-            read_assessments=(
+        read_eligibility=ResolvedRetainedReadSet(
+            retained_reads=(
                 _read_assessment(
                     scope=status_scope,
                     requested_fact_id="fact_1",
@@ -3167,7 +3170,6 @@ def _source_default_param_after_read_eligibility_request() -> SourceBindingReque
             requested_facts=(fact,),
             catalog_selection=catalog_selection,
             conversation_context={},
-            available_values=(),
         )
     ).candidate_scopes[0]
     return source_binding_request(
@@ -3180,8 +3182,8 @@ def _source_default_param_after_read_eligibility_request() -> SourceBindingReque
             requested_fact_id="fact_1",
             source_candidate_ids=(scope.source_candidate_id,),
         ),
-        read_eligibility=ReadEligibilityResult(
-            read_assessments=(
+        read_eligibility=ResolvedRetainedReadSet(
+            retained_reads=(
                 _read_assessment(
                     scope=scope,
                     requested_fact_id="fact_1",
@@ -3272,7 +3274,6 @@ def _multi_row_summary_metric_request(
             requested_facts=(fact,),
             catalog_selection=catalog_selection,
             conversation_context={},
-            available_values=(),
         )
     ).candidate_scopes[0]
     return source_binding_request(
@@ -3286,9 +3287,9 @@ def _multi_row_summary_metric_request(
             source_candidate_ids=(scope.source_candidate_id,),
             plan_shape=plan_shape,
         ),
-        read_eligibility=ReadEligibilityResult(
-            read_assessments=(
-                ReadAssessment(
+        read_eligibility=ResolvedRetainedReadSet(
+            retained_reads=(
+                RetainedReadAssessment(
                     source_candidate_id=scope.source_candidate_id,
                     source_candidate_signature=scope.source_candidate_signature,
                     requested_fact_id="fact_1",
@@ -3298,7 +3299,6 @@ def _multi_row_summary_metric_request(
                         "field.data.location_id",
                         "field.data.amount",
                     ),
-                    retention_decision="RETAIN",
                     retention_basis="Sales summary rows can rank locations by sales.",
                 ),
             )
@@ -3373,7 +3373,6 @@ def _optional_population_params_request() -> SourceBindingRequest:
             requested_facts=(fact,),
             catalog_selection=catalog_selection,
             conversation_context={},
-            available_values=(),
         )
     ).candidate_scopes[0]
     return source_binding_request(
@@ -3386,8 +3385,8 @@ def _optional_population_params_request() -> SourceBindingRequest:
             requested_fact_id="fact_1",
             source_candidate_ids=(scope.source_candidate_id,),
         ),
-        read_eligibility=ReadEligibilityResult(
-            read_assessments=(
+        read_eligibility=ResolvedRetainedReadSet(
+            retained_reads=(
                 _read_assessment(
                     scope=scope,
                     requested_fact_id="fact_1",
@@ -3471,7 +3470,6 @@ def _grounded_time_filter_request(
             requested_facts=(fact,),
             catalog_selection=catalog_selection,
             conversation_context={},
-            available_values=(),
         )
     ).candidate_scopes[0]
     return source_binding_request(
@@ -3502,6 +3500,7 @@ def _grounded_time_filter_request(
                 value_id="time_1",
                 row_source_id=root_row_source_id,
                 param_id="start_date",
+                requested_fact_id="fact_1",
                 value_component=TimeComponent.START,
             ),
             GroundedInputUse(
@@ -3509,11 +3508,12 @@ def _grounded_time_filter_request(
                 value_id="time_1",
                 row_source_id=root_row_source_id,
                 param_id="end_date",
+                requested_fact_id="fact_1",
                 value_component=TimeComponent.END,
             ),
         ),
-        read_eligibility=ReadEligibilityResult(
-            read_assessments=(
+        read_eligibility=ResolvedRetainedReadSet(
+            retained_reads=(
                 _read_assessment(
                     scope=scope,
                     requested_fact_id="fact_1",
@@ -3609,7 +3609,6 @@ def _identity_field_filter_request() -> SourceBindingRequest:
             requested_facts=(fact,),
             catalog_selection=catalog_selection,
             conversation_context={},
-            available_values=(),
         )
     ).candidate_scopes[0]
     return source_binding_request(
@@ -3634,12 +3633,13 @@ def _identity_field_filter_request() -> SourceBindingRequest:
                 display_value="London",
                 matched_field_ref="field.data.name",
                 matched_field_path="data.name",
+                matched_value="London",
                 proof_refs=("known_input:area_1",),
                 applies_to_requested_fact_ids=("fact_1",),
             ),
         ),
-        read_eligibility=ReadEligibilityResult(
-            read_assessments=(
+        read_eligibility=ResolvedRetainedReadSet(
+            retained_reads=(
                 _read_assessment(
                     scope=scope,
                     requested_fact_id="fact_1",
@@ -3987,6 +3987,7 @@ def _source_binding_outcome(
     param_decisions: dict[str, Any] | None = None,
     row_predicate_reviews: dict[str, Any] | None = None,
     finite_choice_param_reviews: dict[str, Any] | None = None,
+    resolved_input_applications: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     selected_fulfillment_decisions = fulfillment_decisions or _fulfillment_decisions(
         candidate,
@@ -4005,6 +4006,7 @@ def _source_binding_outcome(
         if target.requested_fact_id == "fact_1"
         and target.source_candidate_id == str(candidate["source_candidate_id"])
     )
+    prompt_text = _source_binding_prompt_text(request)
     return {
         "kind": "source_bindings",
         **metric_fit_contract,
@@ -4018,9 +4020,22 @@ def _source_binding_outcome(
                     ][0]["population_binding_id"],
                     "intent_text": "active sales",
                     "match_basis_explanation": "The requested fact asks for active sales.",
+                    "population_test_results": (
+                        satisfying_source_population_test_results_for_target(
+                            prompt_text,
+                            binding_target_id=target.binding_target_id,
+                        )
+                    ),
                 },
                 "fulfillment_decisions": selected_fulfillment_decisions,
                 "param_decisions": param_decisions or {},
+                "resolved_input_applications": (
+                    resolved_input_applications_for_target(
+                        prompt_text,
+                        binding_target_id=target.binding_target_id,
+                        selections=resolved_input_applications or (),
+                    )
+                ),
                 "row_predicate_reviews": row_predicate_reviews or {},
                 "finite_choice_param_reviews": finite_choice_param_reviews or {},
             },
@@ -4236,6 +4251,54 @@ def _first_param_decision(candidate: dict[str, Any], param_id: str) -> dict[str,
         if isinstance(decision, dict) and decision.get("decision") == "bind":
             return decision
     raise AssertionError(f"missing bind decision for {param_id}")
+
+
+def _param_decisions_from_case(
+    candidate: dict[str, Any],
+    selections: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        str(param_id): _param_decision(
+            _selected_param_decision(
+                candidate,
+                param_id=str(param_id),
+                selection=selection,
+            )
+        )
+        for param_id, selection in selections.items()
+    }
+
+
+def _source_binding_prompt_text(request: SourceBindingRequest) -> str:
+    return SourceBindingTurnPrompt(request).to_model_invocation(
+        build_turn_prompt_context(
+            current_question=request.question,
+            conversation_context={},
+            memory_payload={},
+        )
+    ).prompt_text
+
+
+def _selected_param_decision(
+    candidate: dict[str, Any],
+    *,
+    param_id: str,
+    selection: Any,
+) -> dict[str, Any]:
+    selected = selection if isinstance(selection, dict) else {"value": selection}
+    value = str(selected.get("value") or "")
+    value_component = str(selected.get("value_component") or "")
+    matches = tuple(
+        decision
+        for decision in _param(candidate, param_id).get("decision_options") or ()
+        if isinstance(decision, dict)
+        and decision.get("decision") == "bind"
+        and str(decision.get("value") or "") == value
+        and str(decision.get("value_component") or "") == value_component
+    )
+    if len(matches) != 1:
+        raise AssertionError(f"param decision fixture must select one {param_id} option")
+    return matches[0]
 
 
 def _param(candidate: dict[str, Any], param_id: str) -> dict[str, Any]:

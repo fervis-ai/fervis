@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from fervis.model_io.turns import ModelTurnPurpose
@@ -13,7 +13,9 @@ from fervis.lookup.relation_catalog import parse_relation_catalog
 from fervis.lookup.relation_catalog.selection import (
     CatalogSelectionRequest,
     CatalogSelectionResult,
+    RequestedFactCatalogSelection,
     ResolverCatalogSelectionRequest,
+    relation_catalog_for_read_ids,
     select_relation_catalog,
     select_resolver_relation_catalog,
 )
@@ -42,9 +44,13 @@ from fervis.lookup.answer_program.persistence import (
 )
 from fervis.lookup.grounding.resolution import (
     ground_question_inputs,
-    GroundingSourceReadError,
 )
-from fervis.lookup.grounding.model import ExpectedInputIdentity, GroundedInputUse
+from fervis.lookup.grounding.model import (
+    CanonicalInputLedger,
+    ExpectedInputIdentity,
+    GroundedInputUse,
+    GroundingCompatibilityResult,
+)
 from fervis.lookup.grounding.turn import GroundingGenerationError
 from fervis.lookup.memory.projection import project_lookup_memory
 from fervis.lookup.memory.outcomes import fact_value_memory_addresses
@@ -81,7 +87,11 @@ from fervis.lookup.fact_plan.fact_plan import (
     PlanClarification,
     PlanImpossible,
 )
-from fervis.lookup.answer_program.values import FactValue, LiteralType
+from fervis.lookup.answer_program.values import (
+    FactValue,
+    IdentityValuePayload,
+    LiteralType,
+)
 from fervis.lookup.fact_planning.request import FactPlanRequest
 from fervis.lookup.fact_planning.turn import (
     FactPlanGenerationError,
@@ -102,10 +112,15 @@ from fervis.lookup.read_eligibility import (
     READ_ELIGIBILITY_RECALL_READS_PER_FACT,
     ReadEligibilityGenerationError,
     ReadEligibilityRequest,
+    ResolvedRetainedReadSet,
     filter_catalog_selection_for_read_eligibility,
     generate_read_eligibility,
     prepare_catalog_selection_for_read_eligibility,
 )
+from fervis.lookup.read_eligibility.resolution import (
+    resolve_read_eligibility,
+)
+from fervis.lookup.source_reads.response import SourceReadFailedError
 from fervis.lookup.orchestration.request import (
     LookupRequest,
     LookupRuntimePorts,
@@ -123,8 +138,6 @@ from fervis.lookup.source_binding import (
 from fervis.lookup.source_binding.candidates.model import SourceCandidateRegistry
 from fervis.lookup.source_binding.role_selection import (
     bound_plan_selection_for_source_binding,
-    plan_selection_uses_only_values,
-    value_only_source_binding_plan,
 )
 from fervis.lookup.memory.available_values import (
     active_memory_operation_values,
@@ -200,6 +213,8 @@ class _LookupPipelineState:
     catalog_selection: CatalogSelectionResult | None = None
     resolver_catalog_selection: Any = None
     read_eligibility_turn: Any = None
+    read_eligibility_step: RunStepWrite | None = None
+    resolved_read_eligibility: ResolvedRetainedReadSet | None = None
     read_eligibility_usage: dict[str, Any] | None = None
     plan_selection_turn_number: int = 3
     source_candidates: SourceCandidateRegistry | None = None
@@ -207,6 +222,7 @@ class _LookupPipelineState:
     plan_selection_outcome: Any = None
     catalog: Any = None
     grounding: Any = None
+    grounding_step: RunStepWrite | None = None
     grounding_usage: dict[str, Any] | None = None
     source_binding_turn_number: int = 3
     source_binding_turn: SourceBindingTurnResult | None = None
@@ -320,7 +336,40 @@ def _run_continue_prior_request_execution(
     )
     if grounding_result is not None:
         return grounding_result
+    _select_callable_frame_reads_for_eligibility(state, execution.frame.program)
+    read_eligibility_result = _run_read_eligibility_phase(state)
+    if read_eligibility_result is not None:
+        return read_eligibility_result
     return _run_continue_prior_request_program(state, execution)
+
+
+def _select_callable_frame_reads_for_eligibility(
+    state: _LookupPipelineState,
+    program: AnswerProgram,
+) -> None:
+    authorized = AuthorizedExecutionSources.from_program(
+        full_catalog=state.full_catalog,
+        program=program,
+    )
+    read_ids = authorized.api_read_ids
+    selections = tuple(
+        RequestedFactCatalogSelection(
+            requested_fact_id=fact.id,
+            query_terms=(),
+            rankings=(),
+            selected_read_ids=read_ids,
+        )
+        for fact in state.question_contract.requested_facts
+    )
+    state.catalog_selection = CatalogSelectionResult(
+        relation_catalog=relation_catalog_for_read_ids(
+            state.full_catalog,
+            read_ids=read_ids,
+        ),
+        requested_fact_selections=selections,
+        selected_read_ids=read_ids,
+    )
+    state.catalog = state.catalog_selection.relation_catalog
 
 
 def _runtime_error_terminal(
@@ -456,9 +505,7 @@ def _run_conversation_resolution_phase(
         state.compiled_conversation_resolution = compile_conversation_resolution(
             state.conversation_resolution,
             memory_projection=state.memory_card_projection,
-            context_sources=conversation_resolution_context_sources(
-                resolution_request
-            ),
+            context_sources=conversation_resolution_context_sources(resolution_request),
         )
     except ValueError:
         return _runtime_error_terminal(
@@ -609,14 +656,14 @@ def _run_grounding_phase(
         stage="grounding",
         message="grounding question inputs",
     )
-    grounding_lineage = _grounding_source_lineage(state)
     try:
         state.grounding = ground_question_inputs(
             question=state.request.question,
             question_contract=state.question_contract,
             full_catalog=state.full_catalog,
-            resolver_catalog=state.resolver_catalog_selection.relation_catalog,
-            data_access_port=state.ports.data_access_port,
+            resolver_selections=(
+                state.resolver_catalog_selection.entity_target_selections
+            ),
             runtime_values=state.request.runtime_values,
             conversation_context=state.request.conversation_context,
             model_port=state.ports.planner_model_port,
@@ -625,7 +672,6 @@ def _run_grounding_phase(
             max_thinking_tokens=state.request.max_thinking_tokens,
             active_memory_ids=_active_memory_ids(state),
             conversation_resolution=state.compiled_conversation_resolution,
-            source_read_lineage=grounding_lineage.scope,
             host=state.request.host,
             selected_input_ids=selected_input_ids,
             expected_input_identities=expected_input_identities,
@@ -646,42 +692,12 @@ def _run_grounding_phase(
             exc=exc,
             usage=_phase_usage(state, exc.usage),
         )
-    except GroundingSourceReadError as exc:
-        grounding_step = None
-        if exc.turn is not None:
-            grounding_step = _append_model_turn_completed(
-                state,
-                phase=ModelTurnPurpose.GROUNDING,
-                turn=_grounding_turn_number(state),
-                model_turn=exc.turn,
-            )
-            record_step_source_context(
-                state.ports,
-                step=grounding_step,
-                catalog_endpoints=grounding_lineage.catalog_endpoints,
-                source_reads=grounding_lineage.source_reads,
-            )
-        return _runtime_error_terminal(
-            state,
-            error_code=ErrorCode.FRAMEWORK_ADAPTER_FAILED,
-            message=str(exc),
-            usage=_phase_usage(state, exc.usage),
-            failed_step_id=(
-                grounding_step.step_id if grounding_step is not None else None
-            ),
-        )
     if state.grounding.turn is not None:
-        grounding_step = _append_model_turn_completed(
+        state.grounding_step = _append_model_turn_completed(
             state,
             phase=ModelTurnPurpose.GROUNDING,
             turn=_grounding_turn_number(state),
             model_turn=state.grounding.turn,
-        )
-        record_step_source_context(
-            state.ports,
-            step=grounding_step,
-            catalog_endpoints=grounding_lineage.catalog_endpoints,
-            source_reads=grounding_lineage.source_reads,
         )
     state.grounding_usage = state.grounding.usage
     if prepare_answer_reads:
@@ -713,17 +729,31 @@ def _run_read_eligibility_phase(state: _LookupPipelineState) -> LookupResult | N
         stage="read_eligibility",
         message="selecting candidate reads",
     )
+    grounding_compatibility = (
+        state.grounding.turn.result
+        if state.grounding.turn is not None
+        else GroundingCompatibilityResult(compatibilities=())
+    )
+    compatible_reference_bindings = tuple(
+        binding
+        for compatibility in grounding_compatibility.compatibilities
+        for binding in compatibility.bindings
+    )
+    request = ReadEligibilityRequest(
+        question=state.request.question,
+        question_contract=state.question_contract,
+        requested_facts=state.question_contract.requested_facts,
+        catalog_selection=_required_catalog_selection(state),
+        resolver_catalog=state.resolver_catalog_selection.relation_catalog,
+        conversation_context=state.request.conversation_context,
+        binding_tasks=state.grounding.binding_tasks,
+        compatible_reference_bindings=compatible_reference_bindings,
+        canonical_values=_read_eligibility_canonical_values(state),
+        host=state.request.host,
+    )
     try:
         state.read_eligibility_turn = generate_read_eligibility(
-            request=ReadEligibilityRequest(
-                question=state.request.question,
-                question_contract=state.question_contract,
-                requested_facts=state.question_contract.requested_facts,
-                catalog_selection=_required_catalog_selection(state),
-                conversation_context=state.request.conversation_context,
-                available_values=_catalog_available_values_for_state(state),
-                host=state.request.host,
-            ),
+            request=request,
             model_port=state.ports.planner_model_port,
             provider=state.provider,
             model_key=state.model_key,
@@ -737,19 +767,90 @@ def _run_read_eligibility_phase(state: _LookupPipelineState) -> LookupResult | N
             exc=exc,
             usage=_phase_usage(state, exc.usage),
         )
-    _append_model_turn_completed(
+    state.read_eligibility_step = _append_model_turn_completed(
         state,
         phase=ModelTurnPurpose.READ_ELIGIBILITY,
         turn=_read_eligibility_turn_number(state),
         model_turn=state.read_eligibility_turn,
     )
     state.read_eligibility_usage = state.read_eligibility_turn.usage
+    source_lineage = _read_eligibility_source_lineage(state)
+    try:
+        resolved = resolve_read_eligibility(
+            request=request,
+            result=state.read_eligibility_turn.result,
+            full_catalog=state.full_catalog,
+            data_access_port=state.ports.data_access_port,
+            source_read_key_prefix="read_eligibility",
+            source_read_lineage=source_lineage.scope,
+        )
+    except SourceReadFailedError as exc:
+        record_step_source_context(
+            state.ports,
+            step=state.read_eligibility_step,
+            catalog_endpoints=source_lineage.catalog_endpoints,
+            source_reads=source_lineage.source_reads,
+        )
+        return _runtime_error_terminal(
+            state,
+            error_code=ErrorCode.FRAMEWORK_ADAPTER_FAILED,
+            message=str(exc),
+            usage=_phase_usage(state, state.read_eligibility_usage),
+            failed_step_id=(
+                state.read_eligibility_step.step_id
+                if state.read_eligibility_step is not None
+                else None
+            ),
+        )
+    record_step_source_context(
+        state.ports,
+        step=state.read_eligibility_step,
+        catalog_endpoints=source_lineage.catalog_endpoints,
+        source_reads=source_lineage.source_reads,
+    )
+    state.grounding = replace(
+        state.grounding,
+        ledger=_merge_canonical_input_ledgers(
+            state.grounding.ledger,
+            resolved.ledger,
+        ),
+    )
+    if resolved.ledger.issues:
+        return _synthesize_result(
+            request=state.request,
+            ports=state.ports,
+            fact_result=_grounding_issue_fact_result(resolved.ledger.issues),
+            status=RunStatus.NEEDS_CLARIFICATION,
+            usage=_phase_usage(state, state.read_eligibility_usage),
+            question_contract=state.question_contract,
+            grounded_values=state.grounding.ledger.values,
+            question_contract_step_id=model_turn_step_id(
+                state.ports,
+                purpose=ModelTurnPurpose.QUESTION_CONTRACT,
+                turn=_question_turn_number(state),
+            ),
+        )
+    state.resolved_read_eligibility = resolved
     state.catalog_selection = filter_catalog_selection_for_read_eligibility(
         catalog_selection=_required_catalog_selection(state),
-        read_eligibility=state.read_eligibility_turn.result,
+        read_eligibility=resolved,
     )
     state.catalog = state.catalog_selection.relation_catalog
     return None
+
+
+def _merge_canonical_input_ledgers(
+    existing: CanonicalInputLedger,
+    added: CanonicalInputLedger,
+) -> CanonicalInputLedger:
+    return CanonicalInputLedger(
+        values=_dedupe_fact_values((*existing.values, *added.values)),
+        uses=tuple(dict.fromkeys((*existing.uses, *added.uses))),
+        issues=tuple(dict.fromkeys((*existing.issues, *added.issues))),
+        certifications=tuple(
+            dict.fromkeys((*existing.certifications, *added.certifications))
+        ),
+    )
 
 
 def _run_continue_prior_request_program(
@@ -819,7 +920,6 @@ def _select_answer_reads_for_eligibility(
             resource_name_matches=(
                 state.query_enrichment_turn.result.requested_fact_resource_name_matches
             ),
-            available_values=_catalog_available_values_for_state(state),
         )
     )
     state.catalog_selection = prepare_catalog_selection_for_read_eligibility(
@@ -843,16 +943,6 @@ def _run_source_binding_phase(state: _LookupPipelineState) -> LookupResult | Non
     if limit_failure is not None:
         return limit_failure
     state.source_binding_turn_number = state.plan_selection_turn_number + 1
-    if _selected_plan_uses_only_values(state):
-        assert isinstance(state.plan_selection_outcome, PlanSelectionSet)
-        value_only_plan = value_only_source_binding_plan(
-            state.plan_selection_outcome,
-            requested_facts=state.question_contract.requested_facts,
-        )
-        if value_only_plan is not None:
-            state.source_binding_outcome = value_only_plan
-            _set_fact_plan_request_from_source_binding(state)
-            return None
     if not isinstance(state.plan_selection_outcome, PlanSelectionSet):
         return _runtime_error_terminal(
             state,
@@ -931,12 +1021,6 @@ def _set_fact_plan_request_from_source_binding(state: _LookupPipelineState) -> N
     )
 
 
-def _selected_plan_uses_only_values(state: _LookupPipelineState) -> bool:
-    if not isinstance(state.plan_selection_outcome, PlanSelectionSet):
-        return False
-    return plan_selection_uses_only_values(state.plan_selection_outcome)
-
-
 def _run_plan_selection_phase(state: _LookupPipelineState) -> LookupResult | None:
     limit_failure = _limit_before_next_model_turn(state.ports, state.request.run_id)
     if limit_failure is not None:
@@ -959,6 +1043,7 @@ def _run_plan_selection_phase(state: _LookupPipelineState) -> LookupResult | Non
                 relation_catalog=state.catalog,
                 source_candidates=state.source_candidates,
                 conversation_context=state.request.conversation_context,
+                available_values=_available_values_for_state(state),
                 host=state.request.host,
             ),
             model_port=state.ports.planner_model_port,
@@ -1026,11 +1111,7 @@ def _source_binding_request_for_state(
             *state.grounding.ledger.uses,
             *_source_binding_response_uses(state),
         ),
-        read_eligibility=(
-            state.read_eligibility_turn.result
-            if state.read_eligibility_turn is not None
-            else None
-        ),
+        read_eligibility=(state.resolved_read_eligibility),
         plan_selection=plan_selection,
         source_candidates=state.source_candidates,
         conversation_context=state.request.conversation_context,
@@ -1053,11 +1134,7 @@ def _source_candidate_discovery_request_for_state(
         catalog_selection=_required_catalog_selection(state),
         available_values=_available_values_for_state(state),
         available_value_uses=state.grounding.ledger.uses,
-        read_eligibility=(
-            state.read_eligibility_turn.result
-            if state.read_eligibility_turn is not None
-            else None
-        ),
+        read_eligibility=(state.resolved_read_eligibility),
         conversation_context=state.request.conversation_context,
         conversation_resolution=state.compiled_conversation_resolution,
         host=state.request.host,
@@ -1386,24 +1463,61 @@ def _source_binding_relation_sources(
 
 
 def _available_values_for_state(state: _LookupPipelineState) -> tuple[FactValue, ...]:
+    grounded_values = tuple(state.grounding.ledger.values)
+    memory_values = active_memory_operation_values(
+        memory=state.memory,
+        active_memory_ids=_active_memory_ids(state),
+    )
     return _dedupe_fact_values(
         (
-            *state.grounding.ledger.values,
-            *active_memory_operation_values(
-                memory=state.memory,
-                active_memory_ids=_active_memory_ids(state),
+            *grounded_values,
+            *(
+                value
+                for value in memory_values
+                if not _identity_is_a_resolved_question_input(
+                    value,
+                    grounded_values=grounded_values,
+                )
             ),
         )
+    )
+
+
+def _identity_is_a_resolved_question_input(
+    value: FactValue,
+    *,
+    grounded_values: tuple[FactValue, ...],
+) -> bool:
+    if not isinstance(value.payload, IdentityValuePayload):
+        return False
+    return any(
+        grounded.known_input_id
+        and isinstance(grounded.payload, IdentityValuePayload)
+        and grounded.payload.key == value.payload.key
+        for grounded in grounded_values
+    )
+
+
+def _read_eligibility_canonical_values(
+    state: _LookupPipelineState,
+) -> tuple[FactValue, ...]:
+    current_known_input_ids = {
+        known_input.id
+        for fact in state.question_contract.requested_facts
+        for known_input in fact.known_inputs
+    }
+    return tuple(
+        value
+        for value in state.grounding.ledger.values
+        if value.known_input_id in current_known_input_ids
+        and isinstance(value.payload, IdentityValuePayload)
     )
 
 
 def _source_binding_available_values_for_state(
     state: _LookupPipelineState,
 ) -> tuple[FactValue, ...]:
-    grounded_values = (
-        tuple(state.grounding.ledger.values) if state.grounding is not None else ()
-    )
-    return _dedupe_fact_values(grounded_values)
+    return _dedupe_fact_values(_available_values_for_state(state))
 
 
 def _source_binding_response_values(
@@ -1504,20 +1618,7 @@ def _catalog_response_use(
         value_id=f"clarification_value:{response.response_id}",
         row_source_id=response.target.row_source_id,
         param_id=response.target.param_id,
-    )
-
-
-def _catalog_available_values_for_state(
-    state: _LookupPipelineState,
-) -> tuple[FactValue, ...]:
-    grounded_values = (
-        tuple(state.grounding.ledger.values) if state.grounding is not None else ()
-    )
-    return _dedupe_fact_values(
-        (
-            *grounded_values,
-            *_active_memory_reference_values_for_state(state),
-        )
+        requested_fact_id=response.requested_fact_id,
     )
 
 
@@ -1924,13 +2025,15 @@ def _program_invocation_binding(
     return binding
 
 
-def _grounding_source_lineage(state: _LookupPipelineState) -> BufferedSourceReadLineage:
+def _read_eligibility_source_lineage(
+    state: _LookupPipelineState,
+) -> BufferedSourceReadLineage:
     return _source_read_lineage_for_step(
         state,
         step_id=model_turn_step_id(
             state.ports,
-            purpose=ModelTurnPurpose.GROUNDING,
-            turn=_grounding_turn_number(state),
+            purpose=ModelTurnPurpose.READ_ELIGIBILITY,
+            turn=_read_eligibility_turn_number(state),
         ),
     )
 

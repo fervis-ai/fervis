@@ -1,7 +1,7 @@
 schema_revision: 1
 programs:
   canonical_a:
-    schema_revision: 2
+    schema_revision: 3
     program:
       $type: AnswerProgram
       fields:
@@ -53,14 +53,14 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 2
+            schema_revision: 3
             compiler_version: ''
             function_semantics:
               $tuple: []
             source_contracts:
               $tuple: []
   canonical_b:
-    schema_revision: 2
+    schema_revision: 3
     program:
       $type: AnswerProgram
       fields:
@@ -108,14 +108,14 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 2
+            schema_revision: 3
             compiler_version: ''
             function_semantics:
               $tuple: []
             source_contracts:
               $tuple: []
   compile_catalog_default:
-    schema_revision: 2
+    schema_revision: 3
     program:
       $type: AnswerProgram
       fields:
@@ -182,6 +182,8 @@ programs:
                     $tuple: []
                   population_choices:
                     $tuple: []
+                  population_binding: null
+                  population_coverage_claims: {$tuple: []}
                   proof_refs:
                     $tuple: []
               fields:
@@ -241,14 +243,14 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 2
+            schema_revision: 3
             compiler_version: ''
             function_semantics:
               $tuple: []
             source_contracts:
               $tuple: []
   compile_hidden_value:
-    schema_revision: 2
+    schema_revision: 3
     program:
       $type: AnswerProgram
       fields:
@@ -317,6 +319,8 @@ programs:
                     $tuple: []
                   population_choices:
                     $tuple: []
+                  population_binding: null
+                  population_coverage_claims: {$tuple: []}
                   proof_refs:
                     $tuple: []
               fields:
@@ -376,14 +380,14 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 2
+            schema_revision: 3
             compiler_version: ''
             function_semantics:
               $tuple: []
             source_contracts:
               $tuple: []
   invocation:
-    schema_revision: 2
+    schema_revision: 3
     program:
       $type: AnswerProgram
       fields:
@@ -497,6 +501,8 @@ programs:
                     $tuple: []
                   population_choices:
                     $tuple: []
+                  population_binding: null
+                  population_coverage_claims: {$tuple: []}
                   proof_refs:
                     $tuple: []
               fields:
@@ -556,7 +562,7 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 2
+            schema_revision: 3
             compiler_version: fervis.answer_program.compiler@1
             function_semantics:
               $tuple:
@@ -598,7 +604,7 @@ programs:
                   source_id: sales
                   fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   memory_backed:
-    schema_revision: 2
+    schema_revision: 3
     program:
       $type: AnswerProgram
       fields:
@@ -623,6 +629,8 @@ programs:
                   applied_filters: {$tuple: []}
                   row_filters: {$tuple: []}
                   population_choices: {$tuple: []}
+                  population_binding: null
+                  population_coverage_claims: {$tuple: []}
                   proof_refs: {$tuple: [memory:prior_sales]}
               fields:
                 $tuple:
@@ -637,7 +645,7 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 2
+            schema_revision: 3
             compiler_version: fervis.answer_program.compiler@1
             function_semantics:
               $tuple:
@@ -657,7 +665,7 @@ programs:
                   source_id: mem_fe7f674c7ac59e4a
                   fingerprint: 8a2f05f7e1f6c2aee3b39cb8f1d4572306d28bfbd81a671f099af87d915638f2
   population_required:
-    schema_revision: 2
+    schema_revision: 3
     program:
       $type: AnswerProgram
       fields:
@@ -788,6 +796,8 @@ programs:
                           $tuple: []
                         review_scope_decisions:
                           $tuple: []
+                  population_binding: null
+                  population_coverage_claims: {$tuple: []}
                   proof_refs:
                     $tuple: []
               fields:
@@ -847,7 +857,7 @@ programs:
         compatibility: &population_compatibility
           $type: ProgramCompatibility
           fields:
-            schema_revision: 2
+            schema_revision: 3
             compiler_version: fervis.answer_program.compiler@1
             function_semantics:
               $tuple:
@@ -893,7 +903,7 @@ programs:
                   source_id: sales
                   fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   population_scalar_invalid:
-    schema_revision: 2
+    schema_revision: 3
     program:
       $type: AnswerProgram
       fields:
@@ -916,7 +926,7 @@ programs:
         result_projection: *population_result_projection
         compatibility: *population_compatibility
   population_plan_control_invalid:
-    schema_revision: 2
+    schema_revision: 3
     program:
       $type: AnswerProgram
       fields:
@@ -939,7 +949,7 @@ programs:
         result_projection: *population_result_projection
         compatibility: *population_compatibility
   population_optional:
-    schema_revision: 2
+    schema_revision: 3
     program:
       $type: AnswerProgram
       fields:
@@ -1069,6 +1079,8 @@ programs:
                           $tuple: []
                         review_scope_decisions:
                           $tuple: []
+                  population_binding: null
+                  population_coverage_claims: {$tuple: []}
                   proof_refs:
                     $tuple: []
               fields:
@@ -1128,7 +1140,7 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 2
+            schema_revision: 3
             compiler_version: fervis.answer_program.compiler@1
             function_semantics:
               $tuple:
@@ -1174,7 +1186,7 @@ programs:
                   source_id: sales
                   fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   capability:
-    schema_revision: 2
+    schema_revision: 3
     program:
       $type: AnswerProgram
       fields:
@@ -1296,6 +1308,8 @@ programs:
                     $tuple: []
                   population_choices:
                     $tuple: []
+                  population_binding: null
+                  population_coverage_claims: {$tuple: []}
                   proof_refs:
                     $tuple: []
               fields:
@@ -1362,7 +1376,7 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 2
+            schema_revision: 3
             compiler_version: fervis.answer_program.compiler@1
             function_semantics:
               $tuple:
@@ -1412,7 +1426,7 @@ programs:
                   source_id: sales
                   fingerprint: e7351d0771a04bb0704b7babf7f953eb634c0b1f8a0e9d88dffbf3ed981ab612
   incompatible_compiler:
-    schema_revision: 2
+    schema_revision: 3
     program:
       $type: AnswerProgram
       fields:
@@ -1515,6 +1529,8 @@ programs:
                     $tuple: []
                   population_choices:
                     $tuple: []
+                  population_binding: null
+                  population_coverage_claims: {$tuple: []}
                   proof_refs:
                     $tuple: []
               fields:
@@ -1574,7 +1590,7 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 2
+            schema_revision: 3
             compiler_version: incompatible.compiler@1
             function_semantics:
               $tuple:
@@ -1616,7 +1632,7 @@ programs:
                   source_id: sales
                   fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   incompatible_function:
-    schema_revision: 2
+    schema_revision: 3
     program:
       $type: AnswerProgram
       fields:
@@ -1719,6 +1735,8 @@ programs:
                     $tuple: []
                   population_choices:
                     $tuple: []
+                  population_binding: null
+                  population_coverage_claims: {$tuple: []}
                   proof_refs:
                     $tuple: []
               fields:
@@ -1778,7 +1796,7 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 2
+            schema_revision: 3
             compiler_version: fervis.answer_program.compiler@1
             function_semantics:
               $tuple:
@@ -1820,7 +1838,7 @@ programs:
                   source_id: sales
                   fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   compute_versioned_constant:
-    schema_revision: 2
+    schema_revision: 3
     program:
       $type: AnswerProgram
       fields:
@@ -1912,6 +1930,7 @@ programs:
                           item_index: null
                           origin: {$enum: ValueExpressionOrigin, value: constant}
                   output_scalar: scaled
+                  input_population_coverage: {$tuple: []}
                   kind: {$enum: OperationKind, value: compute}
               output_relation: ''
         result_projection:
@@ -1929,7 +1948,7 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 2
+            schema_revision: 3
             compiler_version: fervis.answer_program.compiler@1
             function_semantics:
               $tuple:

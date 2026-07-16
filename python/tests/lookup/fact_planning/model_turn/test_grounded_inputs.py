@@ -1,518 +1,82 @@
 from ._helpers import *  # noqa: F403
 
+from fervis.lookup.fact_planning.row_set_filters import (
+    filter_row_set_filters_for_requested_fact,
+)
+from fervis.lookup.fact_planning.grounded_params import (
+    unique_grounded_param_values,
+)
 
-def test_fact_plan_prompt_marks_grounded_required_params_as_satisfied():
-    row_source_id = api_row_source_id("sales", "root")
-    request = FactPlanRequest(
-        question="How much revenue on April 8?",
-        question_contract=_question_contract(),
-        relation_catalog=RelationCatalog(
-            reads=(
-                EndpointRead(
-                    id="sales",
-                    endpoint_name="list_sales",
-                    params=(
-                        CatalogParam(
-                            ref="sales.query.start_date",
-                            name="start_date",
-                            source=ParamSource.QUERY,
-                            type="date",
-                            required=True,
-                        ),
-                        CatalogParam(
-                            ref="sales.query.end_date",
-                            name="end_date",
-                            source=ParamSource.QUERY,
-                            type="date",
-                            required=True,
-                        ),
-                    ),
-                    fields=(CatalogField(ref="field.total", type="decimal"),),
-                ),
-            )
+
+def test_row_set_filters_use_their_exact_fact_scoped_value() -> None:
+    area_value = FactValue.identity(
+        id="nairobi_area",
+        known_input_id="nairobi",
+        key=entity_key_value("area", "primary_key", {"area_id": "area_1"}),
+        applies_to_requested_fact_ids=("area_fact",),
+    )
+    location_value = FactValue.identity(
+        id="nairobi_location",
+        known_input_id="nairobi",
+        key=entity_key_value(
+            "location",
+            "primary_key",
+            {"location_id": "location_1"},
         ),
-        available_values=(
-            FactValue.time(
-                id="april_8",
-                expression="April 8",
-                resolved_start="2026-04-08",
-                resolved_end="2026-04-08",
-                granularity="day",
-            ),
-        ),
-        available_value_uses=(
-            GroundedInputUse(
-                id="grounded_start",
-                value_id="april_8",
-                row_source_id=row_source_id,
-                param_id="start_date",
-                value_component=TimeComponent.START,
-            ),
-            GroundedInputUse(
-                id="grounded_end",
-                value_id="april_8",
-                row_source_id=row_source_id,
-                param_id="end_date",
-                value_component=TimeComponent.END,
-            ),
-        ),
+        applies_to_requested_fact_ids=("location_fact",),
+    )
+    filters = (
+        {"value_id": area_value.id, "known_input_id": "nairobi"},
+        {"value_id": location_value.id, "known_input_id": "nairobi"},
     )
 
-    prompt = _fact_plan_prompt(request)
-    assert prompt.index("Operation input values:") < prompt.index("Bound sources:")
-    relation_catalog = _json_prompt_section(
-        prompt,
-        label="Bound sources",
-        next_label="Catalog selection",
+    assert filter_row_set_filters_for_requested_fact(
+        filters,
+        requested_fact_id="area_fact",
+        available_values=(area_value, location_value),
+    ) == [{"value_id": "nairobi_area", "known_input_id": "nairobi"}]
+
+
+def test_grounded_parameter_values_use_the_fact_scoped_application() -> None:
+    row_source_id = "read:rows"
+    area_value = FactValue.identity(
+        id="nairobi_area",
+        known_input_id="nairobi",
+        key=entity_key_value("area", "primary_key", {"area_id": "area_1"}),
     )
-
-    sales_source = next(
-        item
-        for item in _bound_sources(relation_catalog)
-        if item.get("read_id") == "sales"
+    location_value = FactValue.identity(
+        id="nairobi_location",
+        known_input_id="nairobi",
+        key=entity_key_value(
+            "location",
+            "primary_key",
+            {"location_id": "location_1"},
+        ),
     )
-    assert "params" not in sales_source
-    assert sales_source["applied_filters"] == [
-        {
-            "display_value": "April 8",
-            "kind": "time",
-            "resolved_end": "2026-04-08",
-            "resolved_start": "2026-04-08",
-            "value_id": "april_8",
-        }
-    ]
-
-
-def test_fact_plan_prompt_marks_grounded_optional_params_as_satisfied():
-    row_source_id = api_row_source_id("sales", "root")
-    request = FactPlanRequest(
-        question="How much did Azraah make in sales?",
-        question_contract=_question_contract(),
-        relation_catalog=RelationCatalog(
-            reads=(
-                EndpointRead(
-                    id="sales",
-                    endpoint_name="list_sales",
-                    params=(
-                        CatalogParam(
-                            ref="sales.query.staff_id",
-                            name="staff_id",
-                            source=ParamSource.QUERY,
-                            type="uuid",
-                        ),
-                    ),
-                    fields=(CatalogField(ref="field.amount", type="decimal"),),
-                ),
-            )
+    uses = (
+        GroundedInputUse(
+            id="area_use",
+            value_id=area_value.id,
+            row_source_id=row_source_id,
+            param_id="place_id",
+            requested_fact_id="area_fact",
         ),
-        available_values=(
-            FactValue.identity(
-                id="azraah",
-                key=entity_key_value(
-                    "staff", "primary_key", {"staff_id": "staff_1"}
-                ),
-                display_value="Azraah Fatuma",
-            ),
-        ),
-        available_value_uses=(
-            GroundedInputUse(
-                id="grounded_staff",
-                value_id="azraah",
-                row_source_id=row_source_id,
-                param_id="staff_id",
-            ),
+        GroundedInputUse(
+            id="location_use",
+            value_id=location_value.id,
+            row_source_id=row_source_id,
+            param_id="place_id",
+            requested_fact_id="location_fact",
         ),
     )
 
-    prompt = _fact_plan_prompt(request)
-    assert prompt.index("Operation input values:") < prompt.index("Bound sources:")
-    relation_catalog = _json_prompt_section(
-        prompt,
-        label="Bound sources",
-        next_label="Catalog selection",
+    grounded = unique_grounded_param_values(
+        values=(area_value, location_value),
+        grounded_input_uses=uses,
+        requested_fact_id="area_fact",
     )
 
-    sales_source = next(
-        item
-        for item in _bound_sources(relation_catalog)
-        if item.get("read_id") == "sales"
-    )
-    assert "params" not in sales_source
-    assert sales_source["applied_filters"] == [
-        {
-            "display_value": "Azraah Fatuma",
-            "kind": "identity",
-            "value_id": "azraah",
-        }
-    ]
-
-    operation_values = _json_prompt_section(
-        prompt,
-        label="Operation input values",
-        next_label="Bound sources",
-    )
-    assert operation_values == {"values": []}
-
-
-def test_fact_plan_prompt_projects_grounded_inputs_as_scoped_row_set():
-    row_source_id = api_row_source_id("sales", "root")
-    request = FactPlanRequest(
-        question="How much did Azraah make in sales on February 14, 2026?",
-        question_contract=_question_contract(),
-        relation_catalog=RelationCatalog(
-            reads=(
-                EndpointRead(
-                    id="sales",
-                    endpoint_name="list_sales",
-                    params=(
-                        CatalogParam(
-                            ref="sales.query.staff_id",
-                            name="staff_id",
-                            source=ParamSource.QUERY,
-                            type="uuid",
-                        ),
-                        CatalogParam(
-                            ref="sales.query.start_date",
-                            name="start_date",
-                            source=ParamSource.QUERY,
-                            type="date",
-                        ),
-                        CatalogParam(
-                            ref="sales.query.end_date",
-                            name="end_date",
-                            source=ParamSource.QUERY,
-                            type="date",
-                        ),
-                    ),
-                    fields=(CatalogField(ref="field.amount", type="decimal"),),
-                ),
-            )
-        ),
-        available_values=(
-            FactValue.identity(
-                id="azraah",
-                known_input_id="fact_1_input_1",
-                key=entity_key_value(
-                    "staff", "primary_key", {"staff_id": "staff_1"}
-                ),
-                display_value="Azraah Fatuma",
-                proof_refs=("known_input:fact_1_input_1",),
-            ),
-            FactValue.time(
-                id="feb_14",
-                expression="February 14, 2026",
-                resolved_start="2026-02-14",
-                resolved_end="2026-02-14",
-                granularity="day",
-            ),
-        ),
-        available_value_uses=(
-            GroundedInputUse(
-                id="grounded_staff",
-                value_id="azraah",
-                row_source_id=row_source_id,
-                param_id="staff_id",
-            ),
-            GroundedInputUse(
-                id="grounded_start",
-                value_id="feb_14",
-                row_source_id=row_source_id,
-                param_id="start_date",
-                value_component=TimeComponent.START,
-            ),
-            GroundedInputUse(
-                id="grounded_end",
-                value_id="feb_14",
-                row_source_id=row_source_id,
-                param_id="end_date",
-                value_component=TimeComponent.END,
-            ),
-        ),
-    )
-
-    prompt = _fact_plan_prompt(request)
-    relation_catalog = _json_prompt_section(
-        prompt,
-        label="Bound sources",
-        next_label="Catalog selection",
-    )
-
-    sales_relation = next(
-        item
-        for item in _bound_sources(relation_catalog)
-        if item.get("read_id") == "sales"
-    )
-    assert "params" not in sales_relation
-    assert sales_relation["applied_filters"] == [
-        {
-            "display_value": "Azraah Fatuma",
-            "kind": "identity",
-            "known_input_id": "fact_1_input_1",
-            "value_id": "azraah",
-        },
-        {
-            "display_value": "February 14, 2026",
-            "kind": "time",
-            "resolved_end": "2026-02-14",
-            "resolved_start": "2026-02-14",
-            "value_id": "feb_14",
-        },
-    ]
-    assert "staff_1" not in json.dumps(relation_catalog)
-
-    operation_values = _json_prompt_section(
-        prompt,
-        label="Operation input values",
-        next_label="Bound sources",
-    )
-    assert operation_values == {"values": []}
-
-
-def test_fact_plan_prompt_projects_identity_value_to_matching_source_field_filter():
-    request = FactPlanRequest(
-        question="How many stores are in London?",
-        question_contract=_question_contract(),
-        relation_catalog=RelationCatalog(
-            reads=(
-                EndpointRead(
-                    id="locations",
-                    endpoint_name="list_location_list",
-                    resource_names=("location",),
-                    params=(
-                        CatalogParam(
-                            ref="locations.query.type",
-                            name="type",
-                            source=ParamSource.QUERY,
-                            type="choice",
-                            choices=("STORE", "WAREHOUSE"),
-                        ),
-                    ),
-                    row_paths=(
-                        RowPath(
-                            id="data",
-                            path="data",
-                            cardinality=RowCardinality.MANY,
-                        ),
-                    ),
-                    fields=(
-                        CatalogField(
-                            ref="field.location_id",
-                            path="data.location_id",
-                            row_path_id="data",
-                            type="uuid",
-                        ),
-                        CatalogField(
-                            ref="field.type",
-                            path="data.type",
-                            row_path_id="data",
-                            type="choice",
-                            choices=("STORE", "WAREHOUSE"),
-                        ),
-                        CatalogField(
-                            ref="field.area_id",
-                            path="data.area.area_id",
-                            row_path_id="data",
-                            type="uuid",
-                        ),
-                    ),
-                    candidate_keys=(
-                        CandidateKey(
-                            id="primary_key",
-                            entity_kind="location",
-                            components=(
-                                CandidateKeyComponent(
-                                    id="location_id",
-                                    field_ref="field.location_id",
-                                ),
-                            ),
-                            primary=True,
-                        ),
-                    ),
-                    entity_references=(
-                        EntityReference(
-                            id="area_reference",
-                            target_entity_kind="area",
-                            target_key_id="primary_key",
-                            components=(
-                                EntityReferenceComponent(
-                                    target_component_id="area_id",
-                                    local_field_ref="field.area_id",
-                                ),
-                            ),
-                        ),
-                    ),
-                ),
-                EndpointRead(
-                    id="areas",
-                    endpoint_name="list_area_list",
-                    resource_names=("area",),
-                    row_paths=(
-                        RowPath(
-                            id="data",
-                            path="data",
-                            cardinality=RowCardinality.MANY,
-                        ),
-                    ),
-                    fields=(
-                        CatalogField(
-                            ref="field.area_authority_id",
-                            path="data.area_id",
-                            row_path_id="data",
-                            type="uuid",
-                        ),
-                    ),
-                    candidate_keys=(
-                        CandidateKey(
-                            id="primary_key",
-                            entity_kind="area",
-                            components=(
-                                CandidateKeyComponent(
-                                    id="area_id",
-                                    field_ref="field.area_authority_id",
-                                ),
-                            ),
-                            primary=True,
-                        ),
-                    ),
-                ),
-            )
-        ),
-        available_values=(
-            FactValue.identity(
-                id="nairobi_area",
-                known_input_id="input_1",
-                key=entity_key_value(
-                    "area", "primary_key", {"area_id": "area_nairobi"}
-                ),
-                display_value="London",
-                proof_refs=("known_input:input_1",),
-            ),
-        ),
-        available_value_uses=(),
-    )
-
-    prompt = _fact_plan_prompt(request)
-    relation_catalog = _json_prompt_section(
-        prompt,
-        label="Bound sources",
-        next_label="Catalog selection",
-    )
-
-    locations = next(
-        item
-        for item in _bound_sources(relation_catalog)
-        if item.get("read_id") == "locations"
-    )
-    assert locations["applied_filters"] == [
-        {
-            "display_value": "London",
-            "field_ids": ["area_area_id"],
-            "kind": "identity",
-            "known_input_id": "input_1",
-            "value_id": "nairobi_area",
-        }
-    ]
-
-
-def test_fact_plan_prompt_treats_duplicate_grounded_dates_as_satisfied_once():
-    row_source_id = api_row_source_id("sales", "root")
-    request = FactPlanRequest(
-        question="How much revenue and average ticket on January 1?",
-        question_contract=_question_contract(),
-        relation_catalog=RelationCatalog(
-            reads=(
-                EndpointRead(
-                    id="sales",
-                    endpoint_name="list_sales",
-                    params=(
-                        CatalogParam(
-                            ref="sales.query.start_date",
-                            name="start_date",
-                            source=ParamSource.QUERY,
-                            type="date",
-                            required=True,
-                        ),
-                        CatalogParam(
-                            ref="sales.query.end_date",
-                            name="end_date",
-                            source=ParamSource.QUERY,
-                            type="date",
-                            required=True,
-                        ),
-                    ),
-                    fields=(CatalogField(ref="field.total", type="decimal"),),
-                ),
-            )
-        ),
-        available_values=(
-            FactValue.time(
-                id="jan_1_revenue",
-                expression="January 1",
-                resolved_start="2030-01-01",
-                resolved_end="2030-01-01",
-                granularity="day",
-            ),
-            FactValue.time(
-                id="jan_1_average_ticket",
-                expression="January 1",
-                resolved_start="2030-01-01",
-                resolved_end="2030-01-01",
-                granularity="day",
-            ),
-        ),
-        available_value_uses=(
-            GroundedInputUse(
-                id="grounded_start_revenue",
-                value_id="jan_1_revenue",
-                row_source_id=row_source_id,
-                param_id="start_date",
-                value_component=TimeComponent.START,
-            ),
-            GroundedInputUse(
-                id="grounded_start_average_ticket",
-                value_id="jan_1_average_ticket",
-                row_source_id=row_source_id,
-                param_id="start_date",
-                value_component=TimeComponent.START,
-            ),
-            GroundedInputUse(
-                id="grounded_end_revenue",
-                value_id="jan_1_revenue",
-                row_source_id=row_source_id,
-                param_id="end_date",
-                value_component=TimeComponent.END,
-            ),
-            GroundedInputUse(
-                id="grounded_end_average_ticket",
-                value_id="jan_1_average_ticket",
-                row_source_id=row_source_id,
-                param_id="end_date",
-                value_component=TimeComponent.END,
-            ),
-        ),
-    )
-
-    relation_catalog = _json_prompt_section(
-        _fact_plan_prompt(request),
-        label="Bound sources",
-        next_label="Catalog selection",
-    )
-
-    sales_source = next(
-        item
-        for item in _bound_sources(relation_catalog)
-        if item.get("read_id") == "sales"
-    )
-    assert "params" not in sales_source
-    assert sales_source["applied_filters"] == [
-        {
-            "display_value": "January 1",
-            "kind": "time",
-            "resolved_end": "2030-01-01",
-            "resolved_start": "2030-01-01",
-            "value_id": "jan_1_revenue",
-        }
-    ]
+    assert grounded[(row_source_id, "place_id")].value_id == "nairobi_area"
 
 
 def test_fact_plan_prompt_uses_explicit_source_binding_for_required_dates():

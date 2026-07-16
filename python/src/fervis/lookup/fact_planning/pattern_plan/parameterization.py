@@ -112,6 +112,8 @@ def parameterize_relation(
                 for item in source.row_filters
             ),
             population_choices=population_choices,
+            population_binding=source.population_binding,
+            population_coverage_claims=source.population_coverage_claims,
             proof_refs=source.proof_refs,
         ),
         fields=fields,
@@ -253,8 +255,12 @@ def _parameterize_applied_filter(
         raise ValueError("applied filter requires explicit input value")
     return RelationSourceAppliedFilter(
         predicate_field_ids=source_filter.predicate_field_ids,
-        value_expr=input_context.expression_for_value(value_id),
+        value_expr=input_context.expression_for_value(
+            value_id,
+            component=source_filter.value_component,
+        ),
         operator=source_filter.operator,
+        proof_refs=source_filter.proof_refs,
     )
 
 

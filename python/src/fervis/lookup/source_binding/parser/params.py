@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from itertools import product
 from fervis.lookup.source_binding.compiler_ir import (
     DraftEndpointParamBinding,
     RelationInputOrigin,
@@ -25,6 +24,10 @@ from fervis.lookup.source_binding.candidates.model import (
     SourceCandidate,
 )
 from fervis.lookup.source_binding.param_values import canonical_param_value
+from fervis.lookup.source_binding.param_binding_sets import (
+    combine_param_binding_sets,
+    parameter_binding_sets,
+)
 from fervis.lookup.source_binding.parser.types import (
     NormalizedParamDecision,
     ParamDecisionParse,
@@ -74,7 +77,7 @@ def parse_param_decision_binding_sets(
         if param.choices and decision.population_choice_set is not None:
             choice_set = _population_choice_set(decision, param=param)
             output.append(
-                _param_binding_sets(
+                parameter_binding_sets(
                     param_id=param_id,
                     value=choice_set.included_values,
                     param=param,
@@ -129,7 +132,7 @@ def parse_param_decision_binding_sets(
                 choices=tuple(str(choice) for choice in choices or ()),
             )
         output.append(
-            _param_binding_sets(
+            parameter_binding_sets(
                 param_id=param_id,
                 value=value,
                 param=param,
@@ -149,18 +152,13 @@ def parse_param_decision_binding_sets(
     missing_param_ids = {
         param_id
         for param_id, param in params_by_id.items()
-        if param_id not in decisions and _param_requires_explicit_decision(param)
+        if param_id not in decisions and param.requires_explicit_decision
     }
     if missing_param_ids:
         raise ValueError("source binding missing explicit param decision")
     if not output:
         return ParamDecisionParse(binding_sets=((),))
-    return ParamDecisionParse(
-        binding_sets=tuple(
-            tuple(binding for group in groups for binding in group)
-            for groups in product(*output)
-        ),
-    )
+    return ParamDecisionParse(binding_sets=combine_param_binding_sets(output))
 
 
 def _population_choice_set(
@@ -192,52 +190,6 @@ def _population_choice_set(
     )
 
 
-def _param_binding_sets(
-    *,
-    param_id: str,
-    value: RuntimeValue,
-    param: CandidateParameter,
-    proof_refs: tuple[str, ...] = (),
-    origin_kind: RelationInputOrigin,
-    value_id: str = "",
-    value_component: str = "value",
-    parameter_id: str = "",
-) -> tuple[tuple[DraftEndpointParamBinding, ...], ...]:
-    if isinstance(value, tuple) and not _param_accepts_collection(param):
-        return tuple(
-            (
-                DraftEndpointParamBinding(
-                    param_id=param_id,
-                    value=value,
-                    origin_kind=origin_kind,
-                    value_id=value_id,
-                    value_component=value_component,
-                    value_item_index=index,
-                    parameter_id=parameter_id,
-                    proof_refs=proof_refs,
-                ),
-            )
-            for index, _item in enumerate(value)
-        )
-    return (
-        (
-            DraftEndpointParamBinding(
-                param_id=param_id,
-                value=value,
-                origin_kind=origin_kind,
-                value_id=value_id,
-                value_component=value_component,
-                parameter_id=parameter_id,
-                proof_refs=proof_refs,
-            ),
-        ),
-    )
-
-
-def _param_accepts_collection(param: CandidateParameter) -> bool:
-    return param.type in {"array", "list"}
-
-
 def _param_decision_options_by_id(
     params_by_id: dict[str, CandidateParameter],
 ) -> dict[str, tuple[str, CandidateParamDecision]]:
@@ -249,10 +201,6 @@ def _param_decision_options_by_id(
                 continue
             output[decision_id] = (param_id, option)
     return output
-
-
-def _param_requires_explicit_decision(param: CandidateParameter) -> bool:
-    return param.required or bool(param.choices)
 
 
 def _param_is_model_bindable(param: CandidateParameter) -> bool:

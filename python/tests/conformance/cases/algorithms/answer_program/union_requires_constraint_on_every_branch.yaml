@@ -1,0 +1,27 @@
+id: union_requires_constraint_on_every_branch
+description: One constrained union branch cannot certify rows contributed by an unconstrained branch.
+kind: algorithm
+algorithm: answer_program.population_coverage
+input:
+  question_contract: {$ref: ../../../fixtures/population_constraint_coverage.yaml#/question_contracts/stores_in_nairobi}
+  inputs: [{id: nairobi, value: Nairobi, entity_kind: area, key_component_id: area_id, canonical_value: area-nairobi}]
+  relations:
+    - id: stores_a
+      fields: [store_id, area_id]
+      identity_fields: [store_id]
+      applied_inputs: [{input_id: nairobi, field_id: area_id}]
+      coverage_claims: [{membership_test_id: in_nairobi, role: row_population, proof_ref: returned_filter:stores_a.area_id}]
+    - id: stores_b
+      fields: [store_id, area_id]
+      identity_fields: [store_id]
+  operations:
+    - id: union_stores
+      output_relation: stores
+      spec:
+        kind: union
+        inputs: [stores_a, stores_b]
+        output_fields: [store_id, area_id]
+        identity_fields: [store_id]
+  result: {relation_id: stores, field_id: store_id}
+expect:
+  result_contains: {status: rejected}

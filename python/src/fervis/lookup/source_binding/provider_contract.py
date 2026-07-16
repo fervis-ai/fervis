@@ -12,6 +12,7 @@ class AnswerPopulationOutput(ProviderOutput):
     population_binding_id: str
     intent_text: str
     match_basis_explanation: str
+    population_test_results: dict[str, RowPredicatePopulationTestResultOutput]
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,16 @@ class ParamDecisionOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
+class ResolvedInputApplicationOutput(ProviderOutput):
+    target_kind: str
+    target_id: str
+    value_id: str
+    value_component: str
+    match_basis_explanation: str
+    population_test_results: dict[str, RowPredicatePopulationTestResultOutput]
+
+
+@dataclass(frozen=True)
 class SourceInvocationOutput(ProviderOutput):
     binding_target_id: str
     answer_population: AnswerPopulationOutput
@@ -35,6 +46,7 @@ class SourceInvocationOutput(ProviderOutput):
     param_decisions: dict[str, ParamDecisionOutput]
     row_predicate_reviews: dict[str, RowPredicateReviewOutput]
     finite_choice_param_reviews: dict[str, FiniteChoiceParamReviewOutput]
+    resolved_input_applications: tuple[ResolvedInputApplicationOutput, ...]
 
 
 @dataclass(frozen=True)

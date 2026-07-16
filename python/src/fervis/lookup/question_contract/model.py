@@ -533,6 +533,18 @@ class RequestedFactAnswerSubject:
 
 
 @dataclass(frozen=True)
+class MembershipTestRef:
+    requested_fact_id: str
+    membership_test_id: str
+
+    def __post_init__(self) -> None:
+        if not self.requested_fact_id.strip():
+            raise ValueError("membership test reference requires requested fact")
+        if not self.membership_test_id.strip():
+            raise ValueError("membership test reference requires membership test")
+
+
+@dataclass(frozen=True)
 class RequestedFactAnswerPopulationMembershipTest:
     id: str
     kind: AnswerPopulationMembershipTestKind

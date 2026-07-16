@@ -58,7 +58,6 @@ from fervis.memory.artifacts import (
 from tests.lookup.orchestrator._payloads import (
     ReadEligibilityRetentionSpec,
     _answer_subject_payload,
-    read_eligibility_response_for_retained_fields,
     read_eligibility_response_from_fact_plan,
     read_eligibility_response_from_prompt,
 )
@@ -70,6 +69,7 @@ from tests.lookup.prompt_sections import prompt_section_payload
 from tests.lookup.source_binding_helpers import (
     bound_fact_plan_payload_from_fact_plan,
     plan_selection_payload_from_fact_plan,
+    resolved_input_applications_for_target,
     source_binding_payload_from_fact_plan,
     source_binding_payload_from_fact_plan_with_invocation_overrides,
     source_binding_payload_for_one_call,
@@ -181,6 +181,15 @@ def _run_callable_prior_frame(payload: dict[str, Any]) -> list[str]:
         fact_plan={},
         conversation_resolution=input_payload["conversation_resolution"],
         grounding=input_payload.get("grounding"),
+        read_eligibility_retention_specs=(
+            ReadEligibilityRetentionSpec(
+                requested_fact_id="fact_1",
+                read_id="sales",
+                known_input_resolver_results=(
+                    ("pivot_mall_qi_1", "store:primary_key"),
+                ),
+            ),
+        ),
     )
     data_access = _DataAccessPort(dict(input_payload["responses"]))
     invocation_binding = _RecordingInvocationBinding(
@@ -213,6 +222,10 @@ def _run_callable_prior_frame(payload: dict[str, Any]) -> list[str]:
             "status": result.status,
             "error": result.error,
             "answer": result.answer,
+            "endpoint_names": [
+                request["endpointName"] for request in data_access.requests
+            ],
+            "endpoint_count": len(data_access.requests),
             "endpoint_args": {
                 request["endpointName"]: request["args"]
                 for request in data_access.requests
@@ -317,6 +330,7 @@ def _run_grounded_identity_endpoint_variant(payload: dict[str, Any]) -> list[str
     return subset_mismatches(
         actual={
             "status": result.status,
+            "error": result.error,
             "rendered_rows": rendered_rows,
             "endpoint_args": endpoint_args,
             "tool_names": planner.tool_names,
@@ -355,9 +369,21 @@ class _VariantGroundingPlannerPort:
         elif tool_name == "submit_grounding":
             arguments = self._grounding_arguments(prompt)
         elif tool_name == "submit_read_eligibility":
-            arguments = read_eligibility_response_for_retained_fields(
+            arguments = read_eligibility_response_from_prompt(
                 prompt,
-                answer_value_fields=("merch_shade_id", "data.items.sale_id"),
+                retention_specs=(
+                    ReadEligibilityRetentionSpec(
+                        requested_fact_id="fact_1",
+                        read_id="list_sale_list",
+                        answer_value_fields=(
+                            "merch_shade_id",
+                            "data.items.sale_id",
+                        ),
+                        known_input_resolver_results=(
+                            ("alice_qi_1", "staff:staff_key"),
+                        ),
+                    ),
+                ),
             )
             return arguments
         elif tool_name == "submit_source_alignment_reviews":
@@ -387,33 +413,45 @@ class _VariantGroundingPlannerPort:
         return _tool_output(tool_name=tool_name, arguments=arguments)
 
     def _grounding_arguments(self, prompt: str) -> dict[str, Any]:
-        lookup_texts = {
-            item["known_input_id"]: item["lookup_text"]
-            for item in prompt_section_payload(prompt, "Known inputs to ground")[
-                "known_input_binding_tasks"
-            ]
-        }
-        option_groups = prompt_section_payload(prompt, "Binding options")[
-            "known_input_binding_options"
+        tasks = prompt_section_payload(prompt, "Known input binding tasks")[
+            "known_input_binding_tasks"
         ]
-        bindings = {}
-        for group in option_groups:
-            selected = _selected_grounding_option(group, task_texts=lookup_texts)
-            binding = {
-                "selected_option_id": selected["binding_option_id"],
-                "input_value": lookup_texts[group["known_input_id"]],
-                "result_kind": "canonical_identity",
-                "selection_basis": "Selected by deterministic conformance model.",
+        reviews = {
+            task["known_input_id"]: {
+                "option_reviews": {
+                    option["binding_option_id"]: {
+                        "resolver_fit_question": option["resolver_fit_question"],
+                        "because": (
+                            "The staff route can search the supplied staff name."
+                            if option["api_read"]["read_id"] == "list_staff_list"
+                            else "This route does not return the named staff entity."
+                        ),
+                        "request_values": (
+                            {
+                                "list_staff_list.query.name": task["lookup_text"],
+                            }
+                            if option["api_read"]["read_id"] == "list_staff_list"
+                            else {}
+                        ),
+                        "response_match_alternatives": (
+                            ["data.first_name"]
+                            if option["api_read"]["read_id"] == "list_staff_list"
+                            else []
+                        ),
+                        "decision": (
+                            "CAN_RESOLVE_LOOKUP_TEXT"
+                            if option["api_read"]["read_id"] == "list_staff_list"
+                            else "CANNOT_RESOLVE_LOOKUP_TEXT"
+                        ),
+                    }
+                    for option in task["binding_options"]
+                }
             }
-            field_refs = selected.get("lookup_surface", {}).get("field_refs", ())
-            if lookup_texts[group["known_input_id"]] == "Alice":
-                binding["matched_field_ref"] = "field.staff.first_name"
-            elif field_refs:
-                binding["matched_field_ref"] = field_refs[0]
-            bindings[group["known_input_id"]] = binding
+            for task in tasks
+        }
         return {
             "known_time_resolutions": _time_resolution_payload_from_prompt(prompt),
-            "known_input_bindings": bindings,
+            "known_input_binding_reviews": reviews,
         }
 
     def _source_binding_arguments(self, prompt: str) -> dict[str, Any]:
@@ -455,12 +493,35 @@ class _VariantGroundingPlannerPort:
                             },
                             row_path_ids_by_answer_output={"answer_2": "items"},
                         ),
-                        "param_decisions": _param_decisions(
-                            relation,
-                            bindings={
-                                "start_date": "today",
-                                "end_date": "today",
-                            },
+                        "param_decisions": {},
+                        "resolved_input_applications": (
+                            resolved_input_applications_for_target(
+                                prompt,
+                                binding_target_id=binding_target_id,
+                                selections=(
+                                    {
+                                        "value_id": (
+                                            "grounded_input_1_staff_staff_key_"
+                                            "staff_id_staff_alice"
+                                        ),
+                                        "value_component": "canonical_key",
+                                        "target_kind": "request_parameter",
+                                        "target_id": "staff_id",
+                                    },
+                                    {
+                                        "value_id": "grounded_input_2",
+                                        "value_component": "instant",
+                                        "target_kind": "request_parameter",
+                                        "target_id": "start_date",
+                                    },
+                                    {
+                                        "value_id": "grounded_input_2",
+                                        "value_component": "instant",
+                                        "target_kind": "request_parameter",
+                                        "target_id": "end_date",
+                                    },
+                                ),
+                            )
                         ),
                         "row_predicate_reviews": {},
                         "finite_choice_param_reviews": {},
@@ -559,78 +620,124 @@ def _grounding_payload_for_compatible_resolver_reads(
     *,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    option_groups = prompt_section_payload(prompt, "Binding options")[
-        "known_input_binding_options"
+    tasks = prompt_section_payload(prompt, "Known input binding tasks")[
+        "known_input_binding_tasks"
     ]
     compatible_by_input = _compatible_resolver_reads(payload)
-    result_kind_by_input = _grounding_result_kinds(payload)
-    matched_field_by_input = _grounding_matched_fields(payload)
-    lookup_text_by_input = {
-        item["known_input_id"]: item["lookup_text"]
-        for item in prompt_section_payload(prompt, "Known inputs to ground")[
-            "known_input_binding_tasks"
-        ]
-    }
+    compatible_surfaces_by_input = _compatible_result_surfaces(payload)
     return {
         "known_time_resolutions": _time_resolution_payload_from_prompt(prompt),
-        "known_input_bindings": {
-            group["known_input_id"]: _scripted_selected_binding(
-                group,
-                compatible_read_ids=compatible_by_input.get(
-                    str(group["known_input_id"]), set()
-                ),
-                lookup_text=lookup_text_by_input[str(group["known_input_id"])],
-                result_kind=result_kind_by_input.get(
-                    str(group["known_input_id"]),
-                    "canonical_identity",
-                ),
-                matched_field_ref=matched_field_by_input.get(
-                    str(group["known_input_id"]),
-                    "",
-                ),
-            )
-            for group in option_groups
+        "known_input_binding_reviews": {
+            task["known_input_id"]: {
+                "option_reviews": {
+                    option["binding_option_id"]: {
+                        "resolver_fit_question": option["resolver_fit_question"],
+                        "because": "The declared route capability was reviewed.",
+                        "request_values": (
+                            _scripted_resolver_request_values(
+                                option,
+                                lookup_text=str(task["lookup_text"]),
+                            )
+                            if _grounding_option_is_compatible(
+                                option,
+                                known_input_id=str(task["known_input_id"]),
+                                compatible_by_input=compatible_by_input,
+                                compatible_surfaces_by_input=(
+                                    compatible_surfaces_by_input
+                                ),
+                            )
+                            else {}
+                        ),
+                        "response_match_alternatives": (
+                            _scripted_resolver_match_fields(option)
+                            if _grounding_option_is_compatible(
+                                option,
+                                known_input_id=str(task["known_input_id"]),
+                                compatible_by_input=compatible_by_input,
+                                compatible_surfaces_by_input=(
+                                    compatible_surfaces_by_input
+                                ),
+                            )
+                            else []
+                        ),
+                        "decision": (
+                            "CAN_RESOLVE_LOOKUP_TEXT"
+                            if _grounding_option_is_compatible(
+                                option,
+                                known_input_id=str(task["known_input_id"]),
+                                compatible_by_input=compatible_by_input,
+                                compatible_surfaces_by_input=(
+                                    compatible_surfaces_by_input
+                                ),
+                            )
+                            else "CANNOT_RESOLVE_LOOKUP_TEXT"
+                        ),
+                    }
+                    for option in task["binding_options"]
+                }
+            }
+            for task in tasks
         },
     }
 
 
-def _scripted_selected_binding(
-    group: dict[str, Any],
+def _grounding_option_is_compatible(
+    option: dict[str, Any],
     *,
-    compatible_read_ids: set[str],
+    known_input_id: str,
+    compatible_by_input: dict[str, set[str]],
+    compatible_surfaces_by_input: dict[str, set[str]],
+) -> bool:
+    if option["api_read"]["read_id"] not in compatible_by_input.get(
+        known_input_id, set()
+    ):
+        return False
+    compatible_surfaces = compatible_surfaces_by_input.get(known_input_id)
+    if compatible_surfaces is None:
+        return True
+    result = option["canonical_result"]
+    result_surface = f"entity {result['entity_kind']}:{result['key_id']}"
+    return result_surface in compatible_surfaces
+
+
+def _scripted_resolver_request_values(
+    option: dict[str, Any],
+    *,
     lookup_text: str,
-    result_kind: str,
-    matched_field_ref: str,
-) -> dict[str, object]:
-    options = tuple(group.get("binding_options") or ())
-    selected = next(
-        (
-            option
-            for option in options
-            if option.get("read_id") in compatible_read_ids
-        ),
-        None,
-    )
-    if selected is None:
-        return {
-            "selected_option_id": "none",
-            "input_value": "",
-            "result_kind": "none",
-            "selection_basis": "No declared resolver read was selected.",
-        }
-    selection: dict[str, object] = {
-        "selected_option_id": selected["binding_option_id"],
-        "input_value": lookup_text,
-        "result_kind": result_kind,
-        "selection_basis": "Selected by scripted conformance model.",
-    }
-    if matched_field_ref:
-        selection["matched_field_ref"] = matched_field_ref
-    elif result_kind == "canonical_identity":
-        field_refs = selected.get("lookup_surface", {}).get("field_refs", ())
-        if field_refs:
-            selection["matched_field_ref"] = field_refs[0]
-    return selection
+) -> dict[str, Any]:
+    params = option["api_read"]["input_params"]
+    if not params:
+        return {}
+    return {str(params[0]["param_ref"]): lookup_text}
+
+
+def _scripted_resolver_match_fields(option: dict[str, Any]) -> list[str]:
+    fields = [
+        field for row in option["api_read"]["response_rows"] for field in row["fields"]
+    ]
+    named = [str(field["path"]) for field in fields if "name" in str(field["field_id"])]
+    if named:
+        return named
+    return [
+        str(component["field_path"])
+        for component in option["canonical_result"]["components"]
+    ]
+
+
+def _compatible_result_surfaces(payload: dict[str, Any]) -> dict[str, set[str]]:
+    raw = payload.get("compatible_result_surfaces")
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise AssertionError("grounding.compatible_result_surfaces must be an object")
+    output: dict[str, set[str]] = {}
+    for known_input_id, surfaces in raw.items():
+        if not isinstance(surfaces, list):
+            raise AssertionError(
+                "grounding.compatible_result_surfaces values must be lists"
+            )
+        output[str(known_input_id)] = {str(surface) for surface in surfaces}
+    return output
 
 
 def _compatible_resolver_reads(payload: dict[str, Any]) -> dict[str, set[str]]:
@@ -645,20 +752,6 @@ def _compatible_resolver_reads(payload: dict[str, Any]) -> dict[str, set[str]]:
             )
         output[str(known_input_id)] = {str(read_id) for read_id in read_ids}
     return output
-
-
-def _grounding_result_kinds(payload: dict[str, Any]) -> dict[str, str]:
-    raw = payload.get("result_kinds") or {}
-    if not isinstance(raw, dict):
-        raise AssertionError("grounding.result_kinds must be an object")
-    return {str(input_id): str(result_kind) for input_id, result_kind in raw.items()}
-
-
-def _grounding_matched_fields(payload: dict[str, Any]) -> dict[str, str]:
-    raw = payload.get("matched_field_refs") or {}
-    if not isinstance(raw, dict):
-        raise AssertionError("grounding.matched_field_refs must be an object")
-    return {str(input_id): str(field_ref) for input_id, field_ref in raw.items()}
 
 
 def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -693,9 +786,7 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
                 "answer_outputs": [
                     _scripted_answer_output(
                         answer_output,
-                        default_role=str(
-                            payload.get("support_role") or "ROW_COUNT"
-                        ),
+                        default_role=str(payload.get("support_role") or "ROW_COUNT"),
                     )
                     for answer_output in answer_outputs
                 ],
@@ -766,9 +857,7 @@ def _scripted_question_input(*, index: int, payload: dict[str, Any]) -> dict[str
         role = LiteralInputRole(str(payload["role"]))
         output["value_source_text"] = text
         output["operand_text"] = str(
-            payload.get("operand_text")
-            or payload.get("resolved_value_text")
-            or text
+            payload.get("operand_text") or payload.get("resolved_value_text") or text
         )
         output["role"] = role.value
         if payload.get("value_meaning_hint"):
@@ -801,9 +890,7 @@ def _scripted_query_enrichment_payload(payload: dict[str, Any]) -> dict[str, Any
                         "answer_output_id": f"answer_{index}",
                         "support_role": _scripted_answer_output_support_role(
                             answer_output,
-                            default=str(
-                                payload.get("support_role") or "ROW_COUNT"
-                            ),
+                            default=str(payload.get("support_role") or "ROW_COUNT"),
                         ),
                         "source_text": _scripted_answer_output_description(
                             answer_output
@@ -837,6 +924,14 @@ def _retention_specs(items: Any) -> tuple[ReadEligibilityRetentionSpec, ...]:
             measured_value_fields=tuple(item.get("measured_value_fields") or ()),
             group_key_fields=tuple(item.get("group_key_fields") or ()),
             population_scope_fields=tuple(item.get("population_scope_fields") or ()),
+            known_input_resolver_results=tuple(
+                (
+                    str(binding.get("known_input_id") or ""),
+                    str(binding.get("resolver_result") or ""),
+                )
+                for binding in item.get("known_input_bindings") or ()
+                if isinstance(binding, dict)
+            ),
         )
         for item in items
         if isinstance(item, dict)
@@ -863,16 +958,28 @@ def _source_binding_invocation_override(item: dict[str, Any]) -> dict[str, Any]:
     choices = item.get("param_value_choices") or {}
     default_param_ids = item.get("default_params") or []
     row_predicate_choices = item.get("row_predicate_choices") or {}
+    resolved_input_applications = item.get("resolved_input_applications") or []
     if not isinstance(choices, dict):
         raise AssertionError("source_binding param_value_choices must be an object")
     if not isinstance(default_param_ids, list):
         raise AssertionError("source_binding default_params must be a list")
     if not isinstance(row_predicate_choices, dict):
         raise AssertionError("source_binding row_predicate_choices must be an object")
-    if not choices and not default_param_ids and not row_predicate_choices:
+    if not isinstance(resolved_input_applications, list):
+        raise AssertionError(
+            "source_binding resolved_input_applications must be a list"
+        )
+    if not any(
+        (
+            choices,
+            default_param_ids,
+            row_predicate_choices,
+            resolved_input_applications,
+        )
+    ):
         raise AssertionError(
             "source_binding item requires param_value_choices, default_params, "
-            "or row_predicate_choices"
+            "row_predicate_choices, or resolved_input_applications"
         )
     return {
         "requested_fact_id": requested_fact_id,
@@ -881,6 +988,7 @@ def _source_binding_invocation_override(item: dict[str, Any]) -> dict[str, Any]:
             str(field_id): tuple(str(value) for value in values)
             for field_id, values in row_predicate_choices.items()
         },
+        "resolved_input_applications": tuple(resolved_input_applications),
         "param_decisions": {
             str(param_id): _param_value_choice_decision(
                 param_id=str(param_id),
@@ -1162,28 +1270,6 @@ def _runtime_values(payload: Any) -> RuntimeValueContext | None:
     return RuntimeValueContext(
         runtime_date=str(payload["runtime_date"]),
         timezone=str(payload["timezone"]),
-    )
-
-
-def _selected_grounding_option(
-    group: dict[str, Any],
-    *,
-    task_texts: dict[str, str],
-) -> dict[str, Any]:
-    if task_texts[group["known_input_id"]] != "Alice":
-        return group["binding_options"][0]
-    return next(
-        option
-        for option in group["binding_options"]
-        if option.get("read_id") == "list_staff_list"
-        and any(
-            component.get("component_id") == "staff_id"
-            for component in option.get("returned_identity", {}).get("components", ())
-        )
-        and all(
-            param.get("name") != "include_items"
-            for param in option.get("query_params", ())
-        )
     )
 
 
@@ -1613,29 +1699,24 @@ def _bind_param_decision_option(
     for param in _candidate_binding_surface(relation).get("params") or ():
         if not isinstance(param, dict) or param.get("param_id") != param_id:
             continue
-        for option in param.get("decision_options") or ():
-            if isinstance(option, dict) and option.get("decision") == "bind":
-                return {"param_decision_id": str(option["param_decision_id"])}
-        for value in param.get("binding_values") or ():
-            if not isinstance(value, dict):
-                continue
-            if _binding_value_matches_intent(
+        matching_options = tuple(
+            option
+            for option in param.get("decision_options") or ()
+            if isinstance(option, dict)
+            and option.get("decision") == "bind"
+            and _binding_value_matches_intent(
                 param_id=param_id,
                 intent_text=intent_text,
-                label=str(value.get("label") or ""),
-                value_component=str(value.get("value_component") or ""),
-            ):
-                return {
-                    "param_decision_id": ".".join(
-                        (
-                            "param_decision",
-                            str(relation.get("source_candidate_id") or "source_1"),
-                            param_id,
-                            "bind",
-                            str(value.get("value") or ""),
-                        )
-                    )
-                }
+                label=str(option.get("value") or ""),
+                value_component=str(option.get("value_component") or ""),
+            )
+        )
+        if len(matching_options) == 1:
+            return {
+                "param_decision_id": str(
+                    matching_options[0]["param_decision_id"]
+                )
+            }
     raise AssertionError(f"missing bind option for {param_id}")
 
 

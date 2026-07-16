@@ -229,38 +229,44 @@ class _PlannerPort:
 
 
 def _grounding_payload_from_prompt(prompt: str) -> dict[str, Any]:
-    tasks = {
-        item["known_input_id"]: item
-        for item in _prompt_json_section(prompt, "Known inputs to ground")[
-            "known_input_binding_tasks"
-        ]
-    }
-    option_groups = _prompt_json_section(prompt, "Binding options")[
-        "known_input_binding_options"
+    tasks = _prompt_json_section(prompt, "Known input binding tasks")[
+        "known_input_binding_tasks"
     ]
-    bindings: dict[str, dict[str, Any]] = {}
-    for group in option_groups:
-        options = group["binding_options"]
+    reviews: dict[str, dict[str, Any]] = {}
+    for task in tasks:
+        options = task["binding_options"]
         selected = _select_grounding_route_option(
             options,
-            value_meaning_hint=str(
-                tasks.get(group["known_input_id"], {}).get("value_meaning_hint") or ""
-            ),
+            value_meaning_hint=str(task.get("value_meaning_hint") or ""),
         )
-        task = tasks[group["known_input_id"]]
-        binding = {
-            "selected_option_id": selected["binding_option_id"],
-            "input_value": task["lookup_text"],
-            "result_kind": "canonical_identity",
-            "selection_basis": "Selected by deterministic test model.",
+        lookup_text = str(task["lookup_text"])
+        reviews[task["known_input_id"]] = {
+            "option_reviews": {
+                option["binding_option_id"]: {
+                    "resolver_fit_question": option["resolver_fit_question"],
+                    "because": "The declared route capability was reviewed.",
+                    "request_values": (
+                        _resolver_request_values(option, lookup_text=lookup_text)
+                        if option["binding_option_id"] == selected["binding_option_id"]
+                        else {}
+                    ),
+                    "response_match_alternatives": (
+                        _resolver_match_fields(option)
+                        if option["binding_option_id"] == selected["binding_option_id"]
+                        else []
+                    ),
+                    "decision": (
+                        "CAN_RESOLVE_LOOKUP_TEXT"
+                        if option["binding_option_id"] == selected["binding_option_id"]
+                        else "CANNOT_RESOLVE_LOOKUP_TEXT"
+                    ),
+                }
+                for option in options
+            }
         }
-        field_refs = selected.get("lookup_surface", {}).get("field_refs", ())
-        if field_refs:
-            binding["matched_field_ref"] = field_refs[-1]
-        bindings[group["known_input_id"]] = binding
     return {
         "known_time_resolutions": _time_resolution_payload_from_prompt(prompt),
-        "known_input_bindings": bindings,
+        "known_input_binding_reviews": reviews,
     }
 
 
@@ -398,18 +404,86 @@ def _select_grounding_route_option(
     value_meaning_hint: str,
 ) -> dict[str, Any]:
     normalized_hint = value_meaning_hint.casefold().strip()
-    reference_options = tuple(
-        option for option in options if option.get("purpose") == "reference_grounding"
+    name_search_options = tuple(
+        option
+        for option in options
+        if any(
+            str(parameter.get("name") or "") in {"name", "display_name"}
+            for parameter in option["api_read"]["input_params"]
+        )
     )
-    for option in reference_options:
-        entity_kind = str(
-            (option.get("returned_identity") or {}).get("entity_kind") or ""
-        ).casefold()
-        if entity_kind and normalized_hint.endswith(entity_kind):
+    descriptive_match_options = tuple(
+        option
+        for option in options
+        if not any(
+            str(parameter.get("source") or "") == "path"
+            for parameter in option["api_read"]["input_params"]
+        )
+        and any(
+            "name" in str(field.get("field_id") or "")
+            for row in option["api_read"]["response_rows"]
+            for field in row["fields"]
+        )
+    )
+    options_by_lookup_fit = (
+        name_search_options or descriptive_match_options or tuple(options)
+    )
+    for option in options_by_lookup_fit:
+        result = option.get("canonical_result") or {}
+        entity_kind = str(result.get("entity_kind") or "").casefold()
+        if normalized_hint and entity_kind == normalized_hint:
             return option
-    if reference_options:
-        return reference_options[0]
-    return options[0]
+    for option in options_by_lookup_fit:
+        result = option.get("canonical_result") or {}
+        entity_kind = str(result.get("entity_kind") or "").casefold()
+        if normalized_hint and any(
+            word in entity_kind for word in normalized_hint.split()
+        ):
+            return option
+    return options_by_lookup_fit[0]
+
+
+def _resolver_request_values(
+    option: dict[str, Any],
+    *,
+    lookup_text: str,
+) -> dict[str, Any]:
+    params = option["api_read"]["input_params"]
+    preferred = next(
+        (
+            parameter
+            for parameter in params
+            if str(parameter.get("name") or "") in {"name", "display_name"}
+        ),
+        params[0] if params else None,
+    )
+    if preferred is None:
+        return {}
+    return {str(preferred["param_ref"]): lookup_text}
+
+
+def _resolver_match_fields(option: dict[str, Any]) -> list[str]:
+    fields = [
+        field for row in option["api_read"]["response_rows"] for field in row["fields"]
+    ]
+    named_fields = [
+        str(field["path"])
+        for field in fields
+        if str(field["field_id"])
+        in {
+            "name",
+            "display_name",
+            "first_name",
+            "last_name",
+            "full_name",
+        }
+    ]
+    if named_fields:
+        return named_fields
+    return [
+        str(component["field_path"])
+        for component in option["canonical_result"]["components"]
+    ]
 
 
 def _prompt_json_section(prompt: str, section_name: str) -> dict[str, Any]:

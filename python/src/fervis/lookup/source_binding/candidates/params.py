@@ -166,6 +166,11 @@ def _param_has_omit_decision(param: dict[str, Any]) -> bool:
 
 
 def _param_has_population_contract(param: dict[str, Any]) -> bool:
+    if any(
+        isinstance(item, dict) and item.get("source") == "available_value"
+        for item in param.get("binding_values") or ()
+    ):
+        return False
     choices = param.get("choices")
     return bool(
         param.get("required") is not True
@@ -463,6 +468,7 @@ def _param_binding_values(
                 "value": value.id,
                 "label": value.label or value.id,
                 "source": "available_value",
+                "value_component": "canonical_key",
             }
             for value in available_values
             if _value_matches_entity_target(value, target=target)
@@ -498,9 +504,11 @@ def _time_binding_values(
         "label": value.label or value.id,
         "source": "available_value",
     }
-    allowed_components = ["start", "end"]
-    if payload.resolved_start and payload.resolved_start == payload.resolved_end:
-        allowed_components.append("instant")
+    allowed_components = (
+        ["instant"]
+        if payload.resolved_start and payload.resolved_start == payload.resolved_end
+        else ["start", "end"]
+    )
     output = [
         {
             **base,

@@ -230,6 +230,7 @@
         "answer_program.invoke",
         "answer_program.patch",
         "answer_program.rank_limit",
+        "answer_program.population_coverage",
         "business_time.resolve",
         "conversation_memory.card_projection",
         "conversation_memory.expand_activated",

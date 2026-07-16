@@ -22,7 +22,7 @@ def _candidate_required_param_decision_ids(
         for param in candidate.params
         if param.decision_options
         and not param.finite_choice_review
-        and (param.required or (bool(param.choices) and not param.has_default))
+        and param.requires_explicit_decision
         for param_id in (param.id,)
         if param_id
     )

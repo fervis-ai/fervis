@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import GenericAlias, NoneType, UnionType
 from typing import TypeAlias, Union, get_args, get_origin, get_type_hints
@@ -44,7 +44,9 @@ class SerializerInspection:
     @property
     def relation_model(self) -> type | None:
         models = tuple(
-            dict.fromkeys(binding.relation_model for binding in self.model_field_bindings)
+            dict.fromkeys(
+                binding.relation_model for binding in self.model_field_bindings
+            )
         )
         return models[0] if len(models) == 1 else None
 
@@ -620,6 +622,9 @@ _FIELD_TYPE_MAP = {
 
 def query_params_from_serializer(
     serializer_class: type | None,
+    *,
+    model_context: type | None = None,
+    view_class: type | None = None,
 ) -> tuple[ParameterContract, ...]:
     if serializer_class is None:
         return ()
@@ -640,7 +645,12 @@ def query_params_from_serializer(
                 choice_labels=_choice_labels(field),
                 default=_json_safe_default(getattr(field, "default", None)),
                 source="query",
-                entity_target=_query_param_entity_target(field),
+                entity_target=_query_param_entity_target(
+                    name,
+                    field,
+                    model_context=model_context,
+                    view_class=view_class,
+                ),
             )
         )
     return tuple(params)
@@ -699,14 +709,7 @@ def _path_param_identity(
     )
     if model_field is None:
         return None
-    target_model = _related_model(model_field)
-    target_field = _related_target_field(model_field)
-    if target_model is None or target_field is None:
-        if not (model_field.primary_key or model_field.unique):
-            return None
-        target_model = model
-        target_field = model_field
-    return target_model, target_field
+    return _model_field_identity(model_field)
 
 
 def response_fields_from_serializer(
@@ -876,20 +879,137 @@ def _json_safe_default(
 
 
 def _query_param_entity_target(
+    param_name: str,
     field: serializers.Field,
+    *,
+    model_context: type | None,
+    view_class: type | None,
 ) -> EntityKeyComponentTargetContract | None:
     queryset = getattr(field, "queryset", None)
     model = getattr(queryset, "model", None)
-    if not isinstance(model, type):
+    if isinstance(model, type):
+        target_field = _query_param_target_field(field, model=model)
+        if target_field is not None:
+            return _entity_target_contract(model=model, target_field=target_field)
+    filtered_field = _declared_query_param_field(
+        param_name,
+        model_context=model_context,
+        view_class=view_class,
+    )
+    if filtered_field is None:
         return None
-    target_field = _query_param_target_field(field, model=model)
-    if target_field is None:
+    identity = _model_field_identity(filtered_field)
+    if identity is None:
         return None
+    target_model, target_field = identity
+    return _entity_target_contract(model=target_model, target_field=target_field)
+
+
+def _entity_target_contract(
+    *,
+    model: type,
+    target_field: models.Field,
+) -> EntityKeyComponentTargetContract:
     return EntityKeyComponentTargetContract(
         entity_kind=_model_identity_type(model),
         key_id=_model_field_key_id(target_field),
         component_id=_model_field_component_id(target_field),
     )
+
+
+def _declared_query_param_field(
+    param_name: str,
+    *,
+    model_context: type | None,
+    view_class: type | None,
+) -> models.Field | None:
+    if not isinstance(model_context, type) or not isinstance(view_class, type):
+        return None
+    fields = tuple(
+        model_field
+        for filterset_class in _declared_filterset_classes(
+            view_class,
+            model_context=model_context,
+        )
+        for model_field in (
+            _declared_filter_field(
+                filterset_class,
+                param_name=param_name,
+                model_context=model_context,
+            ),
+        )
+        if model_field is not None
+    )
+    unique_fields = tuple(dict.fromkeys(fields))
+    return unique_fields[0] if len(unique_fields) == 1 else None
+
+
+def _declared_filterset_classes(
+    view_class: type,
+    *,
+    model_context: type,
+) -> tuple[type, ...]:
+    view = view_class()
+    model_manager = getattr(model_context, "_default_manager", None)
+    if model_manager is None:
+        return ()
+    queryset = model_manager.none()
+    filtersets: list[type] = []
+    for backend_class in tuple(getattr(view_class, "filter_backends", ()) or ()):
+        backend = backend_class()
+        get_filterset_class = getattr(backend, "get_filterset_class", None)
+        if not callable(get_filterset_class):
+            continue
+        filterset_class = get_filterset_class(view, queryset)
+        if isinstance(filterset_class, type):
+            filtersets.append(filterset_class)
+    return tuple(dict.fromkeys(filtersets))
+
+
+def _declared_filter_field(
+    filterset_class: type,
+    *,
+    param_name: str,
+    model_context: type,
+) -> models.Field | None:
+    filterset_options = getattr(filterset_class, "_meta", None)
+    if getattr(filterset_options, "model", None) is not model_context:
+        return None
+    filters = getattr(filterset_class, "base_filters", None)
+    if not isinstance(filters, Mapping):
+        return None
+    declared_filter = filters.get(param_name)
+    if declared_filter is None:
+        return None
+    if str(getattr(declared_filter, "lookup_expr", "exact")) != "exact":
+        return None
+    if bool(getattr(declared_filter, "exclude", False)):
+        return None
+    if getattr(declared_filter, "method", None) is not None:
+        return None
+    field_name = str(getattr(declared_filter, "field_name", "") or "")
+    model_options = getattr(model_context, "_meta", None)
+    if not isinstance(model_options, Options):
+        return None
+    return _model_field(model_options, field_name) or _model_field_by_attname(
+        model_options,
+        field_name,
+    )
+
+
+def _model_field_identity(
+    model_field: models.Field,
+) -> tuple[type, models.Field] | None:
+    target_model = _related_model(model_field)
+    target_field = _related_target_field(model_field)
+    if target_model is not None and target_field is not None:
+        return target_model, target_field
+    owner_model = getattr(model_field, "model", None)
+    if not isinstance(owner_model, type):
+        return None
+    if not (model_field.primary_key or model_field.unique):
+        return None
+    return owner_model, model_field
 
 
 def _query_param_target_field(

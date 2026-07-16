@@ -90,6 +90,19 @@ input:
           function: sum
           field_id: metric_total
           label: total_money
+  source_binding:
+  - requested_fact_id: fact_1
+    resolved_input_applications:
+    - value_id: grounded_input_1
+      value_component: instant
+      target_kind: request_parameter
+      target_id: start_date
+      match_basis_explanation: The resolved day restricts start_date.
+    - value_id: grounded_input_1
+      value_component: instant
+      target_kind: request_parameter
+      target_id: end_date
+      match_basis_explanation: The resolved day restricts end_date.
   responses:
     sales_total_by_date:
       data:

@@ -9,3 +9,4 @@ input:
 expect:
   result_contains:
     array_schema_paths_missing_items: []
+    object_schema_paths_not_closed: []

@@ -158,7 +158,9 @@ def test_lookup_default_catalog_selection_caps_positive_reads_at_five():
 
     assert result.status == "COMPLETED", result
     read_eligibility_prompt = next(
-        prompt for prompt in planner.prompts if "Candidate API reads:" in prompt
+        prompt
+        for prompt in planner.prompts
+        if "<read_eligibility_context>" in prompt
     )
     assert 'read="metric_read_1"' in read_eligibility_prompt
     assert 'read="metric_read_5"' in read_eligibility_prompt

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from fervis.lookup.fact_planning.available_relations import (
+    available_relation_catalog_payload,
+)
 from fervis.lookup.fact_planning.fact_requirements import fact_endpoint_requirements
 from fervis.lookup.fact_plan.row_sources import build_row_source_catalog
 
@@ -10,24 +13,46 @@ from tests.testkit.catalog import (
     catalog_from_payload,
     catalog_selection_from_payload,
 )
+from tests.testkit.values import fact_value_from_payload
 
 
 def run_fact_requirements_case(payload: dict[str, Any]) -> list[str]:
     input_payload = payload["input"]
     catalog = catalog_from_payload(input_payload["catalog"])
     row_sources = build_row_source_catalog(catalog)
+    catalog_selection = catalog_selection_from_payload(
+        input_payload["catalog_selection"],
+        catalog=catalog,
+    )
+    available_values = tuple(
+        fact_value_from_payload(item)
+        for item in input_payload.get("available_values") or ()
+    )
     requirements = fact_endpoint_requirements(
         catalog=catalog,
-        catalog_selection=catalog_selection_from_payload(
-            input_payload["catalog_selection"],
-            catalog=catalog,
-        ),
-        available_values=(),
+        catalog_selection=catalog_selection,
+        available_values=available_values,
         available_value_uses=(),
         row_sources=row_sources,
     )
+    relation_payload = available_relation_catalog_payload(
+        catalog,
+        catalog_selection=catalog_selection,
+        memory_inputs={},
+        available_values=available_values,
+        available_value_uses=(),
+    )
     return subset_mismatches(
-        actual=_requirements_payload(requirements, row_sources=row_sources),
+        actual={
+            **_requirements_payload(requirements, row_sources=row_sources),
+            "available_reads_by_fact": {
+                str(item["requested_fact_id"]): [
+                    str(relation["read_id"])
+                    for relation in item.get("available_relations") or ()
+                ]
+                for item in relation_payload["requested_fact_relations"]
+            },
+        },
         expected_subset=payload["expect"]["result_contains"],
     )
 

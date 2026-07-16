@@ -14,6 +14,7 @@ from fervis.lookup.answer_program.values import (
     ParameterRef,
     ValueExpression,
 )
+from fervis.lookup.answer_program.relations import PopulationCoverageClaim
 
 
 class OperationKind(StrEnum):
@@ -306,10 +307,34 @@ def compute_expression_references(
 
 
 @dataclass(frozen=True)
+class ComputeInputPopulationCoverage:
+    input_id: str
+    claims: tuple[PopulationCoverageClaim, ...]
+
+    def __post_init__(self) -> None:
+        if not self.input_id:
+            raise ValueError("compute input population coverage requires input")
+
+
+@dataclass(frozen=True)
 class ComputeSpec:
     expression: ComputeExpression
     output_scalar: str = ""
+    input_population_coverage: tuple[ComputeInputPopulationCoverage, ...] = ()
     kind: OperationKind = field(default=OperationKind.COMPUTE, init=False)
+
+    def __post_init__(self) -> None:
+        input_ids = tuple(item.input_id for item in self.input_population_coverage)
+        if len(set(input_ids)) != len(input_ids):
+            raise ValueError("compute input population coverage must be unique")
+
+
+def compute_value_input_id(expression: ValueExpression) -> str:
+    if isinstance(expression, ParameterRef):
+        return f"parameter:{expression.parameter_id}"
+    if isinstance(expression, ConstantRef):
+        return f"constant:{expression.constant_id}@{expression.version_ref}"
+    raise ValueError("compute input coverage requires a parameter or constant")
 
 
 def compute_expression_leaves(

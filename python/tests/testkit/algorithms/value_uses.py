@@ -11,6 +11,7 @@ from fervis.lookup.source_binding.compiler_ir import (
     DraftEndpointParamBinding,
     DraftRelationSource,
     DraftRelationSourceRowFilter,
+    RelationInputOrigin,
 )
 from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
@@ -20,10 +21,7 @@ from fervis.lookup.answer_program.relations import (
 )
 from fervis.lookup.fact_plan.row_sources import (
     build_row_source_catalog,
-    row_sources_for_read_id,
 )
-from fervis.lookup.grounding.model import GroundedInputUse
-from fervis.lookup.source_binding.grounded_params import grounded_param_bindings
 from fervis.lookup.answer_program.values import (
     ConstantRef,
     FactValue,
@@ -49,6 +47,7 @@ from fervis.lookup.fact_planning.pattern_plan.parameterization import (
     compiled_program_inputs,
     parameterize_relation,
 )
+from fervis.lookup.fact_planning.value_components import value_component
 
 from tests.testkit.assertions import (
     expects_rejection,
@@ -91,10 +90,6 @@ def run_value_uses_case(payload: dict[str, Any]) -> list[str]:
         catalog,
         memory_relations=memory_relations,
     )
-    grounded_input_uses = tuple(
-        _grounded_input_use(item, row_sources=row_sources)
-        for item in input_payload.get("grounded_input_uses") or ()
-    )
     input_context = CompilerInputContext(
         program_inputs=ProgramInputs(
             parameters=parameter_declarations,
@@ -106,22 +101,14 @@ def run_value_uses_case(payload: dict[str, Any]) -> list[str]:
         },
     )
     try:
-        grounded_bindings_by_read_id = {
-            source.read_id: grounded_param_bindings(
-                available_values=values,
-                available_value_uses=grounded_input_uses,
-                row_source=source,
-            )
-            for source in row_sources.sources
-            if source.read_id
-        }
         parameters = {item.id: item for item in parameter_declarations}
         bindings = {item.parameter_id: item for item in binding_set.bindings}
+        values_by_id = {value.id: value for value in values}
         relations = tuple(
             _relation(
                 item,
                 parameter_ids=parameter_ids,
-                grounded_bindings_by_read_id=grounded_bindings_by_read_id,
+                values_by_id=values_by_id,
                 input_context=input_context,
                 parameters=parameters,
                 bindings=bindings,
@@ -214,7 +201,7 @@ def _relation(
     payload: dict[str, Any],
     *,
     parameter_ids: dict[str, str],
-    grounded_bindings_by_read_id: dict[str, tuple[DraftEndpointParamBinding, ...]],
+    values_by_id: dict[str, FactValue],
     input_context: CompilerInputContext,
     parameters: dict[str, ParameterDeclaration],
     bindings: dict[str, ParameterBinding],
@@ -226,7 +213,7 @@ def _relation(
             payload["source"],
             relation_id=relation_id,
             parameter_ids=parameter_ids,
-            grounded_bindings_by_read_id=grounded_bindings_by_read_id,
+            values_by_id=values_by_id,
         ),
         fields=tuple(_relation_field(item) for item in payload.get("fields") or ()),
         input_context=input_context,
@@ -240,29 +227,20 @@ def _relation_source(
     *,
     relation_id: str,
     parameter_ids: dict[str, str],
-    grounded_bindings_by_read_id: dict[str, tuple[DraftEndpointParamBinding, ...]],
+    values_by_id: dict[str, FactValue],
 ) -> DraftRelationSource:
     read_id = str(payload.get("read_id") or "")
     return DraftRelationSource(
         kind=SourceKind(str(payload["kind"])),
         read_id=read_id,
         memory_relation_id=str(payload.get("memory_relation_id") or ""),
-        param_bindings=(
-            *grounded_bindings_by_read_id.get(read_id, ()),
-            *tuple(
-                DraftEndpointParamBinding(
-                    param_id=str(item["param_id"]),
-                    value_expr=_constant_expression(
-                        item["value"],
-                        ref_id=f"{relation_id}.{item['param_id']}",
-                        proof_refs=tuple(
-                            str(ref) for ref in item.get("proof_refs") or ()
-                        ),
-                    ),
-                    proof_refs=tuple(str(ref) for ref in item.get("proof_refs") or ()),
-                )
-                for item in payload.get("param_bindings") or ()
-            ),
+        param_bindings=tuple(
+            _source_param_binding(
+                item,
+                relation_id=relation_id,
+                values_by_id=values_by_id,
+            )
+            for item in payload.get("param_bindings") or ()
         ),
         row_filters=tuple(
             _source_row_filter(
@@ -275,25 +253,37 @@ def _relation_source(
     )
 
 
-def _grounded_input_use(payload: dict[str, Any], *, row_sources) -> GroundedInputUse:
-    source_ref = payload["row_source"]
-    read_id = str(source_ref["read_id"])
-    row_path_id = str(source_ref.get("row_path_id") or "root")
-    candidates = tuple(
-        source
-        for source in row_sources_for_read_id(read_id, row_sources=row_sources)
-        if (source.row_path_id or "root") == row_path_id
+def _source_param_binding(
+    payload: dict[str, Any],
+    *,
+    relation_id: str,
+    values_by_id: dict[str, FactValue],
+) -> DraftEndpointParamBinding:
+    proof_refs = tuple(str(ref) for ref in payload.get("proof_refs") or ())
+    value_id = str(payload.get("value_id") or "")
+    if not value_id:
+        return DraftEndpointParamBinding(
+            param_id=str(payload["param_id"]),
+            value_expr=_constant_expression(
+                payload["value"],
+                ref_id=f"{relation_id}.{payload['param_id']}",
+                proof_refs=proof_refs,
+            ),
+            proof_refs=proof_refs,
+        )
+    fact_value = values_by_id.get(value_id)
+    if fact_value is None:
+        raise ValueError("source param binding references unknown value")
+    component = _value_component(
+        str(payload.get("value_component") or ValueComponent.VALUE.value)
     )
-    if len(candidates) != 1:
-        raise ValueError("grounded input use requires one canonical row source")
-    return GroundedInputUse(
-        id=str(payload["id"]),
-        value_id=str(payload["value_id"]),
-        row_source_id=candidates[0].id,
+    return DraftEndpointParamBinding(
         param_id=str(payload["param_id"]),
-        value_component=_value_component(
-            str(payload.get("value_component") or ValueComponent.VALUE.value)
-        ),
+        value=value_component(fact_value, component),
+        origin_kind=RelationInputOrigin.QUESTION_INPUT,
+        value_id=value_id,
+        value_component=component.value,
+        proof_refs=proof_refs,
     )
 
 

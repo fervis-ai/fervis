@@ -23,10 +23,6 @@ def _grounded_value_id(known_input_id: str) -> str:
     return f"grounded_{_symbol(known_input_id)}"
 
 
-def _normalize_lookup_text(value: object) -> str:
-    return " ".join(str(value or "").strip().split()).casefold()
-
-
 def _symbol(value: object) -> str:
     text = re.sub(r"[^A-Za-z0-9_]+", "_", str(value or "").strip())
     text = re.sub(r"_+", "_", text).strip("_").lower()

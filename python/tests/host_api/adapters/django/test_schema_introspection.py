@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from django.db import models
-from rest_framework import serializers
+from rest_framework import generics, serializers
 
 from fervis.host_api.adapters.django.schema_introspection import (
     entity_references_from_serializer,
@@ -173,9 +173,7 @@ def test_method_field_name_does_not_override_declared_relation_structure():
 
     references = entity_references_from_serializer(SaleSerializer)
 
-    assert tuple(reference.target_entity_kind for reference in references) == (
-        "staff",
-    )
+    assert tuple(reference.target_entity_kind for reference in references) == ("staff",)
 
 
 def test_relation_keys_include_only_total_declared_uniqueness():
@@ -265,9 +263,7 @@ def test_flattened_related_key_remains_outside_the_owning_relation_key():
             )
 
     class CompensationSerializer(serializers.ModelSerializer):
-        shift_record_id = serializers.UUIDField(
-            source="shift_record.shift_record_id"
-        )
+        shift_record_id = serializers.UUIDField(source="shift_record.shift_record_id")
 
         class Meta:
             model = ShiftCompensation
@@ -401,3 +397,159 @@ def test_slug_related_query_parameter_targets_the_declared_unique_key():
     assert params[0].entity_target.entity_kind == "location"
     assert params[0].entity_target.key_id == "unique_code"
     assert params[0].entity_target.component_id == "code"
+
+
+def test_scalar_query_parameter_targets_declared_foreign_key_filter() -> None:
+    class Location(models.Model):
+        location_id = models.UUIDField(primary_key=True)
+
+        class Meta:
+            app_label = "test_schema_introspection_query_filter"
+
+    class Sale(models.Model):
+        sale_id = models.UUIDField(primary_key=True)
+        location = models.ForeignKey(Location, on_delete=models.CASCADE)
+
+        class Meta:
+            app_label = "test_schema_introspection_query_filter"
+
+    class QuerySerializer(serializers.Serializer):
+        location_id = serializers.UUIDField(required=False)
+
+    class LocationFilter:
+        field_name = "location_id"
+        lookup_expr = "exact"
+        exclude = False
+        method = None
+
+    class SaleFilterSet:
+        base_filters = {"location_id": LocationFilter()}
+
+        class _meta:
+            model = Sale
+
+    class DeclaredFilterBackend:
+        def get_filterset_class(self, view, queryset):
+            return view.filterset_class
+
+    class SaleListView(generics.ListAPIView):
+        queryset = Sale.objects.all()
+        filter_backends = (DeclaredFilterBackend,)
+        filterset_class = SaleFilterSet
+
+    params = query_params_from_serializer(
+        QuerySerializer,
+        model_context=Sale,
+        view_class=SaleListView,
+    )
+
+    assert params[0].entity_target is not None
+    assert params[0].entity_target.entity_kind == "location"
+    assert params[0].entity_target.key_id == "primary_key"
+    assert params[0].entity_target.component_id == "location_id"
+
+
+def test_negated_query_parameter_filter_has_no_entity_target() -> None:
+    class Location(models.Model):
+        location_id = models.UUIDField(primary_key=True)
+
+        class Meta:
+            app_label = "test_schema_introspection_negated_query_filter"
+
+    class Sale(models.Model):
+        sale_id = models.UUIDField(primary_key=True)
+        location = models.ForeignKey(Location, on_delete=models.CASCADE)
+
+        class Meta:
+            app_label = "test_schema_introspection_negated_query_filter"
+
+    class QuerySerializer(serializers.Serializer):
+        location_id = serializers.UUIDField(required=False)
+
+    class SaleListView(generics.ListAPIView):
+        queryset = Sale.objects.all()
+
+        def get_queryset(self):
+            queryset = super().get_queryset()
+            location_id = self.request.query_params.get("location_id")
+            return (
+                queryset.exclude(location_id=location_id) if location_id else queryset
+            )
+
+    params = query_params_from_serializer(
+        QuerySerializer,
+        model_context=Sale,
+        view_class=SaleListView,
+    )
+
+    assert params[0].entity_target is None
+
+
+def test_disjunctive_query_parameter_filter_has_no_entity_target() -> None:
+    class Location(models.Model):
+        location_id = models.UUIDField(primary_key=True)
+
+        class Meta:
+            app_label = "test_schema_introspection_disjunctive_query_filter"
+
+    class Sale(models.Model):
+        sale_id = models.UUIDField(primary_key=True)
+        location = models.ForeignKey(Location, on_delete=models.CASCADE)
+        is_public = models.BooleanField(default=False)
+
+        class Meta:
+            app_label = "test_schema_introspection_disjunctive_query_filter"
+
+    class QuerySerializer(serializers.Serializer):
+        location_id = serializers.UUIDField(required=False)
+
+    class SaleListView(generics.ListAPIView):
+        queryset = Sale.objects.all()
+
+        def get_queryset(self):
+            queryset = super().get_queryset()
+            location_id = self.request.query_params.get("location_id")
+            return (
+                queryset.filter(
+                    models.Q(location_id=location_id) | models.Q(is_public=True)
+                )
+                if location_id
+                else queryset
+            )
+
+    params = query_params_from_serializer(
+        QuerySerializer,
+        model_context=Sale,
+        view_class=SaleListView,
+    )
+
+    assert params[0].entity_target is None
+
+
+def test_scalar_query_parameter_without_proven_filter_has_no_entity_target() -> None:
+    class Location(models.Model):
+        location_id = models.UUIDField(primary_key=True)
+
+        class Meta:
+            app_label = "test_schema_introspection_unconnected_query"
+
+    class Sale(models.Model):
+        sale_id = models.UUIDField(primary_key=True)
+        location = models.ForeignKey(Location, on_delete=models.CASCADE)
+
+        class Meta:
+            app_label = "test_schema_introspection_unconnected_query"
+
+    class QuerySerializer(serializers.Serializer):
+        location_id = serializers.UUIDField(required=False)
+
+    class SaleListView(generics.ListAPIView):
+        queryset = Sale.objects.all()
+
+    params = query_params_from_serializer(
+        QuerySerializer,
+        model_context=Sale,
+        view_class=SaleListView,
+    )
+
+    assert params[0].entity_target is None

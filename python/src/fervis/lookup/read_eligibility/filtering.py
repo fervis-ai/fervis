@@ -8,13 +8,13 @@ from fervis.lookup.relation_catalog.selection import (
     relation_catalog_for_read_ids,
     selected_read_ids_from_fact_selections,
 )
-from fervis.lookup.read_eligibility.model import ReadEligibilityResult
+from fervis.lookup.read_eligibility.model import ResolvedRetainedReadSet
 
 
 def filter_catalog_selection_for_read_eligibility(
     *,
     catalog_selection: CatalogSelectionResult,
-    read_eligibility: ReadEligibilityResult,
+    read_eligibility: ResolvedRetainedReadSet,
 ) -> CatalogSelectionResult:
     retained_by_fact = read_eligibility.retained_read_ids_by_requested_fact()
     selections = tuple(

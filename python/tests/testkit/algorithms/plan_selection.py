@@ -20,7 +20,7 @@ from fervis.lookup.question_contract import (
     RequestedFactAnswerOutput,
     RequestedFactAnswerSubject,
 )
-from fervis.lookup.read_eligibility import ReadAssessment, ReadEligibilityResult
+from fervis.lookup.read_eligibility import RetainedReadAssessment, ResolvedRetainedReadSet
 from fervis.lookup.read_eligibility.candidate_identity import read_candidate_signature
 from fervis.lookup.relation_catalog import RelationCatalog
 from fervis.lookup.relation_catalog.selection import (
@@ -113,13 +113,13 @@ def _read_eligibility(
     payload: object,
     *,
     initial_candidate_payload: dict[str, Any],
-) -> ReadEligibilityResult | None:
+) -> ResolvedRetainedReadSet | None:
     if not isinstance(payload, list):
         return None
     candidates_by_read = _source_candidates_by_read(initial_candidate_payload)
-    return ReadEligibilityResult(
-        read_assessments=tuple(
-            ReadAssessment(
+    return ResolvedRetainedReadSet(
+        retained_reads=tuple(
+            RetainedReadAssessment(
                 source_candidate_id=str(
                     candidates_by_read[str(item["read_id"])]["source_candidate_id"]
                 ),
@@ -138,7 +138,6 @@ def _read_eligibility(
                 retention_basis=str(
                     item.get("retention_basis") or "Selected by conformance fixture."
                 ),
-                retention_decision="RETAIN",
             )
             for item in payload
             if isinstance(item, dict)

@@ -45,9 +45,9 @@ input:
         result_kind: answered
     answer_programs:
       - program_id: ap_sales
-        schema_revision: 2
+        schema_revision: 3
       - program_id: ap_sales_by_channel
-        schema_revision: 2
+        schema_revision: 3
     program_invocations:
       - invocation_id: pi_base
         kind: compiled_question
@@ -102,19 +102,19 @@ expect:
         run_base:
           program_derivation:
             invocation_id: pi_base
-            program: {program_id: ap_sales, schema_revision: 2}
+            program: {program_id: ap_sales, schema_revision: 3}
             patch: null
             revision: null
         run_patch:
           program_derivation:
             invocation_id: pi_patch
-            program: {program_id: ap_sales, schema_revision: 2}
+            program: {program_id: ap_sales, schema_revision: 3}
             patch: {patch_id: bp_include_placed}
             revision: null
         run_revision:
           program_derivation:
             invocation_id: pi_revision
-            program: {program_id: ap_sales_by_channel, schema_revision: 2}
+            program: {program_id: ap_sales_by_channel, schema_revision: 3}
             patch: null
             revision:
               revision_id: pr_filter_channel

@@ -1,0 +1,43 @@
+id: parser_rejects_target_for_different_canonical_identity
+description: Parsing rejects a Store-key target under a fixed canonical Area interpretation.
+kind: algorithm
+algorithm: read_eligibility.parse
+input:
+  request_fixture: stores_in_grounded_area
+  request:
+    selected_read_ids_by_fact:
+      fact_1: [list_location_list, list_store_list]
+    compatible_resolver_reads_by_known_input:
+      qi1: [list_area_list, list_store_list]
+  payload:
+    requested_fact_assessments:
+      fact_1:
+        canonical_inputs:
+          london_qi_1:
+            interpretation_question: Which shown canonical result represents what London denotes in requested fact count of stores in London?
+            because: London denotes the Area constraining the requested population.
+            canonical_option_id: london_qi_1.list_area_list.bind_qi1_rs_7de03e00183c6709_area_primary_key
+        read_candidate_reviews:
+          source_1:
+            known_input_uses:
+              london_qi_1:
+                because: London constrains locations through their Area reference.
+                target_id: list_location_list.reference.area.area_reference
+                decision: CONSTRAIN
+            relevant_row_path_tokens: [source_1.row.data]
+            relevant_field_tokens: [source_1.field.data.type]
+            retention_basis: The read returns locations in the selected Area.
+            retention_decision: RETAIN
+          source_2:
+            known_input_uses:
+              london_qi_1:
+                because: This invalid application treats the selected Area as a Store key.
+                target_id: list_store_list.key.store.primary_key
+                decision: CONSTRAIN
+            relevant_row_path_tokens: [source_2.row.data]
+            relevant_field_tokens: [source_2.field.data.store_id]
+            retention_basis: The read returns stores.
+            retention_decision: RETAIN
+expect:
+  result_contains:
+    status: rejected

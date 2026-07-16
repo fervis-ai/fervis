@@ -6,9 +6,13 @@ from fervis.lookup.read_eligibility.filtering import (
 from fervis.lookup.read_eligibility.model import (
     READ_ELIGIBILITY_RECALL_READS_PER_FACT,
     RETENTION_DECISION_VALUES,
+    CanonicalInputSelection,
+    DroppedReadAssessment,
     ReadAssessment,
     ReadEligibilityRequest,
     ReadEligibilityResult,
+    ResolvedRetainedReadSet,
+    RetainedReadAssessment,
 )
 from fervis.lookup.read_eligibility.parser import parse_read_eligibility
 from fervis.lookup.read_eligibility.prompt import (
@@ -37,10 +41,14 @@ __all__ = [
     "READ_ELIGIBILITY_TOOL_NAME",
     "READ_ELIGIBILITY_RECALL_READS_PER_FACT",
     "RETENTION_DECISION_VALUES",
+    "CanonicalInputSelection",
+    "DroppedReadAssessment",
     "ReadAssessment",
     "ReadEligibilityGenerationError",
     "ReadEligibilityRequest",
     "ReadEligibilityResult",
+    "ResolvedRetainedReadSet",
+    "RetainedReadAssessment",
     "ReadEligibilityCandidateSurface",
     "ReadEligibilityTurnPrompt",
     "ReadEligibilityTurnResult",

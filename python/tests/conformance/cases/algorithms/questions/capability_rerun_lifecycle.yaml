@@ -16,7 +16,6 @@ input:
     program_invocations:
       - run_id: run_base
         kind: compiled_question
-        program_id: ap_523d621def00b761d19290925f33718d34d628a1c62ae72ff6c9e9796024d748
         program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/capability}
         bindings:
           - parameter_id: question.store_ids

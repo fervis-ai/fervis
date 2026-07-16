@@ -19,6 +19,10 @@ from fervis.lookup.source_binding.compiler_ir import (
     DraftEndpointParamBinding,
     DraftRelationSourcePopulationChoice,
 )
+from fervis.lookup.answer_program.relations import (
+    PopulationCoverageClaim,
+    PopulationCoverageRole,
+)
 from fervis.lookup.source_binding.model import (
     AnswerPopulation,
     BoundSource,
@@ -63,16 +67,12 @@ from fervis.lookup.source_binding.plan_targets import (
     SourceBindingTargetIndex,
 )
 from fervis.lookup.source_binding.review_scope import SourceBindingReviewScope
+from fervis.lookup.answer_program.relations import (
+    merge_population_coverage_claims,
+)
 from fervis.lookup.source_binding.role_selection import (
     bound_plan_selection_for_source_binding,
 )
-from fervis.lookup.question_contract import (
-    AnswerPopulationMembershipTestKind,
-    AnswerPopulationMembershipTestPolarity,
-)
-from fervis.lookup.source_binding.membership_tests import membership_test_key
-
-
 __all__ = [
     "build_source_binding_plan",
 ]
@@ -95,7 +95,6 @@ def build_source_binding_plan(
     )
     seen_binding_target_ids: set[str] = set()
     bound_sources: list[BoundSource] = []
-    discharged_test_ids_by_fact: dict[str, set[str]] = {}
     for parsed_binding in payload.role_bindings:
         _require_new_binding_target(
             parsed_binding,
@@ -108,10 +107,6 @@ def build_source_binding_plan(
         )
         bound_source = built.source
         bound_sources.append(bound_source)
-        discharged_test_ids_by_fact.setdefault(
-            parsed_binding.target.requested_fact_id,
-            set(),
-        ).update(built.discharged_membership_test_ids)
         derived_sources = _derived_value_bound_sources(
             bound_source,
             value_candidates_by_relation_id=context.value_candidates_by_relation_id,
@@ -120,10 +115,6 @@ def build_source_binding_plan(
         bound_sources.extend(derived_sources)
     plan = SourceBindingPlan(bound_sources=tuple(bound_sources))
     _require_complete_role_target_coverage(plan, request=request)
-    _require_population_test_coverage(
-        request,
-        discharged_test_ids_by_fact=discharged_test_ids_by_fact,
-    )
     return plan
 
 
@@ -146,13 +137,13 @@ class _ParsedBindingDecisions:
     population_binding: CandidatePopulationBinding
     param_binding_sets: tuple[tuple[DraftEndpointParamBinding, ...], ...]
     population_choices: tuple[DraftRelationSourcePopulationChoice, ...]
-    discharged_membership_test_ids: tuple[str, ...]
+    applied_filters: tuple[SourceAppliedFilter, ...]
+    population_coverage_claims: tuple[PopulationCoverageClaim, ...]
 
 
 @dataclass(frozen=True)
 class _BuiltBoundSource:
     source: BoundSource
-    discharged_membership_test_ids: tuple[str, ...]
 
 
 def _plan_build_context(
@@ -229,60 +220,7 @@ def _build_bound_source(
         context=context,
         source_index=source_index,
     )
-    input_proved_test_ids = _input_proved_membership_test_ids(
-        binding,
-        source=source,
-        param_binding_sets=decisions.param_binding_sets,
-        request=context.request,
-    )
-    discharged_test_ids = tuple(
-        dict.fromkeys(
-            (
-                *decisions.discharged_membership_test_ids,
-                *input_proved_test_ids,
-            )
-        )
-    )
-    return _BuiltBoundSource(
-        source=source,
-        discharged_membership_test_ids=discharged_test_ids,
-    )
-
-
-def _input_proved_membership_test_ids(
-    binding: ParsedRoleBinding,
-    *,
-    source: BoundSource,
-    param_binding_sets: tuple[tuple[DraftEndpointParamBinding, ...], ...],
-    request: SourceBindingRequest,
-) -> tuple[str, ...]:
-    bound_input_ids = {
-        proof_ref.removeprefix("known_input:")
-        for binding_set in param_binding_sets
-        for param_binding in binding_set
-        for proof_ref in param_binding.proof_refs
-        if proof_ref.startswith("known_input:")
-    }
-    bound_input_ids.update(
-        applied_filter.known_input_id
-        for applied_filter in source.applied_filters
-        if applied_filter.known_input_id
-    )
-    fact = next(
-        item
-        for item in request.requested_facts
-        if item.id == binding.target.requested_fact_id
-    )
-    population = fact.answer_population
-    if population is None:
-        return ()
-    return tuple(
-        membership_test_key(test)
-        for test in population.membership_tests
-        if test.owned_question_input_refs
-        and test.polarity is AnswerPopulationMembershipTestPolarity.MUST_PASS
-        and set(test.owned_question_input_refs) <= bound_input_ids
-    )
+    return _BuiltBoundSource(source=source)
 
 
 def _binding_candidate(
@@ -310,11 +248,16 @@ def _parse_binding_decisions(
 ) -> _ParsedBindingDecisions:
     target = binding.target
     invocation = binding.invocation
-    answer_population, population_binding = parse_answer_population(
+    (
+        answer_population,
+        population_binding,
+        answer_population_coverage_claims,
+    ) = parse_answer_population(
         invocation.answer_population,
         request=context.request,
-        requested_fact_id=target.requested_fact_id,
+        target=target,
         candidate=candidate,
+        review_scope=context.review_scope,
     )
     param_decisions = parse_param_decision_binding_sets(
         binding.param_decisions,
@@ -333,6 +276,11 @@ def _parse_binding_decisions(
         requested_fact_id=target.requested_fact_id,
         binding_target_id=target.binding_target_id,
         review_scope=context.review_scope,
+        coverage_role=(
+            PopulationCoverageRole.ROW_POPULATION
+            if target.requires_answer_fulfillment
+            else PopulationCoverageRole.OPERATION_CONDITION
+        ),
     )
     param_binding_sets = _merged_binding_sets(
         candidate,
@@ -340,6 +288,7 @@ def _parse_binding_decisions(
             target.binding_target_id
         ),
         model_binding_sets=param_decisions.binding_sets,
+        input_binding_sets=binding.input_applications.param_binding_sets,
     )
     population_choices = (
         *binding.population_choices,
@@ -350,12 +299,21 @@ def _parse_binding_decisions(
         population_binding=population_binding,
         param_binding_sets=param_binding_sets,
         population_choices=population_choices,
-        discharged_membership_test_ids=tuple(
-            dict.fromkeys(
-                (
-                    *binding.discharged_membership_test_ids,
-                    *row_predicates.discharged_membership_test_ids,
-                )
+        applied_filters=binding.input_applications.applied_filters,
+        population_coverage_claims=merge_population_coverage_claims(
+            (
+                *answer_population_coverage_claims,
+                *context.closed_key_bindings.population_coverage_claims(
+                    target,
+                    fact=next(
+                        fact
+                        for fact in context.request.requested_facts
+                        if fact.id == target.requested_fact_id
+                    ),
+                ),
+                *binding.input_applications.population_coverage_claims,
+                *binding.population_coverage_claims,
+                *row_predicates.population_coverage_claims,
             )
         ),
     )
@@ -366,6 +324,7 @@ def _merged_binding_sets(
     *,
     backend_binding_sets: tuple[tuple[DraftEndpointParamBinding, ...], ...],
     model_binding_sets: tuple[tuple[DraftEndpointParamBinding, ...], ...],
+    input_binding_sets: tuple[tuple[DraftEndpointParamBinding, ...], ...] = ((),),
 ) -> tuple[tuple[DraftEndpointParamBinding, ...], ...]:
     base_binding_sets = candidate.applied_param_binding_sets or (
         candidate.applied_param_bindings,
@@ -373,10 +332,11 @@ def _merged_binding_sets(
     return tuple(
         merged_param_bindings(
             merged_param_bindings(base, backend),
-            model,
+            merged_param_bindings(input_bindings, model),
         )
         for base in base_binding_sets
         for backend in backend_binding_sets
+        for input_bindings in input_binding_sets
         for model in model_binding_sets
     )
 
@@ -420,24 +380,37 @@ def _materialize_bound_source(
     source_index: int,
 ) -> BoundSource:
     target = binding.target
+    applied_filters = context.closed_key_bindings.source_level_applied_filters(
+        target.binding_target_id,
+        (*candidate_applied_filters(candidate), *decisions.applied_filters),
+    )
+    bound_candidate = replace(candidate, applied_filters=applied_filters)
     selected_row_source_id = _selected_row_source_id(
-        candidate,
+        bound_candidate,
         fulfillments,
         evidence_items=evidence_items,
     )
     source, source_invocations = bound_relation_source(
-        candidate=candidate,
+        candidate=bound_candidate,
         population_binding=decisions.population_binding,
         param_binding_sets=decisions.param_binding_sets,
         population_choices=decisions.population_choices,
+        population_coverage_claims=decisions.population_coverage_claims,
         row_source_id=selected_row_source_id,
     )
-    required_field_ids = _required_target_field_ids(context.request, target=target)
+    required_field_ids = (
+        *_required_target_field_ids(context.request, target=target),
+        *(
+            field_id
+            for applied_filter in applied_filters
+            for field_id in applied_filter.predicate_field_ids
+        ),
+    )
     population_field_ids = tuple(
         choice.field_id for choice in decisions.population_choices if choice.field_id
     )
     available_fields = candidate_source_fields(
-        candidate,
+        bound_candidate,
         row_source_id=selected_row_source_id,
         evidence_items=evidence_items,
         fulfillments=fulfillments,
@@ -445,11 +418,7 @@ def _materialize_bound_source(
         plan_shape=target.plan_shape,
     )
     available_field_ids = tuple(sorted(field.field_id for field in available_fields))
-    applied_filters = context.closed_key_bindings.source_level_applied_filters(
-        target.binding_target_id,
-        candidate_applied_filters(candidate),
-    )
-    cardinality = candidate_cardinality(candidate)
+    cardinality = candidate_cardinality(bound_candidate)
     if selected_row_source_id:
         row_source = context.row_sources.find(selected_row_source_id)
         if row_source is not None:
@@ -472,13 +441,20 @@ def _materialize_bound_source(
         fulfillments=fulfillments,
         source=source,
         source_invocations=source_invocations,
-        value_id=candidate.value_id,
-        source_candidate_id=candidate.id,
+        value_id=bound_candidate.value_id,
+        value_is_population_derived=bool(
+            bound_candidate.source_relation_id
+            or decisions.population_coverage_claims
+        ),
+        source_candidate_id=bound_candidate.id,
         cardinality=cardinality,
         evidence_items=evidence_items,
         available_field_ids=available_field_ids,
         available_fields=available_fields,
         applied_filters=applied_filters,
+        value_population_coverage_claims=(
+            decisions.population_coverage_claims if source is None else ()
+        ),
     )
 
 
@@ -588,29 +564,6 @@ def _require_complete_role_target_coverage(
         )
 
 
-def _require_population_test_coverage(
-    request: SourceBindingRequest,
-    *,
-    discharged_test_ids_by_fact: dict[str, set[str]],
-) -> None:
-    for fact in request.requested_facts:
-        population = fact.answer_population
-        if population is None:
-            continue
-        discharged = discharged_test_ids_by_fact.get(fact.id, set())
-        missing = tuple(
-            membership_test_key(test)
-            for test in population.membership_tests
-            if test.kind == AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT
-            and membership_test_key(test) not in discharged
-        )
-        if missing:
-            raise ValueError(
-                "source binding does not enforce answer population tests: "
-                + ", ".join(missing)
-            )
-
-
 def _value_candidates_by_source_relation_id(
     candidates: Iterable[SourceCandidate],
 ) -> dict[str, tuple[SourceCandidate, ...]]:
@@ -641,8 +594,12 @@ def _derived_value_bound_sources(
             requested_fact_id=bound.requested_fact_id,
             answer_population=bound.answer_population,
             value_id=candidate.value_id,
+            value_is_population_derived=True,
             source_candidate_id=candidate.id,
             evidence_items=candidate_source_evidence_items(candidate),
+            value_population_coverage_claims=(
+                source.population_coverage_claims
+            ),
         )
         for index, candidate in enumerate(candidates)
         if candidate.value_id

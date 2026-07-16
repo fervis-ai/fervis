@@ -5,27 +5,42 @@ from __future__ import annotations
 from fervis.lookup.grounding import provider_contract as provider_output
 from fervis.lookup.grounding.model import (
     GroundingRequest,
-    InputBindingOption,
-    InputBindingPurpose,
-    InputBindingResultKind,
-    KnownInputBindingTask,
+    LookupTextResolutionDecision,
+    resolver_fit_question_for_option,
+)
+from fervis.lookup.grounding.surface import (
+    ResolverOptionSurface,
+    resolver_option_surface,
 )
 from fervis.lookup.grounding.time_intents import TIME_INTENT_FIELDS
 
 
 def build_grounding_schema(request: GroundingRequest) -> dict[str, object]:
     review_properties: dict[str, object] = {}
-    for binding_task in request.tasks:
-        review_properties[binding_task.known_input_id] = {
-            "oneOf": [
-                *(
-                    schema
-                    for option in binding_task.options
-                    for schema in _selected_option_schemas(binding_task, option)
+    for task in request.tasks:
+        option_review_properties = {
+            option.id: _option_review_schema(
+                resolver_fit_question=resolver_fit_question_for_option(
+                    task=task,
+                    option=option,
                 ),
-                _no_selected_option_schema(),
-            ]
+                surface=resolver_option_surface(request, option),
+                lookup_text=task.lookup_text,
+            )
+            for option in task.options
         }
+        review_properties[task.known_input_id] = (
+            provider_output.KnownInputBindingReviewOutput.schema(
+                {
+                    "option_reviews": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": option_review_properties,
+                        "required": list(option_review_properties),
+                    }
+                }
+            )
+        )
     time_resolution_properties: dict[str, object] = {}
     for time_task in request.time_tasks:
         time_resolution_properties[time_task.known_input_id] = (
@@ -51,7 +66,7 @@ def build_grounding_schema(request: GroundingRequest) -> dict[str, object]:
                 "properties": time_resolution_properties,
                 "required": [task.known_input_id for task in request.time_tasks],
             },
-            "known_input_bindings": {
+            "known_input_binding_reviews": {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": review_properties,
@@ -61,117 +76,110 @@ def build_grounding_schema(request: GroundingRequest) -> dict[str, object]:
     )
 
 
-def _selected_option_schemas(
-    task: KnownInputBindingTask,
-    option: InputBindingOption,
-) -> tuple[dict[str, object], ...]:
-    if option.purpose is InputBindingPurpose.IDENTITY_VALIDATION:
-        return (
-            _selected_option_schema(
-                option,
-                result_kind=InputBindingResultKind.CANONICAL_IDENTITY,
-                input_value_schema=_identity_validation_value_schema(option),
-            ),
-        )
-    route = option.route
-    if route is None:
-        raise ValueError("grounding option requires a route")
-    schemas: list[dict[str, object]] = []
-    canonical_field_refs = tuple(dict.fromkeys(route.canonical_lookup_field_refs))
-    if canonical_field_refs:
-        schemas.append(
-            _selected_option_schema(
-                option,
-                result_kind=InputBindingResultKind.CANONICAL_IDENTITY,
-                input_value_schema={"type": "string", "enum": [task.lookup_text]},
-                matched_field_refs=canonical_field_refs,
-            )
-        )
-    elif not route.lookup_field_ids:
-        schemas.append(
-            _selected_option_schema(
-                option,
-                result_kind=InputBindingResultKind.CANONICAL_IDENTITY,
-                input_value_schema={"type": "string", "enum": [task.lookup_text]},
-            )
-        )
-    schemas.extend(
-        _matched_field_option_schema(option, field_ref=field_ref)
-        for field_ref in dict.fromkeys(route.lookup_field_refs)
-    )
-    return tuple(schemas)
-
-
-def _matched_field_option_schema(
-    option: InputBindingOption,
+def _option_review_schema(
     *,
-    field_ref: str,
+    resolver_fit_question: str,
+    surface: ResolverOptionSurface,
+    lookup_text: str,
 ) -> dict[str, object]:
-    route = option.route
-    if route is None:
-        raise ValueError("grounding option requires a route")
-    field = next(
-        (item for item in route.selected_output_fields if item.field_ref == field_ref),
-        None,
-    )
-    input_value_schema: dict[str, object] = {"type": "string", "minLength": 1}
-    if field is not None and field.choices:
-        input_value_schema = {"type": "string", "enum": list(field.choices)}
-    return _selected_option_schema(
-        option,
-        result_kind=InputBindingResultKind.MATCHED_VALUE,
-        input_value_schema=input_value_schema,
-        matched_field_refs=(field_ref,),
-    )
-
-
-def _selected_option_schema(
-    option: InputBindingOption,
-    *,
-    result_kind: InputBindingResultKind,
-    input_value_schema: dict[str, object],
-    matched_field_refs: tuple[str, ...] = (),
-) -> dict[str, object]:
-    properties = {
-        "selected_option_id": {"enum": [option.id]},
-        "input_value": input_value_schema,
-        "result_kind": {"enum": [result_kind.value]},
-        "selection_basis": {"type": "string", "minLength": 1},
+    common = {
+        "resolver_fit_question": {
+            "type": "string",
+            "enum": [resolver_fit_question],
+        },
+        "because": {"type": "string", "minLength": 1},
     }
-    if matched_field_refs:
-        properties["matched_field_ref"] = {"enum": list(matched_field_refs)}
-    schema = provider_output.KnownInputBindingOutput.schema(properties)
-    if matched_field_refs:
-        required = schema["required"]
-        if not isinstance(required, list):
-            raise ValueError("grounding schema required fields must be an array")
-        schema["required"] = [*required, "matched_field_ref"]
-    return schema
-
-
-def _no_selected_option_schema() -> dict[str, object]:
-    return provider_output.KnownInputBindingOutput.schema(
-        {
-            "selected_option_id": {"enum": ["none"]},
-            "input_value": {"type": "string", "enum": [""]},
-            "result_kind": {"enum": ["none"]},
-            "selection_basis": {"type": "string", "minLength": 1},
-        }
+    variants = []
+    if surface.response_match_fields and surface.required_request_parameters_accept(
+        lookup_text=lookup_text
+    ):
+        variants.append(
+            provider_output.OptionReviewOutput.schema(
+                {
+                    **common,
+                    "request_values": _request_values_schema(
+                        surface,
+                        lookup_text=lookup_text,
+                    ),
+                    "response_match_alternatives": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                field.path for field in surface.response_match_fields
+                            ],
+                        },
+                        "minItems": 1,
+                    },
+                    "decision": {
+                        "type": "string",
+                        "enum": [
+                            LookupTextResolutionDecision.CAN_RESOLVE_LOOKUP_TEXT.value
+                        ],
+                    },
+                }
+            )
+        )
+    variants.append(
+        provider_output.OptionReviewOutput.schema(
+            {
+                **common,
+                "request_values": {
+                    **_empty_object_schema(),
+                },
+                "response_match_alternatives": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "maxItems": 0,
+                },
+                "decision": {
+                    "type": "string",
+                    "enum": [
+                        LookupTextResolutionDecision.CANNOT_RESOLVE_LOOKUP_TEXT.value
+                    ],
+                },
+            }
+        )
     )
+    return {"oneOf": variants}
 
 
-def _identity_validation_value_schema(
-    option: InputBindingOption,
+def _request_values_schema(
+    surface: ResolverOptionSurface,
+    *,
+    lookup_text: str,
 ) -> dict[str, object]:
-    route = option.route
-    type_name = route.lookup_param_type.casefold() if route is not None else ""
-    if type_name == "integer":
-        return {"type": "integer"}
-    if type_name in {"number", "double", "float"}:
-        return {"type": "number"}
-    if type_name == "boolean":
-        return {"type": "boolean"}
-    return {"type": "string", "minLength": 1}
+    parameters = surface.compatible_request_parameters(lookup_text=lookup_text)
+    properties = {
+        parameter.param_ref: {
+            "enum": [
+                surface.compiled_request_value(
+                    parameter.param_ref,
+                    lookup_text=lookup_text,
+                )[1]
+            ]
+        }
+        for parameter in parameters
+    }
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": properties,
+        "required": [
+            parameter.param_ref
+            for parameter in parameters
+            if parameter.required and parameter.default is None
+        ],
+    }
+
+
+def _empty_object_schema() -> dict[str, object]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {},
+        "required": [],
+    }
 
 
 def _time_intent_schema() -> dict[str, object]:

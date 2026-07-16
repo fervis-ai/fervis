@@ -1,7 +1,6 @@
 """Typed provider-output contracts for grounding."""
 
 from dataclasses import dataclass
-from typing import Optional
 
 from fervis.lookup.provider_contract import ProviderOutput
 
@@ -37,15 +36,20 @@ class KnownTimeResolutionOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
-class KnownInputBindingOutput(ProviderOutput):
-    selected_option_id: str
-    input_value: str | int | float | bool
-    result_kind: str
-    selection_basis: str
-    matched_field_ref: Optional[str] = None
+class OptionReviewOutput(ProviderOutput):
+    resolver_fit_question: str
+    because: str
+    request_values: dict[str, str | int | float | bool]
+    response_match_alternatives: tuple[str, ...]
+    decision: str
+
+
+@dataclass(frozen=True)
+class KnownInputBindingReviewOutput(ProviderOutput):
+    option_reviews: dict[str, OptionReviewOutput]
 
 
 @dataclass(frozen=True)
 class GroundingOutput(ProviderOutput):
     known_time_resolutions: dict[str, KnownTimeResolutionOutput]
-    known_input_bindings: dict[str, KnownInputBindingOutput]
+    known_input_binding_reviews: dict[str, KnownInputBindingReviewOutput]

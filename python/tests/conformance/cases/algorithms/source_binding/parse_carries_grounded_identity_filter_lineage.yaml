@@ -1,5 +1,5 @@
 id: parse_carries_grounded_identity_filter_lineage
-description: Source-binding parser carries grounded identity field-filter lineage onto the bound source.
+description: Source Binding applies a resolved identity to an exact declared entity-reference target and preserves its lineage.
 migrates:
   - api/tests/fervis/lookup/test_source_binding_one_call.py::test_parse_source_binding_carries_identity_field_filter_lineage_to_bound_source
 kind: algorithm
@@ -8,6 +8,11 @@ input:
   request:
     mode: identity_field_filter
   selected_field_id: location_id
+  resolved_input_applications:
+    - target_kind: returned_identity
+      target_id: source_1.data.reference.area_reference
+      value_id: nairobi_area
+      value_component: canonical_key
 expect:
   result_contains:
     applied_filters:

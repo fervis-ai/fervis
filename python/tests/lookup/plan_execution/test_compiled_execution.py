@@ -10,6 +10,10 @@ from fervis.lookup.relation_catalog import (
     RowCardinality,
     RowPath,
 )
+from fervis.lookup.fact_plan.row_sources import (
+    RowSourceCatalog,
+    build_row_source_catalog,
+)
 from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
     Relation,
@@ -17,6 +21,8 @@ from fervis.lookup.answer_program.relations import (
     RelationSource,
     RelationSourceAppliedFilter,
     RelationSourceRowFilter,
+    PopulationCoverageClaim,
+    PopulationCoverageRole,
     SourceKind,
 )
 from fervis.lookup.answer_program.instantiation import (
@@ -40,6 +46,7 @@ from fervis.lookup.answer_program.model import AnswerProgram
 from fervis.lookup.answer_program.operations import (
     ComputeBinary,
     ComputeBinaryOperator,
+    ComputeInputPopulationCoverage,
     ComputeSpec,
     Operation,
 )
@@ -57,6 +64,7 @@ from fervis.lookup.question_contract import (
     RequestedFact,
     RequestedFactAnswerOutput,
     RequestedFactLiteralInput,
+    MembershipTestRef,
 )
 
 
@@ -66,6 +74,69 @@ def _constant_ref(value: FactValue, *, constant_id: str) -> ConstantRef:
         version_ref="test@1",
         value=value,
     )
+
+
+def test_compute_intersects_every_population_derived_operand() -> None:
+    constrained = _constant_ref(
+        FactValue.literal(
+            id="nairobi_sales",
+            literal_type=LiteralType.NUMBER,
+            value="100",
+            proof_refs=("known_input:nairobi",),
+        ),
+        constant_id="nairobi_sales",
+    )
+    unconstrained = _constant_ref(
+        FactValue.literal(
+            id="all_refunds",
+            literal_type=LiteralType.NUMBER,
+            value="10",
+            proof_refs=("read:refunds",),
+        ),
+        constant_id="all_refunds",
+    )
+    membership_test = MembershipTestRef("fact_1", "in_nairobi")
+
+    compiled = _materialize_execution(
+        answer=AnswerProgram(
+            operations=(
+                Operation(
+                    id="net_sales",
+                    spec=ComputeSpec(
+                        expression=ComputeBinary(
+                            operator=ComputeBinaryOperator.SUBTRACT,
+                            left=constrained,
+                            right=unconstrained,
+                        ),
+                        output_scalar="net_sales",
+                        input_population_coverage=(
+                            ComputeInputPopulationCoverage(
+                                input_id="constant:nairobi_sales@test@1",
+                                claims=(
+                                    PopulationCoverageClaim(
+                                        test_ref=membership_test,
+                                        role=PopulationCoverageRole.ROW_POPULATION,
+                                        proof_refs=("known_input:nairobi",),
+                                    ),
+                                ),
+                            ),
+                            ComputeInputPopulationCoverage(
+                                input_id="constant:all_refunds@test@1",
+                                claims=(),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        bindings=BindingSet(),
+        catalog=None,
+        row_sources=RowSourceCatalog(),
+    )
+
+    scalar = next(node for node in compiled.proof_graph.nodes if node.id == "scalar:net_sales")
+
+    assert scalar.row_population_test_refs == ()
 
 
 def test_active_memory_scalar_input_keeps_memory_and_prior_proof_refs() -> None:
@@ -101,7 +172,7 @@ def test_active_memory_scalar_input_keeps_memory_and_prior_proof_refs() -> None:
         ),
         bindings=BindingSet(),
         catalog=None,
-        row_sources=(),
+        row_sources=RowSourceCatalog(),
     )
 
     contribution = next(
@@ -182,7 +253,7 @@ def test_repeated_compute_origin_has_one_operation_input_node() -> None:
         ),
         bindings=BindingSet(),
         catalog=None,
-        row_sources=(),
+        row_sources=RowSourceCatalog(),
     )
 
     assert tuple(
@@ -316,7 +387,7 @@ def test_compile_merges_equivalent_applied_and_concrete_row_filters() -> None:
         ),
         bindings=BindingSet(),
         catalog=catalog,
-        row_sources=(),
+        row_sources=build_row_source_catalog(catalog),
     )
 
     row_filter_nodes = tuple(
@@ -392,7 +463,7 @@ def test_compile_rejects_conflicting_same_field_row_filters() -> None:
             ),
             bindings=BindingSet(),
             catalog=catalog,
-            row_sources=(),
+            row_sources=build_row_source_catalog(catalog),
         )
 
 

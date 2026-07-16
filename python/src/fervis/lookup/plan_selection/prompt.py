@@ -13,6 +13,7 @@ from fervis.lookup.turn_prompts import (
 )
 from fervis.lookup.turn_prompts.projections import (
     answer_output_prompt_payload,
+    resolved_inputs_for_requested_fact,
     source_alignment_reviews_xml,
 )
 from fervis.lookup.plan_selection.source_strategies import (
@@ -72,7 +73,8 @@ class PlanSelectionTurnPrompt(TurnPromptBase):
                 "Source Alignment",
                 (
                     "Compare each source_candidate against the fact_text and answer_outputs in the same requested_fact block.",
-                    "Use the source response rows, field names, row cardinality, input params, and read description to assess business meaning alignment.",
+                    "Assess each source candidate without reinterpreting any shown typed resolved input. Applying those inputs belongs to Source Binding.",
+                    "Use the source response rows, field names, row cardinality, and input params to assess business meaning alignment.",
                     "Use source_alignment=DIRECT when this source contains the complete raw ingredient set needed to answer the requested fact by itself, even if subsequent steps must choose params, filters, metrics, groups, aggregation, ranking, or rendering.",
                     "Use source_alignment=PARTIAL when this source contains a necessary raw ingredient for the requested fact, but the fact cannot be answered without combining it with another source.",
                     "Use source_alignment=NOT_ALIGNED when the source is only related, adjacent, or shape-compatible, or lacks the raw ingredients needed for the requested fact; do not forward it.",
@@ -149,6 +151,12 @@ class PlanSelectionTurnPrompt(TurnPromptBase):
                 {
                     "requested_fact_id": fact.id,
                     "fact_text": fact.description,
+                    "resolved_inputs": list(
+                        resolved_inputs_for_requested_fact(
+                            fact,
+                            available_values=self.request.available_values,
+                        )
+                    ),
                     "answer_outputs": [
                         answer_output_prompt_payload(output)
                         for output in fact.support_answer_outputs

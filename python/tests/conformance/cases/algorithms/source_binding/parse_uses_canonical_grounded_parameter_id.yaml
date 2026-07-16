@@ -1,5 +1,5 @@
 id: parse_uses_canonical_grounded_parameter_id
-description: Source binding resolves grounded endpoint inputs by the row source's canonical parameter identity.
+description: Source binding applies an explicit resolved-input decision to the row source's canonical parameter identity.
 kind: algorithm
 algorithm: source_binding.parse
 input:
@@ -7,6 +7,9 @@ input:
     mode: grounded_time_filter
     raw_start_param_name: start-date
   selected_field_id: amount
+  resolved_input_applications:
+    - {target_kind: request_parameter, target_id: start_date, value_id: time_1, value_component: instant}
+    - {target_kind: request_parameter, target_id: end_date, value_id: time_1, value_component: instant}
   choices:
     OPEN: SATISFIES_TEST
     CLOSED: CONFLICTS_WITH_TEST

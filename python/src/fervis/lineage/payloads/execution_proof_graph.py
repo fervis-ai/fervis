@@ -7,12 +7,13 @@ from fervis.types.enums import StrEnum
 from typing import Any, TypeVar
 
 from fervis.lineage.enums import ProofEdgeRole, ProofNodeKind
+from fervis.lookup.question_contract import MembershipTestRef
 
 TEnum = TypeVar("TEnum", bound=StrEnum)
 
 
 EXECUTION_PROOF_GRAPH_SCHEMA = "fervis.execution_proof_graph"
-EXECUTION_PROOF_GRAPH_SCHEMA_REV = 1
+EXECUTION_PROOF_GRAPH_SCHEMA_REV = 2
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,8 @@ class ProofGraphPayloadNode:
     label: str = ""
     value: Any = None
     operator: str = ""
+    row_population_test_refs: tuple[MembershipTestRef, ...] = ()
+    condition_test_refs: tuple[MembershipTestRef, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -54,6 +57,7 @@ def execution_proof_graph_payload(graph: Any) -> dict[str, Any]:
                 "id": node.id,
                 "kind": node.kind.value,
                 "proof_refs": list(node.proof_refs),
+                "population_coverage": _population_coverage_payload(node),
                 **_optional_node_payload(node),
             }
             for node in graph.nodes
@@ -123,6 +127,17 @@ def _optional_node_payload(node: object) -> dict[str, Any]:
     return output
 
 
+def _population_coverage_payload(node: object) -> dict[str, list[dict[str, str]]]:
+    row_tests = tuple(getattr(node, "row_population_test_refs", ()) or ())
+    condition_tests = tuple(getattr(node, "condition_test_refs", ()) or ())
+    return {
+        "row_tests": [_membership_test_ref_payload(ref) for ref in row_tests],
+        "condition_tests": [
+            _membership_test_ref_payload(ref) for ref in condition_tests
+        ],
+    }
+
+
 def _read_node(item: object) -> ProofGraphPayloadNode:
     if not isinstance(item, dict):
         raise ValueError("proof graph node must be an object")
@@ -135,6 +150,9 @@ def _read_node(item: object) -> ProofGraphPayloadNode:
     proof_refs = item.get("proof_refs", [])
     if not isinstance(proof_refs, list):
         raise ValueError("proof graph node proof_refs must be a list")
+    if "population_coverage" not in item:
+        raise ValueError("proof graph node requires population coverage")
+    row_tests, condition_tests = _read_population_coverage(item["population_coverage"])
     return ProofGraphPayloadNode(
         id=node_id,
         kind=kind,
@@ -142,7 +160,48 @@ def _read_node(item: object) -> ProofGraphPayloadNode:
         label=str(item.get("label") or ""),
         value=item.get("value"),
         operator=str(item.get("operator") or ""),
+        row_population_test_refs=row_tests,
+        condition_test_refs=condition_tests,
     )
+
+
+def _membership_test_ref_payload(ref: MembershipTestRef) -> dict[str, str]:
+    return {
+        "requested_fact_id": ref.requested_fact_id,
+        "membership_test_id": ref.membership_test_id,
+    }
+
+
+def _read_population_coverage(
+    value: object,
+) -> tuple[tuple[MembershipTestRef, ...], tuple[MembershipTestRef, ...]]:
+    if not isinstance(value, dict) or set(value) != {"row_tests", "condition_tests"}:
+        raise ValueError("proof graph population coverage must be a closed object")
+    return (
+        _read_membership_test_refs(value["row_tests"]),
+        _read_membership_test_refs(value["condition_tests"]),
+    )
+
+
+def _read_membership_test_refs(value: object) -> tuple[MembershipTestRef, ...]:
+    if not isinstance(value, list):
+        raise ValueError("proof graph population coverage tests must be a list")
+    output: list[MembershipTestRef] = []
+    for item in value:
+        if not isinstance(item, dict) or set(item) != {
+            "requested_fact_id",
+            "membership_test_id",
+        }:
+            raise ValueError("proof graph membership test reference is invalid")
+        output.append(
+            MembershipTestRef(
+                requested_fact_id=_required_text(item, "requested_fact_id"),
+                membership_test_id=_required_text(item, "membership_test_id"),
+            )
+        )
+    if len(set(output)) != len(output):
+        raise ValueError("proof graph population coverage contains duplicate tests")
+    return tuple(output)
 
 
 def _read_edge(item: object) -> ProofGraphPayloadEdge:

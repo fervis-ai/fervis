@@ -26,6 +26,7 @@ from fervis.lookup.answer_program.contracts import (
 from fervis.lookup.answer_program.values import (
     ConstantRef,
     EnvironmentRef,
+    FactValue,
     NodeOutputRef,
     ParameterRef,
     TimeComponent,
@@ -337,6 +338,22 @@ def resolve_value_expression(
 
 
 def _fact_value_component(value: Any, component: str) -> Any:
+    key_component_prefix = "key_component:"
+    if component.startswith(key_component_prefix):
+        if not isinstance(value, FactValue):
+            raise AnswerProgramContractError(
+                "unsupported_value_component",
+                f"value does not carry {component}",
+            )
+        try:
+            return value.identity_key_component(
+                component.removeprefix(key_component_prefix)
+            )
+        except ValueError as exc:
+            raise AnswerProgramContractError(
+                "unsupported_value_component",
+                f"value does not carry {component}",
+            ) from exc
     try:
         typed_component = (
             TimeComponent(component)

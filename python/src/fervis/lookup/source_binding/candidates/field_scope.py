@@ -3,23 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping, Protocol
+from typing import Mapping
 
-
-class ReadAssessmentLike(Protocol):
-    @property
-    def source_candidate_id(self) -> str: ...
-
-    @property
-    def is_retained(self) -> bool: ...
-
-    @property
-    def relevant_field_refs(self) -> tuple[str, ...]: ...
-
-
-class ReadEligibilityResultLike(Protocol):
-    @property
-    def read_assessments(self) -> tuple[ReadAssessmentLike, ...]: ...
+from fervis.lookup.read_eligibility.model import ResolvedRetainedReadSet
 
 
 @dataclass(frozen=True)
@@ -34,19 +20,16 @@ class SourceBindingFieldScope:
     @classmethod
     def from_read_eligibility(
         cls,
-        read_eligibility: ReadEligibilityResultLike | None,
+        read_eligibility: ResolvedRetainedReadSet | None,
     ) -> SourceBindingFieldScope:
         if read_eligibility is None:
             return cls.unscoped()
         scoped_candidate_ids = frozenset(
-            item.source_candidate_id
-            for item in read_eligibility.read_assessments
-            if item.is_retained
+            item.source_candidate_id for item in read_eligibility.retained_reads
         )
         field_refs_by_candidate_id = {
             item.source_candidate_id: frozenset(item.relevant_field_refs)
-            for item in read_eligibility.read_assessments
-            if item.is_retained
+            for item in read_eligibility.retained_reads
         }
         return cls(
             scoped_candidate_ids=scoped_candidate_ids,

@@ -7,14 +7,18 @@ from typing import Any
 from fervis.lookup.source_binding.compiler_ir import (
     DraftRelationSourcePopulationChoice,
 )
-from fervis.lookup.answer_program.relations import PopulationChoiceControllerKind
+from fervis.lookup.answer_program.relations import (
+    PopulationCoverageClaim,
+    PopulationCoverageRole,
+    PopulationChoiceControllerKind,
+)
 from fervis.lookup.source_binding import provider_contract as provider_output
 from fervis.lookup.source_binding.candidates.model import SourceCandidate
 from fervis.lookup.source_binding.model import SourceBindingRequest
 from fervis.lookup.source_binding.parser.membership_effects import (
     answer_population_tests_by_id,
     choice_is_included,
-    discharged_membership_test_ids,
+    satisfied_membership_test_ids,
     population_choice_proof_refs,
     population_tests_allow_choice,
     relation_review_scope_decisions,
@@ -23,6 +27,10 @@ from fervis.lookup.source_binding.parser.types import RowPredicateParse
 from fervis.lookup.source_binding.parser_common import _text
 from fervis.lookup.source_binding.review_scope import SourceBindingReviewScope
 from fervis.lookup.source_binding.review_surface import source_binding_review_surface
+from fervis.lookup.source_binding.population_effects import (
+    canonical_coverage_test_ids,
+    population_coverage_claims_for_satisfied_tests,
+)
 
 
 __all__ = [
@@ -38,6 +46,7 @@ def parse_row_predicate_filters(
     requested_fact_id: str,
     binding_target_id: str,
     review_scope: SourceBindingReviewScope,
+    coverage_role: PopulationCoverageRole,
 ) -> RowPredicateParse:
     candidate_predicates_by_id = source_binding_review_surface(candidate).row_predicates
     scoped_test_ids_by_predicate = {
@@ -60,7 +69,7 @@ def parse_row_predicate_filters(
     if missing_predicate_ids:
         raise ValueError("source binding missing row predicate review")
     population_choices: list[DraftRelationSourcePopulationChoice] = []
-    discharged_test_ids: list[str] = []
+    coverage_claims: list[PopulationCoverageClaim] = []
     for predicate_id, raw in reviews.items():
         predicate = predicates_by_id.get(predicate_id)
         if predicate is None:
@@ -75,19 +84,22 @@ def parse_row_predicate_filters(
             scoped_test_ids=scoped_test_ids_by_predicate[predicate_id],
         )
         allowed_values = predicate.allowed_values
-        values, discharged = _row_predicate_include_values(
+        values, satisfied_test_ids = _row_predicate_include_values(
             raw,
             allowed_values=allowed_values,
             tests_by_id=tests_by_id,
             path=f"row_predicate_reviews.{predicate_id}",
         )
-        discharged_test_ids.extend(discharged)
         excluded_values = tuple(
             value for value in allowed_values if value not in values
         )
         field_id = predicate.field_id
         if not field_id:
             raise ValueError("row predicate missing field")
+        proof_refs = population_choice_proof_refs(
+            f"row_predicate:{predicate_id}",
+            out_of_scope_decisions,
+        )
         population_choices.append(
             DraftRelationSourcePopulationChoice(
                 controller_kind=PopulationChoiceControllerKind.ROW_PREDICATE,
@@ -100,18 +112,26 @@ def parse_row_predicate_filters(
                     f"semantic.{requested_fact_id}.{binding_target_id}."
                     f"row_predicate.{predicate_id}"
                 ),
-                proof_refs=population_choice_proof_refs(
-                    f"row_predicate:{predicate_id}",
-                    out_of_scope_decisions,
-                ),
+                proof_refs=proof_refs,
                 review_scope_decisions=relation_review_scope_decisions(
                     out_of_scope_decisions
                 ),
             )
         )
+        coverage_claims.extend(
+            population_coverage_claims_for_satisfied_tests(
+                canonical_coverage_test_ids(
+                    satisfied_test_ids,
+                    tests_by_id=tests_by_id,
+                ),
+                requested_fact_id=requested_fact_id,
+                coverage_role=coverage_role,
+                proof_refs=proof_refs,
+            )
+        )
     return RowPredicateParse(
         population_choices=tuple(population_choices),
-        discharged_membership_test_ids=tuple(dict.fromkeys(discharged_test_ids)),
+        population_coverage_claims=tuple(coverage_claims),
     )
 
 
@@ -152,12 +172,12 @@ def _row_predicate_include_values(
     )
     if not values:
         raise ValueError("row predicate review must include at least one value")
-    discharged = discharged_membership_test_ids(
+    satisfied = satisfied_membership_test_ids(
         reviewed_effects,
         included_values=values,
         tests_by_id=tests_by_id,
     )
-    return values, discharged
+    return values, satisfied
 
 
 def _row_predicate_filter_test_ids(

@@ -1,0 +1,23 @@
+id: source_read_identity_is_not_constraint_proof
+description: Selecting a read does not mechanically prove that its rows satisfy a question constraint.
+kind: algorithm
+algorithm: answer_program.population_coverage
+input:
+  question_contract: {$ref: ../../../fixtures/population_constraint_coverage.yaml#/question_contracts/sales_in_nairobi}
+  inputs: [{id: nairobi, value: Nairobi, entity_kind: area, key_component_id: area_id, canonical_value: area-nairobi}]
+  relations:
+    - id: sales
+      fields: [sale_id, amount]
+      identity_fields: [sale_id]
+      source_proof_refs: [known_input:nairobi]
+      coverage_claims: [{membership_test_id: in_nairobi, role: row_population, proof_ref: sales}]
+  operations:
+    - id: total_sales
+      output_relation: totals
+      spec:
+        kind: aggregate
+        input_relation: sales
+        aggregations: [{function: sum, input_field: amount, output_field: total}]
+  result: {relation_id: totals, field_id: total}
+expect:
+  result_contains: {status: rejected}

@@ -15,7 +15,13 @@ from fervis.lookup.question_contract import (
     RequestedFactAnswerPopulationMembershipTest,
 )
 from fervis.lookup.source_binding.candidates import SourceCandidate
-from fervis.lookup.source_binding.candidates.model import CandidateParameter
+from fervis.lookup.source_binding.closed_key_params import (
+    closed_key_param_binding_index,
+)
+from fervis.lookup.source_binding.input_applications import (
+    ResolvedInputApplicationSurface,
+    resolved_input_application_surfaces,
+)
 from fervis.lookup.source_binding.membership_tests import membership_test_key
 from fervis.lookup.source_binding.model import SourceBindingRequest
 from fervis.lookup.source_binding.plan_targets import (
@@ -83,6 +89,23 @@ class ReviewAxisScope:
 @dataclass(frozen=True)
 class SourceBindingReviewScope:
     axes: dict[tuple[str, SourceBindingReviewAxisKind, str], ReviewAxisScope]
+    input_owned_test_ids_by_binding_target_id: dict[str, tuple[str, ...]]
+    population_binding_test_ids_by_binding_target_id: dict[str, tuple[str, ...]]
+
+    def input_owned_test_ids(self, binding_target_id: str) -> tuple[str, ...]:
+        return self.input_owned_test_ids_by_binding_target_id.get(
+            binding_target_id,
+            (),
+        )
+
+    def population_binding_test_ids(
+        self,
+        binding_target_id: str,
+    ) -> tuple[str, ...]:
+        return self.population_binding_test_ids_by_binding_target_id.get(
+            binding_target_id,
+            (),
+        )
 
     def finite_choice_param_test_ids(
         self,
@@ -171,20 +194,134 @@ def source_binding_review_scope(
     target_index: SourceBindingTargetIndex | None = None,
 ) -> SourceBindingReviewScope:
     targets = (target_index or source_binding_target_index(request)).targets
+    backend_bindings = closed_key_param_binding_index(
+        request,
+        targets=targets,
+        candidates_by_id=candidates_by_id,
+    )
+    input_application_surfaces = resolved_input_application_surfaces(
+        request,
+        targets=targets,
+        candidates_by_id=candidates_by_id,
+        closed_key_bindings=backend_bindings,
+    )
     facts_by_id = {fact.id: fact for fact in request.requested_facts}
     values_by_input_ref = _applicable_values_by_input_ref(request.available_values)
     axes: dict[tuple[str, SourceBindingReviewAxisKind, str], ReviewAxisScope] = {}
+    input_owned_test_ids_by_target: dict[str, tuple[str, ...]] = {}
+    population_binding_test_ids_by_target: dict[str, tuple[str, ...]] = {}
     for target in targets:
         fact = facts_by_id.get(target.requested_fact_id)
         candidate = candidates_by_id.get(target.source_candidate_id)
-        for scoped in _target_axis_scopes(
+        input_owner_surfaces = _target_input_owner_surfaces(
             target,
             fact=fact,
             candidate=candidate,
+            backend_param_bindings=tuple(
+                binding
+                for binding_set in backend_bindings.backend_param_binding_sets(
+                    target.binding_target_id
+                )
+                for binding in binding_set
+            ),
+            input_application_surface=input_application_surfaces.get(
+                target.binding_target_id
+            ),
             values_by_input_ref=values_by_input_ref,
-        ):
+        )
+        input_owned_test_ids = _input_owned_membership_test_ids(
+            fact,
+            input_owner_surfaces=input_owner_surfaces,
+        )
+        input_owned_test_ids_by_target[target.binding_target_id] = input_owned_test_ids
+        target_axis_scopes = _target_axis_scopes(
+            target,
+            fact=fact,
+            candidate=candidate,
+            input_owner_surfaces=input_owner_surfaces,
+            values_by_input_ref=values_by_input_ref,
+        )
+        for scoped in target_axis_scopes:
             axes[(target.binding_target_id, scoped.axis_kind, scoped.axis_id)] = scoped
-    return SourceBindingReviewScope(axes=axes)
+        population_binding_test_ids_by_target[target.binding_target_id] = (
+            _population_binding_membership_test_ids(
+                fact,
+                input_owned_test_ids=input_owned_test_ids,
+                axis_scopes=target_axis_scopes,
+            )
+        )
+    return SourceBindingReviewScope(
+        axes=axes,
+        input_owned_test_ids_by_binding_target_id=(
+            input_owned_test_ids_by_target
+        ),
+        population_binding_test_ids_by_binding_target_id=(
+            population_binding_test_ids_by_target
+        ),
+    )
+
+
+def _population_binding_membership_test_ids(
+    fact: RequestedFact | None,
+    *,
+    input_owned_test_ids: tuple[str, ...],
+    axis_scopes: tuple[ReviewAxisScope, ...],
+) -> tuple[str, ...]:
+    population = fact.answer_population if fact is not None else None
+    if population is None:
+        return ()
+    axis_owned_test_ids = {
+        test_id
+        for axis_scope in axis_scopes
+        for test_id in axis_scope.in_scope_test_ids
+    }
+    tests_owned_elsewhere = set(input_owned_test_ids) | axis_owned_test_ids
+    return tuple(
+        membership_test_key(test)
+        for test in population.membership_tests
+        if test.kind is not AnswerPopulationMembershipTestKind.SUBJECT_IDENTITY
+        and membership_test_key(test) not in tests_owned_elsewhere
+    )
+
+
+def _target_input_owner_surfaces(
+    target: SourceBindingTarget,
+    *,
+    fact: RequestedFact | None,
+    candidate: SourceCandidate | None,
+    backend_param_bindings: tuple[DraftEndpointParamBinding, ...],
+    input_application_surface: ResolvedInputApplicationSurface | None,
+    values_by_input_ref: dict[str, tuple[FactValue, ...]],
+) -> dict[str, tuple[_OwnerSurfaceProof, ...]]:
+    if fact is None or candidate is None:
+        return {}
+    return _input_owner_surfaces(
+        candidate,
+        requested_fact_id=target.requested_fact_id,
+        backend_param_bindings=backend_param_bindings,
+        input_application_surface=input_application_surface,
+        values_by_input_ref=values_by_input_ref,
+    )
+
+
+def _input_owned_membership_test_ids(
+    fact: RequestedFact | None,
+    *,
+    input_owner_surfaces: dict[str, tuple[_OwnerSurfaceProof, ...]],
+) -> tuple[str, ...]:
+    population = fact.answer_population if fact is not None else None
+    if population is None:
+        return ()
+    return tuple(
+        membership_test_key(test)
+        for test in population.membership_tests
+        if test.kind == AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT
+        and test.owned_question_input_refs
+        and all(
+            input_owner_surfaces.get(input_ref)
+            for input_ref in test.owned_question_input_refs
+        )
+    )
 
 
 def _target_axis_scopes(
@@ -192,17 +329,13 @@ def _target_axis_scopes(
     *,
     fact: RequestedFact | None,
     candidate: SourceCandidate | None,
+    input_owner_surfaces: dict[str, tuple[_OwnerSurfaceProof, ...]],
     values_by_input_ref: dict[str, tuple[FactValue, ...]],
 ) -> tuple[ReviewAxisScope, ...]:
     if fact is None or fact.answer_population is None or candidate is None:
         return ()
     surface = source_binding_review_surface(candidate)
     axis_owners = _axis_owners(surface)
-    input_owner_surfaces = _input_owner_surfaces(
-        candidate,
-        requested_fact_id=target.requested_fact_id,
-        values_by_input_ref=values_by_input_ref,
-    )
     output: list[ReviewAxisScope] = []
     for axis_id in surface.finite_choice_params:
         output.append(
@@ -348,6 +481,8 @@ def _input_owner_surfaces(
     candidate: SourceCandidate,
     *,
     requested_fact_id: str,
+    backend_param_bindings: tuple[DraftEndpointParamBinding, ...],
+    input_application_surface: ResolvedInputApplicationSurface | None,
     values_by_input_ref: dict[str, tuple[FactValue, ...]],
 ) -> dict[str, tuple[_OwnerSurfaceProof, ...]]:
     output: dict[str, tuple[_OwnerSurfaceProof, ...]] = {}
@@ -362,6 +497,8 @@ def _input_owner_surfaces(
         proofs = _candidate_owner_surface_proofs(
             candidate,
             input_ref=input_ref,
+            backend_param_bindings=backend_param_bindings,
+            input_application_surface=input_application_surface,
             values=applicable_values,
         )
         if proofs:
@@ -450,10 +587,13 @@ def _candidate_owner_surface_proofs(
     candidate: SourceCandidate,
     *,
     input_ref: str,
+    backend_param_bindings: tuple[DraftEndpointParamBinding, ...],
+    input_application_surface: ResolvedInputApplicationSurface | None,
     values: tuple[FactValue, ...],
 ) -> tuple[_OwnerSurfaceProof, ...]:
     known_ref = f"known_input:{input_ref}"
     proofs = list(_candidate_applied_param_binding_proofs(candidate, known_ref))
+    proofs.extend(_matching_binding_proofs(backend_param_bindings, known_ref))
     proofs.extend(
         _OwnerSurfaceProof(
             owner_surface_id=f"applied_filter:{field_id}:{input_ref}",
@@ -463,57 +603,16 @@ def _candidate_owner_surface_proofs(
         if item.known_input_id == input_ref
         for field_id in item.predicate_field_ids
     )
-    proofs.extend(_candidate_selectable_param_decision_proofs(candidate, values))
-    return _dedupe_owner_surface_proofs(tuple(proofs))
-
-
-def _candidate_selectable_param_decision_proofs(
-    candidate: SourceCandidate,
-    values: tuple[FactValue, ...],
-) -> tuple[_OwnerSurfaceProof, ...]:
-    value_ids = frozenset(value.id for value in values)
-    if not value_ids:
-        return ()
-    return tuple(
-        _OwnerSurfaceProof(
-            owner_surface_id=f"source_param:{param_id}",
-            proof_refs=(f"param_decision:{decision_id}",),
+    if input_application_surface is not None:
+        proofs.extend(
+            _OwnerSurfaceProof(
+                owner_surface_id=owner.owner_surface_id,
+                proof_refs=owner.proof_refs,
+            )
+            for owner in input_application_surface.owners()
+            if owner.known_input_id == input_ref
         )
-        for param in candidate.params
-        for param_id in (param.id,)
-        if param_id
-        for binding_key in _available_binding_value_keys(param, value_ids=value_ids)
-        for decision_id in _matching_bind_decision_ids(param, binding_key=binding_key)
-    )
-
-
-def _available_binding_value_keys(
-    param: CandidateParameter,
-    *,
-    value_ids: frozenset[str],
-) -> tuple[tuple[str, str], ...]:
-    return tuple(
-        (item.value, item.value_component)
-        for item in param.binding_values
-        if item.value in value_ids and item.source == "available_value"
-    )
-
-
-def _matching_bind_decision_ids(
-    param: CandidateParameter,
-    *,
-    binding_key: tuple[str, str],
-) -> tuple[str, ...]:
-    value_id, value_component = binding_key
-    return tuple(
-        decision_id
-        for option in param.decision_options
-        if option.decision == "bind"
-        and option.value == value_id
-        and option.value_component == value_component
-        for decision_id in (option.id,)
-        if decision_id
-    )
+    return _dedupe_owner_surface_proofs(tuple(proofs))
 
 
 def _dedupe_owner_surface_proofs(

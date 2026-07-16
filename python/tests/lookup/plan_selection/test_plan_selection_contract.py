@@ -1,5 +1,10 @@
 from copy import deepcopy
+from dataclasses import replace
 
+from fervis.lookup.answer_program.values import FactValue
+from fervis.lookup.canonical_data import entity_key_value
+
+from fervis.lookup.turn_prompts import build_turn_prompt_context
 from fervis.lookup.turn_prompts.projections import source_alignment_reviews_xml
 from fervis.lookup.relation_catalog import (
     CatalogField,
@@ -130,6 +135,79 @@ def test_source_alignment_prompt_groups_sources_inside_requested_fact():
     assert '<source_candidate id="source_2"' in xml
     assert xml.index('<requested_fact id="fact_1">') < xml.index(
         '<source_candidate id="source_1"'
+    )
+
+
+def test_source_alignment_prompt_shows_fact_scoped_resolved_input():
+    request = _two_source_alignment_request()
+    known_input = RequestedFactLiteralInput(
+        id="nairobi_qi_1",
+        source=KnownInputSource.QUESTION_CONTEXT,
+        role=LiteralInputRole.REFERENCE_VALUE,
+        text="Nairobi",
+        resolved_value_text="Nairobi",
+    )
+    fact = replace(
+        request.requested_facts[0],
+        known_inputs=(known_input,),
+        input_refs=(known_input.id,),
+    )
+    request = PlanSelectionRequest(
+        question=request.question,
+        question_contract=QuestionContract(requested_facts=(fact,)),
+        requested_facts=(fact,),
+        relation_catalog=request.relation_catalog,
+        source_candidate_payload=request.source_candidates.prompt_payload,
+        available_values=(
+            FactValue.identity(
+                id="value_area_nairobi",
+                known_input_id=known_input.id,
+                key=entity_key_value(
+                    "area",
+                    "primary_key",
+                    {"area_id": "area_nairobi"},
+                ),
+                display_value="Nairobi",
+                matched_field_ref="list_area_list.data.name",
+                matched_field_path="data.name",
+                matched_value="Nairobi",
+                applies_to_requested_fact_ids=(fact.id,),
+            ),
+        ),
+        conversation_context={},
+    )
+
+    payload = PlanSelectionTurnPrompt(request).source_alignment_candidates_payload()
+    xml = source_alignment_reviews_xml(payload)
+    prompt_text = PlanSelectionTurnPrompt(request).to_model_invocation(
+        build_turn_prompt_context(
+            current_question=request.question,
+            conversation_context=request.conversation_context,
+        )
+    ).prompt_text
+
+    assert payload["requested_fact_source_candidates"][0]["resolved_inputs"] == [
+        {
+            "known_input_id": "nairobi_qi_1",
+            "source_text": "Nairobi",
+            "value_id": "value_area_nairobi",
+            "kind": "identity",
+            "entity_kind": "area",
+            "key_id": "primary_key",
+            "key_components": ["area_id"],
+            "display_value": "Nairobi",
+        }
+    ]
+    assert '<resolved_input known_input_id="nairobi_qi_1"' in xml
+    assert 'source_text="Nairobi"' in xml
+    assert 'value_id="value_area_nairobi"' in xml
+    assert '<identity entity_kind="area" key_id="primary_key"' in xml
+    assert 'key_components="area_id"' in xml
+    assert "matched_field" not in xml
+    assert (
+        "Assess each source candidate without reinterpreting any shown typed "
+        "resolved input. Applying those inputs belongs to Source Binding."
+        in prompt_text
     )
 
 
@@ -725,8 +803,20 @@ def test_plan_selection_keeps_closed_key_grouped_count_as_one_operation():
                                 {
                                     "source_candidate_id": "source_1",
                                     "kind": "new_api_read",
-                                    "read_id": "get_staff_sales",
-                                    "fields": [
+                                        "read_id": "get_staff_sales",
+                                        "applied_filters": [
+                                            {
+                                                "known_input_id": "staff_1",
+                                                "value_id": "staff_value_1",
+                                                "field_ids": ["staff_id"],
+                                            },
+                                            {
+                                                "known_input_id": "staff_2",
+                                                "value_id": "staff_value_2",
+                                                "field_ids": ["staff_id"],
+                                            },
+                                        ],
+                                        "fields": [
                                         {"field_id": "staff_id", "type": "uuid"},
                                         {"field_id": "sale_id", "type": "uuid"},
                                     ],

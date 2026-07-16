@@ -9,6 +9,10 @@ from fervis.lookup.question_contract import (
     LiteralInputRole,
     QuestionContract,
     RequestedFact,
+    RequestedFactAnswerPopulation,
+    RequestedFactAnswerPopulationMembershipTest,
+    AnswerPopulationMembershipTestKind,
+    AnswerPopulationMembershipTestPolarity,
     RequestedFactPopulationConstraint,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
@@ -18,6 +22,7 @@ from fervis.lookup.question_contract import (
     RequestedFactKnownInput,
     RequestedFactLiteralInput,
     RequestedFactRowSetReferenceInput,
+    ResultSelectionKind,
 )
 
 
@@ -39,6 +44,9 @@ def requested_fact_from_payload(payload: dict[str, Any]) -> RequestedFact:
         description=str(payload.get("description") or payload["id"]),
         required_for=str(payload.get("required_for") or ""),
         answer_subject=answer_subject_from_payload(payload.get("answer_subject")),
+        answer_population=answer_population_from_payload(
+            payload.get("answer_population")
+        ),
         answer_expression=answer_expression_from_payload(
             payload.get("answer_expression")
         ),
@@ -61,6 +69,37 @@ def requested_fact_from_payload(payload: dict[str, Any]) -> RequestedFact:
                 ),
             )
             for item in payload.get("population_constraints") or ()
+        ),
+    )
+
+
+def answer_population_from_payload(
+    payload: Any,
+) -> RequestedFactAnswerPopulation | None:
+    if payload is None:
+        return None
+    if not isinstance(payload, dict):
+        raise ValueError("answer_population must be an object")
+    return RequestedFactAnswerPopulation(
+        population_label=str(payload["population_label"]),
+        counted_unit=str(payload["counted_unit"]),
+        membership_tests=tuple(
+            RequestedFactAnswerPopulationMembershipTest(
+                id=str(item["id"]),
+                kind=AnswerPopulationMembershipTestKind(str(item["kind"])),
+                polarity=AnswerPopulationMembershipTestPolarity(
+                    str(
+                        item.get("polarity")
+                        or AnswerPopulationMembershipTestPolarity.MUST_PASS.value
+                    )
+                ),
+                test_question=str(item["test_question"]),
+                owned_question_input_refs=tuple(
+                    str(ref)
+                    for ref in item.get("owned_question_input_refs") or ()
+                ),
+            )
+            for item in payload.get("membership_tests") or ()
         ),
     )
 
@@ -99,6 +138,12 @@ def answer_expression_from_payload(
     return RequestedFactAnswerExpression(
         family=RequestedFactAnswerExpressionFamily(str(payload["family"])),
         group_key=group_key_from_payload(payload.get("group_key")),
+        selection_kind=(
+            ResultSelectionKind(str(payload["selection_kind"]))
+            if payload.get("selection_kind")
+            else None
+        ),
+        limit_input_ref=str(payload.get("limit_input_ref") or ""),
     )
 
 

@@ -2,6 +2,9 @@ from tests.lookup.orchestrator._runtime_ports import *  # noqa: F403
 from tests.lookup.orchestrator._runtime_ports import (
     _grounding_payload_from_prompt,
 )
+from tests.lookup.source_binding_helpers import (
+    source_binding_payload_from_fact_plan_with_invocation_overrides,
+)
 
 def _offered_conversation_resolution_tool_names(
     tool_specs: tuple[Any, ...],
@@ -31,6 +34,7 @@ def _select_conversation_resolution_tool_name(
 class _RawPlannerPort:
     arguments: dict[str, Any]
     source_binding_arguments: dict[str, Any] | None = None
+    source_binding_invocation_overrides: tuple[dict[str, Any], ...] = ()
     question_contract: QuestionContract | None = None
     query_enrichment: dict[str, Any] | None = None
     conversation_resolution: Any = None
@@ -158,14 +162,23 @@ class _RawPlannerPort:
                 self.source_binding_arguments or self.arguments,
                 question_contract=question_contract,
             )
+            source_binding_payload = (
+                source_binding_payload_from_fact_plan_with_invocation_overrides(
+                    source_binding_plan_payload,
+                    prompt=prompt,
+                    invocation_overrides=self.source_binding_invocation_overrides,
+                )
+                if self.source_binding_invocation_overrides
+                else source_binding_payload_from_fact_plan(
+                    source_binding_plan_payload,
+                    prompt=prompt,
+                )
+            )
             return {
                 "answer": json.dumps(
                     {
                         "tool": "submit_source_binding",
-                        "arguments": source_binding_payload_from_fact_plan(
-                            source_binding_plan_payload,
-                            prompt=prompt,
-                        ),
+                        "arguments": source_binding_payload,
                     },
                     default=str,
                 ),
@@ -226,6 +239,7 @@ class _ToolNamePlannerPort:
     read_eligibility_retention_specs: (
         tuple[ReadEligibilityRetentionSpec, ...] | None
     ) = None
+    source_binding_invocation_overrides: tuple[dict[str, Any], ...] = ()
     calls: int = 0
     prompts: list[str] = field(default_factory=list)
     system_prompts: list[str] = field(default_factory=list)
@@ -329,10 +343,22 @@ class _ToolNamePlannerPort:
             ):
                 arguments = plan_selection_response
             else:
-                arguments = source_binding_payload_from_fact_plan(
-                    self.responses.get("submit_pattern_fact_plan", {}),
-                    prompt=prompt,
-                )
+                fact_plan = self.responses.get("submit_pattern_fact_plan", {})
+                if self.source_binding_invocation_overrides:
+                    arguments = (
+                        source_binding_payload_from_fact_plan_with_invocation_overrides(
+                            fact_plan,
+                            prompt=prompt,
+                            invocation_overrides=(
+                                self.source_binding_invocation_overrides
+                            ),
+                        )
+                    )
+                else:
+                    arguments = source_binding_payload_from_fact_plan(
+                        fact_plan,
+                        prompt=prompt,
+                    )
             return {
                 "answer": json.dumps(
                     {
@@ -503,9 +529,7 @@ class _PromptSurfacePlannerPort:
                             "binding_target_id": binding_target_id,
                             "answer_population": source_candidate_answer_population(
                                 prompt,
-                                source_candidate_id=str(
-                                    candidate["source_candidate_id"]
-                                ),
+                                binding_target_id=binding_target_id,
                             ),
                             "fulfillment_decisions": source_fulfills_for_candidate(
                                 candidate,

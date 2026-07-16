@@ -95,6 +95,9 @@ input:
     read_id: list_location_list
     row_path_ids:
     - data
+    known_input_bindings:
+    - known_input_id: london_qi_1
+      resolver_result: area:primary_key
   responses:
     list_area_list:
       data:
@@ -129,6 +132,8 @@ expect:
       evidence:
       - kind: known_input
         id: known_input:input_1
+      - kind: resolver_read
+        id: read:list_area_list
       - kind: candidate
         id: 'area:primary_key:{"area_id":"area_nairobi_1"}'
       - kind: candidate

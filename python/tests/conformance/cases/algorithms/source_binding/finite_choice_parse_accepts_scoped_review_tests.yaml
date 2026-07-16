@@ -5,6 +5,8 @@ algorithm: source_binding.finite_choice_parse
 input:
   request:
     mode: scoped_review_owned_input_choice_only
+  resolved_input_applications:
+    - {target_kind: request_parameter, target_id: staff_id, value_id: staff_identity_1, value_component: canonical_key}
   choices:
     OPEN:
       subject_identity: SATISFIES_TEST
@@ -26,9 +28,11 @@ expect:
           - membership_test_id: explicit_user_constraint:specified_staff
             decision: out_of_scope
             owner_surface_ids:
-              - applied_filter:staff_id:staff_id_1
+              - source_param:staff_id
+              - returned_identity:source_1.root.reference.staff_reference
             proof_refs:
               - membership_test:explicit_user_constraint:specified_staff
               - known_input:staff_id_1
-              - applied_filter:staff_id:staff_id_1
+              - source_param:staff_id
               - read:staff_lookup
+              - returned_identity:source_1.root.reference.staff_reference

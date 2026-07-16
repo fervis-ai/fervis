@@ -1,5 +1,5 @@
-id: schema_surface_allows_omitted_default_single_decision_param
-description: Source-binding schema allows defaulted single-decision choice params to be omitted.
+id: schema_surface_rejects_omitted_default_single_decision_param
+description: Source-binding schema requires an explicit decision for a defaulted choice parameter.
 migrates:
   - api/tests/fervis/lookup/test_source_binding_one_call.py::test_source_binding_schema_allows_omitted_optional_single_decision_choice_with_default
 kind: algorithm
@@ -10,4 +10,4 @@ input:
     default_choice_param: true
 expect:
   result_contains:
-    validation: valid
+    validation: invalid

@@ -118,7 +118,12 @@ def resolve_time_resolutions(
             issues.append(time_value)
             continue
         values.append(time_value)
-        uses.extend(_calendar_param_uses(time_value))
+        uses.extend(
+            _calendar_param_uses(
+                time_value,
+                requested_fact_ids=requested_fact_ids,
+            )
+        )
     return CanonicalInputLedger(
         values=tuple(values),
         uses=tuple(uses),
@@ -126,22 +131,25 @@ def resolve_time_resolutions(
     )
 
 
-def _calendar_param_uses(value: FactValue) -> tuple[GroundedInputUse, ...]:
-    return (
+def _calendar_param_uses(
+    value: FactValue,
+    *,
+    requested_fact_ids: tuple[str, ...],
+) -> tuple[GroundedInputUse, ...]:
+    return tuple(
         GroundedInputUse(
-            id=f"use_{value.id}_calendar_start",
+            id=f"use_{value.id}_{requested_fact_id}_calendar_{component.value}",
             value_id=value.id,
             row_source_id=CALENDAR_ROW_SOURCE_ID,
-            param_id=CALENDAR_START_PARAM_ID,
-            value_component=TimeComponent.START,
-        ),
-        GroundedInputUse(
-            id=f"use_{value.id}_calendar_end",
-            value_id=value.id,
-            row_source_id=CALENDAR_ROW_SOURCE_ID,
-            param_id=CALENDAR_END_PARAM_ID,
-            value_component=TimeComponent.END,
-        ),
+            param_id=param_id,
+            requested_fact_id=requested_fact_id,
+            value_component=component,
+        )
+        for requested_fact_id in requested_fact_ids
+        for param_id, component in (
+            (CALENDAR_START_PARAM_ID, TimeComponent.START),
+            (CALENDAR_END_PARAM_ID, TimeComponent.END),
+        )
     )
 
 

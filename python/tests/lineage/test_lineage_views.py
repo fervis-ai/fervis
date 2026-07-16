@@ -43,6 +43,7 @@ from fervis.lineage.views.query import (
     SourceReadRow,
     StepRow,
 )
+from tests.testkit.execution_proof_graph import proof_graph_payload, proof_node
 from fervis.lineage.views.render import render_lineage
 from fervis.lineage.views.service import AnswerLineageService
 from fervis.lineage.views.timeline import lineage_timeline_view
@@ -350,27 +351,26 @@ def _lineage_rows() -> LineageRows:
                 "step_execute",
                 EXECUTION_PROOF_GRAPH_SCHEMA,
                 EXECUTION_PROOF_GRAPH_SCHEMA_REV,
-                {
-                    "nodes": [
-                        {
-                            "id": "relation:source_1",
-                            "kind": ProofNodeKind.RELATION.value,
-                            "proof_refs": ["source_read:source_read_1"],
-                        },
-                        {
-                            "id": "answer_output:fact_1:answer_1",
-                            "kind": ProofNodeKind.ANSWER_OUTPUT.value,
-                            "proof_refs": [],
-                        },
-                    ],
-                    "edges": [
+                proof_graph_payload(
+                    nodes=(
+                        proof_node(
+                            "relation:source_1",
+                            ProofNodeKind.RELATION.value,
+                            proof_refs=("source_read:source_read_1",),
+                        ),
+                        proof_node(
+                            "answer_output:fact_1:answer_1",
+                            ProofNodeKind.ANSWER_OUTPUT.value,
+                        ),
+                    ),
+                    edges=(
                         {
                             "source": "relation:source_1",
                             "target": "answer_output:fact_1:answer_1",
                             "role": ProofEdgeRole.PRODUCES.value,
-                        }
-                    ],
-                },
+                        },
+                    ),
+                ),
             ),
         ),
     )
@@ -591,30 +591,28 @@ def _lineage_rows_with_two_answer_output_branches() -> LineageRows:
                     "step_execute",
                     EXECUTION_PROOF_GRAPH_SCHEMA,
                     EXECUTION_PROOF_GRAPH_SCHEMA_REV,
-                    {
-                        "nodes": [
-                            {
-                                "id": "relation:payroll",
-                                "kind": ProofNodeKind.RELATION.value,
-                                "proof_refs": ["source_read:source_read_1"],
-                            },
-                            {
-                                "id": "relation:bonus",
-                                "kind": ProofNodeKind.RELATION.value,
-                                "proof_refs": ["source_read:source_read_2"],
-                            },
-                            {
-                                "id": "answer_output:fact_1:answer_1",
-                                "kind": ProofNodeKind.ANSWER_OUTPUT.value,
-                                "proof_refs": [],
-                            },
-                            {
-                                "id": "answer_output:fact_1:answer_2",
-                                "kind": ProofNodeKind.ANSWER_OUTPUT.value,
-                                "proof_refs": [],
-                            },
-                        ],
-                        "edges": [
+                    proof_graph_payload(
+                        nodes=(
+                            proof_node(
+                                "relation:payroll",
+                                ProofNodeKind.RELATION.value,
+                                proof_refs=("source_read:source_read_1",),
+                            ),
+                            proof_node(
+                                "relation:bonus",
+                                ProofNodeKind.RELATION.value,
+                                proof_refs=("source_read:source_read_2",),
+                            ),
+                            proof_node(
+                                "answer_output:fact_1:answer_1",
+                                ProofNodeKind.ANSWER_OUTPUT.value,
+                            ),
+                            proof_node(
+                                "answer_output:fact_1:answer_2",
+                                ProofNodeKind.ANSWER_OUTPUT.value,
+                            ),
+                        ),
+                        edges=(
                             {
                                 "source": "relation:payroll",
                                 "target": "answer_output:fact_1:answer_1",
@@ -625,8 +623,8 @@ def _lineage_rows_with_two_answer_output_branches() -> LineageRows:
                                 "target": "answer_output:fact_1:answer_2",
                                 "role": ProofEdgeRole.PRODUCES.value,
                             },
-                        ],
-                    },
+                        ),
+                    ),
                 ),
             ),
             "answer_presentations": (

@@ -7,18 +7,24 @@ algorithm: read_eligibility.prompt
 input:
   request_fixture: stores_in_area
   contains:
-    - Decide only whether each shown API read should remain available
-    - Retain a read when it exposes row or field evidence that could be directly consumed
-    - Drop a read only when it is clearly unrelated
+    - Decide which shown API reads expose useful source evidence for the requested fact
+    - Retain a read when its rows or fields can contribute to the requested fact
+    - Drop a read when it is clearly unrelated
     - Drop a read when it is only related context
-    - When a direct answer input read is incomplete, retain it
     - Do not retain reads whose only basis is that they might help validate
+    - Retain row-level reads that expose rows the requested fact may count, list, filter, group, rank, or aggregate
+    - For RETAIN, retention_basis describes the rows and fields that make the read relevant to the requested fact
+    - For RETAIN, first cite relevant_row_path_tokens and relevant_field_tokens, then write retention_basis
+    - Assess every candidate read under the selected canonical interpretations
 expect:
   result_contains:
     contains:
-      Decide only whether each shown API read should remain available: true
-      Retain a read when it exposes row or field evidence that could be directly consumed: true
-      Drop a read only when it is clearly unrelated: true
+      Decide which shown API reads expose useful source evidence for the requested fact: true
+      Retain a read when its rows or fields can contribute to the requested fact: true
+      Drop a read when it is clearly unrelated: true
       Drop a read when it is only related context: true
-      When a direct answer input read is incomplete, retain it: true
       Do not retain reads whose only basis is that they might help validate: true
+      Retain row-level reads that expose rows the requested fact may count, list, filter, group, rank, or aggregate: true
+      For RETAIN, retention_basis describes the rows and fields that make the read relevant to the requested fact: true
+      For RETAIN, first cite relevant_row_path_tokens and relevant_field_tokens, then write retention_basis: true
+      Assess every candidate read under the selected canonical interpretations: true

@@ -13,7 +13,7 @@ from fervis.questions import (
 )
 from fervis.lookup.clarification.payload import clarification_from_payload
 from fervis.questions.contracts import QuestionLifecycleError
-from fervis.lookup.answer_program.codec import decode_answer_program
+from fervis.lookup.answer_program.codec import answer_program_id, decode_answer_program
 from fervis.lookup.answer_program.persistence import (
     StoredProgramInvocation,
     parse_stored_program_invocation,
@@ -274,7 +274,7 @@ def _portable_rerun_state(
         bindings = binding_set_from_payload(base)
         invocation = program_invocation(
             run_id=str(base["run_id"]),
-            program_id=str(base["program_id"]),
+            program_id=answer_program_id(program),
             bindings=bindings,
             kind=ProgramInvocationKind(str(base["kind"])),
             base_invocation_id=(

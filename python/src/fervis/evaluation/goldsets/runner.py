@@ -284,12 +284,16 @@ def _execute_case(
             setup_result,
             started_at=setup_started_at,
         )
-        if setup_result.status != "COMPLETED":
+        setup_failure = _setup_failure_message(
+            setup_result,
+            question=setup_question,
+        )
+        if setup_failure:
             return _CaseExecution(
                 result=setup_result,
                 setup_results=tuple(setup_results),
                 failure_class="setup_question_failed",
-                failure_message=f"setup question failed: {setup_question}",
+                failure_message=setup_failure,
             )
         setup_results.append(setup_result)
         conversation_id = setup_result.conversation_id
@@ -357,6 +361,15 @@ def _execute_case(
         result = continued
     result = _with_wall_clock_duration(result, started_at=target_started_at)
     return _CaseExecution(result=result, setup_results=tuple(setup_results))
+
+
+def _setup_failure_message(result: AskResult, *, question: str) -> str:
+    if result.status != "COMPLETED":
+        return f"setup question failed: {question}"
+    result_data = result.result_data
+    if not isinstance(result_data, Mapping) or result_data.get("kind") != "answer":
+        return f"setup question did not produce an answer: {question}"
+    return ""
 
 
 def _with_wall_clock_duration(

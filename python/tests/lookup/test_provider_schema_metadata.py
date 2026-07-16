@@ -10,7 +10,10 @@ from fervis.lookup.source_binding.schema import build_source_binding_schema
 
 def test_lookup_provider_schemas_do_not_emit_internal_model_schemas_metadata():
     for schema in (
-        build_read_eligibility_schema(candidate_reviews_by_requested_fact_id={}),
+        build_read_eligibility_schema(
+            canonical_options_by_requested_fact_id={},
+            candidate_reviews_by_requested_fact_id={},
+        ),
         build_plan_selection_schema(
             requested_fact_ids=("fact_1",),
             source_candidate_ids_by_requested_fact_id={"fact_1": ()},
@@ -26,6 +29,7 @@ def test_lookup_provider_schemas_do_not_emit_internal_model_schemas_metadata():
         ),
         build_source_binding_schema(
             target_param_decision_ids_by_param={},
+            target_required_param_decision_ids={},
             target_finite_choice_values={},
             target_row_predicate_values={},
             target_finite_choice_test_ids={},

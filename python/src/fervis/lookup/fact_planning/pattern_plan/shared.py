@@ -240,6 +240,7 @@ def _bound_source_with_source(bound: BoundSource, *, source: Any) -> BoundSource
         answer_population=bound.answer_population,
         source=source,
         value_id=bound.value_id,
+        value_is_population_derived=bound.value_is_population_derived,
         source_candidate_id=bound.source_candidate_id,
         cardinality=bound.cardinality,
         fulfillments=bound.fulfillments,
@@ -247,6 +248,7 @@ def _bound_source_with_source(bound: BoundSource, *, source: Any) -> BoundSource
         available_field_ids=bound.available_field_ids,
         available_fields=bound.available_fields,
         applied_filters=bound.applied_filters,
+        value_population_coverage_claims=bound.value_population_coverage_claims,
     )
 
 

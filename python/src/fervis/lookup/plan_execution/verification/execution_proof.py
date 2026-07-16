@@ -16,6 +16,14 @@ class ExecutionProofContext:
     row_filter_scope_refs: dict[str, frozenset[str]]
 
     @classmethod
+    def empty(cls) -> "ExecutionProofContext":
+        return cls(
+            endpoint_arg_scope_refs={},
+            operation_refs={},
+            row_filter_scope_refs={},
+        )
+
+    @classmethod
     def from_materialized_execution(
         cls,
         materialized: _MaterializedExecution,

@@ -5,19 +5,22 @@ from __future__ import annotations
 from typing import Any
 
 from fervis.lookup.relation_catalog import (
-    EntityKeyComponentTarget,
     ParamSource,
     RelationCatalog,
 )
 from fervis.lookup.relation_catalog.selection import CatalogSelectionResult
 from fervis.lookup.fact_planning.fact_requirements import (
+    RequestedFactEndpointRequirement,
     fact_endpoint_requirements,
 )
 from fervis.lookup.fact_planning.grounded_params import (
     GroundedParamValue,
     unique_grounded_param_values,
 )
-from fervis.lookup.fact_planning.required_inputs import RequiredInput
+from fervis.lookup.fact_planning.required_inputs import (
+    RequiredInput,
+    param_has_bindable_value,
+)
 from fervis.lookup.fact_plan.row_sources import (
     RowCardinality,
     RowSource,
@@ -37,14 +40,13 @@ from fervis.lookup.fact_planning.row_set_filters import (
 )
 from fervis.lookup.answer_program.values import (
     FactValue,
-    IdentitySetValuePayload,
     IdentityValuePayload,
-    LiteralValuePayload,
     NamedValuePayload,
-    TimeValuePayload,
-    ValueFilterOperator,
     ValueKind,
     known_input_id_for_value,
+)
+from fervis.lookup.turn_prompts.projections.resolved_inputs import (
+    fact_value_prompt_payload,
 )
 from fervis.lookup.grounding.model import GroundedInputUse
 
@@ -72,7 +74,6 @@ def available_relation_catalog_payload(
         available_values=available_values,
         available_value_uses=available_value_uses,
         row_sources=row_sources,
-        grounded_params=grounded_params,
     )
 
     missing_inputs: list[dict[str, Any]] = []
@@ -86,32 +87,14 @@ def available_relation_catalog_payload(
         )
     payload: dict[str, Any] = {
         "requested_fact_relations": [
-            {
-                "requested_fact_id": item.requested_fact_id,
-                "query_terms": list(
-                    _query_terms_for_fact(
-                        catalog_selection,
-                        requested_fact_id=item.requested_fact_id,
-                    )
-                ),
-                "available_relations": _available_read_payloads(
-                    sources=tuple(
-                        row_sources_by_id[row_source_id]
-                        for row_source_id in item.selected_row_source_ids
-                        if row_source_id in row_sources_by_id
-                        and (
-                            row_source_id in requirements.executable_row_source_ids
-                            or _source_is_executable(
-                                row_sources_by_id[row_source_id],
-                                grounded_params=grounded_params,
-                                available_values=available_values,
-                            )
-                        )
-                    ),
-                    grounded_params=grounded_params,
-                    values_by_id=values_by_id,
-                ),
-            }
+            _requested_fact_relation_payload(
+                item,
+                catalog_selection=catalog_selection,
+                row_sources_by_id=row_sources_by_id,
+                available_values=available_values,
+                available_value_uses=available_value_uses,
+                values_by_id=values_by_id,
+            )
             for item in requirements.requested_facts
         ]
     }
@@ -141,6 +124,43 @@ def available_relation_catalog_payload(
         payload["missing_required_inputs"] = missing_inputs
     return payload
 
+def _requested_fact_relation_payload(
+    requirement: RequestedFactEndpointRequirement,
+    *,
+    catalog_selection: CatalogSelectionResult,
+    row_sources_by_id: dict[str, RowSource],
+    available_values: tuple[FactValue, ...],
+    available_value_uses: tuple[GroundedInputUse, ...],
+    values_by_id: dict[str, FactValue],
+) -> dict[str, Any]:
+    requested_fact_id = requirement.requested_fact_id
+    grounded_params = unique_grounded_param_values(
+        values=available_values,
+        grounded_input_uses=available_value_uses,
+        requested_fact_id=requested_fact_id,
+    )
+    selected_sources = tuple(
+        source
+        for row_source_id in requirement.executable_row_source_ids
+        for source in (row_sources_by_id.get(row_source_id),)
+        if source is not None
+    )
+    return {
+        "requested_fact_id": requested_fact_id,
+        "query_terms": list(
+            _query_terms_for_fact(
+                catalog_selection,
+                requested_fact_id=requested_fact_id,
+            )
+        ),
+        "available_relations": _available_read_payloads(
+            sources=selected_sources,
+            grounded_params=grounded_params,
+            values_by_id=values_by_id,
+            requested_fact_id=requested_fact_id,
+        ),
+    }
+
 
 def _query_terms_for_fact(
     catalog_selection: CatalogSelectionResult,
@@ -158,6 +178,7 @@ def _available_read_payloads(
     sources: tuple[RowSource, ...],
     grounded_params: dict[tuple[str, str], GroundedParamValue],
     values_by_id: dict[str, FactValue],
+    requested_fact_id: str,
 ) -> list[dict[str, Any]]:
     api_source_groups = api_read_source_groups(sources)
     row_source_counts = read_row_source_counts(api_source_groups)
@@ -168,6 +189,7 @@ def _available_read_payloads(
             read_row_source_count=row_source_counts[group_sources[0].read_id],
             grounded_params=grounded_params,
             values_by_id=values_by_id,
+            requested_fact_id=requested_fact_id,
         )
         for group_sources in api_source_groups
     ]
@@ -180,6 +202,7 @@ def _available_api_read_payload(
     read_row_source_count: int = 1,
     grounded_params: dict[tuple[str, str], GroundedParamValue],
     values_by_id: dict[str, FactValue],
+    requested_fact_id: str,
 ) -> dict[str, Any]:
     representative = _representative_api_source(sources)
     params = _read_bindable_params(sources=sources)
@@ -214,6 +237,7 @@ def _available_api_read_payload(
         sources=sources,
         grounded_params=grounded_params,
         values_by_id=values_by_id,
+        requested_fact_id=requested_fact_id,
     )
     if filters:
         payload["applied_filters"] = filters
@@ -499,40 +523,15 @@ def _source_is_executable(
         not param.required
         or param.default is not None
         or (source.id, param.id) in grounded_params
-        or _param_has_bindable_value(param, available_values=available_values)
+        or param_has_bindable_value(param, available_values=available_values)
         for param in source.params
     )
 
 
-def _param_has_bindable_value(
-    param: RowSourceParam,
-    *,
-    available_values: tuple[FactValue, ...],
-) -> bool:
-    if param.choices:
-        return True
-    if param.entity_target is not None:
-        return any(
-            _value_matches_entity_target(value, target=param.entity_target)
-            for value in available_values
-        )
-    if param.type in {"date", "datetime"}:
-        return any(value.kind == ValueKind.TIME for value in available_values)
-    if param.type in {"integer", "number", "decimal", "float", "string"}:
-        return any(
-            value.kind == ValueKind.LITERAL
-            and isinstance(value.payload, LiteralValuePayload)
-            for value in available_values
-        )
-    return False
-
-
 def _operation_value_payload(value: FactValue) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "value_id": value.id,
-        "kind": value.kind.value,
-        **({"label": value.label} if value.label else {}),
-    }
+    payload: dict[str, object] = dict(fact_value_prompt_payload(value))
+    if value.label:
+        payload["label"] = value.label
     known_input_id = known_input_id_for_value(value)
     if known_input_id:
         payload["known_input_id"] = known_input_id
@@ -544,89 +543,13 @@ def _operation_value_payload(value: FactValue) -> dict[str, object]:
         value.payload,
         IdentityValuePayload,
     ):
-        payload.update(
-            {
-                "entity_kind": value.payload.entity_kind,
-                "key_id": value.payload.key_id,
-                "key_components": [
-                    component.component_id for component in value.payload.key.components
-                ],
-                "display_value": value.payload.display_value or value.label,
-            }
-        )
         if value.payload.matched_field_ref:
             payload["matched_field_ref"] = value.payload.matched_field_ref
         if value.payload.matched_field_path:
             payload["matched_field_path"] = value.payload.matched_field_path
-    elif value.kind == ValueKind.IDENTITY_SET and isinstance(
-        value.payload,
-        IdentitySetValuePayload,
-    ):
-        payload.update(
-            {
-                "entity_kind": value.payload.entity_kind,
-                "key_id": value.payload.key_id,
-                "key_components": [
-                    component.component_id
-                    for component in value.payload.keys[0].components
-                ],
-                "count": len(value.payload.keys),
-                "display_value": value.payload.display_value or value.label,
-            }
-        )
-    elif value.kind == ValueKind.TIME and isinstance(value.payload, TimeValuePayload):
-        payload.update(
-            {
-                "resolved_start": value.payload.resolved_start,
-                "resolved_end": value.payload.resolved_end,
-            }
-        )
-    elif value.kind == ValueKind.LITERAL and isinstance(
-        value.payload,
-        LiteralValuePayload,
-    ):
-        payload.update(
-            {
-                "literal_type": value.payload.literal_type.value,
-                "value": value.payload.value,
-            }
-        )
     elif value.kind == ValueKind.NAMED and isinstance(value.payload, NamedValuePayload):
-        payload["text"] = value.payload.text
-        if value.payload.filter_operator is not ValueFilterOperator.EQUALS:
-            payload["operator"] = value.payload.filter_operator.value
         if value.payload.matched_field_ref:
             payload["matched_field_ref"] = value.payload.matched_field_ref
         if value.payload.matched_field_path:
             payload["matched_field_path"] = value.payload.matched_field_path
     return payload
-
-
-def _value_matches_entity_target(
-    value: FactValue,
-    *,
-    target: EntityKeyComponentTarget,
-) -> bool:
-    if value.kind == ValueKind.IDENTITY and isinstance(
-        value.payload, IdentityValuePayload
-    ):
-        return (
-            value.payload.entity_kind == target.entity_kind
-            and value.payload.key_id == target.key_id
-            and target.component_id
-            in {component.component_id for component in value.payload.key.components}
-        )
-    elif value.kind == ValueKind.IDENTITY_SET and isinstance(
-        value.payload, IdentitySetValuePayload
-    ):
-        return (
-            value.payload.entity_kind == target.entity_kind
-            and value.payload.key_id == target.key_id
-            and all(
-                target.component_id
-                in {component.component_id for component in key.components}
-                for key in value.payload.keys
-            )
-        )
-    else:
-        return False

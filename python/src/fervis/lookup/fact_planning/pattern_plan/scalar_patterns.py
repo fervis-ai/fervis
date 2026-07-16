@@ -7,10 +7,13 @@ from fervis.lookup.answer_program.operations import (
     ComputeBinary,
     ComputeBinaryOperator,
     ComputeExpression,
+    ComputeInputPopulationCoverage,
     ComputeNegation,
     ComputeSpec,
     Operation,
+    compute_value_input_id,
 )
+from fervis.lookup.answer_program.relations import merge_population_coverage_claims
 from fervis.lookup.answer_program.result_projection import ScalarResultOutput
 from fervis.lookup.provider_contract import ProviderObject
 from fervis.lookup.source_binding import BoundSource
@@ -46,13 +49,18 @@ def _compile_computed_scalar_answer(
     )
     operation_id = f"{_pattern_output_relation_id(index)}_compute"
     inputs: dict[str, ComputeExpression] = {}
+    population_claims_by_input: dict[str, list] = {}
     for item in answer.scalar_inputs:
         bound = bound_sources.get(item.source_binding_id)
         if bound is None or not bound.value_id:
             raise ValueError("scalar input requires value source binding")
-        inputs[item.input_id] = input_context.compute_expression_for_value(
-            bound.value_id
-        )
+        expression = input_context.compute_expression_for_value(bound.value_id)
+        inputs[item.input_id] = expression
+        if bound.value_is_population_derived:
+            input_ref = compute_value_input_id(expression)
+            population_claims_by_input.setdefault(input_ref, []).extend(
+                bound.value_population_coverage_claims
+            )
     fulfillment = tuple(
         FactFulfillment(
             requested_fact_id=answer.requested_fact_id,
@@ -70,6 +78,13 @@ def _compile_computed_scalar_answer(
                     inputs=inputs,
                 ),
                 output_scalar=scalar_id,
+                input_population_coverage=tuple(
+                    ComputeInputPopulationCoverage(
+                        input_id=input_id,
+                        claims=merge_population_coverage_claims(tuple(claims)),
+                    )
+                    for input_id, claims in population_claims_by_input.items()
+                ),
             ),
         ),
     )

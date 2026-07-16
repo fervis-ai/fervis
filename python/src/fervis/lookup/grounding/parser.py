@@ -4,15 +4,22 @@ from __future__ import annotations
 
 from fervis.lookup.grounding import provider_contract as provider_output
 from fervis.lookup.grounding.model import (
-    InputBindingSelection,
+    CompatibleInputBinding,
+    InputBindingCompatibility,
     InputBindingOption,
-    InputBindingPurpose,
-    InputBindingResultKind,
     GroundingRequest,
-    GroundingSelectionResult,
+    GroundingCompatibilityResult,
     KnownInputBindingTask,
-    ResolvedInputBinding,
+    LookupTextResolutionDecision,
+    ResolverRequestValue,
     TimeResolutionIntent,
+    resolver_fit_question_for_option,
+)
+from fervis.lookup.grounding.surface import resolver_option_surface
+from fervis.lookup.relation_catalog.parameter_values import (
+    CatalogParameterValueError,
+    CatalogScalarParameterValue,
+    parse_catalog_parameter_value,
 )
 from fervis.lookup.grounding.time_intents import normalize_grounding_date_intent
 
@@ -21,19 +28,19 @@ def parse_grounding_compatibility(
     payload: dict[str, object],
     *,
     request: GroundingRequest,
-) -> GroundingSelectionResult:
+) -> GroundingCompatibilityResult:
     output = provider_output.GroundingOutput.parse(payload)
     time_resolutions = _time_resolutions_from_payload(
         output.known_time_resolutions,
         request=request,
     )
-    reviews = output.known_input_bindings
+    reviews = output.known_input_binding_reviews
     tasks_by_id = {task.known_input_id: task for task in request.tasks}
     options_by_task = {
         task.known_input_id: {option.id: option for option in task.options}
         for task in request.tasks
     }
-    selections: list[InputBindingSelection] = []
+    compatibilities: list[InputBindingCompatibility] = []
     seen: set[str] = set()
     for known_input_id, review in reviews.items():
         if known_input_id in seen:
@@ -41,23 +48,24 @@ def parse_grounding_compatibility(
         if known_input_id not in tasks_by_id:
             raise ValueError("review references unknown known input")
         task = tasks_by_id[known_input_id]
-        binding = _selected_binding(
-            review,
+        compatible_bindings = _compatible_bindings(
+            review.option_reviews,
+            request=request,
             task=task,
             options_by_id=options_by_task[known_input_id],
         )
         seen.add(known_input_id)
-        selections.append(
-            InputBindingSelection(
+        compatibilities.append(
+            InputBindingCompatibility(
                 known_input_id=known_input_id,
-                binding=binding,
+                bindings=compatible_bindings,
             )
         )
     missing = set(tasks_by_id) - seen
     if missing:
         raise ValueError("grounding compatibility review missing known input")
-    return GroundingSelectionResult(
-        selections=tuple(selections),
+    return GroundingCompatibilityResult(
+        compatibilities=tuple(compatibilities),
         time_resolutions=time_resolutions,
     )
 
@@ -91,79 +99,110 @@ def _time_resolutions_from_payload(
     return tuple(output)
 
 
-def _selected_binding(
-    review: provider_output.KnownInputBindingOutput,
+def _compatible_bindings(
+    reviews: dict[str, provider_output.OptionReviewOutput],
     *,
+    request: GroundingRequest,
     task: KnownInputBindingTask,
     options_by_id: dict[str, InputBindingOption],
-) -> ResolvedInputBinding | None:
-    option_id = _required_text(review.selected_option_id)
-    _required_text(review.selection_basis)
-    if option_id == "none":
-        if review.input_value != "" or review.result_kind != "none":
-            raise ValueError("unselected grounding input must not supply a value")
-        return None
-    option = options_by_id.get(option_id)
-    if option is None or option.route is None:
-        raise ValueError("grounding selected an unknown binding option")
-    result_kind = InputBindingResultKind(review.result_kind)
-    input_value = _option_input_value(
-        review.input_value,
-        task=task,
-        option=option,
-        result_kind=result_kind,
-    )
-    if (
-        option.purpose is InputBindingPurpose.IDENTITY_VALIDATION
-        and result_kind is not InputBindingResultKind.CANONICAL_IDENTITY
-    ):
-        raise ValueError("identity validation must return canonical identity")
-    matched_field_ref = (review.matched_field_ref or "").strip()
-    if option.purpose is InputBindingPurpose.REFERENCE_GROUNDING:
-        allowed_field_refs = (
-            option.route.canonical_lookup_field_refs
-            if result_kind is InputBindingResultKind.CANONICAL_IDENTITY
-            else option.route.lookup_field_refs
+) -> tuple[CompatibleInputBinding, ...]:
+    if set(reviews) != set(options_by_id):
+        raise ValueError("grounding option reviews must cover every binding option")
+    compatible: list[CompatibleInputBinding] = []
+    for option_id, option in options_by_id.items():
+        review = reviews[option_id]
+        expected_question = resolver_fit_question_for_option(
+            task=task,
+            option=option,
         )
-        if allowed_field_refs and matched_field_ref not in allowed_field_refs:
-            raise ValueError("reference grounding requires a selected lookup field")
-        if not allowed_field_refs and matched_field_ref:
-            raise ValueError("grounding selected an unexpected lookup field")
-    elif matched_field_ref:
-        raise ValueError("grounding selected an unexpected lookup field")
-    return ResolvedInputBinding(
-        option_id=option_id,
-        input_value=input_value,
-        result_kind=result_kind,
-        matched_field_ref=matched_field_ref,
+        if _required_text(review.resolver_fit_question) != expected_question:
+            raise ValueError("grounding resolver_fit_question mismatch")
+        _required_text(review.because)
+        decision = LookupTextResolutionDecision(review.decision)
+        if decision is LookupTextResolutionDecision.CAN_RESOLVE_LOOKUP_TEXT:
+            compatible.append(
+                _compatible_binding(
+                    review,
+                    request=request,
+                    lookup_text=task.lookup_text,
+                    option=option,
+                )
+            )
+        elif review.request_values or review.response_match_alternatives:
+            raise ValueError("negative grounding review must not select read inputs")
+    return tuple(compatible)
+
+
+def _compatible_binding(
+    review: provider_output.OptionReviewOutput,
+    *,
+    request: GroundingRequest,
+    lookup_text: str,
+    option: InputBindingOption,
+) -> CompatibleInputBinding:
+    surface = resolver_option_surface(request, option)
+    request_values: list[ResolverRequestValue] = []
+    compiled_lookup_values: list[CatalogScalarParameterValue] = []
+    for param_ref, supplied_value in review.request_values.items():
+        parameter, expected_value = surface.compiled_request_value(
+            param_ref,
+            lookup_text=lookup_text,
+        )
+        try:
+            parsed_value = parse_catalog_parameter_value(
+                supplied_value,
+                type_name=parameter.type.value,
+                choices=parameter.choices,
+            )
+        except CatalogParameterValueError as exc:
+            raise ValueError(
+                "grounding review supplies an invalid request value"
+            ) from exc
+        if not isinstance(parsed_value, (str, int, float, bool)):
+            raise ValueError("grounding request parameter must be scalar")
+        if not _same_scalar_value(parsed_value, expected_value):
+            raise ValueError("grounding request value must equal the lookup value")
+        compiled_lookup_values.append(expected_value)
+        request_values.append(
+            ResolverRequestValue(param_ref=param_ref, value=parsed_value)
+        )
+    missing_required_params = {
+        parameter.param_ref
+        for parameter in surface.request_parameters
+        if parameter.required and parameter.default is None
+    } - set(review.request_values)
+    if missing_required_params:
+        raise ValueError("grounding review omits a required request parameter")
+    match_paths = tuple(review.response_match_alternatives)
+    if not match_paths:
+        raise ValueError("positive grounding review requires a response match field")
+    if len(match_paths) != len(set(match_paths)):
+        raise ValueError("grounding review repeats a response match field")
+    for field_path in match_paths:
+        compiled_lookup_values.append(
+            surface.compiled_match_value(field_path, lookup_text=lookup_text)
+        )
+    lookup_value = compiled_lookup_values[0]
+    if any(
+        not _same_scalar_value(value, lookup_value)
+        for value in compiled_lookup_values[1:]
+    ):
+        raise ValueError(
+            "grounding request and match fields parse the lookup differently"
+        )
+    return CompatibleInputBinding(
+        option_id=option.id,
+        lookup_value=lookup_value,
+        request_values=tuple(request_values),
+        response_match_field_paths=match_paths,
     )
 
 
-def _option_input_value(
-    value: str | int | float | bool,
-    *,
-    task: KnownInputBindingTask,
-    option: InputBindingOption,
-    result_kind: InputBindingResultKind,
-) -> str | int | float | bool:
-    if option.purpose is InputBindingPurpose.REFERENCE_GROUNDING:
-        input_text = str(value).strip()
-        if not input_text:
-            raise ValueError("reference grounding requires a non-empty input value")
-        if (
-            result_kind is InputBindingResultKind.CANONICAL_IDENTITY
-            and value != task.lookup_text
-        ):
-            raise ValueError(
-                "canonical identity grounding must use the declared lookup text"
-            )
-        return value
-    input_text = str(value).strip()
-    if not input_text:
-        raise ValueError("identity validation requires a path-key input value")
-    if input_text.casefold() not in task.lookup_text.casefold():
-        raise ValueError("identity-validation input must come from the known input")
-    return value
+def _same_scalar_value(
+    left: CatalogScalarParameterValue,
+    right: CatalogScalarParameterValue,
+) -> bool:
+    return type(left) is type(right) and left == right
 
 
 def _required_text(value: str) -> str:

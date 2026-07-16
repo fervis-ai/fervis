@@ -38,7 +38,6 @@ from fervis.lineage.recorder import (
     AnswerProgramWrite,
     ClarificationRequestWrite,
     ClarificationResponseWrite,
-    ExecutionProofGraphWrite,
     FactResultWrite,
     ModelCallAuditWrite,
     ModelCallWrite,
@@ -108,6 +107,11 @@ from fervis.storage.sql.work_items import SQLWorkItemQueue
 from tests.testkit.terminal_lineage import (
     TerminalAnswerWriter,
     make_terminal_answer_writer,
+)
+from tests.testkit.execution_proof_graph import (
+    proof_graph_payload,
+    proof_graph_write,
+    proof_node,
 )
 
 
@@ -1269,26 +1273,21 @@ def test_sql_lineage_recorder_treats_json_normalization_as_idempotent(
             result_kind=FactResultKind.ANSWERED,
         )
     )
-    proof_graph = ExecutionProofGraphWrite(
+    proof_graph = proof_graph_write(
         proof_graph_id="proof_1",
         run_id=ask.run_id,
         fact_result_id="fact_result_1",
         compile_step_id="step_compile",
         execute_step_id="step_execute",
-        payload_schema="fervis.execution_proof_graph",
-        payload_schema_rev=1,
-        payload_json={
-            "nodes": [
-                {
-                    "id": "answer_1",
-                    "kind": "answer_output",
-                    "proof_refs": [],
-                    "debug_terms": ("orders", "today"),
-                }
-            ],
-            "edges": [],
-            "contributions": [],
-        },
+        payload_json=proof_graph_payload(
+            nodes=(
+                proof_node(
+                    "answer_1",
+                    "answer_output",
+                    debug_terms=("orders", "today"),
+                ),
+            ),
+        ),
     )
 
     recorder.record_execution_proof_graph(proof_graph)

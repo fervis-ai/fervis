@@ -20,6 +20,17 @@ from ._shared import (
 from fervis.lookup.answer_program.expression_instantiation import (
     InstantiatedProgramInputs,
 )
+from fervis.lookup.answer_program.operations import (
+    ComputeSpec,
+    compute_expression_leaves,
+    compute_value_input_id,
+)
+from fervis.lookup.answer_program.inputs import resolve_value_expression
+from fervis.lookup.answer_program.values import ConstantRef, ParameterRef
+from fervis.lookup.question_contract import (
+    AnswerPopulationMembershipTestKind,
+    QuestionContract,
+)
 
 
 def _verify_program_expression_targets(
@@ -89,6 +100,120 @@ def _verify_sources(
             row_sources=row_sources,
             allowed_read_ids=allowed_read_ids,
         )
+
+
+def _verify_source_population_coverage_claims(
+    answer: AnswerProgram,
+    *,
+    question_contract: QuestionContract,
+    row_sources: RowSourceCatalog,
+) -> None:
+    tests = {
+        (fact.id, test.id): test
+        for fact in question_contract.requested_facts
+        for test in (
+            fact.answer_population.membership_tests
+            if fact.answer_population is not None
+            else ()
+        )
+    }
+    for relation in answer.relations:
+        seen: set[tuple[str, str, str]] = set()
+        source_refs = _source_mechanic_proof_refs(relation)
+        for claim in relation.source.population_coverage_claims:
+            test_key = (
+                claim.test_ref.requested_fact_id,
+                claim.test_ref.membership_test_id,
+            )
+            test = tests.get(test_key)
+            if test is None:
+                raise VerificationError(
+                    "population coverage claim references unknown membership test"
+                )
+            if test.kind is AnswerPopulationMembershipTestKind.SUBJECT_IDENTITY:
+                raise VerificationError(
+                    "subject identity cannot be a source population coverage claim"
+                )
+            claim_key = (*test_key, claim.role.value)
+            if claim_key in seen:
+                raise VerificationError("duplicate population coverage claim")
+            seen.add(claim_key)
+            if not set(claim.proof_refs).issubset(source_refs):
+                raise VerificationError(
+                    "population coverage claim lacks source-mechanic proof"
+                )
+
+
+def _verify_compute_input_population_coverage_claims(
+    answer: AnswerProgram,
+    *,
+    question_contract: QuestionContract,
+    bindings,
+) -> None:
+    tests = {
+        (fact.id, test.id): test
+        for fact in question_contract.requested_facts
+        for test in (
+            fact.answer_population.membership_tests
+            if fact.answer_population is not None
+            else ()
+        )
+    }
+    for operation in answer.operations:
+        spec = operation.spec
+        if not isinstance(spec, ComputeSpec):
+            continue
+        leaves = {
+            compute_value_input_id(expression): expression
+            for expression in compute_expression_leaves(spec.expression)
+            if isinstance(expression, (ParameterRef, ConstantRef))
+        }
+        for input_coverage in spec.input_population_coverage:
+            expression = leaves.get(input_coverage.input_id)
+            if expression is None:
+                raise VerificationError(
+                    "compute population coverage references unknown input"
+                )
+            resolved = resolve_value_expression(expression, bindings=bindings)
+            source_refs = set((*resolved.proof_refs, *resolved.source_refs))
+            for claim in input_coverage.claims:
+                test = tests.get(
+                    (
+                        claim.test_ref.requested_fact_id,
+                        claim.test_ref.membership_test_id,
+                    )
+                )
+                if test is None:
+                    raise VerificationError(
+                        "population coverage claim references unknown membership test"
+                    )
+                if test.kind is AnswerPopulationMembershipTestKind.SUBJECT_IDENTITY:
+                    raise VerificationError(
+                        "subject identity cannot be a source population coverage claim"
+                    )
+                if not set(claim.proof_refs).issubset(source_refs):
+                    raise VerificationError(
+                        "compute population coverage claim lacks input proof"
+                    )
+
+
+def _source_mechanic_proof_refs(
+    relation: Relation,
+) -> set[str]:
+    source = relation.source
+    refs: set[str] = set()
+    if source.population_binding is not None:
+        refs.update(source.population_binding.proof_refs)
+    for binding in source.param_bindings:
+        refs.update(binding.proof_refs)
+        refs.add(f"source_param:{binding.param_id}")
+    for applied_filter in source.applied_filters:
+        refs.update(applied_filter.proof_refs)
+    for row_filter in source.row_filters:
+        refs.update(row_filter.proof_refs)
+    for choice in source.population_choices:
+        refs.update(choice.proof_refs)
+    return refs
 
 
 def _verify_source(

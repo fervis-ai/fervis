@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from fervis.lookup.fact_planning.available_relations import (
-    operation_input_values_payload,
-)
 from fervis.lookup.turn_prompts import (
     ProviderResponseContract,
     ProviderToolContract,
@@ -14,8 +11,14 @@ from fervis.lookup.turn_prompts import (
     TurnPromptBase,
     TurnPromptBuilder,
 )
-from fervis.lookup.turn_prompts.projections import source_binding_candidates_xml
-from fervis.lookup.question_contract import requested_fact_evidence_ref
+from fervis.lookup.turn_prompts.projections import (
+    resolved_inputs_for_requested_fact,
+    source_binding_candidates_xml,
+)
+from fervis.lookup.question_contract import (
+    RequestedFactAnswerPopulationMembershipTest,
+    requested_fact_evidence_ref,
+)
 from fervis.lookup.source_binding.candidates import (
     SourceCandidate,
     SourceCandidateRegistry,
@@ -23,6 +26,7 @@ from fervis.lookup.source_binding.candidates import (
     source_binding_candidate_payload,
     source_binding_prompt_candidate_fulfillment_support_set_ids_by_answer_output,
     source_binding_prompt_candidate_population_binding_ids,
+    source_candidate_required_param_decision_ids,
     source_candidate_registry,
 )
 from fervis.lookup.source_binding.candidates.contracts import JsonObject, JsonValue
@@ -40,6 +44,14 @@ from fervis.lookup.operation_families.source_binding_registry import (
 from fervis.lookup.source_binding.model import (
     SourceBindingRequest,
 )
+from fervis.lookup.source_binding.input_applications import (
+    ResolvedInputApplicationSurface,
+    resolved_input_application_surfaces,
+)
+from fervis.lookup.source_binding.membership_tests import membership_tests_by_key
+from fervis.lookup.source_binding.population_effects import (
+    population_test_basis_payload,
+)
 from fervis.lookup.source_binding.param_surface import (
     param_decision_ids_by_effective_param,
 )
@@ -50,7 +62,10 @@ from fervis.lookup.source_binding.plan_targets import (
     source_binding_plan_families,
     source_binding_target_index,
 )
-from fervis.lookup.source_binding.review_scope import source_binding_review_scope
+from fervis.lookup.source_binding.review_scope import (
+    SourceBindingReviewScope,
+    source_binding_review_scope,
+)
 from fervis.lookup.source_binding.review_surface import source_binding_review_surface
 from fervis.lookup.source_binding.schema import (
     build_source_binding_schema,
@@ -80,19 +95,16 @@ def source_binding_requested_facts_payload(
                     }
                     for output in fact.support_answer_outputs
                 ],
+                "resolved_inputs": list(
+                    resolved_inputs_for_requested_fact(
+                        fact,
+                        available_values=request.available_values,
+                    )
+                ),
             }
             for fact in request.requested_facts
         ]
     }
-
-
-def source_binding_grounded_values_payload(
-    request: SourceBindingRequest,
-) -> dict[str, object]:
-    return operation_input_values_payload(
-        available_values=request.available_values,
-        available_value_uses=(),
-    )
 
 
 def source_binding_memory_context_payload(
@@ -117,10 +129,20 @@ def source_binding_transport_context_payload(
         targets=targets,
         candidates_by_id=registry.candidates_by_id,
     )
+    input_application_surfaces = resolved_input_application_surfaces(
+        request,
+        targets=targets,
+        candidates_by_id=registry.candidates_by_id,
+        closed_key_bindings=closed_key_bindings,
+    )
+    review_scope = source_binding_review_scope(
+        request,
+        candidates_by_id=registry.candidates_by_id,
+        target_index=target_index,
+    )
     return {
         "current_question": request.question,
         "requested_facts": source_binding_requested_facts_payload(request),
-        "grounded_values": source_binding_grounded_values_payload(request),
         "memory_context": source_binding_memory_context_payload(request),
         "binding_plan_families": _plan_families_payload(
             source_binding_plan_families(
@@ -128,7 +150,13 @@ def source_binding_transport_context_payload(
                 target_index=target_index,
                 visible_targets=targets,
             ),
-            target_payload=closed_key_bindings.model_visible_target_payload,
+            target_payload=lambda target: _binding_target_payload(
+                target,
+                request=request,
+                review_scope=review_scope,
+                closed_key_bindings=closed_key_bindings,
+                input_application_surfaces=input_application_surfaces,
+            ),
         ),
         "source_candidates_by_id": _prompt_candidates_by_id(registry.prompt_payload),
     }
@@ -175,6 +203,53 @@ def _prompt_binding_targets(
     )
 
 
+def _binding_target_payload(
+    target: SourceBindingTarget,
+    *,
+    request: SourceBindingRequest,
+    review_scope: SourceBindingReviewScope,
+    closed_key_bindings: ClosedKeyParamBindingIndex,
+    input_application_surfaces: dict[str, ResolvedInputApplicationSurface],
+) -> dict[str, object]:
+    payload = closed_key_bindings.model_visible_target_payload(target)
+    surface = input_application_surfaces.get(target.binding_target_id)
+    if surface is not None and (
+        surface.parameter_targets_by_id or surface.identity_targets_by_id
+    ):
+        payload["resolved_input_application"] = surface.prompt_payload()
+    population_tests = _population_binding_tests(
+        request,
+        target=target,
+        review_scope=review_scope,
+    )
+    if population_tests:
+        payload["answer_population_test_basis"] = population_test_basis_payload(
+            population_tests,
+            role_text=target.requirement_id,
+        )
+    return payload
+
+
+def _population_binding_tests(
+    request: SourceBindingRequest,
+    *,
+    target: SourceBindingTarget,
+    review_scope: SourceBindingReviewScope,
+) -> tuple[RequestedFactAnswerPopulationMembershipTest, ...]:
+    fact = next(
+        item for item in request.requested_facts if item.id == target.requested_fact_id
+    )
+    if fact.answer_population is None:
+        return ()
+    tests_by_key = membership_tests_by_key(fact.answer_population.membership_tests)
+    return tuple(
+        tests_by_key[test_id]
+        for test_id in review_scope.population_binding_test_ids(
+            target.binding_target_id
+        )
+    )
+
+
 class SourceBindingTurnPrompt(TurnPromptBase):
     turn_name = "source binding"
     turn_task = (
@@ -194,7 +269,6 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                 "Binding plan families:",
                 self.binding_plan_families_payload(),
             ),
-            builder.json_section("Grounded values:", self.grounded_values_payload()),
             builder.json_section("Memory context:", self.memory_context_payload()),
             builder.text_section(
                 "Candidate evidence sources:",
@@ -221,6 +295,8 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                     "The role binding also chooses its answer population, required fulfillment, params, and population reviews.",
                     "ranked_rows ranks individual source rows without grouping or aggregation.",
                     "ranked_aggregate groups source rows by an entity key, aggregates a measure within each group, and ranks the resulting groups.",
+                    "Bind sources under the fixed meanings in resolved_inputs.",
+                    "Apply resolved question inputs through resolved_input_applications on the selected source invocation.",
                 ),
             ),
             builder.instruction_block(
@@ -228,6 +304,9 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                 (
                     "binding_target_id identifies the selected plan member and source candidate role for this invocation.",
                     "answer_population.population_binding_id is the source candidate's population handle that this invocation uses.",
+                    "When answer_population_test_basis is shown for the selected binding target, answer answer_population.population_test_results for every shown key exactly once.",
+                    "Each answer-population result copies test_id, test_question, and role_scoped_test_question from answer_population_test_basis, then states because and test_effect for the selected source population.",
+                    "Use DOES_NOT_DECIDE_TEST or UNKNOWN_TEST_EFFECT when the selected source population does not establish the test. Do not infer satisfaction merely because the source can return rows.",
                     "applied_filters are backend-derived grounded-value filters already attached to this source candidate.",
                     "Do not reinterpret, rematch, remove, or rewrite applied_filters.",
                     "For each answer output shown under the selected binding target, choose fulfillment_choice_id from that source candidate's fulfillment_choices. Entity outputs use a declared source candidate key or entity reference. Scalar group outputs use a declared factual value. Context labels are not selectable computation evidence.",
@@ -250,11 +329,23 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                 ),
             ),
             builder.instruction_block(
+                "Resolved Input Application",
+                (
+                    "resolved_input_applications is inside one role binding. Each item applies one resolved_values entry to one target listed under targets_by_kind for that role binding.",
+                    "Use target_kind=request_parameter to apply the resolved input to the shown request parameter named by target_id.",
+                    "Use target_kind=returned_identity to keep only returned rows whose shown candidate-key or entity-reference target equals the resolved input value.",
+                    "Each selected role binding must apply every fact-local resolved input that owns an explicit population constraint and exposes a compatible component and target kind on that role.",
+                    "Copy value_component from the selected value's components_by_target_kind entry for target_kind.",
+                    "For returned identities, use value_component=canonical_key; the backend maps every declared key component to its declared returned field.",
+                    "The same resolved value may be applied to more than one target when the selected computation requires each application. Each target may be used at most once.",
+                    "match_basis_explanation states how the resolved input restricts this source invocation.",
+                ),
+            ),
+            builder.instruction_block(
                 "Param Binding",
                 (
-                    "Bind every catalog-required param in param_decisions unless that param appears in binding_params with population_contract.",
+                    "For every shown parameter with decision_surface=single_decision and no population_contract, choose exactly one shown decision_options item when that parameter is required or has catalog choices.",
                     "Do not author param_decisions for backend_owned_param_bindings; the backend compiles those keyed bindings.",
-                    "You may bind an optional non-choice param in param_decisions only when the requested fact needs that param value.",
                     "For params with decision_surface=single_decision and no population_contract, choose exactly one decision_options item.",
                     "Do not author param_decisions for params with population_contract; write finite_choice_param_reviews keyed by param_id instead.",
                 ),
@@ -368,7 +459,7 @@ class SourceBindingTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Copying And Validity",
                 (
-                    "Copy binding_target_id, population_binding_id, fulfillment_choice_id, param_decision_id, param_id, and choice_option_id values verbatim from the prompt JSON.",
+                    "Copy binding_target_id, population_binding_id, fulfillment_choice_id, param_decision_id, param_id, value_id, target_id, and choice_option_id values verbatim from the prompt data.",
                     "For metric_fit_bases and fit_basis_interpretations, copy requested_fact_id and metric_evidence_id keys from Metric fit candidates.",
                     "Do not invent endpoints, params, values, fields, formulas, labels, or calculations.",
                 ),
@@ -399,9 +490,6 @@ class SourceBindingTurnPrompt(TurnPromptBase):
     def requested_facts_payload(self) -> dict[str, object]:
         return source_binding_requested_facts_payload(self.request)
 
-    def grounded_values_payload(self) -> dict[str, object]:
-        return source_binding_grounded_values_payload(self.request)
-
     def memory_context_payload(self) -> dict[str, object]:
         return source_binding_memory_context_payload(self.request)
 
@@ -421,6 +509,17 @@ class SourceBindingTurnPrompt(TurnPromptBase):
             target_index=target_index,
         )
         closed_key_bindings = self._closed_key_bindings(targets, registry=registry)
+        input_application_surfaces = resolved_input_application_surfaces(
+            self.request,
+            targets=targets,
+            candidates_by_id=registry.candidates_by_id,
+            closed_key_bindings=closed_key_bindings,
+        )
+        review_scope = source_binding_review_scope(
+            self.request,
+            candidates_by_id=registry.candidates_by_id,
+            target_index=target_index,
+        )
         families = source_binding_plan_families(
             self.request,
             target_index=target_index,
@@ -428,7 +527,13 @@ class SourceBindingTurnPrompt(TurnPromptBase):
         )
         return _plan_families_payload(
             families,
-            target_payload=closed_key_bindings.model_visible_target_payload,
+            target_payload=lambda target: _binding_target_payload(
+                target,
+                request=self.request,
+                review_scope=review_scope,
+                closed_key_bindings=closed_key_bindings,
+                input_application_surfaces=input_application_surfaces,
+            ),
         )
 
     def metric_fit_surface_payload(self) -> dict[str, object]:
@@ -451,7 +556,14 @@ class SourceBindingTurnPrompt(TurnPromptBase):
             target_index=target_index,
         )
         closed_key_bindings = self._closed_key_bindings(targets, registry=registry)
+        input_application_surfaces = resolved_input_application_surfaces(
+            self.request,
+            targets=targets,
+            candidates_by_id=registry.candidates_by_id,
+            closed_key_bindings=closed_key_bindings,
+        )
         target_param_decision_ids_by_param: dict[str, dict[str, tuple[str, ...]]] = {}
+        target_required_param_decision_ids: dict[str, tuple[str, ...]] = {}
         target_finite_choice_values: dict[str, dict[str, tuple[str, ...]]] = {}
         target_row_predicate_values: dict[str, dict[str, tuple[str, ...]]] = {}
         target_finite_choice_test_ids: dict[str, dict[str, tuple[str, ...]]] = {}
@@ -471,6 +583,7 @@ class SourceBindingTurnPrompt(TurnPromptBase):
         target_fulfillment_supports: dict[str, dict[str, tuple[str, ...]]] = {}
         target_required_fulfillment_output_ids: dict[str, tuple[str, ...]] = {}
         target_population_binding_ids: dict[str, tuple[str, ...]] = {}
+        target_population_binding_test_ids: dict[str, tuple[str, ...]] = {}
         for target in targets:
             candidate = registry.candidates_by_id[target.source_candidate_id]
             review_surface = source_binding_review_surface(candidate)
@@ -492,6 +605,16 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                         if param_id not in finite_choice_param_ids
                     },
                 )
+            )
+            required_param_ids = source_candidate_required_param_decision_ids(
+                candidate
+            )
+            visible_required_params = closed_key_bindings.model_visible_param_map(
+                target_id,
+                {param_id: param_id for param_id in required_param_ids},
+            )
+            target_required_param_decision_ids[target_id] = tuple(
+                visible_required_params
             )
             target_finite_choice_values[target_id] = {
                 param_id: axis.choices
@@ -548,9 +671,19 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                     (),
                 )
             )
+            target_population_binding_test_ids[target_id] = (
+                review_scope.population_binding_test_ids(target_id)
+            )
         return build_source_binding_schema(
             **source_binding_clarification_input_ids(self.request),
             target_param_decision_ids_by_param=target_param_decision_ids_by_param,
+            target_required_param_decision_ids=(
+                target_required_param_decision_ids
+            ),
+            target_resolved_input_application_schemas={
+                target_id: surface.provider_schema()
+                for target_id, surface in input_application_surfaces.items()
+            },
             target_finite_choice_values=target_finite_choice_values,
             target_row_predicate_values=target_row_predicate_values,
             target_finite_choice_test_ids=target_finite_choice_test_ids,
@@ -568,6 +701,9 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                 target_required_fulfillment_output_ids
             ),
             target_population_binding_ids=target_population_binding_ids,
+            target_population_binding_test_ids=(
+                target_population_binding_test_ids
+            ),
             plan_families=source_binding_plan_families(
                 self.request,
                 target_index=target_index,

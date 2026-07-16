@@ -1773,7 +1773,7 @@ def test_source_binding_prompt_excludes_unactivated_memory_context():
     assert "999.00" not in plan_prompt
 
 
-def test_source_binding_prompt_uses_only_current_run_grounded_values():
+def test_source_binding_prompt_uses_only_current_run_resolved_inputs():
     planner = _ToolNamePlannerPort(
         read_eligibility_retention_specs=(
             ReadEligibilityRetentionSpec(
@@ -1845,8 +1845,9 @@ def test_source_binding_prompt_uses_only_current_run_grounded_values():
     source_binding_prompt = planner.prompts[
         planner.tool_names.index("submit_source_binding")
     ]
-    grounded_values = _prompt_json_section(source_binding_prompt, "Grounded values")
-    assert grounded_values == {"values": []}
+    requested_facts = _prompt_json_section(source_binding_prompt, "Requested facts")
+    assert requested_facts["requested_facts"][0]["resolved_inputs"] == []
+    assert "Grounded values:" not in source_binding_prompt
 
 
 def test_runtime_expands_selected_memory_through_activation_chokepoint(monkeypatch):
@@ -2371,25 +2372,28 @@ class _TwoFactActiveMemoryPlannerPort:
                 read_id="inventory_read",
                 required=("inventory_count",),
             )
+            prior_sales_target_id = source_binding_target_id_for_candidate(
+                prompt,
+                requested_fact_id="fact_1",
+                source_candidate_id=str(prior_sales["source_candidate_id"]),
+                plan_shape="list_rows",
+            )
+            inventory_target_id = source_binding_target_id_for_candidate(
+                prompt,
+                requested_fact_id="fact_2",
+                source_candidate_id=str(inventory["source_candidate_id"]),
+                plan_shape="list_rows",
+            )
             self.source_binding_payload = {
                 "outcome": {
                     "kind": "source_bindings",
                     "bindings_for_fact_1": {
                         "plan_shape": "list_rows",
                         "primary": {
-                            "binding_target_id": source_binding_target_id_for_candidate(
-                                prompt,
-                                requested_fact_id="fact_1",
-                                source_candidate_id=str(
-                                    prior_sales["source_candidate_id"]
-                                ),
-                                plan_shape="list_rows",
-                            ),
+                            "binding_target_id": prior_sales_target_id,
                             "answer_population": source_candidate_answer_population(
                                 prompt,
-                                source_candidate_id=str(
-                                    prior_sales["source_candidate_id"]
-                                ),
+                                binding_target_id=prior_sales_target_id,
                             ),
                             "fulfillment_decisions": source_fulfills_for_candidate(
                                 prior_sales,
@@ -2401,19 +2405,10 @@ class _TwoFactActiveMemoryPlannerPort:
                     "bindings_for_fact_2": {
                         "plan_shape": "list_rows",
                         "primary": {
-                            "binding_target_id": source_binding_target_id_for_candidate(
-                                prompt,
-                                requested_fact_id="fact_2",
-                                source_candidate_id=str(
-                                    inventory["source_candidate_id"]
-                                ),
-                                plan_shape="list_rows",
-                            ),
+                            "binding_target_id": inventory_target_id,
                             "answer_population": source_candidate_answer_population(
                                 prompt,
-                                source_candidate_id=str(
-                                    inventory["source_candidate_id"]
-                                ),
+                                binding_target_id=inventory_target_id,
                             ),
                             "fulfillment_decisions": source_fulfills_for_candidate(
                                 inventory,
@@ -2634,25 +2629,28 @@ class _TwoSalesFactActiveMemoryPlannerPort:
                 requested_fact_id="fact_2",
                 required=("sale_id",),
             )
+            prior_sales_target_id = source_binding_target_id_for_candidate(
+                prompt,
+                requested_fact_id="fact_1",
+                source_candidate_id=str(prior_sales["source_candidate_id"]),
+                plan_shape="list_rows",
+            )
+            sale_id_target_id = source_binding_target_id_for_candidate(
+                prompt,
+                requested_fact_id="fact_2",
+                source_candidate_id=str(sale_id["source_candidate_id"]),
+                plan_shape="list_rows",
+            )
             self.source_binding_payload = {
                 "outcome": {
                     "kind": "source_bindings",
                     "bindings_for_fact_1": {
                         "plan_shape": "list_rows",
                         "primary": {
-                            "binding_target_id": source_binding_target_id_for_candidate(
-                                prompt,
-                                requested_fact_id="fact_1",
-                                source_candidate_id=str(
-                                    prior_sales["source_candidate_id"]
-                                ),
-                                plan_shape="list_rows",
-                            ),
+                            "binding_target_id": prior_sales_target_id,
                             "answer_population": source_candidate_answer_population(
                                 prompt,
-                                source_candidate_id=str(
-                                    prior_sales["source_candidate_id"]
-                                ),
+                                binding_target_id=prior_sales_target_id,
                             ),
                             "fulfillment_decisions": source_fulfills_for_candidate(
                                 prior_sales,
@@ -2664,15 +2662,10 @@ class _TwoSalesFactActiveMemoryPlannerPort:
                     "bindings_for_fact_2": {
                         "plan_shape": "list_rows",
                         "primary": {
-                            "binding_target_id": source_binding_target_id_for_candidate(
-                                prompt,
-                                requested_fact_id="fact_2",
-                                source_candidate_id=str(sale_id["source_candidate_id"]),
-                                plan_shape="list_rows",
-                            ),
+                            "binding_target_id": sale_id_target_id,
                             "answer_population": source_candidate_answer_population(
                                 prompt,
-                                source_candidate_id=str(sale_id["source_candidate_id"]),
+                                binding_target_id=sale_id_target_id,
                             ),
                             "fulfillment_decisions": source_fulfills_for_candidate(
                                 sale_id,

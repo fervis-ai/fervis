@@ -31,14 +31,21 @@ from .operations import (
 from .question_contract import _verify_question_contract
 from .result_projection import (
     _result_output_fact_refs,
+    _result_output_proofs,
     _verify_result_output_targets,
     _verify_result_references,
+)
+from fervis.lookup.question_contract import (
+    AnswerPopulationMembershipTestKind,
+    MembershipTestRef,
 )
 from .sources import (
     _allowed_read_ids,
     _verify_api_relation_catalog_refs,
+    _verify_compute_input_population_coverage_claims,
     _verify_relations,
     _verify_required_source_params,
+    _verify_source_population_coverage_claims,
     _verify_sources,
     _verify_program_expression_targets,
 )
@@ -89,6 +96,16 @@ def _verify_answer_program_structure(
             authorized_sources=authorized_sources,
         ),
     )
+    _verify_source_population_coverage_claims(
+        answer,
+        question_contract=question_contract,
+        row_sources=row_sources,
+    )
+    _verify_compute_input_population_coverage_claims(
+        answer,
+        question_contract=question_contract,
+        bindings=bindings,
+    )
     _verify_relations(answer.relations)
     for operation in answer.operations:
         verify_operation(operation)
@@ -107,6 +124,18 @@ def _verify_answer_program_structure(
     _verify_compute_scalar_availability(answer)
     _verify_answer_uses_evidence_input(answer)
     _verify_result_output_targets(answer, require_output=False)
+    relation_contracts = _relation_contracts(
+        answer,
+        catalog=catalog,
+        row_sources=row_sources,
+        proof_context=ExecutionProofContext.empty(),
+    )
+    _verify_population_fulfillment(
+        answer,
+        question_contract=question_contract,
+        relation_contracts=relation_contracts,
+        operation_inputs=(),
+    )
     return _StructuredAnswerProgram(
         program=answer,
         bindings=bindings,
@@ -178,6 +207,12 @@ def _verify_fact_fulfillment(
         relation_contracts=relation_contracts,
         operation_inputs=operation_inputs,
     )
+    _verify_population_fulfillment(
+        answer,
+        question_contract=question_contract,
+        relation_contracts=relation_contracts,
+        operation_inputs=operation_inputs,
+    )
     for item in answer.fulfillment:
         fact = requested.get(item.requested_fact_id)
         if fact is None:
@@ -217,4 +252,45 @@ def _verify_fulfillment_input_refs(
 ) -> None:
     for input_ref in fact.input_refs:
         if f"known_input:{input_ref}" not in proof_refs:
-            raise VerificationError("fulfillment result output missing input proof")
+            raise VerificationError(
+                f"fulfillment result output missing input proof: {input_ref}"
+            )
+
+
+def _verify_population_fulfillment(
+    answer: AnswerProgram,
+    *,
+    question_contract: QuestionContract,
+    relation_contracts: dict[str, RelationContract],
+    operation_inputs,
+) -> None:
+    facts = {fact.id: fact for fact in question_contract.requested_facts}
+    result_proofs = _result_output_proofs(
+        answer,
+        relation_contracts=relation_contracts,
+        operation_inputs=operation_inputs,
+    )
+    for fulfillment in answer.fulfillment:
+        fact = facts.get(fulfillment.requested_fact_id)
+        proof = result_proofs.get(fulfillment.result_output_id)
+        if fact is None or proof is None:
+            continue
+        population = fact.answer_population
+        if population is None:
+            continue
+        required = frozenset(
+            MembershipTestRef(
+                requested_fact_id=fact.id,
+                membership_test_id=test.id,
+            )
+            for test in population.membership_tests
+            if test.kind is not AnswerPopulationMembershipTestKind.SUBJECT_IDENTITY
+        )
+        missing = required - proof.population_coverage.row_tests
+        if missing:
+            raise VerificationError(
+                "fulfillment result does not enforce answer population tests: "
+                + ", ".join(
+                    sorted(test.membership_test_id for test in missing)
+                )
+            )

@@ -7,10 +7,10 @@ from fervis.lookup.grounding.model import (
     InputBindingOption,
     KnownInputBindingTask,
     KnownTimeResolutionTask,
-    ResolverOutputFieldCard,
-    ResolverQueryParamCard,
+    resolver_fit_question_for_option,
 )
 from fervis.lookup.grounding.schema import build_grounding_schema
+from fervis.lookup.grounding.surface import resolver_option_surface
 from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 from fervis.lookup.turn_prompts import (
     ProviderResponseContract,
@@ -27,7 +27,7 @@ GROUNDING_TOOL_NAME = "submit_grounding"
 
 class GroundingTurnPrompt(TurnPromptBase):
     turn_name = "grounding"
-    turn_task = "resolve known reference text to canonical IDs"
+    turn_task = "resolve time inputs and review named-reference resolver options"
 
     def __init__(self, request: GroundingRequest) -> None:
         self.request = request
@@ -36,22 +36,21 @@ class GroundingTurnPrompt(TurnPromptBase):
         self,
         builder: TurnPromptBuilder,
     ) -> tuple[PromptSection, ...]:
-        sections = [
+        return (
             builder.json_section(
-                "Known inputs to ground:", self.known_inputs_payload()
+                "Known input binding tasks:",
+                self.known_input_binding_tasks_payload(),
             ),
             builder.json_section(
                 "Time inputs to resolve:",
                 self.time_inputs_payload(),
             ),
-            builder.json_section("Binding options:", self.binding_options_payload()),
             self.grounding_objective_section(builder),
             self.time_resolution_section(builder),
-            self.resolver_selection_section(builder),
-            self.copying_and_validity_section(builder),
+            self.resolver_compatibility_section(builder),
+            self.output_shape_section(builder),
             self.output_section(builder),
-        ]
-        return tuple(sections)
+        )
 
     def grounding_objective_section(
         self,
@@ -60,12 +59,11 @@ class GroundingTurnPrompt(TurnPromptBase):
         return builder.instruction_block(
             "Grounding Objective",
             (
-                "Resolve known question inputs before source binding and planning.",
-                "For time inputs, author a typed time intent from the shown question span.",
-                "For each reference input, select the one binding option that best resolves it.",
-                "Do not decide how the identity will be used by the final answer source.",
-                "The selected route will validate or ground the input through a source read.",
-                "known_input_text is the original question span; lookup_text and time_expression are the resolved values to search, match, or compile.",
+                "Resolve time inputs and review the resolver options available for each reference input.",
+                "Review every binding option independently. More than one option may be positive.",
+                "A positive review means only that the read can validate or match the supplied lookup text and produce its declared canonical result through the selected request values and exact-match fields.",
+                "Do not choose one resolver. Do not decide which answer read will consume the result. Do not execute a resolver read during this turn.",
+                "known_input_text is the original question span. lookup_text and time_expression are the resolved values to search, match, or compile.",
             ),
         )
 
@@ -92,52 +90,40 @@ class GroundingTurnPrompt(TurnPromptBase):
             ),
         )
 
-    def resolver_selection_section(
+    def resolver_compatibility_section(
         self,
         builder: TurnPromptBuilder,
     ) -> PromptSection:
         return builder.instruction_block(
-            "Resolver Selection",
+            "Resolver Compatibility",
             (
-                "Select exactly one binding option for this known input, or none when no shown option fits.",
-                "A related owner, container, area, location, or source is not the same entity unless the question uses it with that meaning.",
-                "Select identity_validation when the endpoint's declared path key fits field_label_text and value_meaning_hint and lookup_text contains a value of that key's declared type.",
-                "lookup_text itself need not consist only of that value.",
-                "For identity_validation, input_value is the exact value span converted to the declared type, without its field label or surrounding grammar.",
-                "Select reference_grounding when the endpoint can search or match the descriptive text.",
-                "For reference_grounding with result_kind=canonical_identity, copy lookup_text verbatim as input_value and select the returned field whose value names the returned entity.",
-                "For reference_grounding with result_kind=matched_value, select matched_field_ref and set input_value to that field's concrete value expressed by lookup_text; remove subject words and grammar that state how it constrains the subject.",
-                "A matched input_value must be possible content of matched_field_ref, not a phrase describing the subject or its relationship to that field.",
-                "For reference_grounding, use canonical_identity when lookup_text names the entity returned by the selected route.",
-                "Use matched_value when lookup_text supplies a scalar value of one returned field rather than naming the returned entity.",
-                "A canonical identity may still constrain another population; that use does not make it a scalar matched value.",
-                "Identity validation always uses result_kind=canonical_identity.",
-                "Do not reject a resolver because you are unsure how the final answer source will use the grounded result.",
-                "Use question_context.question when interpreting value_meaning_hint.",
-                "Use question_context.requested_facts only as local context for what the lookup text refers to; do not decide final source use from it.",
-                "Use the known input's value_meaning_hint and each option's description, resource_names, returned_identity, lookup_surface, query_params, and selected_output_fields to decide whether the resolver can resolve the lookup text.",
-                "Use field_label_text as the catalog-blind attribute approximation supplied by question interpretation; consider it together with value_meaning_hint, but do not treat it as an authoritative catalog field name.",
-                "lookup_surface.param_ref means the resolver can search its own resource directly using the lookup text.",
-                "lookup_surface.field_refs lists returned fields that can exactly match the lookup text.",
-                "query_params shows endpoint filters available on the resolver resource.",
-                "selected_output_fields shows identity, display, and choice fields from the resolver response that are useful for distinguishing what object the resolver returns.",
-                "Use value_meaning_hint and field_label_text to choose among the options; neither is an authoritative catalog identifier.",
+                "Use CAN_RESOLVE_LOOKUP_TEXT when the read can use selected declared request parameters and exact returned-resource fields to validate or match lookup_text. Use CANNOT_RESOLVE_LOOKUP_TEXT otherwise.",
+                "For every option, answer the shown resolver_fit_question.",
+                "A positive option must use the lookup text to identify the returned resource itself. An exact match in a field that describes another entity, category, or surrounding context does not identify the returned resource.",
+                "Use field_label_text and value_meaning_hint together to understand what the supplied text means. Both are catalog-blind approximations, not authoritative catalog names.",
+                "For a positive review, include every required request parameter with no default. Include an optional request parameter only when it performs the lookup. Key request_values by param_ref. Select every returned-resource field that may exactly equal lookup_text.",
+                "response_match_alternatives has OR semantics: an exact match in any selected field verifies the returned resource. Do not select fields that describe another entity, category, or surrounding context.",
+                "canonical_result identifies the returned resource's complete canonical key. Match fields establish which resource was named, but they never become computation values. Do not substitute a related resource's key.",
+                "Use question_text to interpret field_label_text and value_meaning_hint. Do not infer or decide final source use.",
+                "Judge business meaning, not word equality between the input hint and the returned entity kind.",
+                "Do not reject an option because its result might not fit the final answer source. Later stages own that decision.",
             ),
         )
 
-    def copying_and_validity_section(
+    def output_shape_section(
         self,
         builder: TurnPromptBuilder,
     ) -> PromptSection:
         return builder.instruction_block(
-            "Copying And Validity",
+            "Output Shape",
             (
-                "Return known_time_resolutions as an object keyed by known_input_id; include every time input key exactly once.",
-                "Return known_input_bindings as an object keyed by known_input_id; include every reference input key exactly once.",
-                "Copy the selected binding_option_id as selected_option_id, choose its result_kind, select matched_field_ref when the option has returned lookup fields, and write input_value according to that option's declared purpose.",
-                "When no option fits, use selected_option_id=none, result_kind=none, and input_value as an empty string.",
-                "Briefly state why the selected option fits in selection_basis.",
-                "Do not rewrite, normalize, abbreviate, or invent identity keys.",
+                "Return known_time_resolutions as an object keyed by known_input_id and include every shown time input exactly once.",
+                "Return known_input_binding_reviews as an object keyed by known_input_id. Within each review, return option_reviews keyed by binding_option_id and include every shown binding option exactly once.",
+                "Copy all IDs and each resolver_fit_question exactly.",
+                'For every option review, write the because field as: "{lookup_text} can/cannot identify the returned {resource} because {selected response fields} describe {field owner}, and the route returns {canonical result}." Replace every template term with concrete text from the option.',
+                "Write decision after because. Use CAN_RESOLVE_LOOKUP_TEXT only when the stated field owner is the returned resource; otherwise use CANNOT_RESOLVE_LOOKUP_TEXT.",
+                "For CAN_RESOLVE_LOOKUP_TEXT, return request_values keyed by param_ref and at least one response_match_alternative.",
+                "For CANNOT_RESOLVE_LOOKUP_TEXT, return an empty request_values object and an empty response_match_alternatives array.",
             ),
         )
 
@@ -160,25 +146,26 @@ class GroundingTurnPrompt(TurnPromptBase):
             tool_specs=(
                 required_tool_spec(
                     tool_name=GROUNDING_TOOL_NAME,
-                    tool_description=(
-                        "Submit grounding resolver compatibility reviews."
-                    ),
+                    tool_description="Submit grounding resolver compatibility reviews.",
                     input_schema=build_grounding_schema(self.request),
                 ),
             )
         )
 
-    def known_inputs_payload(self) -> dict[str, object]:
+    def known_input_binding_tasks_payload(self) -> dict[str, object]:
         return {
             "known_input_binding_tasks": [
                 {
                     "known_input_id": task.known_input_id,
                     "known_input_text": task.known_input_text,
                     "lookup_text": task.lookup_text,
-                    "known_input_kind": task.known_input_kind,
                     "field_label_text": task.field_label_text,
                     "value_meaning_hint": task.known_input_description,
-                    "question_context": self._question_context_payload(task),
+                    "question_text": self.request.question,
+                    "binding_options": [
+                        self._binding_option_payload(option, task=task)
+                        for option in task.options
+                    ],
                 }
                 for task in self.request.tasks
             ]
@@ -203,9 +190,7 @@ class GroundingTurnPrompt(TurnPromptBase):
         self,
         task: KnownTimeResolutionTask,
     ) -> dict[str, object]:
-        payload: dict[str, object] = {
-            "question": self.request.question,
-        }
+        payload: dict[str, object] = {"question": self.request.question}
         if task.requested_facts:
             payload["requested_facts"] = [
                 {
@@ -220,108 +205,19 @@ class GroundingTurnPrompt(TurnPromptBase):
                 for fact in task.requested_facts
             ]
         return payload
-
-    def _question_context_payload(
-        self,
-        task: KnownInputBindingTask,
-    ) -> dict[str, object]:
-        payload: dict[str, object] = {
-            "question": self.request.question,
-        }
-        if task.requested_facts:
-            payload["requested_facts"] = [
-                {
-                    "requested_fact_id": fact.requested_fact_id,
-                    "answer_fact": fact.answer_fact,
-                    "answer_population": {
-                        "population_label": fact.answer_population_label,
-                        "counted_unit": fact.answer_population_counted_unit,
-                    },
-                    "answer_outputs": list(fact.answer_outputs),
-                }
-                for fact in task.requested_facts
-            ]
-        return payload
-
-    def binding_options_payload(self) -> dict[str, object]:
-        return {
-            "known_input_binding_options": [
-                {
-                    "known_input_id": task.known_input_id,
-                    "binding_options": [
-                        self._binding_option_payload(option) for option in task.options
-                    ],
-                }
-                for task in self.request.tasks
-            ]
-        }
 
     def _binding_option_payload(
         self,
         option: InputBindingOption,
+        *,
+        task: KnownInputBindingTask,
     ) -> dict[str, object]:
         payload: dict[str, object] = {
             "binding_option_id": option.id,
-            "purpose": option.purpose.value,
+            "resolver_fit_question": resolver_fit_question_for_option(
+                task=task,
+                option=option,
+            ),
         }
-        route = option.route
-        if route is None:
-            return payload
-        payload.update(
-            {
-                "read_id": route.resolver_read_id,
-                "endpoint_name": route.resolver_endpoint_name,
-                "description": route.resolver_description,
-                "resource_names": list(route.resolver_resource_names),
-                "returned_identity": {
-                    "entity_kind": route.entity_kind,
-                    "key_id": route.key_id,
-                    "components": [
-                        {
-                            "component_id": component.component_id,
-                            "field_ref": component.field_ref,
-                        }
-                        for component in route.key_components
-                    ],
-                },
-                "lookup_surface": {
-                    **(
-                        {
-                            "param_ref": route.lookup_param_ref,
-                            "param_type": route.lookup_param_type,
-                        }
-                        if route.lookup_param_ref
-                        else {}
-                    ),
-                    "field_refs": list(route.lookup_field_refs),
-                },
-                "query_params": [
-                    self._route_param_payload(param) for param in route.query_params
-                ],
-                "selected_output_fields": [
-                    self._route_field_payload(field)
-                    for field in route.selected_output_fields
-                ],
-            }
-        )
-        return payload
-
-    def _route_param_payload(self, param: ResolverQueryParamCard) -> dict[str, object]:
-        payload: dict[str, object] = {
-            "param_ref": param.param_ref,
-            "name": param.name,
-            "type": param.type,
-        }
-        if param.choices:
-            payload["choices"] = list(param.choices)
-        return payload
-
-    def _route_field_payload(self, field: ResolverOutputFieldCard) -> dict[str, object]:
-        payload: dict[str, object] = {
-            "field_ref": field.field_ref,
-            "field_path": field.field_path,
-            "type": field.type,
-        }
-        if field.choices:
-            payload["choices"] = list(field.choices)
+        payload.update(resolver_option_surface(self.request, option).prompt_payload())
         return payload

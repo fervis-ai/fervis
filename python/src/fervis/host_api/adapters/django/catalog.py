@@ -163,8 +163,15 @@ def _build_contract(
 ) -> EndpointContract:
     query_serializer_class = getattr(view_class, "query_serializer_class", None)
     response_serializer_class = _get_response_serializer_class(view_class)
-    response_model = _view_queryset_model(view_class)
-    query_params = query_params_from_serializer(query_serializer_class)
+    response_model = _declared_response_model(
+        view_class,
+        response_serializer_class=response_serializer_class,
+    )
+    query_params = query_params_from_serializer(
+        query_serializer_class,
+        model_context=response_model,
+        view_class=view_class,
+    )
     resource_names = _resource_names_for_endpoint(
         path=path,
         url_name=url_name,
@@ -619,7 +626,7 @@ def _resource_names_for_endpoint(
     names.update(_declared_resource_names(query_serializer_class))
     names.update(_declared_resource_names(response_serializer_class))
     for model in (
-        _view_queryset_model(view_class),
+        _declared_queryset_model(view_class),
         _serializer_model(query_serializer_class),
         _serializer_model(response_serializer_class),
     ):
@@ -722,22 +729,20 @@ def _declared_resource_names(owner: type | None) -> set[str]:
     }
 
 
-def _view_queryset_model(view_class: type) -> type | None:
+def _declared_response_model(
+    view_class: type,
+    *,
+    response_serializer_class: type | None,
+) -> type | None:
+    return _declared_queryset_model(view_class) or _serializer_model(
+        response_serializer_class
+    )
+
+
+def _declared_queryset_model(view_class: type) -> type | None:
     queryset = getattr(view_class, "queryset", None)
     model = getattr(queryset, "model", None)
-    if model is not None:
-        return model
-    get_queryset = getattr(view_class, "get_queryset", None)
-    if get_queryset is None:
-        return None
-    view = view_class()
-    view.request = SimpleNamespace(query_params={})
-    view.kwargs = {}
-    try:
-        queryset = view.get_queryset()
-    except Exception:
-        return None
-    return getattr(queryset, "model", None)
+    return model if isinstance(model, type) else None
 
 
 def _serializer_model(serializer_class: type | None) -> type | None:

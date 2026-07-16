@@ -1,5 +1,5 @@
 id: selected_grounding_route_limits_ambiguity
-description: Singular lookup clarifies among canonical matches returned by the one route selected during grounding.
+description: Source binding chooses the retained read's semantic input target from multiple positive resolver results.
 kind: algorithm
 algorithm: lookup.orchestration
 input:
@@ -111,6 +111,17 @@ input:
     read_id: list_location_list
     row_path_ids:
     - data
+    known_input_bindings:
+    - known_input_id: london_qi_1
+      resolver_result: area:primary_key
+  source_binding:
+  - requested_fact_id: fact_1
+    resolved_input_applications:
+    - value_id: grounded_input_1_area_primary_key_area_id_area_nairobi
+      value_component: canonical_key
+      target_kind: returned_identity
+      target_id: source_1.data.reference.area_reference
+      match_basis_explanation: London restricts the returned Area reference.
   responses:
     list_area_list:
       data:
@@ -132,23 +143,6 @@ input:
           area_id: area_mombasa
 expect:
   result_contains:
-    status: NEEDS_CLARIFICATION
-    outcome_kind: needs_clarification
-    clarifications:
-    - question: Which matching city should I use?
-      need: target_reference
-      reason: multiple_matching_entities
-      subjects:
-      - kind: question_input
-        options:
-        - id: 'location:primary_key:{"location_id":"loc_1"}'
-          label: 'Location: London [location_id=loc_1]'
-        - id: 'location:primary_key:{"location_id":"loc_2"}'
-          label: 'Location: London [location_id=loc_2]'
-      evidence:
-      - kind: known_input
-        id: known_input:input_1
-      - kind: candidate
-        id: 'location:primary_key:{"location_id":"loc_1"}'
-      - kind: candidate
-        id: 'location:primary_key:{"location_id":"loc_2"}'
+    status: COMPLETED
+    rendered_rows:
+    - count: 2

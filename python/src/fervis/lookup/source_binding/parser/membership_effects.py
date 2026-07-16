@@ -158,22 +158,22 @@ def review_finite_choice_sets(
         exclude_values.append(choice)
     if not include_values:
         raise ValueError("finite choice reviews must include at least one choice")
-    discharged_test_ids = discharged_membership_test_ids(
+    satisfied_test_ids = satisfied_membership_test_ids(
         reviewed_effects,
         included_values=tuple(include_values),
         tests_by_id=tests_by_id,
     )
-    return tuple(include_values), tuple(exclude_values), discharged_test_ids
+    return tuple(include_values), tuple(exclude_values), satisfied_test_ids
 
 
-def discharged_membership_test_ids(
+def satisfied_membership_test_ids(
     reviewed_effects: list[tuple[str, dict[str, str]]],
     *,
     included_values: tuple[str, ...],
     tests_by_id: dict[str, Any],
 ) -> tuple[str, ...]:
     included = set(included_values)
-    discharged: list[str] = []
+    satisfied: list[str] = []
     for test_id, test in tests_by_id.items():
         required_effect = (
             "SATISFIES_TEST"
@@ -186,8 +186,8 @@ def discharged_membership_test_ids(
         if included_effects and all(
             effect == required_effect for effect in included_effects
         ):
-            discharged.append(test_id)
-    return tuple(discharged)
+            satisfied.append(test_id)
+    return tuple(satisfied)
 
 
 def _validate_population_test_basis(

@@ -1,0 +1,67 @@
+id: fact_scoped_value_does_not_enable_another_fact
+description: A canonical value owned by one fact cannot satisfy another fact's required source parameter.
+kind: algorithm
+algorithm: planning.fact_endpoint_requirements
+input:
+  catalog:
+    reads:
+      - id: stores
+        endpoint_name: list_stores
+        fields:
+          - ref: stores.address
+            path: address
+            type: string
+      - id: store_sales
+        endpoint_name: list_store_sales
+        params:
+          - ref: store_sales.query.store_id
+            name: store_id
+            source: query
+            type: uuid
+            required: true
+            entity_target:
+              entity_kind: store
+              key_id: primary_key
+              component_id: store_id
+        fields:
+          - ref: store_sales.amount
+            path: amount
+            type: decimal
+  catalog_selection:
+    requested_facts:
+      - requested_fact_id: fact_1
+        query_terms: [store, address]
+        selected_read_ids: [stores]
+      - requested_fact_id: fact_2
+        query_terms: [sales, amount]
+        selected_read_ids: [store_sales]
+  available_values:
+    - id: acacia_store
+      kind: identity
+      known_input_id: acacia_qi_1
+      entity_kind: store
+      key_id: primary_key
+      key_component_id: store_id
+      value: store_1
+      applies_to_requested_fact_ids: [fact_1]
+expect:
+  result_contains:
+    requested_facts:
+      - requested_fact_id: fact_1
+        executable_sources:
+          - read_id: stores
+            row_path_id: root
+        missing_inputs: []
+      - requested_fact_id: fact_2
+        executable_sources: []
+        missing_inputs:
+          - read_id: store_sales
+            row_path_id: root
+            param_id: store_id
+    clarifiable_missing_inputs:
+      - read_id: store_sales
+        row_path_id: root
+        param_id: store_id
+    available_reads_by_fact:
+      fact_1: [stores]
+      fact_2: []

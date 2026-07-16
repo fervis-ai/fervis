@@ -123,11 +123,27 @@ def _bindable_param_payloads(
             item["choice_labels"] = _choice_labels(item)
         if binding_values:
             item["binding_values"] = binding_values
-        bind_options = _param_bind_options(item)
+        resolved_input_values = [
+            value
+            for value in binding_values
+            if value.get("source") == "available_value"
+        ]
+        decision_param = item
+        if resolved_input_values:
+            decision_param = {
+                **item,
+                "choices": [],
+                "binding_values": [
+                    value
+                    for value in binding_values
+                    if value.get("source") != "available_value"
+                ],
+            }
+        bind_options = _param_bind_options(decision_param)
         if bind_options:
             item["bind_options"] = bind_options
             item["omit_option"] = _param_omit_option(
-                item,
+                decision_param,
                 bind_options=bind_options,
             )
         output.append(item)

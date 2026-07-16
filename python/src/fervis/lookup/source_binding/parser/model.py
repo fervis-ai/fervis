@@ -8,6 +8,10 @@ from fervis.lookup.source_binding.compiler_ir import DraftRelationSourcePopulati
 from fervis.lookup.source_binding import provider_contract as provider_output
 from fervis.lookup.source_binding.plan_targets import SourceBindingTarget
 from fervis.lookup.source_binding.parser.types import NormalizedParamDecision
+from fervis.lookup.source_binding.input_applications import (
+    ParsedResolvedInputApplications,
+)
+from fervis.lookup.answer_program.relations import PopulationCoverageClaim
 
 
 @dataclass(frozen=True)
@@ -17,7 +21,8 @@ class ParsedRoleBinding:
     param_decisions: dict[str, NormalizedParamDecision]
     effective_param_ids: tuple[str, ...]
     population_choices: tuple[DraftRelationSourcePopulationChoice, ...]
-    discharged_membership_test_ids: tuple[str, ...]
+    population_coverage_claims: tuple[PopulationCoverageClaim, ...]
+    input_applications: ParsedResolvedInputApplications
 
 
 @dataclass(frozen=True)
