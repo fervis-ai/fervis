@@ -72,7 +72,7 @@ _APPROVED_CHARS = {
     "question contract": (364, 18074, 27161),
     "query enrichment": (364, 5185, 7408),
     "grounding": (364, 6620, 9483),
-    "source binding": (364, 16267, 20138),
+    "source binding": (364, 16485, 20357),
     "pattern fact planning": (364, 3497, 5311),
 }
 

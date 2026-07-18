@@ -26,7 +26,6 @@ from fervis.lookup.question_contract import (
     RequestedFact,
     RequestedFactAnswerExpressionFamily,
     RequestedFactGroupKey,
-    AnswerPopulationMembershipTestKind,
     MembershipTestRef,
 )
 from fervis.lookup.source_binding.candidates import SourceCandidate
@@ -218,8 +217,8 @@ class ClosedKeyParamBindingIndex:
         fact: RequestedFact,
     ) -> tuple[PopulationCoverageClaim, ...]:
         binding = self._binding_for_target(target.binding_target_id)
-        population = fact.answer_population
-        if binding is None or population is None:
+        membership_test = fact.specified_group_membership_test()
+        if binding is None or membership_test is None:
             return ()
         proof_refs = tuple(
             dict.fromkeys(
@@ -232,20 +231,19 @@ class ClosedKeyParamBindingIndex:
                 )
             )
         )
-        return tuple(
+        if frozenset(membership_test.owned_question_input_refs) != (
+            binding.question_input_ids
+        ):
+            return ()
+        return (
             PopulationCoverageClaim(
                 test_ref=MembershipTestRef(
                     requested_fact_id=fact.id,
-                    membership_test_id=test.id,
+                    membership_test_id=membership_test.id,
                 ),
                 role=PopulationCoverageRole.ROW_POPULATION,
                 proof_refs=proof_refs,
-            )
-            for test in population.membership_tests
-            if test.kind
-            is AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT
-            and frozenset(test.owned_question_input_refs)
-            == binding.question_input_ids
+            ),
         )
 
     def source_level_applied_filters(
@@ -491,6 +489,8 @@ def _closed_key_group_key(
     if group_key.id not in target.answer_output_ids:
         return None
     if group_key.domain != GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS:
+        return None
+    if fact.specified_group_membership_test() is None:
         return None
     return group_key
 

@@ -78,6 +78,13 @@ class ParsedResolvedInputApplications:
 
 
 @dataclass(frozen=True)
+class _ParameterApplication:
+    output: provider_output.ResolvedInputApplicationOutput
+    param: CandidateParameter
+    value: FactValue
+
+
+@dataclass(frozen=True)
 class ResolvedInputApplicationSurface:
     requested_fact_id: str
     values_by_id: dict[str, FactValue]
@@ -86,6 +93,7 @@ class ResolvedInputApplicationSurface:
     membership_tests_by_input_id: dict[
         str, tuple[RequestedFactAnswerPopulationMembershipTest, ...]
     ]
+    alternative_input_test: RequestedFactAnswerPopulationMembershipTest | None
     coverage_role: PopulationCoverageRole | None
     role_text: str
 
@@ -119,8 +127,16 @@ class ResolvedInputApplicationSurface:
             "type": "array",
             "items": item_schema,
             "maxItems": len(self.parameter_targets_by_id)
-            + len(self.identity_targets_by_id),
+            + len(self.identity_targets_by_id)
+            + self._additional_parameter_alternatives(),
         }
+
+    def _additional_parameter_alternatives(self) -> int:
+        if self.alternative_input_test is None:
+            return 0
+        return (len(self.alternative_input_test.owned_question_input_refs) - 1) * len(
+            self.parameter_targets_by_id
+        )
 
     def _resolved_value_payloads(self) -> tuple[dict[str, object], ...]:
         payloads: list[dict[str, object]] = []
@@ -155,6 +171,17 @@ class ResolvedInputApplicationSurface:
                     "population_test_basis": population_test_basis_payload(
                         tests,
                         role_text=self.role_text,
+                    ),
+                    **(
+                        {
+                            "request_parameter_alternative_group": (
+                                self.alternative_input_test.id
+                            )
+                        }
+                        if self.alternative_input_test is not None
+                        and value.known_input_id
+                        in self.alternative_input_test.owned_question_input_refs
+                        else {}
                     ),
                 }
             )
@@ -263,12 +290,18 @@ def resolved_input_application_surface(
     requested_fact_id: str,
     resolved_values: tuple[FactValue, ...],
     membership_tests: tuple[RequestedFactAnswerPopulationMembershipTest, ...] = (),
+    alternative_input_test: RequestedFactAnswerPopulationMembershipTest | None = None,
     coverage_role: PopulationCoverageRole | None = None,
     role_text: str = "source rows",
 ) -> ResolvedInputApplicationSurface:
     """Describe independently selectable values and invocation-local targets."""
 
     values_by_id = {value.id: value for value in resolved_values}
+    if alternative_input_test is not None and (
+        alternative_input_test not in membership_tests
+        or len(alternative_input_test.owned_question_input_refs) < 2
+    ):
+        raise ValueError("alternative input test must own multiple fact inputs")
     parameter_targets = {
         param.id: param
         for param in candidate.params
@@ -292,8 +325,12 @@ def resolved_input_application_surface(
         parameter_targets_by_id=parameter_targets,
         identity_targets_by_id=identity_targets,
         membership_tests_by_input_id=_membership_tests_by_input_id(
-            membership_tests if coverage_role is not None else ()
+            membership_tests if coverage_role is not None else (),
+            alternative_input_test=(
+                alternative_input_test if coverage_role is not None else None
+            ),
         ),
+        alternative_input_test=alternative_input_test,
         coverage_role=coverage_role,
         role_text=role_text,
     )
@@ -330,6 +367,13 @@ def resolved_input_application_surfaces(
         candidate = candidates_by_id.get(target.source_candidate_id)
         if fact is None or candidate is None:
             continue
+        specified_group_test = fact.specified_group_membership_test()
+        parameter_alternative_test = (
+            specified_group_test
+            if specified_group_test is not None
+            and len(specified_group_test.owned_question_input_refs) > 1
+            else None
+        )
         surface = resolved_input_application_surface(
             candidate=candidate,
             requested_fact_id=fact.id,
@@ -342,6 +386,7 @@ def resolved_input_application_surfaces(
                 if fact.answer_population is not None
                 else ()
             ),
+            alternative_input_test=parameter_alternative_test,
             coverage_role=(
                 PopulationCoverageRole.ROW_POPULATION
                 if target.requires_answer_fulfillment
@@ -360,6 +405,13 @@ def resolved_input_application_surfaces(
             for value_id, value in surface.values_by_id.items()
             if value_id not in backend_owned_value_ids
         }
+        alternative_input_test = surface.alternative_input_test
+        if alternative_input_test is not None and not set(
+            alternative_input_test.owned_question_input_refs
+        ).issubset(
+            value.known_input_id for value in model_visible_values.values()
+        ):
+            alternative_input_test = None
         output[target.binding_target_id] = ResolvedInputApplicationSurface(
             requested_fact_id=surface.requested_fact_id,
             values_by_id=model_visible_values,
@@ -377,6 +429,7 @@ def resolved_input_application_surfaces(
                 )
             },
             membership_tests_by_input_id=surface.membership_tests_by_input_id,
+            alternative_input_test=alternative_input_test,
             coverage_role=surface.coverage_role,
             role_text=surface.role_text,
         )
@@ -389,17 +442,14 @@ def parse_resolved_input_applications(
     surface: ResolvedInputApplicationSurface,
 ) -> ParsedResolvedInputApplications:
     param_binding_groups: list[ParamBindingSetAlternatives] = []
+    parameter_applications_by_target: dict[str, list[_ParameterApplication]] = {}
     applied_filters: list[SourceAppliedFilter] = []
     known_input_ids: list[str] = []
     population_coverage_claims: list[PopulationCoverageClaim] = []
-    used_targets: set[tuple[str, str]] = set()
+    used_identity_targets: set[str] = set()
     for application in applications:
         if not application.match_basis_explanation.strip():
             raise ValueError("resolved input application requires a match basis")
-        target_key = (application.target_kind, application.target_id)
-        if target_key in used_targets:
-            raise ValueError("resolved input application repeats a target")
-        used_targets.add(target_key)
         value = surface.values_by_id.get(application.value_id)
         if value is None:
             raise ValueError("resolved input application references unknown value")
@@ -420,22 +470,25 @@ def parse_resolved_input_applications(
             param = surface.parameter_targets_by_id.get(application.target_id)
             if param is None:
                 raise ValueError("resolved input application references unknown param")
-            param_binding_groups.append(
-                _parameter_binding_sets(
-                    application,
+            parameter_applications_by_target.setdefault(param.id, []).append(
+                _ParameterApplication(
+                    output=application,
                     param=param,
                     value=value,
                 )
             )
-            test_proof_refs = tuple(
-                dict.fromkeys(
-                    (*value.proof_refs, f"source_param:{application.target_id}")
-                )
-            )
+            continue
         elif (
             application.target_kind
             == ResolvedInputApplicationTargetKind.RETURNED_IDENTITY.value
         ):
+            if _is_parameter_alternative(value, surface=surface):
+                raise ValueError(
+                    "grouped input alternatives require a request parameter target"
+                )
+            if application.target_id in used_identity_targets:
+                raise ValueError("resolved input application repeats a target")
+            used_identity_targets.add(application.target_id)
             evidence = surface.identity_targets_by_id.get(application.target_id)
             if evidence is None:
                 raise ValueError(
@@ -462,11 +515,119 @@ def parse_resolved_input_applications(
                 proof_refs=test_proof_refs,
             )
         )
+    for parameter_applications in parameter_applications_by_target.values():
+        binding_sets, claims = _parameter_application_group(
+            tuple(parameter_applications),
+            surface=surface,
+        )
+        param_binding_groups.append(binding_sets)
+        population_coverage_claims.extend(claims)
     return ParsedResolvedInputApplications(
         param_binding_sets=combine_param_binding_sets(param_binding_groups),
         applied_filters=tuple(applied_filters),
         known_input_ids=tuple(dict.fromkeys(known_input_ids)),
         population_coverage_claims=tuple(population_coverage_claims),
+    )
+
+
+def _parameter_application_group(
+    applications: tuple[_ParameterApplication, ...],
+    *,
+    surface: ResolvedInputApplicationSurface,
+) -> tuple[ParamBindingSetAlternatives, tuple[PopulationCoverageClaim, ...]]:
+    if len(applications) == 1:
+        application = applications[0]
+        if _is_parameter_alternative(application.value, surface=surface):
+            raise ValueError("parameter alternatives must apply together")
+        proof_refs = _parameter_application_proof_refs(applications)
+        return (
+            _parameter_binding_sets(
+                application.output,
+                param=application.param,
+                value=application.value,
+            ),
+            _application_population_coverage_claims(
+                application.output,
+                value=application.value,
+                surface=surface,
+                proof_refs=proof_refs,
+            ),
+        )
+    _require_parameter_alternative_group(applications, surface=surface)
+    proof_refs = _parameter_application_proof_refs(applications)
+    coverage_claim_sets = tuple(
+        _application_population_coverage_claims(
+            application.output,
+            value=application.value,
+            surface=surface,
+            proof_refs=proof_refs,
+        )
+        for application in applications
+    )
+    if any(claims != coverage_claim_sets[0] for claims in coverage_claim_sets[1:]):
+        raise ValueError("parameter alternatives disagree on population effects")
+    return (
+        tuple(
+            binding_set
+            for application in applications
+            for binding_set in _parameter_binding_sets(
+                application.output,
+                param=application.param,
+                value=application.value,
+            )
+        ),
+        coverage_claim_sets[0],
+    )
+
+
+def _require_parameter_alternative_group(
+    applications: tuple[_ParameterApplication, ...],
+    *,
+    surface: ResolvedInputApplicationSurface,
+) -> None:
+    membership_test = surface.alternative_input_test
+    if membership_test is None:
+        raise ValueError("resolved input application repeats a target")
+    values = tuple(application.value for application in applications)
+    input_ids = tuple(value.known_input_id for value in values)
+    if (
+        any(not isinstance(value.payload, IdentityValuePayload) for value in values)
+        or len(set(input_ids)) != len(input_ids)
+        or frozenset(input_ids)
+        != frozenset(membership_test.owned_question_input_refs)
+        or len({value.id for value in values}) != len(values)
+        or len({application.output.value_component for application in applications})
+        != 1
+    ):
+        raise ValueError("repeated parameter target requires proven input alternatives")
+
+
+def _is_parameter_alternative(
+    value: FactValue,
+    *,
+    surface: ResolvedInputApplicationSurface,
+) -> bool:
+    membership_test = surface.alternative_input_test
+    return (
+        membership_test is not None
+        and value.known_input_id in membership_test.owned_question_input_refs
+    )
+
+
+def _parameter_application_proof_refs(
+    applications: tuple[_ParameterApplication, ...],
+) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            (
+                *(
+                    proof_ref
+                    for application in applications
+                    for proof_ref in application.value.proof_refs
+                ),
+                f"source_param:{applications[0].param.id}",
+            )
+        )
     )
 
 
@@ -635,14 +796,18 @@ def _identity_filters(
 
 def _membership_tests_by_input_id(
     tests: tuple[RequestedFactAnswerPopulationMembershipTest, ...],
+    *,
+    alternative_input_test: RequestedFactAnswerPopulationMembershipTest | None,
 ) -> dict[str, tuple[RequestedFactAnswerPopulationMembershipTest, ...]]:
     output: dict[str, list[RequestedFactAnswerPopulationMembershipTest]] = {}
     for test in tests:
         if test.kind is not AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT:
             continue
-        if len(test.owned_question_input_refs) != 1:
-            continue
-        output.setdefault(test.owned_question_input_refs[0], []).append(test)
+        if len(test.owned_question_input_refs) == 1:
+            output.setdefault(test.owned_question_input_refs[0], []).append(test)
+        elif test is alternative_input_test:
+            for input_ref in test.owned_question_input_refs:
+                output.setdefault(input_ref, []).append(test)
     return {input_id: tuple(items) for input_id, items in output.items()}
 
 
