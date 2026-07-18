@@ -28,7 +28,6 @@ from fervis.lookup.source_binding.parser_common import _text
 from fervis.lookup.source_binding.review_scope import SourceBindingReviewScope
 from fervis.lookup.source_binding.review_surface import source_binding_review_surface
 from fervis.lookup.source_binding.population_effects import (
-    canonical_coverage_test_ids,
     population_coverage_claims_for_satisfied_tests,
 )
 
@@ -120,10 +119,8 @@ def parse_row_predicate_filters(
         )
         coverage_claims.extend(
             population_coverage_claims_for_satisfied_tests(
-                canonical_coverage_test_ids(
-                    satisfied_test_ids,
-                    tests_by_id=tests_by_id,
-                ),
+                satisfied_test_ids,
+                tests_by_id=tests_by_id,
                 requested_fact_id=requested_fact_id,
                 coverage_role=coverage_role,
                 proof_refs=proof_refs,

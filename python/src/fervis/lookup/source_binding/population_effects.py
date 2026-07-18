@@ -109,7 +109,7 @@ def population_coverage_claims(
                     membership_test_id=test.id,
                 ),
                 role=coverage_role,
-                proof_refs=proof_refs,
+                proof_refs=_coverage_proof_refs(test, proof_refs=proof_refs),
             )
         )
     return tuple(claims)
@@ -118,6 +118,7 @@ def population_coverage_claims(
 def population_coverage_claims_for_satisfied_tests(
     test_ids: tuple[str, ...],
     *,
+    tests_by_id: dict[str, RequestedFactAnswerPopulationMembershipTest],
     requested_fact_id: str,
     coverage_role: PopulationCoverageRole,
     proof_refs: tuple[str, ...],
@@ -128,25 +129,32 @@ def population_coverage_claims_for_satisfied_tests(
         PopulationCoverageClaim(
             test_ref=MembershipTestRef(
                 requested_fact_id=requested_fact_id,
-                membership_test_id=test_id,
+                membership_test_id=test.id,
             ),
             role=coverage_role,
-            proof_refs=proof_refs,
+            proof_refs=_coverage_proof_refs(test, proof_refs=proof_refs),
         )
-        for test_id in test_ids
-    )
-
-
-def canonical_coverage_test_ids(
-    test_ids: tuple[str, ...],
-    *,
-    tests_by_id: dict[str, RequestedFactAnswerPopulationMembershipTest],
-) -> tuple[str, ...]:
-    return tuple(
-        test.id
         for test_id in test_ids
         if (test := tests_by_id[test_id]).kind
         is not AnswerPopulationMembershipTestKind.SUBJECT_IDENTITY
+    )
+
+
+def _coverage_proof_refs(
+    test: RequestedFactAnswerPopulationMembershipTest,
+    *,
+    proof_refs: tuple[str, ...],
+) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            (
+                *proof_refs,
+                *(
+                    f"known_input:{input_ref}"
+                    for input_ref in test.owned_question_input_refs
+                ),
+            )
+        )
     )
 
 

@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from fervis.lookup.answer_program.relations import PopulationCoverageRole
+from fervis.lookup.source_binding.population_effects import (
+    population_coverage_claims_for_satisfied_tests,
+)
+
 from tests.lookup.source_binding._plan_member_targets_fixtures import (
     AnswerPopulationMembershipTestKind,
     AnswerPopulationMembershipTestPolarity,
@@ -20,6 +25,29 @@ from tests.lookup.source_binding._plan_member_targets_fixtures import (
     parse_source_binding,
     replace,
 )
+
+
+def test_satisfied_input_owned_test_preserves_its_input_proof() -> None:
+    test = RequestedFactAnswerPopulationMembershipTest(
+        id="sale_type_constraint",
+        kind=AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT,
+        polarity=AnswerPopulationMembershipTestPolarity.MUST_PASS,
+        test_question="Is this an in-person sale?",
+        owned_question_input_refs=("q1",),
+    )
+
+    claims = population_coverage_claims_for_satisfied_tests(
+        (test.id,),
+        tests_by_id={test.id: test},
+        requested_fact_id="fact_1",
+        coverage_role=PopulationCoverageRole.ROW_POPULATION,
+        proof_refs=("population_choice:sale_type",),
+    )
+
+    assert claims[0].proof_refs == (
+        "population_choice:sale_type",
+        "known_input:q1",
+    )
 
 
 def test_observed_only_input_application_does_not_constrain_anti_join_candidates():
