@@ -84,6 +84,9 @@ def run_read_eligibility_parse_case(payload: dict[str, Any]) -> list[str]:
                     "known_input_id": item.known_input_id,
                     "canonical_option_id": item.canonical_option_id,
                     "interpretation_question": item.interpretation_question,
+                    "canonical_option_assessments": dict(
+                        item.canonical_option_assessments
+                    ),
                     "because": item.because,
                 }
                 for item in result.canonical_inputs

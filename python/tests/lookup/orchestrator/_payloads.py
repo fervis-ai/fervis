@@ -225,6 +225,7 @@ def read_eligibility_payload_from_prompt(
                 "retention_decision": "DROP",
             }
         requested_fact_assessments[requested_fact_id] = {
+            "read_candidate_reviews": read_candidate_reviews,
             "canonical_inputs": {
                 binding["known_input_id"]: {
                     key: value
@@ -233,7 +234,6 @@ def read_eligibility_payload_from_prompt(
                 }
                 for binding in canonical_inputs
             },
-            "read_candidate_reviews": read_candidate_reviews,
         }
     return {
         "requested_fact_assessments": requested_fact_assessments,
@@ -638,12 +638,20 @@ def _canonical_inputs_for_fact(
                 "fixture canonical selection must match one shown option"
             )
         option = matches[0]
+        canonical_option_assessments = {
+            str(candidate["id"]): (
+                f"{candidate['result']}: this fixture assessed the shown "
+                "canonical option against the retained read evidence."
+            )
+            for candidate in options
+        }
         selected.append(
             {
                 "known_input_id": known_input_id,
                 "interpretation_question": str(
                     known_input.get("interpretation_question") or ""
                 ),
+                "canonical_option_assessments": canonical_option_assessments,
                 "because": (
                     "This fixture selects the declared canonical result for "
                     "the named input in the requested fact."

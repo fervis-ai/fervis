@@ -47,8 +47,8 @@ def _requested_fact_assessment_schema(
     }
     return provider_output.RequestedFactAssessmentOutput.schema(
         {
-            "canonical_inputs": _canonical_inputs_schema(canonical_specs),
             "read_candidate_reviews": _closed_object_schema(read_candidate_reviews),
+            "canonical_inputs": _canonical_inputs_schema(canonical_specs),
         },
     )
 
@@ -130,17 +130,22 @@ def _canonical_inputs_schema(
 
 def _canonical_input_schema(spec: dict[str, object]) -> dict[str, object]:
     canonical_options = _canonical_option_specs(spec)
+    canonical_option_ids = tuple(
+        str(option["canonical_option_id"]) for option in canonical_options
+    )
     return provider_output.CanonicalInputSelectionOutput.schema(
         {
             "interpretation_question": _string_schema(
                 enum_values=(str(spec["interpretation_question"]),)
             ),
-            "because": {"type": "string", "minLength": 1},
-            "canonical_option_id": _string_schema(
-                enum_values=tuple(
-                    str(option["canonical_option_id"]) for option in canonical_options
-                )
+            "canonical_option_assessments": _closed_object_schema(
+                {
+                    option_id: {"type": "string", "minLength": 1}
+                    for option_id in canonical_option_ids
+                }
             ),
+            "because": {"type": "string", "minLength": 1},
+            "canonical_option_id": _string_schema(enum_values=canonical_option_ids),
         }
     )
 

@@ -82,10 +82,19 @@ class CanonicalInputOption:
 class CanonicalInputSelection:
     option: CanonicalInputOption
     interpretation_question: str
+    canonical_option_assessments: tuple[tuple[str, str], ...]
     because: str
 
     def __post_init__(self) -> None:
-        if not self.interpretation_question.strip() or not self.because.strip():
+        if (
+            not self.interpretation_question.strip()
+            or not self.canonical_option_assessments
+            or any(
+                not option_id.strip() or not assessment.strip()
+                for option_id, assessment in self.canonical_option_assessments
+            )
+            or not self.because.strip()
+        ):
             raise ValueError("canonical input selection requires its assessment")
 
     @property

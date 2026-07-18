@@ -10,6 +10,7 @@ from fervis.lookup.provider_contract import ProviderObject, ProviderOutput
 @dataclass(frozen=True)
 class CanonicalInputSelectionOutput(ProviderOutput):
     interpretation_question: str
+    canonical_option_assessments: dict[str, str]
     because: str
     canonical_option_id: str
 
@@ -30,8 +31,8 @@ class DroppedReadReviewOutput(ProviderOutput):
 
 @dataclass(frozen=True)
 class RequestedFactAssessmentOutput(ProviderOutput):
-    canonical_inputs: dict[str, CanonicalInputSelectionOutput]
     read_candidate_reviews: dict[str, ProviderObject]
+    canonical_inputs: dict[str, CanonicalInputSelectionOutput]
 
 
 @dataclass(frozen=True)

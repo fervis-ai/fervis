@@ -55,8 +55,8 @@ class ReadEligibilityTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Task Boundary",
                 (
-                    "First, interpret each named input in the complete requested-fact context and select one shown canonical identity.",
-                    "Decide which shown API reads expose useful source evidence for the requested fact, treating every selected canonical identity as fixed.",
+                    "First, assess which shown API reads expose useful source evidence for the requested fact.",
+                    "When a named input has several canonical options, assess reads before selecting one option. Retain a read when it could contribute under at least one shown option.",
                     "Retain a read when its rows or fields can contribute to the requested fact.",
                     "Drop a read when it is clearly unrelated to the requested fact.",
                     "Drop a read when it is only related context, audit/detail data, telemetry, receipt data, verification evidence, or an indirect helper.",
@@ -65,18 +65,19 @@ class ReadEligibilityTurnPrompt(TurnPromptBase):
                 ),
             ),
             builder.instruction_block(
-                "Canonical Interpretation",
+                "Read Assessment Before Canonical Interpretation",
                 (
-                    "Interpret each named input before assessing any candidate read. Use its supplied text, field-label approximation, value-meaning hint, and complete requested fact together.",
-                    'For each named input, copy interpretation_question exactly, then write the `because` field as: "{input} denotes one {entity kind} because {requested-fact and resolver-card evidence}." Replace each template term with concrete text. Do not discuss whether a candidate read is attractive or should be retained.',
-                    "Then select exactly one shown canonical_option_id whose result has the entity kind stated in because. That selection fixes what the input means for this requested fact. Copy the ID exactly. Do not invent, combine, reconsider, or replace resolver bindings, fields, keys, values, or joins while assessing reads.",
+                    "Assess every candidate read before selecting a canonical option. Use the supplied input text and every shown canonical option as fact context.",
+                    "When a read could contribute under at least one shown canonical option, assess its rows and fields normally. Do not choose an option inside a read review.",
                 ),
             ),
             builder.instruction_block(
-                "Read Assessment Under Fixed Identities",
+                "Canonical Interpretation",
                 (
-                    "Assess every candidate read under the selected canonical interpretations. A candidate read cannot reinterpret a named input or select another resolver.",
-                    "The selected canonical option fixes the named input's meaning while every candidate read is assessed. Text match fields are evidence for that identity; they are not computation values. This turn does not choose an application target.",
+                    "After assessing every candidate read, interpret each named input using its supplied text, field-label approximation, value-meaning hint, complete requested fact, resolver cards, and the completed read reviews.",
+                    'In canonical_option_assessments, assess every shown canonical option exactly once. Use the canonical_option_id as the key and write: "{canonical result}: {which reviewed reads expose this identity and what those reads contribute to the requested fact}."',
+                    'After all option assessments, write because as: "Use {selected canonical result} because {its reviewed reads contribute the requested fact using that identity}. Do not use {each alternative canonical result} because {its reviewed reads contribute different evidence or require an undeclared identity conversion}. Therefore, {input} denotes {selected canonical result}." Then select exactly one shown canonical_option_id and copy it exactly.',
+                    "The selected canonical option fixes the named input's meaning for subsequent steps. Text match fields are identity evidence, not computation values. This turn does not choose an application target.",
                 ),
             ),
             builder.instruction_block(
@@ -105,8 +106,8 @@ class ReadEligibilityTurnPrompt(TurnPromptBase):
                 "Output Shape",
                 (
                     "In requested_fact_assessments, use every shown requested_fact id as a key.",
-                    "In canonical_inputs, use every shown known_input id as a key. Copy interpretation_question, write because, and select one shown canonical_option_id.",
                     "In read_candidate_reviews, use every shown source_candidate id for that requested fact as a key.",
+                    "After read_candidate_reviews, write canonical_inputs. Use every shown known_input id as a key. Copy interpretation_question, assess every shown canonical option in canonical_option_assessments, then write because and canonical_option_id.",
                     "For RETAIN, first cite relevant_row_path_tokens and relevant_field_tokens, then write retention_basis.",
                     "For DROP, do not write relevant_row_path_tokens or relevant_field_tokens.",
                     "relevant_row_path_tokens cites zero or more response_rows evidence_token values from the same read_candidate.",
@@ -140,7 +141,7 @@ class ReadEligibilityTurnPrompt(TurnPromptBase):
                 required_tool_spec(
                     tool_name=READ_ELIGIBILITY_TOOL_NAME,
                     tool_description=(
-                        "Submit canonical-input selections and API read retention assessments."
+                        "Submit API read retention assessments followed by canonical-input selections."
                     ),
                     input_schema=self._schema(),
                 ),

@@ -1655,6 +1655,9 @@ def test_selected_canonical_identity_resolves_without_a_read_target() -> None:
             CanonicalInputSelection(
                 option=canonical_option,
                 interpretation_question="Which location?",
+                canonical_option_assessments=(
+                    (canonical_option.id, "The location read exposes this identity."),
+                ),
                 because="Nairobi denotes the returned location.",
             ),
         ),
@@ -1762,6 +1765,13 @@ def test_read_eligibility_executes_only_the_selected_reference_option() -> None:
                 CanonicalInputSelection(
                     option=selected,
                     interpretation_question="Which location?",
+                    canonical_option_assessments=tuple(
+                        (
+                            option.id,
+                            "The candidate reads were assessed under this identity.",
+                        )
+                        for option in surface.canonical_options
+                    ),
                     because="Nairobi denotes the location returned by this read.",
                 ),
             ),

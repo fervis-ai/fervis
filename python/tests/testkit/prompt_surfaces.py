@@ -98,8 +98,8 @@ PROMPT_SURFACE_CONTRACTS = {
         "path": LOOKUP_ROOT / "read_eligibility" / "prompt.py",
         "instruction_headings": (
             "Task Boundary",
+            "Read Assessment Before Canonical Interpretation",
             "Canonical Interpretation",
-            "Read Assessment Under Fixed Identities",
             "Conversation Resolution",
             "Retention Rules",
             "Output Shape",

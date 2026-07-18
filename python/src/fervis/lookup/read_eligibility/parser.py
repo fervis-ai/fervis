@@ -175,16 +175,15 @@ def _parsed_assessments(
     canonical_inputs: list[CanonicalInputSelection] = []
     for requested_fact_id in context.requested_fact_order:
         item = items[requested_fact_id]
-        canonical_selections = _canonical_selections(
-            item.canonical_inputs,
-            requested_fact_id=requested_fact_id,
-            context=context,
-        )
         fact_assessments = _read_candidate_reviews(
             item.read_candidate_reviews,
             context=context,
             requested_fact_id=requested_fact_id,
-            canonical_selections=canonical_selections,
+        )
+        canonical_selections = _canonical_selections(
+            item.canonical_inputs,
+            requested_fact_id=requested_fact_id,
+            context=context,
         )
         for source_candidate_id, assessment in fact_assessments.items():
             output[(requested_fact_id, source_candidate_id)] = assessment
@@ -214,6 +213,12 @@ def _canonical_selections(
         )
         if not matching:
             raise ValueError("known input binding references unknown canonical option")
+        expected_option_ids = tuple(option.id for option in options)
+        option_assessments = item.canonical_option_assessments
+        if set(option_assessments) != set(expected_option_ids):
+            raise ValueError(
+                "canonical option assessments must cover every shown option"
+            )
         expected_question = context.interpretation_questions_by_fact_and_input[
             (requested_fact_id, known_input_token)
         ]
@@ -222,6 +227,10 @@ def _canonical_selections(
         output[known_input_token] = CanonicalInputSelection(
             option=matching[0],
             interpretation_question=expected_question,
+            canonical_option_assessments=tuple(
+                (option_id, _required_text(option_assessments[option_id]))
+                for option_id in expected_option_ids
+            ),
             because=_required_text(item.because),
         )
     return output
@@ -232,7 +241,6 @@ def _read_candidate_reviews(
     *,
     context: _ReadEligibilityParseContext,
     requested_fact_id: str,
-    canonical_selections: dict[str, CanonicalInputSelection],
 ) -> dict[str, ReadAssessment]:
     expected_ids = context.expected_candidate_ids_for_fact(requested_fact_id)
     if set(items) != expected_ids:

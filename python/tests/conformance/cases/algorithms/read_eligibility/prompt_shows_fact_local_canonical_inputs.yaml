@@ -1,5 +1,5 @@
 id: prompt_shows_fact_local_canonical_inputs
-description: Read eligibility renders canonical interpretation before fixed-identity read assessment.
+description: Read eligibility renders fact-local canonical options for interpretation after read assessment.
 kind: algorithm
 algorithm: read_eligibility.prompt
 input:
@@ -21,11 +21,11 @@ input:
     - "<request_value param_ref=\"list_area_list.query.name\" value=\"London\" />"
     - "<match_field path=\"data.name\" />"
     - "<canonical_result entity_kind=\"area\" key_id=\"primary_key\">"
-    - "interpret each named input"
-    - 'write the `because` field as: "{input} denotes one {entity kind} because {requested-fact and resolver-card evidence}."'
-    - "whose result has the entity kind stated in because"
-    - "Assess every candidate read under the selected canonical interpretations."
-    - "Text match fields are evidence for that identity; they are not computation values."
+    - "Assess every candidate read before selecting a canonical option."
+    - "After assessing every candidate read, interpret each named input"
+    - "assess every shown canonical option exactly once"
+    - "Then select exactly one shown canonical_option_id"
+    - "Text match fields are identity evidence, not computation values."
   excludes:
     - "<applicable_known_inputs>"
     - "<input_binding_options>"
@@ -48,11 +48,11 @@ expect:
       "<request_value param_ref=\"list_area_list.query.name\" value=\"London\" />": true
       "<match_field path=\"data.name\" />": true
       "<canonical_result entity_kind=\"area\" key_id=\"primary_key\">": true
-      "interpret each named input": true
-      'write the `because` field as: "{input} denotes one {entity kind} because {requested-fact and resolver-card evidence}."': true
-      "whose result has the entity kind stated in because": true
-      "Assess every candidate read under the selected canonical interpretations.": true
-      "Text match fields are evidence for that identity; they are not computation values.": true
+      "Assess every candidate read before selecting a canonical option.": true
+      "After assessing every candidate read, interpret each named input": true
+      "assess every shown canonical option exactly once": true
+      "Then select exactly one shown canonical_option_id": true
+      "Text match fields are identity evidence, not computation values.": true
     excludes:
       "<applicable_known_inputs>": true
       "<input_binding_options>": true
