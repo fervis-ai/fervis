@@ -19,6 +19,7 @@ from fervis.lookup.turn_prompts import (
     TurnPromptBase,
     TurnPromptBuilder,
 )
+from fervis.lookup.turn_prompts.projections import grounding_binding_tasks_xml
 from fervis.model_io.structured_output.specs import required_tool_spec
 
 
@@ -37,9 +38,11 @@ class GroundingTurnPrompt(TurnPromptBase):
         builder: TurnPromptBuilder,
     ) -> tuple[PromptSection, ...]:
         return (
-            builder.json_section(
+            builder.text_section(
                 "Known input binding tasks:",
-                self.known_input_binding_tasks_payload(),
+                grounding_binding_tasks_xml(
+                    self.known_input_binding_tasks_payload()
+                ),
             ),
             builder.json_section(
                 "Time inputs to resolve:",

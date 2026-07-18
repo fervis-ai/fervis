@@ -86,6 +86,7 @@ from fervis.lookup.question_contract import (
     RequestedFactKnownInput,
     RequestedFactLiteralInput,
 )
+from tests.lookup.prompt_sections import prompt_section_payload
 
 
 def _compiled_resolution_input(
@@ -333,6 +334,8 @@ class _StaffResolverDataAccess:
 
 
 def _json_payload_from_prompt_section(prompt: str, heading: str) -> dict:
+    if heading.rstrip(":") == "Known input binding tasks":
+        return prompt_section_payload(prompt, heading.rstrip(":"))
     start = prompt.index(heading) + len(heading)
     rest = prompt[start:].lstrip()
     decoder = json.JSONDecoder()
@@ -525,6 +528,11 @@ def test_grounding_prompt_instructs_binding_id_copying_verbatim():
     prompt = _grounding_prompt(request)
 
     assert "Known input binding tasks:" in prompt
+    assert "<known_input_binding_tasks>" in prompt
+    assert '<known_input id="input_location"' in prompt
+    assert "<binding_option" in prompt
+    assert "<api_read" in prompt
+    assert '"binding_options":' not in prompt
     assert (
         'write the because field as: "{lookup_text} can/cannot identify the returned '
         "{resource} because {selected response fields} describe {field owner}, and the "
@@ -680,12 +688,9 @@ def test_grounding_shows_one_shared_endpoint_projection_per_canonical_result() -
     )["known_input_binding_tasks"]
     [option] = input_task["binding_options"]
 
-    assert option["api_read"] == {
-        **ApiReadResponseShapeProjector(catalog.read("list_staff_list")).prompt_payload(
-            row_path_ids=("data",)
-        ),
-        "row_source_id": task.options[0].candidate.resolver_source.id,
-    }
+    assert option["api_read"] == ApiReadResponseShapeProjector(
+        catalog.read("list_staff_list")
+    ).prompt_payload(row_path_ids=("data",))
     assert option["canonical_result"] == {
         "entity_kind": "staff",
         "key_id": "primary_key",

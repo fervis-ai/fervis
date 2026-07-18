@@ -397,6 +397,60 @@ def source_strategy_candidates_xml(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def grounding_binding_tasks_xml(payload: dict[str, Any]) -> str:
+    tasks = tuple(
+        task
+        for task in _array(payload.get("known_input_binding_tasks"))
+        if isinstance(task, Mapping)
+    )
+    lines = ["<known_input_binding_tasks>"]
+    question_text = next(
+        (task.get("question_text") for task in tasks if task.get("question_text")),
+        None,
+    )
+    if question_text:
+        lines.extend(_text_node_xml_lines("question_text", question_text, indent="  "))
+    for task in tasks:
+        task_attrs = {
+            "id": task.get("known_input_id"),
+            "known_input_text": task.get("known_input_text"),
+            "lookup_text": task.get("lookup_text"),
+            "field_label_text": task.get("field_label_text"),
+            "value_meaning_hint": task.get("value_meaning_hint"),
+        }
+        lines.append(f"  <known_input{_xml_attrs(task_attrs)}>")
+        for option in _array(task.get("binding_options")):
+            if not isinstance(option, Mapping):
+                continue
+            option_attrs = {
+                "id": option.get("binding_option_id"),
+                "purpose": option.get("purpose"),
+            }
+            lines.append(f"    <binding_option{_xml_attrs(option_attrs)}>")
+            lines.extend(
+                _text_node_xml_lines(
+                    "resolver_fit_question",
+                    option.get("resolver_fit_question"),
+                    indent="      ",
+                )
+            )
+            api_read = option.get("api_read")
+            if isinstance(api_read, Mapping):
+                lines.extend(_resolver_api_read_xml_lines(api_read, indent="      "))
+            canonical_result = option.get("canonical_result")
+            if isinstance(canonical_result, Mapping):
+                lines.extend(
+                    _canonical_result_xml_lines(
+                        canonical_result,
+                        indent="      ",
+                    )
+                )
+            lines.append("    </binding_option>")
+        lines.append("  </known_input>")
+    lines.append("</known_input_binding_tasks>")
+    return "\n".join(lines)
+
+
 def source_alignment_reviews_xml(payload: dict[str, Any]) -> str:
     lines = ["<source_alignment_reviews>"]
     for group in payload.get("requested_fact_source_candidates") or ():
