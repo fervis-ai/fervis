@@ -1,5 +1,5 @@
-id: open_read_preferred_over_unbound_detail_read
-description: Catalog selection prefers an open list read over a required-identity detail read when no identity value is available.
+id: required_and_open_reads_remain_eligible_before_binding
+description: Catalog selection retains both required-identity and open reads before input binding.
 migrates:
   - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_prefers_open_reads_over_required_identity_detail_reads
 kind: algorithm
@@ -51,4 +51,4 @@ input:
   max_reads_per_fact: 4
 expect:
   result_contains:
-    selected_read_ids: [sale_list]
+    selected_read_ids: [sale_list, sale_detail]
