@@ -610,7 +610,7 @@ def _canonical_inputs_for_fact(
     group: dict[str, Any],
     *,
     specs: tuple[ReadEligibilityRetentionSpec, ...],
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     requested_results = dict(
         binding for spec in specs for binding in spec.known_input_resolver_results
     )
@@ -645,21 +645,23 @@ def _canonical_inputs_for_fact(
             )
             for candidate in options
         }
-        selected.append(
-            {
-                "known_input_id": known_input_id,
-                "interpretation_question": str(
-                    known_input.get("interpretation_question") or ""
-                ),
-                "canonical_option_assessments": canonical_option_assessments,
-                "because": (
-                    "This fixture selects the declared canonical result for "
-                    "the named input in the requested fact."
-                ),
-                "canonical_option_id": str(option.get("id") or ""),
-                "canonical_result": str(option.get("result") or ""),
-            }
-        )
+        selection: dict[str, Any] = {
+            "known_input_id": known_input_id,
+            "interpretation_question": str(
+                known_input.get("interpretation_question") or ""
+            ),
+            "canonical_option_assessments": canonical_option_assessments,
+            "because": (
+                "This fixture selects the declared canonical result for "
+                "the named input in the requested fact."
+            ),
+            "canonical_option_id": str(option.get("id") or ""),
+            "canonical_result": str(option.get("result") or ""),
+        }
+        resolver_option_ids = tuple(option.get("resolver_option_ids") or ())
+        if resolver_option_ids:
+            selection["resolver_option_id"] = str(resolver_option_ids[0])
+        selected.append(selection)
     return selected
 
 
@@ -828,6 +830,10 @@ def _read_eligibility_xml_known_input(
             {
                 "id": option.attrib.get("id", ""),
                 "result": option.attrib.get("result", ""),
+                "resolver_option_ids": [
+                    resolver.attrib.get("option_id", "")
+                    for resolver in option.findall("./resolver")
+                ],
             }
             for option in known_input.findall("./canonical_options/canonical_option")
         ],

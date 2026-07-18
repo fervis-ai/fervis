@@ -11,7 +11,7 @@ input:
     - "<source_text>London</source_text>"
     - "<interpretation_question>"
     - "<canonical_options>"
-    - "id=\"london_qi_1.list_area_list.bind_qi1_rs_7de03e00183c6709_area_primary_key\""
+    - "id=\"london_qi_1.area.primary_key.area_id\""
     - "result=\"area:primary_key\""
     - "<resolver option_id=\"bind_qi1_rs_7de03e00183c6709_area_primary_key\">"
     - "<api_read read=\"list_area_list\" endpoint=\"list_area_list\" resources=\"area\">"
@@ -23,7 +23,7 @@ input:
     - "<canonical_result entity_kind=\"area\" key_id=\"primary_key\">"
     - "Assess every candidate read before selecting a canonical option."
     - "After assessing every candidate read, interpret each named input"
-    - "assess every shown canonical option exactly once"
+    - "assess every shown canonical meaning exactly once"
     - "Then select exactly one shown canonical_option_id"
     - "Text match fields are identity evidence, not computation values."
   excludes:
@@ -38,7 +38,7 @@ expect:
       "<source_text>London</source_text>": true
       "<interpretation_question>": true
       "<canonical_options>": true
-      "id=\"london_qi_1.list_area_list.bind_qi1_rs_7de03e00183c6709_area_primary_key\"": true
+      "id=\"london_qi_1.area.primary_key.area_id\"": true
       "result=\"area:primary_key\"": true
       "<resolver option_id=\"bind_qi1_rs_7de03e00183c6709_area_primary_key\">": true
       "<api_read read=\"list_area_list\" endpoint=\"list_area_list\" resources=\"area\">": true
@@ -50,7 +50,7 @@ expect:
       "<canonical_result entity_kind=\"area\" key_id=\"primary_key\">": true
       "Assess every candidate read before selecting a canonical option.": true
       "After assessing every candidate read, interpret each named input": true
-      "assess every shown canonical option exactly once": true
+      "assess every shown canonical meaning exactly once": true
       "Then select exactly one shown canonical_option_id": true
       "Text match fields are identity evidence, not computation values.": true
     excludes:

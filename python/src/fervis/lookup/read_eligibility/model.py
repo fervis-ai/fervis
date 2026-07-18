@@ -50,7 +50,7 @@ class CanonicalInputOption:
     entity_kind: str
     key_id: str
     component_ids: tuple[str, ...]
-    resolver_binding: CompatibleInputBinding | None = None
+    resolver_bindings: tuple[CompatibleInputBinding, ...] = ()
     canonical_value_id: str = ""
 
     def __post_init__(self) -> None:
@@ -64,14 +64,13 @@ class CanonicalInputOption:
             or not self.component_ids
         ):
             raise ValueError("canonical input option is incomplete")
-        if (self.resolver_binding is not None) == bool(self.canonical_value_id):
+        if bool(self.resolver_bindings) == bool(self.canonical_value_id):
             raise ValueError("canonical input option requires one authority")
-
-    @property
-    def authority_id(self) -> str:
-        if self.resolver_binding is not None:
-            return self.resolver_binding.option_id
-        return self.canonical_value_id
+        resolver_option_ids = tuple(
+            binding.option_id for binding in self.resolver_bindings
+        )
+        if len(set(resolver_option_ids)) != len(resolver_option_ids):
+            raise ValueError("canonical input option repeats a resolver route")
 
     @property
     def result(self) -> tuple[str, str]:
@@ -84,6 +83,7 @@ class CanonicalInputSelection:
     interpretation_question: str
     canonical_option_assessments: tuple[tuple[str, str], ...]
     because: str
+    selected_resolver_binding: CompatibleInputBinding | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -96,6 +96,11 @@ class CanonicalInputSelection:
             or not self.because.strip()
         ):
             raise ValueError("canonical input selection requires its assessment")
+        if self.option.canonical_value_id:
+            if self.selected_resolver_binding is not None:
+                raise ValueError("certified canonical input cannot select a resolver")
+        elif self.selected_resolver_binding not in self.option.resolver_bindings:
+            raise ValueError("canonical input selection requires a shown resolver")
 
     @property
     def requested_fact_id(self) -> str:
@@ -112,6 +117,12 @@ class CanonicalInputSelection:
     @property
     def canonical_option_id(self) -> str:
         return self.option.id
+
+    @property
+    def resolver_option_id(self) -> str:
+        if self.selected_resolver_binding is None:
+            return ""
+        return self.selected_resolver_binding.option_id
 
 
 @dataclass(frozen=True)

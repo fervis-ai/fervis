@@ -230,11 +230,27 @@ def _canonical_option_payload(
         "id": option.id,
         "result": f"{option.entity_kind}:{option.key_id}",
     }
-    if option.resolver_binding is None:
+    if option.canonical_value_id:
         payload["canonical_value"] = option.canonical_value_id
         return payload
 
-    resolver_binding = option.resolver_binding
+    payload["resolvers"] = [
+        _resolver_payload(
+            resolver_binding,
+            resolver_options_by_id=resolver_options_by_id,
+            resolver_reads_by_id=resolver_reads_by_id,
+        )
+        for resolver_binding in option.resolver_bindings
+    ]
+    return payload
+
+
+def _resolver_payload(
+    resolver_binding: CompatibleInputBinding,
+    *,
+    resolver_options_by_id: dict[str, InputBindingOption],
+    resolver_reads_by_id: dict[str, EndpointRead],
+) -> dict[str, object]:
     resolver_option = resolver_options_by_id[resolver_binding.option_id]
     resolver_read = resolver_reads_by_id[resolver_option.candidate.resolver_read_id]
     resolver_catalog = RelationCatalog(reads=(resolver_read,))
@@ -242,7 +258,7 @@ def _canonical_option_payload(
         resolver_catalog,
         resolver_option,
     )
-    payload["resolver"] = {
+    return {
         **resolver_surface.prompt_payload(),
         "request_values": [
             {"param_ref": item.param_ref, "value": item.value}
@@ -252,7 +268,6 @@ def _canonical_option_payload(
             resolver_binding.response_match_field_paths
         ),
     }
-    return payload
 
 
 def _known_input_tokens_by_id(

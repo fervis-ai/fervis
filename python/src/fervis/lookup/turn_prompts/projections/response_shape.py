@@ -1001,12 +1001,17 @@ def _canonical_options_xml_lines(
             "result": item.get("result"),
             "canonical_value": item.get("canonical_value"),
         }
-        resolver = item.get("resolver")
-        if not isinstance(resolver, Mapping):
+        resolvers = tuple(
+            resolver
+            for resolver in _array(item.get("resolvers"))
+            if isinstance(resolver, Mapping)
+        )
+        if not resolvers:
             lines.append(f"{indent}  <canonical_option{_xml_attrs(attrs)} />")
             continue
         lines.append(f"{indent}  <canonical_option{_xml_attrs(attrs)}>")
-        lines.extend(_resolver_xml_lines(resolver, indent=indent + "    "))
+        for resolver in resolvers:
+            lines.extend(_resolver_xml_lines(resolver, indent=indent + "    "))
         lines.append(f"{indent}  </canonical_option>")
     lines.append(f"{indent}</canonical_options>")
     return lines

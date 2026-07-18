@@ -53,9 +53,9 @@ def resolve_read_eligibility(
         option.id: option for task in request.binding_tasks for option in task.options
     }
     selected_resolver_bindings = tuple(
-        selection.option.resolver_binding
+        selection.selected_resolver_binding
         for selection in result.canonical_inputs
-        if selection.option.resolver_binding is not None
+        if selection.selected_resolver_binding is not None
     )
     resolver_executions = execute_compatible_reference_bindings(
         tasks=request.binding_tasks,
@@ -74,7 +74,7 @@ def resolve_read_eligibility(
         if authority.canonical_value_id:
             value = canonical_values_by_id[authority.canonical_value_id]
         else:
-            resolver_binding = authority.resolver_binding
+            resolver_binding = selection.selected_resolver_binding
             if resolver_binding is None:
                 raise ValueError("resolver-backed canonical input lost its binding")
             resolver_option = resolver_options_by_id[resolver_binding.option_id]

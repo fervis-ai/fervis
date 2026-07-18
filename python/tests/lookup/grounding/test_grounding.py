@@ -68,6 +68,8 @@ from fervis.lookup.read_eligibility.model import (
 from fervis.lookup.read_eligibility.resolution import (
     resolve_read_eligibility,
 )
+from fervis.lookup.read_eligibility.parser import parse_read_eligibility
+from fervis.lookup.read_eligibility.prompt import ReadEligibilityTurnPrompt
 from fervis.lookup.read_eligibility.surface import (
     read_eligibility_candidate_surface,
 )
@@ -1666,6 +1668,7 @@ def test_selected_canonical_identity_resolves_without_a_read_target() -> None:
         canonical_inputs=(
             CanonicalInputSelection(
                 option=canonical_option,
+                selected_resolver_binding=canonical_option.resolver_bindings[0],
                 interpretation_question="Which location?",
                 canonical_option_assessments=(
                     (canonical_option.id, "The location read exposes this identity."),
@@ -1757,37 +1760,54 @@ def test_read_eligibility_executes_only_the_selected_reference_option() -> None:
     surface = read_eligibility_candidate_surface(request)
 
     assert data_access.calls == []
+    [canonical_option] = surface.canonical_options
     resolver_options_by_id = {
         option.id: option for task in tasks for option in task.options
     }
-    selected = next(
-        option
-        for option in surface.canonical_options
-        if option.resolver_binding is not None
-        and resolver_options_by_id[
-            option.resolver_binding.option_id
+    assert {
+        binding.option_id for binding in canonical_option.resolver_bindings
+    } == set(resolver_options_by_id)
+    selected_resolver_binding = next(
+        binding
+        for binding in canonical_option.resolver_bindings
+        if resolver_options_by_id[
+            binding.option_id
         ].candidate.resolver_read_id
         == "list_location_list"
     )
+    interpretation_question = (
+        surface.card_payload["requested_fact_read_candidates"][0]["known_inputs"][0][
+            "interpretation_question"
+        ]
+    )
+    payload = {
+        "requested_fact_assessments": {
+            "fact_1": {
+                "read_candidate_reviews": {},
+                "canonical_inputs": {
+                    canonical_option.known_input_token: {
+                        "interpretation_question": interpretation_question,
+                        "canonical_option_assessments": {
+                            canonical_option.id: (
+                                "The candidate reads were assessed under this identity."
+                            )
+                        },
+                        "because": (
+                            "Nairobi denotes the location returned by this read."
+                        ),
+                        "canonical_option_id": canonical_option.id,
+                        "resolver_option_id": selected_resolver_binding.option_id,
+                    }
+                },
+            }
+        }
+    }
+    schema = ReadEligibilityTurnPrompt(request).response_contract().provider_schema
+    validate(instance=payload, schema=schema)
+    result = parse_read_eligibility(payload, request=request)
     resolved = resolve_read_eligibility(
         request=request,
-        result=ReadEligibilityResult(
-            read_assessments=(),
-            canonical_inputs=(
-                CanonicalInputSelection(
-                    option=selected,
-                    interpretation_question="Which location?",
-                    canonical_option_assessments=tuple(
-                        (
-                            option.id,
-                            "The candidate reads were assessed under this identity.",
-                        )
-                        for option in surface.canonical_options
-                    ),
-                    because="Nairobi denotes the location returned by this read.",
-                ),
-            ),
-        ),
+        result=result,
         full_catalog=catalog,
         data_access_port=data_access,
         source_read_key_prefix="test",

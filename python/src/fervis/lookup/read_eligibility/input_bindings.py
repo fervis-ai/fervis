@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import re
 
 from fervis.lookup.answer_program.values import FactValue, IdentityValuePayload
@@ -22,36 +23,60 @@ def canonical_input_options(
     compatible_bindings_by_option_id = {
         binding.option_id: binding for binding in compatible_reference_bindings
     }
-    resolver_options = tuple(
-        (option, compatible_bindings_by_option_id[option.id])
-        for task in binding_tasks
-        if _task_applies(task, requested_fact_id=requested_fact_id)
-        for option in task.options
-        if option.id in compatible_bindings_by_option_id
-        if option.known_input_id in known_input_tokens_by_id
-    )
-    output: list[CanonicalInputOption] = []
-    for resolver_option, compatible_binding in resolver_options:
-        candidate = resolver_option.candidate
-        known_input_token = known_input_tokens_by_id[resolver_option.known_input_id]
-        output.append(
-            CanonicalInputOption(
+    options_by_meaning: dict[
+        tuple[str, str, str, tuple[str, ...]],
+        CanonicalInputOption,
+    ] = {}
+    for task in binding_tasks:
+        if not _task_applies(task, requested_fact_id=requested_fact_id):
+            continue
+        for resolver_option in task.options:
+            compatible_binding = compatible_bindings_by_option_id.get(
+                resolver_option.id
+            )
+            if (
+                compatible_binding is None
+                or resolver_option.known_input_id not in known_input_tokens_by_id
+            ):
+                continue
+            candidate = resolver_option.candidate
+            component_ids = tuple(
+                component.component_id for component in candidate.key_components
+            )
+            meaning_key = (
+                resolver_option.known_input_id,
+                candidate.entity_kind,
+                candidate.key_id,
+                component_ids,
+            )
+            existing = options_by_meaning.get(meaning_key)
+            if existing is not None:
+                options_by_meaning[meaning_key] = replace(
+                    existing,
+                    resolver_bindings=(
+                        *existing.resolver_bindings,
+                        compatible_binding,
+                    ),
+                )
+                continue
+            known_input_token = known_input_tokens_by_id[
+                resolver_option.known_input_id
+            ]
+            options_by_meaning[meaning_key] = CanonicalInputOption(
                 id=_canonical_option_id(
                     known_input_token=known_input_token,
-                    authority=resolver_option.id,
-                    resolver_read_id=candidate.resolver_read_id,
+                    entity_kind=candidate.entity_kind,
+                    key_id=candidate.key_id,
+                    component_ids=component_ids,
                 ),
                 requested_fact_id=requested_fact_id,
                 known_input_id=resolver_option.known_input_id,
                 known_input_token=known_input_token,
                 entity_kind=candidate.entity_kind,
                 key_id=candidate.key_id,
-                component_ids=tuple(
-                    component.component_id for component in candidate.key_components
-                ),
-                resolver_binding=compatible_binding,
+                component_ids=component_ids,
+                resolver_bindings=(compatible_binding,),
             )
-        )
     for value in canonical_values:
         payload = value.payload
         if (
@@ -62,25 +87,34 @@ def canonical_input_options(
         ):
             continue
         known_input_token = known_input_tokens_by_id[value.known_input_id]
-        output.append(
-            CanonicalInputOption(
-                id=_canonical_option_id(
-                    known_input_token=known_input_token,
-                    authority=value.id,
-                    resolver_read_id="canonical",
-                ),
-                requested_fact_id=requested_fact_id,
-                known_input_id=value.known_input_id,
+        component_ids = tuple(
+            component.component_id for component in payload.key.components
+        )
+        meaning_key = (
+            value.known_input_id,
+            payload.entity_kind,
+            payload.key_id,
+            component_ids,
+        )
+        existing = options_by_meaning.get(meaning_key)
+        if existing is not None and existing.canonical_value_id not in {"", value.id}:
+            raise ValueError("canonical input meaning has several certified values")
+        options_by_meaning[meaning_key] = CanonicalInputOption(
+            id=_canonical_option_id(
                 known_input_token=known_input_token,
                 entity_kind=payload.entity_kind,
                 key_id=payload.key_id,
-                component_ids=tuple(
-                    component.component_id for component in payload.key.components
-                ),
-                canonical_value_id=value.id,
-            )
+                component_ids=component_ids,
+            ),
+            requested_fact_id=requested_fact_id,
+            known_input_id=value.known_input_id,
+            known_input_token=known_input_token,
+            entity_kind=payload.entity_kind,
+            key_id=payload.key_id,
+            component_ids=component_ids,
+            canonical_value_id=value.id,
         )
-    return tuple(output)
+    return tuple(options_by_meaning.values())
 
 
 def interpretation_question(*, known_input_text: str, answer_fact: str) -> str:
@@ -113,14 +147,16 @@ def _task_applies(
 def _canonical_option_id(
     *,
     known_input_token: str,
-    authority: str,
-    resolver_read_id: str,
+    entity_kind: str,
+    key_id: str,
+    component_ids: tuple[str, ...],
 ) -> str:
     return ".".join(
         (
             known_input_token,
-            _identifier(resolver_read_id),
-            _identifier(authority),
+            _identifier(entity_kind),
+            _identifier(key_id),
+            _identifier("_".join(component_ids)),
         )
     )
 

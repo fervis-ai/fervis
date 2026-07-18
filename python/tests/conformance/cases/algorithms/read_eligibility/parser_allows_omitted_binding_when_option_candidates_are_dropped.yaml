@@ -15,9 +15,10 @@ input:
           london_qi_1:
             interpretation_question: Which shown canonical result represents what London denotes in requested fact count of stores in London?
             canonical_option_assessments:
-              london_qi_1.list_area_list.bind_qi1_rs_7de03e00183c6709_area_primary_key: "area:primary_key: the candidate reads were assessed under this identity."
+              london_qi_1.area.primary_key.area_id: "area:primary_key: the candidate reads were assessed under this identity."
             because: London denotes the area constraining the requested store population, and the Area result represents that area directly.
-            canonical_option_id: london_qi_1.list_area_list.bind_qi1_rs_7de03e00183c6709_area_primary_key
+            canonical_option_id: london_qi_1.area.primary_key.area_id
+            resolver_option_id: bind_qi1_rs_7de03e00183c6709_area_primary_key
 expect:
   result_contains:
     retained_read_ids_by_requested_fact: {}

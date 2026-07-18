@@ -13,6 +13,7 @@ class CanonicalInputSelectionOutput(ProviderOutput):
     canonical_option_assessments: dict[str, str]
     because: str
     canonical_option_id: str
+    resolver_option_id: str | None = None
 
 
 @dataclass(frozen=True)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from fervis.lookup.grounding.model import CompatibleInputBinding
 from fervis.lookup.read_eligibility.candidate_scope import (
     ReadEligibilityCandidateScope,
 )
@@ -213,6 +214,11 @@ def _canonical_selections(
         )
         if not matching:
             raise ValueError("known input binding references unknown canonical option")
+        selected_option = matching[0]
+        selected_resolver_binding = _selected_resolver_binding(
+            item.resolver_option_id,
+            option=selected_option,
+        )
         expected_option_ids = tuple(option.id for option in options)
         option_assessments = item.canonical_option_assessments
         if set(option_assessments) != set(expected_option_ids):
@@ -225,15 +231,36 @@ def _canonical_selections(
         if _required_text(item.interpretation_question) != expected_question:
             raise ValueError("known input interpretation question mismatch")
         output[known_input_token] = CanonicalInputSelection(
-            option=matching[0],
+            option=selected_option,
             interpretation_question=expected_question,
             canonical_option_assessments=tuple(
                 (option_id, _required_text(option_assessments[option_id]))
                 for option_id in expected_option_ids
             ),
             because=_required_text(item.because),
+            selected_resolver_binding=selected_resolver_binding,
         )
     return output
+
+
+def _selected_resolver_binding(
+    resolver_option_id: str | None,
+    *,
+    option: CanonicalInputOption,
+) -> CompatibleInputBinding | None:
+    if not option.resolver_bindings:
+        if resolver_option_id is not None:
+            raise ValueError("certified canonical input cannot select a resolver")
+        return None
+    selected_id = _required_text(resolver_option_id or "")
+    matching = tuple(
+        binding
+        for binding in option.resolver_bindings
+        if binding.option_id == selected_id
+    )
+    if len(matching) != 1:
+        raise ValueError("canonical input references an unknown resolver option")
+    return matching[0]
 
 
 def _read_candidate_reviews(
