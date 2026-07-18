@@ -71,7 +71,7 @@ from fervis.lookup.plan_selection import (
 _APPROVED_CHARS = {
     "question contract": (364, 18074, 27161),
     "query enrichment": (364, 5185, 7408),
-    "grounding": (364, 6105, 8964),
+    "grounding": (364, 6620, 9483),
     "source binding": (364, 16267, 20138),
     "pattern fact planning": (364, 3497, 5311),
 }

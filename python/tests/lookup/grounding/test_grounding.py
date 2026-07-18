@@ -534,14 +534,21 @@ def test_grounding_prompt_instructs_binding_id_copying_verbatim():
     assert "<api_read" in prompt
     assert '"binding_options":' not in prompt
     assert (
-        'write the because field as: "{lookup_text} can/cannot identify the returned '
-        "{resource} because {selected response fields} describe {field owner}, and the "
-        'route returns {canonical result}."' in prompt
+        'For CAN_RESOLVE_LOOKUP_TEXT, write the because field as: "The route can '
+        "look up {lookup_text} using {selected request parameters} because {what "
+        "those parameters accept or search}. If returned, {selected response fields} "
+        "can exact-match {lookup_text} on the returned {resource}. The route returns "
+        '{canonical result}."' in prompt
     )
     assert (
-        "Use CAN_RESOLVE_LOOKUP_TEXT only when the stated field owner is the returned "
-        "resource; otherwise use CANNOT_RESOLVE_LOOKUP_TEXT." in prompt
+        'For CANNOT_RESOLVE_LOOKUP_TEXT, write the because field as: "The route '
+        "cannot resolve {lookup_text}. Its shown request parameters {can/cannot} "
+        "perform this lookup because {what those parameters accept or search}. If "
+        "returned, {shown response fields} {can/cannot} exact-match {lookup_text} on "
+        "the returned {resource}. The route returns {canonical result}." in prompt
     )
+    assert "At least one stated mechanic must be cannot." in prompt
+    assert "can/cannot identify the returned" not in prompt
     assert "because briefly explains the capability decision" not in prompt
     schema = GroundingTurnPrompt(request).response_contract().provider_schema
     bindings_schema = schema["properties"]["known_input_binding_reviews"]

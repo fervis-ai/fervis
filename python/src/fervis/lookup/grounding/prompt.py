@@ -100,7 +100,8 @@ class GroundingTurnPrompt(TurnPromptBase):
         return builder.instruction_block(
             "Resolver Compatibility",
             (
-                "Use CAN_RESOLVE_LOOKUP_TEXT when the read can use selected declared request parameters and exact returned-resource fields to validate or match lookup_text. Use CANNOT_RESOLVE_LOOKUP_TEXT otherwise.",
+                "A route can resolve lookup_text only when both mechanics work: its selected declared request parameters can perform this lookup, and its selected returned-resource fields can exact-match lookup_text on the returned resource.",
+                "Use CAN_RESOLVE_LOOKUP_TEXT when both mechanics work. Use CANNOT_RESOLVE_LOOKUP_TEXT when either mechanic fails.",
                 "For every option, answer the shown resolver_fit_question.",
                 "A positive option must use the lookup text to identify the returned resource itself. An exact match in a field that describes another entity, category, or surrounding context does not identify the returned resource.",
                 "Use field_label_text and value_meaning_hint together to understand what the supplied text means. Both are catalog-blind approximations, not authoritative catalog names.",
@@ -123,8 +124,9 @@ class GroundingTurnPrompt(TurnPromptBase):
                 "Return known_time_resolutions as an object keyed by known_input_id and include every shown time input exactly once.",
                 "Return known_input_binding_reviews as an object keyed by known_input_id. Within each review, return option_reviews keyed by binding_option_id and include every shown binding option exactly once.",
                 "Copy all IDs and each resolver_fit_question exactly.",
-                'For every option review, write the because field as: "{lookup_text} can/cannot identify the returned {resource} because {selected response fields} describe {field owner}, and the route returns {canonical result}." Replace every template term with concrete text from the option.',
-                "Write decision after because. Use CAN_RESOLVE_LOOKUP_TEXT only when the stated field owner is the returned resource; otherwise use CANNOT_RESOLVE_LOOKUP_TEXT.",
+                'For CAN_RESOLVE_LOOKUP_TEXT, write the because field as: "The route can look up {lookup_text} using {selected request parameters} because {what those parameters accept or search}. If returned, {selected response fields} can exact-match {lookup_text} on the returned {resource}. The route returns {canonical result}."',
+                'For CANNOT_RESOLVE_LOOKUP_TEXT, write the because field as: "The route cannot resolve {lookup_text}. Its shown request parameters {can/cannot} perform this lookup because {what those parameters accept or search}. If returned, {shown response fields} {can/cannot} exact-match {lookup_text} on the returned {resource}. The route returns {canonical result}." At least one stated mechanic must be cannot.',
+                "Replace every template term with concrete text from the option. Write decision after because.",
                 "For CAN_RESOLVE_LOOKUP_TEXT, return request_values keyed by param_ref and at least one response_match_alternative.",
                 "For CANNOT_RESOLVE_LOOKUP_TEXT, return an empty request_values object and an empty response_match_alternatives array.",
             ),
