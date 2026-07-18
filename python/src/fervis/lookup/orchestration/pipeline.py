@@ -744,7 +744,7 @@ def _run_read_eligibility_phase(state: _LookupPipelineState) -> LookupResult | N
         question_contract=state.question_contract,
         requested_facts=state.question_contract.requested_facts,
         catalog_selection=_required_catalog_selection(state),
-        resolver_catalog=state.resolver_catalog_selection.relation_catalog,
+        resolver_catalog=state.full_catalog,
         conversation_context=state.request.conversation_context,
         binding_tasks=state.grounding.binding_tasks,
         compatible_reference_bindings=compatible_reference_bindings,
