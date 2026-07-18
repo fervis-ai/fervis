@@ -1323,7 +1323,7 @@ def _variant_staff_sales_catalog() -> RelationCatalog:
                         ref="list_sale_list.query.staff_id",
                         name="staff_id",
                         source=ParamSource.QUERY,
-                        type="uuid",
+                        type="string",
                         entity_target=EntityKeyComponentTarget(
                             entity_kind="staff",
                             key_id="staff_key",
@@ -1363,13 +1363,13 @@ def _variant_staff_sales_catalog() -> RelationCatalog:
                         ref="field.data.sale_id",
                         path="data.sale_id",
                         row_path_id="data",
-                        type="uuid",
+                        type="string",
                     ),
                     CatalogField(
                         ref="field.data.items.sale_id",
                         path="data.items.sale_id",
                         row_path_id="items",
-                        type="uuid",
+                        type="string",
                         requirements=(
                             FieldRequirement(
                                 param_ref="list_sale_list.query.include_items",
@@ -1381,7 +1381,7 @@ def _variant_staff_sales_catalog() -> RelationCatalog:
                         ref="field.data.items.merch_shade_id",
                         path="data.items.merch_shade_id",
                         row_path_id="items",
-                        type="uuid",
+                        type="string",
                         requirements=(
                             FieldRequirement(
                                 param_ref="list_sale_list.query.include_items",
@@ -1469,7 +1469,7 @@ def _variant_staff_sales_catalog() -> RelationCatalog:
                         ref="field.staff.staff_id",
                         path="data.staff_id",
                         row_path_id="data",
-                        type="uuid",
+                        type="string",
                     ),
                     CatalogField(
                         ref="field.staff.full_name",
@@ -1519,7 +1519,7 @@ def _variant_staff_sales_catalog() -> RelationCatalog:
                         ref="field.merch_shade.merch_shade_id",
                         path="data.merch_shade_id",
                         row_path_id="data",
-                        type="uuid",
+                        type="string",
                     ),
                 ),
                 candidate_keys=(

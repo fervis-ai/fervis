@@ -5,8 +5,6 @@ import hashlib
 from ._shared import (
     Any,
     FactValue,
-    IdentitySetValuePayload,
-    IdentityValuePayload,
     LiteralType,
     LiteralValuePayload,
     TimeValuePayload,
@@ -14,7 +12,10 @@ from ._shared import (
     canonical_param_value,
     re,
 )
-from fervis.lookup.source_binding.candidates.contracts import EntityTarget, parse_entity_target
+from fervis.lookup.source_binding.candidates.contracts import parse_entity_target
+from fervis.lookup.source_binding.param_values import (
+    identity_value_matches_entity_target,
+)
 
 
 def _candidate_with_param_decision_options(
@@ -471,7 +472,12 @@ def _param_binding_values(
                 "value_component": "canonical_key",
             }
             for value in available_values
-            if _value_matches_entity_target(value, target=target)
+            if identity_value_matches_entity_target(
+                value,
+                entity_kind=target.entity_kind,
+                key_id=target.key_id,
+                component_id=target.component_id,
+            )
         ]
     if param_type in {"date", "datetime"}:
         return [
@@ -518,35 +524,6 @@ def _time_binding_values(
         for component in allowed_components
     ]
     return tuple(output)
-
-
-def _value_matches_entity_target(
-    value: FactValue,
-    *,
-    target: EntityTarget,
-) -> bool:
-    if value.kind == ValueKind.IDENTITY and isinstance(
-        value.payload, IdentityValuePayload
-    ):
-        return (
-            value.payload.entity_kind == target.entity_kind
-            and value.payload.key_id == target.key_id
-            and target.component_id
-            in {component.component_id for component in value.payload.key.components}
-        )
-    if value.kind == ValueKind.IDENTITY_SET and isinstance(
-        value.payload, IdentitySetValuePayload
-    ):
-        return (
-            value.payload.entity_kind == target.entity_kind
-            and value.payload.key_id == target.key_id
-            and all(
-                target.component_id
-                in {component.component_id for component in key.components}
-                for key in value.payload.keys
-            )
-        )
-    return False
 
 
 def _value_matches_literal_param(value: FactValue, *, param_type: str) -> bool:

@@ -21,6 +21,9 @@ from fervis.lookup.source_binding.candidates.params import (
     _param_binding_values,
     _param_omit_option,
 )
+from fervis.lookup.source_binding.candidates.api_sources import (
+    _api_candidate_payload,
+)
 from fervis.lookup.answer_program.inputs import resolve_value_expression
 from fervis.lookup.answer_program.values import (
     BindingProvenance,
@@ -151,6 +154,156 @@ def test_resolved_identity_param_is_not_a_param_decision():
     assert "decision_options" not in candidate["params"][0]
 
 
+def test_api_candidate_preserves_required_parameter_without_entity_target():
+    candidate = _api_candidate_payload(
+        {
+            "read_id": "get_staff_sales",
+            "row_source_id": "api:get_staff_sales:root",
+            "row_path_id": "root",
+            "read_row_source_count": 1,
+            "params": [
+                {
+                    "param_id": "staff_id",
+                    "source": "path",
+                    "type": "uuid",
+                    "required": True,
+                }
+            ],
+        },
+        available_values=(),
+    )
+
+    assert candidate["params"] == [
+        {
+            "param_id": "staff_id",
+            "source": "path",
+            "type": "uuid",
+            "required": True,
+        }
+    ]
+
+
+def test_api_candidate_exposes_only_compatible_optional_identity_parameter():
+    identity = FactValue.identity(
+        id="staff_1",
+        key=entity_key_value(
+            "staff",
+            "primary_key",
+            {"staff_id": "51515151-0000-0000-0002-000000000001"},
+        ),
+    )
+    candidate = _api_candidate_payload(
+        {
+            "read_id": "list_staff_sales",
+            "row_source_id": "api:list_staff_sales:root",
+            "row_path_id": "root",
+            "read_row_source_count": 1,
+            "params": [
+                {
+                    "param_id": "staff_id",
+                    "source": "query",
+                    "type": "uuid",
+                    "required": False,
+                },
+                {
+                    "param_id": "page",
+                    "source": "query",
+                    "type": "integer",
+                    "required": False,
+                },
+            ],
+        },
+        available_values=(identity,),
+    )
+
+    assert [param["param_id"] for param in candidate["params"]] == ["staff_id"]
+
+
+def test_resolved_identity_component_compiles_to_compatible_raw_parameter():
+    identity = FactValue.identity(
+        id="staff_1",
+        key=entity_key_value(
+            "staff",
+            "primary_key",
+            {"staff_id": "51515151-0000-0000-0002-000000000001"},
+        ),
+        known_input_id="staff_member_id_1",
+        applies_to_requested_fact_ids=("fact_1",),
+    )
+    param = CandidateParameter(
+        id="staff_id",
+        type="uuid",
+        required=True,
+        choices=(),
+        decision_options=(),
+    )
+    surface = resolved_input_application_surface(
+        candidate=SourceCandidate(
+            id="get_staff_sales",
+            applies_to_requested_fact_ids=("fact_1",),
+            kind="read",
+            params=(param,),
+        ),
+        requested_fact_id="fact_1",
+        resolved_values=(identity,),
+    )
+
+    assert surface.prompt_payload()["resolved_values"] == [
+        {
+            "value_id": "staff_1",
+            "components_by_target_kind": {"request_parameter": ["staff_id"]},
+            "population_test_basis": {},
+        }
+    ]
+    parsed = parse_resolved_input_applications(
+        (
+            _application(
+                identity.id,
+                param.id,
+                value_component="staff_id",
+            ),
+        ),
+        surface=surface,
+    )
+
+    binding = parsed.param_binding_sets[0][0]
+    assert binding.param_id == "staff_id"
+    assert binding.value == "51515151-0000-0000-0002-000000000001"
+    assert binding.value_component == "key_component:staff_id"
+
+
+def test_raw_parameter_rejects_incompatible_identity_component_type():
+    identity = FactValue.identity(
+        id="staff_1",
+        key=entity_key_value(
+            "staff",
+            "primary_key",
+            {"staff_id": "not-a-uuid"},
+        ),
+    )
+    surface = resolved_input_application_surface(
+        candidate=SourceCandidate(
+            id="get_staff_sales",
+            applies_to_requested_fact_ids=("fact_1",),
+            kind="read",
+            params=(
+                CandidateParameter(
+                    id="staff_id",
+                    type="uuid",
+                    required=True,
+                    choices=(),
+                    decision_options=(),
+                ),
+            ),
+        ),
+        requested_fact_id="fact_1",
+        resolved_values=(identity,),
+    )
+
+    assert surface.parameter_targets_by_id == {}
+    assert surface.prompt_payload()["resolved_values"] == []
+
+
 def test_resolved_values_compile_through_explicit_input_applications():
     identity = FactValue.identity(
         id="customer_1",
@@ -204,7 +357,11 @@ def test_resolved_values_compile_through_explicit_input_applications():
     )
     parsed = parse_resolved_input_applications(
         (
-            _application(identity.id, "customer_id"),
+            _application(
+                identity.id,
+                "customer_id",
+                value_component="customer_id",
+            ),
             _application(period.id, "start_date", value_component="start"),
             _application(threshold.id, "minimum_total"),
         ),
@@ -226,8 +383,16 @@ def test_resolved_identity_set_expands_scalar_entity_parameter_bindings():
     identities = FactValue.identity_set(
         id="staff_ids",
         keys=(
-            entity_key_value("staff", "primary_key", {"staff_id": "staff-1"}),
-            entity_key_value("staff", "primary_key", {"staff_id": "staff-2"}),
+            entity_key_value(
+                "staff",
+                "primary_key",
+                {"staff_id": "51515151-0000-0000-0002-000000000001"},
+            ),
+            entity_key_value(
+                "staff",
+                "primary_key",
+                {"staff_id": "51515151-0000-0000-0002-000000000002"},
+            ),
         ),
         proof_refs=("known_input:staff",),
     )
@@ -275,8 +440,16 @@ def test_resolved_identity_set_expands_scalar_entity_parameter_bindings():
         for binding_set in parsed.param_binding_sets
         for binding in binding_set
     ] == [
-        ("staff-1", "key_component:staff_id", 0),
-        ("staff-2", "key_component:staff_id", 1),
+        (
+            "51515151-0000-0000-0002-000000000001",
+            "key_component:staff_id",
+            0,
+        ),
+        (
+            "51515151-0000-0000-0002-000000000002",
+            "key_component:staff_id",
+            1,
+        ),
     ]
     program_parameter_id = "question.staff_ids"
     program_bindings = BindingSet.from_bindings(
@@ -301,7 +474,10 @@ def test_resolved_identity_set_expands_scalar_entity_parameter_bindings():
         ).value
         for binding_set in parsed.param_binding_sets
         for binding in binding_set
-    ] == ["staff-1", "staff-2"]
+    ] == [
+        "51515151-0000-0000-0002-000000000001",
+        "51515151-0000-0000-0002-000000000002",
+    ]
 
 
 def test_composite_identity_set_preserves_key_component_correlation():
@@ -311,12 +487,18 @@ def test_composite_identity_set_preserves_key_component_correlation():
             entity_key_value(
                 "staff",
                 "composite_key",
-                {"organization_id": "org-1", "staff_id": "staff-1"},
+                {
+                    "organization_id": "51515151-0000-0000-0001-000000000001",
+                    "staff_id": "51515151-0000-0000-0002-000000000001",
+                },
             ),
             entity_key_value(
                 "staff",
                 "composite_key",
-                {"organization_id": "org-2", "staff_id": "staff-2"},
+                {
+                    "organization_id": "51515151-0000-0000-0001-000000000002",
+                    "staff_id": "51515151-0000-0000-0002-000000000002",
+                },
             ),
         ),
         proof_refs=("known_input:staff",),
@@ -363,8 +545,20 @@ def test_composite_identity_set_preserves_key_component_correlation():
         tuple((binding.param_id, binding.compiler_value) for binding in binding_set)
         for binding_set in parsed.param_binding_sets
     ] == [
-        (("organization_id", "org-1"), ("staff_id", "staff-1")),
-        (("organization_id", "org-2"), ("staff_id", "staff-2")),
+        (
+            (
+                "organization_id",
+                "51515151-0000-0000-0001-000000000001",
+            ),
+            ("staff_id", "51515151-0000-0000-0002-000000000001"),
+        ),
+        (
+            (
+                "organization_id",
+                "51515151-0000-0000-0001-000000000002",
+            ),
+            ("staff_id", "51515151-0000-0000-0002-000000000002"),
+        ),
     ]
 
 

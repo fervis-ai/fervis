@@ -3,6 +3,9 @@
 from typing import TypedDict
 
 from fervis.lookup.source_binding.candidates.contracts import JsonValue
+from fervis.lookup.source_binding.param_values import (
+    compatible_identity_parameter_component_ids,
+)
 
 from ._shared import Any, FactValue
 from .params import (
@@ -56,7 +59,7 @@ def _api_candidate_payload(
             *list(output.get("bound_params") or ()),
             *default_bindings,
         ]
-    output["params"] = _bindable_param_payloads(
+    output["params"] = _source_parameter_payloads(
         tuple(
             item
             for item in params
@@ -107,7 +110,7 @@ def _api_source_candidate_id(payload: dict[str, Any]) -> str:
     return f"{read_id}.{suffix}.{row_source_id}"
 
 
-def _bindable_param_payloads(
+def _source_parameter_payloads(
     params: tuple[dict[str, Any], ...],
     *,
     available_values: tuple[FactValue, ...],
@@ -115,11 +118,25 @@ def _bindable_param_payloads(
     output: list[dict[str, Any]] = []
     for param in params:
         binding_values = _param_binding_values(param, available_values=available_values)
-        if not binding_values and not param.get("choices"):
+        choices = tuple(str(choice) for choice in param.get("choices") or ())
+        accepts_identity = any(
+            compatible_identity_parameter_component_ids(
+                value,
+                type_name=str(param.get("type") or ""),
+                choices=choices,
+            )
+            for value in available_values
+        )
+        if (
+            not binding_values
+            and not choices
+            and param.get("required") is not True
+            and not accepts_identity
+        ):
             continue
         item = dict(param)
-        choices = item.get("choices")
-        if isinstance(choices, list) and choices:
+        declared_choices = item.get("choices")
+        if isinstance(declared_choices, list) and declared_choices:
             item["choice_labels"] = _choice_labels(item)
         if binding_values:
             item["binding_values"] = binding_values

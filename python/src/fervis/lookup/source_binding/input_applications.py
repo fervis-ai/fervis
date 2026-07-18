@@ -8,6 +8,7 @@ from decimal import Decimal
 from fervis.types.enums import StrEnum
 from fervis.lookup.answer_program.values import (
     FactValue,
+    IdentitySetValuePayload,
     IdentityValuePayload,
     TimeComponent,
     ValueComponent,
@@ -38,6 +39,11 @@ from fervis.lookup.source_binding.param_binding_sets import (
     ParamBindingSetAlternatives,
     combine_param_binding_sets,
     parameter_binding_sets,
+)
+from fervis.lookup.source_binding.param_values import (
+    compatible_identity_parameter_component_ids,
+    identity_parameter_component_value,
+    identity_value_matches_entity_target,
 )
 from fervis.lookup.turn_prompts.projections import resolved_values_for_requested_fact
 from fervis.lookup.question_contract import (
@@ -95,7 +101,11 @@ class ResolvedInputApplicationSurface:
                 value_id=value_id,
                 value_component=value_component,
                 target_kind=target_kind,
-                target_ids=self._targets_by_kind()[target_kind],
+                target_ids=self._application_target_ids(
+                    value_id=value_id,
+                    value_component=value_component,
+                    target_kind=target_kind,
+                ),
                 population_test_ids=population_test_ids,
             )
             for value_id, target_kind, value_component, population_test_ids in (
@@ -112,59 +122,40 @@ class ResolvedInputApplicationSurface:
             + len(self.identity_targets_by_id),
         }
 
-    def application_options(self) -> tuple[dict[str, object], ...]:
-        options = (
-            *_parameter_application_options(
-                self.parameter_targets_by_id,
-                values_by_id=self.values_by_id,
-            ),
-            *_identity_application_options(
-                self.identity_targets_by_id,
-                values_by_id=self.values_by_id,
-            ),
-        )
-        return tuple(self._option_with_population_tests(option) for option in options)
-
-    def application_option_keys(self) -> frozenset[tuple[str, str, str, str]]:
-        return frozenset(
-            (
-                str(option["target_kind"]),
-                str(option["target_id"]),
-                str(option["value_id"]),
-                str(option["value_component"]),
-            )
-            for option in self.application_options()
-        )
-
     def _resolved_value_payloads(self) -> tuple[dict[str, object], ...]:
         payloads: list[dict[str, object]] = []
-        for value_id in self.values_by_id:
-            options = tuple(
-                option
-                for option in self.application_options()
-                if option["value_id"] == value_id
+        for value_id, value in self.values_by_id.items():
+            parameter_components = tuple(
+                dict.fromkeys(
+                    component
+                    for param in self.parameter_targets_by_id.values()
+                    for component in _parameter_value_components(param, value=value)
+                )
             )
-            if not options:
+            has_identity_target = any(
+                _identity_target_accepts_value(evidence, value=value)
+                for evidence in self.identity_targets_by_id.values()
+            )
+            components_by_target_kind: dict[str, list[str]] = {}
+            if parameter_components:
+                components_by_target_kind[
+                    ResolvedInputApplicationTargetKind.REQUEST_PARAMETER.value
+                ] = list(parameter_components)
+            if has_identity_target:
+                components_by_target_kind[
+                    ResolvedInputApplicationTargetKind.RETURNED_IDENTITY.value
+                ] = ["canonical_key"]
+            if not components_by_target_kind:
                 continue
-            components_by_target_kind = {
-                target_kind: list(
-                    dict.fromkeys(
-                        str(option["value_component"])
-                        for option in options
-                        if option["target_kind"] == target_kind
-                    )
-                )
-                for target_kind in (
-                    ResolvedInputApplicationTargetKind.REQUEST_PARAMETER.value,
-                    ResolvedInputApplicationTargetKind.RETURNED_IDENTITY.value,
-                )
-                if any(option["target_kind"] == target_kind for option in options)
-            }
+            tests = self.membership_tests_by_input_id.get(value.known_input_id, ())
             payloads.append(
                 {
                     "value_id": value_id,
                     "components_by_target_kind": components_by_target_kind,
-                    "population_test_basis": options[0]["population_test_basis"],
+                    "population_test_basis": population_test_basis_payload(
+                        tests,
+                        role_text=self.role_text,
+                    ),
                 }
             )
         return tuple(payloads)
@@ -178,6 +169,45 @@ class ResolvedInputApplicationSurface:
                 self.identity_targets_by_id
             ),
         }
+
+    def _application_target_ids(
+        self,
+        *,
+        value_id: str,
+        value_component: str,
+        target_kind: str,
+    ) -> list[str]:
+        value = self.values_by_id[value_id]
+        if target_kind == ResolvedInputApplicationTargetKind.REQUEST_PARAMETER.value:
+            return [
+                param_id
+                for param_id, param in self.parameter_targets_by_id.items()
+                if value_component in _parameter_value_components(param, value=value)
+            ]
+        if target_kind != ResolvedInputApplicationTargetKind.RETURNED_IDENTITY.value:
+            return []
+        return [
+            evidence_id
+            for evidence_id, evidence in self.identity_targets_by_id.items()
+            if value_component == "canonical_key"
+            and _identity_target_accepts_value(evidence, value=value)
+        ]
+
+    def accepts_application(
+        self,
+        *,
+        value_id: str,
+        value_component: str,
+        target_kind: str,
+        target_id: str,
+    ) -> bool:
+        if value_id not in self.values_by_id:
+            return False
+        return target_id in self._application_target_ids(
+            value_id=value_id,
+            value_component=value_component,
+            target_kind=target_kind,
+        )
 
     def _schema_value_variants(
         self,
@@ -202,25 +232,11 @@ class ResolvedInputApplicationSurface:
                 )
         return tuple(variants)
 
-    def _option_with_population_tests(
-        self, option: dict[str, str]
-    ) -> dict[str, object]:
-        value = self.values_by_id[option["value_id"]]
-        tests = self.membership_tests_by_input_id.get(value.known_input_id, ())
-        return {
-            **option,
-            "population_test_basis": population_test_basis_payload(
-                tests,
-                role_text=self.role_text,
-            ),
-        }
-
     def owners(self) -> tuple[ResolvedInputApplicationOwner, ...]:
         owners: list[ResolvedInputApplicationOwner] = []
         for param in self.parameter_targets_by_id.values():
-            for binding_value in param.binding_values:
-                value = self.values_by_id.get(binding_value.value)
-                if value is None or binding_value.source != "available_value":
+            for value in self.values_by_id.values():
+                if not _parameter_value_components(param, value=value):
                     continue
                 owners.append(
                     _application_owner(
@@ -257,9 +273,8 @@ def resolved_input_application_surface(
         param.id: param
         for param in candidate.params
         if any(
-            binding_value.source == "available_value"
-            and binding_value.value in values_by_id
-            for binding_value in param.binding_values
+            _parameter_value_components(param, value=value)
+            for value in resolved_values
         )
     }
     identity_targets = {
@@ -378,7 +393,6 @@ def parse_resolved_input_applications(
     known_input_ids: list[str] = []
     population_coverage_claims: list[PopulationCoverageClaim] = []
     used_targets: set[tuple[str, str]] = set()
-    allowed_applications = surface.application_option_keys()
     for application in applications:
         if not application.match_basis_explanation.strip():
             raise ValueError("resolved input application requires a match basis")
@@ -389,13 +403,12 @@ def parse_resolved_input_applications(
         value = surface.values_by_id.get(application.value_id)
         if value is None:
             raise ValueError("resolved input application references unknown value")
-        application_key = (
-            application.target_kind,
-            application.target_id,
-            application.value_id,
-            application.value_component,
-        )
-        if application_key not in allowed_applications:
+        if not surface.accepts_application(
+            target_kind=application.target_kind,
+            target_id=application.target_id,
+            value_id=application.value_id,
+            value_component=application.value_component,
+        ):
             raise ValueError("resolved value is incompatible with application target")
         if value.known_input_id:
             known_input_ids.append(value.known_input_id)
@@ -479,42 +492,6 @@ def _application_schema(
     )
 
 
-def _parameter_application_options(
-    params_by_id: dict[str, CandidateParameter],
-    *,
-    values_by_id: dict[str, FactValue],
-) -> tuple[dict[str, str], ...]:
-    return tuple(
-        {
-            "target_kind": ResolvedInputApplicationTargetKind.REQUEST_PARAMETER.value,
-            "target_id": param_id,
-            "value_id": binding.value,
-            "value_component": binding.value_component or "value",
-        }
-        for param_id, param in params_by_id.items()
-        for binding in param.binding_values
-        if binding.source == "available_value" and binding.value in values_by_id
-    )
-
-
-def _identity_application_options(
-    evidence_by_id: dict[str, EntityEvidence],
-    *,
-    values_by_id: dict[str, FactValue],
-) -> tuple[dict[str, str], ...]:
-    return tuple(
-        {
-            "target_kind": ResolvedInputApplicationTargetKind.RETURNED_IDENTITY.value,
-            "target_id": evidence_id,
-            "value_id": value.id,
-            "value_component": "canonical_key",
-        }
-        for evidence_id, evidence in evidence_by_id.items()
-        for value in values_by_id.values()
-        if _identity_target_accepts_value(evidence, value=value)
-    )
-
-
 def _parameter_binding_sets(
     application: provider_output.ResolvedInputApplicationOutput,
     *,
@@ -523,17 +500,18 @@ def _parameter_binding_sets(
 ) -> ParamBindingSetAlternatives:
     selected_component = application.value_component
     compiler_component = selected_component
-    concrete_value: RuntimeValue
-    if param.entity_target is not None:
-        compiler_component = f"key_component:{param.entity_target.component_id}"
-        concrete_value = value.identity_key_component(param.entity_target.component_id)
-    else:
-        concrete_value = _ordinary_component_value(
-            value,
-            component=selected_component,
+    if isinstance(value.payload, (IdentityValuePayload, IdentitySetValuePayload)):
+        component_id = (
+            param.entity_target.component_id
+            if param.entity_target is not None
+            else selected_component
         )
-    if isinstance(concrete_value, Decimal):
-        concrete_value = str(concrete_value)
+        compiler_component = f"key_component:{component_id}"
+    concrete_value = _parameter_component_value(
+        param,
+        value=value,
+        component=selected_component,
+    )
     return parameter_binding_sets(
         param_id=param.id,
         value=concrete_value,
@@ -543,6 +521,85 @@ def _parameter_binding_sets(
         value_component=compiler_component,
         proof_refs=tuple(value.proof_refs),
     )
+
+
+def _parameter_value_components(
+    param: CandidateParameter,
+    *,
+    value: FactValue,
+) -> tuple[str, ...]:
+    payload = value.payload
+    if isinstance(payload, (IdentityValuePayload, IdentitySetValuePayload)):
+        if param.entity_target is not None:
+            target = param.entity_target
+            if not identity_value_matches_entity_target(
+                value,
+                entity_kind=target.entity_kind,
+                key_id=target.key_id,
+                component_id=target.component_id,
+            ):
+                return ()
+            candidates = tuple(
+                binding.value_component or "value"
+                for binding in param.binding_values
+                if binding.source == "available_value" and binding.value == value.id
+            ) or ("value",)
+        else:
+            candidates = compatible_identity_parameter_component_ids(
+                value,
+                type_name=param.type,
+                choices=param.choices,
+            )
+    else:
+        binding_components = (
+            binding.value_component or "value"
+            for binding in param.binding_values
+            if binding.source == "available_value" and binding.value == value.id
+        )
+        return tuple(dict.fromkeys(binding_components))
+    return tuple(
+        component
+        for component in dict.fromkeys(candidates)
+        if _parameter_accepts_component(param, value=value, component=component)
+    )
+
+
+def _parameter_accepts_component(
+    param: CandidateParameter,
+    *,
+    value: FactValue,
+    component: str,
+) -> bool:
+    try:
+        _parameter_component_value(param, value=value, component=component)
+    except ValueError:
+        return False
+    return True
+
+
+def _parameter_component_value(
+    param: CandidateParameter,
+    *,
+    value: FactValue,
+    component: str,
+) -> RuntimeValue:
+    payload = value.payload
+    if isinstance(payload, (IdentityValuePayload, IdentitySetValuePayload)):
+        component_id = (
+            param.entity_target.component_id
+            if param.entity_target is not None
+            else component
+        )
+        return identity_parameter_component_value(
+            value,
+            component_id=component_id,
+            type_name=param.type,
+            choices=param.choices,
+        )
+    ordinary_value = _ordinary_component_value(value, component=component)
+    if isinstance(ordinary_value, Decimal):
+        return str(ordinary_value)
+    return ordinary_value
 
 
 def _identity_filters(
