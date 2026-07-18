@@ -134,7 +134,7 @@ class _SourceTextSelection:
 @dataclass(frozen=True)
 class _ResourceNameRanking:
     is_exact_resource_name: bool
-    requires_explicit_input: bool
+    requires_caller_supplied_input: bool
     ranking: CatalogSelectionRanking
 
 
@@ -294,7 +294,9 @@ def _rankings_for_resource_name(
                 ranked_matches.append(
                     _ResourceNameRanking(
                         is_exact_resource_name=False,
-                        requires_explicit_input=_requires_explicit_input(read),
+                        requires_caller_supplied_input=(
+                            _requires_caller_supplied_input(read)
+                        ),
                         ranking=ranking,
                     )
                 )
@@ -302,7 +304,7 @@ def _rankings_for_resource_name(
         ranked_matches.append(
             _ResourceNameRanking(
                 is_exact_resource_name=match.is_exact_resource_name,
-                requires_explicit_input=_requires_explicit_input(read),
+                requires_caller_supplied_input=_requires_caller_supplied_input(read),
                 ranking=_resource_name_match_ranking(
                     _rank_resource_read(
                         read,
@@ -320,14 +322,14 @@ def _rankings_for_resource_name(
             key=lambda item: (
                 not item.is_exact_resource_name,
                 -item.ranking.score,
-                item.requires_explicit_input,
+                item.requires_caller_supplied_input,
                 item.ranking.read_id,
             ),
         )
     )
 
 
-def _requires_explicit_input(read: EndpointRead) -> bool:
+def _requires_caller_supplied_input(read: EndpointRead) -> bool:
     return any(param.required and param.default is None for param in read.params)
 
 
