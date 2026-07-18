@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fervis.lookup.fact_planning.available_relations import (
-    available_relation_catalog_payload,
+    selected_relation_catalog_payload,
 )
 from fervis.lookup.fact_planning.fact_requirements import fact_endpoint_requirements
 from fervis.lookup.fact_plan.row_sources import build_row_source_catalog
@@ -35,7 +35,7 @@ def run_fact_requirements_case(payload: dict[str, Any]) -> list[str]:
         available_value_uses=(),
         row_sources=row_sources,
     )
-    relation_payload = available_relation_catalog_payload(
+    relation_payload = selected_relation_catalog_payload(
         catalog,
         catalog_selection=catalog_selection,
         memory_inputs={},

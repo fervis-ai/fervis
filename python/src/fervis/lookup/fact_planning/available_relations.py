@@ -1,4 +1,4 @@
-"""Model-facing relation surface after deterministic grounding."""
+"""Model-facing relation surface for catalog-selected reads."""
 
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ from fervis.lookup.turn_prompts.projections.resolved_inputs import (
 from fervis.lookup.grounding.model import GroundedInputUse
 
 
-def available_relation_catalog_payload(
+def selected_relation_catalog_payload(
     catalog: RelationCatalog,
     *,
     catalog_selection: CatalogSelectionResult,
@@ -59,7 +59,7 @@ def available_relation_catalog_payload(
     available_values: tuple[FactValue, ...],
     available_value_uses: tuple[GroundedInputUse, ...],
 ) -> dict[str, Any]:
-    """Project selected catalog rows into executable row sets for the fact planner."""
+    """Project catalog-selected rows for downstream candidate assessment."""
 
     row_sources = build_row_source_catalog(catalog)
     row_sources_by_id = {source.id: source for source in row_sources.sources}
@@ -141,7 +141,7 @@ def _requested_fact_relation_payload(
     )
     selected_sources = tuple(
         source
-        for row_source_id in requirement.executable_row_source_ids
+        for row_source_id in requirement.selected_row_source_ids
         for source in (row_sources_by_id.get(row_source_id),)
         if source is not None
     )

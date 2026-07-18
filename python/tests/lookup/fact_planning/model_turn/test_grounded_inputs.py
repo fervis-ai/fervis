@@ -168,7 +168,7 @@ def test_fact_plan_prompt_uses_explicit_source_binding_for_required_dates():
     assert "missing_required_inputs" not in relation_catalog
 
 
-def test_fact_plan_prompt_hides_missing_inputs_when_fact_has_executable_relation():
+def test_fact_plan_prompt_preserves_selected_read_with_required_input():
     request = _request_with_executable_relation_and_required_detail()
 
     relation_catalog = _json_prompt_section(
@@ -179,7 +179,7 @@ def test_fact_plan_prompt_hides_missing_inputs_when_fact_has_executable_relation
 
     available_ids = {item.get("read_id") for item in _bound_sources(relation_catalog)}
     assert "sales" in available_ids
-    assert "sale_detail" not in available_ids
+    assert "sale_detail" in available_ids
     assert "missing_required_inputs" not in relation_catalog
 
 

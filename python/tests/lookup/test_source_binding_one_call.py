@@ -206,7 +206,7 @@ def test_source_binding_does_not_promote_utility_sources_as_fact_sources_after_r
 
     monkeypatch.setattr(
         raw_payload_module,
-        "available_relation_catalog_payload",
+        "selected_relation_catalog_payload",
         relation_payload,
     )
     request = _request_with_optional_params(
@@ -346,7 +346,7 @@ def test_source_candidate_discovery_uses_retained_read_authority(
     )
     monkeypatch.setattr(
         raw_payload_module,
-        "available_relation_catalog_payload",
+        "selected_relation_catalog_payload",
         lambda *args, **kwargs: {
             "requested_fact_relations": [
                 {

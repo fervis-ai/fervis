@@ -64,4 +64,4 @@ expect:
         param_id: store_id
     available_reads_by_fact:
       fact_1: [stores]
-      fact_2: []
+      fact_2: [store_sales]

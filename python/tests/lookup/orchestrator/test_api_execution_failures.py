@@ -197,7 +197,7 @@ def test_lookup_cutover_rejects_non_empty_incomplete_final_relation():
     assert result.error == "incomplete_evidence"
 
 
-def test_lookup_cutover_rejects_missing_required_endpoint_param_before_execution():
+def test_lookup_rejects_missing_required_endpoint_param_during_source_binding():
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(
@@ -278,7 +278,7 @@ def test_lookup_cutover_rejects_missing_required_endpoint_param_before_execution
     )
 
     assert result.status == "FAILED"
-    assert result.error == "plan_validation_failed"
+    assert result.error == "planning_failed"
 
 
 def test_lookup_cutover_rejects_unknown_api_read_before_execution():

@@ -6,9 +6,9 @@ from ._shared import (
     RelationCatalog,
     SourceCandidateInputRequest,
     ValueKind,
-    available_relation_catalog_payload,
     known_input_id_for_value,
     operation_input_values_payload,
+    selected_relation_catalog_payload,
 )
 from fervis.lookup.source_binding.candidates.contracts import (
     JsonValue,
@@ -44,7 +44,7 @@ def _raw_source_binding_candidate_payload(
     selected_value_ids: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     requested_fact_ids = tuple(fact.id for fact in request.requested_facts)
-    relation_payload = available_relation_catalog_payload(
+    relation_payload = selected_relation_catalog_payload(
         request.relation_catalog,
         catalog_selection=request.catalog_selection,
         memory_inputs=request.memory_inputs,
