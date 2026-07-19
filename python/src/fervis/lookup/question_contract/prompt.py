@@ -141,7 +141,7 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                     "For NORMAL_BUSINESS_INSTANCE, include a NORMAL_INSTANCE_GUARD test; the backend attaches the standard ORDINARY_BUSINESS_INSTANCE_V1 profile with typed excluded-state roles.",
                     "For RAW_DATA_RECORD, include a RAW_RECORD_GUARD test.",
                     "Each membership test has polarity MUST_PASS unless the user explicitly asks to exclude matching instances, in which case use MUST_FAIL.",
-                    "For a threshold_value operand, comparison_operator states the candidate-to-boundary test: gt for above, gte for at least, lt for below, and lte for at most. Do not write comparison_operator for another input role.",
+                    "On a threshold_value question input, comparison_operator states the candidate-to-boundary test: gt for above, gte for at least, lt for below, and lte for at most.",
                     "Do not decide which API values, enum options, endpoints, fields, or params pass answer_population tests in this turn.",
                     "answer_requests_count must equal the number of answer_requests.",
                     "Do not put API details, endpoint names, field names, params, enum values, or execution operations in answer_subject.",

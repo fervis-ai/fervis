@@ -30,6 +30,7 @@ def _input(
     text: str,
     role: str,
     field_label_text: str = "",
+    comparison_operator: str = "",
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "input_ref": input_ref,
@@ -44,6 +45,8 @@ def _input(
     }
     if field_label_text:
         payload["field_label_text"] = field_label_text
+    if comparison_operator:
+        payload["comparison_operator"] = comparison_operator
     return payload
 
 
@@ -762,6 +765,31 @@ def test_schema_exposes_only_the_single_ownership_ledger() -> None:
     )
 
 
+def test_schema_places_comparison_operator_only_on_threshold_inputs() -> None:
+    schema = build_answer_request_contract_schema()
+    input_branches = schema["properties"]["question_inputs"]["items"]["oneOf"]
+    branches_by_role = {
+        branch["properties"]["role"]["enum"][0]: branch for branch in input_branches
+    }
+
+    threshold = branches_by_role["threshold_value"]
+    assert "comparison_operator" in threshold["properties"]
+    assert "comparison_operator" in threshold["required"]
+    assert all(
+        "comparison_operator" not in branch["properties"]
+        for role, branch in branches_by_role.items()
+        if role != "threshold_value"
+    )
+
+    membership_test = schema["properties"]["answer_requests"]["items"]["properties"][
+        "answer_population"
+    ]["properties"]["membership_tests"]["items"]
+    assert all(
+        "comparison_operator" not in branch["properties"]
+        for branch in membership_test["oneOf"]
+    )
+
+
 def _predicate_contract(
     *,
     text: str,
@@ -770,7 +798,12 @@ def _predicate_contract(
 ) -> dict[str, object]:
     payload = _grouped_staff_contract()
     payload["question_inputs"] = [
-        _input(input_ref="qi_operand", text=text, role=role)
+        _input(
+            input_ref="qi_operand",
+            text=text,
+            role=role,
+            comparison_operator=comparison_operator,
+        )
     ]
     request = payload["answer_requests"][0]
     request["answer_expression"] = {"family": "scalar_aggregate"}
@@ -792,7 +825,6 @@ def _predicate_contract(
             kind="EXPLICIT_USER_CONSTRAINT",
             question="Does the sale satisfy the supplied predicate?",
             question_input_use_refs=["use_operand"],
-            comparison_operator=comparison_operator,
         ),
     ]
     return payload

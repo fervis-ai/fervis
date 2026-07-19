@@ -16,6 +16,7 @@ input:
       operand_text: '1000'
       value_meaning_hint: numeric boundary
       role: threshold_value
+      comparison_operator: gt
       inventory_check:
         why_this_is_an_input: It is the fixed boundary of the population predicate.
     answer_requests:
@@ -41,7 +42,6 @@ input:
           kind: EXPLICIT_USER_CONSTRAINT
           polarity: MUST_PASS
           test_question: Is the measured value greater than the supplied boundary?
-          comparison_operator: gt
           question_input_use_refs: [use_boundary]
       answer_outputs:
       - description: record count

@@ -67,6 +67,12 @@ class _ParsedQuestionInputUses:
     result_limit_input_ref: str
 
 
+@dataclass(frozen=True, slots=True)
+class _ParsedQuestionInputs:
+    values: tuple[RequestedFactKnownInput, ...]
+    threshold_operators_by_input_ref: dict[str, PredicateOperator]
+
+
 def parse_question_contract(
     *,
     tool_name: str,
@@ -123,30 +129,33 @@ def parse_question_contract(
     kind = parsed.kind
     if kind != "question_contract":
         raise ValueError("invalid question contract kind")
-    question_inputs = _question_inputs(
+    parsed_question_inputs = _question_inputs(
         parsed.question_inputs,
         current_question_texts=current_question_texts,
         question_context_texts=context_texts,
     )
     _validate_conversation_resolution_question_inputs(
-        question_inputs,
+        parsed_question_inputs.values,
         conversation_resolution=conversation_resolution,
     )
     requested_facts = _requested_facts(
         parsed.answer_requests,
-        question_inputs=question_inputs,
+        question_inputs=parsed_question_inputs.values,
+        threshold_operators_by_input_ref=(
+            parsed_question_inputs.threshold_operators_by_input_ref
+        ),
         question_context_texts=context_texts,
     )
     _reject_unowned_question_inputs(
-        question_inputs,
+        parsed_question_inputs.values,
         requested_facts=requested_facts,
     )
     _reject_answer_subject_question_inputs(
-        question_inputs,
+        parsed_question_inputs.values,
         requested_facts=requested_facts,
     )
     question_inputs = _referenced_question_inputs(
-        question_inputs,
+        parsed_question_inputs.values,
         requested_facts=requested_facts,
     )
     _validate_answer_requests_count(
@@ -238,6 +247,7 @@ def _requested_facts(
     items: tuple[provider_output.AnswerRequestOutput, ...],
     *,
     question_inputs: tuple[RequestedFactKnownInput, ...],
+    threshold_operators_by_input_ref: dict[str, PredicateOperator],
     question_context_texts: tuple[str, ...],
 ) -> tuple[RequestedFact, ...]:
     output: list[RequestedFact] = []
@@ -264,6 +274,7 @@ def _requested_facts(
                 input_uses.population_input_refs_by_use_id
             ),
             inputs_by_id=inputs_by_id,
+            threshold_operators_by_input_ref=threshold_operators_by_input_ref,
             path=f"{path}.answer_population.membership_tests",
         )
         answer_subject = _answer_subject(
@@ -426,6 +437,7 @@ def _parsed_membership_tests(
     *,
     population_input_refs_by_use_id: dict[str, str],
     inputs_by_id: dict[str, RequestedFactKnownInput],
+    threshold_operators_by_input_ref: dict[str, PredicateOperator],
     path: str,
 ) -> tuple[_ParsedMembershipTest, ...]:
     output: list[_ParsedMembershipTest] = []
@@ -467,7 +479,6 @@ def _parsed_membership_tests(
             )
             and known_input.is_threshold_value
         )
-        raw_operator = (item.comparison_operator or "").strip()
         if threshold_refs:
             if len(threshold_refs) != len(owned_input_refs):
                 raise ValueError(
@@ -477,26 +488,8 @@ def _parsed_membership_tests(
                 raise ValueError(
                     f"{item_path} threshold comparison requires one boundary"
                 )
-            try:
-                comparison_operator = PredicateOperator(raw_operator)
-            except ValueError as exc:
-                raise ValueError(
-                    f"{item_path}.comparison_operator requires lt, lte, gt, or gte"
-                ) from exc
-            if comparison_operator not in {
-                PredicateOperator.LT,
-                PredicateOperator.LTE,
-                PredicateOperator.GT,
-                PredicateOperator.GTE,
-            }:
-                raise ValueError(
-                    f"{item_path}.comparison_operator requires lt, lte, gt, or gte"
-                )
+            comparison_operator = threshold_operators_by_input_ref[threshold_refs[0]]
         else:
-            if raw_operator:
-                raise ValueError(
-                    f"{item_path}.comparison_operator requires threshold_value"
-                )
             comparison_operator = None
         output.append(
             _ParsedMembershipTest(
@@ -792,9 +785,8 @@ def _validate_input_owner_kind(
         ):
             raise ValueError(f"{path} GROUP_KEY_DERIVATION requires grouped_aggregate")
         return
-    if (
-        isinstance(known_input, RequestedFactLiteralInput)
-        and (known_input.is_predicate_value or known_input.is_threshold_value)
+    if isinstance(known_input, RequestedFactLiteralInput) and (
+        known_input.is_predicate_value or known_input.is_threshold_value
     ):
         if owner_kind is not provider_output.QuestionInputOwnerKind.POPULATION_TESTS:
             raise ValueError(
@@ -822,8 +814,9 @@ def _question_inputs(
     *,
     current_question_texts: tuple[str, ...],
     question_context_texts: tuple[str, ...],
-) -> tuple[RequestedFactKnownInput, ...]:
+) -> _ParsedQuestionInputs:
     output: list[RequestedFactKnownInput] = []
+    threshold_operators_by_input_ref: dict[str, PredicateOperator] = {}
     seen_ids: set[str] = set()
     for index, raw_item in enumerate(raw):
         path = f"question_inputs[{index}]"
@@ -856,18 +849,60 @@ def _question_inputs(
             question_context_texts=span_contexts,
             path=f"{path}.{input_text_key}",
         )
-        output.append(
-            _question_input(
-                parsed,
-                input_ref=input_ref,
-                kind=kind,
-                source=source,
-                reference_text=copied_reference_text,
-                question_context_texts=question_context_texts,
-                path=path,
-            )
+        known_input = _question_input(
+            parsed,
+            input_ref=input_ref,
+            kind=kind,
+            source=source,
+            reference_text=copied_reference_text,
+            question_context_texts=question_context_texts,
+            path=path,
         )
-    return tuple(output)
+        output.append(known_input)
+        comparison_operator = _question_input_comparison_operator(
+            parsed,
+            known_input=known_input,
+            path=path,
+        )
+        if comparison_operator is not None:
+            threshold_operators_by_input_ref[input_ref] = comparison_operator
+    return _ParsedQuestionInputs(
+        values=tuple(output),
+        threshold_operators_by_input_ref=threshold_operators_by_input_ref,
+    )
+
+
+def _question_input_comparison_operator(
+    item: provider_output.LiteralTextInputOutput
+    | provider_output.RowSetReferenceInputOutput,
+    *,
+    known_input: RequestedFactKnownInput,
+    path: str,
+) -> PredicateOperator | None:
+    if not isinstance(item, provider_output.LiteralTextInputOutput):
+        return None
+    raw_operator = (item.comparison_operator or "").strip()
+    if (
+        not isinstance(known_input, RequestedFactLiteralInput)
+        or not known_input.is_threshold_value
+    ):
+        if raw_operator:
+            raise ValueError(f"{path}.comparison_operator requires threshold_value")
+        return None
+    try:
+        operator = PredicateOperator(raw_operator)
+    except ValueError as exc:
+        raise ValueError(
+            f"{path}.comparison_operator requires lt, lte, gt, or gte"
+        ) from exc
+    if operator not in {
+        PredicateOperator.LT,
+        PredicateOperator.LTE,
+        PredicateOperator.GT,
+        PredicateOperator.GTE,
+    }:
+        raise ValueError(f"{path}.comparison_operator requires lt, lte, gt, or gte")
+    return operator
 
 
 def _question_input_output(

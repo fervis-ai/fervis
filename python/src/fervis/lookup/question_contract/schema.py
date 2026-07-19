@@ -245,10 +245,6 @@ def _answer_population_membership_test_schema() -> dict[str, object]:
             _answer_population_membership_test_variant(
                 kind="EXPLICIT_USER_CONSTRAINT",
             ),
-            _answer_population_membership_test_variant(
-                kind="EXPLICIT_USER_CONSTRAINT",
-                comparison=True,
-            ),
             *(
                 _answer_population_membership_test_variant(
                     kind=kind,
@@ -266,7 +262,6 @@ def _answer_population_membership_test_schema() -> dict[str, object]:
 def _answer_population_membership_test_variant(
     *,
     kind: str,
-    comparison: bool = False,
 ) -> dict[str, object]:
     use_refs: dict[str, object] = {
         "type": "array",
@@ -277,27 +272,13 @@ def _answer_population_membership_test_variant(
     else:
         use_refs["maxItems"] = 0
     properties: dict[str, object] = {
-            "question_input_use_refs": use_refs,
-            "test_id": {"type": "string", "minLength": 1},
-            "kind": {"enum": [kind]},
-            "polarity": {"enum": ["MUST_PASS", "MUST_FAIL"]},
-            "test_question": {"type": "string", "minLength": 1},
+        "question_input_use_refs": use_refs,
+        "test_id": {"type": "string", "minLength": 1},
+        "kind": {"enum": [kind]},
+        "polarity": {"enum": ["MUST_PASS", "MUST_FAIL"]},
+        "test_question": {"type": "string", "minLength": 1},
     }
-    if comparison:
-        properties["comparison_operator"] = {
-            "enum": [
-                PredicateOperator.LT.value,
-                PredicateOperator.LTE.value,
-                PredicateOperator.GT.value,
-                PredicateOperator.GTE.value,
-            ]
-        }
-    schema = provider_output.AnswerPopulationMembershipTestOutput.schema(properties)
-    if comparison:
-        required = schema["required"]
-        assert isinstance(required, list)
-        required.append("comparison_operator")
-    return schema
+    return provider_output.AnswerPopulationMembershipTestOutput.schema(properties)
 
 
 def _answer_output_schema() -> dict[str, object]:
@@ -453,6 +434,9 @@ def _declared_literal_input_schema(
     if item.value_meaning_hint:
         properties["value_meaning_hint"] = {"enum": [item.value_meaning_hint]}
         required_optional_fields.append("value_meaning_hint")
+    if item.role is LiteralInputRole.THRESHOLD_VALUE:
+        properties["comparison_operator"] = _ordered_comparison_operator_schema()
+        required_optional_fields.append("comparison_operator")
     schema = provider_output.LiteralTextInputOutput.schema(properties)
     required = schema["required"]
     if not isinstance(required, list):
@@ -502,8 +486,26 @@ def _literal_text_input_role_schema(
     }
     if include_conversation_resolution_inputs:
         properties["resolved_input_ref"] = {"type": "string", "minLength": 1}
+    if role is LiteralInputRole.THRESHOLD_VALUE:
+        properties["comparison_operator"] = _ordered_comparison_operator_schema()
     schema = provider_output.LiteralTextInputOutput.schema(properties)
+    if role is LiteralInputRole.THRESHOLD_VALUE:
+        required = schema["required"]
+        if not isinstance(required, list):
+            raise ValueError("provider schema required fields must be an array")
+        required.append("comparison_operator")
     return schema
+
+
+def _ordered_comparison_operator_schema() -> dict[str, object]:
+    return {
+        "enum": [
+            PredicateOperator.LT.value,
+            PredicateOperator.LTE.value,
+            PredicateOperator.GT.value,
+            PredicateOperator.GTE.value,
+        ]
+    }
 
 
 def _question_input_inventory_check_schema() -> dict[str, object]:

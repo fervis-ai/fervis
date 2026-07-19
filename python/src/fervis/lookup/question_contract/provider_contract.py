@@ -46,6 +46,7 @@ class LiteralTextInputOutput(ProviderOutput):
     value_meaning_hint: Optional[str] = None
     occurrence: Optional[int] = None
     resolved_input_ref: Optional[str] = None
+    comparison_operator: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -72,7 +73,6 @@ class AnswerPopulationMembershipTestOutput(ProviderOutput):
     kind: str
     polarity: str
     test_question: str
-    comparison_operator: Optional[str] = None
 
 
 @dataclass(frozen=True)
