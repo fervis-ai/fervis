@@ -5,11 +5,12 @@ from __future__ import annotations
 from fervis.lookup.answer_program.operations import (
     Operation,
     OrderSpec,
-    ProjectField,
+    NamedExpression,
     ProjectSpec,
     SortDirection,
     SortKey,
 )
+from fervis.lookup.answer_program.expressions import FieldRef
 from fervis.lookup.answer_program.compiler_inputs import CompilerInputContext
 from fervis.lookup.answer_program.result_projection import (
     EntityKeyProjection,
@@ -142,7 +143,10 @@ def _compile_project_fields(
         offset=len(output_fields),
     )
     project_fields = tuple(
-        ProjectField(source=item["field_id"], output=item["output_field_id"])
+        NamedExpression(
+            output_field=item["output_field_id"],
+            expression=FieldRef(item["field_id"]),
+        )
         for item in (*group_fields, *output_fields)
     )
     result_pairs = (*output_field_result_pairs, *group_field_result_pairs)
@@ -218,7 +222,7 @@ def _row_operations(
     *,
     relation_id: str,
     output_relation_id: str,
-    project_fields: tuple[ProjectField, ...],
+    project_fields: tuple[NamedExpression, ...],
     order_field: dict[str, str] | None,
     tie_breaker_fields: tuple[dict[str, str], ...],
     ordering: CompiledOrdering | None,
@@ -255,7 +259,7 @@ def _row_operations(
             id=f"{output_relation_id}_project",
             spec=ProjectSpec(
                 input_relation=project_input_relation,
-                fields=project_fields,
+                outputs=project_fields,
             ),
             output_relation=output_relation_id,
         )

@@ -18,12 +18,13 @@ from fervis.lookup.answer_program.operations import (
     ComputeSpec,
     JoinSpec,
     Operation,
-    ProjectField,
+    NamedExpression,
     ProjectSpec,
     OrderSpec,
     RelationRole,
     RelationRoleRef,
 )
+from fervis.lookup.answer_program.expressions import FieldRef
 from fervis.lookup.answer_program.relations import (
     EndpointParamBinding,
     FieldBindingRole,
@@ -123,7 +124,6 @@ from tests.lookup.source_binding_helpers import (
     source_fulfills_by_row_population_for_candidate,
     source_fulfills_for_candidate,
 )
-
 
 
 __all__ = tuple(name for name in globals() if not name.startswith("__"))

@@ -425,6 +425,84 @@ def test_formula_value_rejects_unit_bearing_text_without_typed_unit_authority() 
         _parse(payload, question="What is the total plus 10 widgets?")
 
 
+def test_grouping_grain_is_owned_by_source_group_key_derivation() -> None:
+    payload = _grouped_staff_contract()
+    payload["question_inputs"] = [
+        _input(input_ref="qi_grain", text="day", role="grouping_grain")
+    ]
+    payload["answer_requests"] = [
+        _answer_request(
+            answer_fact="event count per day",
+            expression={
+                "family": "grouped_aggregate",
+                "group_key": {
+                    "description": "event day",
+                    "domain": "SOURCE_RESULT_VALUES",
+                },
+                "selection": {"kind": "all_results"},
+            },
+            membership_tests=[
+                _membership_test(
+                    test_id="t_subject",
+                    kind="SUBJECT_IDENTITY",
+                    question="Is this an event?",
+                )
+            ],
+            question_input_uses=[
+                {
+                    "input_ref": "qi_grain",
+                    "owner_kind": "GROUP_KEY_DERIVATION",
+                }
+            ],
+        )
+    ]
+
+    result = _parse(payload, question="How many events were recorded per day?")
+
+    expression = result.outcome.requested_facts[0].answer_expression
+    assert expression is not None
+    assert expression.group_key is not None
+    assert expression.group_key.derivation_input_refs == ("qi_grain",)
+
+
+def test_grouping_grain_cannot_be_owned_by_population_tests() -> None:
+    payload = _grouped_staff_contract()
+    payload["question_inputs"] = [
+        _input(input_ref="qi_grain", text="day", role="grouping_grain")
+    ]
+    payload["answer_requests"] = [
+        _answer_request(
+            answer_fact="event count per day",
+            expression={
+                "family": "grouped_aggregate",
+                "group_key": {
+                    "description": "event day",
+                    "domain": "SOURCE_RESULT_VALUES",
+                },
+                "selection": {"kind": "all_results"},
+            },
+            membership_tests=[
+                _membership_test(
+                    test_id="t_grain",
+                    kind="EXPLICIT_USER_CONSTRAINT",
+                    question="Did this event happen on a day?",
+                    question_input_use_refs=["use_grain"],
+                )
+            ],
+            question_input_uses=[
+                {
+                    "use_id": "use_grain",
+                    "input_ref": "qi_grain",
+                    "owner_kind": "POPULATION_TESTS",
+                }
+            ],
+        )
+    ]
+
+    with pytest.raises(ValueError, match="grouping_grain.*GROUP_KEY_DERIVATION"):
+        _parse(payload, question="How many events were recorded per day?")
+
+
 @pytest.mark.parametrize(
     ("mutate", "error"),
     [
@@ -484,9 +562,7 @@ def test_parser_rejects_duplicate_population_use_ids() -> None:
 def test_parser_rejects_explicit_population_test_without_an_operand() -> None:
     payload = _grouped_staff_contract()
     request = payload["answer_requests"][0]
-    request["answer_population"]["membership_tests"][1][
-        "question_input_use_refs"
-    ] = []
+    request["answer_population"]["membership_tests"][1]["question_input_use_refs"] = []
 
     with pytest.raises(ValueError, match="requires at least one question input"):
         _parse(payload)
@@ -648,12 +724,12 @@ def test_schema_exposes_only_the_single_ownership_ledger() -> None:
     assert "question_input_uses" in properties
     use_schema = properties["question_input_uses"]["items"]
     assert [
-        branch["properties"]["owner_kind"]["enum"][0]
-        for branch in use_schema["oneOf"]
+        branch["properties"]["owner_kind"]["enum"][0] for branch in use_schema["oneOf"]
     ] == [
         "GROUP_KEY",
         "POPULATION_TESTS",
         "COMPUTE_EXPRESSION",
+        "GROUP_KEY_DERIVATION",
         "RESULT_LIMIT",
     ]
     assert "use_id" not in use_schema["oneOf"][0]["properties"]
@@ -667,9 +743,7 @@ def test_schema_exposes_only_the_single_ownership_ledger() -> None:
     )
     assert (
         "question_input_refs"
-        not in grouped_expression["properties"]["group_key"]["oneOf"][0][
-            "properties"
-        ]
+        not in grouped_expression["properties"]["group_key"]["oneOf"][0]["properties"]
     )
     membership_variants = properties["answer_population"]["properties"][
         "membership_tests"

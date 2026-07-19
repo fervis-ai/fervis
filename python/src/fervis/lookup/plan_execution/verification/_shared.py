@@ -49,13 +49,14 @@ from fervis.lookup.answer_program.operations import (
     JoinSpec,
     Operation,
     OrderSpec,
-    ProjectField,
+    NamedExpression,
     ProjectSpec,
     ProjectToKeySpec,
     RoleExpandSpec,
     UnionSpec,
     UniversalConditionSpec,
 )
+from fervis.lookup.answer_program.expressions import FieldRef
 from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
     Relation,

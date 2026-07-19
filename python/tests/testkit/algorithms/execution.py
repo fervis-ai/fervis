@@ -5,7 +5,12 @@ from typing import Any
 from fervis.lookup.relation_catalog import RelationCatalog
 from fervis.lookup.answer_program.instantiation import _materialize_execution
 from fervis.lookup.answer_program.model import AnswerProgram, FactFulfillment
-from fervis.lookup.answer_program.operations import Operation, ProjectField, ProjectSpec
+from fervis.lookup.answer_program.operations import (
+    Operation,
+    NamedExpression,
+    ProjectSpec,
+)
+from fervis.lookup.answer_program.expressions import FieldRef
 from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
     PopulationChoiceControllerKind,
@@ -126,7 +131,9 @@ def _answer_plan(input_payload: dict[str, Any]) -> AnswerProgram:
                 id="project",
                 spec=ProjectSpec(
                     input_relation="source_1",
-                    fields=(ProjectField(source="id", output="id"),),
+                    outputs=(
+                        NamedExpression(output_field="id", expression=FieldRef("id")),
+                    ),
                 ),
                 output_relation="result",
             ),

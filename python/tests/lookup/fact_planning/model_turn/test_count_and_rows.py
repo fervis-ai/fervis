@@ -108,9 +108,7 @@ def test_pattern_prompt_count_metric_uses_declared_row_population():
                             "The active record count is determined by rows where "
                             "is_active is true."
                         ),
-                        row_count_basis_evidence_ids=(
-                            "row_population.source_1.data",
-                        ),
+                        row_count_basis_evidence_ids=("row_population.source_1.data",),
                     ),
                 ),
             ),
@@ -674,9 +672,7 @@ def test_pattern_prompt_does_not_require_raw_record_fields_for_count_metric_answ
                         match_basis_explanation=(
                             "The declared row population is the count basis."
                         ),
-                        row_count_basis_evidence_ids=(
-                            "row_population.source_1.data",
-                        ),
+                        row_count_basis_evidence_ids=("row_population.source_1.data",),
                     ),
                 ),
             ),
@@ -807,7 +803,7 @@ def test_grouped_rows_deduplicates_output_fields_that_repeat_group_fields():
         "item_count",
     ]
     project = plan.operations[0].spec
-    assert [field.output or field.source for field in project.fields] == [
+    assert [field.output_field for field in project.outputs] == [
         "sale_id",
         "item_count",
     ]

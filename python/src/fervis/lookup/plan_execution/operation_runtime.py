@@ -71,6 +71,8 @@ class RelationEngineInput:
     relations: tuple[RelationRows, ...] = ()
     operations: tuple[ExecutableOperation, ...] = ()
     scalar_inputs: tuple[ScalarInput, ...] = ()
+    environment_values: Mapping[str, RuntimeValue] | None = None
+    environment_types: Mapping[str, str] | None = None
     operation_proof_refs: Mapping[str, tuple[str, ...]] | None = None
 
 

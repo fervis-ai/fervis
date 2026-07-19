@@ -35,7 +35,7 @@ from fervis.lookup.answer_program.operations import (
     OrderSpec,
     Predicate,
     PredicateOperator,
-    ProjectField,
+    NamedExpression,
     ProjectSpec,
     ProjectToKeySpec,
     RelationRole,
@@ -50,8 +50,12 @@ from fervis.lookup.answer_program.operations import (
 )
 from fervis.lookup.answer_program.expressions import (
     BinaryExpression,
+    EnvironmentRef,
     ExpressionBinaryOperator,
+    ExpressionFunction,
     ExpressionUnaryOperator,
+    FieldRef,
+    FunctionExpression,
     UnaryExpression,
 )
 from fervis.lookup.answer_program.values import NodeOutputRef, ParameterRef
@@ -151,6 +155,8 @@ def engine_input_from_payload(payload: dict[str, Any]) -> RelationEngineInput:
         scalar_inputs=_scalar_inputs(payload, operation_payloads=operation_payloads),
         relations=tuple(_relation(item) for item in payload.get("relations") or ()),
         operations=tuple(_operation(item) for item in operation_payloads),
+        environment_values=dict(payload.get("environment_values") or {}),
+        environment_types=dict(payload.get("environment_types") or {}),
     )
 
 
@@ -247,7 +253,7 @@ def operation_spec_from_payload(payload: dict[str, Any]) -> Any:
     if kind == "project":
         return ProjectSpec(
             input_relation=str(payload["input_relation"]),
-            fields=tuple(_project_field(item) for item in payload["fields"]),
+            outputs=tuple(_project_field(item) for item in payload["fields"]),
         )
     if kind == "project_to_key":
         return ProjectToKeySpec(
@@ -333,6 +339,15 @@ def operation_spec_from_payload(payload: dict[str, Any]) -> Any:
 
 
 def _compute_expression(payload: dict[str, Any]):
+    if set(payload) == {"field"}:
+        return FieldRef(str(payload["field"]))
+    if set(payload) == {"environment"}:
+        return EnvironmentRef(key=str(payload["environment"]))
+    if set(payload) == {"function", "arguments"}:
+        return FunctionExpression(
+            function=ExpressionFunction(str(payload["function"])),
+            arguments=tuple(_compute_expression(item) for item in payload["arguments"]),
+        )
     if set(payload) == {"value"}:
         value = payload["value"]
         return ParameterRef(parameter_id=str(value["input_ref"]))
@@ -370,10 +385,14 @@ def _join_key(payload: dict[str, Any]) -> JoinKey:
     return JoinKey(left=str(payload["left"]), right=str(payload["right"]))
 
 
-def _project_field(payload: dict[str, Any]) -> ProjectField:
-    return ProjectField(
-        source=str(payload["source"]),
-        output=str(payload.get("output") or ""),
+def _project_field(payload: dict[str, Any]) -> NamedExpression:
+    return NamedExpression(
+        output_field=str(payload.get("output") or payload["source"]),
+        expression=(
+            _compute_expression(payload["expression"])
+            if "expression" in payload
+            else FieldRef(str(payload["source"]))
+        ),
     )
 
 

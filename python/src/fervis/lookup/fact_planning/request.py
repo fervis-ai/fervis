@@ -27,6 +27,7 @@ from fervis.lookup.fact_planning.metric_options import (
 )
 from fervis.lookup.fact_planning.grouped_aggregate_choices import (
     GROUPED_AGGREGATE_PLAN_SHAPES,
+    group_key_source_field_candidates,
     grouped_aggregate_choices_by_requested_fact_id,
     grouped_aggregate_choices_prompt,
 )
@@ -49,6 +50,7 @@ from fervis.lookup.turn_prompts import (
 )
 from fervis.lookup.question_contract import (
     QuestionContract,
+    RequestedFact,
     requested_fact_evidence_ref,
 )
 from fervis.lookup.plan_selection import BoundPlanSelectionSet
@@ -100,9 +102,11 @@ class PatternFactPlanTurnPrompt(TurnPromptBase):
     ) -> None:
         self.request = request
         self.plan_selection = plan_selection
-        self._grouped_aggregate_choices = _grouped_aggregate_choices_by_requested_fact_id(
-            request,
-            plan_selection=plan_selection,
+        self._grouped_aggregate_choices = (
+            _grouped_aggregate_choices_by_requested_fact_id(
+                request,
+                plan_selection=plan_selection,
+            )
         )
         self._scalar_aggregate_choices = _scalar_aggregate_choices_by_requested_fact_id(
             request,
@@ -224,7 +228,9 @@ class PatternFactPlanTurnPrompt(TurnPromptBase):
             source_binding_ids_by_requirement_by_requested_fact_id=(
                 self.plan_selection.source_binding_ids_by_requirement_by_requested_fact_id()
             ),
-            grouped_aggregate_choices_by_requested_fact_id=(self._grouped_aggregate_choices),
+            grouped_aggregate_choices_by_requested_fact_id=(
+                self._grouped_aggregate_choices
+            ),
             scalar_aggregate_choices_by_requested_fact_id=(
                 self._scalar_aggregate_choices
             ),
@@ -413,7 +419,7 @@ def _grouped_aggregate_choices_by_requested_fact_id(
     *,
     plan_selection: BoundPlanSelectionSet,
 ) -> dict[str, Any]:
-    return grouped_aggregate_choices_by_requested_fact_id(
+    choices = grouped_aggregate_choices_by_requested_fact_id(
         request.bound_sources,
         selected_plan_shapes_by_requested_fact_id=(
             plan_selection.plan_shapes_by_requested_fact_id()
@@ -423,6 +429,61 @@ def _grouped_aggregate_choices_by_requested_fact_id(
             for plan in plan_selection.plan_selections
         },
     )
+    facts_by_id = {fact.id: fact for fact in request.question_contract.requested_facts}
+    sources_by_id = {source.id: source for source in request.bound_sources}
+    value_ids_by_known_input_id = {
+        value.known_input_id: value.id
+        for value in request.available_values
+        if value.known_input_id
+    }
+    output: dict[str, tuple[dict[str, Any], ...]] = {}
+    for requested_fact_id, fact_choices in choices.items():
+        projected = tuple(
+            candidate
+            for choice in fact_choices
+            if (
+                candidate := _with_group_key_source_fields(
+                    choice,
+                    requested_fact=facts_by_id.get(requested_fact_id),
+                    sources_by_id=sources_by_id,
+                    value_ids_by_known_input_id=value_ids_by_known_input_id,
+                )
+            )
+            is not None
+        )
+        if projected:
+            output[requested_fact_id] = projected
+    return output
+
+
+def _with_group_key_source_fields(
+    choice: dict[str, Any],
+    *,
+    requested_fact: RequestedFact | None,
+    sources_by_id: dict[str, BoundSource],
+    value_ids_by_known_input_id: dict[str, str],
+) -> dict[str, Any] | None:
+    group_key = (
+        requested_fact.answer_expression.group_key
+        if requested_fact is not None and requested_fact.answer_expression is not None
+        else None
+    )
+    if group_key is None or not group_key.derivation_input_refs:
+        return choice
+    source = sources_by_id.get(str(choice.get("source_binding_id") or ""))
+    if source is None:
+        return choice
+    derivation_value_ids = {
+        value_ids_by_known_input_id.get(input_id, "")
+        for input_id in group_key.derivation_input_refs
+    }
+    if source.source is not None and any(
+        binding.value_id in derivation_value_ids
+        for binding in source.source.param_bindings
+    ):
+        return choice
+    fields = group_key_source_field_candidates(choice)
+    return {**choice, "group_key_source_fields": fields} if fields else None
 
 
 def _plan_shape_uses_count_metric_for_source(

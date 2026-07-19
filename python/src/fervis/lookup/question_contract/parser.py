@@ -59,6 +59,7 @@ class _ParsedMembershipTest:
 class _ParsedQuestionInputUses:
     input_refs: tuple[str, ...]
     group_key_input_refs: tuple[str, ...]
+    group_key_derivation_input_refs: tuple[str, ...]
     population_input_refs_by_use_id: dict[str, str]
     compute_input_refs: tuple[str, ...]
     result_limit_input_ref: str
@@ -278,6 +279,9 @@ def _requested_facts(
         answer_expression = _answer_expression(
             parsed.answer_expression,
             group_key_input_refs=input_uses.group_key_input_refs,
+            group_key_derivation_input_refs=(
+                input_uses.group_key_derivation_input_refs
+            ),
             compute_input_refs=input_uses.compute_input_refs,
             limit_input_ref=input_uses.result_limit_input_ref,
             path=f"{path}.answer_expression",
@@ -304,6 +308,7 @@ def _answer_expression(
     item: provider_output.AnswerExpressionOutput,
     *,
     group_key_input_refs: tuple[str, ...],
+    group_key_derivation_input_refs: tuple[str, ...],
     compute_input_refs: tuple[str, ...],
     limit_input_ref: str,
     path: str,
@@ -321,15 +326,14 @@ def _answer_expression(
             item.ordering.basis, path=f"{path}.ordering.basis"
         )
         ordering_direction = RequestedFactOrderingDirection(
-            _required_text(
-                item.ordering.direction, path=f"{path}.ordering.direction"
-            )
+            _required_text(item.ordering.direction, path=f"{path}.ordering.direction")
         )
     return RequestedFactAnswerExpression(
         family=family,
         group_key=_answer_expression_group_key(
             item.group_key,
             question_input_refs=group_key_input_refs,
+            derivation_input_refs=group_key_derivation_input_refs,
             path=f"{path}.group_key",
         ),
         ordering_basis=ordering_basis,
@@ -344,6 +348,7 @@ def _answer_expression_group_key(
     item: provider_output.GroupKeyOutput | None,
     *,
     question_input_refs: tuple[str, ...],
+    derivation_input_refs: tuple[str, ...],
     path: str,
 ) -> RequestedFactGroupKey | None:
     if item is None:
@@ -352,6 +357,7 @@ def _answer_expression_group_key(
         description=_required_text(item.description, path=f"{path}.description"),
         domain=_group_key_domain(item, path=path),
         question_input_refs=question_input_refs,
+        derivation_input_refs=derivation_input_refs,
     )
 
 
@@ -606,6 +612,7 @@ def _question_input_uses(
 ) -> _ParsedQuestionInputUses:
     input_refs: list[str] = []
     group_key_input_refs: list[str] = []
+    group_key_derivation_input_refs: list[str] = []
     population_input_refs_by_use_id: dict[str, str] = {}
     compute_input_refs: list[str] = []
     result_limit_input_ref = ""
@@ -648,6 +655,15 @@ def _question_input_uses(
             group_key_input_refs.append(input_ref)
             continue
 
+        if owner_kind is provider_output.QuestionInputOwnerKind.GROUP_KEY_DERIVATION:
+            if group_domain is not GroupKeyDomainKind.SOURCE_RESULT_VALUES:
+                raise ValueError(
+                    f"{item_path}.owner_kind GROUP_KEY_DERIVATION requires "
+                    "SOURCE_RESULT_VALUES"
+                )
+            group_key_derivation_input_refs.append(input_ref)
+            continue
+
         if owner_kind is provider_output.QuestionInputOwnerKind.RESULT_LIMIT:
             if result_limit_input_ref:
                 raise ValueError("answer request may use at most one result limit")
@@ -671,9 +687,12 @@ def _question_input_uses(
         raise ValueError(
             "SPECIFIED_QUESTION_INPUTS requires at least one GROUP_KEY input use"
         )
+    if len(group_key_derivation_input_refs) > 1:
+        raise ValueError("group key may use at most one grouping grain")
     return _ParsedQuestionInputUses(
         input_refs=tuple(input_refs),
         group_key_input_refs=tuple(group_key_input_refs),
+        group_key_derivation_input_refs=tuple(group_key_derivation_input_refs),
         population_input_refs_by_use_id=population_input_refs_by_use_id,
         compute_input_refs=tuple(compute_input_refs),
         result_limit_input_ref=result_limit_input_ref,
@@ -715,11 +734,31 @@ def _validate_input_owner_kind(
         ):
             raise ValueError(f"{path} COMPUTE_EXPRESSION requires computed_scalar")
         return
+    if owner_kind is provider_output.QuestionInputOwnerKind.GROUP_KEY_DERIVATION:
+        if not (
+            isinstance(known_input, RequestedFactLiteralInput)
+            and known_input.is_grouping_grain
+        ):
+            raise ValueError(
+                f"{path} GROUP_KEY_DERIVATION requires a grouping_grain input"
+            )
+        if answer_expression.family != (
+            RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE.value
+        ):
+            raise ValueError(f"{path} GROUP_KEY_DERIVATION requires grouped_aggregate")
+        return
     if (
         isinstance(known_input, RequestedFactLiteralInput)
         and known_input.is_formula_value
     ):
         raise ValueError(f"{path} for formula_value input must be COMPUTE_EXPRESSION")
+    if (
+        isinstance(known_input, RequestedFactLiteralInput)
+        and known_input.is_grouping_grain
+    ):
+        raise ValueError(
+            f"{path} for grouping_grain input must be GROUP_KEY_DERIVATION"
+        )
     if known_input.is_result_limit:
         raise ValueError(f"{path} for result_limit input must be RESULT_LIMIT")
 

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from typing import Mapping
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing_extensions import assert_never
 
 from fervis.lookup.answer_program.expressions import (
@@ -25,7 +27,10 @@ from fervis.lookup.answer_program.values import (
 from fervis.lookup.canonical_data import RuntimeValue
 from fervis.lookup.outcomes.errors import UndefinedOperationError
 from fervis.lookup.outcomes.operation_semantics import division_undefined_reason
-from fervis.lookup.plan_execution.declared_values import declared_number
+from fervis.lookup.plan_execution.declared_values import (
+    declared_number,
+    parse_declared_value,
+)
 from fervis.lookup.plan_execution.errors import RelationEngineError
 from fervis.lookup.plan_execution.relations import Row
 
@@ -43,6 +48,8 @@ class ExpressionEnvironment:
     scalars: Mapping[str, RuntimeValue] | None = None
     scalar_types: Mapping[str, str] | None = None
     computed_outputs: Mapping[str, tuple[str, RuntimeValue]] | None = None
+    environment_values: Mapping[str, RuntimeValue] | None = None
+    environment_types: Mapping[str, str] | None = None
 
 
 def evaluate_expression(
@@ -64,7 +71,7 @@ def evaluate_expression(
             expression_input_id(item),
             environment=environment,
         ),
-        environment=lambda item: _environment(item),
+        environment=lambda item: _environment(item, environment=environment),
         unary=_unary,
         binary=_binary,
         function=_function,
@@ -111,8 +118,20 @@ def _output(
     return EvaluatedExpression(value=produced[1], value_type="decimal")
 
 
-def _environment(expression: EnvironmentRef) -> EvaluatedExpression:
-    raise RelationEngineError(f"unavailable expression environment {expression.key}")
+def _environment(
+    expression: EnvironmentRef,
+    *,
+    environment: ExpressionEnvironment,
+) -> EvaluatedExpression:
+    values = environment.environment_values or {}
+    if expression.key not in values:
+        raise RelationEngineError(
+            f"unavailable expression environment {expression.key}"
+        )
+    return EvaluatedExpression(
+        value=values[expression.key],
+        value_type=(environment.environment_types or {}).get(expression.key, ""),
+    )
 
 
 def _unary(
@@ -154,5 +173,46 @@ def _function(
     arguments: tuple[EvaluatedExpression, ...],
 ) -> EvaluatedExpression:
     if expression.function is ExpressionFunction.TEMPORAL_BUCKET:
-        raise RelationEngineError("temporal bucket expression is not enabled")
+        return _temporal_bucket(arguments)
     assert_never(expression.function)
+
+
+def _temporal_bucket(
+    arguments: tuple[EvaluatedExpression, ...],
+) -> EvaluatedExpression:
+    if len(arguments) != 3:
+        raise RelationEngineError("temporal bucket requires value, grain, and timezone")
+    raw_value, raw_grain, raw_timezone = arguments
+    if not isinstance(raw_grain.value, str):
+        raise RelationEngineError("temporal bucket grain must be string")
+    grain = raw_grain.value.strip().casefold()
+    if grain not in {"day", "week", "month", "quarter", "year"}:
+        raise RelationEngineError("temporal bucket grain is unsupported")
+    if not isinstance(raw_timezone.value, str) or not raw_timezone.value:
+        raise RelationEngineError("temporal bucket timezone must be named")
+    try:
+        timezone = ZoneInfo(raw_timezone.value)
+    except ZoneInfoNotFoundError as exc:
+        raise RelationEngineError("temporal bucket timezone is invalid") from exc
+    parsed = parse_declared_value(raw_value.value, raw_value.value_type)
+    if isinstance(parsed, datetime):
+        local = (
+            parsed.replace(tzinfo=timezone)
+            if parsed.tzinfo is None
+            else parsed.astimezone(timezone)
+        ).date()
+    elif isinstance(parsed, date):
+        local = parsed
+    else:
+        raise RelationEngineError("temporal bucket value must be date or datetime")
+    if grain == "day":
+        bucket = local
+    elif grain == "week":
+        bucket = local - timedelta(days=local.weekday())
+    elif grain == "month":
+        bucket = local.replace(day=1)
+    elif grain == "quarter":
+        bucket = local.replace(month=((local.month - 1) // 3) * 3 + 1, day=1)
+    else:
+        bucket = local.replace(month=1, day=1)
+    return EvaluatedExpression(value=bucket, value_type="date")

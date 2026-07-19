@@ -5,6 +5,7 @@ from __future__ import annotations
 from fervis.lookup.fact_planning.fact_planning_family_schema import (
     optional_pattern_schema,
 )
+from fervis.lookup.fact_planning import provider_contract as provider_output
 from fervis.lookup.fact_planning.schema_helpers import (
     field_id_schema,
     strict_object,
@@ -61,8 +62,7 @@ def _grouped_aggregate_pattern_answer_schema(
         group = choice.get("group")
         group_payload = group if isinstance(group, dict) else {}
         ordering_field_ids = tuple(
-            str(field_id)
-            for field_id in group_payload.get("field_ids", ())
+            str(field_id) for field_id in group_payload.get("field_ids", ())
         )
         if ordering_field_ids:
             properties["ordering_field"] = strict_object(
@@ -72,6 +72,22 @@ def _grouped_aggregate_pattern_answer_schema(
                 },
                 required=("selection_basis", "field_id"),
             )
+    raw_group_key_source_fields = choice.get("group_key_source_fields")
+    group_key_source_fields = tuple(
+        str(item.get("source_field_id") or "")
+        for item in (
+            raw_group_key_source_fields
+            if isinstance(raw_group_key_source_fields, (list, tuple))
+            else ()
+        )
+        if isinstance(item, dict) and str(item.get("source_field_id") or "")
+    )
+    if group_key_source_fields:
+        properties["group_key_source_field"] = (
+            provider_output.GroupKeySourceFieldOutput.schema(
+                {"source_field_id": field_id_schema(group_key_source_fields)}
+            )
+        )
     required: tuple[str, ...] = (
         "requested_fact_id",
         "pattern",
@@ -79,6 +95,8 @@ def _grouped_aggregate_pattern_answer_schema(
         "metric",
         "function",
     )
+    if group_key_source_fields:
+        required = (*required, "group_key_source_field")
     return strict_object(properties, required=required)
 
 

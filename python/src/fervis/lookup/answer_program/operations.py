@@ -88,9 +88,9 @@ class SortKey:
 
 
 @dataclass(frozen=True)
-class ProjectField:
-    source: str
-    output: str = ""
+class NamedExpression:
+    output_field: str
+    expression: Expression
 
 
 @dataclass(frozen=True)
@@ -119,7 +119,7 @@ class FilterSpec:
 @dataclass(frozen=True)
 class ProjectSpec:
     input_relation: str
-    fields: tuple[ProjectField, ...]
+    outputs: tuple[NamedExpression, ...]
     kind: OperationKind = field(default=OperationKind.PROJECT, init=False)
 
 
@@ -168,7 +168,7 @@ class AntiJoinSpec:
     candidate: RelationRoleRef
     observed: RelationRoleRef
     join_keys: tuple[JoinKey, ...]
-    output_fields: tuple[ProjectField, ...]
+    output_fields: tuple[NamedExpression, ...]
     kind: OperationKind = field(default=OperationKind.ANTI_JOIN, init=False)
 
 
@@ -180,7 +180,7 @@ class UniversalConditionSpec:
     subject_keys: tuple[JoinKey, ...]
     dimension_keys: tuple[JoinKey, ...]
     predicate: Predicate
-    output_fields: tuple[ProjectField, ...]
+    output_fields: tuple[NamedExpression, ...]
     kind: OperationKind = field(
         default=OperationKind.UNIVERSAL_CONDITION,
         init=False,

@@ -250,7 +250,7 @@ def test_lookup_cutover_grounded_named_entity_is_stored_as_memory_identity():
                     ],
                 }
             },
-        }
+        },
     )
     result = run_lookup_question(
         LookupRequest(
@@ -423,7 +423,7 @@ def test_lookup_orchestrator_repeated_named_target_does_not_reuse_inactive_memor
                     ],
                 }
             },
-        }
+        },
     )
     data_access = _DataAccessPort(
         {
@@ -598,7 +598,11 @@ def test_lookup_cutover_coalesces_identical_api_reads_for_multiple_row_relations
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="summary_rows",
-                        fields=(ProjectField(source="name"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="name", expression=FieldRef("name")
+                            ),
+                        ),
                     ),
                     output_relation="answer_rows",
                 ),
@@ -1577,28 +1581,28 @@ def test_lookup_cutover_resolves_generated_calendar_dates_from_time_values():
                         }
                     ],
                 }
+            },
+            question_contract=question_contract,
+            source_binding_invocation_overrides=(
+                {
+                    "requested_fact_id": "fact_1",
+                    "resolved_input_applications": (
+                        {
+                            "value_id": "grounded_fact_1_time_1",
+                            "value_component": "start",
+                            "target_kind": "request_parameter",
+                            "target_id": "interval_start",
+                        },
+                        {
+                            "value_id": "grounded_fact_1_time_1",
+                            "value_component": "end",
+                            "target_kind": "request_parameter",
+                            "target_id": "interval_end",
+                        },
+                    ),
                 },
-                question_contract=question_contract,
-                source_binding_invocation_overrides=(
-                    {
-                        "requested_fact_id": "fact_1",
-                        "resolved_input_applications": (
-                            {
-                                "value_id": "grounded_fact_1_time_1",
-                                "value_component": "start",
-                                "target_kind": "request_parameter",
-                                "target_id": "interval_start",
-                            },
-                            {
-                                "value_id": "grounded_fact_1_time_1",
-                                "value_component": "end",
-                                "target_kind": "request_parameter",
-                                "target_id": "interval_end",
-                            },
-                        ),
-                    },
-                ),
             ),
+        ),
     )
 
     result = run_lookup_question(

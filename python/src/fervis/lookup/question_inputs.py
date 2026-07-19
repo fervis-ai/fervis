@@ -16,6 +16,7 @@ class LiteralInputRole(StrEnum):
     REFERENCE_VALUE = "reference_value"
     TIME_VALUE = "time_value"
     FORMULA_VALUE = "formula_value"
+    GROUPING_GRAIN = "grouping_grain"
     RESULT_LIMIT = "result_limit"
 
 
@@ -23,6 +24,7 @@ _LITERAL_ROLE_PART_KINDS = {
     LiteralInputRole.REFERENCE_VALUE: "entity_identity",
     LiteralInputRole.TIME_VALUE: "time_scope",
     LiteralInputRole.FORMULA_VALUE: "computation_operand",
+    LiteralInputRole.GROUPING_GRAIN: "grouping_grain",
     LiteralInputRole.RESULT_LIMIT: "limit",
 }
 

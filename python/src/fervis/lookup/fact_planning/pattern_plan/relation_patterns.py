@@ -10,11 +10,12 @@ from fervis.lookup.answer_program.operations import (
     JoinKey,
     JoinSpec,
     Operation,
-    ProjectField,
+    NamedExpression,
     ProjectSpec,
     RelationRole,
     RelationRoleRef,
 )
+from fervis.lookup.answer_program.expressions import FieldRef
 from fervis.lookup.answer_program.result_projection import RelationResultOutput
 from fervis.lookup.answer_program.result_projection import (
     EntityKeyProjection,
@@ -145,7 +146,9 @@ def _compile_set_difference_answer(
                     )
                 ),
                 output_fields=tuple(
-                    ProjectField(source=field_id, output=field_id)
+                    NamedExpression(
+                        output_field=field_id, expression=FieldRef(field_id)
+                    )
                     for field_id in candidate_identity_fields
                 ),
             ),
@@ -365,10 +368,10 @@ def _compile_joined_rows_answer(
                 id=f"{output_relation_id}_project",
                 spec=ProjectSpec(
                     input_relation=joined_relation_id,
-                    fields=tuple(
-                        ProjectField(
-                            source=item["field_id"],
-                            output=item["output_field_id"],
+                    outputs=tuple(
+                        NamedExpression(
+                            output_field=item["output_field_id"],
+                            expression=FieldRef(item["field_id"]),
                         )
                         for item in output_fields
                     ),

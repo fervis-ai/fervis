@@ -1,0 +1,27 @@
+id: extended_projection_requires_temporal_timezone
+description: Temporal projection fails closed when its timezone environment value is absent.
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  scalar_inputs: [{id: day, value: day, value_type: string}]
+  relations:
+    - id: events
+      rows: [{occurred_at: "2026-04-01T02:30:00+00:00"}]
+      field_types: {occurred_at: datetime}
+  operations:
+    - id: by_day
+      output_relation: day_rows
+      spec:
+        kind: project
+        input_relation: events
+        fields:
+          - source: occurred_at
+            output: bucket
+            expression:
+              function: temporal_bucket
+              arguments:
+                - {field: occurred_at}
+                - {value: {input_ref: day}}
+                - {environment: ANCHOR_TIMEZONE}
+expect:
+  result_contains: {status: rejected}

@@ -87,6 +87,8 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
                 scalar_proofs,
                 scalar_types,
                 computed_outputs,
+                environment_values=dict(engine_input.environment_values or {}),
+                environment_types=dict(engine_input.environment_types or {}),
                 operation_proof_refs=operation_proof_refs,
             )
         except IncompleteEvidenceError as exc:
@@ -154,6 +156,8 @@ def _execute_operation(
     scalar_types: dict[str, str],
     computed_outputs: dict[str, tuple[str, RuntimeValue]],
     *,
+    environment_values: dict[str, RuntimeValue],
+    environment_types: dict[str, str],
     operation_proof_refs: dict[str, tuple[str, ...]],
 ) -> RelationRows | RuntimeValue:
     spec = operation.spec
@@ -168,7 +172,17 @@ def _execute_operation(
             operation_refs=operation_proof_refs.get(operation.id, ()),
         )
     if isinstance(spec, ProjectSpec):
-        return _project(operation, spec, relations)
+        return _project(
+            operation,
+            spec,
+            relations,
+            scalars,
+            scalar_proofs,
+            scalar_types,
+            computed_outputs,
+            environment_values=environment_values,
+            environment_types=environment_types,
+        )
     if isinstance(spec, ProjectToKeySpec):
         return _project_to_key(operation, spec, relations)
     if isinstance(spec, JoinSpec):

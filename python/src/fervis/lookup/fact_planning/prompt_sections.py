@@ -118,6 +118,15 @@ def fact_plan_instruction_sections(
                 ),
             )
         )
+        sections.append(
+            builder.instruction_block(
+                "Derived Group Key",
+                (
+                    "When group_key_source_fields are shown, select exactly one source_field_id whose declared value is divided into the requested groups.",
+                    "The grouping_grain input already fixes the bucket size. Do not copy or reinterpret it.",
+                ),
+            )
+        )
     if "computed_scalar" in plan_shapes:
         sections.append(
             builder.instruction_block(
@@ -199,12 +208,8 @@ def _list_field_pattern_lines(plan_shapes: frozenset[str]) -> tuple[str, ...]:
     )
 
 
-_LIST_FIELD_PLAN_SHAPES = frozenset(
-    {"list_rows", "grouped_rows", "direct_field_value"}
-)
-_METRIC_PLAN_SHAPES = frozenset(
-    {"aggregate_scalar", "aggregate_by_group"}
-)
+_LIST_FIELD_PLAN_SHAPES = frozenset({"list_rows", "grouped_rows", "direct_field_value"})
+_METRIC_PLAN_SHAPES = frozenset({"aggregate_scalar", "aggregate_by_group"})
 _SOURCE_BINDING_ID_PLAN_SHAPES = frozenset(
     {
         "list_rows",

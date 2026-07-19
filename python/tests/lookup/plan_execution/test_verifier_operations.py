@@ -19,7 +19,7 @@ from fervis.lookup.answer_program.operations import (
     Operation,
     Predicate,
     PredicateOperator,
-    ProjectField,
+    NamedExpression,
     ProjectSpec,
     OrderSpec,
     RelationRole,
@@ -231,11 +231,11 @@ def _fulfillment(
 def _render_field(operation: Operation) -> str:
     spec = operation.spec
     if isinstance(spec, AntiJoinSpec):
-        return spec.output_fields[0].output or spec.output_fields[0].source
+        return spec.output_fields[0].output_field
     if isinstance(spec, UniversalConditionSpec):
-        return spec.output_fields[0].output or spec.output_fields[0].source
+        return spec.output_fields[0].output_field
     if isinstance(spec, ProjectSpec):
-        return spec.fields[0].output or spec.fields[0].source
+        return spec.outputs[0].output_field
     if isinstance(spec, AggregateSpec):
         return spec.group_by[0] if spec.group_by else spec.aggregations[0].output_field
     return "name"
@@ -339,7 +339,11 @@ def test_anti_join_requires_role_refs_join_keys_and_output_fields():
                 required_identity_fields=("observed.id",),
             ),
             join_keys=(),
-            output_fields=(ProjectField(source="candidate.name"),),
+            output_fields=(
+                NamedExpression(
+                    output_field="candidate.name", expression=FieldRef("candidate.name")
+                ),
+            ),
         ),
         output_relation="result",
     )
@@ -357,7 +361,11 @@ def test_anti_join_requires_role_refs_join_keys_and_output_fields():
                 required_identity_fields=("observed.id",),
             ),
             join_keys=(JoinKey(left="candidate.id", right="observed.id"),),
-            output_fields=(ProjectField(source="candidate.name"),),
+            output_fields=(
+                NamedExpression(
+                    output_field="candidate.name", expression=FieldRef("candidate.name")
+                ),
+            ),
         ),
         output_relation="result",
     )
@@ -383,7 +391,11 @@ def test_anti_join_rejects_identity_binding_as_output_field():
                     required_identity_fields=("observed.id",),
                 ),
                 join_keys=(JoinKey(left="candidate.id", right="observed.id"),),
-                output_fields=(ProjectField(source="candidate.id"),),
+                output_fields=(
+                    NamedExpression(
+                        output_field="candidate.id", expression=FieldRef("candidate.id")
+                    ),
+                ),
             ),
             output_relation="result",
         )
@@ -415,7 +427,11 @@ def test_universal_condition_requires_subject_dimension_and_predicate():
             subject_keys=(JoinKey(left="subject_id", right="obs_subject_id"),),
             dimension_keys=(JoinKey(left="dimension_id", right="obs_dimension_id"),),
             predicate=Predicate(left=FieldRef("invalid"), operator=""),
-            output_fields=(ProjectField(source="subject_name"),),
+            output_fields=(
+                NamedExpression(
+                    output_field="subject_name", expression=FieldRef("subject_name")
+                ),
+            ),
         ),
         output_relation="result",
     )
@@ -444,7 +460,11 @@ def test_universal_condition_requires_subject_dimension_and_predicate():
                 operator=PredicateOperator.LTE,
                 right=FieldRef("field.other"),
             ),
-            output_fields=(ProjectField(source="subject_name"),),
+            output_fields=(
+                NamedExpression(
+                    output_field="subject_name", expression=FieldRef("subject_name")
+                ),
+            ),
         ),
         output_relation="result",
     )
@@ -521,7 +541,11 @@ def test_compute_references_declared_value_origins_only():
                         id="project_answer",
                         spec=ProjectSpec(
                             input_relation="rows",
-                            fields=(ProjectField(source="name", output="name"),),
+                            outputs=(
+                                NamedExpression(
+                                    output_field="name", expression=FieldRef("name")
+                                ),
+                            ),
                         ),
                         output_relation="result",
                     ),
@@ -595,7 +619,11 @@ def test_one_answer_output_can_be_fulfilled_by_multiple_distinct_result_outputs(
                     id="project_day_1",
                     spec=ProjectSpec(
                         input_relation="day_1_rows",
-                        fields=(ProjectField(source="amount", output="amount"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="amount", expression=FieldRef("amount")
+                            ),
+                        ),
                     ),
                     output_relation="day_1_result",
                 ),
@@ -603,7 +631,11 @@ def test_one_answer_output_can_be_fulfilled_by_multiple_distinct_result_outputs(
                     id="project_day_2",
                     spec=ProjectSpec(
                         input_relation="day_2_rows",
-                        fields=(ProjectField(source="amount", output="amount"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="amount", expression=FieldRef("amount")
+                            ),
+                        ),
                     ),
                     output_relation="day_2_result",
                 ),
@@ -694,7 +726,11 @@ def test_scalar_only_terminal_answer_cannot_launder_unrelated_relation_evidence(
                     id="project_unrelated_evidence",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(ProjectField(source="name"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="name", expression=FieldRef("name")
+                            ),
+                        ),
                     ),
                     output_relation="unrelated_evidence",
                 ),
@@ -738,7 +774,11 @@ def test_unprojected_compute_outputs_are_not_legal_answer_work():
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(ProjectField(source="name"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="name", expression=FieldRef("name")
+                            ),
+                        ),
                     ),
                     output_relation="result",
                 ),
@@ -780,9 +820,13 @@ def test_result_output_ids_must_be_unique():
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(
-                            ProjectField(source="name"),
-                            ProjectField(source="total"),
+                        outputs=(
+                            NamedExpression(
+                                output_field="name", expression=FieldRef("name")
+                            ),
+                            NamedExpression(
+                                output_field="total", expression=FieldRef("total")
+                            ),
                         ),
                     ),
                     output_relation="result",
@@ -811,7 +855,9 @@ def test_relation_answer_requires_result_outputs():
             id="project",
             spec=ProjectSpec(
                 input_relation="rows",
-                fields=(ProjectField(source="name"),),
+                outputs=(
+                    NamedExpression(output_field="name", expression=FieldRef("name")),
+                ),
             ),
             output_relation="result",
         )
@@ -842,7 +888,9 @@ def test_project_requires_output_relation():
             id="project",
             spec=ProjectSpec(
                 input_relation="rows",
-                fields=(ProjectField(source="name"),),
+                outputs=(
+                    NamedExpression(output_field="name", expression=FieldRef("name")),
+                ),
             ),
         )
     )
@@ -943,9 +991,13 @@ def test_project_and_aggregate_reject_duplicate_output_fields():
         id="project",
         spec=ProjectSpec(
             input_relation="rows",
-            fields=(
-                ProjectField(source="field.first", output="value"),
-                ProjectField(source="field.second", output="value"),
+            outputs=(
+                NamedExpression(
+                    output_field="value", expression=FieldRef("field.first")
+                ),
+                NamedExpression(
+                    output_field="value", expression=FieldRef("field.second")
+                ),
             ),
         ),
         output_relation="result",

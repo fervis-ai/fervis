@@ -102,9 +102,15 @@ def _metric_answer_plan() -> FactPlan:
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(
-                            ProjectField(source="location_id"),
-                            ProjectField(source="metric_total"),
+                        outputs=(
+                            NamedExpression(
+                                output_field="location_id",
+                                expression=FieldRef("location_id"),
+                            ),
+                            NamedExpression(
+                                output_field="metric_total",
+                                expression=FieldRef("metric_total"),
+                            ),
                         ),
                     ),
                     output_relation="answer_rows",
@@ -438,10 +444,15 @@ def _source_description_inner(
         return bindings.get(relation_id, {}).get(field_id, field_id)
     spec = operation.spec
     if isinstance(spec, ProjectSpec):
-        for field in spec.fields:
-            if (field.output or field.source) == field_id:
+        for field in spec.outputs:
+            if field.output_field == field_id and isinstance(
+                field.expression, FieldRef
+            ):
                 return _source_description_inner(
-                    answer, spec.input_relation, field.source, seen=seen
+                    answer,
+                    spec.input_relation,
+                    field.expression.field_id,
+                    seen=seen,
                 )
     if isinstance(spec, AggregateSpec):
         if field_id in spec.group_by:
@@ -458,11 +469,13 @@ def _source_description_inner(
                 )
     if isinstance(spec, AntiJoinSpec):
         for field in spec.output_fields:
-            if (field.output or field.source) == field_id:
+            if field.output_field == field_id and isinstance(
+                field.expression, FieldRef
+            ):
                 return _source_description_inner(
                     answer,
                     spec.candidate.relation_id,
-                    field.source,
+                    field.expression.field_id,
                     seen=seen,
                 )
     return field_id

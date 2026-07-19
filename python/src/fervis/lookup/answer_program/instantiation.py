@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Mapping
 
 from fervis.lineage.enums import (
     ContributionOrigin,
@@ -32,6 +32,7 @@ from fervis.lookup.answer_program.values import (
     FactValue,
     ParameterRef,
 )
+from fervis.lookup.canonical_data import RuntimeValue
 from fervis.lookup.answer_program.operations import (
     ComputeSpec,
     FilterSpec,
@@ -80,6 +81,8 @@ class ExecutionEnvironment:
     catalog_selection: CatalogSelectionResult | None = None
     memory_relations: tuple[RelationRows, ...] = ()
     authority_ref: str = ""
+    expression_values: Mapping[str, RuntimeValue] | None = None
+    expression_types: Mapping[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -165,6 +168,8 @@ class _MaterializedExecution:
     proof_graph: ExecutionProofGraph
     effective_requested_facts: tuple[RequestedFact, ...]
     operation_inputs: tuple[ResolvedOperationInput, ...] = ()
+    expression_values: Mapping[str, RuntimeValue] | None = None
+    expression_types: Mapping[str, str] | None = None
 
     @property
     def proof_node_refs_by_result_output_id(self) -> dict[str, tuple[str, ...]]:
@@ -271,6 +276,8 @@ def instantiate_answer_program(
         proof_graph=materialized.proof_graph,
         effective_requested_facts=materialized.effective_requested_facts,
         operation_inputs=materialized.operation_inputs,
+        expression_values=environment.expression_values,
+        expression_types=environment.expression_types,
     )
 
 

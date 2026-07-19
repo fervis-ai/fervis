@@ -143,7 +143,11 @@ def test_lookup_question_contract_cannot_short_circuit_into_clarification():
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="metric_rows",
-                        fields=(ProjectField(source="store_name", output="store"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="store", expression=FieldRef("store_name")
+                            ),
+                        ),
                     ),
                     output_relation="answer_rows",
                 ),
@@ -541,7 +545,12 @@ def test_lookup_follow_up_memory_stays_out_of_question_contract_prompt():
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(ProjectField(source="metric_total"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="metric_total",
+                                expression=FieldRef("metric_total"),
+                            ),
+                        ),
                     ),
                     output_relation="answer_rows",
                 ),

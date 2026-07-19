@@ -1,6 +1,12 @@
 """Scalar-input helpers for fact-plan verification."""
 
-from ._shared import ComputeSpec, FilterSpec, Operation, UniversalConditionSpec
+from ._shared import (
+    ComputeSpec,
+    FilterSpec,
+    Operation,
+    ProjectSpec,
+    UniversalConditionSpec,
+)
 from fervis.lookup.answer_program.operations import (
     Predicate,
 )
@@ -21,6 +27,26 @@ def _operation_scalar_inputs(operation: Operation) -> tuple[str, ...]:
         )
     if isinstance(spec, FilterSpec):
         return _predicate_scalar_inputs(spec.predicate)
+    if isinstance(spec, ProjectSpec):
+        project_references = tuple(
+            expression_references(output.expression) for output in spec.outputs
+        )
+        return tuple(
+            dict.fromkeys(
+                (
+                    *(
+                        item.output_id
+                        for refs in project_references
+                        for item in refs.outputs
+                    ),
+                    *(
+                        item.parameter_id
+                        for refs in project_references
+                        for item in refs.parameters
+                    ),
+                )
+            )
+        )
     if isinstance(spec, UniversalConditionSpec):
         return _predicate_scalar_inputs(spec.predicate)
     return ()

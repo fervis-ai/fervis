@@ -22,7 +22,7 @@ from fervis.lookup.answer_program.operations import (
     Predicate,
     RelationRoleRef,
 )
-from fervis.lookup.answer_program.expressions import expression_references
+from fervis.lookup.answer_program.expressions import FieldRef, expression_references
 
 
 def _verify_answer_uses_evidence_input(answer: AnswerProgram) -> None:
@@ -86,7 +86,7 @@ def _operation_field_outputs(operations: tuple[Operation, ...]) -> set[str]:
                 elif aggregation.output_field:
                     outputs.add(aggregation.output_field)
         elif isinstance(spec, ProjectSpec):
-            outputs.update(field.output or field.source for field in spec.fields)
+            outputs.update(output.output_field for output in spec.outputs)
         elif isinstance(spec, ProjectToKeySpec):
             outputs.update(spec.key_fields)
     return outputs
@@ -157,7 +157,11 @@ def _verify_coverage_operation_relation_contracts(
                 )
                 _verify_role_relation_fields(
                     contract=candidate,
-                    fields=tuple(field.source for field in spec.output_fields),
+                    fields=tuple(
+                        output.expression.field_id
+                        for output in spec.output_fields
+                        if isinstance(output.expression, FieldRef)
+                    ),
                     expected_role=FieldBindingRole.OUTPUT,
                     role="anti_join.candidate",
                 )
@@ -199,7 +203,11 @@ def _verify_coverage_operation_relation_contracts(
                 )
                 _verify_role_relation_fields(
                     contract=candidate,
-                    fields=tuple(field.source for field in spec.output_fields),
+                    fields=tuple(
+                        output.expression.field_id
+                        for output in spec.output_fields
+                        if isinstance(output.expression, FieldRef)
+                    ),
                     expected_role=FieldBindingRole.OUTPUT,
                     role="universal_condition.candidate_subject",
                 )

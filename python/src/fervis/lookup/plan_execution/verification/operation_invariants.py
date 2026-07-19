@@ -13,6 +13,7 @@ from fervis.lookup.answer_program.operations import (
     CrossJoinSpec,
     FilterSpec,
     JoinSpec,
+    NamedExpression,
     Operation,
     Predicate,
     PredicateOperator,
@@ -29,7 +30,7 @@ from fervis.lookup.answer_program.operations import (
     UnionSpec,
     UniversalConditionSpec,
 )
-from fervis.lookup.answer_program.expressions import expression_references
+from fervis.lookup.answer_program.expressions import FieldRef, expression_references
 
 
 BINARY_PREDICATE_OPERATORS = frozenset(
@@ -61,10 +62,10 @@ def verify_operation(operation: Operation) -> None:
         _require_predicate(spec.predicate, "filter")
     elif isinstance(spec, ProjectSpec):
         _require_input(spec.input_relation, "project")
-        if not spec.fields:
+        if not spec.outputs:
             raise VerificationError("project requires fields")
         _require_unique_fields(
-            tuple(field.output or field.source for field in spec.fields),
+            tuple(output.output_field for output in spec.outputs),
             "project",
         )
     elif isinstance(spec, ProjectToKeySpec):
@@ -106,11 +107,13 @@ def verify_operation(operation: Operation) -> None:
         if not spec.output_fields:
             raise VerificationError("anti_join requires output fields")
         _require_unique_fields(
-            tuple(field.output or field.source for field in spec.output_fields),
+            tuple(output.output_field for output in spec.output_fields),
             "anti_join",
         )
+        _require_direct_projections(spec.output_fields, "anti_join")
     elif isinstance(spec, UniversalConditionSpec):
         _require_universal_condition(spec)
+        _require_direct_projections(spec.output_fields, "universal_condition")
     elif isinstance(spec, AggregateSpec):
         _require_input(spec.input_relation, "aggregate")
         if not spec.aggregations:
@@ -122,6 +125,14 @@ def verify_operation(operation: Operation) -> None:
         _require_compute(spec)
     else:
         assert_never(spec)
+
+
+def _require_direct_projections(
+    outputs: tuple[NamedExpression, ...],
+    label: str,
+) -> None:
+    if any(not isinstance(output.expression, FieldRef) for output in outputs):
+        raise VerificationError(f"{label} output requires direct field expression")
 
 
 def _require_input(input_relation: str, label: str) -> None:
@@ -165,7 +176,7 @@ def _require_universal_condition(spec: UniversalConditionSpec) -> None:
         raise VerificationError("universal_condition requires output fields")
     _require_predicate(spec.predicate, "universal_condition")
     _require_unique_fields(
-        tuple(field.output or field.source for field in spec.output_fields),
+        tuple(output.output_field for output in spec.output_fields),
         "universal_condition",
     )
 
@@ -190,9 +201,10 @@ def _require_order(spec: OrderSpec) -> None:
     _require_sort_keys(spec.order_by, "order")
     if not isinstance(spec.selection, (KeepAll, Take)):
         raise VerificationError("order requires a selection")
-    if isinstance(spec.selection, Take) and not expression_references(
-        spec.selection.limit
-    ).leaves:
+    if (
+        isinstance(spec.selection, Take)
+        and not expression_references(spec.selection.limit).leaves
+    ):
         raise VerificationError("order take limit requires an expression")
     if not spec.tie_breakers:
         raise VerificationError("order requires deterministic tie breakers")

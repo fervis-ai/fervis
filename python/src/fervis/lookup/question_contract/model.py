@@ -219,6 +219,7 @@ class RequestedFactGroupKey:
     description: str
     domain: GroupKeyDomainKind
     question_input_refs: tuple[str, ...] = ()
+    derivation_input_refs: tuple[str, ...] = ()
     id: str = "group_key"
 
     def __post_init__(self) -> None:
@@ -235,8 +236,22 @@ class RequestedFactGroupKey:
             object.__setattr__(self, "question_input_refs", refs)
         if len(set(refs)) != len(refs):
             raise ValueError("group key repeats question input")
+        derivation_refs = tuple(
+            str(item).strip()
+            for item in self.derivation_input_refs
+            if str(item).strip()
+        )
+        if derivation_refs != self.derivation_input_refs:
+            object.__setattr__(self, "derivation_input_refs", derivation_refs)
+        if len(set(derivation_refs)) != len(derivation_refs):
+            raise ValueError("group key repeats derivation input")
         if self.domain == GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS and not refs:
             raise ValueError("specified group key requires question inputs")
+        if (
+            self.domain == GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS
+            and derivation_refs
+        ):
+            raise ValueError("specified group key cannot carry derivation inputs")
         if self.domain == GroupKeyDomainKind.SOURCE_RESULT_VALUES and refs:
             raise ValueError("source-result group key cannot carry input refs")
 
@@ -248,6 +263,8 @@ class RequestedFactGroupKey:
         }
         if self.question_input_refs:
             payload["question_input_refs"] = list(self.question_input_refs)
+        if self.derivation_input_refs:
+            payload["derivation_input_refs"] = list(self.derivation_input_refs)
         return payload
 
     def to_answer_request_dict(self) -> dict[str, object]:
@@ -257,6 +274,8 @@ class RequestedFactGroupKey:
         }
         if self.question_input_refs:
             payload["question_input_refs"] = list(self.question_input_refs)
+        if self.derivation_input_refs:
+            payload["derivation_input_refs"] = list(self.derivation_input_refs)
         return payload
 
 
@@ -330,7 +349,10 @@ class RequestedFactAnswerExpression:
             raise ValueError("ordering requires basis and direction")
         if not relation_valued and self.ordering_direction is not None:
             raise ValueError("ordering requires a relation-valued answer expression")
-        if self.selection_kind in {ResultSelectionKind.TAKE_ONE, ResultSelectionKind.TAKE}:
+        if self.selection_kind in {
+            ResultSelectionKind.TAKE_ONE,
+            ResultSelectionKind.TAKE,
+        }:
             if self.ordering_direction is None:
                 raise ValueError("take selection requires ordering")
         if self.selection_kind is ResultSelectionKind.TAKE:
@@ -401,6 +423,11 @@ class RequestedFactLiteralInput:
             literal_type, _ = normalize_scalar_literal_text(self.resolved_value_text)
             if literal_type != "number":
                 raise ValueError("formula_value requires a numeric scalar literal")
+        if self.role == LiteralInputRole.GROUPING_GRAIN:
+            grain = self.resolved_value_text.strip().casefold()
+            if grain not in {"day", "week", "month", "quarter", "year"}:
+                raise ValueError("grouping_grain requires a supported temporal grain")
+            object.__setattr__(self, "resolved_value_text", grain)
         if self.source == KnownInputSource.CONVERSATION_RESOLUTION:
             if not self.resolved_input_ref.strip():
                 raise ValueError(
@@ -430,6 +457,10 @@ class RequestedFactLiteralInput:
     @property
     def is_formula_value(self) -> bool:
         return self.role == LiteralInputRole.FORMULA_VALUE
+
+    @property
+    def is_grouping_grain(self) -> bool:
+        return self.role == LiteralInputRole.GROUPING_GRAIN
 
     def to_model_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -857,13 +888,14 @@ class RequestedFact:
         if (
             self.answer_expression is not None
             and self.answer_expression.group_key is not None
-            and self.answer_expression.group_key.domain
-            == GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS
         ):
             input_ref_set = set(input_refs)
             unknown_refs = tuple(
                 ref
-                for ref in self.answer_expression.group_key.question_input_refs
+                for ref in (
+                    *self.answer_expression.group_key.question_input_refs,
+                    *self.answer_expression.group_key.derivation_input_refs,
+                )
                 if ref not in input_ref_set
             )
             if unknown_refs:

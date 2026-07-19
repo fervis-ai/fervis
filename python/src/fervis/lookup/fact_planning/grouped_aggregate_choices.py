@@ -42,6 +42,7 @@ from fervis.lookup.source_binding import (
     entity_evidence_entity_kind,
     entity_evidence_key_id,
 )
+from fervis.lookup.question_contract import RequestedFact
 
 
 GROUPED_AGGREGATE_PLAN_SHAPES = frozenset({"aggregate_by_group"})
@@ -76,6 +77,7 @@ class GroupedAggregateSelection:
     group_entity_components: tuple[tuple[str, str], ...]
     metric: CompiledMetric
     answer_outputs: tuple[GroupedAggregateResultOutput, ...]
+    group_key_source_field_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -202,6 +204,7 @@ def selected_grouped_aggregate_operation(
     answer: GroupedAggregateAnswerOutput,
     *,
     bound_sources: dict[str, BoundSource],
+    requested_fact: RequestedFact | None = None,
 ) -> GroupedAggregateSelection:
     requested_fact_id = answer.requested_fact_id
     plan_shape = answer.pattern
@@ -240,6 +243,11 @@ def selected_grouped_aggregate_operation(
     )
     if not answer_outputs:
         raise ValueError("grouped aggregate selection produces no answer outputs")
+    group_key_source_field_id = _selected_group_key_source_field(
+        answer,
+        choice,
+        requested_fact=requested_fact,
+    )
     return GroupedAggregateSelection(
         source_binding_id=source_binding_id,
         fulfills_answer_output_ids=tuple(
@@ -255,6 +263,57 @@ def selected_grouped_aggregate_operation(
             answer_output_id=_metric_answer_output_id(metric, answer_outputs),
         ),
         answer_outputs=answer_outputs,
+        group_key_source_field_id=group_key_source_field_id,
+    )
+
+
+def _selected_group_key_source_field(
+    answer: GroupedAggregateAnswerOutput,
+    choice: Mapping[str, Any],
+    *,
+    requested_fact: RequestedFact | None,
+) -> str:
+    group_key = (
+        requested_fact.answer_expression.group_key
+        if requested_fact is not None and requested_fact.answer_expression is not None
+        else None
+    )
+    candidates = (
+        tuple(
+            _text(item.get("source_field_id"))
+            for item in group_key_source_field_candidates(choice)
+        )
+        if group_key is not None and group_key.derivation_input_refs
+        else ()
+    )
+    selected = (
+        answer.group_key_source_field.source_field_id
+        if answer.group_key_source_field is not None
+        else ""
+    )
+    if candidates and selected not in candidates:
+        raise ValueError("group key source field is not a shown candidate")
+    if not candidates and selected:
+        raise ValueError("group key source field is unavailable")
+    return selected
+
+
+def group_key_source_field_candidates(
+    choice: Mapping[str, Any],
+) -> tuple[dict[str, str], ...]:
+    """Return evidence-backed temporal fields eligible for group-key derivation."""
+
+    group = choice.get("group")
+    if not isinstance(group, dict):
+        return ()
+    return tuple(
+        {"source_field_id": str(field_id), "type": str(type_name)}
+        for field_id, type_name in zip(
+            group.get("field_ids") or (),
+            group.get("types") or (),
+            strict=True,
+        )
+        if str(type_name).strip().casefold() in {"date", "datetime"}
     )
 
 
@@ -752,6 +811,13 @@ def _choice_xml_lines(choice: Mapping[str, Any], *, indent: str) -> list[str]:
     lines.append(
         f'{indent}    <group fields="{_xml(" ".join(_texts(group.get("field_ids"))))}" key_id="{_xml(_text(group.get("key_id")))}" entity_kind="{_xml(_text(group.get("entity_kind")))}" source="source_binding" />'
     )
+    if choice.get("group_key_source_fields"):
+        lines.append(f"{indent}    <group_key_source_fields>")
+        for item in choice.get("group_key_source_fields") or ():
+            lines.append(
+                f'{indent}      <field source_field_id="{_xml(_text(item.get("source_field_id")))}" type="{_xml(_text(item.get("type")))}" />'
+            )
+        lines.append(f"{indent}    </group_key_source_fields>")
     lines.append(f"{indent}    <metric_candidates>")
     for item in choice.get("metric_candidates") or ():
         if _text(item.get("kind")) == "count_records":

@@ -30,7 +30,7 @@ from fervis.lookup.answer_program.operations import (
     JoinSpec,
     OrderSpec,
     Predicate,
-    ProjectField,
+    NamedExpression,
     ProjectSpec,
     ProjectToKeySpec,
     RelationRole,
@@ -39,6 +39,7 @@ from fervis.lookup.answer_program.operations import (
     UnionSpec,
     UniversalConditionSpec,
 )
+from fervis.lookup.answer_program.expressions import FieldRef
 from fervis.lookup.plan_execution.operation_runtime import (
     ExecutableOperation,
 )
@@ -109,7 +110,7 @@ def _require_grain(
 
 def _project_output(
     row: Row,
-    fields: tuple[ProjectField, ...],
+    fields: tuple[NamedExpression, ...],
     *,
     grain_keys: tuple[str, ...] = (),
 ) -> dict[str, RuntimeValue]:
@@ -117,8 +118,14 @@ def _project_output(
     for grain_field in grain_keys:
         _assign_or_match(output, grain_field, _field(row, grain_field))
     for field in fields:
+        if not isinstance(field.expression, FieldRef):
+            raise RelationEngineError(
+                "role projection requires direct field expressions"
+            )
         _assign_or_match(
-            output, field.output or field.source, _field(row, field.source)
+            output,
+            field.output_field,
+            _field(row, field.expression.field_id),
         )
     return output
 
@@ -199,11 +206,15 @@ def _operation_relation(
 
 def _project_grain(
     input_relation: RelationRows,
-    fields: tuple[ProjectField, ...],
+    fields: tuple[NamedExpression, ...],
 ) -> tuple[str, ...]:
     if not input_relation.grain_keys:
         return ()
-    projections = {field.source: field.output or field.source for field in fields}
+    projections = {
+        field.expression.field_id: field.output_field
+        for field in fields
+        if isinstance(field.expression, FieldRef)
+    }
     if not all(field in projections for field in input_relation.grain_keys):
         return ()
     return tuple(projections[field] for field in input_relation.grain_keys)
@@ -277,8 +288,8 @@ def _input_relations(
         spec,
         (
             FilterSpec,
-    ProjectSpec,
-    OrderSpec,
+            ProjectSpec,
+            OrderSpec,
             ProjectToKeySpec,
             RoleExpandSpec,
             AggregateSpec,

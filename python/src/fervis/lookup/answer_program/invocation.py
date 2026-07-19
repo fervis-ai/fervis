@@ -210,6 +210,8 @@ def execute_verified_program(
             relations=relations,
             operations=execution.operations,
             scalar_inputs=_operation_scalar_inputs(execution),
+            environment_values=execution.expression_values,
+            environment_types=execution.expression_types,
             operation_proof_refs=execution.operation_proof_refs,
         )
     )

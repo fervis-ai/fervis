@@ -69,7 +69,7 @@ from fervis.lookup.plan_selection import (
 
 
 _APPROVED_CHARS = {
-    "question contract": (364, 21389, 36694),
+    "question contract": (364, 21906, 38220),
     "query enrichment": (364, 5185, 7408),
     "grounding": (364, 7202, 10861),
     "source binding": (364, 16300, 20170),
@@ -131,7 +131,7 @@ def test_question_contract_prompt_states_relational_ownership_together():
             "Relational Ownership",
             "answer_subject: Kind of candidate instance to which answer_expression applies.",
             "answer_population: Candidate instances qualifying independently, before cross-instance operations.",
-        "answer_expression: The base operation over qualifying candidates, plus any requested ordering and result selection.",
+            "answer_expression: The base operation over qualifying candidates, plus any requested ordering and result selection.",
             "answer_outputs: Values or facts projected from the result.",
         )
     )
@@ -194,7 +194,9 @@ def test_question_contract_prompt_assigns_input_ownership_once() -> None:
     assert "computation operand" not in invocation.prompt_text
 
 
-def test_question_contract_prompt_resolves_prior_references_before_contracting() -> None:
+def test_question_contract_prompt_resolves_prior_references_before_contracting() -> (
+    None
+):
     invocation = next(
         item for item in _turn_invocations() if item.turn_name == "question contract"
     )

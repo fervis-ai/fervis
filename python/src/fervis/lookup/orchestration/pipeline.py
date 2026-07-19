@@ -891,6 +891,8 @@ def _run_continue_prior_request_program(
             authorized_sources=execution_sources,
             memory_relations=state.memory.relations,
             authority_ref=state.request.authority_ref,
+            expression_values=_answer_program_expression_values(state),
+            expression_types={"ANCHOR_TIMEZONE": "string"},
         ),
         invocation_binding=_program_invocation_binding(state),
         question_contract_step_id=(
@@ -1241,6 +1243,8 @@ def _run_execution_phase(state: _LookupPipelineState) -> LookupResult:
             catalog_selection=state.catalog_selection,
             memory_relations=state.memory.relations,
             authority_ref=state.request.authority_ref,
+            expression_values=_answer_program_expression_values(state),
+            expression_types={"ANCHOR_TIMEZONE": "string"},
         ),
         invocation_binding=_program_invocation_binding(state),
         question_contract_step_id=model_turn_step_id(
@@ -1290,6 +1294,15 @@ def _source_binding_terminal_result(
             usage=_source_binding_usage(state),
         )
     return None
+
+
+def _answer_program_expression_values(
+    state: _LookupPipelineState,
+) -> dict[str, str]:
+    runtime_values = state.request.runtime_values
+    return {
+        "ANCHOR_TIMEZONE": runtime_values.timezone if runtime_values is not None else ""
+    }
 
 
 def _pattern_plan_terminal_result(state: _LookupPipelineState) -> LookupResult | None:

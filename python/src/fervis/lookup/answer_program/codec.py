@@ -572,7 +572,7 @@ _CONTRACT_TYPES = (
     operations.OperationKind,
     operations.Predicate,
     operations.PredicateOperator,
-    operations.ProjectField,
+    operations.NamedExpression,
     operations.ProjectSpec,
     operations.ProjectToKeySpec,
     operations.KeepAll,

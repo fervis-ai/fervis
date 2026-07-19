@@ -143,7 +143,12 @@ def test_lookup_cutover_rejects_non_empty_incomplete_final_relation():
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(ProjectField(source="metric_total"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="metric_total",
+                                expression=FieldRef("metric_total"),
+                            ),
+                        ),
                     ),
                     output_relation="answer_rows",
                 ),
@@ -220,7 +225,12 @@ def test_lookup_rejects_missing_required_endpoint_param_during_source_binding():
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(ProjectField(source="metric_total"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="metric_total",
+                                expression=FieldRef("metric_total"),
+                            ),
+                        ),
                     ),
                     output_relation="answer_rows",
                 ),
@@ -308,9 +318,15 @@ def test_lookup_cutover_rejects_unknown_api_read_before_execution():
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(
-                            ProjectField(source="location_name", output="location"),
-                            ProjectField(source="metric_total"),
+                        outputs=(
+                            NamedExpression(
+                                output_field="location",
+                                expression=FieldRef("location_name"),
+                            ),
+                            NamedExpression(
+                                output_field="metric_total",
+                                expression=FieldRef("metric_total"),
+                            ),
                         ),
                     ),
                     output_relation="answer_rows",

@@ -1945,9 +1945,10 @@ def _pattern_answer_from_answer_plan(plan: AnswerProgram) -> dict[str, Any]:
         }
         projected_result_ids = result_field_ids | result_output_ids
         output_fields = [
-            {"field_id": field.source}
-            for field in project.spec.fields
-            if (field.output or field.source) in projected_result_ids
+            {"field_id": field.expression.field_id}
+            for field in project.spec.outputs
+            if field.output_field in projected_result_ids
+            and isinstance(field.expression, FieldRef)
         ]
         return {
             **_pattern_answer_base(plan, relation_by_id[project.spec.input_relation]),

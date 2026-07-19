@@ -64,6 +64,14 @@ def _deterministic_known_inputs(
                     applies_to_requested_fact_ids=requested_fact_ids,
                 )
             )
+            continue
+        if known.is_grouping_grain:
+            values.append(
+                _grouping_grain_value(
+                    known,
+                    applies_to_requested_fact_ids=requested_fact_ids,
+                )
+            )
     return CanonicalInputLedger(
         values=tuple(values),
         issues=(),
@@ -297,6 +305,22 @@ def _formula_value(
         known_input_id=known.id,
         literal_type=LiteralType(literal_type),
         value=value,
+        label=known.text,
+        proof_refs=(f"known_input:{known.id}",),
+        applies_to_requested_fact_ids=applies_to_requested_fact_ids,
+    )
+
+
+def _grouping_grain_value(
+    known: RequestedFactLiteralInput,
+    *,
+    applies_to_requested_fact_ids: tuple[str, ...],
+) -> FactValue:
+    return FactValue.literal(
+        id=_grounded_value_id(known.id),
+        known_input_id=known.id,
+        literal_type=LiteralType.STRING,
+        value=known.resolved_value_text,
         label=known.text,
         proof_refs=(f"known_input:{known.id}",),
         applies_to_requested_fact_ids=applies_to_requested_fact_ids,

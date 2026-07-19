@@ -72,12 +72,18 @@ class AggregateScalarAnswerOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
+class GroupKeySourceFieldOutput(ProviderOutput):
+    source_field_id: str
+
+
+@dataclass(frozen=True)
 class GroupedAggregateAnswerOutput(ProviderOutput):
     requested_fact_id: str
     pattern: str
     source_binding_id: str
     metric: MetricSelectionOutput
     function: FunctionSelectionOutput
+    group_key_source_field: Optional[GroupKeySourceFieldOutput] = None
     ordering_field: Optional[OrderFieldSelectionOutput] = None
 
 

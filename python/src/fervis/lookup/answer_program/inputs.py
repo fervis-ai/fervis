@@ -208,12 +208,19 @@ def _operation_value_expressions(
         )
     if isinstance(spec, FilterSpec):
         return _predicate_value_expressions(operation.id, spec.predicate)
+    if isinstance(spec, ProjectSpec):
+        return tuple(
+            NamedValueExpression(
+                sink=f"operation.{operation.id}.project.{output.output_field}",
+                expression=output.expression,
+            )
+            for output in spec.outputs
+        )
     if isinstance(spec, UniversalConditionSpec):
         return _predicate_value_expressions(operation.id, spec.predicate)
     if isinstance(
         spec,
         (
-            ProjectSpec,
             ProjectToKeySpec,
             JoinSpec,
             UnionSpec,

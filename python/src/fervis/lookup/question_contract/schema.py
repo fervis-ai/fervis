@@ -337,6 +337,9 @@ def _question_input_use_schema() -> dict[str, object]:
                 provider_output.QuestionInputOwnerKind.COMPUTE_EXPRESSION,
             ),
             _question_input_use_variant(
+                provider_output.QuestionInputOwnerKind.GROUP_KEY_DERIVATION,
+            ),
+            _question_input_use_variant(
                 provider_output.QuestionInputOwnerKind.RESULT_LIMIT,
             ),
         ]
@@ -372,6 +375,10 @@ def _question_input_schema(
         ),
         _literal_text_input_role_schema(
             role=LiteralInputRole.FORMULA_VALUE,
+            include_conversation_resolution_inputs=False,
+        ),
+        _literal_text_input_role_schema(
+            role=LiteralInputRole.GROUPING_GRAIN,
             include_conversation_resolution_inputs=False,
         ),
         _literal_text_input_role_schema(

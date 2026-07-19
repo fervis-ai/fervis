@@ -27,9 +27,10 @@ from fervis.lookup.answer_program.model import FactFulfillment
 from fervis.lookup.fact_plan.fact_plan import FactPlan
 from fervis.lookup.answer_program.operations import (
     Operation,
-    ProjectField,
+    NamedExpression,
     ProjectSpec,
 )
+from fervis.lookup.answer_program.expressions import FieldRef
 from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
     Relation,
@@ -269,9 +270,14 @@ def _plan(*, param_value: object) -> FactPlan:
                     id="project_sales",
                     spec=ProjectSpec(
                         input_relation="sales_rows",
-                        fields=(
-                            ProjectField(source="sale_id", output="answer_sale_id"),
-                            ProjectField(source="store_id"),
+                        outputs=(
+                            NamedExpression(
+                                output_field="answer_sale_id",
+                                expression=FieldRef("sale_id"),
+                            ),
+                            NamedExpression(
+                                output_field="store_id", expression=FieldRef("store_id")
+                            ),
                         ),
                     ),
                     output_relation="answer_rows",

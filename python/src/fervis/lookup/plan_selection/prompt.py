@@ -76,6 +76,7 @@ class PlanSelectionTurnPrompt(TurnPromptBase):
                     "Assess each source candidate without reinterpreting any shown typed resolved input. Applying those inputs belongs to Source Binding.",
                     "Use the source response rows, field names, row cardinality, and input params to assess business meaning alignment.",
                     "Use source_alignment=DIRECT when this source contains the complete raw ingredient set needed to answer the requested fact by itself, even if subsequent steps must bind inputs, filter rows, choose metrics or groups, aggregate, compute, order, take results, or render them.",
+                    "When the requested group key is derived, DIRECT requires the source value from which that group key can be derived.",
                     "When the requested fact includes ordering, DIRECT requires evidence for the value being ordered. If that value is the aggregate produced from the source's shown metric, no separate ordering field is required.",
                     "Use source_alignment=PARTIAL when this source contains a necessary raw ingredient for the requested fact, but the fact cannot be answered without combining it with another source.",
                     "Use source_alignment=NOT_ALIGNED when the source is only related, adjacent, or shape-compatible, or lacks the raw ingredients needed for the requested fact; do not forward it.",

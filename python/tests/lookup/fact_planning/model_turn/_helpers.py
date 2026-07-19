@@ -339,6 +339,8 @@ def compile_pattern_answer_plan(
         dict[str, dict[str, tuple[str, ...]]] | None
     ) = None,
     requested_facts: tuple[RequestedFact, ...] | None = None,
+    available_values: tuple[FactValue, ...] = (),
+    question_contract: QuestionContract | None = None,
 ):
     if source_binding_ids_by_requested_fact_id is None:
         source_binding_ids_by_requested_fact_id = _selected_source_ids_by_fact(
@@ -346,8 +348,7 @@ def compile_pattern_answer_plan(
         )
     if source_binding_ids_by_requirement_by_requested_fact_id is None:
         source_binding_ids_by_requirement_by_requested_fact_id = {}
-    from fervis.lookup.answer_program import CompilerInputContext, ProgramInputs
-    from fervis.lookup.answer_program import BindingSet
+    from fervis.lookup.answer_program import compiler_input_context
 
     answers = tuple(
         parse_pattern_answer(ProviderObject(answer))
@@ -380,10 +381,10 @@ def compile_pattern_answer_plan(
                     )
                 ),
             )
-            for fact_id in dict.fromkeys(
-                answer.requested_fact_id for answer in answers
-            )
+            for fact_id in dict.fromkeys(answer.requested_fact_id for answer in answers)
         )
+    if question_contract is None:
+        question_contract = QuestionContract(requested_facts=requested_facts)
     program, _bindings = _compile_pattern_answer_program(
         answers,
         bound_sources=bound_sources,
@@ -393,11 +394,9 @@ def compile_pattern_answer_plan(
         source_binding_ids_by_requirement_by_requested_fact_id=(
             source_binding_ids_by_requirement_by_requested_fact_id
         ),
-        input_context=CompilerInputContext(
-            program_inputs=ProgramInputs(parameters=(), bindings=BindingSet()),
-            expressions_by_value_id={},
-            population_coverage_by_value_id={},
-            value_types_by_value_id={},
+        input_context=compiler_input_context(
+            values=available_values,
+            question_contract=question_contract,
         ),
         requested_facts=requested_facts,
     )
@@ -676,9 +675,7 @@ def _ranked_count_by_store_bound_source() -> BoundSource:
                     requested_fact_id="rf_answer",
                     answer_output_id="answer_2",
                     match_basis_explanation="The order row population is countable.",
-                    row_count_basis_evidence_ids=(
-                        "row_population.source_1.data",
-                    ),
+                    row_count_basis_evidence_ids=("row_population.source_1.data",),
                 ),
             ),
         )
