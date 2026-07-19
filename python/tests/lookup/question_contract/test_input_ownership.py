@@ -52,12 +52,14 @@ def _membership_test(
     test_id: str,
     kind: str,
     question: str,
+    question_input_use_refs: list[str] | None = None,
 ) -> dict[str, object]:
     return {
         "test_id": test_id,
         "kind": kind,
         "polarity": "MUST_PASS",
         "test_question": question,
+        "question_input_use_refs": question_input_use_refs or [],
     }
 
 
@@ -126,15 +128,22 @@ def _grouped_staff_contract() -> dict[str, object]:
                         test_id="t_today",
                         kind="EXPLICIT_USER_CONSTRAINT",
                         question="Did the sale occur today?",
+                        question_input_use_refs=["use_today"],
                     ),
                 ],
                 question_input_uses=[
-                    {"input_ref": "qi_staff_1", "owner_kind": "GROUP_KEY"},
-                    {"input_ref": "qi_staff_2", "owner_kind": "GROUP_KEY"},
                     {
+                        "input_ref": "qi_staff_1",
+                        "owner_kind": "GROUP_KEY",
+                    },
+                    {
+                        "input_ref": "qi_staff_2",
+                        "owner_kind": "GROUP_KEY",
+                    },
+                    {
+                        "use_id": "use_today",
                         "input_ref": "qi_today",
                         "owner_kind": "POPULATION_TESTS",
-                        "membership_test_ids": ["t_today"],
                     },
                 ],
             )
@@ -191,18 +200,20 @@ def test_one_input_may_supply_multiple_population_tests() -> None:
             test_id="t_started",
             kind="EXPLICIT_USER_CONSTRAINT",
             question="Did the sale start after today?",
+            question_input_use_refs=["use_today"],
         ),
         _membership_test(
             test_id="t_finished",
             kind="EXPLICIT_USER_CONSTRAINT",
             question="Did the sale finish after today?",
+            question_input_use_refs=["use_today"],
         ),
     ]
     request["question_input_uses"] = [
         {
+            "use_id": "use_today",
             "input_ref": "qi_today",
             "owner_kind": "POPULATION_TESTS",
-            "membership_test_ids": ["t_started", "t_finished"],
         }
     ]
     payload["question_inputs"] = [payload["question_inputs"][2]]
@@ -231,18 +242,19 @@ def test_multiple_inputs_may_supply_one_population_test() -> None:
             test_id="t_staff",
             kind="EXPLICIT_USER_CONSTRAINT",
             question="Is the sale associated with a requested staff member?",
+            question_input_use_refs=["use_staff_1", "use_staff_2"],
         ),
     ]
     request["question_input_uses"] = [
         {
+            "use_id": "use_staff_1",
             "input_ref": "qi_staff_1",
             "owner_kind": "POPULATION_TESTS",
-            "membership_test_ids": ["t_staff"],
         },
         {
+            "use_id": "use_staff_2",
             "input_ref": "qi_staff_2",
             "owner_kind": "POPULATION_TESTS",
-            "membership_test_ids": ["t_staff"],
         },
     ]
     payload["question_inputs"] = payload["question_inputs"][:2]
@@ -269,13 +281,14 @@ def test_one_declared_input_may_be_owned_independently_by_multiple_facts() -> No
             test_id="t_today",
             kind="EXPLICIT_USER_CONSTRAINT",
             question="Did the sale occur today?",
+            question_input_use_refs=["use_today"],
         ),
     ]
     request["question_input_uses"] = [
         {
+            "use_id": "use_today",
             "input_ref": "qi_today",
             "owner_kind": "POPULATION_TESTS",
-            "membership_test_ids": ["t_today"],
         }
     ]
     second = deepcopy(request)
@@ -311,7 +324,10 @@ def test_result_limit_use_lowers_to_the_existing_expression_field() -> None:
                 )
             ],
             question_input_uses=[
-                {"input_ref": "qi_limit", "owner_kind": "RESULT_LIMIT"}
+                {
+                    "input_ref": "qi_limit",
+                    "owner_kind": "RESULT_LIMIT",
+                }
             ],
         )
     ]
@@ -328,33 +344,33 @@ def test_result_limit_use_lowers_to_the_existing_expression_field() -> None:
     [
         (
             lambda payload: payload["answer_requests"][0]["question_input_uses"].append(
-                {"input_ref": "missing", "owner_kind": "GROUP_KEY"}
+                {
+                    "input_ref": "missing",
+                    "owner_kind": "GROUP_KEY",
+                }
             ),
             "unknown question input",
         ),
         (
             lambda payload: payload["answer_requests"][0]["question_input_uses"].append(
-                {"input_ref": "qi_staff_1", "owner_kind": "GROUP_KEY"}
+                {
+                    "input_ref": "qi_staff_1",
+                    "owner_kind": "GROUP_KEY",
+                }
             ),
             "duplicates question input",
         ),
         (
-            lambda payload: payload["answer_requests"][0]["question_input_uses"][
-                2
-            ].update({"membership_test_ids": ["missing"]}),
-            "unknown membership test",
+            lambda payload: payload["answer_requests"][0]["answer_population"][
+                "membership_tests"
+            ][1].update({"question_input_use_refs": ["missing"]}),
+            "unknown question input use",
         ),
         (
-            lambda payload: payload["answer_requests"][0]["question_input_uses"][
-                2
-            ].update({"membership_test_ids": ["t_subject"]}),
-            "non-explicit membership test",
-        ),
-        (
-            lambda payload: payload["answer_requests"][0]["question_input_uses"][
-                2
-            ].update({"membership_test_ids": ["t_today", "t_today"]}),
-            "duplicates membership test",
+            lambda payload: payload["answer_requests"][0]["answer_population"][
+                "membership_tests"
+            ][1].update({"question_input_use_refs": ["use_today", "use_today"]}),
+            "duplicates question input use",
         ),
     ],
 )
@@ -366,11 +382,25 @@ def test_parser_rejects_invalid_population_ownership(mutate, error: str) -> None
         _parse(payload)
 
 
+def test_parser_rejects_duplicate_population_use_ids() -> None:
+    payload = _grouped_staff_contract()
+    request = payload["answer_requests"][0]
+    request["question_input_uses"][0] = {
+        "use_id": "use_today",
+        "input_ref": "qi_staff_1",
+        "owner_kind": "POPULATION_TESTS",
+    }
+
+    with pytest.raises(ValueError, match="duplicates use ID"):
+        _parse(payload)
+
+
 def test_parser_rejects_explicit_population_test_without_an_operand() -> None:
     payload = _grouped_staff_contract()
     request = payload["answer_requests"][0]
-    request["question_input_uses"] = request["question_input_uses"][:2]
-    payload["question_inputs"] = payload["question_inputs"][:2]
+    request["answer_population"]["membership_tests"][1][
+        "question_input_use_refs"
+    ] = []
 
     with pytest.raises(ValueError, match="requires at least one question input"):
         _parse(payload)
@@ -402,7 +432,10 @@ def test_parser_rejects_result_limit_owner_for_non_limit_input() -> None:
         request["answer_population"]["membership_tests"][0]
     ]
     request["question_input_uses"] = [
-        {"input_ref": "qi_today", "owner_kind": "RESULT_LIMIT"}
+        {
+            "input_ref": "qi_today",
+            "owner_kind": "RESULT_LIMIT",
+        }
     ]
     payload["question_inputs"] = [payload["question_inputs"][2]]
 
@@ -429,13 +462,14 @@ def test_parser_rejects_non_limit_owner_for_result_limit_input() -> None:
                     test_id="t_limit",
                     kind="EXPLICIT_USER_CONSTRAINT",
                     question="Is this sale within the requested limit?",
+                    question_input_use_refs=["use_limit"],
                 ),
             ],
             question_input_uses=[
                 {
+                    "use_id": "use_limit",
                     "input_ref": "qi_limit",
                     "owner_kind": "POPULATION_TESTS",
-                    "membership_test_ids": ["t_limit"],
                 }
             ],
         )
@@ -463,8 +497,14 @@ def test_parser_rejects_multiple_result_limits_for_one_fact() -> None:
                 )
             ],
             question_input_uses=[
-                {"input_ref": "qi_limit_3", "owner_kind": "RESULT_LIMIT"},
-                {"input_ref": "qi_limit_5", "owner_kind": "RESULT_LIMIT"},
+                {
+                    "input_ref": "qi_limit_3",
+                    "owner_kind": "RESULT_LIMIT",
+                },
+                {
+                    "input_ref": "qi_limit_5",
+                    "owner_kind": "RESULT_LIMIT",
+                },
             ],
         )
     ]
@@ -508,6 +548,18 @@ def test_schema_exposes_only_the_single_ownership_ledger() -> None:
     properties = answer_request["properties"]
 
     assert "question_input_uses" in properties
+    use_schema = properties["question_input_uses"]["items"]
+    assert [
+        branch["properties"]["owner_kind"]["enum"][0]
+        for branch in use_schema["oneOf"]
+    ] == [
+        "GROUP_KEY",
+        "POPULATION_TESTS",
+        "RESULT_LIMIT",
+    ]
+    assert "use_id" not in use_schema["oneOf"][0]["properties"]
+    assert "use_id" in use_schema["oneOf"][1]["properties"]
+    assert "use_id" not in use_schema["oneOf"][2]["properties"]
     assert "used_question_inputs" not in properties
     assert (
         "question_input_refs"
@@ -520,5 +572,9 @@ def test_schema_exposes_only_the_single_ownership_ledger() -> None:
     ]["items"]["oneOf"]
     assert all(
         "owned_question_input_refs" not in variant["properties"]
+        for variant in membership_variants
+    )
+    assert all(
+        "question_input_use_refs" in variant["properties"]
         for variant in membership_variants
     )

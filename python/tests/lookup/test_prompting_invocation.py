@@ -69,7 +69,7 @@ from fervis.lookup.plan_selection import (
 
 
 _APPROVED_CHARS = {
-    "question contract": (364, 18620, 27712),
+    "question contract": (364, 20099, 29637),
     "query enrichment": (364, 5185, 7408),
     "grounding": (364, 7202, 10861),
     "source binding": (364, 16485, 20357),
@@ -145,23 +145,53 @@ def test_question_contract_prompt_groups_alternative_predicate_operands():
     )
 
     assert (
-        "Question inputs are predicate operands, not separate tests. One predicate "
-        "may own one or more inputs; the number of inputs does not determine the "
-        "number of tests."
+        "Within answer_population, question inputs are predicate operands, not "
+        "separate tests; the number of inputs does not determine the number of "
+        "tests."
     ) in invocation.prompt_text
     assert (
         "Within answer_population, when multiple inputs are alternative values for "
-        "the same predicate, create one membership test owning all those inputs."
+        "the same predicate, create one membership test for that predicate."
     ) in invocation.prompt_text
     assert (
-        "SPECIFIED_QUESTION_INPUTS restricts the result to those input values and "
-        "groups the result by them. The group key owns those inputs; "
-        "answer_population must not repeat that restriction."
+        "A SPECIFIED_QUESTION_INPUTS group key restricts results to its GROUP_KEY "
+        "inputs and groups by them."
+    ) in invocation.prompt_text
+    assert (
+        "GROUP_KEY inputs are not candidate-row predicates; create no "
+        "EXPLICIT_USER_CONSTRAINT for them."
     ) in invocation.prompt_text
     assert (
         "A value identifying a particular subject member is a separate "
         "EXPLICIT_USER_CONSTRAINT."
     ) not in invocation.prompt_text
+
+
+def test_question_contract_prompt_assigns_input_ownership_once() -> None:
+    invocation = next(
+        item for item in _turn_invocations() if item.turn_name == "question contract"
+    )
+
+    assert (
+        "question_input_uses assigns each input used by this answer_request to "
+        "exactly one semantic owner kind."
+    ) in invocation.prompt_text
+    assert (
+        "Create exactly one question_input_uses record for each fact-local "
+        "input_ref. When several population tests consume that input, they reuse "
+        "its one use_id; do not create one use record per test."
+    ) in invocation.prompt_text
+    assert (
+        "One population test may reference several POPULATION_TESTS use_ids."
+    ) in invocation.prompt_text
+    assert (
+        "Build EXPLICIT_USER_CONSTRAINT tests only from prior POPULATION_TESTS "
+        "uses; an input without use_id cannot be a question_input_use_ref."
+    ) in invocation.prompt_text
+    assert "used_question_inputs" not in invocation.prompt_text
+    assert "owned_question_input_refs" not in invocation.prompt_text
+    assert "question_input_refs" not in invocation.prompt_text
+    assert "computation operand" not in invocation.prompt_text
 
 
 def test_source_binding_prompt_distinguishes_ranked_physical_operations():

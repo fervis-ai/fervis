@@ -51,13 +51,14 @@ class _ParsedMembershipTest:
     kind: AnswerPopulationMembershipTestKind
     polarity: AnswerPopulationMembershipTestPolarity
     test_question: str
+    owned_question_input_refs: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class _ParsedQuestionInputUses:
     input_refs: tuple[str, ...]
     group_key_input_refs: tuple[str, ...]
-    population_input_refs_by_test_id: dict[str, tuple[str, ...]]
+    population_input_refs_by_use_id: dict[str, str]
     result_limit_input_ref: str
 
 
@@ -245,17 +246,19 @@ def _requested_facts(
             parsed.answer_outputs,
             path=f"{path}.answer_outputs",
         )
-        membership_tests = _parsed_membership_tests(
-            parsed.answer_population.membership_tests,
-            path=f"{path}.answer_population.membership_tests",
-        )
         input_uses = _question_input_uses(
             parsed.question_input_uses,
             inputs_by_id=inputs_by_id,
             answer_expression=parsed.answer_expression,
-            membership_tests=membership_tests,
             expression_path=f"{path}.answer_expression",
             path=f"{path}.question_input_uses",
+        )
+        membership_tests = _parsed_membership_tests(
+            parsed.answer_population.membership_tests,
+            population_input_refs_by_use_id=(
+                input_uses.population_input_refs_by_use_id
+            ),
+            path=f"{path}.answer_population.membership_tests",
         )
         answer_subject = _answer_subject(
             parsed.answer_subject,
@@ -268,7 +271,6 @@ def _requested_facts(
         answer_population = _answer_population(
             parsed.answer_population,
             membership_tests=membership_tests,
-            input_refs_by_test_id=input_uses.population_input_refs_by_test_id,
             path=f"{path}.answer_population",
         )
         answer_expression = _answer_expression(
@@ -377,7 +379,6 @@ def _answer_population(
     item: provider_output.AnswerPopulationOutput,
     *,
     membership_tests: tuple[_ParsedMembershipTest, ...],
-    input_refs_by_test_id: dict[str, tuple[str, ...]],
     path: str,
 ) -> RequestedFactAnswerPopulation:
     return RequestedFactAnswerPopulation(
@@ -391,7 +392,6 @@ def _answer_population(
         ),
         membership_tests=_answer_population_membership_tests(
             membership_tests,
-            input_refs_by_test_id=input_refs_by_test_id,
         ),
     )
 
@@ -399,36 +399,65 @@ def _answer_population(
 def _parsed_membership_tests(
     items: tuple[provider_output.AnswerPopulationMembershipTestOutput, ...],
     *,
+    population_input_refs_by_use_id: dict[str, str],
     path: str,
 ) -> tuple[_ParsedMembershipTest, ...]:
     output: list[_ParsedMembershipTest] = []
     seen_ids: set[str] = set()
+    consumed_use_ids: set[str] = set()
     for index, item in enumerate(items):
         item_path = f"{path}[{index}]"
         test_id = _required_text(item.test_id, path=f"{item_path}.test_id")
         if test_id in seen_ids:
             raise ValueError(f"{item_path}.test_id duplicates membership test")
         seen_ids.add(test_id)
+        kind = AnswerPopulationMembershipTestKind(item.kind.strip())
+        owned_input_refs: list[str] = []
+        seen_use_refs: set[str] = set()
+        for use_index, raw_use_ref in enumerate(item.question_input_use_refs):
+            use_path = f"{item_path}.question_input_use_refs[{use_index}]"
+            use_ref = _required_text(raw_use_ref, path=use_path)
+            if use_ref in seen_use_refs:
+                raise ValueError(f"{use_path} duplicates question input use")
+            seen_use_refs.add(use_ref)
+            input_ref = population_input_refs_by_use_id.get(use_ref)
+            if input_ref is None:
+                raise ValueError(f"{use_path} references unknown question input use")
+            owned_input_refs.append(input_ref)
+            consumed_use_ids.add(use_ref)
+        if kind is AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT:
+            if not owned_input_refs:
+                raise ValueError(
+                    f"explicit membership test {test_id} requires at least one "
+                    "question input"
+                )
+        elif owned_input_refs:
+            raise ValueError(f"{item_path} non-explicit membership test has operands")
         output.append(
             _ParsedMembershipTest(
                 id=test_id,
-                kind=AnswerPopulationMembershipTestKind(item.kind.strip()),
+                kind=kind,
                 polarity=AnswerPopulationMembershipTestPolarity(item.polarity.strip()),
                 test_question=_required_text(
                     item.test_question,
                     path=f"{item_path}.test_question",
                 ),
+                owned_question_input_refs=tuple(owned_input_refs),
             )
         )
     if not output:
         raise ValueError(f"{path} must not be empty")
+    unused_use_ids = set(population_input_refs_by_use_id) - consumed_use_ids
+    if unused_use_ids:
+        raise ValueError(
+            "POPULATION_TESTS input uses must be consumed by a membership test: "
+            + ", ".join(sorted(unused_use_ids))
+        )
     return tuple(output)
 
 
 def _answer_population_membership_tests(
     items: tuple[_ParsedMembershipTest, ...],
-    *,
-    input_refs_by_test_id: dict[str, tuple[str, ...]],
 ) -> tuple[RequestedFactAnswerPopulationMembershipTest, ...]:
     return tuple(
         RequestedFactAnswerPopulationMembershipTest(
@@ -436,7 +465,7 @@ def _answer_population_membership_tests(
             kind=item.kind,
             polarity=item.polarity,
             test_question=item.test_question,
-            owned_question_input_refs=input_refs_by_test_id.get(item.id, ()),
+            owned_question_input_refs=item.owned_question_input_refs,
         )
         for item in items
     )
@@ -556,16 +585,15 @@ def _question_input_uses(
     *,
     inputs_by_id: dict[str, RequestedFactKnownInput],
     answer_expression: provider_output.AnswerExpressionOutput,
-    membership_tests: tuple[_ParsedMembershipTest, ...],
     expression_path: str,
     path: str,
 ) -> _ParsedQuestionInputUses:
     input_refs: list[str] = []
     group_key_input_refs: list[str] = []
-    population_refs: dict[str, list[str]] = {}
+    population_input_refs_by_use_id: dict[str, str] = {}
     result_limit_input_ref = ""
     seen_inputs: set[str] = set()
-    tests_by_id = {test.id: test for test in membership_tests}
+    seen_use_ids: set[str] = set()
     group_domain = (
         None
         if answer_expression.group_key is None
@@ -577,11 +605,8 @@ def _question_input_uses(
 
     for index, raw_item in enumerate(raw):
         item_path = f"{path}[{index}]"
-        owner_kind = _question_input_owner_kind(raw_item, path=item_path)
-        item = _question_input_use_output(
-            raw_item,
-            owner_kind=owner_kind,
-        )
+        item = raw_item.parse_as(provider_output.QuestionInputUseOutput)
+        owner_kind = _question_input_owner_kind(item, path=item_path)
         input_ref = _required_text(item.input_ref, path=f"{item_path}.input_ref")
         if input_ref not in inputs_by_id:
             raise ValueError(f"{item_path}.input_ref references unknown question input")
@@ -611,28 +636,11 @@ def _question_input_uses(
             result_limit_input_ref = input_ref
             continue
 
-        if not isinstance(
-            item,
-            provider_output.PopulationTestsQuestionInputUseOutput,
-        ):
-            raise AssertionError("unreachable question input owner contract")
-        population_item = item
-        seen_test_ids: set[str] = set()
-        for test_index, raw_test_id in enumerate(population_item.membership_test_ids):
-            test_path = f"{item_path}.membership_test_ids[{test_index}]"
-            test_id = _required_text(raw_test_id, path=test_path)
-            if test_id in seen_test_ids:
-                raise ValueError(f"{test_path} duplicates membership test")
-            seen_test_ids.add(test_id)
-            test = tests_by_id.get(test_id)
-            if test is None:
-                raise ValueError(f"{test_path} references unknown membership test")
-            if (
-                test.kind
-                is not AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT
-            ):
-                raise ValueError(f"{test_path} references non-explicit membership test")
-            population_refs.setdefault(test_id, []).append(input_ref)
+        use_id = _required_text(item.use_id or "", path=f"{item_path}.use_id")
+        if use_id in seen_use_ids:
+            raise ValueError(f"{item_path}.use_id duplicates use ID")
+        seen_use_ids.add(use_id)
+        population_input_refs_by_use_id[use_id] = input_ref
 
     if (
         group_domain is GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS
@@ -641,50 +649,23 @@ def _question_input_uses(
         raise ValueError(
             "SPECIFIED_QUESTION_INPUTS requires at least one GROUP_KEY input use"
         )
-    for test in membership_tests:
-        if (
-            test.kind is AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT
-            and not population_refs.get(test.id)
-        ):
-            raise ValueError(
-                f"explicit membership test {test.id} requires at least one question input"
-            )
-
     return _ParsedQuestionInputUses(
         input_refs=tuple(input_refs),
         group_key_input_refs=tuple(group_key_input_refs),
-        population_input_refs_by_test_id={
-            test_id: tuple(refs) for test_id, refs in population_refs.items()
-        },
+        population_input_refs_by_use_id=population_input_refs_by_use_id,
         result_limit_input_ref=result_limit_input_ref,
     )
 
 
 def _question_input_owner_kind(
-    item: ProviderObject,
+    item: provider_output.QuestionInputUseOutput,
     *,
     path: str,
 ) -> provider_output.QuestionInputOwnerKind:
     try:
-        return provider_output.QuestionInputOwnerKind(item.discriminator("owner_kind"))
+        return provider_output.QuestionInputOwnerKind(item.owner_kind)
     except ValueError as exc:
         raise ValueError(f"{path}.owner_kind is invalid") from exc
-
-
-def _question_input_use_output(
-    item: ProviderObject,
-    *,
-    owner_kind: provider_output.QuestionInputOwnerKind,
-) -> (
-    provider_output.GroupKeyQuestionInputUseOutput
-    | provider_output.PopulationTestsQuestionInputUseOutput
-    | provider_output.ResultLimitQuestionInputUseOutput
-):
-    if owner_kind is provider_output.QuestionInputOwnerKind.GROUP_KEY:
-        return item.parse_as(provider_output.GroupKeyQuestionInputUseOutput)
-    if owner_kind is provider_output.QuestionInputOwnerKind.POPULATION_TESTS:
-        return item.parse_as(provider_output.PopulationTestsQuestionInputUseOutput)
-    return item.parse_as(provider_output.ResultLimitQuestionInputUseOutput)
 
 
 def _validate_input_owner_kind(

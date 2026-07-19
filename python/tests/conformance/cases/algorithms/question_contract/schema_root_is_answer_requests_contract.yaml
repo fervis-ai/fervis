@@ -37,10 +37,10 @@ expect:
     answer_request_required:
       - answer_fact
       - answer_expression
+      - question_input_uses
       - answer_subject
       - answer_population
       - answer_outputs
-      - used_question_inputs
   result_exact_fields:
     root_required: [decision_basis, outcome]
     root_properties: [decision_basis, outcome]
@@ -85,7 +85,7 @@ expect:
     answer_request_required:
       - answer_fact
       - answer_expression
+      - question_input_uses
       - answer_subject
       - answer_population
       - answer_outputs
-      - used_question_inputs

@@ -65,6 +65,7 @@ class AnswerOutputOutput(ProviderOutput):
 
 @dataclass(frozen=True)
 class AnswerPopulationMembershipTestOutput(ProviderOutput):
+    question_input_use_refs: tuple[str, ...]
     test_id: str
     kind: str
     polarity: str
@@ -102,32 +103,20 @@ class AnswerExpressionOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
-class GroupKeyQuestionInputUseOutput(ProviderOutput):
+class QuestionInputUseOutput(ProviderOutput):
     input_ref: str
     owner_kind: str
-
-
-@dataclass(frozen=True)
-class PopulationTestsQuestionInputUseOutput(ProviderOutput):
-    input_ref: str
-    owner_kind: str
-    membership_test_ids: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class ResultLimitQuestionInputUseOutput(ProviderOutput):
-    input_ref: str
-    owner_kind: str
+    use_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
 class AnswerRequestOutput(ProviderOutput):
     answer_fact: str
     answer_expression: AnswerExpressionOutput
+    question_input_uses: tuple[ProviderObject, ...]
     answer_subject: AnswerSubjectOutput
     answer_population: AnswerPopulationOutput
     answer_outputs: tuple[AnswerOutputOutput, ...]
-    question_input_uses: tuple[ProviderObject, ...]
 
 
 @dataclass(frozen=True)

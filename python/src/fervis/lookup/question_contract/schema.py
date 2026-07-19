@@ -121,16 +121,16 @@ def _answer_request_schema() -> dict[str, object]:
     properties: dict[str, object] = {
         "answer_fact": {"type": "string", "minLength": 1},
         "answer_expression": _answer_expression_schema(),
+        "question_input_uses": {
+            "type": "array",
+            "items": _question_input_use_schema(),
+        },
         "answer_subject": _answer_subject_schema(),
         "answer_population": _answer_population_schema(),
         "answer_outputs": {
             "type": "array",
             "minItems": 1,
             "items": _answer_output_schema(),
-        },
-        "question_input_uses": {
-            "type": "array",
-            "items": _question_input_use_schema(),
         },
     }
     return provider_output.AnswerRequestOutput.schema(
@@ -236,8 +236,17 @@ def _answer_population_membership_test_variant(
     *,
     kind: str,
 ) -> dict[str, object]:
+    use_refs: dict[str, object] = {
+        "type": "array",
+        "items": {"type": "string", "minLength": 1},
+    }
+    if kind == "EXPLICIT_USER_CONSTRAINT":
+        use_refs["minItems"] = 1
+    else:
+        use_refs["maxItems"] = 0
     return provider_output.AnswerPopulationMembershipTestOutput.schema(
         {
+            "question_input_use_refs": use_refs,
             "test_id": {"type": "string", "minLength": 1},
             "kind": {"enum": [kind]},
             "polarity": {"enum": ["MUST_PASS", "MUST_FAIL"]},
@@ -291,41 +300,32 @@ def _source_result_values_group_key_schema() -> dict[str, object]:
 def _question_input_use_schema() -> dict[str, object]:
     return {
         "oneOf": [
-            provider_output.GroupKeyQuestionInputUseOutput.schema(
-                {
-                    "input_ref": {"type": "string", "minLength": 1},
-                    "owner_kind": {
-                        "enum": [provider_output.QuestionInputOwnerKind.GROUP_KEY.value]
-                    },
-                }
+            _question_input_use_variant(
+                provider_output.QuestionInputOwnerKind.GROUP_KEY,
             ),
-            provider_output.PopulationTestsQuestionInputUseOutput.schema(
-                {
-                    "input_ref": {"type": "string", "minLength": 1},
-                    "owner_kind": {
-                        "enum": [
-                            provider_output.QuestionInputOwnerKind.POPULATION_TESTS.value
-                        ]
-                    },
-                    "membership_test_ids": {
-                        "type": "array",
-                        "minItems": 1,
-                        "items": {"type": "string", "minLength": 1},
-                    },
-                }
+            _question_input_use_variant(
+                provider_output.QuestionInputOwnerKind.POPULATION_TESTS,
+                include_use_id=True,
             ),
-            provider_output.ResultLimitQuestionInputUseOutput.schema(
-                {
-                    "input_ref": {"type": "string", "minLength": 1},
-                    "owner_kind": {
-                        "enum": [
-                            provider_output.QuestionInputOwnerKind.RESULT_LIMIT.value
-                        ]
-                    },
-                }
+            _question_input_use_variant(
+                provider_output.QuestionInputOwnerKind.RESULT_LIMIT,
             ),
         ]
     }
+
+
+def _question_input_use_variant(
+    owner_kind: provider_output.QuestionInputOwnerKind,
+    *,
+    include_use_id: bool = False,
+) -> dict[str, object]:
+    properties: dict[str, object] = {
+        "input_ref": {"type": "string", "minLength": 1},
+        "owner_kind": {"enum": [owner_kind.value]},
+    }
+    if include_use_id:
+        properties["use_id"] = {"type": "string", "minLength": 1}
+    return provider_output.QuestionInputUseOutput.schema(properties)
 
 
 def _question_input_schema(
