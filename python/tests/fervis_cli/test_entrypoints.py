@@ -228,8 +228,8 @@ def test_fervis_flask_inspect_uses_sql_runtime_storage(
     monkeypatch.setattr(sql_bundle, "sql_storage_bundle", fake_sql_storage_bundle)
     monkeypatch.setattr(cli_main, "run_fervis", record_run_fervis)
 
-    assert cli_main.main(("inspect", "artifact", "artifact_1")) == 0
-    assert routed == [(("inspect", "artifact", "artifact_1"), "flask")]
+    assert cli_main.main(("debug", "artifact", "artifact_1")) == 0
+    assert routed == [(("debug", "artifact", "artifact_1"), "flask")]
 
 
 def test_fervis_executable_exposes_command_surface() -> None:
@@ -244,7 +244,7 @@ def test_fervis_executable_exposes_command_surface() -> None:
 
     assert result.returncode == 0
     assert (
-        "{init,catalog,config,doctor,migrate,auth,models,model,explain,goldset,inspect,project,runtime,sources,usage,worker}"
+        "{init,catalog,config,doctor,migrate,auth,models,model,debug,explain,goldset,project,runtime,sources,usage,worker}"
         in result.stdout
     )
 

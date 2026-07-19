@@ -34,7 +34,6 @@ def test_fervis_usage_answer_view_uses_observability_service() -> None:
 def test_fervis_usage_supports_additive_detail_modes() -> None:
     compact = StringIO()
     verbose = StringIO()
-    debug = StringIO()
 
     assert (
         run_fervis(
@@ -54,21 +53,10 @@ def test_fervis_usage_supports_additive_detail_modes() -> None:
         )
         == 0
     )
-    assert (
-        run_fervis(
-            ("usage", "answer_1", "--debug", "--format", "text"),
-            ports=_ports(),
-            stdout=debug,
-            stderr=StringIO(),
-        )
-        == 0
-    )
-
     assert "Usage answer answer_1" in compact.getvalue()
     assert "calls:" not in compact.getvalue()
     assert "calls:" in verbose.getvalue()
     assert "usage rows:" not in verbose.getvalue()
-    assert "usage rows:" in debug.getvalue()
 
 
 def test_fervis_usage_supports_provider_model_and_usage_filters() -> None:

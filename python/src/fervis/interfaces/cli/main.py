@@ -130,7 +130,7 @@ def _sql_runtime_main(args: tuple[str, ...], *, project) -> int:
 def _uses_sql_runtime_storage(args: tuple[str, ...]) -> bool:
     if not args:
         return False
-    if args[:1] in {("explain",), ("inspect",), ("usage",)}:
+    if args[:1] in {("debug",), ("explain",), ("usage",)}:
         return True
     if args[:1] == ("runtime",):
         return len(args) > 1 and args[1] == "ask"
@@ -138,8 +138,6 @@ def _uses_sql_runtime_storage(args: tuple[str, ...]) -> bool:
         return True
     if args[:1] == ("goldset",):
         return True
-    if args[:1] == ("inspect",):
-        return len(args) > 1 and args[1] in {"artifact", "prompts"}
     return False
 
 

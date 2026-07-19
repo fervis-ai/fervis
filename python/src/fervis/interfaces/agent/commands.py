@@ -10,6 +10,8 @@ from typing import Union
 
 class FervisCommand(StrEnum):
     AUTH_CONFIGURE = "auth.configure"
+    DEBUG_QUESTION = "debug.question"
+    DEBUG_RUN = "debug.run"
     DOCTOR = "doctor"
     EXPLAIN_QUESTION = "explain.question"
     EXPLAIN_RUN = "explain.run"
@@ -53,6 +55,8 @@ class CommandInvocation:
 
 COMMAND_PATHS: dict[FervisCommand, tuple[str, ...]] = {
     FervisCommand.AUTH_CONFIGURE: ("auth", "configure"),
+    FervisCommand.DEBUG_QUESTION: ("debug",),
+    FervisCommand.DEBUG_RUN: ("debug",),
     FervisCommand.DOCTOR: ("doctor",),
     FervisCommand.EXPLAIN_QUESTION: ("explain",),
     FervisCommand.EXPLAIN_RUN: ("explain",),
@@ -102,13 +106,23 @@ class CommandBuilders:
     def explain_question(
         self,
         question_id: object,
-        *,
-        debug: bool = False,
     ) -> CommandInvocation:
-        parts: list[CommandPart] = [Option("--question-id", question_id)]
-        if debug:
-            parts.append(Switch("--debug"))
-        return CommandInvocation(FervisCommand.EXPLAIN_QUESTION, tuple(parts))
+        return CommandInvocation(
+            FervisCommand.EXPLAIN_QUESTION,
+            (Option("--question-id", question_id),),
+        )
+
+    def debug_question(self, question_id: object) -> CommandInvocation:
+        return CommandInvocation(
+            FervisCommand.DEBUG_QUESTION,
+            (Option("--question-id", question_id),),
+        )
+
+    def debug_run(self, run_id: object) -> CommandInvocation:
+        return CommandInvocation(
+            FervisCommand.DEBUG_RUN,
+            (Option("--run-id", run_id),),
+        )
 
     def explain_run(self, run_id: object) -> CommandInvocation:
         return CommandInvocation(

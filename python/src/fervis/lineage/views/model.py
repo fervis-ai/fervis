@@ -46,6 +46,7 @@ class ModelCallInspectionView:
     prompt_chars: int
     schema_chars: int
     tool_spec_chars: int
+    duration_ms: int | None
     artifacts: tuple[ArtifactInspectionView, ...] = ()
 
 

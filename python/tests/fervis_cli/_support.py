@@ -716,6 +716,7 @@ def _model_call() -> ObservabilityModelCall:
         prompt_chars=100,
         schema_chars=50,
         tool_spec_chars=75,
+        duration_ms=1234,
         usage_rows=(
             ObservabilityUsage(
                 usage_kind=ModelUsageKind.INPUT_TOKENS,

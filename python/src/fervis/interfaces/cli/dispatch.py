@@ -16,12 +16,13 @@ from fervis.interfaces.cli.commands.auth import auth_result
 from fervis.interfaces.cli.commands.catalog import catalog_result
 from fervis.interfaces.cli.commands.config import config_result
 from fervis.interfaces.cli.commands.doctor import doctor_result
+from fervis.interfaces.cli.commands.debug import (
+    debug_artifact_result,
+    debug_prompts_result,
+    debug_result,
+)
 from fervis.interfaces.cli.commands.explain import explain_result
 from fervis.interfaces.cli.commands.goldset import goldset_result
-from fervis.interfaces.cli.commands.inspect import (
-    inspect_artifact_result,
-    inspect_prompts_result,
-)
 from fervis.interfaces.cli.commands.init import init_result
 from fervis.interfaces.cli.commands.migrate import migrate_result
 from fervis.interfaces.cli.commands.models import models_result
@@ -375,14 +376,16 @@ def execute_fervis(
         return models_result(args, project=ports.project)
     if args.command == FervisCommandKind.CONFIG:
         return config_result(args, project=ports.project)
+    if args.command == FervisCommandKind.DEBUG:
+        if args.debug_command == "prompts":
+            return debug_prompts_result(args, ports=ports)
+        if args.debug_command == "artifact":
+            return debug_artifact_result(args, ports=ports)
+        return debug_result(args, ports=ports)
     if args.command == FervisCommandKind.EXPLAIN:
         return explain_result(args, ports=ports)
     if args.command == FervisCommandKind.GOLDSET:
         return goldset_result(args, ports=ports, progress_stream=stderr)
-    if args.command == "inspect" and args.inspect_command == "prompts":
-        return inspect_prompts_result(args, ports=ports)
-    if args.command == "inspect" and args.inspect_command == "artifact":
-        return inspect_artifact_result(args, ports=ports)
     if args.command == "project" and args.project_command == "inspect":
         return project_inspect_result(ports.project)
     if args.command == FervisCommandKind.SOURCES:

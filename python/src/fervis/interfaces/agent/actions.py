@@ -231,7 +231,11 @@ def inspect_question_action(
     return {
         "kind": "inspect_question",
         "question_id": question_id,
-        "command": render_command(commands.explain_question(question_id, debug=debug)),
+        "command": render_command(
+            commands.debug_question(question_id)
+            if debug
+            else commands.explain_question(question_id)
+        ),
         "description": (
             "Inspects the question, including its current answer state and all "
             "runs attempted for that question."
@@ -243,7 +247,7 @@ def inspect_run_action(run_id: str) -> dict[str, object]:
     return {
         "kind": "inspect_run",
         "run_id": run_id,
-        "command": render_command(commands.explain_run(run_id)),
+        "command": render_command(commands.debug_run(run_id)),
         "description": "Inspects one execution run for diagnostics.",
     }
 

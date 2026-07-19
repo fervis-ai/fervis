@@ -474,11 +474,15 @@ fervis catalog
 fervis runtime ask
 fervis worker
 fervis explain
-fervis inspect
+fervis debug
 fervis usage
 fervis model
 fervis goldset run
 ```
+
+`explain` presents causal answer lineage and provenance. `debug` owns technical
+run diagnostics, captured prompts, and persisted observability artifacts; those
+surfaces do not have a second `inspect` command.
 
 Commands return agent-readable structured results and precise next actions.
 Next actions should be minimal, usually one action and never noisy.

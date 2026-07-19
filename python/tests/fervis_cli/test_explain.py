@@ -225,7 +225,7 @@ def test_fervis_explain_inputs_detail_modes_are_additive() -> None:
     )
     assert (
         run_fervis(
-            ("explain", "answer_1", "--inputs", "--debug", "--format", "text"),
+            ("debug", "--question-id", "question_1", "--inputs", "--format", "text"),
             ports=_ports(),
             stdout=debug,
             stderr=StringIO(),
@@ -257,10 +257,11 @@ def test_fervis_explain_agent_inputs_detail_modes_are_additive() -> None:
     debug = _command_payload(
         render_fervis_result(
             evaluate_fervis(
-                ("explain", "answer_1", "--inputs", "--debug"), ports=_ports()
+                ("debug", "--question-id", "question_1", "--inputs"),
+                ports=_ports(),
             )
         ),
-        command="explain",
+        command="debug",
     )
 
     compact_result = compact["input_lineage"]["results"][0]
@@ -286,9 +287,11 @@ def test_fervis_explain_agent_detail_modes_are_additive() -> None:
     )
     debug = _command_payload(
         render_fervis_result(
-            evaluate_fervis(("explain", "answer_1", "--debug"), ports=_ports())
+            evaluate_fervis(
+                ("debug", "--question-id", "question_1"), ports=_ports()
+            )
         ),
-        command="explain",
+        command="debug",
     )
 
     compact_step = compact["questions"][0]["runs"][0]["steps"][1]
@@ -299,6 +302,7 @@ def test_fervis_explain_agent_detail_modes_are_additive() -> None:
 
     assert "model_calls" not in compact_step
     assert verbose_step["model_call_ids"] == ["call_1"]
+    assert debug["index"]["model_calls"][0]["duration_ms"] == 1234
     assert verbose["index"]["model_calls"][0]["model_call_id"] == "call_1"
     assert verbose["index"]["model_calls"][0]["artifacts"][0]["artifact_id"] == (
         "artifact_prompt"
@@ -349,11 +353,11 @@ def test_fervis_explain_verbose_view_shows_proof_graph_without_raw_payload_dump(
     assert "payload_json" not in rendered
 
 
-def test_fervis_explain_debug_view_shows_complete_formatted_audit_details() -> None:
+def test_fervis_debug_view_shows_complete_formatted_audit_details() -> None:
     stdout = StringIO()
 
     exit_code = run_fervis(
-        ("explain", "answer_1", "--debug", "--format", "text"),
+        ("debug", "--run-id", "run_1", "--format", "text"),
         ports=_ports(),
         stdout=stdout,
         stderr=StringIO(),
@@ -364,12 +368,20 @@ def test_fervis_explain_debug_view_shows_complete_formatted_audit_details() -> N
     assert "Step 1: question_contract" in rendered
     assert "Step 2: source_binding" in rendered
     assert "Step 9000: execute" in rendered
+    assert "duration: 1234 ms" in rendered
     assert "Proof details for answer_1: proof_1" in rendered
     assert "Evidence handles:" in rendered
     assert "- relation:source_1" in rendered
     assert "Computation links:" in rendered
     assert "operation:op_1 -> answer_output:fact_1:answer_1 (produces)" in rendered
     assert "payload_json" not in rendered
+
+
+def test_fervis_explain_does_not_expose_a_debug_detail_flag() -> None:
+    with pytest.raises(SystemExit) as error:
+        evaluate_fervis(("explain", "answer_1", "--debug"), ports=_ports())
+
+    assert error.value.code == 2
 
 
 def test_fervis_explain_rejects_ambiguous_roots() -> None:

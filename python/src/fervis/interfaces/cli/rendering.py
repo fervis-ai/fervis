@@ -46,10 +46,10 @@ def render_fervis_result(result: FervisCommandResult) -> str:
             indent=2,
             sort_keys=True,
         )
-    if result.kind is FervisCommandKind.EXPLAIN:
+    if result.kind in {FervisCommandKind.DEBUG, FervisCommandKind.EXPLAIN}:
         payload = result.payload
         if not isinstance(payload, ExplainView):
-            raise ValueError("explain command requires an ExplainView payload")
+            raise ValueError("lineage command requires an ExplainView payload")
         options = result.render_options
         if options.inputs_only:
             return render_input_lineage(
@@ -75,22 +75,22 @@ def render_fervis_result(result: FervisCommandResult) -> str:
             payload,
             detail=UsageRenderDetail(result.render_options.detail.value),
         )
-    if result.kind is FervisCommandKind.INSPECT_PROMPTS:
+    if result.kind is FervisCommandKind.DEBUG_PROMPTS:
         payload = result.payload
         if not isinstance(payload, PromptViewerResult):
-            raise ValueError("inspect prompts requires a PromptViewerResult payload")
+            raise ValueError("debug prompts requires a PromptViewerResult payload")
         return f"Wrote {payload.run_count} run(s) to {payload.index_path}"
-    if result.kind is FervisCommandKind.INSPECT_ARTIFACT:
+    if result.kind is FervisCommandKind.DEBUG_ARTIFACT:
         payload = result.payload
         if not isinstance(payload, ObservabilityArtifactContent):
             raise ValueError(
-                "inspect artifact requires an ObservabilityArtifactContent payload"
+                "debug artifact requires an ObservabilityArtifactContent payload"
             )
         return render_artifact_content(payload)
     raise ValueError(f"unsupported command result kind: {result.kind}")
 
 
-def agent_explain_payload(
+def agent_lineage_payload(
     view: ExplainView,
     *,
     options: FervisRenderOptions,

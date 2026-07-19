@@ -100,7 +100,7 @@ def test_fervis_project_inspect_unknown_project_is_blocked() -> None:
     )
 
 
-def test_fervis_inspect_prompts_is_the_prompt_viewer_execution_surface(
+def test_fervis_debug_prompts_is_the_prompt_viewer_execution_surface(
     monkeypatch,
 ) -> None:
     import fervis.observability.prompt_viewer.render_prompts as prompt_viewer
@@ -120,14 +120,14 @@ def test_fervis_inspect_prompts_is_the_prompt_viewer_execution_surface(
     stdout = StringIO()
 
     exit_code = run_fervis(
-        ("inspect", "prompts", "--run-id", "run_1"),
+        ("debug", "prompts", "--run-id", "run_1"),
         ports=_ports(),
         stdout=stdout,
         stderr=StringIO(),
     )
 
     assert exit_code == 0
-    envelope = _command_envelope(stdout.getvalue(), command="inspect.prompts")
+    envelope = _command_envelope(stdout.getvalue(), command="debug.prompts")
     assert envelope["payload_schema"] == "fervis-prompt-inspection-result.v0.1"
     assert envelope["payload"]["output_format"] == "raw"
     assert [call[0].run_id for call in calls] == ["run_1"]
@@ -137,7 +137,7 @@ def test_fervis_inspect_prompts_is_the_prompt_viewer_execution_surface(
     assert all(isinstance(call[1], _PromptCaptureQuery) for call in calls)
 
 
-def test_fervis_inspect_prompts_supports_explicit_text_format(monkeypatch) -> None:
+def test_fervis_debug_prompts_supports_explicit_text_format(monkeypatch) -> None:
     import fervis.observability.prompt_viewer.render_prompts as prompt_viewer
 
     monkeypatch.setattr(
@@ -152,7 +152,7 @@ def test_fervis_inspect_prompts_supports_explicit_text_format(monkeypatch) -> No
     stdout = StringIO()
 
     exit_code = run_fervis(
-        ("inspect", "prompts", "--run-id", "run_1", "--format", "text"),
+        ("debug", "prompts", "--run-id", "run_1", "--format", "text"),
         ports=_ports(),
         stdout=stdout,
         stderr=StringIO(),
@@ -164,7 +164,7 @@ def test_fervis_inspect_prompts_supports_explicit_text_format(monkeypatch) -> No
     )
 
 
-def test_fervis_inspect_prompts_supports_explicit_html_format(monkeypatch) -> None:
+def test_fervis_debug_prompts_supports_explicit_html_format(monkeypatch) -> None:
     import fervis.observability.prompt_viewer.render_prompts as prompt_viewer
 
     calls = []
@@ -182,7 +182,7 @@ def test_fervis_inspect_prompts_supports_explicit_html_format(monkeypatch) -> No
     )
 
     exit_code = run_fervis(
-        ("inspect", "prompts", "--run-id", "run_1", "--viewer-format", "html"),
+        ("debug", "prompts", "--run-id", "run_1", "--viewer-format", "html"),
         ports=_ports(),
         stdout=StringIO(),
         stderr=StringIO(),
@@ -194,29 +194,29 @@ def test_fervis_inspect_prompts_supports_explicit_html_format(monkeypatch) -> No
     ]
 
 
-def test_fervis_inspect_prompts_open_requires_html_format() -> None:
+def test_fervis_debug_prompts_open_requires_html_format() -> None:
     stdout = StringIO()
 
     exit_code = run_fervis(
-        ("inspect", "prompts", "--run-id", "run_1", "--open"),
+        ("debug", "prompts", "--run-id", "run_1", "--open"),
         ports=_ports(),
         stdout=stdout,
         stderr=StringIO(),
     )
 
     assert exit_code == 2
-    envelope = _blocked_envelope(stdout.getvalue(), command="inspect.prompts")
+    envelope = _blocked_envelope(stdout.getvalue(), command="debug.prompts")
     assert (
         "--open requires --viewer-format html"
         in (envelope["payload"]["error"]["message"])
     )
 
 
-def test_fervis_inspect_artifact_is_the_full_artifact_surface() -> None:
+def test_fervis_debug_artifact_is_the_full_artifact_surface() -> None:
     stdout = StringIO()
 
     exit_code = run_fervis(
-        ("inspect", "artifact", "artifact_parsed"),
+        ("debug", "artifact", "artifact_parsed"),
         ports=_ports(),
         stdout=stdout,
         stderr=StringIO(),
@@ -224,14 +224,14 @@ def test_fervis_inspect_artifact_is_the_full_artifact_surface() -> None:
 
     assert exit_code == 0
     rendered = stdout.getvalue()
-    envelope = _command_envelope(rendered, command="inspect.artifact")
+    envelope = _command_envelope(rendered, command="debug.artifact")
     assert envelope["payload_schema"] == "fervis-artifact-content-result.v0.1"
     assert envelope["payload"]["artifact_id"] == "artifact_parsed"
 
     text = StringIO()
     assert (
         run_fervis(
-            ("inspect", "artifact", "artifact_parsed", "--format", "text"),
+            ("debug", "artifact", "artifact_parsed", "--format", "text"),
             ports=_ports(),
             stdout=text,
             stderr=StringIO(),
@@ -246,10 +246,10 @@ def test_fervis_inspect_artifact_is_the_full_artifact_surface() -> None:
     assert '{"answer": "parsed"}' in rendered
 
 
-def test_fervis_inspect_artifact_rejects_removed_json_flag() -> None:
+def test_fervis_debug_artifact_rejects_removed_json_flag() -> None:
     with pytest.raises(SystemExit) as error:
         run_fervis(
-            ("inspect", "artifact", "artifact_parsed", "--json"),
+            ("debug", "artifact", "artifact_parsed", "--json"),
             ports=_ports(),
             stdout=StringIO(),
             stderr=StringIO(),
