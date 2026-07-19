@@ -12,7 +12,10 @@ from fervis.lookup.answer_program.values import (
     IdentityValuePayload,
     TimeComponent,
     ValueComponent,
+    LiteralType,
+    LiteralValuePayload,
 )
+from fervis.lookup.answer_program.operations import PredicateOperator
 from fervis.lookup.answer_program.relations import (
     PopulationCoverageClaim,
     PopulationCoverageRole,
@@ -23,6 +26,7 @@ from fervis.lookup.source_binding.candidates.contracts import (
     CandidateKeyEvidence,
     EntityEvidence,
     EntityReferenceEvidence,
+    FieldEvidence,
 )
 from fervis.lookup.source_binding.candidates.model import (
     CandidateParameter,
@@ -57,11 +61,13 @@ from fervis.lookup.source_binding.population_effects import (
     population_test_basis_payload,
     population_test_results_schema,
 )
+from fervis.lookup.source_binding.membership_tests import membership_test_key
 
 
 class ResolvedInputApplicationTargetKind(StrEnum):
     REQUEST_PARAMETER = "request_parameter"
     RETURNED_IDENTITY = "returned_identity"
+    RETURNED_FIELD = "returned_field"
 
 
 @dataclass(frozen=True)
@@ -69,6 +75,48 @@ class ResolvedInputApplicationOwner:
     known_input_id: str
     owner_surface_id: str
     proof_refs: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _ResolvedValueSurface:
+    value_id: str
+    value: FactValue
+    components_by_target_kind: dict[str, tuple[str, ...]]
+
+    def prompt_payload(
+        self,
+        *,
+        membership_tests: tuple[RequestedFactAnswerPopulationMembershipTest, ...],
+        role_text: str,
+        parameter_alternative_group: RequestedFactGroupKey | None,
+    ) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "value_id": self.value_id,
+            "kind": self.value.kind.value,
+            "value_meaning": self.value.label or self.value.id,
+            "components_by_target_kind": {
+                kind: list(components)
+                for kind, components in self.components_by_target_kind.items()
+            },
+            "population_test_basis": population_test_basis_payload(
+                membership_tests,
+                role_text=role_text,
+            ),
+        }
+        if isinstance(self.value.payload, LiteralValuePayload):
+            payload.update(
+                literal_type=self.value.payload.literal_type.value,
+                literal_value=self.value.payload.value,
+            )
+        if (
+            parameter_alternative_group is not None
+            and self.value.known_input_id
+            in parameter_alternative_group.question_input_refs
+        ):
+            payload["request_parameter_alternative_group"] = (
+                parameter_alternative_group.id
+            )
+        return payload
 
 
 @dataclass(frozen=True)
@@ -84,6 +132,15 @@ class _ParameterApplication:
     output: provider_output.ResolvedInputApplicationOutput
     param: CandidateParameter
     value: FactValue
+    application_value: str = ""
+
+
+@dataclass(frozen=True)
+class _ReturnedFieldApplication:
+    output: provider_output.ResolvedInputApplicationOutput
+    field: FieldEvidence
+    value: FactValue
+    application_value: str = ""
 
 
 @dataclass(frozen=True)
@@ -92,6 +149,8 @@ class ResolvedInputApplicationSurface:
     values_by_id: dict[str, FactValue]
     parameter_targets_by_id: dict[str, CandidateParameter]
     identity_targets_by_id: dict[str, EntityEvidence]
+    returned_field_targets_by_id: dict[str, FieldEvidence]
+    application_values_by_id: dict[str, tuple[str, str, str]]
     membership_tests_by_input_id: dict[
         str, tuple[RequestedFactAnswerPopulationMembershipTest, ...]
     ]
@@ -102,46 +161,103 @@ class ResolvedInputApplicationSurface:
     def prompt_payload(self) -> dict[str, object]:
         return {
             "resolved_values": list(self._resolved_value_payloads()),
+            "predicate_requirements": list(self._predicate_requirement_payloads()),
             "targets_by_kind": self._targets_by_kind(),
+            "application_values": [
+                {
+                    "application_value_id": application_value_id,
+                    "target_id": target_id,
+                    "value": value,
+                }
+                for application_value_id, (_, target_id, value) in (
+                    self.application_values_by_id.items()
+                )
+            ],
         }
 
     def provider_schema(self) -> dict[str, object]:
-        variants = [
-            _application_schema(
-                value_id=value_id,
-                value_component=value_component,
-                target_kind=target_kind,
-                target_ids=self._application_target_ids(
-                    value_id=value_id,
-                    value_component=value_component,
-                    target_kind=target_kind,
-                ),
-                population_test_ids=population_test_ids,
+        value_surfaces = self._resolved_value_surfaces()
+        value_ids = tuple(surface.value_id for surface in value_surfaces)
+        target_ids = tuple(
+            dict.fromkeys(
+                (
+                    *self.parameter_targets_by_id,
+                    *self.identity_targets_by_id,
+                    *self.returned_field_targets_by_id,
+                )
             )
-            for value_id, target_kind, value_component, population_test_ids in (
-                self._schema_value_variants()
+        )
+        components = tuple(
+            dict.fromkeys(
+                component
+                for surface in value_surfaces
+                for components in surface.components_by_target_kind.values()
+                for component in components
             )
-        ]
-        if not variants:
+        )
+        if not value_ids or not target_ids or not components:
             return empty_resolved_input_applications_schema()
-        item_schema = variants[0] if len(variants) == 1 else {"oneOf": variants}
+        properties: dict[str, object] = {
+            "target_kind": {
+                "enum": [
+                    kind.value
+                    for kind in ResolvedInputApplicationTargetKind
+                    if self._target_ids_for_kind(kind.value)
+                ]
+            },
+            "target_id": {"enum": list(target_ids)},
+            "value_id": {"enum": list(value_ids)},
+            "value_component": {"enum": list(components)},
+            "match_basis_explanation": {"type": "string", "minLength": 1},
+            "population_test_results": _bounded_population_test_results_schema(
+                tuple(
+                    dict.fromkeys(
+                        membership_test_key(test)
+                        for tests in self.membership_tests_by_input_id.values()
+                        for test in tests
+                    )
+                )
+            ),
+        }
+        if self.application_values_by_id:
+            properties["application_value_id"] = {
+                "enum": list(self.application_values_by_id)
+            }
+        item_schema = provider_output.ResolvedInputApplicationOutput.schema(properties)
         return {
             "type": "array",
             "items": item_schema,
-            "maxItems": len(self.parameter_targets_by_id)
-            + len(self.identity_targets_by_id)
-            + self._additional_parameter_alternatives(),
+            "maxItems": self._max_application_count(),
         }
 
-    def _additional_parameter_alternatives(self) -> int:
-        if self.parameter_alternative_group is None:
-            return 0
-        return (
-            len(self.parameter_alternative_group.question_input_refs) - 1
-        ) * len(self.parameter_targets_by_id)
+    def _max_application_count(self) -> int:
+        return sum(
+            len(
+                self._application_target_ids(
+                    value_id=surface.value_id,
+                    value_component=value_component,
+                    target_kind=target_kind,
+                )
+            )
+            for surface in self._resolved_value_surfaces()
+            for target_kind, components in surface.components_by_target_kind.items()
+            for value_component in components
+        )
 
     def _resolved_value_payloads(self) -> tuple[dict[str, object], ...]:
-        payloads: list[dict[str, object]] = []
+        return tuple(
+            surface.prompt_payload(
+                membership_tests=self.membership_tests_by_input_id.get(
+                    surface.value.known_input_id, ()
+                ),
+                role_text=self.role_text,
+                parameter_alternative_group=self.parameter_alternative_group,
+            )
+            for surface in self._resolved_value_surfaces()
+        )
+
+    def _resolved_value_surfaces(self) -> tuple[_ResolvedValueSurface, ...]:
+        surfaces: list[_ResolvedValueSurface] = []
         for value_id, value in self.values_by_id.items():
             parameter_components = tuple(
                 dict.fromkeys(
@@ -154,50 +270,101 @@ class ResolvedInputApplicationSurface:
                 _identity_target_accepts_value(evidence, value=value)
                 for evidence in self.identity_targets_by_id.values()
             )
-            components_by_target_kind: dict[str, list[str]] = {}
+            components_by_target_kind: dict[str, tuple[str, ...]] = {}
             if parameter_components:
                 components_by_target_kind[
                     ResolvedInputApplicationTargetKind.REQUEST_PARAMETER.value
-                ] = list(parameter_components)
+                ] = parameter_components
             if has_identity_target:
                 components_by_target_kind[
                     ResolvedInputApplicationTargetKind.RETURNED_IDENTITY.value
-                ] = ["canonical_key"]
+                ] = ("canonical_key",)
+            if any(
+                _returned_field_accepts_value(field, value=value)
+                for field in self.returned_field_targets_by_id.values()
+            ):
+                components_by_target_kind[
+                    ResolvedInputApplicationTargetKind.RETURNED_FIELD.value
+                ] = ("value",)
             if not components_by_target_kind:
                 continue
-            tests = self.membership_tests_by_input_id.get(value.known_input_id, ())
-            payloads.append(
+            surfaces.append(
+                _ResolvedValueSurface(
+                    value_id=value_id,
+                    value=value,
+                    components_by_target_kind=components_by_target_kind,
+                )
+            )
+        return tuple(surfaces)
+
+    def _predicate_requirement_payloads(self) -> tuple[dict[str, object], ...]:
+        return tuple(
+            {
+                "test_id": test.id,
+                "test_question": test.test_question,
+                "value_id": value.id,
+                "value_meaning": value.label,
+                "operator": _predicate_operator(test).value,
+            }
+            for value in self.values_by_id.values()
+            for test in self.membership_tests_by_input_id.get(
+                value.known_input_id, ()
+            )
+            if isinstance(value.payload, LiteralValuePayload)
+        )
+
+    def _targets_by_kind(self) -> dict[str, list[dict[str, object]]]:
+        return {
+            ResolvedInputApplicationTargetKind.REQUEST_PARAMETER.value: [
                 {
-                    "value_id": value_id,
-                    "components_by_target_kind": components_by_target_kind,
-                    "population_test_basis": population_test_basis_payload(
-                        tests,
-                        role_text=self.role_text,
+                    "target_id": param.id,
+                    "type": param.type,
+                    **({"description": param.description} if param.description else {}),
+                    **({"semantics": param.semantics} if param.semantics else {}),
+                    **({"choices": list(param.choices)} if param.choices else {}),
+                }
+                for param in self.parameter_targets_by_id.values()
+            ],
+            ResolvedInputApplicationTargetKind.RETURNED_IDENTITY.value: [
+                {"target_id": target_id}
+                for target_id in self.identity_targets_by_id
+            ],
+            ResolvedInputApplicationTargetKind.RETURNED_FIELD.value: [
+                {
+                    "target_id": target_id,
+                    "field_id": field.field_id,
+                    "type": field.type,
+                    **({"label": field.label} if field.label else {}),
+                    **(
+                        {"description": field.description}
+                        if field.description
+                        else {}
                     ),
                     **(
-                        {
-                            "request_parameter_alternative_group": (
-                                self.parameter_alternative_group.id
-                            )
-                        }
-                        if self.parameter_alternative_group is not None
-                        and value.known_input_id
-                        in self.parameter_alternative_group.question_input_refs
+                        {"choices": list(self._target_choices(target_id))}
+                        if self._target_choices(target_id)
                         else {}
                     ),
                 }
-            )
-        return tuple(payloads)
-
-    def _targets_by_kind(self) -> dict[str, list[str]]:
-        return {
-            ResolvedInputApplicationTargetKind.REQUEST_PARAMETER.value: list(
-                self.parameter_targets_by_id
-            ),
-            ResolvedInputApplicationTargetKind.RETURNED_IDENTITY.value: list(
-                self.identity_targets_by_id
-            ),
+                for target_id, field in self.returned_field_targets_by_id.items()
+            ],
         }
+
+    def _target_ids_for_kind(self, target_kind: str) -> tuple[str, ...]:
+        if target_kind == ResolvedInputApplicationTargetKind.REQUEST_PARAMETER.value:
+            return tuple(self.parameter_targets_by_id)
+        if target_kind == ResolvedInputApplicationTargetKind.RETURNED_IDENTITY.value:
+            return tuple(self.identity_targets_by_id)
+        if target_kind == ResolvedInputApplicationTargetKind.RETURNED_FIELD.value:
+            return tuple(self.returned_field_targets_by_id)
+        return ()
+
+    def _target_choices(self, target_id: str) -> tuple[str, ...]:
+        return tuple(
+            value
+            for _, choice_target_id, value in self.application_values_by_id.values()
+            if choice_target_id == target_id
+        )
 
     def _application_target_ids(
         self,
@@ -214,7 +381,14 @@ class ResolvedInputApplicationSurface:
                 if value_component in _parameter_value_components(param, value=value)
             ]
         if target_kind != ResolvedInputApplicationTargetKind.RETURNED_IDENTITY.value:
-            return []
+            if target_kind != ResolvedInputApplicationTargetKind.RETURNED_FIELD.value:
+                return []
+            return [
+                target_id
+                for target_id, field in self.returned_field_targets_by_id.items()
+                if value_component == "value"
+                and _returned_field_accepts_value(field, value=value)
+            ]
         return [
             evidence_id
             for evidence_id, evidence in self.identity_targets_by_id.items()
@@ -238,28 +412,17 @@ class ResolvedInputApplicationSurface:
             target_kind=target_kind,
         )
 
-    def _schema_value_variants(
+    def application_value(
         self,
-    ) -> tuple[tuple[str, str, str, tuple[str, ...]], ...]:
-        variants: list[tuple[str, str, str, tuple[str, ...]]] = []
-        for value in self._resolved_value_payloads():
-            test_basis = value["population_test_basis"]
-            assert isinstance(test_basis, dict)
-            components_by_kind = value["components_by_target_kind"]
-            assert isinstance(components_by_kind, dict)
-            for target_kind, components in components_by_kind.items():
-                assert isinstance(target_kind, str)
-                assert isinstance(components, list)
-                variants.extend(
-                    (
-                        str(value["value_id"]),
-                        target_kind,
-                        str(component),
-                        tuple(str(test_id) for test_id in test_basis),
-                    )
-                    for component in components
-                )
-        return tuple(variants)
+        *,
+        application_value_id: str,
+        target_kind: str,
+        target_id: str,
+    ) -> str | None:
+        item = self.application_values_by_id.get(application_value_id)
+        if item is None or item[:2] != (target_kind, target_id):
+            return None
+        return item[2]
 
     def owners(self) -> tuple[ResolvedInputApplicationOwner, ...]:
         owners: list[ResolvedInputApplicationOwner] = []
@@ -322,11 +485,30 @@ def resolved_input_application_surface(
             for value in resolved_values
         )
     }
+    returned_field_targets = {
+        evidence.evidence_id: evidence
+        for evidence in candidate.evidence_items
+        if isinstance(evidence, FieldEvidence)
+        if any(
+            _returned_field_accepts_value(evidence, value=value)
+            and _membership_tests_by_input_id(membership_tests).get(
+                value.known_input_id
+            )
+            for value in resolved_values
+        )
+    }
+    application_values = _application_values(
+        candidate,
+        parameter_targets=parameter_targets,
+        returned_field_targets=returned_field_targets,
+    )
     return ResolvedInputApplicationSurface(
         requested_fact_id=requested_fact_id,
         values_by_id=values_by_id,
         parameter_targets_by_id=parameter_targets,
         identity_targets_by_id=identity_targets,
+        returned_field_targets_by_id=returned_field_targets,
+        application_values_by_id=application_values,
         membership_tests_by_input_id=_membership_tests_by_input_id(
             membership_tests if coverage_role is not None else (),
         ),
@@ -349,6 +531,14 @@ def empty_resolved_input_applications_schema() -> dict[str, object]:
         },
         "maxItems": 0,
     }
+
+
+def _bounded_population_test_results_schema(
+    test_ids: tuple[str, ...],
+) -> dict[str, object]:
+    schema = population_test_results_schema(test_ids)
+    schema["required"] = []
+    return schema
 
 
 def resolved_input_application_surfaces(
@@ -428,11 +618,64 @@ def resolved_input_application_surfaces(
                     for value in model_visible_values.values()
                 )
             },
+            returned_field_targets_by_id={
+                evidence_id: evidence
+                for evidence_id, evidence in (
+                    surface.returned_field_targets_by_id.items()
+                )
+                if any(
+                    _returned_field_accepts_value(evidence, value=value)
+                    for value in model_visible_values.values()
+                )
+            },
+            application_values_by_id={
+                application_value_id: item
+                for application_value_id, item in (
+                    surface.application_values_by_id.items()
+                )
+                if (
+                    item[0]
+                    != ResolvedInputApplicationTargetKind.REQUEST_PARAMETER.value
+                    or item[1] not in backend_owned_param_ids
+                )
+            },
             membership_tests_by_input_id=surface.membership_tests_by_input_id,
             parameter_alternative_group=parameter_alternative_group,
             coverage_role=surface.coverage_role,
             role_text=surface.role_text,
         )
+    return output
+
+
+def _application_values(
+    candidate: SourceCandidate,
+    *,
+    parameter_targets: dict[str, CandidateParameter],
+    returned_field_targets: dict[str, FieldEvidence],
+) -> dict[str, tuple[str, str, str]]:
+    choices_by_field_id = {
+        predicate.field_id: predicate.allowed_values
+        for predicate in candidate.row_predicates
+        if predicate.allowed_values
+    }
+    output: dict[str, tuple[str, str, str]] = {}
+    for target_kind, targets in (
+        (
+            ResolvedInputApplicationTargetKind.REQUEST_PARAMETER.value,
+            ((target_id, param.choices) for target_id, param in parameter_targets.items()),
+        ),
+        (
+            ResolvedInputApplicationTargetKind.RETURNED_FIELD.value,
+            (
+                (target_id, choices_by_field_id.get(field.field_id, ()))
+                for target_id, field in returned_field_targets.items()
+            ),
+        ),
+    ):
+        for target_id, choices in targets:
+            for index, value in enumerate(choices, start=1):
+                application_value_id = f"{target_kind}.{target_id}.choice_{index}"
+                output[application_value_id] = (target_kind, target_id, value)
     return output
 
 
@@ -443,6 +686,7 @@ def parse_resolved_input_applications(
 ) -> ParsedResolvedInputApplications:
     param_binding_groups: list[ParamBindingSetAlternatives] = []
     parameter_applications_by_target: dict[str, list[_ParameterApplication]] = {}
+    field_applications_by_target: dict[str, list[_ReturnedFieldApplication]] = {}
     applied_filters: list[SourceAppliedFilter] = []
     known_input_ids: list[str] = []
     population_coverage_claims: list[PopulationCoverageClaim] = []
@@ -460,6 +704,12 @@ def parse_resolved_input_applications(
             value_component=application.value_component,
         ):
             raise ValueError("resolved value is incompatible with application target")
+        application_value = _selected_application_value(
+            application,
+            surface=surface,
+            target_kind=application.target_kind,
+            target_id=application.target_id,
+        )
         if value.known_input_id:
             known_input_ids.append(value.known_input_id)
         test_proof_refs: tuple[str, ...]
@@ -475,6 +725,7 @@ def parse_resolved_input_applications(
                     output=application,
                     param=param,
                     value=value,
+                    application_value=application_value or "",
                 )
             )
             continue
@@ -505,6 +756,24 @@ def parse_resolved_input_applications(
                     )
                 )
             )
+        elif (
+            application.target_kind
+            == ResolvedInputApplicationTargetKind.RETURNED_FIELD.value
+        ):
+            field = surface.returned_field_targets_by_id.get(application.target_id)
+            if field is None:
+                raise ValueError(
+                    "resolved input application references unknown returned field"
+                )
+            field_applications_by_target.setdefault(field.evidence_id, []).append(
+                _ReturnedFieldApplication(
+                    output=application,
+                    field=field,
+                    value=value,
+                    application_value=application_value or "",
+                )
+            )
+            continue
         else:
             raise ValueError("resolved input application has unsupported target kind")
         population_coverage_claims.extend(
@@ -522,11 +791,99 @@ def parse_resolved_input_applications(
         )
         param_binding_groups.append(binding_sets)
         population_coverage_claims.extend(claims)
+    for field_applications in field_applications_by_target.values():
+        filters, claims = _returned_field_application_group(
+            tuple(field_applications),
+            surface=surface,
+        )
+        applied_filters.extend(filters)
+        population_coverage_claims.extend(claims)
     return ParsedResolvedInputApplications(
         param_binding_sets=combine_param_binding_sets(param_binding_groups),
         applied_filters=tuple(applied_filters),
         known_input_ids=tuple(dict.fromkeys(known_input_ids)),
         population_coverage_claims=tuple(population_coverage_claims),
+    )
+
+
+def _returned_field_application_group(
+    applications: tuple[_ReturnedFieldApplication, ...],
+    *,
+    surface: ResolvedInputApplicationSurface,
+) -> tuple[tuple[SourceAppliedFilter, ...], tuple[PopulationCoverageClaim, ...]]:
+    tests = _shared_application_tests(
+        tuple(application.value for application in applications),
+        surface=surface,
+    )
+    if len(tests) != 1:
+        raise ValueError(
+            "returned-field predicate application requires one fact predicate"
+        )
+    test = tests[0]
+    operator = _predicate_operator(test)
+    proof_refs = tuple(
+        dict.fromkeys(
+            (
+                *(ref for application in applications for ref in application.value.proof_refs),
+                f"returned_field:{applications[0].field.evidence_id}",
+            )
+        )
+    )
+    claim_sets = tuple(
+        _application_population_coverage_claims(
+            application.output,
+            value=application.value,
+            surface=surface,
+            proof_refs=proof_refs,
+        )
+        for application in applications
+    )
+    if any(claims != claim_sets[0] for claims in claim_sets[1:]):
+        raise ValueError("predicate alternatives disagree on population effects")
+    concrete_values = tuple(
+        application.application_value
+        or str(application.value.payload.component_value(ValueComponent.VALUE))
+        for application in applications
+    )
+    if len(applications) > 1 and operator is PredicateOperator.EQUALS:
+        return (
+            (
+                SourceAppliedFilter(
+                    known_input_id="",
+                    predicate_field_ids=(applications[0].field.field_id,),
+                    value_id=f"predicate_set.{test.id}",
+                    value_kind="string_set",
+                    display_value=test.test_question,
+                    operator=PredicateOperator.IN.value,
+                    application_values=tuple(dict.fromkeys(concrete_values)),
+                    proof_refs=proof_refs,
+                ),
+            ),
+            claim_sets[0],
+        )
+    if len(applications) > 1 and operator is not PredicateOperator.NOT_EQUALS:
+        raise ValueError("ordered predicate cannot have alternative boundaries")
+    return (
+        tuple(
+            SourceAppliedFilter(
+                known_input_id=application.value.known_input_id,
+                predicate_field_ids=(application.field.field_id,),
+                value_id=application.value.id,
+                value_kind=application.value.kind.value,
+                value_component="value",
+                display_value=application.value.label,
+                literal_type=(
+                    application.value.payload.literal_type.value
+                    if isinstance(application.value.payload, LiteralValuePayload)
+                    else ""
+                ),
+                operator=operator.value,
+                application_value=application.application_value,
+                proof_refs=proof_refs,
+            )
+            for application in applications
+        ),
+        claim_sets[0],
     )
 
 
@@ -539,12 +896,13 @@ def _parameter_application_group(
         application = applications[0]
         if _is_parameter_alternative(application.value, surface=surface):
             raise ValueError("parameter alternatives must apply together")
-        proof_refs = _parameter_application_proof_refs(applications)
+        proof_refs = _parameter_application_proof_refs(applications, surface=surface)
         return (
             _parameter_binding_sets(
                 application.output,
                 param=application.param,
                 value=application.value,
+                application_value=application.application_value,
             ),
             _application_population_coverage_claims(
                 application.output,
@@ -554,7 +912,7 @@ def _parameter_application_group(
             ),
         )
     _require_parameter_alternative_group(applications, surface=surface)
-    proof_refs = _parameter_application_proof_refs(applications)
+    proof_refs = _parameter_application_proof_refs(applications, surface=surface)
     coverage_claim_sets = tuple(
         _application_population_coverage_claims(
             application.output,
@@ -574,6 +932,7 @@ def _parameter_application_group(
                 application.output,
                 param=application.param,
                 value=application.value,
+                application_value=application.application_value,
             )
         ),
         coverage_claim_sets[0],
@@ -586,10 +945,20 @@ def _require_parameter_alternative_group(
     surface: ResolvedInputApplicationSurface,
 ) -> None:
     alternative_group = surface.parameter_alternative_group
-    if alternative_group is None:
-        raise ValueError("resolved input application repeats a target")
     values = tuple(application.value for application in applications)
     input_ids = tuple(value.known_input_id for value in values)
+    if alternative_group is None:
+        tests = _shared_application_tests(values, surface=surface)
+        if (
+            len(tests) == 1
+            and len(values) > 1
+            and _predicate_operator(tests[0]) is PredicateOperator.EQUALS
+            and frozenset(input_ids)
+            == frozenset(tests[0].owned_question_input_refs)
+            and len(set(input_ids)) == len(input_ids)
+        ):
+            return
+        raise ValueError("resolved input application repeats a target")
     if (
         any(not isinstance(value.payload, IdentityValuePayload) for value in values)
         or len(set(input_ids)) != len(input_ids)
@@ -608,14 +977,44 @@ def _is_parameter_alternative(
     surface: ResolvedInputApplicationSurface,
 ) -> bool:
     alternative_group = surface.parameter_alternative_group
-    return (
+    if (
         alternative_group is not None
         and value.known_input_id in alternative_group.question_input_refs
+    ):
+        return True
+    return any(
+        len(test.owned_question_input_refs) > 1
+        for test in surface.membership_tests_by_input_id.get(value.known_input_id, ())
+    )
+
+
+def _shared_application_tests(
+    values: tuple[FactValue, ...],
+    *,
+    surface: ResolvedInputApplicationSurface,
+) -> tuple[RequestedFactAnswerPopulationMembershipTest, ...]:
+    if not values:
+        return ()
+    shared = set(
+        surface.membership_tests_by_input_id.get(values[0].known_input_id, ())
+    )
+    for value in values[1:]:
+        shared &= set(
+            surface.membership_tests_by_input_id.get(value.known_input_id, ())
+        )
+    return tuple(
+        test
+        for test in surface.membership_tests_by_input_id.get(
+            values[0].known_input_id, ()
+        )
+        if test in shared
     )
 
 
 def _parameter_application_proof_refs(
     applications: tuple[_ParameterApplication, ...],
+    *,
+    surface: ResolvedInputApplicationSurface,
 ) -> tuple[str, ...]:
     return tuple(
         dict.fromkeys(
@@ -631,33 +1030,12 @@ def _parameter_application_proof_refs(
     )
 
 
-def _application_schema(
-    *,
-    value_id: str,
-    value_component: str,
-    target_kind: str,
-    target_ids: list[str],
-    population_test_ids: tuple[str, ...],
-) -> dict[str, object]:
-    return provider_output.ResolvedInputApplicationOutput.schema(
-        {
-            "target_kind": {"enum": [target_kind]},
-            "target_id": {"enum": target_ids},
-            "value_id": {"enum": [value_id]},
-            "value_component": {"enum": [value_component]},
-            "match_basis_explanation": {"type": "string", "minLength": 1},
-            "population_test_results": population_test_results_schema(
-                population_test_ids
-            ),
-        }
-    )
-
-
 def _parameter_binding_sets(
     application: provider_output.ResolvedInputApplicationOutput,
     *,
     param: CandidateParameter,
     value: FactValue,
+    application_value: str = "",
 ) -> ParamBindingSetAlternatives:
     selected_component = application.value_component
     compiler_component = selected_component
@@ -668,11 +1046,11 @@ def _parameter_binding_sets(
             else selected_component
         )
         compiler_component = f"key_component:{component_id}"
-    concrete_value = _parameter_component_value(
-        param,
-        value=value,
-        component=selected_component,
-    )
+    concrete_value = application_value or _parameter_component_value(
+            param,
+            value=value,
+            component=selected_component,
+        )
     return parameter_binding_sets(
         param_id=param.id,
         value=concrete_value,
@@ -717,7 +1095,16 @@ def _parameter_value_components(
             for binding in param.binding_values
             if binding.source == "available_value" and binding.value == value.id
         )
-        return tuple(dict.fromkeys(binding_components))
+        components = tuple(dict.fromkeys(binding_components))
+        if components:
+            return components
+        if isinstance(payload, LiteralValuePayload) and _literal_accepts_catalog_type(
+            payload,
+            type_name=param.type,
+            has_choices=bool(param.choices),
+        ):
+            return ("value",)
+        return ()
     return tuple(
         component
         for component in dict.fromkeys(candidates)
@@ -736,6 +1123,88 @@ def _parameter_accepts_component(
     except ValueError:
         return False
     return True
+
+
+def _selected_application_value(
+    application: provider_output.ResolvedInputApplicationOutput,
+    *,
+    surface: ResolvedInputApplicationSurface,
+    target_kind: str,
+    target_id: str,
+) -> str | None:
+    target_choices = surface._target_choices(target_id)
+    selected_id = (application.application_value_id or "").strip()
+    if target_choices:
+        if not selected_id:
+            raise ValueError(
+                "finite-choice predicate application requires application_value_id"
+            )
+        selected = surface.application_value(
+            application_value_id=selected_id,
+            target_kind=target_kind,
+            target_id=target_id,
+        )
+        if selected is None:
+            raise ValueError(
+                "predicate application value does not belong to selected target"
+            )
+        return selected
+    if selected_id:
+        raise ValueError(
+            "application_value_id requires a finite-choice application target"
+        )
+    return None
+
+
+def _literal_accepts_catalog_type(
+    payload: LiteralValuePayload,
+    *,
+    type_name: str,
+    has_choices: bool = False,
+) -> bool:
+    normalized = type_name.strip().casefold()
+    if has_choices or normalized == "choice":
+        return payload.literal_type is LiteralType.STRING
+    if normalized in {"integer", "number", "decimal", "float", "double"}:
+        if payload.literal_type is not LiteralType.NUMBER:
+            return False
+        return normalized != "integer" or Decimal(payload.value) == Decimal(
+            payload.value
+        ).to_integral_value()
+    if normalized in {"string", "path", "pk", ""}:
+        return payload.literal_type is LiteralType.STRING
+    if normalized == "boolean":
+        return payload.literal_type is LiteralType.BOOLEAN
+    return False
+
+
+def _returned_field_accepts_value(
+    field: FieldEvidence,
+    *,
+    value: FactValue,
+) -> bool:
+    return (
+        isinstance(value.payload, LiteralValuePayload)
+        and not field.presentation_only
+        and bool(field.field_id)
+        and _literal_accepts_catalog_type(
+            value.payload,
+            type_name=field.type,
+            has_choices=field.type.strip().casefold() == "choice",
+        )
+    )
+
+
+def _predicate_operator(
+    test: RequestedFactAnswerPopulationMembershipTest,
+) -> PredicateOperator:
+    if test.comparison_operator is not None:
+        return test.comparison_operator
+    return (
+        PredicateOperator.NOT_EQUALS
+        if test.polarity.value == "MUST_FAIL"
+        else PredicateOperator.EQUALS
+    )
 
 
 def _parameter_component_value(
@@ -801,8 +1270,8 @@ def _membership_tests_by_input_id(
     for test in tests:
         if test.kind is not AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT:
             continue
-        if len(test.owned_question_input_refs) == 1:
-            output.setdefault(test.owned_question_input_refs[0], []).append(test)
+        for input_id in test.owned_question_input_refs:
+            output.setdefault(input_id, []).append(test)
     return {input_id: tuple(items) for input_id, items in output.items()}
 
 

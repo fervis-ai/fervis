@@ -86,6 +86,8 @@ PROMPT_SURFACE_CONTRACTS = {
             "Answer Outputs",
             "Question Inputs Overview",
             "Literal Reference Inputs",
+            "Predicate Values",
+            "Threshold Values",
             "Literal Time Inputs",
             "Formula Values",
             "Grouping Grain",
@@ -117,7 +119,7 @@ PROMPT_SURFACE_CONTRACTS = {
         "instruction_headings": (
             "Source Binding",
             "Source Population And Fulfillment",
-            "Resolved Input Application",
+            "Predicate Applications",
             "Param Binding",
             "Row Predicates",
             "Finite Choice Review Shape",

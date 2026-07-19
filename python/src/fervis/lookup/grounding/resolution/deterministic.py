@@ -65,6 +65,14 @@ def _deterministic_known_inputs(
                 )
             )
             continue
+        if known.is_predicate_value or known.is_threshold_value:
+            values.append(
+                _predicate_operand_value(
+                    known,
+                    applies_to_requested_fact_ids=requested_fact_ids,
+                )
+            )
+            continue
         if known.is_grouping_grain:
             values.append(
                 _grouping_grain_value(
@@ -300,6 +308,25 @@ def _formula_value(
     literal_type, value = normalize_scalar_literal_text(known.resolved_value_text)
     if literal_type != LiteralType.NUMBER.value:
         raise ValueError("formula_value requires a numeric scalar literal")
+    return FactValue.literal(
+        id=_grounded_value_id(known.id),
+        known_input_id=known.id,
+        literal_type=LiteralType(literal_type),
+        value=value,
+        label=known.text,
+        proof_refs=(f"known_input:{known.id}",),
+        applies_to_requested_fact_ids=applies_to_requested_fact_ids,
+    )
+
+
+def _predicate_operand_value(
+    known: RequestedFactLiteralInput,
+    *,
+    applies_to_requested_fact_ids: tuple[str, ...],
+) -> FactValue:
+    literal_type, value = normalize_scalar_literal_text(known.resolved_value_text)
+    if known.is_threshold_value and literal_type != LiteralType.NUMBER.value:
+        raise ValueError("threshold_value requires a numeric scalar literal")
     return FactValue.literal(
         id=_grounded_value_id(known.id),
         known_input_id=known.id,

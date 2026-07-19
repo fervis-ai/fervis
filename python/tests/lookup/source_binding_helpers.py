@@ -875,7 +875,11 @@ def _resolved_input_application_from_selection(
     value = matching_values[0]
     components_by_kind = value.get("components_by_target_kind") or {}
     shown_components = components_by_kind.get(selected_identity[0]) or ()
-    shown_targets = targets_by_kind.get(selected_identity[0]) or ()
+    shown_targets = tuple(
+        str(target.get("target_id") or "")
+        for target in targets_by_kind.get(selected_identity[0]) or ()
+        if isinstance(target, dict)
+    )
     if selected_identity[1] not in shown_targets or selected_identity[3] not in shown_components:
         raise AssertionError(
             "resolved-input application fixture must select shown target and component: "

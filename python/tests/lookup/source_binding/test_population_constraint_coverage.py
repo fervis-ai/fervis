@@ -182,7 +182,9 @@ def _apply_staff_input(outcome, *, target, role: str, basis: str) -> None:
     outcome["bindings_for_fact_1"][role]["resolved_input_applications"] = [
         {
             "target_kind": target_kind,
-            "target_id": application["targets_by_kind"][target_kind][0],
+            "target_id": application["targets_by_kind"][target_kind][0][
+                "target_id"
+            ],
             "value_id": value["value_id"],
             "value_component": components[0],
             "match_basis_explanation": basis,

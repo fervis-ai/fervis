@@ -44,6 +44,7 @@ from fervis.lookup.question_contract.tools import (
     QUESTION_CONTRACT_TOOL_NAME,
 )
 from fervis.lookup.provider_contract import ProviderObject
+from fervis.lookup.predicate_operators import PredicateOperator
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +54,7 @@ class _ParsedMembershipTest:
     polarity: AnswerPopulationMembershipTestPolarity
     test_question: str
     owned_question_input_refs: tuple[str, ...]
+    comparison_operator: PredicateOperator | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,6 +263,7 @@ def _requested_facts(
             population_input_refs_by_use_id=(
                 input_uses.population_input_refs_by_use_id
             ),
+            inputs_by_id=inputs_by_id,
             path=f"{path}.answer_population.membership_tests",
         )
         answer_subject = _answer_subject(
@@ -422,6 +425,7 @@ def _parsed_membership_tests(
     items: tuple[provider_output.AnswerPopulationMembershipTestOutput, ...],
     *,
     population_input_refs_by_use_id: dict[str, str],
+    inputs_by_id: dict[str, RequestedFactKnownInput],
     path: str,
 ) -> tuple[_ParsedMembershipTest, ...]:
     output: list[_ParsedMembershipTest] = []
@@ -455,6 +459,45 @@ def _parsed_membership_tests(
                 )
         elif owned_input_refs:
             raise ValueError(f"{item_path} non-explicit membership test has operands")
+        threshold_refs = tuple(
+            input_ref
+            for input_ref in owned_input_refs
+            if isinstance(
+                known_input := inputs_by_id[input_ref], RequestedFactLiteralInput
+            )
+            and known_input.is_threshold_value
+        )
+        raw_operator = (item.comparison_operator or "").strip()
+        if threshold_refs:
+            if len(threshold_refs) != len(owned_input_refs):
+                raise ValueError(
+                    f"{item_path} threshold comparison cannot mix operand roles"
+                )
+            if len(threshold_refs) != 1:
+                raise ValueError(
+                    f"{item_path} threshold comparison requires one boundary"
+                )
+            try:
+                comparison_operator = PredicateOperator(raw_operator)
+            except ValueError as exc:
+                raise ValueError(
+                    f"{item_path}.comparison_operator requires lt, lte, gt, or gte"
+                ) from exc
+            if comparison_operator not in {
+                PredicateOperator.LT,
+                PredicateOperator.LTE,
+                PredicateOperator.GT,
+                PredicateOperator.GTE,
+            }:
+                raise ValueError(
+                    f"{item_path}.comparison_operator requires lt, lte, gt, or gte"
+                )
+        else:
+            if raw_operator:
+                raise ValueError(
+                    f"{item_path}.comparison_operator requires threshold_value"
+                )
+            comparison_operator = None
         output.append(
             _ParsedMembershipTest(
                 id=test_id,
@@ -465,6 +508,7 @@ def _parsed_membership_tests(
                     path=f"{item_path}.test_question",
                 ),
                 owned_question_input_refs=tuple(owned_input_refs),
+                comparison_operator=comparison_operator,
             )
         )
     if not output:
@@ -488,6 +532,7 @@ def _answer_population_membership_tests(
             polarity=item.polarity,
             test_question=item.test_question,
             owned_question_input_refs=item.owned_question_input_refs,
+            comparison_operator=item.comparison_operator,
         )
         for item in items
     )
@@ -746,6 +791,15 @@ def _validate_input_owner_kind(
             RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE.value
         ):
             raise ValueError(f"{path} GROUP_KEY_DERIVATION requires grouped_aggregate")
+        return
+    if (
+        isinstance(known_input, RequestedFactLiteralInput)
+        and (known_input.is_predicate_value or known_input.is_threshold_value)
+    ):
+        if owner_kind is not provider_output.QuestionInputOwnerKind.POPULATION_TESTS:
+            raise ValueError(
+                f"{path} for predicate or threshold input must be POPULATION_TESTS"
+            )
         return
     if (
         isinstance(known_input, RequestedFactLiteralInput)

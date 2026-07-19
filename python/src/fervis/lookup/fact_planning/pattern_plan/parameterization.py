@@ -12,7 +12,6 @@ from fervis.lookup.source_binding.compiler_ir import (
     DraftRelationSource,
     DraftRelationSourceAppliedFilter,
     DraftRelationSourcePopulationChoice,
-    DraftRelationSourceRowFilter,
     RelationInputOrigin,
 )
 from fervis.lookup.answer_program.contracts import (
@@ -58,7 +57,7 @@ from fervis.lookup.answer_program.values import (
     TimeComponent,
     ValueKind,
 )
-from fervis.lookup.answer_program.expressions import Expression, FieldRef
+from fervis.lookup.answer_program.expressions import FieldRef
 
 
 @dataclass(frozen=True)
@@ -99,15 +98,6 @@ def parameterize_relation(
             )
         ),
         *(
-            _parameterize_row_filter(
-                item,
-                relation_id=relation_id,
-                parameters=parameters,
-                bindings=bindings,
-            )
-            for item in source.row_filters
-        ),
-        *(
             Predicate(
                 left=FieldRef(choice.field_id),
                 operator=PredicateOperator.IN,
@@ -126,7 +116,6 @@ def parameterize_relation(
         dict.fromkeys(
             (
                 *(ref for item in source.applied_filters for ref in item.proof_refs),
-                *(ref for item in source.row_filters for ref in item.proof_refs),
                 *(
                     ref
                     for item in source.population_choices
@@ -373,51 +362,6 @@ def _parameterize_applied_filter(
             right=expression,
         )
         for field_id in source_filter.predicate_field_ids
-    )
-
-
-def _parameterize_row_filter(
-    row_filter: DraftRelationSourceRowFilter,
-    *,
-    relation_id: str,
-    parameters: dict[str, ParameterDeclaration],
-    bindings: dict[str, ParameterBinding],
-) -> Predicate:
-    expression: Expression
-    if row_filter.value_expr is not None:
-        expression = row_filter.value_expr
-    elif row_filter.parameter_id:
-        expression = ParameterRef(row_filter.parameter_id)
-        if row_filter.parameter_id not in parameters:
-            expression = _add_parameter(
-                parameter_id=row_filter.parameter_id,
-                role=ParameterRole.SEMANTIC_CONTROL,
-                value=FactValue.string_set(
-                    id=f"binding.{row_filter.parameter_id}",
-                    values=tuple(str(value) for value in row_filter.values),
-                    proof_refs=row_filter.proof_refs,
-                ),
-                proof_refs=row_filter.proof_refs,
-                parameters=parameters,
-                bindings=bindings,
-            )
-    else:
-        expression = ConstantRef(
-            constant_id=f"row-filter.{relation_id}.{row_filter.field_id}",
-            version_ref="source-binding@1",
-            value=FactValue.string_set(
-                id=f"constant.{relation_id}.{row_filter.field_id}",
-                values=tuple(str(value) for value in row_filter.values),
-                proof_refs=row_filter.proof_refs,
-            ),
-        )
-    operator = PredicateOperator(row_filter.operator)
-    if operator is PredicateOperator.EQUALS and len(row_filter.values) > 1:
-        operator = PredicateOperator.IN
-    return Predicate(
-        left=FieldRef(row_filter.field_id),
-        operator=operator,
-        right=expression,
     )
 
 

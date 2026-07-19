@@ -214,7 +214,9 @@ def _binding_target_payload(
     payload = closed_key_bindings.model_visible_target_payload(target)
     surface = input_application_surfaces.get(target.binding_target_id)
     if surface is not None and (
-        surface.parameter_targets_by_id or surface.identity_targets_by_id
+        surface.parameter_targets_by_id
+        or surface.identity_targets_by_id
+        or surface.returned_field_targets_by_id
     ):
         payload["resolved_input_application"] = surface.prompt_payload()
     population_tests = _population_binding_tests(
@@ -327,11 +329,17 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                 ),
             ),
             builder.instruction_block(
-                "Resolved Input Application",
+                "Predicate Applications",
                 (
                     "resolved_input_applications is inside one role binding. Each item applies one resolved_values entry to one target listed under targets_by_kind for that role binding.",
                     "Use target_kind=request_parameter to apply the resolved input to the shown request parameter named by target_id.",
                     "Use target_kind=returned_identity to keep only returned rows whose shown candidate-key or entity-reference target equals the resolved input value.",
+                    "For every shown predicate requirement on the selected role, choose exactly one shown target using target_kind and target_id.",
+                    "A request_parameter application means the source applies the shown predicate before returning rows.",
+                    "A returned_field application means Fervis keeps returned rows satisfying the shown field, operator, and value predicate.",
+                    "For threshold_value, the requested fact already fixes the value and comparison operator; choose only where that predicate is applied.",
+                    "For predicate_value, the requested fact fixes the value meaning and predicate kind. When the chosen target exposes finite choices, also select one shown application_value_id carrying that meaning. Otherwise the typed literal itself is applied.",
+                    "Do not infer predicate meaning from parameter or field names.",
                     "Each selected role binding must apply every fact-local resolved input that owns an explicit population constraint and exposes a compatible component and target kind on that role.",
                     "Copy value_component from the selected value's components_by_target_kind entry for target_kind.",
                     "For returned identities, use value_component=canonical_key; the backend maps every declared key component to its declared returned field.",

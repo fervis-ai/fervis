@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 from fervis.lookup.provider_contract import ProviderObject, ProviderOutput
 
@@ -36,6 +37,7 @@ class ResolvedInputApplicationOutput(ProviderOutput):
     value_component: str
     match_basis_explanation: str
     population_test_results: dict[str, RowPredicatePopulationTestResultOutput]
+    application_value_id: Optional[str] = None
 
 
 @dataclass(frozen=True)

@@ -21,6 +21,7 @@ from fervis.lookup.question_inputs import (
 )
 from fervis.lookup.turn_prompts.context import HostPromptContext
 from fervis.lookup.clarification.model import QuestionContractResponse
+from fervis.lookup.predicate_operators import PredicateOperator
 
 
 class KnownInputSource(StrEnum):
@@ -423,6 +424,13 @@ class RequestedFactLiteralInput:
             literal_type, _ = normalize_scalar_literal_text(self.resolved_value_text)
             if literal_type != "number":
                 raise ValueError("formula_value requires a numeric scalar literal")
+        if self.role == LiteralInputRole.THRESHOLD_VALUE:
+            literal_type, normalized = normalize_scalar_literal_text(
+                self.resolved_value_text
+            )
+            if literal_type != "number":
+                raise ValueError("threshold_value requires a numeric scalar literal")
+            object.__setattr__(self, "resolved_value_text", normalized)
         if self.role == LiteralInputRole.GROUPING_GRAIN:
             grain = self.resolved_value_text.strip().casefold()
             if grain not in {"day", "week", "month", "quarter", "year"}:
@@ -449,6 +457,14 @@ class RequestedFactLiteralInput:
     @property
     def is_time_value(self) -> bool:
         return self.role == LiteralInputRole.TIME_VALUE
+
+    @property
+    def is_predicate_value(self) -> bool:
+        return self.role == LiteralInputRole.PREDICATE_VALUE
+
+    @property
+    def is_threshold_value(self) -> bool:
+        return self.role == LiteralInputRole.THRESHOLD_VALUE
 
     @property
     def is_result_limit(self) -> bool:
@@ -612,6 +628,7 @@ class RequestedFactAnswerPopulationMembershipTest:
     test_question: str
     owned_question_input_refs: tuple[str, ...] = ()
     normal_instance_profile: NormalInstanceProfile | None = None
+    comparison_operator: PredicateOperator | None = None
 
     def __post_init__(self) -> None:
         if not self.id.strip():
@@ -642,6 +659,19 @@ class RequestedFactAnswerPopulationMembershipTest:
             and self.normal_instance_profile is not None
         ):
             raise ValueError("normal instance profile requires normal instance guard")
+        if self.comparison_operator is not None and (
+            self.kind is not AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT
+            or self.comparison_operator
+            not in {
+                PredicateOperator.LT,
+                PredicateOperator.LTE,
+                PredicateOperator.GT,
+                PredicateOperator.GTE,
+            }
+        ):
+            raise ValueError(
+                "comparison operator requires an ordered explicit user constraint"
+            )
 
     def to_answer_request_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -655,16 +685,21 @@ class RequestedFactAnswerPopulationMembershipTest:
             payload["normal_instance_profile"] = (
                 self.normal_instance_profile.to_answer_request_dict()
             )
+        if self.comparison_operator is not None:
+            payload["comparison_operator"] = self.comparison_operator.value
         return payload
 
     def to_question_contract_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "test_id": self.id,
             "kind": self.kind.value,
             "polarity": self.polarity.value,
             "test_question": self.test_question,
             "owned_question_input_refs": list(self.owned_question_input_refs),
         }
+        if self.comparison_operator is not None:
+            payload["comparison_operator"] = self.comparison_operator.value
+        return payload
 
 
 @dataclass(frozen=True)

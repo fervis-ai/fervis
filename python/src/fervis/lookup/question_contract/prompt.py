@@ -141,6 +141,7 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                     "For NORMAL_BUSINESS_INSTANCE, include a NORMAL_INSTANCE_GUARD test; the backend attaches the standard ORDINARY_BUSINESS_INSTANCE_V1 profile with typed excluded-state roles.",
                     "For RAW_DATA_RECORD, include a RAW_RECORD_GUARD test.",
                     "Each membership test has polarity MUST_PASS unless the user explicitly asks to exclude matching instances, in which case use MUST_FAIL.",
+                    "For a threshold_value operand, comparison_operator states the candidate-to-boundary test: gt for above, gte for at least, lt for below, and lte for at most. Do not write comparison_operator for another input role.",
                     "Do not decide which API values, enum options, endpoints, fields, or params pass answer_population tests in this turn.",
                     "answer_requests_count must equal the number of answer_requests.",
                     "Do not put API details, endpoint names, field names, params, enum values, or execution operations in answer_subject.",
@@ -188,10 +189,8 @@ class QuestionContractTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Literal Reference Inputs",
                 (
-                    "A reference_value is a concrete identity, property, category, status, channel, or other predicate value, such as completed or in-person; create one kind=literal_text with role=reference_value input for each and, when it modifies a candidate kind, copy only the property-value span.",
-                    "The qualification test must make sense for one candidate without inspecting any other candidate.",
-                    "Values used to compare, order, rank, or select candidates by position belong to answer_expression, not reference_value.",
-                    "Question Contract does not decide whether a reference resolves to a canonical entity or a scalar field value; catalog-aware grounding owns that decision.",
+                    "Use reference_value when the input identifies one particular resource.",
+                    "A value used to compare candidates with one another or select them by position belongs to answer_expression. A boundary tested independently against each candidate is a threshold_value.",
                     "A reference_value is required when the requested fact depends on that concrete value being grounded or directly verified before compilation.",
                     "Do not use reference_value for answer_subject.subject_text, a generic resource class, answer category, grouping label, pronoun, or question word unless conversation resolution emits that pronoun as a resolved literal_text input.",
                     "Use one literal_text reference_value item per separately addressable value, even when multiple values appear in one coordinated phrase.",
@@ -203,6 +202,20 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                     "field_label_text helps grounding choose or verify the intended attribute; it is not a catalog field decision.",
                     "value_meaning_hint briefly describes what kind of value this is, such as location, account, or code.",
                     "Do not replace operand_text with a resolver result, API value, synonym, or different business object that was not supplied by the user or conversation context.",
+                ),
+            ),
+            builder.instruction_block(
+                "Predicate Values",
+                (
+                    "Use predicate_value when a supplied property value is tested independently against each candidate by equality, membership, or exclusion.",
+                    "A predicate_value does not identify one particular resource.",
+                ),
+            ),
+            builder.instruction_block(
+                "Threshold Values",
+                (
+                    "Use threshold_value when a supplied number is the boundary in a predicate evaluated independently for each candidate, such as 1000 in 'records with a measured value over 1000.'",
+                    "Copy only the boundary into operand_text. The population test states what is measured and whether it must be above, below, at least, or at most that boundary. Do not select an API field or parameter in this turn.",
                 ),
             ),
             builder.instruction_block(
@@ -244,12 +257,12 @@ class QuestionContractTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Question Input Inventory",
                 (
-                    "Before finalizing question_inputs, actively inventory every word or phrase that is a reference value, time value, formula value, grouping grain, result limit, or resolved row-set reference.",
+                    "Before finalizing question_inputs, actively inventory every word or phrase that is a reference value, predicate value, time value, threshold value, formula value, grouping grain, result limit, or resolved row-set reference.",
                     "Declare exactly one question_inputs item for every inventoried phrase.",
                     "Question inputs are atomic value rows. Each question_input represents one value, time, formula operand, limit, or reference that the answer contract may use. If the question names multiple values, create one question_input per value. Put the input's semantic role in field_label_text; do not combine several values into one value_source_text or operand_text.",
                     "Question-input identity comes from the copied occurrence, not from the predicate or field that consumes it. One copied occurrence remains one input when several predicates consume it.",
                     "Each question_inputs item must include inventory_check.why_this_is_an_input explaining which input category it belongs to and why it constrains an answer request or supplies a value.",
-                    "Each question_input must have one primary contract role: population predicate operand, result key, time constraint, group-key derivation, compute-expression operand, or result limit.",
+                    "Each question_input must have one primary contract role: population predicate operand, result key, time constraint, grouping-grain operand, computation operand, or result limit.",
                     "Result-shape and result-axis inputs belong to answer_expression, not answer_population membership tests.",
                     "Use answer_population membership_tests only for predicates that narrow subject instances independently of answer_expression's result axis.",
                     "question_inputs declares concrete user/context values that those predicates, time predicates, or result limits depend on and that downstream stages must ground, compile, verify, or bind.",
@@ -262,7 +275,7 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                 "Clarification Boundary",
                 (
                     "Write decision_basis first. First state whether the current wording identifies a requested fact and whether any required referent can only be identified from an earlier utterance.",
-                    "Then list every reference_value, time_value, formula_value, grouping_grain, and result_limit the question contains and outcome must declare without assigning owners or predicates.",
+                    "Then list every reference_value, predicate_value, time_value, threshold_value, formula_value, grouping_grain, and result_limit the question contains and outcome must declare without assigning owners or predicates.",
                     "Relational structure belongs in outcome; do not assess grounding, time compilation, or execution in decision_basis.",
                     "Do not use a clarification outcome when visible context is sufficient to author a complete factual question contract.",
                     "Use kind=missing_requested_fact only when explicit wording states no business fact, property, measure, relationship, comparison, or row set to return.",

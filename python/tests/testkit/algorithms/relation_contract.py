@@ -114,7 +114,6 @@ def run_relation_contract_case(payload: dict[str, Any]) -> list[str]:
         fields = _relation_fields_with_source_requirements(
             relation_fields,
             source_filters=(),
-            row_filters=(),
             population_choices=population_choices,
         )
         return exact_mismatches(

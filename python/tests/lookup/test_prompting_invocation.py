@@ -69,10 +69,10 @@ from fervis.lookup.plan_selection import (
 
 
 _APPROVED_CHARS = {
-    "question contract": (364, 21906, 38220),
+    "question contract": (364, 22411, 40872),
     "query enrichment": (364, 5185, 7408),
     "grounding": (364, 7202, 10861),
-    "source binding": (364, 16300, 20170),
+    "source binding": (364, 17082, 20958),
     "pattern fact planning": (364, 3497, 5311),
 }
 
@@ -191,7 +191,7 @@ def test_question_contract_prompt_assigns_input_ownership_once() -> None:
     assert "used_question_inputs" not in invocation.prompt_text
     assert "owned_question_input_refs" not in invocation.prompt_text
     assert "question_input_refs" not in invocation.prompt_text
-    assert "computation operand" not in invocation.prompt_text
+    assert "computation operand" in invocation.prompt_text
 
 
 def test_question_contract_prompt_resolves_prior_references_before_contracting() -> (

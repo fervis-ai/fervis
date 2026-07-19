@@ -117,11 +117,11 @@ def test_resolved_endpoint_params_use_input_applications_not_param_decisions():
     }
     backend_param_ids = direct_param_ids | key_param_ids
     application_target_ids = {
-        target_id
+        str(target["target_id"])
         for target_ids in target["resolved_input_application"][
             "targets_by_kind"
         ].values()
-        for target_id in target_ids
+        for target in target_ids
     }
 
     assert param_properties == {}

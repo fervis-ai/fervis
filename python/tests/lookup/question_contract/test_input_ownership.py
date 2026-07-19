@@ -53,14 +53,18 @@ def _membership_test(
     kind: str,
     question: str,
     question_input_use_refs: list[str] | None = None,
+    comparison_operator: str = "",
 ) -> dict[str, object]:
-    return {
+    payload = {
         "test_id": test_id,
         "kind": kind,
         "polarity": "MUST_PASS",
         "test_question": question,
         "question_input_use_refs": question_input_use_refs or [],
     }
+    if comparison_operator:
+        payload["comparison_operator"] = comparison_operator
+    return payload
 
 
 def _answer_request(
@@ -756,3 +760,90 @@ def test_schema_exposes_only_the_single_ownership_ledger() -> None:
         "question_input_use_refs" in variant["properties"]
         for variant in membership_variants
     )
+
+
+def _predicate_contract(
+    *,
+    text: str,
+    role: str,
+    comparison_operator: str = "",
+) -> dict[str, object]:
+    payload = _grouped_staff_contract()
+    payload["question_inputs"] = [
+        _input(input_ref="qi_operand", text=text, role=role)
+    ]
+    request = payload["answer_requests"][0]
+    request["answer_expression"] = {"family": "scalar_aggregate"}
+    request["question_input_uses"] = [
+        {
+            "use_id": "use_operand",
+            "input_ref": "qi_operand",
+            "owner_kind": "POPULATION_TESTS",
+        }
+    ]
+    request["answer_population"]["membership_tests"] = [
+        _membership_test(
+            test_id="t_subject",
+            kind="SUBJECT_IDENTITY",
+            question="Is this a sale?",
+        ),
+        _membership_test(
+            test_id="t_operand",
+            kind="EXPLICIT_USER_CONSTRAINT",
+            question="Does the sale satisfy the supplied predicate?",
+            question_input_use_refs=["use_operand"],
+            comparison_operator=comparison_operator,
+        ),
+    ]
+    return payload
+
+
+def test_predicate_value_is_owned_by_population_tests() -> None:
+    result = _parse(
+        _predicate_contract(text="completed", role="predicate_value"),
+        question="How many completed sales were recorded?",
+    )
+
+    known = result.outcome.question_inputs[0]
+    test = result.outcome.requested_facts[0].answer_population.membership_tests[1]
+    assert known.is_predicate_value
+    assert not known.is_reference_value
+    assert test.owned_question_input_refs == ("qi_operand",)
+    assert test.comparison_operator is None
+
+
+@pytest.mark.parametrize("operator", ["gt", "gte", "lt", "lte"])
+def test_threshold_value_carries_one_ordered_comparison(operator: str) -> None:
+    result = _parse(
+        _predicate_contract(
+            text="1000",
+            role="threshold_value",
+            comparison_operator=operator,
+        ),
+        question="How many records have a measured value compared with 1000?",
+    )
+
+    known = result.outcome.question_inputs[0]
+    test = result.outcome.requested_facts[0].answer_population.membership_tests[1]
+    assert known.is_threshold_value
+    assert test.comparison_operator.value == operator
+
+
+def test_threshold_value_without_comparison_fails_closed() -> None:
+    with pytest.raises(ValueError, match="comparison_operator"):
+        _parse(
+            _predicate_contract(text="1000", role="threshold_value"),
+            question="How many records have a measured value compared with 1000?",
+        )
+
+
+def test_non_threshold_comparison_fails_closed() -> None:
+    with pytest.raises(ValueError, match="requires threshold_value"):
+        _parse(
+            _predicate_contract(
+                text="completed",
+                role="predicate_value",
+                comparison_operator="gt",
+            ),
+            question="How many completed sales were recorded?",
+        )

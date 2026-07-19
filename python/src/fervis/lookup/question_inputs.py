@@ -14,7 +14,9 @@ class KnownInputKind(StrEnum):
 
 class LiteralInputRole(StrEnum):
     REFERENCE_VALUE = "reference_value"
+    PREDICATE_VALUE = "predicate_value"
     TIME_VALUE = "time_value"
+    THRESHOLD_VALUE = "threshold_value"
     FORMULA_VALUE = "formula_value"
     GROUPING_GRAIN = "grouping_grain"
     RESULT_LIMIT = "result_limit"
@@ -22,7 +24,9 @@ class LiteralInputRole(StrEnum):
 
 _LITERAL_ROLE_PART_KINDS = {
     LiteralInputRole.REFERENCE_VALUE: "entity_identity",
+    LiteralInputRole.PREDICATE_VALUE: "predicate_operand",
     LiteralInputRole.TIME_VALUE: "time_scope",
+    LiteralInputRole.THRESHOLD_VALUE: "comparison_boundary",
     LiteralInputRole.FORMULA_VALUE: "computation_operand",
     LiteralInputRole.GROUPING_GRAIN: "grouping_grain",
     LiteralInputRole.RESULT_LIMIT: "limit",

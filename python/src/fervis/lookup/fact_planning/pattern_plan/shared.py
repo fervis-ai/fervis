@@ -16,7 +16,6 @@ from fervis.lookup.source_binding.compiler_ir import (
     DraftRelationSourceAppliedFilter,
     SourceAppliedFilter,
     DraftRelationSourcePopulationChoice,
-    DraftRelationSourceRowFilter,
 )
 from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
@@ -267,17 +266,14 @@ def _relation_for_bound(
     if bound.source is None:
         raise ValueError("fact plan references unknown relation source binding")
     source_filters = _relation_source_filters(bound.applied_filters)
-    row_filters = tuple(bound.source.row_filters) if bound.source is not None else ()
     relation_fields = _relation_fields_with_source_requirements(
         relation_fields,
         source_filters=source_filters,
-        row_filters=row_filters,
         population_choices=bound.source.population_choices,
     )
     source = _source_with_filters(
         bound.source,
         source_filters=source_filters,
-        row_filters=row_filters,
     )
     _validate_relation_fields_for_bound(
         address=address,
@@ -293,11 +289,10 @@ def _source_with_filters(
     source: DraftRelationSource,
     *,
     source_filters: tuple[DraftRelationSourceAppliedFilter, ...],
-    row_filters: tuple[DraftRelationSourceRowFilter, ...],
 ) -> DraftRelationSource:
-    if not source_filters and not row_filters:
+    if not source_filters:
         return source
-    return replace(source, applied_filters=source_filters, row_filters=row_filters)
+    return replace(source, applied_filters=source_filters)
 
 
 def _relation_source_filters(
@@ -315,10 +310,9 @@ def _relation_fields_with_source_requirements(
     relation_fields: tuple[RelationField, ...],
     *,
     source_filters: tuple[DraftRelationSourceAppliedFilter, ...],
-    row_filters: tuple[DraftRelationSourceRowFilter, ...],
     population_choices: tuple[DraftRelationSourcePopulationChoice, ...],
 ) -> tuple[RelationField, ...]:
-    if not source_filters and not row_filters and not population_choices:
+    if not source_filters and not population_choices:
         return relation_fields
     output = list(relation_fields)
     existing = {field.field_id for field in output}
@@ -327,17 +321,6 @@ def _relation_fields_with_source_requirements(
         for source_filter in source_filters
         for field_id in source_filter.predicate_field_ids
     ):
-        if field_id in existing:
-            continue
-        output.append(
-            RelationField(
-                field_id=field_id,
-                roles=(FieldBindingRole.PREDICATE,),
-            )
-        )
-        existing.add(field_id)
-    for source_filter in row_filters:
-        field_id = source_filter.field_id
         if field_id in existing:
             continue
         output.append(

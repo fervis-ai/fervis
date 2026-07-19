@@ -57,6 +57,8 @@ class CandidateParameter:
     omission_default_value: str = ""
     normal_instance_profiles: tuple[CandidateNormalInstanceProfile, ...] = ()
     owned_membership_test_ids: tuple[str, ...] = ()
+    description: str = ""
+    semantics: str = ""
 
     @property
     def requires_explicit_decision(self) -> bool:

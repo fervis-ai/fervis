@@ -10,7 +10,7 @@ from fervis.lookup.plan_execution.relations import RelationRows
 from fervis.lookup.source_binding.compiler_ir import (
     DraftEndpointParamBinding,
     DraftRelationSource,
-    DraftRelationSourceRowFilter,
+    DraftRelationSourceAppliedFilter,
     RelationInputOrigin,
 )
 from fervis.lookup.answer_program.relations import (
@@ -253,13 +253,13 @@ def _relation_source(
             )
             for item in payload.get("param_bindings") or ()
         ),
-        row_filters=tuple(
-            _source_row_filter(
+        applied_filters=tuple(
+            _source_applied_filter(
                 item,
                 relation_id=relation_id,
                 parameter_ids=parameter_ids,
             )
-            for item in payload.get("row_filters") or ()
+            for item in payload.get("applied_filters") or ()
         ),
     )
 
@@ -305,12 +305,15 @@ def _relation_field(payload: dict[str, Any]) -> RelationField:
     )
 
 
-def _source_row_filter(
+def _source_applied_filter(
     payload: dict[str, Any],
     *,
     relation_id: str,
     parameter_ids: dict[str, str],
-) -> DraftRelationSourceRowFilter:
+) -> DraftRelationSourceAppliedFilter:
+    field_ids = tuple(str(item) for item in payload.get("field_ids") or ())
+    if not field_ids:
+        raise ValueError("source applied filter requires fields")
     value_id = str(payload.get("value_id") or "")
     proof_refs = tuple(str(ref) for ref in payload.get("proof_refs") or ())
     expression = (
@@ -321,12 +324,13 @@ def _source_row_filter(
         if value_id
         else _constant_expression(
             tuple(str(value) for value in payload.get("values") or ()),
-            ref_id=f"{relation_id}.{payload['field_id']}",
+            ref_id=f"{relation_id}.{field_ids[0]}",
             proof_refs=proof_refs,
         )
     )
-    return DraftRelationSourceRowFilter(
-        field_id=str(payload["field_id"]),
+    return DraftRelationSourceAppliedFilter(
+        predicate_field_ids=field_ids,
+        known_input_id="",
         operator=str(payload["operator"]),
         value_expr=expression,
         proof_refs=proof_refs,

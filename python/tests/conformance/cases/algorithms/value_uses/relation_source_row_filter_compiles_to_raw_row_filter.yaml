@@ -1,5 +1,5 @@
-id: relation_source_constraint_compiles_to_filter_operation
-description: Relation-source constraints compile to FilterSpec operations with lineage proof refs.
+id: relation_source_applied_filter_compiles_to_filter_operation
+description: Relation-source applied filters compile to FilterSpec operations with lineage proof refs.
 migrates:
   - api/tests/fervis/lookup/plan_execution/test_relations.py::test_relation_source_row_filter_compiles_to_raw_row_filter
 kind: algorithm
@@ -14,8 +14,8 @@ input:
       source:
         kind: api_read
         read_id: list_store_list
-        row_filters:
-          - field_id: is_open
+        applied_filters:
+          - field_ids: [is_open]
             operator: in
             values: ["true"]
             proof_refs: [row_predicate:rp.source_1.is_open]

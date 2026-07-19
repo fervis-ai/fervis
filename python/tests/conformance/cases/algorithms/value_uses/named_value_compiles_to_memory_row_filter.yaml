@@ -1,5 +1,5 @@
-id: named_value_compiles_to_memory_row_filter
-description: A named value constraint compiles to a canonical filter over memory rows.
+id: named_value_compiles_to_memory_applied_filter
+description: A named value constraint compiles through the same applied-filter path over memory rows.
 migrates:
   - api/tests/fervis/lookup/fact_planning/test_values.py::test_named_value_compiles_to_memory_row_filter_when_sink_selects_bound_field
 kind: algorithm
@@ -17,8 +17,8 @@ input:
       source:
         kind: memory_read
         memory_relation_id: artifact.relation.rows
-        row_filters:
-          - field_id: label
+        applied_filters:
+          - field_ids: [label]
             operator: equals
             value_id: alpha
       fields:

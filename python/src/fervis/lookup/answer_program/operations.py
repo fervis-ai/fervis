@@ -10,6 +10,7 @@ from typing_extensions import assert_never
 from fervis.lookup.answer_program.expressions import Expression, expression_input_id
 from fervis.lookup.answer_program.values import ConstantRef, ParameterRef
 from fervis.lookup.answer_program.relations import PopulationCoverageClaim
+from fervis.lookup.predicate_operators import PredicateOperator
 
 
 class OperationKind(StrEnum):
@@ -25,19 +26,6 @@ class OperationKind(StrEnum):
     AGGREGATE = "aggregate"
     ORDER = "order"
     COMPUTE = "compute"
-
-
-class PredicateOperator(StrEnum):
-    EQUALS = "equals"
-    NOT_EQUALS = "not_equals"
-    LT = "lt"
-    LTE = "lte"
-    GT = "gt"
-    GTE = "gte"
-    IN = "in"
-    CONTAINS = "contains"
-    IS_NULL = "is_null"
-    NOT_NULL = "not_null"
 
 
 class SortDirection(StrEnum):

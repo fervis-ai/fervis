@@ -15,7 +15,7 @@ input:
       field_label_text: priority
       operand_text: priority
       value_meaning_hint: job priority
-      role: reference_value
+      role: predicate_value
       inventory_check:
         why_this_is_an_input: It is the concrete operand of the population predicate.
     answer_requests:
@@ -53,7 +53,7 @@ expect:
     - id: priority
       text: priority
       resolved_value_text: priority
-      role: reference_value
+      role: predicate_value
     requested_facts:
     - answer_subject_text: jobs
       input_refs: [priority]

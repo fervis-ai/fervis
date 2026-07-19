@@ -1,0 +1,47 @@
+id: prompt_projects_only_identity_reference_values
+description: Query Enrichment receives identity references but not property predicates or numeric thresholds as entity targets.
+kind: algorithm
+algorithm: query_enrichment.prompt
+input:
+  request:
+    question: How many selected records exceed the supplied boundary?
+    reads:
+    - id: records
+      endpoint_name: list_records
+      resource_names: [record]
+    requested_facts:
+    - id: fact_1
+      description: matching record count
+      answer_outputs:
+      - id: answer_1
+        role: ROW_COUNT
+      known_inputs:
+      - id: selected_resource
+        kind: literal_text
+        source: question_context
+        text: selected resource
+        resolved_value_text: selected resource
+        value_meaning_hint: one resource
+        role: reference_value
+      - id: requested_state
+        kind: literal_text
+        source: question_context
+        text: selected
+        resolved_value_text: selected
+        value_meaning_hint: state
+        role: predicate_value
+      - id: supplied_boundary
+        kind: literal_text
+        source: question_context
+        text: '1000'
+        resolved_value_text: '1000'
+        value_meaning_hint: numeric boundary
+        role: threshold_value
+expect:
+  result_contains:
+    entity_targets_payload:
+      entity_targets:
+      - target_id: selected_resource
+        reference_text: selected resource
+        resolved_value_text: selected resource
+        value_meaning_hint: one resource

@@ -1,25 +1,28 @@
-id: prompt_uses_literal_text_roles
-description: Question-contract prompt describes the closed literal_text roles owned by question inputs.
+id: prompt_uses_question_input_roles
+description: Question-contract prompt distinguishes identity, predicate, time, grouping, formula, threshold, and result-limit inputs.
 kind: algorithm
 algorithm: question_contract.prompt
 input:
   current_question: How much did staff_id 51515151-0000-0000-0002-000000000001 make today?
   contains:
-  - kind=literal_text with role=reference_value
-  - kind=literal_text with role=time_value
-  - kind=literal_text with role=result_limit
+  - Use reference_value when the input identifies one particular resource.
+  - Use predicate_value when a supplied property value is tested independently against each candidate by equality, membership, or exclusion.
+  - Use threshold_value when a supplied number is the boundary in a predicate evaluated independently for each candidate, such as 1000 in 'records with a measured value over 1000.'
   - Use source=conversation_resolution only for declared resolved question inputs.
   - operand_text contains only the operand.
-  - A reference_value is a concrete identity, property, category, status, channel, or other predicate value, such as completed or in-person; create one kind=literal_text with role=reference_value input for each and, when it modifies a candidate kind, copy only the property-value span.
+  - A predicate_value does not identify one particular resource.
 expect:
   result_contains:
     contains:
-      kind=literal_text with role=reference_value: true
-      kind=literal_text with role=time_value: true
-      kind=literal_text with role=result_limit: true
+      ? Use reference_value when the input identifies one particular resource.
+      : true
+      ? Use predicate_value when a supplied property value is tested independently against each candidate by equality, membership, or exclusion.
+      : true
+      ? Use threshold_value when a supplied number is the boundary in a predicate evaluated independently for each candidate, such as 1000 in 'records with a measured value over 1000.'
+      : true
       ? Use source=conversation_resolution only for declared resolved question inputs.
       : true
       ? operand_text contains only the operand.
       : true
-      ? A reference_value is a concrete identity, property, category, status, channel, or other predicate value, such as completed or in-person; create one kind=literal_text with role=reference_value input for each and, when it modifies a candidate kind, copy only the property-value span.
+      ? A predicate_value does not identify one particular resource.
       : true

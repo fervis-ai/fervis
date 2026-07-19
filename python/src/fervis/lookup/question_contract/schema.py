@@ -15,6 +15,7 @@ from fervis.lookup.conversation_resolution.compilation import (
     ResolvedQuestionInput,
     ResolvedRowSetQuestionInput,
 )
+from fervis.lookup.predicate_operators import PredicateOperator
 
 
 def build_question_contract_decisions_schema(
@@ -244,6 +245,10 @@ def _answer_population_membership_test_schema() -> dict[str, object]:
             _answer_population_membership_test_variant(
                 kind="EXPLICIT_USER_CONSTRAINT",
             ),
+            _answer_population_membership_test_variant(
+                kind="EXPLICIT_USER_CONSTRAINT",
+                comparison=True,
+            ),
             *(
                 _answer_population_membership_test_variant(
                     kind=kind,
@@ -261,6 +266,7 @@ def _answer_population_membership_test_schema() -> dict[str, object]:
 def _answer_population_membership_test_variant(
     *,
     kind: str,
+    comparison: bool = False,
 ) -> dict[str, object]:
     use_refs: dict[str, object] = {
         "type": "array",
@@ -270,15 +276,28 @@ def _answer_population_membership_test_variant(
         use_refs["minItems"] = 1
     else:
         use_refs["maxItems"] = 0
-    return provider_output.AnswerPopulationMembershipTestOutput.schema(
-        {
+    properties: dict[str, object] = {
             "question_input_use_refs": use_refs,
             "test_id": {"type": "string", "minLength": 1},
             "kind": {"enum": [kind]},
             "polarity": {"enum": ["MUST_PASS", "MUST_FAIL"]},
             "test_question": {"type": "string", "minLength": 1},
+    }
+    if comparison:
+        properties["comparison_operator"] = {
+            "enum": [
+                PredicateOperator.LT.value,
+                PredicateOperator.LTE.value,
+                PredicateOperator.GT.value,
+                PredicateOperator.GTE.value,
+            ]
         }
-    )
+    schema = provider_output.AnswerPopulationMembershipTestOutput.schema(properties)
+    if comparison:
+        required = schema["required"]
+        assert isinstance(required, list)
+        required.append("comparison_operator")
+    return schema
 
 
 def _answer_output_schema() -> dict[str, object]:
@@ -370,7 +389,15 @@ def _question_input_schema(
             include_conversation_resolution_inputs=False,
         ),
         _literal_text_input_role_schema(
+            role=LiteralInputRole.PREDICATE_VALUE,
+            include_conversation_resolution_inputs=False,
+        ),
+        _literal_text_input_role_schema(
             role=LiteralInputRole.TIME_VALUE,
+            include_conversation_resolution_inputs=False,
+        ),
+        _literal_text_input_role_schema(
+            role=LiteralInputRole.THRESHOLD_VALUE,
             include_conversation_resolution_inputs=False,
         ),
         _literal_text_input_role_schema(

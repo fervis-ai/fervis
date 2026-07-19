@@ -72,6 +72,7 @@ class AnswerPopulationMembershipTestOutput(ProviderOutput):
     kind: str
     polarity: str
     test_question: str
+    comparison_operator: Optional[str] = None
 
 
 @dataclass(frozen=True)

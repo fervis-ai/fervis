@@ -17,6 +17,7 @@ from fervis.lookup.source_binding.candidates.contracts import (
     EntityTarget,
     EntityReferenceEvidence,
     EvidenceComponent,
+    FieldEvidence,
 )
 from fervis.lookup.source_binding.candidates.params import (
     _candidate_with_param_decision_options,
@@ -40,6 +41,8 @@ from fervis.lookup.answer_program.values import (
 )
 from fervis.lookup.canonical_data import entity_key_value
 from fervis.lookup.question_contract import (
+    AnswerPopulationMembershipTestKind,
+    AnswerPopulationMembershipTestPolarity,
     GroupKeyDomainKind,
     RequestedFact,
     RequestedFactAnswerExpression,
@@ -47,7 +50,10 @@ from fervis.lookup.question_contract import (
     ResultSelectionKind,
     RequestedFactAnswerOutput,
     RequestedFactGroupKey,
+    RequestedFactAnswerPopulationMembershipTest,
 )
+from fervis.lookup.answer_program.operations import PredicateOperator
+from fervis.lookup.answer_program.relations import PopulationCoverageRole
 from fervis.lookup.source_binding.model import AnswerPopulation
 from fervis.lookup.source_binding.input_applications import (
     ResolvedInputApplicationTargetKind,
@@ -262,8 +268,12 @@ def test_resolved_identity_component_compiles_to_compatible_raw_parameter():
     )
 
     assert surface.prompt_payload()["resolved_values"] == [
-        {
-            "value_id": "staff_1",
+            {
+                "value_id": "staff_1",
+                "kind": "identity",
+                "value_meaning": (
+                    "{'staff_id': '51515151-0000-0000-0002-000000000001'}"
+                ),
             "components_by_target_kind": {"request_parameter": ["staff_id"]},
             "population_test_basis": {},
         }
@@ -728,15 +738,23 @@ def test_resolved_input_contract_lists_values_and_targets_without_pair_product()
 
     assert surface.prompt_payload() == {
         "resolved_values": [
-            {
-                "value_id": "minimum_amount",
+                {
+                    "value_id": "minimum_amount",
+                    "kind": "literal",
+                    "value_meaning": "minimum_amount",
+                    "literal_type": "number",
+                    "literal_value": "10",
                 "components_by_target_kind": {
                     "request_parameter": ["value"],
                 },
                 "population_test_basis": {},
             },
-            {
-                "value_id": "maximum_amount",
+                {
+                    "value_id": "maximum_amount",
+                    "kind": "literal",
+                    "value_meaning": "maximum_amount",
+                    "literal_type": "number",
+                    "literal_value": "20",
                 "components_by_target_kind": {
                     "request_parameter": ["value"],
                 },
@@ -744,18 +762,27 @@ def test_resolved_input_contract_lists_values_and_targets_without_pair_product()
             },
         ],
         "targets_by_kind": {
-            "request_parameter": ["lower_bound", "upper_bound"],
+            "request_parameter": [
+                {"target_id": "lower_bound", "type": "number"},
+                {"target_id": "upper_bound", "type": "number"},
+            ],
             "returned_identity": [],
+            "returned_field": [],
         },
+        "predicate_requirements": [],
+        "application_values": [],
     }
-    variants = surface.provider_schema()["items"]["oneOf"]
+    item_schema = surface.provider_schema()["items"]
 
-    assert len(variants) == 2
-    assert all(
-        variant["properties"]["target_id"]["enum"]
-        == ["lower_bound", "upper_bound"]
-        for variant in variants
-    )
+    assert item_schema["properties"]["value_id"]["enum"] == [
+        "minimum_amount",
+        "maximum_amount",
+    ]
+    assert item_schema["properties"]["target_id"]["enum"] == [
+        "lower_bound",
+        "upper_bound",
+    ]
+    assert "oneOf" not in item_schema
 
 
 def test_resolved_identity_compiles_against_one_declared_entity_reference():
@@ -857,15 +884,392 @@ def _application(
     target_id: str,
     *,
     value_component: str = "value",
+    target_kind: str = ResolvedInputApplicationTargetKind.REQUEST_PARAMETER.value,
+    application_value_id: str | None = None,
+    population_test_results: dict[str, object] | None = None,
 ) -> ResolvedInputApplicationOutput:
     return ResolvedInputApplicationOutput(
-        target_kind=ResolvedInputApplicationTargetKind.REQUEST_PARAMETER.value,
+        target_kind=target_kind,
         target_id=target_id,
         value_id=value_id,
         value_component=value_component,
         match_basis_explanation="The resolved input restricts this source.",
-        population_test_results={},
+        population_test_results=population_test_results or {},
+        application_value_id=application_value_id,
     )
+
+
+def _predicate_test(
+    *,
+    input_id: str,
+    polarity: AnswerPopulationMembershipTestPolarity = (
+        AnswerPopulationMembershipTestPolarity.MUST_PASS
+    ),
+    operator: PredicateOperator | None = None,
+) -> RequestedFactAnswerPopulationMembershipTest:
+    return RequestedFactAnswerPopulationMembershipTest(
+        id="test_operand",
+        kind=AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT,
+        polarity=polarity,
+        test_question="Does the row satisfy the requested value predicate?",
+        owned_question_input_refs=(input_id,),
+        comparison_operator=operator,
+    )
+
+
+def _satisfies_test_result(
+    question: str = "Does the row satisfy the requested value predicate?",
+    *,
+    test_effect: str = "SATISFIES_TEST",
+):
+    from fervis.lookup.source_binding.provider_contract import (
+        RowPredicatePopulationTestResultOutput,
+    )
+
+    return {
+        "explicit_user_constraint:test_operand": RowPredicatePopulationTestResultOutput(
+            test_id="explicit_user_constraint:test_operand",
+            test_question=question,
+            role_scoped_test_question=(
+                f"For source rows, {question}"
+            ),
+            because="The selected physical target enforces the fixed predicate.",
+            test_effect=test_effect,
+        )
+    }
+
+
+def test_threshold_predicate_can_bind_one_declared_request_parameter() -> None:
+    value = FactValue.literal(
+        id="minimum_amount",
+        known_input_id="qi_amount",
+        literal_type=LiteralType.NUMBER,
+        value="1000",
+        proof_refs=("known_input:qi_amount",),
+    )
+    test = _predicate_test(input_id="qi_amount", operator=PredicateOperator.GT)
+    param = CandidateParameter(
+        id="minimum_amount",
+        type="number",
+        required=False,
+        choices=(),
+        decision_options=(),
+    )
+    surface = resolved_input_application_surface(
+        candidate=SourceCandidate(
+            id="source_1",
+            applies_to_requested_fact_ids=("fact_1",),
+            kind="read",
+            params=(param,),
+        ),
+        requested_fact_id="fact_1",
+        resolved_values=(value,),
+        membership_tests=(test,),
+        coverage_role=PopulationCoverageRole.ROW_POPULATION,
+    )
+
+    parsed = parse_resolved_input_applications(
+        (
+            _application(
+                value.id,
+                param.id,
+                population_test_results=_satisfies_test_result(),
+            ),
+        ),
+        surface=surface,
+    )
+
+    assert parsed.param_binding_sets[0][0].param_id == "minimum_amount"
+    assert parsed.param_binding_sets[0][0].compiler_value == "1000"
+    assert [claim.test_ref.membership_test_id for claim in parsed.population_coverage_claims] == [
+        "test_operand"
+    ]
+
+
+def test_threshold_predicate_can_filter_one_declared_returned_field() -> None:
+    value = FactValue.literal(
+        id="minimum_amount",
+        known_input_id="qi_amount",
+        literal_type=LiteralType.NUMBER,
+        value="1000",
+        proof_refs=("known_input:qi_amount",),
+    )
+    test = _predicate_test(input_id="qi_amount", operator=PredicateOperator.GTE)
+    field = FieldEvidence(
+        evidence_id="field.amount",
+        field_id="data.amount",
+        type="number",
+        row_path_id="data",
+        row_source_id="sales",
+    )
+    surface = resolved_input_application_surface(
+        candidate=SourceCandidate(
+            id="source_1",
+            applies_to_requested_fact_ids=("fact_1",),
+            kind="read",
+            evidence_items=(field,),
+        ),
+        requested_fact_id="fact_1",
+        resolved_values=(value,),
+        membership_tests=(test,),
+        coverage_role=PopulationCoverageRole.ROW_POPULATION,
+    )
+
+    parsed = parse_resolved_input_applications(
+        (
+            _application(
+                value.id,
+                field.evidence_id,
+                target_kind=ResolvedInputApplicationTargetKind.RETURNED_FIELD.value,
+                population_test_results=_satisfies_test_result(),
+            ),
+        ),
+        surface=surface,
+    )
+
+    assert len(parsed.applied_filters) == 1
+    applied = parsed.applied_filters[0]
+    assert applied.predicate_field_ids == ("data.amount",)
+    assert applied.operator == PredicateOperator.GTE.value
+    assert applied.value_id == value.id
+
+
+def test_predicate_choice_requires_one_target_local_application_value() -> None:
+    value = FactValue.literal(
+        id="requested_state",
+        known_input_id="qi_state",
+        literal_type=LiteralType.STRING,
+        value="finished",
+        proof_refs=("known_input:qi_state",),
+    )
+    test = _predicate_test(input_id="qi_state")
+    param = CandidateParameter(
+        id="state",
+        type="choice",
+        required=False,
+        choices=("DONE", "OPEN"),
+        decision_options=(),
+    )
+    candidate = SourceCandidate(
+        id="source_1",
+        applies_to_requested_fact_ids=("fact_1",),
+        kind="read",
+        params=(param,),
+    )
+    surface = resolved_input_application_surface(
+        candidate=candidate,
+        requested_fact_id="fact_1",
+        resolved_values=(value,),
+        membership_tests=(test,),
+        coverage_role=PopulationCoverageRole.ROW_POPULATION,
+    )
+    selected_id = next(
+        application_value_id
+        for application_value_id, (_, _, raw_value) in (
+            surface.application_values_by_id.items()
+        )
+        if raw_value == "DONE"
+    )
+
+    with pytest.raises(ValueError, match="requires application_value_id"):
+        parse_resolved_input_applications(
+            (
+                _application(
+                    value.id,
+                    param.id,
+                    population_test_results=_satisfies_test_result(),
+                ),
+            ),
+            surface=surface,
+        )
+
+    parsed = parse_resolved_input_applications(
+        (
+            _application(
+                value.id,
+                param.id,
+                application_value_id=selected_id,
+                population_test_results=_satisfies_test_result(),
+            ),
+        ),
+        surface=surface,
+    )
+    assert parsed.param_binding_sets[0][0].compiler_value == "DONE"
+
+
+def test_returned_field_predicate_rejects_incompatible_declared_type() -> None:
+    value = FactValue.literal(
+        id="minimum_amount",
+        known_input_id="qi_amount",
+        literal_type=LiteralType.NUMBER,
+        value="1000",
+    )
+    test = _predicate_test(input_id="qi_amount", operator=PredicateOperator.LT)
+    surface = resolved_input_application_surface(
+        candidate=SourceCandidate(
+            id="source_1",
+            applies_to_requested_fact_ids=("fact_1",),
+            kind="read",
+            evidence_items=(
+                FieldEvidence(
+                    evidence_id="field.description",
+                    field_id="data.description",
+                    type="string",
+                    row_path_id="data",
+                    row_source_id="sales",
+                ),
+            ),
+        ),
+        requested_fact_id="fact_1",
+        resolved_values=(value,),
+        membership_tests=(test,),
+        coverage_role=PopulationCoverageRole.ROW_POPULATION,
+    )
+
+    assert surface.returned_field_targets_by_id == {}
+
+
+def test_identity_value_is_not_exposed_as_a_returned_field_scalar() -> None:
+    identity = FactValue.identity(
+        id="resource_identity",
+        known_input_id="qi_resource",
+        key=entity_key_value(
+            "resource",
+            "primary_key",
+            {"resource_id": "resource_1"},
+        ),
+    )
+    test = _predicate_test(input_id="qi_resource")
+    surface = resolved_input_application_surface(
+        candidate=SourceCandidate(
+            id="source_1",
+            applies_to_requested_fact_ids=("fact_1",),
+            kind="read",
+            evidence_items=(
+                FieldEvidence(
+                    evidence_id="field.resource_id",
+                    field_id="data.resource_id",
+                    type="string",
+                    row_path_id="data",
+                    row_source_id="records",
+                ),
+            ),
+        ),
+        requested_fact_id="fact_1",
+        resolved_values=(identity,),
+        membership_tests=(test,),
+        coverage_role=PopulationCoverageRole.ROW_POPULATION,
+    )
+
+    assert surface.returned_field_targets_by_id == {}
+
+
+def test_excluded_predicate_value_compiles_to_not_equals_filter() -> None:
+    value = FactValue.literal(
+        id="excluded_state",
+        known_input_id="qi_state",
+        literal_type=LiteralType.STRING,
+        value="archived",
+    )
+    test = _predicate_test(
+        input_id="qi_state",
+        polarity=AnswerPopulationMembershipTestPolarity.MUST_FAIL,
+    )
+    field = FieldEvidence(
+        evidence_id="field.state",
+        field_id="data.state",
+        type="string",
+        row_path_id="data",
+        row_source_id="records",
+    )
+    surface = resolved_input_application_surface(
+        candidate=SourceCandidate(
+            id="source_1",
+            applies_to_requested_fact_ids=("fact_1",),
+            kind="read",
+            evidence_items=(field,),
+        ),
+        requested_fact_id="fact_1",
+        resolved_values=(value,),
+        membership_tests=(test,),
+        coverage_role=PopulationCoverageRole.ROW_POPULATION,
+    )
+
+    parsed = parse_resolved_input_applications(
+        (
+            _application(
+                value.id,
+                field.evidence_id,
+                target_kind=ResolvedInputApplicationTargetKind.RETURNED_FIELD.value,
+                population_test_results=_satisfies_test_result(
+                    test_effect="CONFLICTS_WITH_TEST"
+                ),
+            ),
+        ),
+        surface=surface,
+    )
+
+    assert parsed.applied_filters[0].operator == PredicateOperator.NOT_EQUALS.value
+
+
+def test_multiple_predicate_values_compile_to_one_returned_field_membership() -> None:
+    values = tuple(
+        FactValue.literal(
+            id=f"state_{index}",
+            known_input_id=f"qi_state_{index}",
+            literal_type=LiteralType.STRING,
+            value=value,
+            proof_refs=(f"known_input:qi_state_{index}",),
+        )
+        for index, value in enumerate(("ready", "finished"), start=1)
+    )
+    test = RequestedFactAnswerPopulationMembershipTest(
+        id="test_operand",
+        kind=AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT,
+        polarity=AnswerPopulationMembershipTestPolarity.MUST_PASS,
+        test_question="Is the row in a requested state?",
+        owned_question_input_refs=tuple(value.known_input_id for value in values),
+    )
+    field = FieldEvidence(
+        evidence_id="field.state",
+        field_id="data.state",
+        type="string",
+        row_path_id="data",
+        row_source_id="records",
+    )
+    surface = resolved_input_application_surface(
+        candidate=SourceCandidate(
+            id="source_1",
+            applies_to_requested_fact_ids=("fact_1",),
+            kind="read",
+            evidence_items=(field,),
+        ),
+        requested_fact_id="fact_1",
+        resolved_values=values,
+        membership_tests=(test,),
+        coverage_role=PopulationCoverageRole.ROW_POPULATION,
+    )
+    result = _satisfies_test_result(test.test_question)
+
+    parsed = parse_resolved_input_applications(
+        tuple(
+            _application(
+                value.id,
+                field.evidence_id,
+                target_kind=ResolvedInputApplicationTargetKind.RETURNED_FIELD.value,
+                population_test_results=result,
+            )
+            for value in values
+        ),
+        surface=surface,
+    )
+
+    assert len(parsed.applied_filters) == 1
+    assert parsed.applied_filters[0].operator == PredicateOperator.IN.value
+    assert set(parsed.applied_filters[0].application_values) == {
+        "ready",
+        "finished",
+    }
 
 
 def test_boolean_finite_choice_param_keeps_population_contract_review_surface():
