@@ -248,7 +248,7 @@ def test_source_alignment_prompt_preserves_backend_applied_filter():
     assert 'display_value="Nadia Wanjiku"' in xml
 
 
-def test_source_alignment_reviews_forward_aligned_contributors_without_narrowing_support():
+def test_source_alignment_reviews_do_not_forward_partial_source_as_standalone():
     request = _two_source_alignment_request()
     source_payload = request.source_candidates.prompt_payload["requested_fact_sources"][
         0
@@ -296,10 +296,7 @@ def test_source_alignment_reviews_forward_aligned_contributors_without_narrowing
     filtered_sources = filtered["requested_fact_sources"][0]["source_contexts"][0][
         "source_options"
     ]
-    assert [item["source_candidate_id"] for item in filtered_sources] == [
-        "source_1",
-        "source_2",
-    ]
+    assert [item["source_candidate_id"] for item in filtered_sources] == ["source_1"]
     assert (
         _support_set_ids(
             filtered_sources[0]["binding_surface"]["fulfillment_support_sets"]
@@ -977,74 +974,7 @@ def test_source_alignment_filter_preserves_all_support_sets_for_aligned_source()
 
 
 def test_plan_selection_payload_preserves_relation_member_roles():
-    fact = RequestedFact(
-        id="fact_1",
-        description="products not sold this month",
-        answer_expression=RequestedFactAnswerExpression(
-            family=RequestedFactAnswerExpressionFamily.SET_DIFFERENCE,
-        ),
-        answer_outputs=(RequestedFactAnswerOutput(id="answer_1", role="ANSWER_VALUE"),),
-    )
-    request = PlanSelectionRequest(
-        question="Which products were not sold this month?",
-        question_contract=QuestionContract(requested_facts=(fact,)),
-        requested_facts=(fact,),
-        relation_catalog=RelationCatalog(reads=()),
-        source_candidate_payload={
-            "requested_fact_sources": [
-                {
-                    "requested_fact_id": "fact_1",
-                    "source_contexts": [
-                        {
-                            "context_id": "fact_1:sources",
-                            "source_options": [
-                                {
-                                    "source_candidate_id": "source_products",
-                                    "kind": "new_api_read",
-                                    "read_id": "list_products",
-                                    "fulfillment_support_sets": [
-                                        _candidate_key_support_set(
-                                            "support.products.answer_1.product_id",
-                                            answer_output_id="answer_1",
-                                            slot_id="slot.products.product_id",
-                                            evidence_id="source_products.data.product_id",
-                                            field_id="product_id",
-                                            entity_kind="product",
-                                            key_id="product_key",
-                                        )
-                                    ],
-                                    "fields": [
-                                        {"field_id": "product_id"},
-                                        {"field_id": "name"},
-                                    ],
-                                },
-                                {
-                                    "source_candidate_id": "source_sales",
-                                    "kind": "new_api_read",
-                                    "read_id": "list_sales",
-                                    "fulfillment_support_sets": [
-                                        _candidate_key_support_set(
-                                            "support.sales.answer_1.product_id",
-                                            answer_output_id="answer_1",
-                                            slot_id="slot.sales.product_id",
-                                            evidence_id=(
-                                                "source_sales.data.product_id"
-                                            ),
-                                            field_id="product_id",
-                                            entity_kind="product",
-                                            key_id="product_key",
-                                        )
-                                    ],
-                                    "fields": [{"field_id": "product_id"}],
-                                },
-                            ],
-                        }
-                    ],
-                }
-            ]
-        },
-        conversation_context={},
-    )
+    request = _set_difference_plan_selection_request()
 
     payload = PlanSelectionTurnPrompt(request).plan_selection_candidates_payload()
     source_strategy = payload["requested_fact_source_strategies"][0][
@@ -1058,6 +988,44 @@ def test_plan_selection_payload_preserves_relation_member_roles():
         (["candidate_set"], "source_products"),
         (["observed_set"], "source_sales"),
     ]
+
+
+def test_source_alignment_reviews_preserve_multi_member_partial_strategy():
+    request = _set_difference_plan_selection_request()
+
+    outcome = parse_plan_selection(
+        {
+            "outcome": {
+                "kind": "source_alignment_reviews",
+                "reviews_by_requested_fact": {
+                    "fact_1": {
+                        "source_products": {
+                            "source_candidate_id": "source_products",
+                            "basis": "Product rows provide the candidate set.",
+                            "source_alignment": "PARTIAL",
+                        },
+                        "source_sales": {
+                            "source_candidate_id": "source_sales",
+                            "basis": "Sales rows provide the observed set.",
+                            "source_alignment": "PARTIAL",
+                        },
+                    }
+                },
+            }
+        },
+        request=request,
+    ).outcome
+
+    assert isinstance(outcome, PlanSelectionSet)
+    assert outcome.plan_selections
+    assert all(
+        len(strategy.source_members) == 2 for strategy in outcome.plan_selections
+    )
+    assert all(
+        {member.source_candidate_id for member in strategy.source_members}
+        == {"source_products", "source_sales"}
+        for strategy in outcome.plan_selections
+    )
 
 
 def test_plan_selection_candidates_are_limited_to_answer_expression_family():
@@ -2237,6 +2205,77 @@ def _ranked_multi_metric_plan_selection_request() -> PlanSelectionRequest:
                                         "fulfillment_support_sets": support_sets,
                                     },
                                 }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+        conversation_context={},
+    )
+
+
+def _set_difference_plan_selection_request() -> PlanSelectionRequest:
+    fact = RequestedFact(
+        id="fact_1",
+        description="products not sold this month",
+        answer_expression=RequestedFactAnswerExpression(
+            family=RequestedFactAnswerExpressionFamily.SET_DIFFERENCE,
+        ),
+        answer_outputs=(RequestedFactAnswerOutput(id="answer_1", role="ANSWER_VALUE"),),
+    )
+    return PlanSelectionRequest(
+        question="Which products were not sold this month?",
+        question_contract=QuestionContract(requested_facts=(fact,)),
+        requested_facts=(fact,),
+        relation_catalog=RelationCatalog(reads=()),
+        source_candidate_payload={
+            "requested_fact_sources": [
+                {
+                    "requested_fact_id": "fact_1",
+                    "source_contexts": [
+                        {
+                            "context_id": "fact_1:sources",
+                            "source_options": [
+                                {
+                                    "source_candidate_id": "source_products",
+                                    "kind": "new_api_read",
+                                    "read_id": "list_products",
+                                    "fulfillment_support_sets": [
+                                        _candidate_key_support_set(
+                                            "support.products.answer_1.product_id",
+                                            answer_output_id="answer_1",
+                                            slot_id="slot.products.product_id",
+                                            evidence_id="source_products.data.product_id",
+                                            field_id="product_id",
+                                            entity_kind="product",
+                                            key_id="product_key",
+                                        )
+                                    ],
+                                    "fields": [
+                                        {"field_id": "product_id"},
+                                        {"field_id": "name"},
+                                    ],
+                                },
+                                {
+                                    "source_candidate_id": "source_sales",
+                                    "kind": "new_api_read",
+                                    "read_id": "list_sales",
+                                    "fulfillment_support_sets": [
+                                        _candidate_key_support_set(
+                                            "support.sales.answer_1.product_id",
+                                            answer_output_id="answer_1",
+                                            slot_id="slot.sales.product_id",
+                                            evidence_id=(
+                                                "source_sales.data.product_id"
+                                            ),
+                                            field_id="product_id",
+                                            entity_kind="product",
+                                            key_id="product_key",
+                                        )
+                                    ],
+                                    "fields": [{"field_id": "product_id"}],
+                                },
                             ],
                         }
                     ],
