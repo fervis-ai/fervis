@@ -49,6 +49,7 @@ def test_closed_key_grouped_identity_param_is_backend_owned_not_model_authored()
         {},
     )
 
+    assert "backend_owned_param_bindings" in target
     assert "staff_id" not in param_properties
 
 

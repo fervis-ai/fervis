@@ -227,6 +227,8 @@ class RequestedFactGroupKey:
         )
         if refs != self.question_input_refs:
             object.__setattr__(self, "question_input_refs", refs)
+        if len(set(refs)) != len(refs):
+            raise ValueError("group key repeats question input")
         if self.domain == GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS and not refs:
             raise ValueError("specified group key requires question inputs")
         if self.domain == GroupKeyDomainKind.SOURCE_RESULT_VALUES and refs:
@@ -875,35 +877,18 @@ class RequestedFact:
             *answer_outputs,
         )
 
-    def specified_group_membership_test(
-        self,
-    ) -> RequestedFactAnswerPopulationMembershipTest | None:
-        """Return the predicate proving specified group inputs are alternatives."""
+    def specified_group_key(self) -> RequestedFactGroupKey | None:
+        """Return the expression-owned closed group-key domain, when present."""
 
         expression = self.answer_expression
-        population = self.answer_population
         if (
             expression is None
-            or expression.family
-            is not RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE
             or expression.group_key is None
             or expression.group_key.domain
             is not GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS
-            or population is None
         ):
             return None
-        input_refs = expression.group_key.question_input_refs
-        if len(set(input_refs)) != len(input_refs):
-            return None
-        matching_tests = tuple(
-            test
-            for test in population.membership_tests
-            if test.kind
-            is AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT
-            and len(test.owned_question_input_refs) == len(input_refs)
-            and frozenset(test.owned_question_input_refs) == frozenset(input_refs)
-        )
-        return matching_tests[0] if len(matching_tests) == 1 else None
+        return expression.group_key
 
     def answer_request_model_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {

@@ -69,7 +69,7 @@ from fervis.lookup.plan_selection import (
 
 
 _APPROVED_CHARS = {
-    "question contract": (364, 18398, 27489),
+    "question contract": (364, 18583, 27675),
     "query enrichment": (364, 5185, 7408),
     "grounding": (364, 6804, 9800),
     "source binding": (364, 16485, 20357),
@@ -150,8 +150,12 @@ def test_question_contract_prompt_groups_alternative_predicate_operands():
         "number of tests."
     ) in invocation.prompt_text
     assert (
-        "When multiple inputs are alternative values for the same predicate, "
-        "create one test owning all those inputs."
+        "Within answer_population, when multiple inputs are alternative values for "
+        "the same predicate, create one membership test owning all those inputs."
+    ) in invocation.prompt_text
+    assert (
+        "Inputs referenced by a SPECIFIED_QUESTION_INPUTS group key are owned by "
+        "that group key. Do not also put them in answer_population membership tests."
     ) in invocation.prompt_text
     assert (
         "A value identifying a particular subject member is a separate "

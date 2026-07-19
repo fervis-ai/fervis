@@ -40,20 +40,14 @@ from fervis.lookup.answer_program.values import (
 )
 from fervis.lookup.canonical_data import entity_key_value
 from fervis.lookup.question_contract import (
-    AnswerPopulationMembershipTestKind,
-    AnswerPopulationMembershipTestPolarity,
     GroupKeyDomainKind,
     RequestedFact,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
     RequestedFactAnswerOutput,
-    RequestedFactAnswerPopulation,
-    RequestedFactAnswerPopulationMembershipTest,
     RequestedFactGroupKey,
 )
-from fervis.lookup.answer_program.relations import PopulationCoverageRole
 from fervis.lookup.source_binding.model import AnswerPopulation
-from fervis.lookup.source_binding.membership_tests import membership_test_key
 from fervis.lookup.source_binding.input_applications import (
     ResolvedInputApplicationTargetKind,
     parse_resolved_input_applications,
@@ -63,7 +57,6 @@ from fervis.lookup.source_binding.parser.params import parse_param_decision_bind
 from fervis.lookup.source_binding.parser.types import NormalizedParamDecision
 from fervis.lookup.source_binding.provider_contract import (
     ResolvedInputApplicationOutput,
-    RowPredicatePopulationTestResultOutput,
 )
 
 
@@ -292,13 +285,6 @@ def test_resolved_identity_component_compiles_to_compatible_raw_parameter():
 
 
 def test_grouped_identity_inputs_compile_as_parameter_alternatives() -> None:
-    staff_test = RequestedFactAnswerPopulationMembershipTest(
-        id="specified_staff",
-        kind=AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT,
-        polarity=AnswerPopulationMembershipTestPolarity.MUST_PASS,
-        test_question="Does the sale belong to either specified staff member?",
-        owned_question_input_refs=("staff_id_1", "staff_id_2"),
-    )
     fact = RequestedFact(
         id="fact_1",
         description="sales count for each specified staff member",
@@ -309,19 +295,6 @@ def test_grouped_identity_inputs_compile_as_parameter_alternatives() -> None:
                 description="specified staff member",
                 domain=GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS,
                 question_input_refs=("staff_id_1", "staff_id_2"),
-            ),
-        ),
-        answer_population=RequestedFactAnswerPopulation(
-            population_label="sales by specified staff member",
-            counted_unit="sales",
-            membership_tests=(
-                RequestedFactAnswerPopulationMembershipTest(
-                    id="subject_identity",
-                    kind=AnswerPopulationMembershipTestKind.SUBJECT_IDENTITY,
-                    polarity=AnswerPopulationMembershipTestPolarity.MUST_PASS,
-                    test_question="Does the row represent a sale?",
-                ),
-                staff_test,
             ),
         ),
         answer_outputs=(
@@ -360,7 +333,7 @@ def test_grouped_identity_inputs_compile_as_parameter_alternatives() -> None:
         choices=(),
         decision_options=(),
     )
-    alternative_test = fact.specified_group_membership_test()
+    alternative_group = fact.specified_group_key()
     surface = resolved_input_application_surface(
         candidate=SourceCandidate(
             id="get_staff_sales",
@@ -370,29 +343,16 @@ def test_grouped_identity_inputs_compile_as_parameter_alternatives() -> None:
         ),
         requested_fact_id="fact_1",
         resolved_values=identities,
-        membership_tests=(staff_test,),
-        alternative_input_test=alternative_test,
-        coverage_role=PopulationCoverageRole.ROW_POPULATION,
-        role_text="grouped sales source",
+        parameter_alternative_group=alternative_group,
     )
 
-    assert alternative_test is staff_test
+    assert alternative_group is fact.answer_expression.group_key
     assert surface.provider_schema()["maxItems"] == 2
     assert [
         value["request_parameter_alternative_group"]
         for value in surface.prompt_payload()["resolved_values"]
-    ] == ["specified_staff", "specified_staff"]
+    ] == ["answer_staff", "answer_staff"]
 
-    staff_test_key = membership_test_key(staff_test)
-    test_result = RowPredicatePopulationTestResultOutput(
-        test_id=staff_test_key,
-        test_question=staff_test.test_question,
-        role_scoped_test_question=(
-            "For grouped sales source, " + staff_test.test_question
-        ),
-        because="Each invocation is restricted to one requested staff member.",
-        test_effect="SATISFIES_TEST",
-    )
     applications = tuple(
         ResolvedInputApplicationOutput(
                 target_kind=(
@@ -404,7 +364,7 @@ def test_grouped_identity_inputs_compile_as_parameter_alternatives() -> None:
                 match_basis_explanation=(
                     "Apply this requested staff identity to staff_id."
                 ),
-                population_test_results={staff_test_key: test_result},
+                population_test_results={},
             )
         for value in identities
     )
@@ -420,19 +380,11 @@ def test_grouped_identity_inputs_compile_as_parameter_alternatives() -> None:
         (("staff_id", "51515151-0000-0000-0002-000000000001"),),
         (("staff_id", "51515151-0000-0000-0002-000000000002"),),
     ]
-    assert tuple(
-        claim.test_ref.membership_test_id
-        for claim in parsed.population_coverage_claims
-    ) == ("specified_staff",)
-    assert parsed.population_coverage_claims[0].proof_refs == (
-        "known_input:staff_id_1",
-        "known_input:staff_id_2",
-        "source_param:staff_id",
-    )
+    assert parsed.population_coverage_claims == ()
     with pytest.raises(ValueError, match="repeats a target"):
         parse_resolved_input_applications(
             applications,
-            surface=replace(surface, alternative_input_test=None),
+            surface=replace(surface, parameter_alternative_group=None),
         )
     with pytest.raises(ValueError, match="alternatives must apply together"):
         parse_resolved_input_applications(

@@ -303,14 +303,6 @@ def _parse_binding_decisions(
         population_coverage_claims=merge_population_coverage_claims(
             (
                 *answer_population_coverage_claims,
-                *context.closed_key_bindings.population_coverage_claims(
-                    target,
-                    fact=next(
-                        fact
-                        for fact in context.request.requested_facts
-                        if fact.id == target.requested_fact_id
-                    ),
-                ),
                 *binding.input_applications.population_coverage_claims,
                 *binding.population_coverage_claims,
                 *row_predicates.population_coverage_claims,

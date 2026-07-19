@@ -48,7 +48,9 @@ from fervis.lookup.source_binding.param_values import (
 from fervis.lookup.turn_prompts.projections import resolved_values_for_requested_fact
 from fervis.lookup.question_contract import (
     AnswerPopulationMembershipTestKind,
+    GroupKeyDomainKind,
     RequestedFactAnswerPopulationMembershipTest,
+    RequestedFactGroupKey,
 )
 from fervis.lookup.source_binding.population_effects import (
     population_coverage_claims,
@@ -93,7 +95,7 @@ class ResolvedInputApplicationSurface:
     membership_tests_by_input_id: dict[
         str, tuple[RequestedFactAnswerPopulationMembershipTest, ...]
     ]
-    alternative_input_test: RequestedFactAnswerPopulationMembershipTest | None
+    parameter_alternative_group: RequestedFactGroupKey | None
     coverage_role: PopulationCoverageRole | None
     role_text: str
 
@@ -132,11 +134,11 @@ class ResolvedInputApplicationSurface:
         }
 
     def _additional_parameter_alternatives(self) -> int:
-        if self.alternative_input_test is None:
+        if self.parameter_alternative_group is None:
             return 0
-        return (len(self.alternative_input_test.owned_question_input_refs) - 1) * len(
-            self.parameter_targets_by_id
-        )
+        return (
+            len(self.parameter_alternative_group.question_input_refs) - 1
+        ) * len(self.parameter_targets_by_id)
 
     def _resolved_value_payloads(self) -> tuple[dict[str, object], ...]:
         payloads: list[dict[str, object]] = []
@@ -175,12 +177,12 @@ class ResolvedInputApplicationSurface:
                     **(
                         {
                             "request_parameter_alternative_group": (
-                                self.alternative_input_test.id
+                                self.parameter_alternative_group.id
                             )
                         }
-                        if self.alternative_input_test is not None
+                        if self.parameter_alternative_group is not None
                         and value.known_input_id
-                        in self.alternative_input_test.owned_question_input_refs
+                        in self.parameter_alternative_group.question_input_refs
                         else {}
                     ),
                 }
@@ -290,18 +292,19 @@ def resolved_input_application_surface(
     requested_fact_id: str,
     resolved_values: tuple[FactValue, ...],
     membership_tests: tuple[RequestedFactAnswerPopulationMembershipTest, ...] = (),
-    alternative_input_test: RequestedFactAnswerPopulationMembershipTest | None = None,
+    parameter_alternative_group: RequestedFactGroupKey | None = None,
     coverage_role: PopulationCoverageRole | None = None,
     role_text: str = "source rows",
 ) -> ResolvedInputApplicationSurface:
     """Describe independently selectable values and invocation-local targets."""
 
     values_by_id = {value.id: value for value in resolved_values}
-    if alternative_input_test is not None and (
-        alternative_input_test not in membership_tests
-        or len(alternative_input_test.owned_question_input_refs) < 2
+    if parameter_alternative_group is not None and (
+        parameter_alternative_group.domain
+        is not GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS
+        or len(parameter_alternative_group.question_input_refs) < 2
     ):
-        raise ValueError("alternative input test must own multiple fact inputs")
+        raise ValueError("parameter alternative group requires multiple fact inputs")
     parameter_targets = {
         param.id: param
         for param in candidate.params
@@ -326,11 +329,8 @@ def resolved_input_application_surface(
         identity_targets_by_id=identity_targets,
         membership_tests_by_input_id=_membership_tests_by_input_id(
             membership_tests if coverage_role is not None else (),
-            alternative_input_test=(
-                alternative_input_test if coverage_role is not None else None
-            ),
         ),
-        alternative_input_test=alternative_input_test,
+        parameter_alternative_group=parameter_alternative_group,
         coverage_role=coverage_role,
         role_text=role_text,
     )
@@ -367,11 +367,11 @@ def resolved_input_application_surfaces(
         candidate = candidates_by_id.get(target.source_candidate_id)
         if fact is None or candidate is None:
             continue
-        specified_group_test = fact.specified_group_membership_test()
-        parameter_alternative_test = (
-            specified_group_test
-            if specified_group_test is not None
-            and len(specified_group_test.owned_question_input_refs) > 1
+        specified_group_key = fact.specified_group_key()
+        parameter_alternative_group = (
+            specified_group_key
+            if specified_group_key is not None
+            and len(specified_group_key.question_input_refs) > 1
             else None
         )
         surface = resolved_input_application_surface(
@@ -386,7 +386,7 @@ def resolved_input_application_surfaces(
                 if fact.answer_population is not None
                 else ()
             ),
-            alternative_input_test=parameter_alternative_test,
+            parameter_alternative_group=parameter_alternative_group,
             coverage_role=(
                 PopulationCoverageRole.ROW_POPULATION
                 if target.requires_answer_fulfillment
@@ -405,13 +405,13 @@ def resolved_input_application_surfaces(
             for value_id, value in surface.values_by_id.items()
             if value_id not in backend_owned_value_ids
         }
-        alternative_input_test = surface.alternative_input_test
-        if alternative_input_test is not None and not set(
-            alternative_input_test.owned_question_input_refs
+        parameter_alternative_group = surface.parameter_alternative_group
+        if parameter_alternative_group is not None and not set(
+            parameter_alternative_group.question_input_refs
         ).issubset(
             value.known_input_id for value in model_visible_values.values()
         ):
-            alternative_input_test = None
+            parameter_alternative_group = None
         output[target.binding_target_id] = ResolvedInputApplicationSurface(
             requested_fact_id=surface.requested_fact_id,
             values_by_id=model_visible_values,
@@ -429,7 +429,7 @@ def resolved_input_application_surfaces(
                 )
             },
             membership_tests_by_input_id=surface.membership_tests_by_input_id,
-            alternative_input_test=alternative_input_test,
+            parameter_alternative_group=parameter_alternative_group,
             coverage_role=surface.coverage_role,
             role_text=surface.role_text,
         )
@@ -585,8 +585,8 @@ def _require_parameter_alternative_group(
     *,
     surface: ResolvedInputApplicationSurface,
 ) -> None:
-    membership_test = surface.alternative_input_test
-    if membership_test is None:
+    alternative_group = surface.parameter_alternative_group
+    if alternative_group is None:
         raise ValueError("resolved input application repeats a target")
     values = tuple(application.value for application in applications)
     input_ids = tuple(value.known_input_id for value in values)
@@ -594,7 +594,7 @@ def _require_parameter_alternative_group(
         any(not isinstance(value.payload, IdentityValuePayload) for value in values)
         or len(set(input_ids)) != len(input_ids)
         or frozenset(input_ids)
-        != frozenset(membership_test.owned_question_input_refs)
+        != frozenset(alternative_group.question_input_refs)
         or len({value.id for value in values}) != len(values)
         or len({application.output.value_component for application in applications})
         != 1
@@ -607,10 +607,10 @@ def _is_parameter_alternative(
     *,
     surface: ResolvedInputApplicationSurface,
 ) -> bool:
-    membership_test = surface.alternative_input_test
+    alternative_group = surface.parameter_alternative_group
     return (
-        membership_test is not None
-        and value.known_input_id in membership_test.owned_question_input_refs
+        alternative_group is not None
+        and value.known_input_id in alternative_group.question_input_refs
     )
 
 
@@ -796,8 +796,6 @@ def _identity_filters(
 
 def _membership_tests_by_input_id(
     tests: tuple[RequestedFactAnswerPopulationMembershipTest, ...],
-    *,
-    alternative_input_test: RequestedFactAnswerPopulationMembershipTest | None,
 ) -> dict[str, tuple[RequestedFactAnswerPopulationMembershipTest, ...]]:
     output: dict[str, list[RequestedFactAnswerPopulationMembershipTest]] = {}
     for test in tests:
@@ -805,9 +803,6 @@ def _membership_tests_by_input_id(
             continue
         if len(test.owned_question_input_refs) == 1:
             output.setdefault(test.owned_question_input_refs[0], []).append(test)
-        elif test is alternative_input_test:
-            for input_ref in test.owned_question_input_refs:
-                output.setdefault(input_ref, []).append(test)
     return {input_id: tuple(items) for input_id, items in output.items()}
 
 

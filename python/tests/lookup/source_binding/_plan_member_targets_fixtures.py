@@ -262,16 +262,6 @@ def _closed_key_grouped_staff_sales_request() -> SourceBindingRequest:
                     test_question="Does the row represent a sale?",
                 ),
                 RequestedFactAnswerPopulationMembershipTest(
-                    id="specified_staff",
-                    kind=AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT,
-                    polarity=AnswerPopulationMembershipTestPolarity.MUST_PASS,
-                    test_question=(
-                        "Does the sale belong to one of the staff members specified "
-                        "by the question inputs?"
-                    ),
-                    owned_question_input_refs=("staff_id_1", "staff_id_2"),
-                ),
-                RequestedFactAnswerPopulationMembershipTest(
                     id="normal_instance_guard",
                     kind=AnswerPopulationMembershipTestKind.NORMAL_INSTANCE_GUARD,
                     polarity=AnswerPopulationMembershipTestPolarity.MUST_PASS,
