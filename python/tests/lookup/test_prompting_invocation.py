@@ -3,8 +3,12 @@ import json
 from tests.lookup.source_binding_helpers import source_binding_request
 
 from fervis.lookup.relation_catalog import (
+    CandidateKey,
+    CandidateKeyComponent,
     CatalogField,
+    CatalogParam,
     EndpointRead,
+    ParamSource,
     RelationCatalog,
     RowCardinality,
     RowPath,
@@ -18,11 +22,11 @@ from fervis.lookup.grounding.model import (
     GroundingRequest,
     InputBindingOption,
     InputBindingKeyComponent,
-    InputBindingPurpose,
-    InputBindingRoute,
     KnownInputBindingTask,
+    ResolverCandidate,
 )
 from fervis.lookup.grounding.prompt import GroundingTurnPrompt
+from fervis.lookup.fact_plan.row_sources import build_row_source_catalog
 from fervis.lookup.answer_program.relations import (
     RelationSource,
     SourceKind,
@@ -65,10 +69,10 @@ from fervis.lookup.plan_selection import (
 
 
 _APPROVED_CHARS = {
-    "question contract": (364, 18074, 27161),
+    "question contract": (364, 18620, 27712),
     "query enrichment": (364, 5185, 7408),
-    "grounding": (364, 6624, 9008),
-    "source binding": (364, 14486, 18017),
+    "grounding": (364, 7202, 10861),
+    "source binding": (364, 16485, 20357),
     "pattern fact planning": (364, 3497, 5311),
 }
 
@@ -135,6 +139,31 @@ def test_question_contract_prompt_states_relational_ownership_together():
     assert ownership in invocation.prompt_text
 
 
+def test_question_contract_prompt_groups_alternative_predicate_operands():
+    invocation = next(
+        item for item in _turn_invocations() if item.turn_name == "question contract"
+    )
+
+    assert (
+        "Question inputs are predicate operands, not separate tests. One predicate "
+        "may own one or more inputs; the number of inputs does not determine the "
+        "number of tests."
+    ) in invocation.prompt_text
+    assert (
+        "Within answer_population, when multiple inputs are alternative values for "
+        "the same predicate, create one membership test owning all those inputs."
+    ) in invocation.prompt_text
+    assert (
+        "SPECIFIED_QUESTION_INPUTS restricts the result to those input values and "
+        "groups the result by them. The group key owns those inputs; "
+        "answer_population must not repeat that restriction."
+    ) in invocation.prompt_text
+    assert (
+        "A value identifying a particular subject member is a separate "
+        "EXPLICIT_USER_CONSTRAINT."
+    ) not in invocation.prompt_text
+
+
 def test_source_binding_prompt_distinguishes_ranked_physical_operations():
     invocation = next(
         item for item in _turn_invocations() if item.turn_name == "source binding"
@@ -146,14 +175,12 @@ def test_source_binding_prompt_distinguishes_ranked_physical_operations():
     )
     assert (
         "ranked_aggregate groups source rows by an entity key, aggregates a measure "
-        "within each group, and ranks the resulting groups."
-        in invocation.prompt_text
+        "within each group, and ranks the resulting groups." in invocation.prompt_text
     )
     assert (
         "A metric fits when it is the correct measure input to the requested "
         "computation. Do not reject it merely because aggregation or another later "
-        "operation produces the final answer value."
-        in invocation.prompt_text
+        "operation produces the final answer value." in invocation.prompt_text
     )
     assert "directly yields the requested measure" not in invocation.prompt_text
     assert "candidate's metric_operation" not in invocation.prompt_text
@@ -198,9 +225,61 @@ def _turn_invocations():
         )
     )
 
+    resolver_catalog = RelationCatalog(
+        reads=(
+            EndpointRead(
+                id="read_today",
+                endpoint_name="read_today",
+                resource_names=("calendar_value",),
+                params=(
+                    CatalogParam(
+                        ref="read_today.query.value",
+                        name="value",
+                        source=ParamSource.QUERY,
+                        type="string",
+                    ),
+                ),
+                row_paths=(
+                    RowPath(
+                        id="data",
+                        path="data",
+                        cardinality=RowCardinality.MANY,
+                    ),
+                ),
+                fields=(
+                    CatalogField(
+                        ref="read_today.id",
+                        path="data.id",
+                        row_path_id="data",
+                        type="string",
+                    ),
+                    CatalogField(
+                        ref="read_today.value",
+                        path="data.value",
+                        row_path_id="data",
+                        type="string",
+                    ),
+                ),
+                candidate_keys=(
+                    CandidateKey(
+                        id="primary_key",
+                        entity_kind="calendar_value",
+                        components=(
+                            CandidateKeyComponent(
+                                id="id",
+                                field_ref="read_today.id",
+                            ),
+                        ),
+                        primary=True,
+                    ),
+                ),
+            ),
+        ),
+    )
     grounding_request = GroundingRequest(
         question=question,
         conversation_context=context,
+        resolver_catalog=resolver_catalog,
         tasks=(
             KnownInputBindingTask(
                 known_input_id="input_today",
@@ -212,19 +291,15 @@ def _turn_invocations():
                     InputBindingOption(
                         id="bind_input_today_1",
                         known_input_id="input_today",
-                        path="placeholder resolver",
-                        purpose=InputBindingPurpose.REFERENCE_GROUNDING,
-                        route=InputBindingRoute(
+                        candidate=ResolverCandidate(
                             known_input_id="input_today",
-                            resolver_row_source_id="resolver_today",
-                            resolver_read_id="read_today",
-                            resolver_endpoint_name="read_today",
-                            lookup_param_id="query.value",
-                            lookup_param_ref="read_today.query.value",
-                            lookup_param_type="string",
-                            lookup_field_ids=("field.value",),
-                            lookup_field_refs=("read_today.value",),
-                            canonical_lookup_field_refs=("read_today.value",),
+                            resolver_source=next(
+                                source
+                                for source in build_row_source_catalog(
+                                    resolver_catalog
+                                ).sources
+                                if source.read_id == "read_today"
+                            ),
                             entity_kind="calendar_value",
                             key_id="primary_key",
                             key_components=(
@@ -234,8 +309,6 @@ def _turn_invocations():
                                     field_ref="read_today.id",
                                 ),
                             ),
-                            context_field_ids=("field.value",),
-                            display="value -> calendar value",
                         ),
                     ),
                 ),

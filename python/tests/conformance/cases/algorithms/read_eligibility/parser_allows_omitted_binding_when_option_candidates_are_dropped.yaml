@@ -1,0 +1,26 @@
+id: parser_keeps_canonical_selection_when_option_candidates_are_dropped
+description: Canonical interpretation remains fact-local when the candidate read is dropped.
+kind: algorithm
+algorithm: read_eligibility.parse
+input:
+  request_fixture: stores_in_grounded_area
+  payload:
+    requested_fact_assessments:
+      fact_1:
+        read_candidate_reviews:
+          source_1:
+            retention_basis: The available canonical interpretation does not fit the requested store population.
+            retention_decision: DROP
+        canonical_inputs:
+          london_qi_1:
+            interpretation_question: Which shown canonical result represents what London denotes in requested fact count of stores in London?
+            canonical_option_assessments:
+              london_qi_1.area.primary_key.area_id: "area:primary_key: the candidate reads were assessed under this identity."
+            because: London denotes the area constraining the requested store population, and the Area result represents that area directly.
+            canonical_option_id: london_qi_1.area.primary_key.area_id
+            resolver_option_assessments:
+              bind_qi1_rs_7de03e00183c6709_area_primary_key: The name lookup parameter retrieves the Area and its returned fields verify that Area.
+            resolver_option_id: bind_qi1_rs_7de03e00183c6709_area_primary_key
+expect:
+  result_contains:
+    retained_read_ids_by_requested_fact: {}

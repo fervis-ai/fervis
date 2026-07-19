@@ -81,6 +81,11 @@ from fervis.questions import AskRequestLimits, AskResult
 from fervis.project import ProjectInspection
 
 from tests.testkit.algorithms.lineage import fixture_lineage_query
+from tests.testkit.execution_proof_graph import (
+    proof_graph_payload,
+    proof_graph_record,
+    proof_node,
+)
 
 API_DIR = Path(__file__).resolve().parents[3]
 
@@ -392,36 +397,33 @@ def _lineage_dataset() -> dict[str, object]:
             }
         ],
         "proof_graphs": [
-            {
-                "proof_graph_id": "proof_1",
-                "run_id": "run_1",
-                "fact_result_id": "fact_result_1",
-                "compile_step_id": "step_compile",
-                "execute_step_id": "step_execute",
-                "payload_schema": "fervis.execution_proof_graph",
-                "payload_schema_rev": 1,
-                "payload_json": {
-                    "nodes": [
-                        {
-                            "id": "relation:source_1",
-                            "kind": "relation",
-                            "proof_refs": ["source_read:source_read_1"],
-                        },
-                        {
-                            "id": "endpoint_arg:source_1:month",
-                            "kind": "endpoint_arg",
-                            "proof_refs": ["known_input:month_1"],
-                            "label": "month=2026-06",
-                            "value": "2026-06",
-                        },
-                        {"id": "operation:op_1", "kind": "operation", "proof_refs": []},
-                        {
-                            "id": "answer_output:fact_1:answer_1",
-                            "kind": "answer_output",
-                            "proof_refs": [],
-                        },
-                    ],
-                    "edges": [
+            proof_graph_record(
+                proof_graph_id="proof_1",
+                run_id="run_1",
+                fact_result_id="fact_result_1",
+                compile_step_id="step_compile",
+                execute_step_id="step_execute",
+                payload_json=proof_graph_payload(
+                    nodes=(
+                        proof_node(
+                            "relation:source_1",
+                            "relation",
+                            proof_refs=("source_read:source_read_1",),
+                        ),
+                        proof_node(
+                            "endpoint_arg:source_1:month",
+                            "endpoint_arg",
+                            proof_refs=("known_input:month_1",),
+                            label="month=2026-06",
+                            value="2026-06",
+                        ),
+                        proof_node("operation:op_1", "operation"),
+                        proof_node(
+                            "answer_output:fact_1:answer_1",
+                            "answer_output",
+                        ),
+                    ),
+                    edges=(
                         {
                             "source": "endpoint_arg:source_1:month",
                             "target": "relation:source_1",
@@ -437,8 +439,8 @@ def _lineage_dataset() -> dict[str, object]:
                             "target": "answer_output:fact_1:answer_1",
                             "role": "produces",
                         },
-                    ],
-                    "contributions": [
+                    ),
+                    contributions=(
                         {
                             "origin": "explicit",
                             "label": "June 2026",
@@ -451,9 +453,9 @@ def _lineage_dataset() -> dict[str, object]:
                             "node_refs": ["endpoint_arg:source_1:month"],
                             "proof_refs": ["known_input:month_1"],
                         },
-                    ],
-                },
-            }
+                    ),
+                ),
+            )
         ],
     }
 

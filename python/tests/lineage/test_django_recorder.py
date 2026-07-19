@@ -49,6 +49,9 @@ from fervis.lineage.models import (
     SourceRead,
 )
 from fervis.lineage.ports import LineageRecorderPort
+from fervis.lineage.payloads.execution_proof_graph import (
+    EXECUTION_PROOF_GRAPH_SCHEMA_REV,
+)
 from fervis.lineage.recorder import (
     AnswerOutputWrite,
     AnswerPresentationWrite,
@@ -81,6 +84,7 @@ from fervis.lineage.recorder import (
 )
 from fervis.lineage.records import RECORD_SPECS_BY_KEY
 from fervis.lineage.recorder_core import LineageRecorder
+from tests.testkit.execution_proof_graph import proof_graph_payload, proof_node
 
 pytestmark = pytest.mark.django_db
 
@@ -465,6 +469,39 @@ def test_django_lineage_recorder_persists_source_read_without_response_body() ->
     assert SourceRead.objects.filter(source_read_id="source_read_1").count() == 1
 
 
+def test_django_lineage_recorder_persists_read_eligibility_resolver_read() -> None:
+    recorder: LineageRecorderPort = DjangoLineageRecorder()
+    _record_run_spine(recorder)
+    _record_catalog_endpoint(recorder)
+    recorder.record_step(
+        RunStepWrite(
+            step_id="step_read_eligibility",
+            run_id="run_1",
+            sequence=1,
+            step_key=RunStepKey.READ_ELIGIBILITY,
+            kind=RunStepKind.MODEL_TURN,
+        )
+    )
+
+    recorder.record_source_read(
+        SourceReadWrite(
+            source_read_id="source_read_resolver",
+            run_id="run_1",
+            step_id="step_read_eligibility",
+            catalog_endpoint_id=_CATALOG_ENDPOINT_ID,
+            status=SourceReadStatus.SUCCEEDED,
+            row_count=1,
+            completeness_json={"complete": True},
+            response_hash="sha256:resolved-area",
+        )
+    )
+
+    source_read = SourceRead.objects.select_related("step").get(
+        source_read_id="source_read_resolver"
+    )
+    assert source_read.step.step_key == RunStepKey.READ_ELIGIBILITY.value
+
+
 def test_django_lineage_recorder_rejects_source_read_endpoint_from_other_run() -> None:
     recorder: LineageRecorderPort = DjangoLineageRecorder()
     _record_run_spine(recorder)
@@ -725,7 +762,7 @@ def test_django_lineage_recorder_persists_answer_lineage_primitives_idempotently
         compile_step_id="step_compile",
         execute_step_id="step_execute",
         payload_schema="fervis.execution_proof_graph",
-        payload_schema_rev=1,
+        payload_schema_rev=EXECUTION_PROOF_GRAPH_SCHEMA_REV,
         payload_json=_answer_proof_graph_payload(),
     )
     run_result = RunResultWrite(
@@ -847,7 +884,7 @@ def test_django_lineage_recorder_records_answered_result_atomically() -> None:
                     compile_step_id="step_compile",
                     execute_step_id="step_execute",
                     payload_schema="fervis.execution_proof_graph",
-                    payload_schema_rev=1,
+                    payload_schema_rev=EXECUTION_PROOF_GRAPH_SCHEMA_REV,
                     payload_json=_answer_proof_graph_payload(),
                 ),
             ),
@@ -961,7 +998,7 @@ def test_django_lineage_recorder_rolls_back_answered_result_on_late_failure() ->
                         compile_step_id="step_compile",
                         execute_step_id="step_execute",
                         payload_schema="fervis.execution_proof_graph",
-                        payload_schema_rev=1,
+                        payload_schema_rev=EXECUTION_PROOF_GRAPH_SCHEMA_REV,
                         payload_json=_answer_proof_graph_payload(),
                     ),
                 ),
@@ -1029,7 +1066,7 @@ def test_django_lineage_recorder_preserves_no_data_terminal_proof() -> None:
                     compile_step_id="step_compile",
                     execute_step_id="step_execute",
                     payload_schema="fervis.execution_proof_graph",
-                    payload_schema_rev=1,
+                    payload_schema_rev=EXECUTION_PROOF_GRAPH_SCHEMA_REV,
                     payload_json=_answer_proof_graph_payload(),
                 ),
             ),
@@ -1513,7 +1550,7 @@ def test_django_lineage_recorder_rejects_missing_source_read_proof_ref() -> None
                 compile_step_id="step_compile",
                 execute_step_id="step_execute",
                 payload_schema="fervis.execution_proof_graph",
-                payload_schema_rev=1,
+                payload_schema_rev=EXECUTION_PROOF_GRAPH_SCHEMA_REV,
                 payload_json=_answer_proof_graph_payload(),
             )
         )
@@ -1695,7 +1732,7 @@ def _record_answered_lineage_prerequisites(recorder: LineageRecorderPort) -> Non
             compile_step_id="step_compile",
             execute_step_id="step_execute",
             payload_schema="fervis.execution_proof_graph",
-            payload_schema_rev=1,
+            payload_schema_rev=EXECUTION_PROOF_GRAPH_SCHEMA_REV,
             payload_json=_answer_proof_graph_payload(),
         )
     )
@@ -1851,7 +1888,7 @@ def _answered_result_write() -> AnsweredRunResultWrite:
                 compile_step_id="step_compile",
                 execute_step_id="step_execute",
                 payload_schema="fervis.execution_proof_graph",
-                payload_schema_rev=1,
+                payload_schema_rev=EXECUTION_PROOF_GRAPH_SCHEMA_REV,
                 payload_json=_answer_proof_graph_payload(),
             ),
         ),
@@ -1880,24 +1917,20 @@ def _answer_proof_node_ref() -> str:
 
 
 def _answer_proof_graph_payload() -> dict[str, object]:
-    return {
-        "nodes": [
-            {
-                "id": "relation:source_1",
-                "kind": "relation",
-                "proof_refs": ["source_read:source_read_1"],
-            },
-            {
-                "id": _answer_proof_node_ref(),
-                "kind": "answer_output",
-                "proof_refs": [],
-            },
-        ],
-        "edges": [
+    return proof_graph_payload(
+        nodes=(
+            proof_node(
+                "relation:source_1",
+                "relation",
+                proof_refs=("source_read:source_read_1",),
+            ),
+            proof_node(_answer_proof_node_ref(), "answer_output"),
+        ),
+        edges=(
             {
                 "source": "relation:source_1",
                 "target": _answer_proof_node_ref(),
                 "role": "produces",
             },
-        ],
-    }
+        ),
+    )

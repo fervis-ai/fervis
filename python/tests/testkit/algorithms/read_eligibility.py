@@ -7,10 +7,24 @@ from jsonschema import ValidationError, validate
 from fervis.lookup.relation_catalog.selection import (
     CatalogSelectionRanking,
     CatalogSelectionResult,
+    EntityTargetResolverSelection,
     RequestedFactCatalogSelection,
 )
+from fervis.lookup.fact_plan.row_sources import build_row_source_catalog
+from fervis.lookup.grounding.resolution.references import (
+    reference_binding_sources_by_known_input,
+    reference_input_binding_tasks,
+)
+from fervis.lookup.grounding.model import (
+    CompatibleInputBinding,
+    IdentifierKind,
+    LookupRequestParameter,
+)
 from fervis.lookup.turn_prompts import build_turn_prompt_context
-from fervis.lookup.read_eligibility.model import ReadEligibilityRequest
+from fervis.lookup.read_eligibility.model import (
+    ReadEligibilityRequest,
+    RetainedReadAssessment,
+)
 from fervis.lookup.read_eligibility.parser import parse_read_eligibility
 from fervis.lookup.read_eligibility.prompt import ReadEligibilityTurnPrompt
 from fervis.lookup.read_eligibility.recall import (
@@ -19,7 +33,6 @@ from fervis.lookup.read_eligibility.recall import (
 from fervis.lookup.read_eligibility.surface import (
     read_eligibility_candidate_surface,
 )
-from fervis.lookup.answer_program.values import FactValue
 
 from tests.testkit.assertions import (
     expects_rejection,
@@ -31,7 +44,6 @@ from tests.testkit.fixtures import load_conformance_fixture
 from tests.testkit.question_contract import (
     question_contract_from_payload,
 )
-from tests.testkit.values import fact_value_from_payload
 
 
 def run_read_eligibility_parse_case(payload: dict[str, Any]) -> list[str]:
@@ -66,6 +78,23 @@ def run_read_eligibility_parse_case(payload: dict[str, Any]) -> list[str]:
                     "relevant_field_refs": list(item.relevant_field_refs),
                 }
                 for item in result.read_assessments
+                if isinstance(item, RetainedReadAssessment)
+            ],
+            "canonical_inputs": [
+                {
+                    "known_input_id": item.known_input_id,
+                    "canonical_option_id": item.canonical_option_id,
+                    "resolver_option_id": item.resolver_option_id,
+                    "interpretation_question": item.interpretation_question,
+                    "canonical_option_assessments": dict(
+                        item.canonical_option_assessments
+                    ),
+                    "resolver_option_assessments": dict(
+                        item.resolver_option_assessments
+                    ),
+                    "because": item.because,
+                }
+                for item in result.canonical_inputs
             ],
         },
         expected_subset=payload["expect"]["result_contains"],
@@ -110,6 +139,9 @@ def run_read_eligibility_prompt_case(payload: dict[str, Any]) -> list[str]:
         "array_schema_paths_missing_items": _array_schema_paths_missing_items(
             invocation.provider_schema
         ),
+        "object_schema_paths_not_closed": _object_schema_paths_not_closed(
+            invocation.provider_schema
+        ),
     }
     return subset_mismatches(
         actual=actual,
@@ -128,14 +160,10 @@ def run_read_eligibility_cards_case(payload: dict[str, Any]) -> list[str]:
             for row in card["response_rows"]
             for field in row["fields"]
         },
-        "applicable_known_inputs_by_read": {
-            str(candidate.get("read_id") or ""): candidate.get(
-                "applicable_known_inputs"
-            )
+        "known_inputs_by_fact": {
+            str(group.get("requested_fact_id") or ""): group.get("known_inputs")
             for group in card_payload.get("requested_fact_read_candidates") or ()
             if isinstance(group, dict)
-            for candidate in group.get("read_candidates") or ()
-            if isinstance(candidate, dict) and candidate.get("applicable_known_inputs")
         },
     }
     return subset_mismatches(
@@ -158,7 +186,6 @@ def run_read_eligibility_prepare_recall_case(payload: dict[str, Any]) -> list[st
             requested_facts=request.requested_facts,
             catalog_selection=prepared,
             conversation_context=request.conversation_context,
-            available_values=request.available_values,
         )
     )
     card_payload = surface.card_payload
@@ -206,10 +233,12 @@ def _request_from_input(input_payload: dict[str, Any]) -> ReadEligibilityRequest
                 request_payload.get("unselected_positive_read_ids_by_fact") or {}
             ).items()
         },
-        available_values=tuple(
-            fact_value_from_payload(item)
-            for item in request_payload.get("available_values") or ()
-        ),
+        compatible_resolver_reads_by_known_input={
+            str(known_input_id): tuple(read_ids)
+            for known_input_id, read_ids in (
+                request_payload.get("compatible_resolver_reads_by_known_input") or {}
+            ).items()
+        },
     )
 
 
@@ -220,10 +249,45 @@ def _request(
     catalog: Any,
     selected_read_ids_by_fact: dict[str, tuple[str, ...]],
     unselected_positive_read_ids_by_fact: dict[str, tuple[str, ...]] | None = None,
-    available_values: tuple[FactValue, ...] = (),
+    compatible_resolver_reads_by_known_input: (
+        dict[str, tuple[str, ...]] | None
+    ) = None,
 ) -> ReadEligibilityRequest:
     facts = question_contract.requested_facts
     unselected_positive = unselected_positive_read_ids_by_fact or {}
+    resolver_selections = tuple(
+        EntityTargetResolverSelection(
+            target_id=known_input_id,
+            catalog_search_terms=(),
+            selected_read_ids=read_ids,
+        )
+        for known_input_id, read_ids in (
+            compatible_resolver_reads_by_known_input or {}
+        ).items()
+    )
+    binding_tasks = reference_input_binding_tasks(
+        question_contract,
+        resolver_catalog=catalog,
+        resolver_sources_by_known_input=reference_binding_sources_by_known_input(
+            full_row_sources=build_row_source_catalog(catalog),
+            resolver_selections=resolver_selections,
+        ),
+    )
+    lookup_text_by_input_id = {
+        known_input.id: known_input.resolved_value_text
+        for fact in facts
+        for known_input in fact.known_inputs
+        if hasattr(known_input, "resolved_value_text")
+    }
+    compatible_reference_bindings = tuple(
+        _compatible_binding(
+            catalog=catalog,
+            option=option,
+            lookup_text=str(lookup_text_by_input_id[option.known_input_id]),
+        )
+        for task in binding_tasks
+        for option in task.options
+    )
     return ReadEligibilityRequest(
         question=question,
         question_contract=question_contract,
@@ -250,7 +314,40 @@ def _request(
             ),
         ),
         conversation_context={},
-        available_values=available_values,
+        binding_tasks=binding_tasks,
+        compatible_reference_bindings=compatible_reference_bindings,
+        resolver_catalog=catalog,
+    )
+
+
+def _compatible_binding(
+    *,
+    catalog: Any,
+    option: Any,
+    lookup_text: str,
+) -> CompatibleInputBinding:
+    read = catalog.read(option.candidate.resolver_read_id)
+    lookup_params = tuple(
+        parameter
+        for parameter in read.params
+        if parameter.type in {"string", "uuid", "pk", "path"}
+        and parameter.semantics != "response_shape"
+    )
+    match_paths = tuple(
+        field.path
+        for field in read.fields
+        if field.type in {"string", "uuid", "pk"}
+        and (field.row_path_id or "root") == option.candidate.resolver_row_path_id
+    )
+    return CompatibleInputBinding(
+        option_id=option.id,
+        lookup_value=lookup_text,
+        identifier_kind=IdentifierKind.DESCRIPTIVE,
+        lookup_request_parameters=tuple(
+            LookupRequestParameter(param_ref=parameter.ref, value=lookup_text)
+            for parameter in lookup_params[:1]
+        ),
+        returned_identity_verification_field_paths=match_paths,
     )
 
 
@@ -266,5 +363,24 @@ def _array_schema_paths_missing_items(schema: object, path: str = "$") -> list[s
         errors = []
         for index, value in enumerate(schema):
             errors.extend(_array_schema_paths_missing_items(value, f"{path}[{index}]"))
+        return errors
+    return []
+
+
+def _object_schema_paths_not_closed(schema: object, path: str = "$") -> list[str]:
+    if isinstance(schema, dict):
+        errors: list[str] = []
+        if (
+            schema.get("type") == "object"
+            and schema.get("additionalProperties") is not False
+        ):
+            errors.append(path)
+        for key, value in schema.items():
+            errors.extend(_object_schema_paths_not_closed(value, f"{path}.{key}"))
+        return errors
+    if isinstance(schema, list):
+        errors = []
+        for index, value in enumerate(schema):
+            errors.extend(_object_schema_paths_not_closed(value, f"{path}[{index}]"))
         return errors
     return []

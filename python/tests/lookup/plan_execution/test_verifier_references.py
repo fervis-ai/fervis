@@ -286,6 +286,7 @@ def verify_fact_plan(plan: FactPlan, **kwargs):
 def _grounded_input_use(
     *,
     value_id: str,
+    requested_fact_id: str,
     row_source_id: str | None = None,
     param_id: str,
     value_component=ValueComponent.VALUE,
@@ -296,6 +297,7 @@ def _grounded_input_use(
         value_id=value_id,
         row_source_id=row_source_id,
         param_id=param_id,
+        requested_fact_id=requested_fact_id,
         value_component=value_component,
     )
 

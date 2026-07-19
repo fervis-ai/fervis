@@ -20,6 +20,7 @@ from ._shared import (
     UniversalConditionSpec,
 )
 from .contract_types import (
+    PopulationCoverage,
     ProofLineage,
     RelationContract,
     _combined_entity_keys,
@@ -70,7 +71,7 @@ def _operation_relation_contract(
     if isinstance(spec, AntiJoinSpec):
         return _anti_join_contract(spec, contracts)
     if isinstance(spec, UniversalConditionSpec):
-        return _with_population_scope_refs(
+        return _with_operation_proof_refs(
             _universal_condition_contract(spec, contracts),
             proof_context.operation_refs.get(operation.id, frozenset()),
         )
@@ -89,23 +90,13 @@ def _operation_relation_contract(
     assert_never(spec)
 
 
-def _with_population_scope_refs(
+def _with_operation_proof_refs(
     contract: RelationContract,
     refs: frozenset[str],
 ) -> RelationContract:
     if not refs:
         return contract
-    return RelationContract(
-        fields=dict(contract.fields),
-        grain_keys=contract.grain_keys,
-        field_proofs={
-            field: proof.with_population_scope(refs)
-            for field, proof in contract.field_proofs.items()
-        },
-        field_types=dict(contract.field_types),
-        entity_keys=contract.entity_keys,
-        population_proof=contract.population_proof.with_population_scope(refs),
-    )
+    return _with_dependency_proof(contract, ProofLineage.value(refs))
 
 
 def _operation_value_proof(
@@ -228,18 +219,21 @@ def _join_contract(
 ) -> RelationContract:
     left = _contract(contracts, spec.left)
     right = _contract(contracts, spec.right)
-    dependency_proof = _join_dependency_proof(left, right, spec.join_keys)
-    for key in spec.join_keys:
-        if not declared_types_compatible(
-            left.field_types.get(key.left), right.field_types.get(key.right)
-        ):
-            raise VerificationError("join keys have incompatible declared types")
+    dependency_proof = _join_dependency_proof(
+        left,
+        right,
+        spec.join_keys,
+        require_identity_authority=bool(
+            left.population_proof.population_coverage.all_tests
+            or right.population_proof.population_coverage.all_tests
+        ),
+    )
     fields = {**left.fields}
-    joined_scope = left.population_proof.merge(
-        right.population_proof
-    ).population_scope_refs
+    joined_coverage = left.population_proof.population_coverage.additive(
+        right.population_proof.population_coverage
+    )
     field_proofs = {
-        field: proof.with_population_scope(joined_scope).merge(dependency_proof)
+        field: proof.with_population_coverage(joined_coverage).merge(dependency_proof)
         for field, proof in left.field_proofs.items()
     }
     for field, roles in right.fields.items():
@@ -247,7 +241,7 @@ def _join_contract(
         fields[field] = roles if existing is None else frozenset({*existing, *roles})
         proof = (
             right.field_proofs.get(field, ProofLineage())
-            .with_population_scope(joined_scope)
+            .with_population_coverage(joined_coverage)
             .merge(dependency_proof)
         )
         field_proofs[field] = field_proofs.get(field, ProofLineage()).merge(proof)
@@ -257,9 +251,15 @@ def _join_contract(
         field_proofs=field_proofs,
         field_types=_merge_contract_field_types(left, right),
         entity_keys=_combined_entity_keys(left, right),
-        population_proof=left.population_proof.merge(
-            right.population_proof,
-            dependency_proof,
+        population_proof=ProofLineage(
+            value_refs=frozenset(
+                {
+                    *left.population_proof.value_refs,
+                    *right.population_proof.value_refs,
+                    *dependency_proof.value_refs,
+                }
+            ),
+            population_coverage=joined_coverage,
         ),
     )
 
@@ -268,7 +268,14 @@ def _join_dependency_proof(
     left: RelationContract,
     right: RelationContract,
     join_keys: tuple[JoinKey, ...],
+    *,
+    require_identity_authority: bool = False,
 ) -> ProofLineage:
+    if (
+        require_identity_authority
+        and not _join_keys_include_shared_entity_key(left, right, join_keys)
+    ):
+        raise VerificationError("join keys lack declared identity authority")
     proof = ProofLineage()
     for key in join_keys:
         if not declared_types_compatible(
@@ -282,15 +289,51 @@ def _join_dependency_proof(
     return proof
 
 
+def _join_keys_include_shared_entity_key(
+    left: RelationContract,
+    right: RelationContract,
+    join_keys: tuple[JoinKey, ...],
+) -> bool:
+    declared_pairs = {(key.left, key.right) for key in join_keys}
+    for left_key in left.entity_keys:
+        for right_key in right.entity_keys:
+            if (left_key.entity_kind, left_key.key_id) != (
+                right_key.entity_kind,
+                right_key.key_id,
+            ):
+                continue
+            right_fields = {
+                component.component_id: component.field_id
+                for component in right_key.components
+            }
+            required_pairs = {
+                (component.field_id, right_fields.get(component.component_id, ""))
+                for component in left_key.components
+            }
+            if required_pairs and all(
+                right_field and (left_field, right_field) in declared_pairs
+                for left_field, right_field in required_pairs
+            ):
+                return True
+    return False
+
+
 def _union_contract(
     spec: UnionSpec,
     contracts: dict[str, RelationContract],
 ) -> RelationContract:
-    population_proof = ProofLineage()
-    for relation_id in spec.inputs:
-        population_proof = population_proof.merge(
-            _contract(contracts, relation_id).population_proof
-        )
+    population_proofs = tuple(
+        _contract(contracts, relation_id).population_proof
+        for relation_id in spec.inputs
+    )
+    population_proof = ProofLineage(
+        value_refs=frozenset(
+            ref for proof in population_proofs for ref in proof.value_refs
+        ),
+        population_coverage=PopulationCoverage.guaranteed_by_every(
+            tuple(proof.population_coverage for proof in population_proofs)
+        ),
+    )
     field_types = {
         field: _union_field_type(contracts, spec.inputs, field)
         for field in spec.output_fields
@@ -320,6 +363,7 @@ def _role_expand_contract(
     fields: dict[str, frozenset[FieldBindingRole]] = {}
     field_proofs: dict[str, ProofLineage] = {}
     field_types: dict[str, str] = {}
+    alternative_proofs: dict[str, list[ProofLineage]] = {}
     for field in spec.carry_fields:
         if field in spec.output_fields:
             fields[field] = _field_roles(source, field, "role_expand")
@@ -337,11 +381,20 @@ def _role_expand_contract(
         roles = _field_roles(source, mapping.source_field, "role_expand")
         existing = fields.get(mapping.output_field, frozenset())
         fields[mapping.output_field] = frozenset({*existing, *roles})
-        field_proofs[mapping.output_field] = field_proofs.get(
-            mapping.output_field, ProofLineage()
-        ).merge(_field_proof(source, mapping.source_field, "role_expand"))
+        alternative_proofs.setdefault(mapping.output_field, []).append(
+            _field_proof(source, mapping.source_field, "role_expand")
+        )
         field_types[mapping.output_field] = source.field_types.get(
             mapping.source_field, ""
+        )
+    for output_field, proofs in alternative_proofs.items():
+        field_proofs[output_field] = ProofLineage(
+            value_refs=frozenset(
+                ref for proof in proofs for ref in proof.value_refs
+            ),
+            population_coverage=PopulationCoverage.guaranteed_by_every(
+                tuple(proof.population_coverage for proof in proofs)
+            ),
         )
     grain_keys: tuple[str, ...] = ()
     if source.grain_keys:
@@ -382,8 +435,19 @@ def _cross_join_contract(
     for field, roles in right.fields.items():
         existing = fields.get(field)
         fields[field] = roles if existing is None else frozenset({*existing, *roles})
-        field_proofs[field] = field_proofs.get(field, ProofLineage()).merge(
-            right.field_proofs.get(field, ProofLineage())
+        right_proof = right.field_proofs.get(field, ProofLineage())
+        if field not in field_proofs:
+            field_proofs[field] = right_proof
+            continue
+        left_proof = field_proofs[field]
+        field_proofs[field] = ProofLineage(
+            value_refs=frozenset({*left_proof.value_refs, *right_proof.value_refs}),
+            population_coverage=PopulationCoverage.guaranteed_by_every(
+                (
+                    left_proof.population_coverage,
+                    right_proof.population_coverage,
+                )
+            ),
         )
     return RelationContract(
         fields=fields,
@@ -391,7 +455,20 @@ def _cross_join_contract(
         field_proofs=field_proofs,
         field_types=_merge_contract_field_types(left, right),
         entity_keys=_combined_entity_keys(left, right),
-        population_proof=left.population_proof.merge(right.population_proof),
+        population_proof=ProofLineage(
+            value_refs=frozenset(
+                {
+                    *left.population_proof.value_refs,
+                    *right.population_proof.value_refs,
+                }
+            ),
+            population_coverage=PopulationCoverage.guaranteed_by_every(
+                (
+                    left.population_proof.population_coverage,
+                    right.population_proof.population_coverage,
+                )
+            ),
+        ),
     )
 
 
@@ -401,8 +478,27 @@ def _anti_join_contract(
 ) -> RelationContract:
     candidate = _contract(contracts, spec.candidate.relation_id)
     observed = _contract(contracts, spec.observed.relation_id)
-    observed_scope = observed.population_proof.population_scope_refs
-    dependency_proof = _join_dependency_proof(candidate, observed, spec.join_keys)
+    consumed_conditions = frozenset(
+        {
+            *candidate.population_proof.population_coverage.condition_tests,
+            *observed.population_proof.population_coverage.condition_tests,
+        }
+    )
+    output_coverage = PopulationCoverage(
+        row_tests=frozenset(
+            {
+                *candidate.population_proof.population_coverage.row_tests,
+                *consumed_conditions,
+            }
+        ),
+        condition_tests=consumed_conditions,
+    )
+    dependency_proof = _join_dependency_proof(
+        candidate,
+        observed,
+        spec.join_keys,
+        require_identity_authority=bool(consumed_conditions),
+    )
     fields: dict[str, frozenset[FieldBindingRole]] = {}
     field_proofs: dict[str, ProofLineage] = {}
     field_types: dict[str, str] = {}
@@ -411,7 +507,7 @@ def _anti_join_contract(
         fields[grain_key] = frozenset({FieldBindingRole.IDENTITY})
         field_proofs[grain_key] = (
             _field_proof(candidate, grain_key, "anti_join")
-            .with_population_scope(observed_scope)
+            .with_population_coverage(output_coverage)
             .merge(dependency_proof)
         )
         field_types[grain_key] = candidate.field_types.get(grain_key, "")
@@ -420,7 +516,7 @@ def _anti_join_contract(
         fields[output] = _field_roles(candidate, field.source, "anti_join")
         field_proofs[output] = (
             _field_proof(candidate, field.source, "anti_join")
-            .with_population_scope(observed_scope)
+            .with_population_coverage(output_coverage)
             .merge(dependency_proof)
         )
         field_types[output] = candidate.field_types.get(field.source, "")
@@ -436,9 +532,15 @@ def _anti_join_contract(
         field_proofs=field_proofs,
         field_types=field_types,
         entity_keys=_project_entity_keys(candidate, projections),
-        population_proof=candidate.population_proof.merge(
-            observed.population_proof,
-            dependency_proof,
+        population_proof=ProofLineage(
+            value_refs=frozenset(
+                {
+                    *candidate.population_proof.value_refs,
+                    *observed.population_proof.value_refs,
+                    *dependency_proof.value_refs,
+                }
+            ),
+            population_coverage=output_coverage,
         ),
     )
 
@@ -450,9 +552,22 @@ def _universal_condition_contract(
     candidate = _contract(contracts, spec.candidate_subject.relation_id)
     required_dimension = _contract(contracts, spec.required_dimension.relation_id)
     observation = _contract(contracts, spec.observation.relation_id)
-    condition_scope = required_dimension.population_proof.merge(
-        observation.population_proof
-    ).population_scope_refs
+    consumed_conditions = frozenset(
+        {
+            *candidate.population_proof.population_coverage.condition_tests,
+            *required_dimension.population_proof.population_coverage.condition_tests,
+            *observation.population_proof.population_coverage.condition_tests,
+        }
+    )
+    output_coverage = PopulationCoverage(
+        row_tests=frozenset(
+            {
+                *candidate.population_proof.population_coverage.row_tests,
+                *consumed_conditions,
+            }
+        ),
+        condition_tests=consumed_conditions,
+    )
     dependency_proof = _universal_dependency_proof(
         candidate,
         required_dimension,
@@ -467,8 +582,8 @@ def _universal_condition_contract(
         fields[grain_key] = frozenset({FieldBindingRole.IDENTITY})
         field_proofs[grain_key] = (
             _field_proof(candidate, grain_key, "universal_condition")
-            .with_population_scope(condition_scope)
             .merge(dependency_proof)
+            .with_population_coverage(output_coverage)
         )
         field_types[grain_key] = candidate.field_types.get(grain_key, "")
     for field in spec.output_fields:
@@ -476,8 +591,8 @@ def _universal_condition_contract(
         fields[output] = _field_roles(candidate, field.source, "universal_condition")
         field_proofs[output] = (
             _field_proof(candidate, field.source, "universal_condition")
-            .with_population_scope(condition_scope)
             .merge(dependency_proof)
+            .with_population_coverage(output_coverage)
         )
         field_types[output] = candidate.field_types.get(field.source, "")
     projections = {
@@ -493,10 +608,16 @@ def _universal_condition_contract(
         field_proofs=field_proofs,
         field_types=field_types,
         entity_keys=_project_entity_keys(candidate, projections),
-        population_proof=candidate.population_proof.merge(
-            required_dimension.population_proof,
-            observation.population_proof,
-            dependency_proof,
+        population_proof=ProofLineage(
+            value_refs=frozenset(
+                {
+                    *candidate.population_proof.value_refs,
+                    *required_dimension.population_proof.value_refs,
+                    *observation.population_proof.value_refs,
+                    *dependency_proof.value_refs,
+                }
+            ),
+            population_coverage=output_coverage,
         ),
     )
 
@@ -507,31 +628,25 @@ def _universal_dependency_proof(
     observation: RelationContract,
     spec: UniversalConditionSpec,
 ) -> ProofLineage:
-    proof = ProofLineage()
-    for key in spec.subject_keys:
-        if not declared_types_compatible(
-            candidate.field_types.get(key.left),
-            observation.field_types.get(key.right),
-        ):
-            raise VerificationError(
-                "universal subject keys have incompatible declared types"
-            )
-        proof = proof.merge(
-            _field_proof(candidate, key.left, "universal_condition"),
-            _field_proof(observation, key.right, "universal_condition"),
+    proof = _join_dependency_proof(
+        candidate,
+        observation,
+        spec.subject_keys,
+        require_identity_authority=bool(
+            candidate.population_proof.population_coverage.condition_tests
+            or observation.population_proof.population_coverage.condition_tests
+        ),
+    ).merge(
+        _join_dependency_proof(
+            required_dimension,
+            observation,
+            spec.dimension_keys,
+            require_identity_authority=bool(
+                required_dimension.population_proof.population_coverage.condition_tests
+                or observation.population_proof.population_coverage.condition_tests
+            ),
         )
-    for key in spec.dimension_keys:
-        if not declared_types_compatible(
-            required_dimension.field_types.get(key.left),
-            observation.field_types.get(key.right),
-        ):
-            raise VerificationError(
-                "universal dimension keys have incompatible declared types"
-            )
-        proof = proof.merge(
-            _field_proof(required_dimension, key.left, "universal_condition"),
-            _field_proof(observation, key.right, "universal_condition"),
-        )
+    )
     return proof.merge(_predicate_dependency_proof(observation, spec.predicate))
 
 
@@ -548,7 +663,7 @@ def _aggregate_contract(
         fields[field] = _field_roles(source, field, "aggregate")
         field_proofs[field] = _field_proof(
             source, field, "aggregate"
-        ).with_population_scope(source.population_proof.population_scope_refs)
+        ).with_population_coverage(source.population_proof.population_coverage)
         field_types[field] = source.field_types.get(field, "")
     for aggregation in spec.aggregations:
         fields[aggregation.output_field] = frozenset(
@@ -559,7 +674,7 @@ def _aggregate_contract(
             if aggregation.function == AggregationFunction.COUNT
             else _field_proof(source, aggregation.input_field, "aggregate")
             .merge(group_proof)
-            .with_population_scope(source.population_proof.population_scope_refs)
+            .with_population_coverage(source.population_proof.population_coverage)
         )
         field_types[aggregation.output_field] = (
             "integer"

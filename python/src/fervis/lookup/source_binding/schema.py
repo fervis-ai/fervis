@@ -21,6 +21,12 @@ from fervis.lookup.source_binding.normal_instance_roles import (
 from fervis.lookup.source_binding.metric_fit import (
     METRIC_FIT_DECISIONS,
 )
+from fervis.lookup.source_binding.input_applications import (
+    empty_resolved_input_applications_schema,
+)
+from fervis.lookup.source_binding.population_effects import (
+    population_test_results_schema,
+)
 from fervis.lookup.source_binding import provider_contract as provider_output
 from fervis.lookup.source_binding.plan_targets import (
     SourceBindingPlanFamily,
@@ -42,6 +48,8 @@ class _SourceBindingSchemaScope:
     required_catalog_input_ids: tuple[str, ...]
     required_catalog_choice_input_ids: tuple[str, ...]
     target_param_decision_ids_by_param: dict[str, dict[str, tuple[str, ...]]]
+    target_required_param_decision_ids: dict[str, tuple[str, ...]]
+    target_resolved_input_application_schemas: dict[str, dict[str, object]]
     target_finite_choice_values: dict[str, dict[str, tuple[str, ...]]]
     target_row_predicate_values: dict[str, dict[str, tuple[str, ...]]]
     target_finite_choice_test_ids: dict[str, dict[str, tuple[str, ...]]]
@@ -55,6 +63,7 @@ class _SourceBindingSchemaScope:
     ]
     target_required_fulfillment_answer_output_ids: dict[str, tuple[str, ...]]
     target_population_binding_ids: dict[str, tuple[str, ...]]
+    target_population_binding_test_ids: dict[str, tuple[str, ...]]
     plan_families: tuple[SourceBindingPlanFamily, ...]
 
     @property
@@ -94,6 +103,10 @@ def build_source_binding_schema(
     required_catalog_input_ids: tuple[str, ...] = (),
     required_catalog_choice_input_ids: tuple[str, ...] = (),
     target_param_decision_ids_by_param: dict[str, dict[str, tuple[str, ...]]],
+    target_required_param_decision_ids: dict[str, tuple[str, ...]],
+    target_resolved_input_application_schemas: dict[
+        str, dict[str, object]
+    ] | None = None,
     target_finite_choice_values: dict[str, dict[str, tuple[str, ...]]],
     target_row_predicate_values: dict[str, dict[str, tuple[str, ...]]],
     target_finite_choice_test_ids: dict[str, dict[str, tuple[str, ...]]],
@@ -110,12 +123,17 @@ def build_source_binding_schema(
     ],
     target_required_fulfillment_answer_output_ids: dict[str, tuple[str, ...]],
     target_population_binding_ids: dict[str, tuple[str, ...]] | None = None,
+    target_population_binding_test_ids: dict[str, tuple[str, ...]] | None = None,
     plan_families: tuple[SourceBindingPlanFamily, ...],
 ) -> dict[str, object]:
     scope = _SourceBindingSchemaScope(
         required_catalog_input_ids=required_catalog_input_ids,
         required_catalog_choice_input_ids=required_catalog_choice_input_ids,
         target_param_decision_ids_by_param=target_param_decision_ids_by_param,
+        target_required_param_decision_ids=target_required_param_decision_ids,
+        target_resolved_input_application_schemas=(
+            target_resolved_input_application_schemas or {}
+        ),
         target_finite_choice_values=target_finite_choice_values,
         target_row_predicate_values=target_row_predicate_values,
         target_finite_choice_test_ids=target_finite_choice_test_ids,
@@ -133,6 +151,9 @@ def build_source_binding_schema(
             target_required_fulfillment_answer_output_ids
         ),
         target_population_binding_ids=target_population_binding_ids or {},
+        target_population_binding_test_ids=(
+            target_population_binding_test_ids or {}
+        ),
         plan_families=plan_families,
     )
     outcome_schema = _source_binding_outcome_schema(scope)
@@ -246,7 +267,8 @@ def _source_binding_item_schema(
         {
             "binding_target_id": {"enum": [target_id]},
             "answer_population": _answer_population_schema(
-                scope.target_population_binding_ids.get(target_id, ())
+                scope.target_population_binding_ids.get(target_id, ()),
+                test_ids=scope.target_population_binding_test_ids.get(target_id, ()),
             ),
             "fulfillment_decisions": _fulfillment_decisions_schema(
                 scope.target_fulfillment_support_set_ids_by_answer_output.get(
@@ -261,7 +283,15 @@ def _source_binding_item_schema(
             ),
             "param_decisions": _param_decisions_schema(
                 scope.target_param_decision_ids_by_param.get(target_id, {}),
-                required_param_ids=(),
+                required_param_ids=scope.target_required_param_decision_ids.get(
+                    target_id, ()
+                ),
+            ),
+            "resolved_input_applications": (
+                scope.target_resolved_input_application_schemas.get(
+                    target_id,
+                    empty_resolved_input_applications_schema(),
+                )
             ),
             "row_predicate_reviews": _row_predicate_reviews_schema(
                 scope.target_row_predicate_values.get(target_id, {}),
@@ -482,6 +512,8 @@ def _normal_instance_role_schema() -> dict[str, object]:
 
 def _answer_population_schema(
     population_binding_ids: tuple[str, ...],
+    *,
+    test_ids: tuple[str, ...],
 ) -> dict[str, object]:
     population_binding_id_schema: dict[str, object] = _handle_schema()
     if population_binding_ids:
@@ -494,6 +526,7 @@ def _answer_population_schema(
             "population_binding_id": population_binding_id_schema,
             "intent_text": _handle_schema(),
             "match_basis_explanation": _handle_schema(),
+            "population_test_results": population_test_results_schema(test_ids),
         }
     )
 

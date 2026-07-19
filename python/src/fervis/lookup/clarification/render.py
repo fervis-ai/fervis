@@ -42,8 +42,8 @@ def _target_reference_question(clarification: Clarification) -> str:
     if clarification.reason == ClarificationReason.UNSUPPORTED_REFERENCE:
         if source_text:
             return (
-                f'I found "{source_text}", but it is not supported for this question. '
-                f"Which supported {label} should I use?"
+                f'I could not resolve the {label} "{source_text}". '
+                f"Which {label} should I use?"
             )
-        return f"Which supported {label} should I use?"
+        return f"Which {label} should I use?"
     return f"Which {label} should I use?"

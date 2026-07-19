@@ -30,6 +30,10 @@ def source_binding_tool_spec() -> ToolSpec:
                 },
                 "target.source_2": {},
             },
+            target_required_param_decision_ids={
+                "target.source_1": ("start_date",),
+                "target.source_2": (),
+            },
             target_finite_choice_values={
                 "target.source_1": {"status": ("DRAFT", "COMPLETED")},
                 "target.source_2": {},

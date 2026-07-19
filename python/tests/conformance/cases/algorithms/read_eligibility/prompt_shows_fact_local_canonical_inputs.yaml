@@ -1,0 +1,66 @@
+id: prompt_shows_fact_local_canonical_inputs
+description: Read eligibility renders fact-local canonical options for interpretation after read assessment.
+kind: algorithm
+algorithm: read_eligibility.prompt
+input:
+  request_fixture: stores_in_grounded_area
+  contains:
+    - "<read_eligibility_context>"
+    - "<known_inputs>"
+    - "id=\"london_qi_1\""
+    - "<source_text>London</source_text>"
+    - "<interpretation_question>"
+    - "<canonical_options>"
+    - "id=\"london_qi_1.area.primary_key.area_id\""
+    - "result=\"area:primary_key\""
+    - "identifier_kind=\"DESCRIPTIVE\""
+    - "<resolver option_id=\"bind_qi1_rs_7de03e00183c6709_area_primary_key\">"
+    - "<api_read read=\"list_area_list\" endpoint=\"list_area_list\" resources=\"area\">"
+    - "<param name=\"kind\" source=\"query\" type=\"choice\""
+    - "<choice value=\"CITY\" />"
+    - "<field name=\"kind\" path=\"data.kind\" type=\"choice\">"
+    - "<parameter param_ref=\"list_area_list.query.name\" source=\"query\" value=\"London\" />"
+    - "<field path=\"data.name\" />"
+    - "<canonical_result entity_kind=\"area\" key_id=\"primary_key\">"
+    - "Assess every candidate read before selecting a canonical option."
+    - "After assessing every candidate read, interpret each named input"
+    - "assess every shown canonical meaning exactly once"
+    - "Then select exactly one shown canonical_option_id"
+    - "Before resolver_option_id, assess every shown resolver route"
+    - "A returned_identity_verification_field verifies only the resource retrieved by that request."
+  excludes:
+    - "<applicable_known_inputs>"
+    - "<input_binding_options>"
+    - "<request_values>"
+    - "<response_match_alternatives>"
+expect:
+  result_contains:
+    contains:
+      "<read_eligibility_context>": true
+      "<known_inputs>": true
+      "id=\"london_qi_1\"": true
+      "<source_text>London</source_text>": true
+      "<interpretation_question>": true
+      "<canonical_options>": true
+      "id=\"london_qi_1.area.primary_key.area_id\"": true
+      "result=\"area:primary_key\"": true
+      "identifier_kind=\"DESCRIPTIVE\"": true
+      "<resolver option_id=\"bind_qi1_rs_7de03e00183c6709_area_primary_key\">": true
+      "<api_read read=\"list_area_list\" endpoint=\"list_area_list\" resources=\"area\">": true
+      "<param name=\"kind\" source=\"query\" type=\"choice\"": true
+      "<choice value=\"CITY\" />": true
+      "<field name=\"kind\" path=\"data.kind\" type=\"choice\">": true
+      "<parameter param_ref=\"list_area_list.query.name\" source=\"query\" value=\"London\" />": true
+      "<field path=\"data.name\" />": true
+      "<canonical_result entity_kind=\"area\" key_id=\"primary_key\">": true
+      "Assess every candidate read before selecting a canonical option.": true
+      "After assessing every candidate read, interpret each named input": true
+      "assess every shown canonical meaning exactly once": true
+      "Then select exactly one shown canonical_option_id": true
+      "Before resolver_option_id, assess every shown resolver route": true
+      "A returned_identity_verification_field verifies only the resource retrieved by that request.": true
+    excludes:
+      "<applicable_known_inputs>": true
+      "<input_binding_options>": true
+      "<request_values>": true
+      "<response_match_alternatives>": true

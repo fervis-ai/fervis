@@ -5,8 +5,6 @@ import hashlib
 from ._shared import (
     Any,
     FactValue,
-    IdentitySetValuePayload,
-    IdentityValuePayload,
     LiteralType,
     LiteralValuePayload,
     TimeValuePayload,
@@ -14,7 +12,10 @@ from ._shared import (
     canonical_param_value,
     re,
 )
-from fervis.lookup.source_binding.candidates.contracts import EntityTarget, parse_entity_target
+from fervis.lookup.source_binding.candidates.contracts import parse_entity_target
+from fervis.lookup.source_binding.param_values import (
+    identity_value_matches_entity_target,
+)
 
 
 def _candidate_with_param_decision_options(
@@ -166,6 +167,11 @@ def _param_has_omit_decision(param: dict[str, Any]) -> bool:
 
 
 def _param_has_population_contract(param: dict[str, Any]) -> bool:
+    if any(
+        isinstance(item, dict) and item.get("source") == "available_value"
+        for item in param.get("binding_values") or ()
+    ):
+        return False
     choices = param.get("choices")
     return bool(
         param.get("required") is not True
@@ -463,9 +469,15 @@ def _param_binding_values(
                 "value": value.id,
                 "label": value.label or value.id,
                 "source": "available_value",
+                "value_component": "canonical_key",
             }
             for value in available_values
-            if _value_matches_entity_target(value, target=target)
+            if identity_value_matches_entity_target(
+                value,
+                entity_kind=target.entity_kind,
+                key_id=target.key_id,
+                component_id=target.component_id,
+            )
         ]
     if param_type in {"date", "datetime"}:
         return [
@@ -498,9 +510,11 @@ def _time_binding_values(
         "label": value.label or value.id,
         "source": "available_value",
     }
-    allowed_components = ["start", "end"]
-    if payload.resolved_start and payload.resolved_start == payload.resolved_end:
-        allowed_components.append("instant")
+    allowed_components = (
+        ["instant"]
+        if payload.resolved_start and payload.resolved_start == payload.resolved_end
+        else ["start", "end"]
+    )
     output = [
         {
             **base,
@@ -510,35 +524,6 @@ def _time_binding_values(
         for component in allowed_components
     ]
     return tuple(output)
-
-
-def _value_matches_entity_target(
-    value: FactValue,
-    *,
-    target: EntityTarget,
-) -> bool:
-    if value.kind == ValueKind.IDENTITY and isinstance(
-        value.payload, IdentityValuePayload
-    ):
-        return (
-            value.payload.entity_kind == target.entity_kind
-            and value.payload.key_id == target.key_id
-            and target.component_id
-            in {component.component_id for component in value.payload.key.components}
-        )
-    if value.kind == ValueKind.IDENTITY_SET and isinstance(
-        value.payload, IdentitySetValuePayload
-    ):
-        return (
-            value.payload.entity_kind == target.entity_kind
-            and value.payload.key_id == target.key_id
-            and all(
-                target.component_id
-                in {component.component_id for component in key.components}
-                for key in value.payload.keys
-            )
-        )
-    return False
 
 
 def _value_matches_literal_param(value: FactValue, *, param_type: str) -> bool:

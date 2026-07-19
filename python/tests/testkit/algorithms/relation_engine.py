@@ -190,12 +190,12 @@ def _relation(payload: dict[str, Any]) -> RelationRows:
 def _operation(payload: dict[str, Any]) -> ExecutableOperation:
     return ExecutableOperation(
         id=str(payload["id"]),
-        spec=_operation_spec(payload["spec"]),
+        spec=operation_spec_from_payload(payload["spec"]),
         output_relation=str(payload["output_relation"]),
     )
 
 
-def _operation_spec(payload: dict[str, Any]) -> Any:
+def operation_spec_from_payload(payload: dict[str, Any]) -> Any:
     kind = str(payload["kind"])
     if kind == "filter":
         return FilterSpec(
@@ -354,5 +354,6 @@ def _predicate(payload: dict[str, Any]) -> Predicate:
     return Predicate(
         left=str(payload["left"]),
         operator=PredicateOperator(str(payload["operator"])),
-        right_scalar=str(payload["right_scalar"]),
+        right=str(payload.get("right") or ""),
+        right_scalar=str(payload.get("right_scalar") or ""),
     )

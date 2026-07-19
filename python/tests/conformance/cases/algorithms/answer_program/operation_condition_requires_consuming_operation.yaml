@@ -1,0 +1,23 @@
+id: operation_condition_requires_consuming_operation
+description: An operation-condition claim cannot directly satisfy an ordinary projected result.
+kind: algorithm
+algorithm: answer_program.population_coverage
+input:
+  question_contract: {$ref: ../../../fixtures/population_constraint_coverage.yaml#/question_contracts/stores_in_nairobi}
+  inputs: [{id: nairobi, value: Nairobi, entity_kind: area, key_component_id: area_id, canonical_value: area-nairobi}]
+  relations:
+    - id: stores
+      fields: [store_id, area_id]
+      identity_fields: [store_id]
+      applied_inputs: [{input_id: nairobi, field_id: area_id}]
+      coverage_claims: [{membership_test_id: in_nairobi, role: operation_condition, proof_ref: returned_filter:stores.area_id}]
+  operations:
+    - id: project_store
+      output_relation: projected
+      spec:
+        kind: project
+        input_relation: stores
+        fields: [{source: store_id, output: store_id}]
+  result: {relation_id: projected, field_id: store_id}
+expect:
+  result_contains: {status: rejected}

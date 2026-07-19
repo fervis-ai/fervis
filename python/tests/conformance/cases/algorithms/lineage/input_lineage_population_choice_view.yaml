@@ -92,11 +92,12 @@ input:
         compile_step_id: step_execute
         execute_step_id: step_execute
         payload_schema: fervis.execution_proof_graph
-        payload_schema_rev: 1
+        payload_schema_rev: 2
         payload_json:
           nodes:
             - id: population_choice:source_1:row_predicate:status
               kind: population_choice
+              population_coverage: {row_tests: [], condition_tests: []}
               proof_refs:
                 - row_predicate:status
               label: "Included status values [ALLOCATED, IN_TRANSIT, RECEIVED]. Excluded: CANCELLED, SUPERSEDED"
@@ -105,13 +106,16 @@ input:
                 excluded_values: [CANCELLED, SUPERSEDED]
             - id: relation:source_1
               kind: relation
+              population_coverage: {row_tests: [], condition_tests: []}
               proof_refs:
                 - source_read:source_read_1
             - id: operation:op_1
               kind: operation
+              population_coverage: {row_tests: [], condition_tests: []}
               proof_refs: []
             - id: answer_output:fact_1:count
               kind: answer_output
+              population_coverage: {row_tests: [], condition_tests: []}
               proof_refs: []
           edges:
             - source: population_choice:source_1:row_predicate:status

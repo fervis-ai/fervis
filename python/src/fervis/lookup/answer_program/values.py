@@ -13,6 +13,8 @@ from fervis.lookup.answer_program.errors import AnswerProgramContractError
 from fervis.lookup.canonical_data import (
     EntityKeyComponentValue,
     EntityKeyValue,
+    RuntimeScalar,
+    RuntimeValue,
     canonical_runtime_json,
 )
 
@@ -83,10 +85,18 @@ class IdentityValuePayload:
     display_value: str = ""
     matched_field_ref: str = ""
     matched_field_path: str = ""
+    matched_value: RuntimeScalar = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.key, EntityKeyValue):
             raise TypeError("identity value requires a complete entity key")
+        match_parts_present = (
+            bool(self.matched_field_ref),
+            bool(self.matched_field_path),
+            self.matched_value is not None,
+        )
+        if any(match_parts_present) and not all(match_parts_present):
+            raise ValueError("identity match evidence must be complete")
 
     @property
     def entity_kind(self) -> str:
@@ -182,7 +192,9 @@ class IdentitySetValuePayload:
         if component is not ValueComponent.VALUE:
             raise ValueError("identity set has only a value component")
         if any(len(key.components) != 1 for key in self.keys):
-            raise ValueError("composite identity set requires an explicit key projection")
+            raise ValueError(
+                "composite identity set requires an explicit key projection"
+            )
         return tuple(str(key.components[0].value) for key in self.keys)
 
     @property
@@ -477,6 +489,15 @@ class FactValue:
     def kind(self) -> ValueKind:
         return self.payload.kind
 
+    def identity_key_component(self, component_id: str) -> RuntimeValue:
+        """Project one key component from a singular or set identity."""
+
+        if isinstance(self.payload, IdentityValuePayload):
+            return self.payload.key.component_value(component_id)
+        if isinstance(self.payload, IdentitySetValuePayload):
+            return tuple(key.component_value(component_id) for key in self.payload.keys)
+        raise ValueError("value does not carry an entity-key component")
+
     @classmethod
     def identity(
         cls,
@@ -486,6 +507,7 @@ class FactValue:
         display_value: str = "",
         matched_field_ref: str = "",
         matched_field_path: str = "",
+        matched_value: RuntimeScalar = None,
         proof_refs: tuple[str, ...] = (),
         source_refs: tuple[str, ...] = (),
         dependencies: tuple[ValueDependency, ...] = (),
@@ -501,6 +523,7 @@ class FactValue:
                 display_value=display_value,
                 matched_field_ref=matched_field_ref,
                 matched_field_path=matched_field_path,
+                matched_value=matched_value,
             ),
             proof_refs=tuple(proof_refs),
             source_refs=tuple(source_refs),

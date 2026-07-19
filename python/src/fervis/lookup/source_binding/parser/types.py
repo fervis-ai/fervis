@@ -9,6 +9,7 @@ from fervis.lookup.source_binding.compiler_ir import (
     DraftEndpointParamBinding,
     DraftRelationSourcePopulationChoice,
 )
+from fervis.lookup.answer_program.relations import PopulationCoverageClaim
 
 
 __all__ = [
@@ -28,7 +29,7 @@ class ParamDecisionParse:
 @dataclass(frozen=True)
 class RowPredicateParse:
     population_choices: tuple[DraftRelationSourcePopulationChoice, ...] = ()
-    discharged_membership_test_ids: tuple[str, ...] = ()
+    population_coverage_claims: tuple[PopulationCoverageClaim, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -49,4 +50,4 @@ class NormalizedParamDecision:
 class DerivedFiniteChoiceParamDecisions:
     param_decisions: dict[str, NormalizedParamDecision]
     population_choices: tuple[DraftRelationSourcePopulationChoice, ...]
-    discharged_membership_test_ids: tuple[str, ...] = ()
+    population_coverage_claims: tuple[PopulationCoverageClaim, ...] = ()

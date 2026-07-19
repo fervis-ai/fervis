@@ -12,8 +12,8 @@ from typing import Any
 
 from fervis.lookup.relation_catalog import RelationCatalog, RowCardinality
 from fervis.lookup.fact_planning.available_relations import (
-    available_relation_catalog_payload,
     operation_input_values_payload,
+    selected_relation_catalog_payload,
 )
 from fervis.lookup.source_binding.compiler_ir import (
     DraftEndpointParamBinding,

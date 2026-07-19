@@ -3,38 +3,87 @@
 from dataclasses import field
 
 from ._shared import FieldBindingRole, ProjectField, VerificationError, dataclass
+from fervis.lookup.question_contract import MembershipTestRef
+
+
+@dataclass(frozen=True)
+class PopulationCoverage:
+    row_tests: frozenset[MembershipTestRef] = frozenset()
+    condition_tests: frozenset[MembershipTestRef] = frozenset()
+
+    @property
+    def all_tests(self) -> frozenset[MembershipTestRef]:
+        return frozenset({*self.row_tests, *self.condition_tests})
+
+    def additive(self, *others: "PopulationCoverage") -> "PopulationCoverage":
+        row_tests = set(self.row_tests)
+        condition_tests = set(self.condition_tests)
+        for other in others:
+            row_tests.update(other.row_tests)
+            condition_tests.update(other.condition_tests)
+        return PopulationCoverage(
+            row_tests=frozenset(row_tests),
+            condition_tests=frozenset(condition_tests),
+        )
+
+    @classmethod
+    def guaranteed_by_every(
+        cls, coverages: tuple["PopulationCoverage", ...]
+    ) -> "PopulationCoverage":
+        if not coverages:
+            return cls()
+        row_tests = set(coverages[0].row_tests)
+        condition_tests = set(coverages[0].condition_tests)
+        for coverage in coverages[1:]:
+            row_tests.intersection_update(coverage.row_tests)
+            condition_tests.intersection_update(coverage.condition_tests)
+        return cls(
+            row_tests=frozenset(row_tests),
+            condition_tests=frozenset(condition_tests),
+        )
+
+    @classmethod
+    def common_population_contributors(
+        cls, coverages: tuple["PopulationCoverage", ...]
+    ) -> "PopulationCoverage":
+        population_coverages = tuple(
+            coverage for coverage in coverages if coverage.all_tests
+        )
+        return cls.guaranteed_by_every(population_coverages)
 
 
 @dataclass(frozen=True)
 class ProofLineage:
     value_refs: frozenset[str] = frozenset()
-    population_scope_refs: frozenset[str] = frozenset()
+    population_coverage: PopulationCoverage = PopulationCoverage()
 
     @classmethod
     def value(cls, refs: frozenset[str]) -> "ProofLineage":
         return cls(value_refs=refs)
 
-    def with_population_scope(self, refs: frozenset[str]) -> "ProofLineage":
-        if not refs:
-            return self
+    def with_population_coverage(
+        self, coverage: PopulationCoverage
+    ) -> "ProofLineage":
         return ProofLineage(
             value_refs=self.value_refs,
-            population_scope_refs=frozenset({*self.population_scope_refs, *refs}),
+            population_coverage=coverage,
         )
 
     def merge(self, *others: "ProofLineage") -> "ProofLineage":
         value_refs = set(self.value_refs)
-        population_scope_refs = set(self.population_scope_refs)
+        coverages = [self.population_coverage]
         for other in others:
             value_refs.update(other.value_refs)
-            population_scope_refs.update(other.population_scope_refs)
+            coverages.append(other.population_coverage)
         return ProofLineage(
             value_refs=frozenset(value_refs),
-            population_scope_refs=frozenset(population_scope_refs),
+            population_coverage=PopulationCoverage.common_population_contributors(
+                tuple(coverages)
+            ),
         )
 
     def fulfillment_refs(self) -> frozenset[str]:
-        return frozenset({*self.value_refs, *self.population_scope_refs})
+        return self.value_refs
 
 
 @dataclass(frozen=True)
@@ -58,6 +107,34 @@ class RelationContract:
     field_types: dict[str, str] = field(default_factory=dict)
     entity_keys: tuple[RelationEntityKey, ...] = ()
     population_proof: ProofLineage = ProofLineage()
+
+
+@dataclass(frozen=True)
+class ScalarContract:
+    proof: ProofLineage = ProofLineage()
+    population_derived: bool = False
+
+    def combine(self, *others: "ScalarContract") -> "ScalarContract":
+        operands = (self, *others)
+        population_operands = tuple(
+            operand for operand in operands if operand.population_derived
+        )
+        return ScalarContract(
+            proof=ProofLineage(
+                value_refs=frozenset(
+                    ref
+                    for operand in operands
+                    for ref in operand.proof.value_refs
+                ),
+                population_coverage=PopulationCoverage.guaranteed_by_every(
+                    tuple(
+                        operand.proof.population_coverage
+                        for operand in population_operands
+                    )
+                ),
+            ),
+            population_derived=bool(population_operands),
+        )
 
 
 def _copy_contract(
@@ -176,12 +253,16 @@ def _union_field_proof(
     relation_ids: tuple[str, ...],
     field: str,
 ) -> ProofLineage:
-    proof = ProofLineage()
-    for relation_id in relation_ids:
-        proof = proof.merge(
-            _field_proof(_contract(contracts, relation_id), field, "union")
-        )
-    return proof
+    proofs = tuple(
+        _field_proof(_contract(contracts, relation_id), field, "union")
+        for relation_id in relation_ids
+    )
+    return ProofLineage(
+        value_refs=frozenset(ref for proof in proofs for ref in proof.value_refs),
+        population_coverage=PopulationCoverage.guaranteed_by_every(
+            tuple(proof.population_coverage for proof in proofs)
+        ),
+    )
 
 
 def _join_contract_grain(

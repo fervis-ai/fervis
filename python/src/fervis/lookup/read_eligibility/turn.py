@@ -74,7 +74,13 @@ def generate_read_eligibility(
     artifact = replace(
         output.artifact,
         derived_payload=lineage_explanation_metadata(
-            ("read_candidate_reviews", "*", "retention_basis"),
+            (
+                "requested_fact_assessments",
+                "*",
+                "read_candidate_reviews",
+                "*",
+                "retention_basis",
+            ),
         ),
     )
     try:

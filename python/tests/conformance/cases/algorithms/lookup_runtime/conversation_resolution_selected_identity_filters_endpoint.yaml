@@ -101,6 +101,13 @@ input:
         type: number
       candidate_keys:
       - {id: primary_key, entity_kind: staff, primary: true, components: [{id: staff_id, field_ref: field.staff_id}]}
+  read_eligibility:
+  - requested_fact_id: fact_1
+    read_id: staff_sales_read
+    measured_value_fields: [amount]
+    known_input_bindings:
+    - known_input_id: alice_smith_qi_1
+      resolver_result: staff:primary_key
   fact_plan:
     outcome:
       kind: fact_plan
@@ -117,6 +124,19 @@ input:
           function: sum
           field_id: amount
           label: sales_amount
+  source_binding:
+  - requested_fact_id: fact_1
+    resolved_input_applications:
+    - value_id: grounded_input_1
+      value_component: canonical_key
+      target_kind: request_parameter
+      target_id: staff_id
+      match_basis_explanation: Alice Smith restricts staff_id.
+    - value_id: grounded_input_2
+      value_component: instant
+      target_kind: request_parameter
+      target_id: business_date
+      match_basis_explanation: Yesterday restricts business_date.
   responses:
     staff_sales_read:
       data:

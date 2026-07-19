@@ -58,6 +58,10 @@ class CandidateParameter:
     normal_instance_profiles: tuple[CandidateNormalInstanceProfile, ...] = ()
     owned_membership_test_ids: tuple[str, ...] = ()
 
+    @property
+    def requires_explicit_decision(self) -> bool:
+        return self.required or bool(self.choices)
+
 
 @dataclass(frozen=True)
 class CandidatePopulationBinding:

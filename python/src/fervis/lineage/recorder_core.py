@@ -587,12 +587,15 @@ def _require_model_turn_step(step: LineageRow) -> None:
 
 
 def _require_source_read_step(*, step_key: str, kind: str, label: str) -> None:
-    if kind == RunStepKind.MODEL_TURN.value and step_key == RunStepKey.GROUNDING.value:
+    if kind == RunStepKind.MODEL_TURN.value and step_key in {
+        RunStepKey.GROUNDING.value,
+        RunStepKey.READ_ELIGIBILITY.value,
+    }:
         return
     if kind == RunStepKind.DETERMINISTIC.value and step_key == RunStepKey.EXECUTE.value:
         return
     raise LineageRecorderConflict(
-        f"{label} cannot own source reads; expected grounding or execute"
+        f"{label} cannot own source reads; expected grounding, read eligibility, or execute"
     )
 
 

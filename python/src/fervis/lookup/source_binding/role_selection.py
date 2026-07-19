@@ -15,7 +15,6 @@ from fervis.lookup.plan_selection import (
 )
 from fervis.lookup.question_contract import RequestedFact
 from fervis.lookup.source_binding.model import (
-    AnswerPopulation,
     BoundSource,
     SourceBindingPlan,
 )
@@ -97,69 +96,6 @@ class SourceBindingRoleSelection:
             )
         )
         return tuple(self.target_index.require(target_id) for target_id in target_ids)
-
-
-def plan_selection_uses_only_values(plan_selection: PlanSelectionSet) -> bool:
-    return all(
-        member.value_id
-        and not member.read_id
-        and not member.memory_relation_id
-        and not member.source_relation_id
-        for plan in plan_selection.plan_selections
-        for member in plan.source_members
-    )
-
-
-def value_only_source_binding_plan(
-    plan_selection: PlanSelectionSet,
-    *,
-    requested_facts: tuple[RequestedFact, ...],
-) -> SourceBindingPlan | None:
-    target_index = source_binding_target_index_for_plan_selection(
-        plan_selection,
-        requested_facts=requested_facts,
-    )
-    bound_sources: list[BoundSource] = []
-    selected_plans: list[SelectedSourceStrategy] = []
-    for requested_fact_id in _requested_fact_ids(plan_selection):
-        fact_plans = tuple(
-            plan
-            for plan in plan_selection.plan_selections
-            if plan.requested_fact_id == requested_fact_id
-        )
-        selected_plan = _single_compatible_plan(fact_plans)
-        if selected_plan is None:
-            return None
-        selected_plans.append(selected_plan)
-    for plan in selected_plans:
-        for member in plan.source_members:
-            for target in _targets_for_plan_member(
-                target_index,
-                plan_selection_id=plan.plan_selection_id,
-                source_candidate_id=member.source_candidate_id,
-            ):
-                bound_sources.append(
-                    BoundSource(
-                        id=f"sb_{len(bound_sources) + 1}",
-                        requested_fact_id=plan.requested_fact_id,
-                        binding_target_id=target.binding_target_id,
-                        requirement_id=target.requirement_id,
-                        answer_population=AnswerPopulation(
-                            population_binding_id=(
-                                f"pop.{member.source_candidate_id}.value"
-                            ),
-                            intent_text="selected known value",
-                            match_basis_explanation=(
-                                "The selected source strategy uses an already-known "
-                                "value as an operation operand."
-                            ),
-                        ),
-                        value_id=member.value_id,
-                        source_candidate_id=member.source_candidate_id,
-                        evidence_items=(),
-                    )
-                )
-    return SourceBindingPlan(bound_sources=tuple(bound_sources))
 
 
 def bound_plan_selection_for_source_binding(

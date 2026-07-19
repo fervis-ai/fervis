@@ -229,24 +229,26 @@ def _query_enrichment_semantic_items(
 
 
 def _grounding_semantic_items(payload: dict[str, Any]) -> tuple[StepSemanticItem, ...]:
-    bindings = _dict_or_empty(payload.get("known_input_bindings"))
+    reviews = _dict_or_empty(payload.get("known_input_binding_reviews"))
     items: list[StepSemanticItem] = []
-    for input_id, raw_binding in bindings.items():
-        binding = _dict_or_empty(raw_binding)
-        basis = _text(binding.get("selection_basis"))
-        if not basis:
-            continue
-        items.append(
-            StepSemanticItem(
-                kind="resolver_candidate",
-                payload={
-                    "input_id": str(input_id),
-                    "resolver_read_id": "",
-                    "resolver_label": "",
-                    "basis": basis,
-                },
+    for input_id, raw_review in reviews.items():
+        review = _dict_or_empty(raw_review)
+        options = _dict_or_empty(review.get("option_reviews"))
+        for option_id, raw_option in options.items():
+            option = _dict_or_empty(raw_option)
+            if _text(option.get("decision")) != "CAN_RESOLVE_LOOKUP_TEXT":
+                continue
+            items.append(
+                StepSemanticItem(
+                    kind="resolver_candidate",
+                    payload={
+                        "input_id": str(input_id),
+                        "resolver_read_id": "",
+                        "resolver_label": str(option_id),
+                        "basis": _text(option.get("because")),
+                    },
+                )
             )
-        )
     return tuple(items)
 
 
@@ -416,11 +418,17 @@ def _read_eligibility_step_summary(payload: dict[str, Any]) -> dict[str, object]
 
 
 def _read_eligibility_reviews(payload: dict[str, Any]) -> tuple[dict[str, Any], ...]:
-    if isinstance(payload.get("read_candidate_reviews"), list):
-        return _dicts(payload.get("read_candidate_reviews"))
     reviews: list[dict[str, Any]] = []
-    for assessment in _dicts(payload.get("requested_fact_assessments")):
-        reviews.extend(_dicts(assessment.get("read_candidate_reviews")))
+    assessments = _dict_or_empty(payload.get("requested_fact_assessments"))
+    for assessment in assessments.values():
+        if not isinstance(assessment, dict):
+            continue
+        fact_reviews = _dict_or_empty(assessment.get("read_candidate_reviews"))
+        reviews.extend(
+            {"source_candidate_id": source_candidate_id, **review}
+            for source_candidate_id, review in fact_reviews.items()
+            if isinstance(review, dict)
+        )
     return tuple(reviews)
 
 

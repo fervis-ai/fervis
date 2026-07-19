@@ -25,9 +25,11 @@ input:
         read_id: records
         param_bindings:
           - param_id: start_date
-            value: "2026-05-01"
+            value_id: this_month
+            value_component: start
           - param_id: end_date
-            value: "2026-05-10"
+            value_id: this_month
+            value_component: end
   values:
     - id: this_month
       kind: time
@@ -35,17 +37,6 @@ input:
       resolved_start: "2026-05-01"
       resolved_end: "2026-05-10"
       granularity: day
-  grounded_input_uses:
-    - id: grounded_use_this_month_start_date_start
-      value_id: this_month
-      row_source: {read_id: records, row_path_id: root}
-      param_id: start_date
-      value_component: start
-    - id: grounded_use_this_month_end_date_end
-      value_id: this_month
-      row_source: {read_id: records, row_path_id: root}
-      param_id: end_date
-      value_component: end
 expect:
   result_contains:
     endpoint_args:

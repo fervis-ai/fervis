@@ -5,6 +5,23 @@ from __future__ import annotations
 from .model import RowSource, RowSourceKind
 
 
+def endpoint_parameter_source(sources: tuple[RowSource, ...]) -> RowSource:
+    """Return the canonical row-source owner for one endpoint's parameters."""
+
+    if not sources:
+        raise ValueError("endpoint parameter source requires a row source")
+    read_ids = {source.read_id for source in sources}
+    if len(read_ids) != 1:
+        raise ValueError("endpoint parameter sources must belong to one read")
+    return min(
+        sources,
+        key=lambda source: (
+            len(tuple(part for part in source.row_path.split(".") if part)),
+            source.id,
+        ),
+    )
+
+
 def api_read_source_groups(
     sources: tuple[RowSource, ...],
 ) -> tuple[tuple[RowSource, ...], ...]:

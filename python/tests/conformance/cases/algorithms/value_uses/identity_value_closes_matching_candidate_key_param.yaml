@@ -37,7 +37,12 @@ input:
             stable: true
   relations:
     - id: shipment
-      source: {kind: api_read, read_id: shipment_detail}
+      source:
+        kind: api_read
+        read_id: shipment_detail
+        param_bindings:
+          - param_id: tracking_number
+            value_id: validated_tracking_number
       fields:
         - {field_id: tracking_number, roles: [identity]}
   values:

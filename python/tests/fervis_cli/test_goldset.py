@@ -368,6 +368,24 @@ def test_fervis_goldset_run_submits_setup_questions_in_same_conversation(
     assert questions.requests[1].conversation_id == "conversation_shared"
 
 
+def test_fervis_goldset_run_does_not_continue_after_impossible_setup() -> None:
+    questions = _ImpossibleSetupQuestions()
+
+    result = _run_suite(
+        _suite(setup_questions=("Establish the prior fact.",)),
+        questions=questions,
+    )
+
+    assert result.failed_count == 1
+    assert result.cases[0].details["failure_class"] == "setup_question_failed"
+    assert result.cases[0].message == (
+        "setup question did not produce an answer: Establish the prior fact."
+    )
+    assert [request.question for request in questions.requests] == [
+        "Establish the prior fact."
+    ]
+
+
 def test_fervis_goldset_run_enforces_duration_ratio_to_setup(
     tmp_path: Path,
     monkeypatch,
@@ -576,7 +594,11 @@ def match_answer(case, result):
     return suite_path
 
 
-def _suite(*, clarification_answers: tuple[str, ...] = ()):
+def _suite(
+    *,
+    setup_questions: tuple[str, ...] = (),
+    clarification_answers: tuple[str, ...] = (),
+):
     from fervis.evaluation.goldsets import GoldsetCase, GoldsetMatch, GoldsetSuite
 
     return GoldsetSuite(
@@ -585,6 +607,7 @@ def _suite(*, clarification_answers: tuple[str, ...] = ()):
             GoldsetCase(
                 case_id="sales_count",
                 question="How many sales happened this month?",
+                setup_questions=setup_questions,
                 clarification_answers=clarification_answers,
             ),
         ),
@@ -645,7 +668,7 @@ class _ConversationQuestions:
             question_id=f"question_{len(self.requests)}",
             run_id=f"run_{len(self.requests)}",
             answer="42",
-            result_data={},
+            result_data={"kind": "answer"},
         )
 
     def respond_to_clarification(self, request, *, event_sink=None):
@@ -671,8 +694,29 @@ class _TimedConversationQuestions:
             question_id=f"question_{index}",
             run_id=f"run_{index}",
             answer="42",
-            result_data={},
+            result_data={"kind": "answer"},
             duration_ms=self.durations[index - 1],
+        )
+
+    def respond_to_clarification(self, request, *, event_sink=None):
+        raise AssertionError("goldset run should not continue questions directly")
+
+
+class _ImpossibleSetupQuestions:
+    def __init__(self) -> None:
+        self.requests = []
+
+    def ask(self, request, *, event_sink=None):
+        self.requests.append(request)
+        if len(self.requests) > 1:
+            raise AssertionError("target question must not run after impossible setup")
+        return AskResult(
+            status="COMPLETED",
+            conversation_id="conversation_setup",
+            question_id="question_setup",
+            run_id="run_setup",
+            answer=None,
+            result_data={"kind": "impossible"},
         )
 
     def respond_to_clarification(self, request, *, event_sink=None):

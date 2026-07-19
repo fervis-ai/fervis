@@ -16,9 +16,10 @@ from fervis.lookup.source_binding.compiler_ir import (
     SourceAppliedFilter,
 )
 from fervis.lookup.answer_program.values import FactValue
+from fervis.lookup.answer_program.relations import PopulationCoverageClaim
 from fervis.lookup.grounding.model import GroundedInputUse
 from fervis.lookup.question_contract import QuestionContract, RequestedFact
-from fervis.lookup.read_eligibility import ReadEligibilityResult
+from fervis.lookup.read_eligibility import ResolvedRetainedReadSet
 from fervis.lookup.plan_selection import PlanSelectionSet
 from fervis.lookup.turn_prompts.context import HostPromptContext
 from fervis.lookup.source_binding.candidates.contracts import (
@@ -41,7 +42,7 @@ class SourceCandidateDiscoveryRequest:
     active_memory_ids: tuple[str, ...] = ()
     available_values: tuple[FactValue, ...] = ()
     available_value_uses: tuple[GroundedInputUse, ...] = ()
-    read_eligibility: ReadEligibilityResult | None = None
+    read_eligibility: ResolvedRetainedReadSet | None = None
     conversation_context: dict[str, Any] = field(default_factory=dict)
     conversation_resolution: CompiledConversationResolution | None = None
     host: HostPromptContext = field(default_factory=HostPromptContext)
@@ -61,7 +62,7 @@ class SourceBindingRequest:
     active_memory_ids: tuple[str, ...] = ()
     available_values: tuple[FactValue, ...] = ()
     available_value_uses: tuple[GroundedInputUse, ...] = ()
-    read_eligibility: ReadEligibilityResult | None = None
+    read_eligibility: ResolvedRetainedReadSet | None = None
     conversation_context: dict[str, Any] = field(default_factory=dict)
     conversation_resolution: CompiledConversationResolution | None = None
     host: HostPromptContext = field(default_factory=HostPromptContext)
@@ -205,6 +206,7 @@ class BoundSource:
     source: DraftRelationSource | None = None
     source_invocations: tuple[DraftRelationSource, ...] = ()
     value_id: str = ""
+    value_is_population_derived: bool = False
     source_candidate_id: str = ""
     cardinality: str = ""
     fulfillments: tuple[SourceFulfillment, ...] = ()
@@ -212,6 +214,7 @@ class BoundSource:
     available_field_ids: tuple[str, ...] = ()
     available_fields: tuple[SourceField, ...] = ()
     applied_filters: tuple[SourceAppliedFilter, ...] = ()
+    value_population_coverage_claims: tuple[PopulationCoverageClaim, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.id:
@@ -228,6 +231,10 @@ class BoundSource:
             )
         if self.source_invocations and self.source is None:
             raise ValueError("source invocations require relation source")
+        if self.source is not None and self.value_population_coverage_claims:
+            raise ValueError(
+                "relation source coverage belongs on the relation source"
+            )
 
     @property
     def is_auxiliary_value(self) -> bool:

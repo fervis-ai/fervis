@@ -302,6 +302,7 @@ def test_missing_value_clarification_rejects_grounded_required_input():
                     value_id="selector_value",
                     row_source_id=source_id,
                     param_id="selector",
+                    requested_fact_id="rf_name",
                 ),
             ),
         )

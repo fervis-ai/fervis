@@ -229,38 +229,118 @@ class _PlannerPort:
 
 
 def _grounding_payload_from_prompt(prompt: str) -> dict[str, Any]:
-    tasks = {
-        item["known_input_id"]: item
-        for item in _prompt_json_section(prompt, "Known inputs to ground")[
-            "known_input_binding_tasks"
-        ]
-    }
-    option_groups = _prompt_json_section(prompt, "Binding options")[
-        "known_input_binding_options"
+    tasks = _prompt_json_section(prompt, "Known input binding tasks")[
+        "known_input_binding_tasks"
     ]
-    bindings: dict[str, dict[str, Any]] = {}
-    for group in option_groups:
-        options = group["binding_options"]
+    reviews: dict[str, dict[str, Any]] = {}
+    for task in tasks:
+        options = task["binding_options"]
         selected = _select_grounding_route_option(
             options,
-            value_meaning_hint=str(
-                tasks.get(group["known_input_id"], {}).get("value_meaning_hint") or ""
-            ),
+            value_meaning_hint=str(task.get("value_meaning_hint") or ""),
         )
-        task = tasks[group["known_input_id"]]
-        binding = {
-            "selected_option_id": selected["binding_option_id"],
-            "input_value": task["lookup_text"],
-            "result_kind": "canonical_identity",
-            "selection_basis": "Selected by deterministic test model.",
-        }
-        field_refs = selected.get("lookup_surface", {}).get("field_refs", ())
-        if field_refs:
-            binding["matched_field_ref"] = field_refs[-1]
-        bindings[group["known_input_id"]] = binding
+        reviews[task["known_input_id"]] = _grounding_review_for_task(
+            task,
+            compatible_option_ids={str(selected["binding_option_id"])},
+        )
     return {
         "known_time_resolutions": _time_resolution_payload_from_prompt(prompt),
-        "known_input_bindings": bindings,
+        "known_input_binding_reviews": reviews,
+    }
+
+
+def _grounding_review_for_task(
+    task: dict[str, Any],
+    *,
+    compatible_option_ids: set[str],
+    request_values_for_option: Any = None,
+    match_fields_for_option: Any = None,
+) -> dict[str, Any]:
+    options = task["binding_options"]
+    compatible_options = tuple(
+        option
+        for option in options
+        if str(option["binding_option_id"]) in compatible_option_ids
+    )
+    if not compatible_options:
+        resource_type_x = "NO_SHOWN_RESOURCE_TYPE"
+        identifier_kind = "DESCRIPTIVE"
+    else:
+        resource_types = {str(option["resource_type"]) for option in compatible_options}
+        if len(resource_types) != 1:
+            raise AssertionError("scripted compatible resolvers return different types")
+        [resource_type_x] = resource_types
+        purposes = {str(option.get("purpose") or "") for option in compatible_options}
+        if len(purposes) != 1:
+            raise AssertionError("scripted compatible resolvers use different purposes")
+        identifier_kind = (
+            "PRIMARY_KEY" if purposes == {"identity_validation"} else "DESCRIPTIVE"
+        )
+    request_values = request_values_for_option or _resolver_request_values
+    match_fields = match_fields_for_option or _resolver_match_fields
+    lookup_text = str(task["lookup_text"])
+    return {
+        "resource_type_basis": f"The input identifies {resource_type_x}.",
+        "resource_type_x": resource_type_x,
+        "identifier_kind_basis": (
+            f"The input uses a {identifier_kind.lower()} identifier."
+        ),
+        "identifier_kind": identifier_kind,
+        "option_reviews": {
+            option["binding_option_id"]: _grounding_option_review(
+                option,
+                lookup_text=lookup_text,
+                resource_type_x=resource_type_x,
+                compatible=str(option["binding_option_id"]) in compatible_option_ids,
+                request_values_for_option=request_values,
+                match_fields_for_option=match_fields,
+            )
+            for option in options
+        },
+    }
+
+
+def _grounding_option_review(
+    option: dict[str, Any],
+    *,
+    lookup_text: str,
+    resource_type_x: str,
+    compatible: bool,
+    request_values_for_option: Any,
+    match_fields_for_option: Any,
+) -> dict[str, Any]:
+    resource_type = str(option["resource_type"])
+    same_resource_type = resource_type == resource_type_x
+    if compatible and not same_resource_type:
+        raise AssertionError("scripted compatible resolver returns a different type")
+    request_values = (
+        request_values_for_option(option, lookup_text=lookup_text)
+        if compatible
+        else {}
+    )
+    return {
+        "resource_type": resource_type,
+        "resource_type_match": (
+            "SAME_RESOURCE_TYPE"
+            if same_resource_type
+            else "DIFFERENT_RESOURCE_TYPE"
+        ),
+        "resolver_fit_question": option["resolver_fit_question"],
+        "because": "The declared route capability was reviewed.",
+        "resolution": {
+            "decision": (
+                "CAN_RESOLVE_LOOKUP_TEXT"
+                if compatible
+                else "CANNOT_RESOLVE_LOOKUP_TEXT"
+            ),
+            "lookup_request_params": [
+                {"param_ref": param_ref, "value": value}
+                for param_ref, value in request_values.items()
+            ],
+            "returned_identity_verification_fields": (
+                match_fields_for_option(option) if compatible else []
+            ),
+        },
     }
 
 
@@ -398,18 +478,86 @@ def _select_grounding_route_option(
     value_meaning_hint: str,
 ) -> dict[str, Any]:
     normalized_hint = value_meaning_hint.casefold().strip()
-    reference_options = tuple(
-        option for option in options if option.get("purpose") == "reference_grounding"
+    name_search_options = tuple(
+        option
+        for option in options
+        if any(
+            str(parameter.get("name") or "") in {"name", "display_name"}
+            for parameter in option["api_read"]["input_params"]
+        )
     )
-    for option in reference_options:
-        entity_kind = str(
-            (option.get("returned_identity") or {}).get("entity_kind") or ""
-        ).casefold()
-        if entity_kind and normalized_hint.endswith(entity_kind):
+    descriptive_match_options = tuple(
+        option
+        for option in options
+        if not any(
+            str(parameter.get("source") or "") == "path"
+            for parameter in option["api_read"]["input_params"]
+        )
+        and any(
+            "name" in str(field.get("field_id") or "")
+            for row in option["api_read"]["response_rows"]
+            for field in row["fields"]
+        )
+    )
+    options_by_lookup_fit = (
+        name_search_options or descriptive_match_options or tuple(options)
+    )
+    for option in options_by_lookup_fit:
+        result = option.get("canonical_result") or {}
+        entity_kind = str(result.get("entity_kind") or "").casefold()
+        if normalized_hint and entity_kind == normalized_hint:
             return option
-    if reference_options:
-        return reference_options[0]
-    return options[0]
+    for option in options_by_lookup_fit:
+        result = option.get("canonical_result") or {}
+        entity_kind = str(result.get("entity_kind") or "").casefold()
+        if normalized_hint and any(
+            word in entity_kind for word in normalized_hint.split()
+        ):
+            return option
+    return options_by_lookup_fit[0]
+
+
+def _resolver_request_values(
+    option: dict[str, Any],
+    *,
+    lookup_text: str,
+) -> dict[str, Any]:
+    params = option["api_read"]["input_params"]
+    preferred = next(
+        (
+            parameter
+            for parameter in params
+            if str(parameter.get("name") or "") in {"name", "display_name"}
+        ),
+        params[0] if params else None,
+    )
+    if preferred is None:
+        return {}
+    return {str(preferred["param_ref"]): lookup_text}
+
+
+def _resolver_match_fields(option: dict[str, Any]) -> list[str]:
+    fields = [
+        field for row in option["api_read"]["response_rows"] for field in row["fields"]
+    ]
+    named_fields = [
+        str(field["path"])
+        for field in fields
+        if str(field["field_id"])
+        in {
+            "name",
+            "display_name",
+            "first_name",
+            "last_name",
+            "full_name",
+        }
+    ]
+    if named_fields:
+        return named_fields
+    return [
+        str(component["field_path"])
+        for component in option["canonical_result"]["components"]
+    ]
 
 
 def _prompt_json_section(prompt: str, section_name: str) -> dict[str, Any]:

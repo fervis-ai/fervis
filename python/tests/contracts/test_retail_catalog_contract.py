@@ -95,6 +95,14 @@ def test_retail_catalog_preserves_path_params_and_declared_query_params(
     }
 
 
+def test_django_catalog_does_not_infer_identity_from_imperative_queryset() -> None:
+    contracts = _contracts_by_name(_django_retail_case().adapter)
+    order_list = contracts["list_orders_list"]
+    params = {param.name: param for param in order_list.query_params}
+
+    assert params["store_id"].entity_target is None
+
+
 def test_retail_catalog_preserves_response_fields(
     retail_catalog_case: RetailCatalogCase,
 ) -> None:

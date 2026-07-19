@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from math import isfinite
 from typing import TypeAlias
 from uuid import UUID
@@ -16,6 +17,7 @@ CatalogParameterValue: TypeAlias = (
     | tuple["CatalogParameterValue", ...]
     | dict[str, "CatalogParameterValue"]
 )
+CatalogScalarParameterValue: TypeAlias = bool | int | float | str
 
 
 class CatalogParameterValueError(ValueError):
@@ -83,6 +85,35 @@ def parse_catalog_parameter_value(
     if normalized_type in {"any", "unknown", ""}:
         return _parse_json_value(value)
     raise CatalogParameterValueError(f"unsupported catalog value type {type_name}")
+
+
+def parse_catalog_parameter_text(
+    text: str,
+    *,
+    type_name: str,
+    choices: tuple[str, ...] = (),
+) -> CatalogScalarParameterValue:
+    """Compile supplied text into one declared scalar parameter value."""
+
+    candidates: list[CatalogScalarParameterValue] = [text]
+    try:
+        decoded = json.loads(text)
+    except json.JSONDecodeError:
+        decoded = None
+    if isinstance(decoded, (bool, int, float, str)) and decoded != text:
+        candidates.append(decoded)
+    for candidate in candidates:
+        try:
+            parsed = parse_catalog_parameter_value(
+                candidate,
+                type_name=type_name,
+                choices=choices,
+            )
+        except CatalogParameterValueError:
+            continue
+        if isinstance(parsed, (bool, int, float, str)):
+            return parsed
+    raise CatalogParameterValueError("text is incompatible with the scalar parameter")
 
 
 def _parse_json_value(value: object) -> CatalogParameterValue:

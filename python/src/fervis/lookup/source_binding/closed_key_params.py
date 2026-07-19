@@ -18,20 +18,11 @@ from fervis.lookup.answer_program.values import (
 )
 from fervis.lookup.canonical_data import EntityKeyValue
 from fervis.lookup.question_contract import (
-    GroupKeyDomainKind,
     RequestedFact,
-    RequestedFactAnswerExpressionFamily,
     RequestedFactGroupKey,
 )
 from fervis.lookup.source_binding.candidates import SourceCandidate
 from fervis.lookup.source_binding.candidates.model import CandidateParameter
-from fervis.lookup.source_binding.grounded_params import grounded_param_bindings
-from fervis.lookup.fact_plan.row_sources import (
-    RowSource,
-    RowSourceCatalog,
-    build_row_source_catalog,
-    row_sources_for_read_id,
-)
 from fervis.lookup.source_binding.candidates.contracts import (
     FulfillmentSupportSet,
     entity_evidence_entity_kind,
@@ -92,6 +83,10 @@ class _ClosedKeyParamBinding:
         )
 
     @property
+    def value_ids(self) -> frozenset[str]:
+        return frozenset(binding.value_id for binding in self.key_input_bindings)
+
+    @property
     def param_binding_sets(self) -> tuple[tuple[DraftEndpointParamBinding, ...], ...]:
         return tuple(
             tuple(
@@ -130,10 +125,6 @@ class _TargetClosedKeyBinding:
 class ClosedKeyParamBindingIndex:
     _target_bindings_by_id: dict[str, _TargetClosedKeyBinding]
     _candidate_id_by_target_id: dict[str, str]
-    _grounded_bindings_by_target_id: dict[
-        str,
-        tuple[DraftEndpointParamBinding, ...],
-    ]
 
     def model_visible_target_payload(
         self,
@@ -144,10 +135,6 @@ class ClosedKeyParamBindingIndex:
         backend_bindings: list[dict[str, object]] = []
         if binding is not None:
             backend_bindings.append(binding.to_payload())
-        backend_bindings.extend(
-            _grounded_binding_payload(item)
-            for item in self._grounded_bindings(target.binding_target_id)
-        )
         if backend_bindings:
             payload["backend_owned_param_bindings"] = backend_bindings
         return payload
@@ -201,9 +188,7 @@ class ClosedKeyParamBindingIndex:
         target_id: str,
     ) -> tuple[tuple[DraftEndpointParamBinding, ...], ...]:
         binding = self._binding_for_target(target_id)
-        closed_sets = binding.param_binding_sets if binding is not None else ((),)
-        grounded = self._grounded_bindings(target_id)
-        return tuple((*closed, *grounded) for closed in closed_sets)
+        return binding.param_binding_sets if binding is not None else ((),)
 
     def owned_param_ids(self, target_id: str) -> frozenset[str]:
         binding = self._binding_for_target(target_id)
@@ -212,10 +197,11 @@ class ClosedKeyParamBindingIndex:
             if binding is not None
             else ()
         )
-        grounded_param_ids = tuple(
-            binding.param_id for binding in self._grounded_bindings(target_id)
-        )
-        return frozenset((*closed_param_ids, *grounded_param_ids))
+        return frozenset(closed_param_ids)
+
+    def owned_value_ids(self, target_id: str) -> frozenset[str]:
+        binding = self._binding_for_target(target_id)
+        return binding.value_ids if binding is not None else frozenset()
 
     def source_level_applied_filters(
         self,
@@ -271,12 +257,6 @@ class ClosedKeyParamBindingIndex:
             for candidate_id, param_ids in grouped.items()
         }
 
-    def _grounded_bindings(
-        self,
-        target_id: str,
-    ) -> tuple[DraftEndpointParamBinding, ...]:
-        return self._grounded_bindings_by_target_id.get(target_id, ())
-
     def _fulfillment_choice_ids(
         self,
         candidate: SourceCandidate,
@@ -301,9 +281,7 @@ def closed_key_param_binding_index(
     candidates_by_id: Mapping[str, SourceCandidate],
 ) -> ClosedKeyParamBindingIndex:
     facts_by_id = {fact.id: fact for fact in request.requested_facts}
-    row_sources = build_row_source_catalog(request.relation_catalog)
     closed_bindings: dict[str, _TargetClosedKeyBinding] = {}
-    grounded_bindings: dict[str, tuple[DraftEndpointParamBinding, ...]] = {}
     candidate_ids: dict[str, str] = {}
     for target in targets:
         candidate = candidates_by_id.get(target.source_candidate_id)
@@ -317,57 +295,16 @@ def closed_key_param_binding_index(
             target=target,
             candidate=candidate,
         )
-        excluded_param_ids: frozenset[str] = frozenset()
         if closed is not None:
             closed_bindings[target_id] = _TargetClosedKeyBinding(
                 target_id=target_id,
                 source_candidate_id=target.source_candidate_id,
                 binding=closed,
             )
-            excluded_param_ids = frozenset(
-                param_id for _, param_id in closed.params_by_component_id
-            )
-        row_source = _candidate_row_source(candidate, row_sources=row_sources)
-        if row_source is None:
-            continue
-        bindings = grounded_param_bindings(
-            available_values=request.available_values,
-            available_value_uses=request.available_value_uses,
-            row_source=row_source,
-            requested_fact_id=target.requested_fact_id,
-            excluded_param_ids=excluded_param_ids,
-        )
-        if bindings:
-            grounded_bindings[target_id] = bindings
     return ClosedKeyParamBindingIndex(
         _target_bindings_by_id=closed_bindings,
         _candidate_id_by_target_id=candidate_ids,
-        _grounded_bindings_by_target_id=grounded_bindings,
     )
-
-
-def _candidate_row_source(
-    candidate: SourceCandidate,
-    *,
-    row_sources: RowSourceCatalog,
-) -> RowSource | None:
-    source = candidate.source
-    if source is None:
-        return None
-    if source.read_id:
-        candidates = row_sources_for_read_id(source.read_id, row_sources=row_sources)
-        return candidates[0] if candidates else None
-    return row_sources.find(source.row_source_id)
-
-
-def _grounded_binding_payload(
-    binding: DraftEndpointParamBinding,
-) -> dict[str, object]:
-    return {
-        "param_id": binding.param_id,
-        "value_id": binding.value_id,
-        "proof_refs": list(binding.proof_refs),
-    }
 
 
 def _model_visible_candidate_payload(
@@ -498,17 +435,10 @@ def _closed_key_group_key(
     *,
     target: SourceBindingTarget,
 ) -> RequestedFactGroupKey | None:
-    if (
-        fact.answer_expression is None
-        or fact.answer_expression.family
-        != RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE
-        or fact.answer_expression.group_key is None
-    ):
+    group_key = fact.specified_group_key()
+    if group_key is None:
         return None
-    group_key = fact.answer_expression.group_key
     if group_key.id not in target.answer_output_ids:
-        return None
-    if group_key.domain != GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS:
         return None
     return group_key
 

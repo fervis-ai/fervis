@@ -4,13 +4,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fervis.lookup.provider_contract import ProviderOutput
+from fervis.lookup.provider_contract import ProviderObject, ProviderOutput
 
 
 @dataclass(frozen=True)
-class ReadCandidateReviewOutput(ProviderOutput):
-    source_candidate_id: str
-    read_id: str
+class CanonicalInputSelectionOutput(ProviderOutput):
+    interpretation_question: str
+    canonical_option_assessments: dict[str, str]
+    because: str
+    canonical_option_id: str
+    resolver_option_assessments: dict[str, str]
+    resolver_option_id: str | None = None
+
+
+@dataclass(frozen=True)
+class RetainedReadReviewOutput(ProviderOutput):
     relevant_row_path_tokens: tuple[str, ...]
     relevant_field_tokens: tuple[str, ...]
     retention_basis: str
@@ -18,11 +26,17 @@ class ReadCandidateReviewOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
+class DroppedReadReviewOutput(ProviderOutput):
+    retention_basis: str
+    retention_decision: str
+
+
+@dataclass(frozen=True)
 class RequestedFactAssessmentOutput(ProviderOutput):
-    requested_fact_id: str
-    read_candidate_reviews: tuple[ReadCandidateReviewOutput, ...]
+    read_candidate_reviews: dict[str, ProviderObject]
+    canonical_inputs: dict[str, CanonicalInputSelectionOutput]
 
 
 @dataclass(frozen=True)
 class ReadEligibilityOutput(ProviderOutput):
-    requested_fact_assessments: tuple[RequestedFactAssessmentOutput, ...]
+    requested_fact_assessments: dict[str, RequestedFactAssessmentOutput]

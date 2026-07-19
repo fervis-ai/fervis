@@ -1,5 +1,5 @@
-id: required_identity_read_kept_when_identity_value_available
-description: Catalog selection keeps a required-identity detail read when a matching identity value is available.
+id: required_identity_read_kept_before_identity_resolution
+description: Catalog selection keeps a relevant required-identity read before its identity value is resolved.
 migrates:
   - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_keeps_required_identity_read_with_matching_identity_value
 kind: algorithm
@@ -42,13 +42,6 @@ input:
           support_role: MEASURED_VALUE
           source_text: sale receipt item detail
           matching_resource_names: [sale receipt item detail, sale]
-  available_values:
-    - id: value_sale_1
-      kind: identity
-      entity_kind: sale
-      key_id: primary_key
-      key_component_id: sale_id
-      value: sale-1
   max_reads_per_fact: 4
 expect:
   result_contains:

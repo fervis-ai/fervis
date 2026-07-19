@@ -149,6 +149,8 @@ expect:
   result_contains:
     status: COMPLETED
     error: ''
+    endpoint_names: [list_store_list, list_sale_list]
+    endpoint_count: 2
     endpoint_args:
       list_store_list: {}
       list_sale_list: {sales.query.store_id: store_2}
@@ -156,5 +158,6 @@ expect:
     - submit_conversation_resolution
     - submit_query_enrichment
     - submit_grounding
+    - submit_read_eligibility
     invocation_kind: continue_prior_request
-    base_invocation_id: pi_cdcb84ce278a6911ed9041ad28c83997db469c239add21c2cfa543d6b1ab09f8
+    base_invocation_id: pi_03700ee4df18ff856b238c04d7ffcb0b6f4577053f4fe0635e783fc64bd41c79

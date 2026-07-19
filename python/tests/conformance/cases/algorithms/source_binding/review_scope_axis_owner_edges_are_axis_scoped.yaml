@@ -31,14 +31,16 @@ expect:
           proof_refs: []
         - membership_test_id: explicit_user_constraint:specified_staff
           decision: out_of_scope
-          owner_surface_id: applied_filter:staff_id:staff_id_1
+          owner_surface_id: ""
           owner_surface_ids:
-            - applied_filter:staff_id:staff_id_1
+            - source_param:staff_id
+            - returned_identity:source_1.root.reference.staff_reference
           proof_refs:
             - membership_test:explicit_user_constraint:specified_staff
             - known_input:staff_id_1
-            - applied_filter:staff_id:staff_id_1
+            - source_param:staff_id
             - read:staff_lookup
+            - returned_identity:source_1.root.reference.staff_reference
         - membership_test_id: explicit_user_constraint:sale_type_constraint
           decision: out_of_scope
           owner_surface_id: review_axis:finite_choice_param:sale_type
@@ -60,14 +62,16 @@ expect:
           proof_refs: []
         - membership_test_id: explicit_user_constraint:specified_staff
           decision: out_of_scope
-          owner_surface_id: applied_filter:staff_id:staff_id_1
+          owner_surface_id: ""
           owner_surface_ids:
-            - applied_filter:staff_id:staff_id_1
+            - source_param:staff_id
+            - returned_identity:source_1.root.reference.staff_reference
           proof_refs:
             - membership_test:explicit_user_constraint:specified_staff
             - known_input:staff_id_1
-            - applied_filter:staff_id:staff_id_1
+            - source_param:staff_id
             - read:staff_lookup
+            - returned_identity:source_1.root.reference.staff_reference
         - membership_test_id: explicit_user_constraint:sale_type_constraint
           decision: in_scope
           owner_surface_id: ""
@@ -86,14 +90,16 @@ expect:
           proof_refs: []
         - membership_test_id: explicit_user_constraint:specified_staff
           decision: out_of_scope
-          owner_surface_id: applied_filter:staff_id:staff_id_1
+          owner_surface_id: ""
           owner_surface_ids:
-            - applied_filter:staff_id:staff_id_1
+            - source_param:staff_id
+            - returned_identity:source_1.root.reference.staff_reference
           proof_refs:
             - membership_test:explicit_user_constraint:specified_staff
             - known_input:staff_id_1
-            - applied_filter:staff_id:staff_id_1
+            - source_param:staff_id
             - read:staff_lookup
+            - returned_identity:source_1.root.reference.staff_reference
         - membership_test_id: explicit_user_constraint:sale_type_constraint
           decision: out_of_scope
           owner_surface_id: review_axis:finite_choice_param:sale_type

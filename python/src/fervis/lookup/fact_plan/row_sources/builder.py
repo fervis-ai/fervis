@@ -213,6 +213,7 @@ def _api_row_sources_for_path(
             kind=RowSourceKind.API_READ,
             label=_source_label(label, params=read.params, defaults=source_defaults),
             read_id=read.id,
+            endpoint_name=read.endpoint_name,
             resource_names=read.resource_names,
             description=_source_description(
                 read,

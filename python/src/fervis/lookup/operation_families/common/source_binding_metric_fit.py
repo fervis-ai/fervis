@@ -174,7 +174,7 @@ def _relevant_field_refs_by_fact_candidate(
     if request.read_eligibility is None:
         return {}
     output: dict[tuple[str, str], set[str]] = {}
-    for assessment in request.read_eligibility.read_assessments:
+    for assessment in request.read_eligibility.retained_reads:
         if not assessment.is_retained:
             continue
         key = (assessment.requested_fact_id, assessment.source_candidate_id)

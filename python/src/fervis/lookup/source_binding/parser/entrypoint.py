@@ -8,6 +8,8 @@ from typing import Any
 from fervis.lookup.source_binding.compiler_ir import (
     DraftRelationSourcePopulationChoice,
 )
+from fervis.lookup.answer_program.relations import PopulationCoverageClaim
+from fervis.lookup.answer_program.relations import PopulationCoverageRole
 from fervis.lookup.source_binding.candidates import (
     SourceCandidate,
     source_candidate_required_param_decision_ids,
@@ -27,6 +29,11 @@ from fervis.lookup.source_binding.parser.model import (
     ParsedSourceBindingPlan,
 )
 from fervis.lookup.source_binding.parser.types import NormalizedParamDecision
+from fervis.lookup.source_binding.input_applications import (
+    ParsedResolvedInputApplications,
+    ResolvedInputApplicationSurface,
+    parse_resolved_input_applications,
+)
 from fervis.lookup.source_binding.parser.plan_builder import build_source_binding_plan
 from fervis.lookup.source_binding.parser_common import _dict, _text
 from fervis.lookup.source_binding.plan_targets import (
@@ -47,7 +54,8 @@ from fervis.lookup.source_binding.terminal_parser import (
 class _NormalizedBindingDecisions:
     param_decisions: dict[str, NormalizedParamDecision]
     population_choices: tuple[DraftRelationSourcePopulationChoice, ...]
-    discharged_membership_test_ids: tuple[str, ...]
+    population_coverage_claims: tuple[PopulationCoverageClaim, ...]
+    input_applications: ParsedResolvedInputApplications
 
 
 __all__ = [
@@ -70,6 +78,7 @@ def parse_source_binding(
             target_index=context.target_index,
             review_scope=context.review_scope,
             candidates=context.candidates,
+            input_application_surfaces=context.input_application_surfaces,
         )
         return SourceBindingResult(
             outcome=build_source_binding_plan(
@@ -94,6 +103,7 @@ def _normalize_source_binding_payload_with_derived_finite_choices(
     target_index: SourceBindingTargetIndex,
     review_scope: SourceBindingReviewScope,
     candidates: dict[str, SourceCandidate],
+    input_application_surfaces: dict[str, ResolvedInputApplicationSurface],
 ) -> ParsedSourceBindingPlan:
     closed_key_bindings = closed_key_param_binding_index(
         request,
@@ -114,6 +124,7 @@ def _normalize_source_binding_payload_with_derived_finite_choices(
                 review_scope=review_scope,
                 candidates=candidates,
                 closed_key_bindings=closed_key_bindings,
+                input_application_surfaces=input_application_surfaces,
             )
         )
     return ParsedSourceBindingPlan(
@@ -160,6 +171,7 @@ def _normalize_requested_fact_binding(
     review_scope: SourceBindingReviewScope,
     candidates: dict[str, SourceCandidate],
     closed_key_bindings: ClosedKeyParamBindingIndex,
+    input_application_surfaces: dict[str, ResolvedInputApplicationSurface],
 ) -> tuple[ParsedRoleBinding, ...]:
     fact_binding = _dict(
         raw_fact_binding,
@@ -182,6 +194,7 @@ def _normalize_requested_fact_binding(
             review_scope=review_scope,
             candidates=candidates,
             closed_key_bindings=closed_key_bindings,
+            input_application_surfaces=input_application_surfaces,
         )
         for requirement_id, raw_invocation in role_bindings.items()
     )
@@ -198,6 +211,7 @@ def _normalize_role_binding(
     review_scope: SourceBindingReviewScope,
     candidates: dict[str, SourceCandidate],
     closed_key_bindings: ClosedKeyParamBindingIndex,
+    input_application_surfaces: dict[str, ResolvedInputApplicationSurface],
 ) -> ParsedRoleBinding:
     parsed_invocation = provider_output.SourceInvocationOutput.parse(raw_invocation)
     target = target_index.require(_text(parsed_invocation.binding_target_id))
@@ -215,12 +229,16 @@ def _normalize_role_binding(
         request=request,
         review_scope=review_scope,
         closed_key_bindings=closed_key_bindings,
+        input_application_surface=input_application_surfaces.get(
+            target.binding_target_id
+        ),
     )
     effective_param_ids = _effective_param_ids(
         candidate,
         param_decisions=decisions.param_decisions,
         target=target,
         closed_key_bindings=closed_key_bindings,
+        input_applications=decisions.input_applications,
     )
     return ParsedRoleBinding(
         target=target,
@@ -228,7 +246,8 @@ def _normalize_role_binding(
         param_decisions=decisions.param_decisions,
         effective_param_ids=effective_param_ids,
         population_choices=decisions.population_choices,
-        discharged_membership_test_ids=decisions.discharged_membership_test_ids,
+        population_coverage_claims=decisions.population_coverage_claims,
+        input_applications=decisions.input_applications,
     )
 
 
@@ -270,7 +289,14 @@ def _normalize_binding_decisions(
     request: SourceBindingRequest,
     review_scope: SourceBindingReviewScope,
     closed_key_bindings: ClosedKeyParamBindingIndex,
+    input_application_surface: ResolvedInputApplicationSurface | None,
 ) -> _NormalizedBindingDecisions:
+    if input_application_surface is None:
+        raise ValueError("source binding target has no input application surface")
+    input_applications = parse_resolved_input_applications(
+        invocation.resolved_input_applications,
+        surface=input_application_surface,
+    )
     authored_decisions = {
         param_id: NormalizedParamDecision(
             population_intent=decision.population_intent,
@@ -292,12 +318,18 @@ def _normalize_binding_decisions(
         review_scope=review_scope,
         answer_population=invocation.answer_population,
         raw_param_decision_ids=tuple(visible_decisions),
+        coverage_role=(
+            PopulationCoverageRole.ROW_POPULATION
+            if target.requires_answer_fulfillment
+            else PopulationCoverageRole.OPERATION_CONDITION
+        ),
     )
     decisions = {**visible_decisions, **derived.param_decisions}
     return _NormalizedBindingDecisions(
         param_decisions=decisions,
         population_choices=derived.population_choices,
-        discharged_membership_test_ids=(derived.discharged_membership_test_ids),
+        population_coverage_claims=derived.population_coverage_claims,
+        input_applications=input_applications,
     )
 
 
@@ -307,12 +339,22 @@ def _effective_param_ids(
     param_decisions: dict[str, NormalizedParamDecision],
     target: SourceBindingTarget,
     closed_key_bindings: ClosedKeyParamBindingIndex,
+    input_applications: ParsedResolvedInputApplications | None = None,
 ) -> tuple[str, ...]:
     effective_param_ids = tuple(
         dict.fromkeys(
             (
                 *source_candidate_required_param_decision_ids(candidate),
                 *param_decisions,
+                *(
+                    binding.param_id
+                    for binding_set in (
+                        input_applications.param_binding_sets
+                        if input_applications is not None
+                        else ()
+                    )
+                    for binding in binding_set
+                ),
             )
         )
     )

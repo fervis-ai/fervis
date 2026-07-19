@@ -29,7 +29,6 @@ from fervis.lineage.recorder import (
     ClarificationResponseWrite,
     ConversationWrite,
     CatalogEndpointWrite,
-    ExecutionProofGraphWrite,
     FactResultWrite,
     ModelCallAuditWrite,
     ModelCallUsageWrite,
@@ -46,6 +45,11 @@ from fervis.lineage.recorder import (
 )
 from fervis.observability.usage import RuntimeUsageService
 from fervis.observability.django import DjangoObservabilityQuery
+from tests.testkit.execution_proof_graph import (
+    proof_graph_payload,
+    proof_graph_write,
+    proof_node,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -252,14 +256,12 @@ def test_django_observability_query_answer_scope_includes_previous_runs() -> Non
                 ),
             ),
             proof_graphs=(
-                ExecutionProofGraphWrite(
+                proof_graph_write(
                     proof_graph_id="proof_1",
                     run_id="run_2",
                     fact_result_id="fact_result_1",
                     compile_step_id="step_compile",
                     execute_step_id="step_execute",
-                    payload_schema="fervis.execution_proof_graph",
-                    payload_schema_rev=1,
                     payload_json=_answer_proof_graph_payload(),
                 ),
             ),
@@ -449,14 +451,12 @@ def test_django_observability_query_answer_scope_includes_clarification_lineage(
                 ),
             ),
             proof_graphs=(
-                ExecutionProofGraphWrite(
+                proof_graph_write(
                     proof_graph_id="proof_1",
                     run_id="run_1",
                     fact_result_id="fact_result_1",
                     compile_step_id="step_run_1_compile",
                     execute_step_id="step_run_1_execute",
-                    payload_schema="fervis.execution_proof_graph",
-                    payload_schema_rev=1,
                     payload_json=_answer_proof_graph_payload(),
                 ),
             ),
@@ -557,24 +557,20 @@ def _answer_proof_node_ref() -> str:
 
 
 def _answer_proof_graph_payload() -> dict[str, object]:
-    return {
-        "nodes": [
-            {
-                "id": "relation:source_1",
-                "kind": "relation",
-                "proof_refs": ["source_read:source_read_1"],
-            },
-            {
-                "id": _answer_proof_node_ref(),
-                "kind": "answer_output",
-                "proof_refs": [],
-            },
-        ],
-        "edges": [
+    return proof_graph_payload(
+        nodes=(
+            proof_node(
+                "relation:source_1",
+                "relation",
+                proof_refs=("source_read:source_read_1",),
+            ),
+            proof_node(_answer_proof_node_ref(), "answer_output"),
+        ),
+        edges=(
             {
                 "source": "relation:source_1",
                 "target": _answer_proof_node_ref(),
                 "role": "produces",
             },
-        ],
-    }
+        ),
+    )

@@ -7,7 +7,9 @@ from fervis.types.enums import StrEnum
 from typing import TypeAlias
 
 from fervis.lookup.answer_program.relations import (
+    PopulationCoverageClaim,
     PopulationChoiceControllerKind,
+    RelationSourcePopulationBinding,
     RelationSourceReviewScopeDecision,
     SourceKind,
 )
@@ -64,7 +66,9 @@ class DraftRelationSourceAppliedFilter:
     value_id: str = ""
     value_expr: ValueExpression | None = None
     value_kind: str = ""
+    value_component: str = "value"
     operator: str = "equals"
+    proof_refs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.predicate_field_ids:
@@ -82,6 +86,7 @@ class SourceAppliedFilter:
     predicate_field_ids: tuple[str, ...] = ()
     value_id: str = ""
     value_kind: str = ""
+    value_component: str = "value"
     display_value: str = ""
     matched_field_ref: str = ""
     matched_field_path: str = ""
@@ -89,6 +94,7 @@ class SourceAppliedFilter:
     resolved_end: str = ""
     literal_type: str = ""
     operator: str = "equals"
+    proof_refs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.known_input_id and not self.value_id:
@@ -102,7 +108,9 @@ class SourceAppliedFilter:
             known_input_id=self.known_input_id,
             value_id=self.value_id,
             value_kind=self.value_kind,
+            value_component=self.value_component,
             operator=self.operator,
+            proof_refs=self.proof_refs,
         )
 
     def to_payload(self) -> dict[str, _SourceAppliedFilterPayloadValue]:
@@ -115,6 +123,8 @@ class SourceAppliedFilter:
             payload["value_id"] = self.value_id
         if self.value_kind:
             payload["kind"] = self.value_kind
+        if self.value_component != "value":
+            payload["value_component"] = self.value_component
         if self.operator != "equals":
             payload["operator"] = self.operator
         for key, value in (
@@ -200,4 +210,6 @@ class DraftRelationSource:
     applied_filters: tuple[DraftRelationSourceAppliedFilter, ...] = ()
     row_filters: tuple[DraftRelationSourceRowFilter, ...] = ()
     population_choices: tuple[DraftRelationSourcePopulationChoice, ...] = ()
+    population_binding: RelationSourcePopulationBinding | None = None
+    population_coverage_claims: tuple[PopulationCoverageClaim, ...] = ()
     proof_refs: tuple[str, ...] = ()

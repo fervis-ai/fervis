@@ -27,6 +27,7 @@ from fervis.lookup.plan_selection.model import (
     PlanSelectionSet,
     PlanSelectionRequest,
     PlanSelectionResult,
+    SourceStrategy,
     SourceStrategyMember,
 )
 from fervis.lookup.source_binding.candidates.model import SourceCandidateRegistry
@@ -74,11 +75,19 @@ def parse_plan_selection(
                     )
                 )
                 continue
-        aligned_source_ids, basis_by_source_id = _aligned_source_reviews(
+        source_alignment_by_id, basis_by_source_id = _source_alignment_reviews(
             reviews_by_fact[fact.id].named(provider_output.SourceAlignmentReviewOutput),
             source_candidate_ids=source_candidate_ids,
         )
-        if not aligned_source_ids:
+        aligned_strategies = tuple(
+            source_strategy
+            for source_strategy in strategies_by_fact.get(fact.id, ())
+            if _source_strategy_is_supported(
+                source_strategy,
+                source_alignment_by_id=source_alignment_by_id,
+            )
+        )
+        if not aligned_strategies:
             blocked_facts.append(
                 _blocked_fact_from_unaligned_reviews(
                     requested_fact_id=fact.id,
@@ -87,16 +96,6 @@ def parse_plan_selection(
                 )
             )
             continue
-        aligned_strategies = tuple(
-            source_strategy
-            for source_strategy in strategies_by_fact.get(fact.id, ())
-            if all(
-                member.source_candidate_id in aligned_source_ids
-                for member in source_strategy.source_members
-            )
-        )
-        if not aligned_strategies:
-            raise ValueError("source alignment produced no executable source strategy")
         for source_strategy in aligned_strategies:
             plans.append(
                 SelectedSourceStrategy(
@@ -125,14 +124,14 @@ def parse_plan_selection(
     return PlanSelectionResult(outcome=PlanSelectionSet(plan_selections=tuple(plans)))
 
 
-def _aligned_source_reviews(
+def _source_alignment_reviews(
     reviews: dict[str, provider_output.SourceAlignmentReviewOutput],
     *,
     source_candidate_ids: tuple[str, ...],
-) -> tuple[set[str], dict[str, str]]:
+) -> tuple[dict[str, SourceAlignment], dict[str, str]]:
     if set(reviews) != set(source_candidate_ids):
         raise ValueError("source alignment must review every shown source candidate")
-    aligned_source_ids: set[str] = set()
+    source_alignment_by_id: dict[str, SourceAlignment] = {}
     basis_by_source_id: dict[str, str] = {}
     for source_candidate_id in source_candidate_ids:
         review = reviews[source_candidate_id]
@@ -146,12 +145,24 @@ def _aligned_source_reviews(
             _required_text(review.source_alignment),
             "source_alignment",
         )
-        if alignment in {
-            SourceAlignment.DIRECT,
-            SourceAlignment.PARTIAL,
-        }:
-            aligned_source_ids.add(source_candidate_id)
-    return aligned_source_ids, basis_by_source_id
+        source_alignment_by_id[source_candidate_id] = alignment
+    return source_alignment_by_id, basis_by_source_id
+
+
+def _source_strategy_is_supported(
+    source_strategy: SourceStrategy,
+    *,
+    source_alignment_by_id: dict[str, SourceAlignment],
+) -> bool:
+    member_alignments = tuple(
+        source_alignment_by_id[member.source_candidate_id]
+        for member in source_strategy.source_members
+    )
+    if SourceAlignment.NOT_ALIGNED in member_alignments:
+        return False
+    if len(member_alignments) == 1:
+        return member_alignments[0] is SourceAlignment.DIRECT
+    return True
 
 
 def _blocked_fact_from_unaligned_reviews(

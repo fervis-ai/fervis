@@ -16,7 +16,6 @@ input:
     program_invocations:
       - run_id: run_base
         kind: compiled_question
-        program_id: ap_08954f6851b3b36aed2d5db8334165121d08dcc985b35bf191fa98f213398672
         program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/invocation}
         bindings: &bindings
           - parameter_id: question.store_ids

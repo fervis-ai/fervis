@@ -199,21 +199,30 @@ def test_model_turn_summary_projects_generic_explanation_fields() -> None:
         {
             EventPayloadKey.PURPOSE: ModelTurnPurpose.READ_ELIGIBILITY,
             EventPayloadKey.DERIVED_ARGUMENTS: lineage_explanation_metadata(
-                ("read_candidate_reviews", "*", "retention_basis"),
+                (
+                    "requested_fact_assessments",
+                    "*",
+                    "read_candidate_reviews",
+                    "*",
+                    "retention_basis",
+                ),
             ),
             EventPayloadKey.PARSED_ARGUMENTS: {
-                "read_candidate_reviews": [
-                    {
-                        "source_candidate_id": "source_1",
-                        "read_id": "list_area_list",
-                        "retention_basis": (
-                            "Area rows can ground the named London population scope."
-                        ),
-                        "relevant_row_path_tokens": ["source_1.row"],
-                        "relevant_field_tokens": ["name"],
-                        "decision": "RETAIN",
+                "requested_fact_assessments": {
+                    "fact_1": {
+                        "canonical_inputs": {},
+                        "read_candidate_reviews": {
+                            "source_1": {
+                                "retention_basis": (
+                                    "Area rows can ground the named London population scope."
+                                ),
+                                "relevant_row_path_tokens": ["source_1.row"],
+                                "relevant_field_tokens": ["name"],
+                                "retention_decision": "RETAIN",
+                            }
+                        },
                     }
-                ]
+                }
             },
         }
     )
@@ -224,12 +233,12 @@ def test_model_turn_summary_projects_generic_explanation_fields() -> None:
         ),
         StepSummaryItem(
             text=(
-                "source_1 list_area_list: RETAIN - rows=1 - fields=1 - "
+                "source_1: RETAIN - rows=1 - fields=1 - "
                 "Area rows can ground the named London population scope."
             ),
             detail=StepSummaryDetail.VERBOSE,
             is_explanation=True,
-            subject="source_1 list_area_list",
+            subject="source_1",
             disposition="RETAIN",
             basis="Area rows can ground the named London population scope.",
         ),
@@ -385,14 +394,18 @@ def test_enrichment_and_grounding_summaries_project_semantic_resolver_records() 
         {
             EventPayloadKey.PURPOSE: ModelTurnPurpose.GROUNDING,
             EventPayloadKey.PARSED_ARGUMENTS: {
-                "known_input_bindings": {
+                "known_input_binding_reviews": {
                     "fact_1_entity_1": {
-                        "selected_option_id": "bind_fact_1_entity_1_1",
-                        "input_value": "ABC Mall",
-                        "selection_basis": (
-                            "The resolver can search location records "
-                            "by the provided lookup text."
-                        ),
+                        "option_reviews": {
+                            "bind_fact_1_entity_1_1": {
+                                "resolver_fit_question": "Can this route resolve ABC Mall?",
+                                "because": (
+                                    "The resolver can search location records "
+                                    "by the provided lookup text."
+                                ),
+                                "decision": "CAN_RESOLVE_LOOKUP_TEXT",
+                            }
+                        }
                     }
                 }
             },
@@ -419,7 +432,7 @@ def test_enrichment_and_grounding_summaries_project_semantic_resolver_records() 
             payload={
                 "input_id": "fact_1_entity_1",
                 "resolver_read_id": "",
-                "resolver_label": "",
+                "resolver_label": "bind_fact_1_entity_1_1",
                 "basis": (
                     "The resolver can search location records "
                     "by the provided lookup text."

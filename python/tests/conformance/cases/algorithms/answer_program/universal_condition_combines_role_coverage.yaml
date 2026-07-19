@@ -1,0 +1,46 @@
+id: universal_condition_combines_role_coverage
+description: Universal-condition output carries the separately certified dimension and observation conditions.
+kind: algorithm
+algorithm: answer_program.population_coverage
+input:
+  question_contract: {$ref: ../../../fixtures/population_constraint_coverage.yaml#/question_contracts/products_available_in_every_store}
+  inputs:
+    - {id: active, value: active, entity_kind: store_status, key_component_id: status, canonical_value: active}
+    - {id: available, value: available, entity_kind: inventory_status, key_component_id: status, canonical_value: available}
+  relations:
+    - id: products
+      fields: [product_id]
+      identity_fields: [product_id]
+    - id: active_stores
+      fields: [store_id, status]
+      identity_fields: [store_id]
+      applied_inputs: [{input_id: active, field_id: status}]
+      coverage_claims: [{membership_test_id: active_store_dimension, role: operation_condition, proof_ref: returned_filter:active_stores.status}]
+    - id: inventory
+      fields: [product_id, store_id, available, expected_availability]
+      identity_fields: [product_id, store_id]
+      predicate_fields: [available, expected_availability]
+      entity_references:
+        - id: inventory_product
+          target_entity_kind: products
+          components: [{target_component_id: product_id, local_field_id: product_id}]
+        - id: inventory_store
+          target_entity_kind: active_stores
+          components: [{target_component_id: store_id, local_field_id: store_id}]
+      applied_inputs: [{input_id: available, field_id: available}]
+      coverage_claims: [{membership_test_id: observed_availability, role: operation_condition, proof_ref: returned_filter:inventory.available}]
+  operations:
+    - id: products_available_everywhere
+      output_relation: qualifying_products
+      spec:
+        kind: universal_condition
+        candidate_subject: {relation_id: products, role: universal_condition.candidate_subject, required_identity_fields: [product_id]}
+        required_dimension: {relation_id: active_stores, role: universal_condition.required_dimension, required_identity_fields: [store_id]}
+        observation: {relation_id: inventory, role: universal_condition.observation, required_identity_fields: [product_id, store_id]}
+        subject_keys: [{left: product_id, right: product_id}]
+        dimension_keys: [{left: store_id, right: store_id}]
+        predicate: {left: available, operator: equals, right: expected_availability}
+        output_fields: [{source: product_id, output: product_id}]
+  result: {relation_id: qualifying_products, field_id: product_id}
+expect:
+  result_contains: {status: accepted}

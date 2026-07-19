@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fervis.lookup.relation_catalog import RelationCatalog
+from fervis.lookup.relation_catalog.selection import EntityTargetResolverSelection
 from fervis.lookup.clarification import clarification_response_ref
 from fervis.lookup.conversation_resolution.compilation import (
     CompiledConversationResolution,
@@ -22,12 +23,9 @@ from fervis.lookup.grounding.model import (
     GroundingIssue,
     GroundingRequest,
     ExpectedInputIdentity,
-    InputBindingSelection,
 )
 from fervis.lookup.turn_prompts.context import HostPromptContext
 from fervis.lookup.grounding.turn import GroundingTurnResult, generate_grounding
-from fervis.lookup.lineage.source_reads import SourceReadLineageScope
-from fervis.lookup.source_reads.response import SourceReadFailedError
 from fervis.lookup.fact_planning.request import RuntimeValueContext
 from fervis.lookup.fact_plan.row_sources import build_row_source_catalog
 from fervis.lookup.question_contract import (
@@ -47,29 +45,15 @@ from .deterministic import (
 )
 from .model import GroundingOutput
 from .references import (
-    _execute_reference_selections,
     _reference_known_input_bindings,
-    _resolve_reference_tasks,
-    reference_binding_row_sources,
+    reference_binding_sources_by_known_input,
     reference_input_binding_tasks,
+    unresolved_reference_issues,
 )
 from .values import _dedupe_values, _grounded_value_id
 from fervis.lookup.clarification.model import (
     GroundingIdentityResponse,
 )
-
-
-class GroundingSourceReadError(RuntimeError):
-    def __init__(
-        self,
-        *,
-        source_read_error: SourceReadFailedError,
-        turn: GroundingTurnResult | None,
-    ) -> None:
-        self.source_read_error = source_read_error
-        self.turn = turn
-        self.usage = getattr(turn, "usage", {}) if turn is not None else {}
-        super().__init__(str(source_read_error))
 
 
 @dataclass(frozen=True)
@@ -90,8 +74,7 @@ def ground_question_inputs(
     question: str,
     question_contract: QuestionContract,
     full_catalog: RelationCatalog,
-    resolver_catalog: RelationCatalog,
-    data_access_port: Any,
+    resolver_selections: tuple[EntityTargetResolverSelection, ...],
     runtime_values: RuntimeValueContext | None,
     model_port: Any,
     provider: str,
@@ -100,7 +83,6 @@ def ground_question_inputs(
     conversation_context: dict[str, Any] | None = None,
     active_memory_ids: frozenset[str] | None = None,
     conversation_resolution: CompiledConversationResolution | None = None,
-    source_read_lineage: SourceReadLineageScope | None = None,
     host: HostPromptContext = HostPromptContext(),
     selected_input_ids: frozenset[str] | None = None,
     expected_input_identities: Mapping[str, ExpectedInputIdentity] | None = None,
@@ -111,10 +93,9 @@ def ground_question_inputs(
     issues: list[GroundingIssue] = []
     certifications: list[GroundedValueCertification] = []
     full_row_sources = build_row_source_catalog(full_catalog)
-    reference_grounding_sources = build_row_source_catalog(resolver_catalog)
-    input_binding_sources = reference_binding_row_sources(
+    input_binding_sources = reference_binding_sources_by_known_input(
         full_row_sources=full_row_sources,
-        resolver_row_sources=reference_grounding_sources,
+        resolver_selections=resolver_selections,
     )
     current_active_memory_ids = (
         active_memory_ids if active_memory_ids is not None else frozenset()
@@ -159,7 +140,8 @@ def ground_question_inputs(
 
     reference_tasks = reference_input_binding_tasks(
         question_contract,
-        resolver_row_sources=input_binding_sources,
+        resolver_catalog=full_catalog,
+        resolver_sources_by_known_input=input_binding_sources,
         expected_input_identities=expected_input_identities,
     )
     reference_tasks = tuple(
@@ -185,30 +167,14 @@ def ground_question_inputs(
             for task in reference_tasks
             if task.known_input_id not in identity_imports.known_input_ids
         )
-    try:
-        resolved_references = _resolve_reference_tasks(
-            reference_tasks,
-            full_catalog=full_catalog,
-            resolver_row_sources=input_binding_sources,
-            data_access_port=data_access_port,
-            source_read_lineage=source_read_lineage,
-        )
-    except SourceReadFailedError as exc:
-        raise GroundingSourceReadError(
-            source_read_error=exc,
-            turn=None,
-        ) from exc
-    values.extend(resolved_references.values)
-    certifications.extend(resolved_references.certifications)
-    issues.extend(resolved_references.issues)
     turn: GroundingTurnResult | None = None
-    selections: list[InputBindingSelection] = []
-    model_tasks = resolved_references.model_tasks
+    model_tasks = tuple(task for task in reference_tasks if task.options)
     if model_tasks or time_tasks:
         turn = generate_grounding(
             request=GroundingRequest(
                 question=question,
                 tasks=model_tasks,
+                resolver_catalog=full_catalog,
                 time_tasks=time_tasks,
                 conversation_context=dict(conversation_context or {}),
                 host=host,
@@ -228,25 +194,13 @@ def ground_question_inputs(
         uses.extend(time_ledger.uses)
         issues.extend(time_ledger.issues)
         certifications.extend(time_ledger.certifications)
-        selections.extend(turn.result.selections)
-    try:
-        reference_ledger = _execute_reference_selections(
-            selections=tuple(selections),
-            tasks=model_tasks,
-            full_catalog=full_catalog,
-            resolver_row_sources=input_binding_sources,
-            data_access_port=data_access_port,
-            source_read_lineage=source_read_lineage,
+    compatibilities = turn.result.compatibilities if turn is not None else ()
+    issues.extend(
+        unresolved_reference_issues(
+            reference_tasks,
+            compatibilities=compatibilities,
         )
-    except SourceReadFailedError as exc:
-        raise GroundingSourceReadError(
-            source_read_error=exc,
-            turn=turn,
-        ) from exc
-    values.extend(reference_ledger.values)
-    uses.extend(reference_ledger.uses)
-    issues.extend(reference_ledger.issues)
-    certifications.extend(reference_ledger.certifications)
+    )
 
     return GroundingOutput(
         ledger=CanonicalInputLedger(
@@ -255,6 +209,7 @@ def ground_question_inputs(
             issues=tuple(issues),
             certifications=tuple(certifications),
         ),
+        binding_tasks=reference_tasks,
         turn=turn,
     )
 

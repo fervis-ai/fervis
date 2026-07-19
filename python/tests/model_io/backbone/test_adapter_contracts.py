@@ -21,6 +21,7 @@ from fervis.lookup.question_contract import (
 )
 from fervis.lookup.question_contract.model import QuestionContractRequest
 from fervis.lookup.fact_planning.schema import build_fact_plan_schema
+from fervis.lookup.read_eligibility.schema import build_read_eligibility_schema
 from fervis.model_io.structured_output.errors import RequiredToolOutputError
 from fervis.model_io.structured_output.generation import (
     generate_one_of_tool_output,
@@ -1367,6 +1368,27 @@ def test_openai_adapter_strips_validator_only_schema_metadata():
     ) == (True, False, {"type": "string"})
 
 
+def test_openai_adapter_leaves_array_uniqueness_to_local_validation():
+    schema = {
+        "type": "array",
+        "items": {"type": "string", "enum": ["first", "second"]},
+        "minItems": 1,
+        "maxItems": 2,
+        "uniqueItems": True,
+    }
+
+    projected = openai_compatible_loop._openai_strict_schema(schema)
+
+    assert schema["uniqueItems"] is True
+    assert "uniqueItems" not in projected
+    assert projected == {
+        "type": "array",
+        "items": {"type": "string", "enum": ["first", "second"]},
+        "minItems": 1,
+        "maxItems": 2,
+    }
+
+
 def test_anthropic_adapter_projects_one_of_to_supported_strict_schema():
     runtime = AnthropicLoopRuntime(config=_anthropic_test_config())
     payload = runtime.request_payload(
@@ -1623,6 +1645,92 @@ def test_openai_accepts_source_binding_schema_nesting_depth():
     projected_schema = openai_compatible_loop._openai_strict_schema(spec.input_schema)
 
     assert _maximum_container_nesting(projected_schema) <= 10
+
+
+def test_openai_read_eligibility_schema_preserves_exact_backend_owned_coverage():
+    schema = build_read_eligibility_schema(
+        canonical_options_by_requested_fact_id={
+            "fact_1": (
+                {
+                    "known_input_id": "nairobi_qi_1",
+                    "interpretation_question": "What does Nairobi denote?",
+                    "canonical_options": (
+                        {"canonical_option_id": "area_primary_key"},
+                    ),
+                },
+            ),
+            "fact_2": (),
+        },
+        candidate_reviews_by_requested_fact_id={
+            "fact_1": (
+                {
+                    "source_candidate_id": "source_1",
+                    "read_id": "list_locations",
+                    "row_path_tokens": ("source_1.row.data",),
+                    "field_tokens": ("source_1.field.data.type",),
+                    "known_input_targets": (
+                        {
+                            "known_input_id": "nairobi_qi_1",
+                            "target_ids": ("list_locations.area_reference",),
+                        },
+                    ),
+                },
+                {
+                    "source_candidate_id": "source_2",
+                    "read_id": "list_areas",
+                    "row_path_tokens": ("source_2.row.data",),
+                    "field_tokens": ("source_2.field.data.name",),
+                    "known_input_targets": (
+                        {
+                            "known_input_id": "nairobi_qi_1",
+                            "target_ids": ("list_areas.primary_key",),
+                        },
+                    ),
+                },
+            ),
+            "fact_2": (
+                {
+                    "source_candidate_id": "source_3",
+                    "read_id": "list_sales",
+                    "row_path_tokens": ("source_3.row.data",),
+                    "field_tokens": ("source_3.field.data.amount",),
+                    "known_input_targets": (),
+                },
+            ),
+        },
+    )
+
+    projected = openai_compatible_loop._openai_strict_schema(schema)
+    assessments = projected["properties"]["requested_fact_assessments"]
+
+    assert assessments["type"] == "object"
+    assert assessments["required"] == ["fact_1", "fact_2"]
+    fact_1 = assessments["properties"]["fact_1"]
+    assert fact_1["properties"]["canonical_inputs"]["required"] == [
+        "nairobi_qi_1"
+    ]
+    assert fact_1["properties"]["read_candidate_reviews"]["required"] == [
+        "source_1",
+        "source_2",
+    ]
+    source_1 = fact_1["properties"]["read_candidate_reviews"]["properties"][
+        "source_1"
+    ]
+    retained_source_1 = next(
+        variant
+        for variant in source_1["anyOf"]
+        if variant["properties"]["retention_decision"]["enum"] == ["RETAIN"]
+    )
+    assert list(retained_source_1["properties"]) == [
+        "relevant_row_path_tokens",
+        "relevant_field_tokens",
+        "retention_basis",
+        "retention_decision",
+    ]
+    fact_2 = assessments["properties"]["fact_2"]
+    assert fact_2["properties"]["read_candidate_reviews"]["required"] == [
+        "source_3"
+    ]
 
 
 def _maximum_container_nesting(schema: object, *, depth: int = 0) -> int:

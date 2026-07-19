@@ -41,6 +41,29 @@ class ApiReadResponseShapeProjector:
 
     read: EndpointRead
 
+    def prompt_payload(
+        self,
+        *,
+        row_path_ids: Iterable[str] = (),
+        source_candidate_id: str = "",
+        include_evidence_tokens: bool = False,
+    ) -> dict[str, object]:
+        """Return the shared model-facing shape for one declared API read."""
+
+        return {
+            "read_id": self.read.id,
+            "endpoint_name": self.read.endpoint_name,
+            "resource_names": list(self.read.resource_names),
+            "input_params": self.input_params(
+                include_param_tokens=include_evidence_tokens
+            ),
+            "response_rows": self.response_rows(
+                row_path_ids=row_path_ids,
+                source_candidate_id=source_candidate_id,
+                include_evidence_tokens=include_evidence_tokens,
+            ),
+        }
+
     def input_params(
         self, *, include_param_tokens: bool = False
     ) -> list[dict[str, Any]]:
@@ -145,35 +168,7 @@ class ApiReadResponseShapeProjector:
             attributes.update(extra_attributes)
         lines = [f"<api_read{_xml_attrs(attributes)}>"]
         input_params = self.input_params(include_param_tokens=include_evidence_tokens)
-        if input_params:
-            lines.append(f"{indent}<input_params>")
-            for param in input_params:
-                attrs = {
-                    key: param[key]
-                    for key in (
-                        "name",
-                        "source",
-                        "type",
-                        "required",
-                        "param_ref",
-                        "param_token",
-                    )
-                    if key in param
-                }
-                lines.append(f"{indent * 2}<param{_xml_attrs(attrs)}>")
-                if param.get("choices"):
-                    lines.append(f"{indent * 3}<choices>")
-                    for choice in param.get("choices") or ():
-                        choice_attrs: dict[str, object] = {"value": choice}
-                        labels = param.get("choice_labels")
-                        if isinstance(labels, dict) and choice in labels:
-                            choice_attrs["label"] = labels[choice]
-                        lines.append(
-                            f"{indent * 4}<choice{_xml_attrs(choice_attrs)} />"
-                        )
-                    lines.append(f"{indent * 3}</choices>")
-                lines.append(f"{indent * 2}</param>")
-            lines.append(f"{indent}</input_params>")
+        lines.extend(_input_params_xml_lines(input_params, indent=indent))
         response_rows = self.response_rows(
             row_path_ids=row_path_ids,
             source_candidate_id=source_candidate_id,
@@ -242,7 +237,7 @@ class ApiReadResponseShapeProjector:
         include_evidence_tokens: bool,
     ) -> list[dict[str, Any]]:
         fields: list[dict[str, Any]] = []
-        seen: set[str] = set()
+        seen_paths: set[str] = set()
         blocked_field_refs = _blocked_field_refs(self.read)
         for field in self.read.fields:
             if field.ref in blocked_field_refs:
@@ -252,14 +247,16 @@ class ApiReadResponseShapeProjector:
             if _field_is_row_container(field_path=field.path, read=self.read):
                 continue
             field_id = _field_id(field.path)
-            if not field_id or field_id in seen:
+            if not field_id or field.path in seen_paths:
                 continue
-            seen.add(field_id)
+            seen_paths.add(field.path)
             payload: dict[str, Any] = {
                 "field_id": field_id,
                 "path": field.path,
                 "type": field.type,
             }
+            if field.choices:
+                payload["choices"] = list(field.choices)
             if include_evidence_tokens and source_candidate_id:
                 payload["evidence_token"] = _field_evidence_token(
                     source_candidate_id=source_candidate_id,
@@ -346,19 +343,29 @@ def _dedupe_name(value: object) -> str:
 
 
 def api_read_cards_xml(payload: dict[str, Any]) -> str:
-    lines = ["<candidate_api_reads>"]
+    lines = ["<read_eligibility_context>"]
     for group in payload.get("requested_fact_read_candidates") or ():
         if not isinstance(group, dict):
             continue
         lines.append(
             f"  <requested_fact id={_xml_quote(group.get('requested_fact_id'))}>"
         )
+        lines.extend(
+            _structured_xml_lines(
+                "answer_request",
+                group.get("answer_request"),
+                indent="    ",
+            )
+        )
+        lines.extend(_known_inputs_xml_lines(group.get("known_inputs"), indent="    "))
+        lines.append("    <candidate_api_reads>")
         for card in group.get("read_candidates") or ():
             if not isinstance(card, dict):
                 continue
-            lines.extend(_api_read_card_xml_lines(card, indent="    "))
+            lines.extend(_api_read_card_xml_lines(card, indent="      "))
+        lines.append("    </candidate_api_reads>")
         lines.append("  </requested_fact>")
-    lines.append("</candidate_api_reads>")
+    lines.append("</read_eligibility_context>")
     return "\n".join(lines)
 
 
@@ -390,6 +397,79 @@ def source_strategy_candidates_xml(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def grounding_binding_tasks_xml(payload: dict[str, Any]) -> str:
+    tasks = tuple(
+        task
+        for task in _array(payload.get("known_input_binding_tasks"))
+        if isinstance(task, Mapping)
+    )
+    lines = ["<known_input_binding_tasks>"]
+    question_text = next(
+        (task.get("question_text") for task in tasks if task.get("question_text")),
+        None,
+    )
+    if question_text:
+        lines.extend(_text_node_xml_lines("question_text", question_text, indent="  "))
+    for task in tasks:
+        task_attrs = {
+            "id": task.get("known_input_id"),
+            "known_input_text": task.get("known_input_text"),
+            "lookup_text": task.get("lookup_text"),
+            "field_label_text": task.get("field_label_text"),
+            "value_meaning_hint": task.get("value_meaning_hint"),
+        }
+        lines.append(f"  <known_input{_xml_attrs(task_attrs)}>")
+        shown_resource_types = _array(task.get("shown_resource_types"))
+        if shown_resource_types:
+            lines.append("    <shown_resource_types>")
+            for resource_type in shown_resource_types:
+                lines.extend(
+                    _text_node_xml_lines(
+                        "resource_type",
+                        resource_type,
+                        indent="      ",
+                    )
+                )
+            lines.append("    </shown_resource_types>")
+        for option in _array(task.get("binding_options")):
+            if not isinstance(option, Mapping):
+                continue
+            option_attrs = {
+                "id": option.get("binding_option_id"),
+                "purpose": option.get("purpose"),
+            }
+            lines.append(f"    <binding_option{_xml_attrs(option_attrs)}>")
+            lines.extend(
+                _text_node_xml_lines(
+                    "resource_type",
+                    option.get("resource_type"),
+                    indent="      ",
+                )
+            )
+            lines.extend(
+                _text_node_xml_lines(
+                    "resolver_fit_question",
+                    option.get("resolver_fit_question"),
+                    indent="      ",
+                )
+            )
+            api_read = option.get("api_read")
+            if isinstance(api_read, Mapping):
+                lines.extend(_resolver_api_read_xml_lines(api_read, indent="      "))
+            canonical_result = option.get("canonical_result")
+            if isinstance(canonical_result, Mapping):
+                lines.extend(
+                    _canonical_result_xml_lines(
+                        canonical_result,
+                        indent="      ",
+                    )
+                )
+            lines.append("    </binding_option>")
+        lines.append("  </known_input>")
+    lines.append("</known_input_binding_tasks>")
+    return "\n".join(lines)
+
+
 def source_alignment_reviews_xml(payload: dict[str, Any]) -> str:
     lines = ["<source_alignment_reviews>"]
     for group in payload.get("requested_fact_source_candidates") or ():
@@ -400,6 +480,9 @@ def source_alignment_reviews_xml(payload: dict[str, Any]) -> str:
         )
         lines.extend(
             _text_node_xml_lines("fact_text", group.get("fact_text"), indent="    ")
+        )
+        lines.extend(
+            _resolved_inputs_xml_lines(group.get("resolved_inputs"), indent="    ")
         )
         answer_outputs = tuple(
             item for item in group.get("answer_outputs") or () if isinstance(item, dict)
@@ -432,6 +515,57 @@ def source_alignment_reviews_xml(payload: dict[str, Any]) -> str:
         lines.append("  </requested_fact>")
     lines.append("</source_alignment_reviews>")
     return "\n".join(lines)
+
+
+def _resolved_inputs_xml_lines(inputs: object, *, indent: str) -> list[str]:
+    items = tuple(item for item in _array(inputs) if isinstance(item, dict))
+    if not items:
+        return []
+    lines = [f"{indent}<resolved_inputs>"]
+    for item in items:
+        attrs = {
+            "known_input_id": item.get("known_input_id"),
+            "source_text": item.get("source_text"),
+            "value_id": item.get("value_id"),
+            "kind": item.get("kind"),
+        }
+        lines.append(f"{indent}  <resolved_input{_xml_attrs(attrs)}>")
+        detail_attrs = _resolved_input_detail_attrs(item)
+        lines.append(f"{indent}    <{item.get('kind')}{_xml_attrs(detail_attrs)} />")
+        lines.append(f"{indent}  </resolved_input>")
+    lines.append(f"{indent}</resolved_inputs>")
+    return lines
+
+
+def _resolved_input_detail_attrs(item: dict[str, Any]) -> dict[str, object]:
+    detail_fields_by_kind = {
+        "identity": (
+            "entity_kind",
+            "key_id",
+            "key_components",
+            "display_value",
+        ),
+        "identity_set": (
+            "entity_kind",
+            "key_id",
+            "key_components",
+            "count",
+            "display_value",
+        ),
+        "time": ("resolved_start", "resolved_end"),
+        "literal": ("literal_type", "value"),
+        "named": ("text", "operator"),
+        "string_set": ("values",),
+    }
+    fields = detail_fields_by_kind.get(str(item.get("kind") or ""), ())
+    return {
+        field: (
+            _space_separated(item.get(field))
+            if field in {"key_components", "values"}
+            else item.get(field)
+        )
+        for field in fields
+    }
 
 
 def source_binding_candidates_xml(payload: dict[str, Any]) -> str:
@@ -529,12 +663,6 @@ def _api_read_card_xml_lines(card: dict[str, Any], *, indent: str) -> list[str]:
     lines.extend(
         _input_params_xml_lines(card.get("input_params"), indent=indent + "  ")
     )
-    lines.extend(
-        _applicable_known_inputs_xml_lines(
-            card.get("applicable_known_inputs"),
-            indent=indent + "  ",
-        )
-    )
     rows = tuple(
         row for row in card.get("response_rows") or () if isinstance(row, dict)
     )
@@ -577,6 +705,9 @@ def _source_member_xml_lines(member: dict[str, Any], *, indent: str) -> list[str
                 container_tag="evidence_items",
                 indent=indent + "  ",
             )
+        )
+        lines.extend(
+            _binding_params_xml_lines(member.get("params"), indent=indent + "  ")
         )
         if member.get("population_bindings"):
             lines.append(f"{indent}  <population_bindings>")
@@ -687,7 +818,7 @@ def _binding_params_xml_lines(params: object, *, indent: str) -> list[str]:
         binding_values = tuple(
             item
             for item in _array(param.get("binding_values"))
-            if isinstance(item, dict)
+            if isinstance(item, dict) and item.get("source") != "available_value"
         )
         if binding_values:
             lines.append(f"{indent}    <binding_values>")
@@ -779,9 +910,7 @@ def _row_predicates_xml_lines(predicates: object, *, indent: str) -> list[str]:
             "default": predicate.get("default"),
         }
         lines.append(f"{indent}  <predicate{_xml_attrs(attrs)}>")
-        values = tuple(
-            str(value) for value in _array(predicate.get("allowed_values"))
-        )
+        values = tuple(str(value) for value in _array(predicate.get("allowed_values")))
         if values:
             lines.append(f"{indent}    <values>")
             for value in values:
@@ -847,19 +976,162 @@ def _applied_filters_xml_lines(filters: object, *, indent: str) -> list[str]:
     return lines
 
 
-def _applicable_known_inputs_xml_lines(
-    inputs: object,
+def _known_inputs_xml_lines(known_inputs: object, *, indent: str) -> list[str]:
+    items = tuple(item for item in _array(known_inputs) if isinstance(item, dict))
+    if not items:
+        return []
+    lines = [f"{indent}<known_inputs>"]
+    for item in items:
+        attrs = {"id": item.get("id"), "role": item.get("role")}
+        lines.append(f"{indent}  <known_input{_xml_attrs(attrs)}>")
+        for key in (
+            "source_text",
+            "resolved_text",
+            "field_label_text",
+            "value_meaning_hint",
+            "interpretation_question",
+        ):
+            lines.extend(
+                _text_node_xml_lines(key, item.get(key), indent=indent + "    ")
+            )
+        lines.extend(
+            _canonical_options_xml_lines(
+                item.get("canonical_options"),
+                indent=indent + "    ",
+            )
+        )
+        lines.append(f"{indent}  </known_input>")
+    lines.append(f"{indent}</known_inputs>")
+    return lines
+
+
+def _canonical_options_xml_lines(
+    options: object,
     *,
     indent: str,
 ) -> list[str]:
-    input_items = tuple(item for item in _array(inputs) if isinstance(item, dict))
-    if not input_items:
+    items = tuple(item for item in _array(options) if isinstance(item, dict))
+    if not items:
         return []
-    lines = [f"{indent}<applicable_known_inputs>"]
-    for item in input_items:
-        lines.append(f"{indent}  <known_input{_xml_attrs(item)} />")
-    lines.append(f"{indent}</applicable_known_inputs>")
+    lines = [f"{indent}<canonical_options>"]
+    for item in items:
+        attrs = {
+            "id": item.get("id"),
+            "result": item.get("result"),
+            "canonical_value": item.get("canonical_value"),
+            "identifier_kind": item.get("identifier_kind"),
+        }
+        resolvers = tuple(
+            resolver
+            for resolver in _array(item.get("resolvers"))
+            if isinstance(resolver, Mapping)
+        )
+        if not resolvers:
+            lines.append(f"{indent}  <canonical_option{_xml_attrs(attrs)} />")
+            continue
+        lines.append(f"{indent}  <canonical_option{_xml_attrs(attrs)}>")
+        for resolver in resolvers:
+            lines.extend(_resolver_xml_lines(resolver, indent=indent + "    "))
+        lines.append(f"{indent}  </canonical_option>")
+    lines.append(f"{indent}</canonical_options>")
     return lines
+
+
+def _resolver_xml_lines(resolver: Mapping[str, object], *, indent: str) -> list[str]:
+    lines = [
+        f"{indent}<resolver{_xml_attrs({'option_id': resolver.get('binding_option_id')})}>"
+    ]
+    api_read = resolver.get("api_read")
+    if isinstance(api_read, Mapping):
+        lines.extend(_resolver_api_read_xml_lines(api_read, indent=indent + "  "))
+    lookup_parameters = tuple(
+        item
+        for item in _array(resolver.get("lookup_request_parameters"))
+        if isinstance(item, Mapping)
+    )
+    if lookup_parameters:
+        lines.append(f"{indent}  <lookup_request_parameters>")
+        for item in lookup_parameters:
+            lines.append(
+                f"{indent}    <parameter"
+                f"{_xml_attrs({'param_ref': item.get('param_ref'), 'source': item.get('source'), 'value': item.get('value')})} />"
+            )
+        lines.append(f"{indent}  </lookup_request_parameters>")
+    verification_fields = _array(resolver.get("returned_identity_verification_fields"))
+    if verification_fields:
+        lines.append(f"{indent}  <returned_identity_verification_fields>")
+        for field_path in verification_fields:
+            lines.append(f"{indent}    <field{_xml_attrs({'path': field_path})} />")
+        lines.append(f"{indent}  </returned_identity_verification_fields>")
+    canonical_result = resolver.get("canonical_result")
+    if isinstance(canonical_result, Mapping):
+        lines.extend(
+            _canonical_result_xml_lines(canonical_result, indent=indent + "  ")
+        )
+    lines.append(f"{indent}</resolver>")
+    return lines
+
+
+def _resolver_api_read_xml_lines(
+    api_read: Mapping[str, object],
+    *,
+    indent: str,
+) -> list[str]:
+    attrs = {
+        "read": api_read.get("read_id"),
+        "endpoint": api_read.get("endpoint_name"),
+        "resources": _space_separated(api_read.get("resource_names")),
+    }
+    lines = [f"{indent}<api_read{_xml_attrs(attrs)}>"]
+    lines.extend(
+        _input_params_xml_lines(api_read.get("input_params"), indent=indent + "  ")
+    )
+    response_rows = tuple(
+        row for row in _array(api_read.get("response_rows")) if isinstance(row, dict)
+    )
+    if response_rows:
+        lines.append(f"{indent}  <response>")
+        lines.extend(_response_row_xml_lines(response_rows, indent=indent + "    "))
+        lines.append(f"{indent}  </response>")
+    lines.append(f"{indent}</api_read>")
+    return lines
+
+
+def _canonical_result_xml_lines(
+    canonical_result: Mapping[str, object],
+    *,
+    indent: str,
+) -> list[str]:
+    attrs = {
+        "entity_kind": canonical_result.get("entity_kind"),
+        "key_id": canonical_result.get("key_id"),
+    }
+    lines = [f"{indent}<canonical_result{_xml_attrs(attrs)}>"]
+    for component in _array(canonical_result.get("components")):
+        if isinstance(component, Mapping):
+            lines.append(f"{indent}  <component{_xml_attrs(component)} />")
+    lines.append(f"{indent}</canonical_result>")
+    return lines
+
+
+def _structured_xml_lines(tag: str, value: object, *, indent: str) -> list[str]:
+    if isinstance(value, Mapping):
+        lines = [f"{indent}<{tag}>"]
+        for key, child in value.items():
+            lines.extend(_structured_xml_lines(str(key), child, indent=indent + "  "))
+        lines.append(f"{indent}</{tag}>")
+        return lines
+    if isinstance(value, list | tuple):
+        lines = [f"{indent}<{tag}>"]
+        item_tag = tag[:-1] if tag.endswith("s") else "item"
+        for item in value:
+            lines.extend(_structured_xml_lines(item_tag, item, indent=indent + "  "))
+        lines.append(f"{indent}</{tag}>")
+        return lines
+    if value is None:
+        return []
+    text = str(value).lower() if isinstance(value, bool) else str(value)
+    return [f"{indent}<{tag}>{escape(text)}</{tag}>"]
 
 
 def _population_roles_xml_lines(roles: object, *, indent: str) -> list[str]:
@@ -926,7 +1198,21 @@ def _input_params_xml_lines(params: object, *, indent: str) -> list[str]:
             )
             if key in param
         }
-        lines.append(f"{indent}  <param{_xml_attrs(attrs)} />")
+        choices = tuple(str(choice) for choice in _array(param.get("choices")))
+        if not choices:
+            lines.append(f"{indent}  <param{_xml_attrs(attrs)} />")
+            continue
+        lines.append(f"{indent}  <param{_xml_attrs(attrs)}>")
+        labels = param.get("choice_labels")
+        choice_labels = labels if isinstance(labels, Mapping) else {}
+        lines.extend(
+            _choices_xml_lines(
+                choices,
+                labels=choice_labels,
+                indent=indent + "    ",
+            )
+        )
+        lines.append(f"{indent}  </param>")
     lines.append(f"{indent}</input_params>")
     return lines
 
@@ -995,12 +1281,34 @@ def _row_xml_lines(
             "type": field.get("type"),
             "evidence_token": field.get("evidence_token"),
         }
-        lines.append(f"{indent}  <field{_xml_attrs(field_attrs)} />")
+        choices = tuple(str(choice) for choice in _array(field.get("choices")))
+        if not choices:
+            lines.append(f"{indent}  <field{_xml_attrs(field_attrs)} />")
+            continue
+        lines.append(f"{indent}  <field{_xml_attrs(field_attrs)}>")
+        lines.extend(_choices_xml_lines(choices, indent=indent + "    "))
+        lines.append(f"{indent}  </field>")
     for child in rows_by_parent.get(str(row.get("path") or ""), ()):
         lines.extend(
             _row_xml_lines(child, rows_by_parent=rows_by_parent, indent=indent + "  ")
         )
     lines.append(f"{indent}</row>")
+    return lines
+
+
+def _choices_xml_lines(
+    choices: tuple[str, ...],
+    *,
+    indent: str,
+    labels: Mapping[object, object] | None = None,
+) -> list[str]:
+    lines = [f"{indent}<choices>"]
+    for choice in choices:
+        attrs: dict[str, object] = {"value": choice}
+        if labels is not None and choice in labels:
+            attrs["label"] = labels[choice]
+        lines.append(f"{indent}  <choice{_xml_attrs(attrs)} />")
+    lines.append(f"{indent}</choices>")
     return lines
 
 

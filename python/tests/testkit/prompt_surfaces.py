@@ -30,8 +30,8 @@ PROMPT_SURFACE_CONTRACTS = {
         "instruction_headings": (
             "Grounding Objective",
             "Time Resolution",
-            "Resolver Selection",
-            "Copying And Validity",
+            "Resolver Compatibility",
+            "Output Shape",
             "Output",
         ),
     },
@@ -98,6 +98,8 @@ PROMPT_SURFACE_CONTRACTS = {
         "path": LOOKUP_ROOT / "read_eligibility" / "prompt.py",
         "instruction_headings": (
             "Task Boundary",
+            "Read Assessment Before Canonical Interpretation",
+            "Canonical Interpretation",
             "Conversation Resolution",
             "Retention Rules",
             "Output Shape",
@@ -110,6 +112,7 @@ PROMPT_SURFACE_CONTRACTS = {
         "instruction_headings": (
             "Source Binding",
             "Source Population And Fulfillment",
+            "Resolved Input Application",
             "Param Binding",
             "Row Predicates",
             "Finite Choice Review Shape",

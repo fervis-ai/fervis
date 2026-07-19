@@ -237,6 +237,15 @@ def test_grouped_aggregate_provider_schema_requires_expression_group_key():
     assert grouped_branch["required"] == ["family", "group_key"]
 
 
+def test_group_key_rejects_repeated_question_inputs():
+    with pytest.raises(ValueError, match="group key repeats question input"):
+        RequestedFactGroupKey(
+            description="staff member",
+            domain=GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS,
+            question_input_refs=("qi_staff_1", "qi_staff_1"),
+        )
+
+
 def test_grouped_aggregate_serializes_group_key_on_answer_expression():
     fact = RequestedFact(
         id="fact_1",

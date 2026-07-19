@@ -24,6 +24,9 @@ input:
       source:
         kind: api_read
         read_id: records
+        param_bindings:
+          - param_id: selector
+            value_id: alpha
       fields:
         - field_id: data_entity_id
           roles: [identity]
@@ -31,14 +34,6 @@ input:
     - id: alpha
       kind: named
       text: Alpha
-  grounded_input_uses:
-    - id: grounded_use_alpha_selector_value
-      value_id: alpha
-      row_source:
-        read_id: records
-        row_path_id: root
-      param_id: selector
-      value_component: value
 expect:
   result_contains:
     endpoint_args:

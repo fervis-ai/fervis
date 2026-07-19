@@ -21,17 +21,14 @@ input:
       source:
         kind: api_read
         read_id: records
+        param_bindings:
+          - param_id: status
+            value_id: status
   values:
     - id: status
       kind: literal
       literal_type: string
       value: PLACED
-  grounded_input_uses:
-    - id: grounded_use_status_status_value
-      value_id: status
-      row_source: {read_id: records, row_path_id: root}
-      param_id: status
-      value_component: value
 expect:
   result_contains:
     endpoint_args:

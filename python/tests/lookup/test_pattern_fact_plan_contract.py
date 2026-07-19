@@ -1484,7 +1484,7 @@ class _OpaqueSourceHandlePlannerPort(_PlannerPort):
                             "binding_target_id": binding_target_id,
                             "answer_population": source_candidate_answer_population(
                                 prompt,
-                                source_candidate_id=candidate_id,
+                                binding_target_id=binding_target_id,
                             ),
                             "fulfillment_decisions": (
                                 source_fulfills_fields_for_candidate(
@@ -1690,7 +1690,7 @@ class _TwoAnswerOutputPlannerPort(_PlannerPort):
                             "binding_target_id": binding_target_id,
                             "answer_population": source_candidate_answer_population(
                                 prompt,
-                                source_candidate_id=candidate_id,
+                                binding_target_id=binding_target_id,
                             ),
                             "fulfillment_decisions": {
                                 **source_fulfills_for_candidate(
@@ -1886,7 +1886,7 @@ class _SameScopeFieldPlannerPort:
                             "binding_target_id": binding_target_id,
                             "answer_population": source_candidate_answer_population(
                                 prompt,
-                                source_candidate_id=candidate_id,
+                                binding_target_id=binding_target_id,
                             ),
                             "fulfillment_decisions": _same_scope_fulfillment_decisions(
                                 candidate,

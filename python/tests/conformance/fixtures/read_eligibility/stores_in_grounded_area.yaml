@@ -38,6 +38,7 @@ catalog:
           path: data.type
           row_path_id: data
           type: choice
+          choices: [STORE, WAREHOUSE]
         - ref: field.location.data.area.area_id
           path: data.area.area_id
           row_path_id: data
@@ -62,13 +63,76 @@ catalog:
     - id: list_area_list
       endpoint_name: list_area_list
       resource_names: [area]
+      params:
+        - ref: list_area_list.query.name
+          name: name
+          source: query
+          type: string
+        - ref: list_area_list.query.kind
+          name: kind
+          source: query
+          type: choice
+          choices: [CITY, REGION]
+      row_paths:
+        - id: data
+          path: data
+          cardinality: many
       fields:
-        - {ref: field.area.data.area_id, path: data.area_id, type: string}
+        - {ref: field.area.data.area_id, path: data.area_id, row_path_id: data, type: string}
+        - {ref: field.area.data.name, path: data.name, row_path_id: data, type: string}
+        - {ref: field.area.data.kind, path: data.kind, row_path_id: data, type: choice, choices: [CITY, REGION]}
       candidate_keys:
         - id: primary_key
           entity_kind: area
           primary: true
           components:
             - {id: area_id, field_ref: field.area.data.area_id}
+          context_field_refs: [field.area.data.name]
+    - id: list_store_list
+      endpoint_name: list_store_list
+      resource_names: [store]
+      params:
+        - ref: list_store_list.query.name
+          name: name
+          source: query
+          type: string
+      row_paths:
+        - id: data
+          path: data
+          cardinality: many
+      fields:
+        - {ref: field.store.data.store_id, path: data.store_id, row_path_id: data, type: string}
+        - {ref: field.store.data.name, path: data.name, row_path_id: data, type: string}
+      candidate_keys:
+        - id: primary_key
+          entity_kind: store
+          primary: true
+          components:
+            - {id: store_id, field_ref: field.store.data.store_id}
+          context_field_refs: [field.store.data.name]
+    - id: list_store_summary
+      endpoint_name: list_store_summary
+      row_paths:
+        - id: data
+          path: data
+          cardinality: many
+      fields:
+        - {ref: field.store_summary.data.summary_id, path: data.summary_id, row_path_id: data, type: string}
+        - {ref: field.store_summary.data.area_id, path: data.area_id, row_path_id: data, type: string}
+        - {ref: field.store_summary.data.store_count, path: data.store_count, row_path_id: data, type: integer}
+      candidate_keys:
+        - id: primary_key
+          entity_kind: store_summary
+          primary: true
+          components:
+            - {id: summary_id, field_ref: field.store_summary.data.summary_id}
+      entity_references:
+        - id: area_reference
+          target_entity_kind: area
+          target_key_id: primary_key
+          components:
+            - {target_component_id: area_id, local_field_ref: field.store_summary.data.area_id}
 selected_read_ids_by_fact:
   fact_1: [list_location_list]
+compatible_resolver_reads_by_known_input:
+  qi1: [list_area_list]

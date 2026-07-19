@@ -5,6 +5,8 @@ algorithm: source_binding.row_predicate_parse
 input:
   request:
     mode: scoped_review_owned_input_row_only
+  resolved_input_applications:
+    - {target_kind: request_parameter, target_id: staff_id, value_id: staff_identity_1, value_component: canonical_key}
   row_predicates:
     is_deleted:
       "false":

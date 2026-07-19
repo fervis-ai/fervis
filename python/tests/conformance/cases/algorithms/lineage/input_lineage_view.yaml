@@ -105,11 +105,12 @@ input:
         compile_step_id: step_execute
         execute_step_id: step_execute
         payload_schema: fervis.execution_proof_graph
-        payload_schema_rev: 1
+        payload_schema_rev: 2
         payload_json:
           nodes:
             - id: endpoint_arg:source_1.data.area_id
               kind: endpoint_arg
+              population_coverage: {row_tests: [], condition_tests: []}
               proof_refs:
                 - known_input:London
                 - source_read:source_read_1
@@ -117,6 +118,7 @@ input:
               value: area_123
             - id: row_filter:source_1.data.is_open
               kind: row_filter
+              population_coverage: {row_tests: [], condition_tests: []}
               proof_refs:
                 - source_read:source_read_1
               label: is_open=true
@@ -124,29 +126,36 @@ input:
               value: true
             - id: relation:source_1
               kind: relation
+              population_coverage: {row_tests: [], condition_tests: []}
               proof_refs:
                 - source_read:source_read_1
             - id: operation:op_1
               kind: operation
+              population_coverage: {row_tests: [], condition_tests: []}
               proof_refs: []
             - id: answer_output:fact_1:count
               kind: answer_output
+              population_coverage: {row_tests: [], condition_tests: []}
               proof_refs: []
             - id: endpoint_arg:source_2.data.month
               kind: endpoint_arg
+              population_coverage: {row_tests: [], condition_tests: []}
               proof_refs:
                 - known_input:last_month
               label: month=2026-05
               value: "2026-05"
             - id: relation:source_2
               kind: relation
+              population_coverage: {row_tests: [], condition_tests: []}
               proof_refs:
                 - source_read:unrelated_source_read
             - id: operation:unrelated
               kind: operation
+              population_coverage: {row_tests: [], condition_tests: []}
               proof_refs: []
             - id: answer_output:fact_1:unrelated
               kind: answer_output
+              population_coverage: {row_tests: [], condition_tests: []}
               proof_refs: []
           edges:
             - source: endpoint_arg:source_1.data.area_id

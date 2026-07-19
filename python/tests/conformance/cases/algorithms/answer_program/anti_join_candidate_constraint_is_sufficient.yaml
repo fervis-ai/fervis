@@ -1,0 +1,32 @@
+id: anti_join_candidate_constraint_is_sufficient
+description: Constraining anti-join candidates is sufficient when the observed relation is complete and unfiltered.
+kind: algorithm
+algorithm: answer_program.population_coverage
+input:
+  question_contract: {$ref: ../../../fixtures/population_constraint_coverage.yaml#/question_contracts/named_staff_without_sales}
+  inputs: [{id: nadia, value: Nadia, entity_kind: staff, key_component_id: staff_id, canonical_value: staff-nadia}]
+  relations:
+    - id: staff
+      fields: [staff_id]
+      identity_fields: [staff_id]
+      applied_inputs: [{input_id: nadia, field_id: staff_id}]
+      coverage_claims: [{membership_test_id: named_nadia, role: row_population, proof_ref: returned_filter:staff.staff_id}]
+    - id: sales
+      fields: [staff_id]
+      identity_fields: [staff_id]
+      entity_references:
+        - id: sale_staff
+          target_entity_kind: staff
+          components: [{target_component_id: staff_id, local_field_id: staff_id}]
+  operations:
+    - id: staff_without_sales
+      output_relation: remaining_staff
+      spec:
+        kind: anti_join
+        candidate: {relation_id: staff, role: anti_join.candidate, required_identity_fields: [staff_id]}
+        observed: {relation_id: sales, role: anti_join.observed, required_identity_fields: [staff_id]}
+        join_keys: [{left: staff_id, right: staff_id}]
+        output_fields: [{source: staff_id, output: staff_id}]
+  result: {relation_id: remaining_staff, field_id: staff_id}
+expect:
+  result_contains: {status: accepted}

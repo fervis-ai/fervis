@@ -205,7 +205,7 @@ def _openai_strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
         return _openai_tuple_array_schema(schema)
     transformed: dict[str, Any] = {}
     for key, value in schema.items():
-        if key in {"allOf", "contains", "modelSchemas"}:
+        if key in {"allOf", "contains", "modelSchemas", "uniqueItems"}:
             continue
         if key == "const":
             transformed["enum"] = [value]

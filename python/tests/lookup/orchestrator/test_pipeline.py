@@ -15,7 +15,6 @@ from fervis.lineage.recorder import (
     RunStepWrite,
     SourceReadWrite,
 )
-from fervis.lineage.step_summary import step_semantic_items_from_json
 from fervis.lookup.lineage.steps import LineageRuntimeStepSink
 from fervis.lookup.lineage.errors import LineagePersistenceUnavailable
 from fervis.lookup.relation_catalog import CatalogEndpointMetadata
@@ -797,7 +796,7 @@ def _finite_choice_param_review(
     }
 
 
-def test_lookup_allows_omitted_optional_default_finite_choice_param():
+def test_lookup_requires_explicit_optional_default_finite_choice_decision():
     read_id = "sales_summary"
     plan = FactPlan(
         outcome=_answer_plan(
@@ -873,7 +872,7 @@ def test_lookup_allows_omitted_optional_default_finite_choice_param():
             ),
         )
     )
-    planner = _OmitOptionalDefaultChoicePlannerPort(
+    planner = _UseOptionalDefaultChoicePlannerPort(
         plan=plan,
         eligible_read_id=read_id,
     )
@@ -887,7 +886,7 @@ def test_lookup_allows_omitted_optional_default_finite_choice_param():
     result = run_lookup_question(
         LookupRequest(
             question="What was total sales revenue?",
-            run_id="run_optional_default_choice_omitted",
+            run_id="run_optional_default_choice_selected",
             tenant_id="tenant_1",
             provider_preferences={"provider": "fake", "modelKey": "FAKE"},
         ),
@@ -1165,38 +1164,12 @@ class _ProviderAuthFailurePlannerPort:
         raise _ProviderAuthError("authentication failed")
 
 
-def _read_eligibility_fact_context(
-    prompt: str,
-) -> dict[str, dict[str, tuple[str, ...]]]:
-    requested_facts = _prompt_json_section(prompt, "Requested facts")["requested_facts"]
-    output: dict[str, dict[str, tuple[str, ...]]] = {}
-    for fact in requested_facts:
-        fact_id = str(fact.get("requested_fact_id") or "")
-        answer_request = fact.get("answer_request") or {}
-        answer_population = answer_request.get("answer_population") or {}
-        output[fact_id] = {
-            "answer_output_ids": tuple(
-                str(item.get("answer_output_id") or "")
-                for item in fact.get("answer_outputs") or ()
-                if str(item.get("answer_output_id") or "")
-            ),
-            "membership_test_ids": tuple(
-                str(item.get("test_id") or "")
-                for item in answer_population.get("membership_tests") or ()
-                if str(item.get("test_id") or "")
-            ),
-        }
-    return output
-
-
 def _test_retained_read_candidate(
     *,
     card: dict[str, object],
-    fact_context: dict[str, tuple[str, ...]],
     field_paths: tuple[str, ...],
     retention_basis: str,
 ) -> dict[str, object]:
-    del fact_context
     source_candidate_id = str(card["source_candidate_id"])
     read_id = str(card["read_id"])
     tokens_by_path = {
@@ -1224,38 +1197,34 @@ def _test_retained_read_candidate(
 def _read_eligibility_assessments_by_requested_fact(
     *,
     requested_fact_id: str,
-    fact_context: dict[str, tuple[str, ...]],
     candidate_cards: list[dict[str, object]],
     retained_candidates: list[dict[str, object]],
-) -> list[dict[str, object]]:
+) -> dict[str, dict[str, object]]:
     retained_by_source_id = {
         str(candidate["source_candidate_id"]): candidate
         for candidate in retained_candidates
     }
-    del fact_context
-    read_candidate_reviews = []
+    read_candidate_reviews: dict[str, dict[str, object]] = {}
     for card in candidate_cards:
         source_candidate_id = str(card["source_candidate_id"])
         retained = retained_by_source_id.get(source_candidate_id)
         if retained is not None:
-            read_candidate_reviews.append(retained)
-            continue
-        read_candidate_reviews.append(
-            {
-                "source_candidate_id": source_candidate_id,
-                "read_id": str(card["read_id"]),
-                "relevant_row_path_tokens": [],
-                "relevant_field_tokens": [],
-                "retention_basis": "This read was not retained for the requested fact.",
-                "retention_decision": "DROP",
+            read_candidate_reviews[source_candidate_id] = {
+                key: value
+                for key, value in retained.items()
+                if key not in {"source_candidate_id", "read_id"}
             }
-        )
-    return [
-        {
-            "requested_fact_id": requested_fact_id,
+            continue
+        read_candidate_reviews[source_candidate_id] = {
+            "retention_basis": "This read was not retained for the requested fact.",
+            "retention_decision": "DROP",
+        }
+    return {
+        requested_fact_id: {
+            "canonical_inputs": {},
             "read_candidate_reviews": read_candidate_reviews,
         }
-    ]
+    }
 
 
 @dataclass
@@ -1287,14 +1256,13 @@ class _ReadEligibilityPlannerPort(_PlannerPort):
         self.system_prompts.append(system_prompt)
         self.prompts.append(prompt)
         self.read_eligibility_prompt = prompt
-        read_cards = _prompt_json_section(prompt, "Candidate API reads")[
-            "requested_fact_read_candidates"
-        ]
-        facts_by_id = _read_eligibility_fact_context(prompt)
-        requested_fact_assessments = []
+        read_cards = _read_eligibility_prompt_json_section(
+            prompt,
+            label="Candidate API reads",
+        )["requested_fact_read_candidates"]
+        requested_fact_assessments: dict[str, dict[str, object]] = {}
         for fact_group in read_cards:
             requested_fact_id = fact_group["requested_fact_id"]
-            fact_context = facts_by_id[requested_fact_id]
             candidate_cards = list(fact_group["read_candidates"])
             retained_candidates = []
             for card in candidate_cards:
@@ -1311,17 +1279,15 @@ class _ReadEligibilityPlannerPort(_PlannerPort):
                     retained_candidates.append(
                         _test_retained_read_candidate(
                             card=card,
-                            fact_context=fact_context,
                             field_paths=tuple(field_paths),
                             retention_basis=(
                                 "total_revenue provides the requested revenue."
                             ),
                         )
                     )
-            requested_fact_assessments.extend(
+            requested_fact_assessments.update(
                 _read_eligibility_assessments_by_requested_fact(
                     requested_fact_id=requested_fact_id,
-                    fact_context=fact_context,
                     candidate_cards=candidate_cards,
                     retained_candidates=retained_candidates,
                 )
@@ -1374,14 +1340,13 @@ class _DocstringAmbiguousReadEligibilityPlannerPort(_ReadEligibilityPlannerPort)
         self.system_prompts.append(system_prompt)
         self.prompts.append(prompt)
         self.read_eligibility_prompt = prompt
-        read_cards = _prompt_json_section(prompt, "Candidate API reads")[
-            "requested_fact_read_candidates"
-        ]
-        facts_by_id = _read_eligibility_fact_context(prompt)
-        requested_fact_assessments = []
+        read_cards = _read_eligibility_prompt_json_section(
+            prompt,
+            label="Candidate API reads",
+        )["requested_fact_read_candidates"]
+        requested_fact_assessments: dict[str, dict[str, object]] = {}
         for fact_group in read_cards:
             requested_fact_id = fact_group["requested_fact_id"]
-            fact_context = facts_by_id[requested_fact_id]
             candidate_cards = list(fact_group["read_candidates"])
             retained_candidates = []
             for card in candidate_cards:
@@ -1401,17 +1366,15 @@ class _DocstringAmbiguousReadEligibilityPlannerPort(_ReadEligibilityPlannerPort)
                     retained_candidates.append(
                         _test_retained_read_candidate(
                             card=card,
-                            fact_context=fact_context,
                             field_paths=tuple(field_paths),
                             retention_basis=(
                                 "The docstring and fields show plausible support."
                             ),
                         )
                     )
-            requested_fact_assessments.extend(
+            requested_fact_assessments.update(
                 _read_eligibility_assessments_by_requested_fact(
                     requested_fact_id=requested_fact_id,
-                    fact_context=fact_context,
                     candidate_cards=candidate_cards,
                     retained_candidates=retained_candidates,
                 )
@@ -1436,7 +1399,7 @@ class _DocstringAmbiguousReadEligibilityPlannerPort(_ReadEligibilityPlannerPort)
 
 
 @dataclass
-class _OmitOptionalDefaultChoicePlannerPort(_ReadEligibilityPlannerPort):
+class _UseOptionalDefaultChoicePlannerPort(_ReadEligibilityPlannerPort):
     def generate(
         self,
         *,
@@ -1467,6 +1430,12 @@ class _OmitOptionalDefaultChoicePlannerPort(_ReadEligibilityPlannerPort):
             source_candidate_id="source_1",
             plan_shape="list_rows",
         )
+        granularity_options = _source_candidate_param_decision_options(prompt)[
+            "source_1"
+        ]["granularity"]
+        default_decision_id = granularity_options["non_bind_decision_id"]
+        assert granularity_options["omit_decision"] == "use_default"
+        assert default_decision_id
         arguments = source_binding_payload_for_one_call(
             {
                 "outcome": {
@@ -1494,7 +1463,17 @@ class _OmitOptionalDefaultChoicePlannerPort(_ReadEligibilityPlannerPort):
                                     ),
                                 }
                             },
-                            "param_decisions": {},
+                            "param_decisions": {
+                                "granularity": {
+                                    "population_intent": (
+                                        "Use the declared granularity default."
+                                    ),
+                                    "match_basis_explanation": (
+                                        "The declared default is accepted for this source."
+                                    ),
+                                    "param_decision_id": default_decision_id,
+                                }
+                            },
                             "row_predicate_reviews": {},
                             "finite_choice_param_reviews": {},
                         },
@@ -1520,7 +1499,7 @@ class _OmitOptionalDefaultChoicePlannerPort(_ReadEligibilityPlannerPort):
         }
 
 
-def test_lookup_unresolved_named_entity_returns_resource_specific_clarification():
+def test_lookup_selected_canonical_resolver_runs_without_a_read_target():
     planner = _ToolNamePlannerPort(
         responses={
             "submit_question_contract_outcome": _question_contract_response(
@@ -1551,20 +1530,9 @@ def test_lookup_unresolved_named_entity_returns_resource_specific_clarification(
                     }
                 ],
             ),
-            "submit_grounding": {
-                "known_time_resolutions": {},
-                "known_input_bindings": {
-                    "fact_1_entity_1": {
-                        "selected_option_id": "bind_fact_1_entity_1_1",
-                        "input_value": "Nextgen",
-                        "result_kind": "canonical_identity",
-                        "matched_field_ref": "field.name",
-                        "selection_basis": "The selected location name field is the supplied store reference.",
-                    }
-                },
-            },
         }
     )
+    data_access = _DataAccessPort({"list_location_list": {"data": []}})
     ports = LookupRuntimePorts(
         relation_catalog_port=_CatalogPort(
             _catalog(
@@ -1618,7 +1586,7 @@ def test_lookup_unresolved_named_entity_returns_resource_specific_clarification(
                 )
             )
         ),
-        data_access_port=_DataAccessPort({"list_location_list": {"data": []}}),
+        data_access_port=data_access,
         planner_model_port=planner,
     )
 
@@ -1637,13 +1605,17 @@ def test_lookup_unresolved_named_entity_returns_resource_specific_clarification(
     )
 
     assert result.status == "NEEDS_CLARIFICATION", result
-    assert (
-        result.answer == 'I could not find store "Nextgen". Which store should I use?'
-    )
+    assert data_access.requests == [
+        {
+            "endpointName": "list_location_list",
+            "args": {"list_location_list.query.name": "Nextgen"},
+        }
+    ]
     assert planner.tool_names == [
         "submit_question_contract_outcome",
         "submit_query_enrichment",
         "submit_grounding",
+        "submit_read_eligibility",
     ]
 
 
@@ -1654,9 +1626,10 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
             tool_name = tool_specs[0].name if tool_specs else ""
             if tool_name == "submit_source_binding":
                 from tests.lookup.source_binding_helpers import (
-                    source_candidate_answer_population,
-                    source_candidate_with_fields,
-                    source_fulfills_for_candidate,
+                        source_candidate_answer_population,
+                        source_candidate_with_fields,
+                        resolved_input_applications_for_target,
+                        source_fulfills_for_candidate,
                     source_binding_target_id_for_candidate,
                 )
 
@@ -1680,15 +1653,32 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
                                 "binding_target_id": binding_target_id,
                                 "answer_population": source_candidate_answer_population(
                                     prompt,
-                                    source_candidate_id=candidate[
-                                        "source_candidate_id"
-                                    ],
+                                    binding_target_id=binding_target_id,
                                 ),
                                 "fulfillment_decisions": source_fulfills_for_candidate(
                                     candidate,
                                     field_ids=("staff_id",),
                                 ),
                                 "param_decisions": {},
+                                "resolved_input_applications": (
+                                    resolved_input_applications_for_target(
+                                        prompt,
+                                        binding_target_id=binding_target_id,
+                                        selections=(
+                                            {
+                                                "value_id": (
+                                                    "grounded_fact_1_entity_1_staff_"
+                                                    "staff_key_staff_id_staff_1"
+                                                ),
+                                                "value_component": "canonical_key",
+                                                "target_kind": "returned_identity",
+                                                "target_id": (
+                                                    "source_1.data.key.staff_key"
+                                                ),
+                                            },
+                                        ),
+                                    )
+                                ),
                             },
                         },
                     }
@@ -1717,6 +1707,13 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
             return super().generate(**kwargs)
 
     planner = _NoisyResolverPlannerPort(
+        read_eligibility_retention_specs=(
+            ReadEligibilityRetentionSpec(
+                requested_fact_id="fact_1",
+                read_id="staff_list",
+                known_input_resolver_results=(("fact_1_entity_1", "staff:staff_key"),),
+            ),
+        ),
         responses={
             "submit_question_contract_outcome": _question_contract_response(
                 subject="Jane Doe staff ID",
@@ -1765,7 +1762,7 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
                     ],
                 }
             },
-        }
+        },
     )
     ports = LookupRuntimePorts(
         relation_catalog_port=_CatalogPort(
@@ -1828,7 +1825,7 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
     assert ports.data_access_port.requests == [
         {
             "endpointName": "list_staff_list",
-            "args": {},
+            "args": {"list_staff_list.query.name": "Jane Doe"},
         },
         {
             "endpointName": "list_staff_list",
@@ -1837,14 +1834,33 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
     ]
 
 
-def test_lookup_grounding_executes_ambiguous_resolver_routes_before_source_binding():
+def test_lookup_read_eligibility_executes_only_selected_ambiguous_resolver_route():
     planner = _ToolNamePlannerPort(
         read_eligibility_retention_specs=(
             ReadEligibilityRetentionSpec(
                 requested_fact_id="fact_1",
                 read_id="sales",
                 row_path_ids=("data",),
+                known_input_resolver_results=(
+                    ("fact_1_entity_1", "location:primary_key"),
+                ),
             ),
+        ),
+        source_binding_invocation_overrides=(
+            {
+                "requested_fact_id": "fact_1",
+                "resolved_input_applications": (
+                    {
+                        "value_id": (
+                            "grounded_fact_1_entity_1_location_primary_key_"
+                            "location_id_loc_1"
+                        ),
+                        "value_component": "canonical_key",
+                        "target_kind": "request_parameter",
+                        "target_id": "location_id",
+                    },
+                ),
+            },
         ),
         responses={
             "submit_question_contract_outcome": _question_contract_response(
@@ -1858,7 +1874,7 @@ def test_lookup_grounding_executes_ambiguous_resolver_routes_before_source_bindi
                         "source": "question_context",
                         "source_text": "ABC Mall",
                         "role": LiteralInputRole.REFERENCE_VALUE.value,
-                        "value_meaning_hint": "store location",
+                        "value_meaning_hint": "location",
                         "resolved_value_text": "ABC Mall",
                     },
                 ),
@@ -1877,19 +1893,24 @@ def test_lookup_grounding_executes_ambiguous_resolver_routes_before_source_bindi
                     }
                 ],
             ),
-            "submit_source_binding": {
+            "submit_pattern_fact_plan": {
                 "outcome": {
-                    "kind": "impossible",
-                    "blocked_facts": [
+                    "kind": "fact_plan",
+                    "answers": [
                         {
                             "requested_fact_id": "fact_1",
-                            "basis": "policy_access",
-                            "evidence_refs": ["policy:sales_records_restricted"],
-                            "reviewed_read_ids": ["sales"],
-                            "nearest_fields": [
-                                {"read_id": "sales", "field_id": "sale_id"}
-                            ],
-                            "explanation": "The test stops after grounding resolves the named entity.",
+                            "answer_output_ids": ["answer_1"],
+                            "pattern": "aggregate_scalar",
+                            "source": {"kind": "read", "read_id": "sales"},
+                            "metric": {
+                                "kind": "count_records",
+                                "count_basis": {
+                                    "kind": "row_population",
+                                    "row_path_id": "data",
+                                    "row_cardinality": "many",
+                                },
+                                "label": "count",
+                            },
                         }
                     ],
                 }
@@ -1946,14 +1967,6 @@ def test_lookup_grounding_executes_ambiguous_resolver_routes_before_source_bindi
                             type="string",
                         ),
                     ),
-                    facts=(
-                        CatalogFact(
-                            ref="sales.records",
-                            availability=CatalogFactAvailability.POLICY_BLOCKED,
-                            read_id="sales",
-                            proof_refs=("policy:sales_records_restricted",),
-                        ),
-                    ),
                 ),
             )
         ),
@@ -1964,6 +1977,12 @@ def test_lookup_grounding_executes_ambiguous_resolver_routes_before_source_bindi
                 "get_deal_location_limits": {"data": []},
                 "list_location_list": {
                     "data": [{"location_id": "loc-1", "name": "ABC Mall"}]
+                },
+                "list_sale_list": {
+                    "data": [
+                        {"sale_id": "sale-1"},
+                        {"sale_id": "sale-2"},
+                    ]
                 },
             }
         ),
@@ -1988,21 +2007,45 @@ def test_lookup_grounding_executes_ambiguous_resolver_routes_before_source_bindi
         "submit_read_eligibility",
         "submit_source_alignment_reviews",
         "submit_source_binding",
+        "submit_pattern_fact_plan",
     ]
     requested_endpoints = {
         item["endpointName"] for item in ports.data_access_port.requests
     }
     assert "list_location_list" in requested_endpoints
-    assert len(requested_endpoints) <= 3
+    assert "list_store_list" not in requested_endpoints
+    sale_request = next(
+        item
+        for item in ports.data_access_port.requests
+        if item["endpointName"] == "list_sale_list"
+    )
+    assert sale_request["args"] == {"list_sale_list.query.location_id": "loc-1"}
 
 
-def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
+def test_lookup_runtime_records_selected_resolver_reads_under_read_eligibility() -> None:
     planner = _ToolNamePlannerPort(
         read_eligibility_retention_specs=(
             ReadEligibilityRetentionSpec(
                 requested_fact_id="fact_1",
                 read_id="staff_list",
+                known_input_resolver_results=(("fact_1_entity_1", "staff:staff_key"),),
             ),
+        ),
+        source_binding_invocation_overrides=(
+            {
+                "requested_fact_id": "fact_1",
+                "resolved_input_applications": (
+                    {
+                        "value_id": (
+                            "grounded_fact_1_entity_1_staff_staff_key_"
+                            "staff_id_staff_1"
+                        ),
+                        "value_component": "canonical_key",
+                        "target_kind": "returned_identity",
+                        "target_id": "source_1.data.key.staff_key",
+                    },
+                ),
+            },
         ),
         responses={
             "submit_question_contract_outcome": _question_contract_response(
@@ -2035,18 +2078,6 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
                     }
                 ],
             ),
-            "submit_grounding": {
-                "known_time_resolutions": {},
-                "known_input_bindings": {
-                    "fact_1_entity_1": {
-                        "selected_option_id": "bind_fact_1_entity_1_1",
-                        "input_value": "Jane Doe",
-                        "result_kind": "canonical_identity",
-                        "matched_field_ref": "staff.field.full_name",
-                        "selection_basis": "The staff resolver returns the staff identity named by Jane Doe.",
-                    }
-                },
-            },
             "submit_pattern_fact_plan": {
                 "outcome": {
                     "kind": "fact_plan",
@@ -2099,6 +2130,10 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
     )
 
     assert result.status == "COMPLETED", (result, result.error)
+    assert (
+        'resolution_status="exact_match"' not in planner.source_binding_selection_prompt
+    )
+    assert "resolver_fit_question=" not in planner.source_binding_selection_prompt
     source_reads_by_step_key = {step.step_id: step.step_key for step in lineage.steps}
     assert [
         (
@@ -2109,7 +2144,7 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
         for item in lineage.source_reads
     ] == [
         (
-            RunStepKey.GROUNDING,
+            RunStepKey.READ_ELIGIBILITY,
             lineage.catalog_endpoints[0].catalog_endpoint_id,
             1,
         ),
@@ -2119,35 +2154,25 @@ def test_lookup_runtime_records_grounding_resolver_source_reads() -> None:
             1,
         ),
     ]
-    latest_steps_by_id = {step.step_id: step for step in lineage.steps}
-    assert [
-        item.payload
-        for step in latest_steps_by_id.values()
-        if step.step_key is RunStepKey.GROUNDING
-        for item in step_semantic_items_from_json(step.output_summary_json)
-        if item.kind == "grounding_result"
-    ] == [
-        {
-            "input_id": "fact_1_entity_1",
-            "input_text": "Jane Doe",
-            "resolver_read_id": "staff_list",
-            "resolver_label": "Staff List",
-            "entity_kind": "staff",
-            "key_id": "staff_key",
-            "key_components": [{"component_id": "staff_id", "value": "staff-1"}],
-            "matched_label": "Jane Doe",
-        }
-    ]
 
 
-def test_lookup_runtime_fails_closed_on_grounding_resolver_source_read_failure() -> (
+def test_lookup_runtime_attributes_selected_resolver_failure_to_read_eligibility() -> (
     None
 ):
     planner = _ToolNamePlannerPort(
+        read_eligibility_retention_specs=(
+            ReadEligibilityRetentionSpec(
+                requested_fact_id="fact_1",
+                read_id="staff_list",
+                answer_value_fields=("staff_id",),
+                known_input_resolver_results=(("fact_1_entity_1", "staff:staff_key"),),
+            ),
+        ),
         responses={
             "submit_question_contract_outcome": _question_contract_response(
                 subject="Jane Doe staff ID",
                 answer_subject="staff ID",
+                answer_expression_family="scalar_value",
                 parts=("staff ID",),
                 question_inputs=(
                     {
@@ -2174,17 +2199,18 @@ def test_lookup_runtime_fails_closed_on_grounding_resolver_source_read_failure()
                     }
                 ],
             ),
-            "submit_grounding": {
-                "known_time_resolutions": {},
-                "known_input_bindings": {
-                    "fact_1_entity_1": {
-                        "selected_option_id": "bind_fact_1_entity_1_1",
-                        "input_value": "Jane Doe",
-                        "result_kind": "canonical_identity",
-                        "matched_field_ref": "staff.field.full_name",
-                        "selection_basis": "The staff resolver returns the staff identity named by Jane Doe.",
-                    }
-                },
+            "submit_pattern_fact_plan": {
+                "outcome": {
+                    "kind": "fact_plan",
+                    "answers": [
+                        {
+                            "requested_fact_id": "fact_1",
+                            "pattern": "direct_field_value",
+                            "source": {"kind": "read", "read_id": "staff_list"},
+                            "output_field": {"field_id": "staff_id"},
+                        }
+                    ],
+                }
             },
         },
     )
@@ -2219,23 +2245,35 @@ def test_lookup_runtime_fails_closed_on_grounding_resolver_source_read_failure()
 
     assert result.status == "FAILED", result
     assert result.error == "framework_adapter_failed"
+    assert not planner.source_binding_selection_prompt
     source_reads_by_step_key = {step.step_id: step.step_key for step in lineage.steps}
     assert [
         (source_reads_by_step_key[item.step_id], item.status, item.row_count)
         for item in lineage.source_reads
-    ] == [(RunStepKey.GROUNDING, SourceReadStatus.FAILED, None)]
+    ] == [(RunStepKey.READ_ELIGIBILITY, SourceReadStatus.FAILED, None)]
     assert lineage.runtime_error_results
     assert lineage.runtime_error_results[0].error.failed_step_id in {
-        step.step_id for step in lineage.steps if step.step_key is RunStepKey.GROUNDING
+        step.step_id
+        for step in lineage.steps
+        if step.step_key is RunStepKey.READ_ELIGIBILITY
     }
 
 
 def test_lookup_runtime_fails_closed_on_grounding_missing_catalog_endpoint() -> None:
     planner = _ToolNamePlannerPort(
+        read_eligibility_retention_specs=(
+            ReadEligibilityRetentionSpec(
+                requested_fact_id="fact_1",
+                read_id="staff_list",
+                answer_value_fields=("staff_id",),
+                known_input_resolver_results=(("fact_1_entity_1", "staff:staff_key"),),
+            ),
+        ),
         responses={
             "submit_question_contract_outcome": _question_contract_response(
                 subject="Jane Doe staff ID",
                 answer_subject="staff ID",
+                answer_expression_family="scalar_value",
                 parts=("staff ID",),
                 question_inputs=(
                     {
@@ -2262,17 +2300,18 @@ def test_lookup_runtime_fails_closed_on_grounding_missing_catalog_endpoint() -> 
                     }
                 ],
             ),
-            "submit_grounding": {
-                "known_time_resolutions": {},
-                "known_input_bindings": {
-                    "fact_1_entity_1": {
-                        "selected_option_id": "bind_fact_1_entity_1_1",
-                        "input_value": "Jane Doe",
-                        "result_kind": "canonical_identity",
-                        "matched_field_ref": "staff.field.full_name",
-                        "selection_basis": "The staff resolver returns the staff identity named by Jane Doe.",
-                    }
-                },
+            "submit_pattern_fact_plan": {
+                "outcome": {
+                    "kind": "fact_plan",
+                    "answers": [
+                        {
+                            "requested_fact_id": "fact_1",
+                            "pattern": "direct_field_value",
+                            "source": {"kind": "read", "read_id": "staff_list"},
+                            "output_field": {"field_id": "staff_id"},
+                        }
+                    ],
+                }
             },
         },
     )
@@ -3198,6 +3237,25 @@ def test_lookup_cutover_uses_relation_as_read_instance_and_derives_grain():
                         ),
                     ),
                 ),
+                source_binding_invocation_overrides=(
+                    {
+                        "requested_fact_id": "fact_1",
+                        "resolved_input_applications": (
+                            {
+                                "value_id": "grounded_fact_1_time_1",
+                                "value_component": "instant",
+                                "target_kind": "request_parameter",
+                                "target_id": "start_date",
+                            },
+                            {
+                                "value_id": "grounded_fact_1_time_1",
+                                "value_component": "instant",
+                                "target_kind": "request_parameter",
+                                "target_id": "end_date",
+                            },
+                        ),
+                    },
+                ),
             ),
         ),
     )
@@ -3635,6 +3693,14 @@ def _staff_identity_list_read() -> EndpointRead:
             route_path_template="/v1/staff/",
             handler_ref="tests.StaffListView",
             domain_resource_names=("staff",),
+        ),
+        params=(
+            CatalogParam(
+                ref="list_staff_list.query.name",
+                name="name",
+                source=ParamSource.QUERY,
+                type="string",
+            ),
         ),
         row_paths=(RowPath(id="data", path="data", cardinality=RowCardinality.MANY),),
         fields=(

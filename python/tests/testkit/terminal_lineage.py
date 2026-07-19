@@ -19,7 +19,6 @@ from fervis.lineage.recorder import (
     AnswerOutputWrite,
     AnswerPresentationWrite,
     AnswerWrite,
-    ExecutionProofGraphWrite,
     FactResultWrite,
     ProgramInvocationBundleWrite,
     ProgramInvocationWrite,
@@ -28,6 +27,11 @@ from fervis.lineage.recorder import (
     RunStepWrite,
 )
 from fervis.questions.ports import LookupExecutionRequest
+from tests.testkit.execution_proof_graph import (
+    proof_graph_payload,
+    proof_graph_write,
+    proof_node,
+)
 
 
 TerminalAnswerWriter = Callable[[LookupExecutionRequest, str, dict[str, object]], None]
@@ -116,35 +120,32 @@ def make_terminal_answer_writer(recorder: LineageRecorderPort) -> TerminalAnswer
                     ),
                 ),
                 proof_graphs=(
-                    ExecutionProofGraphWrite(
+                    proof_graph_write(
                         proof_graph_id=f"{run_id}:proof",
                         run_id=run_id,
                         fact_result_id=f"{run_id}:fact-result",
                         compile_step_id=f"{step_prefix}:compile",
                         execute_step_id=f"{step_prefix}:execute",
-                        payload_schema="fervis.execution_proof_graph",
-                        payload_schema_rev=1,
-                        payload_json={
-                            "nodes": [
-                                {
-                                    "id": f"{run_id}:evidence",
-                                    "kind": "relation",
-                                    "proof_refs": [f"question:{run_id}"],
-                                },
-                                {
-                                    "id": f"{run_id}:answer-node",
-                                    "kind": "answer_output",
-                                    "proof_refs": [],
-                                },
-                            ],
-                            "edges": [
+                        payload_json=proof_graph_payload(
+                            nodes=(
+                                proof_node(
+                                    f"{run_id}:evidence",
+                                    "relation",
+                                    proof_refs=(f"question:{run_id}",),
+                                ),
+                                proof_node(
+                                    f"{run_id}:answer-node",
+                                    "answer_output",
+                                ),
+                            ),
+                            edges=(
                                 {
                                     "source": f"{run_id}:evidence",
                                     "target": f"{run_id}:answer-node",
                                     "role": "produces",
-                                }
-                            ],
-                        },
+                                },
+                            ),
+                        ),
                     ),
                 ),
                 answer=AnswerWrite(

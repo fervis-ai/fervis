@@ -1,5 +1,5 @@
 id: parse_carries_grounded_time_filter_lineage
-description: Source-binding parser carries grounded business-time filter lineage onto the bound source.
+description: Source-binding parser carries resolved business-time lineage through explicit input applications.
 migrates:
   - api/tests/fervis/lookup/test_source_binding_one_call.py::test_parse_source_binding_carries_applied_filter_lineage_to_bound_source
 kind: algorithm
@@ -8,14 +8,20 @@ input:
   request:
     mode: grounded_time_filter
   selected_field_id: amount
+  resolved_input_applications:
+    - {target_kind: request_parameter, target_id: start_date, value_id: time_1, value_component: instant}
+    - {target_kind: request_parameter, target_id: end_date, value_id: time_1, value_component: instant}
   choices:
     OPEN: SATISFIES_TEST
     CLOSED: CONFLICTS_WITH_TEST
 expect:
   result_contains:
-    applied_filters:
-      - kind: time
-        known_input_id: time_1
-        display_value: today
-        resolved_start: "2026-05-22"
-        resolved_end: "2026-05-22"
+    source_param_bindings:
+      - param_id: start_date
+        value: "2026-05-22"
+        origin_kind: question_input
+        value_id: time_1
+      - param_id: end_date
+        value: "2026-05-22"
+        origin_kind: question_input
+        value_id: time_1

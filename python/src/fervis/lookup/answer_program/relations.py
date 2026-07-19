@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from fervis.types.enums import StrEnum
 
 from fervis.lookup.answer_program.values import ParameterRef, ValueExpression
+from fervis.lookup.question_contract import MembershipTestRef
 
 
 class FieldBindingRole(StrEnum):
@@ -28,6 +29,68 @@ class PopulationChoiceControllerKind(StrEnum):
 class ReviewScopeDecisionKind(StrEnum):
     IN_SCOPE = "in_scope"
     OUT_OF_SCOPE = "out_of_scope"
+
+
+class PopulationCoverageRole(StrEnum):
+    ROW_POPULATION = "row_population"
+    OPERATION_CONDITION = "operation_condition"
+
+
+def population_binding_proof_ref(population_binding_id: str) -> str:
+    if not population_binding_id:
+        raise ValueError("population binding proof requires binding id")
+    return f"source_population:{population_binding_id}"
+
+
+@dataclass(frozen=True)
+class RelationSourcePopulationBinding:
+    id: str
+    supporting_proof_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        population_binding_proof_ref(self.id)
+
+    @property
+    def proof_refs(self) -> tuple[str, ...]:
+        return (
+            population_binding_proof_ref(self.id),
+            *self.supporting_proof_refs,
+        )
+
+
+@dataclass(frozen=True)
+class PopulationCoverageClaim:
+    test_ref: MembershipTestRef
+    role: PopulationCoverageRole
+    proof_refs: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.proof_refs:
+            raise ValueError("population coverage claim requires proof references")
+
+
+def merge_population_coverage_claims(
+    claims: tuple[PopulationCoverageClaim, ...],
+) -> tuple[PopulationCoverageClaim, ...]:
+    """Merge independent mechanics proving the same canonical claim."""
+
+    merged: dict[
+        tuple[MembershipTestRef, PopulationCoverageRole], PopulationCoverageClaim
+    ] = {}
+    for claim in claims:
+        key = (claim.test_ref, claim.role)
+        existing = merged.get(key)
+        if existing is None:
+            merged[key] = claim
+            continue
+        merged[key] = PopulationCoverageClaim(
+            test_ref=claim.test_ref,
+            role=claim.role,
+            proof_refs=tuple(
+                dict.fromkeys((*existing.proof_refs, *claim.proof_refs))
+            ),
+        )
+    return tuple(merged.values())
 
 
 @dataclass(frozen=True)
@@ -64,6 +127,7 @@ class RelationSourceAppliedFilter:
     predicate_field_ids: tuple[str, ...]
     value_expr: ValueExpression
     operator: str = "equals"
+    proof_refs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.predicate_field_ids:
@@ -123,6 +187,8 @@ class RelationSource:
     applied_filters: tuple[RelationSourceAppliedFilter, ...] = ()
     row_filters: tuple[RelationSourceRowFilter, ...] = ()
     population_choices: tuple[RelationSourcePopulationChoice, ...] = ()
+    population_binding: RelationSourcePopulationBinding | None = None
+    population_coverage_claims: tuple[PopulationCoverageClaim, ...] = ()
     proof_refs: tuple[str, ...] = ()
 
 

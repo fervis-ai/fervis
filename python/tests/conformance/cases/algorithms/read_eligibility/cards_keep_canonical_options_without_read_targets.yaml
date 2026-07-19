@@ -1,0 +1,27 @@
+id: cards_keep_canonical_options_without_read_targets
+description: Fact-level canonical choices include every Grounding-positive identity even when one has no compatible answer-read target.
+kind: algorithm
+algorithm: read_eligibility.cards
+input:
+  request_fixture: stores_in_grounded_area
+  request:
+    compatible_resolver_reads_by_known_input:
+      qi1: [list_area_list, list_store_list]
+expect:
+  result_contains:
+    known_inputs_by_fact:
+      fact_1:
+        - id: london_qi_1
+          canonical_options:
+            - id: london_qi_1.area.primary_key.area_id
+              result: area:primary_key
+              resolvers:
+                - binding_option_id: bind_qi1_rs_7de03e00183c6709_area_primary_key
+                  api_read:
+                    read_id: list_area_list
+            - id: london_qi_1.store.primary_key.store_id
+              result: store:primary_key
+              resolvers:
+                - binding_option_id: bind_qi1_rs_3383b7033a2e3bc8_store_primary_key
+                  api_read:
+                    read_id: list_store_list

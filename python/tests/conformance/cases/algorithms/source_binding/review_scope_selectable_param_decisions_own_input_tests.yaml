@@ -1,5 +1,5 @@
 id: review_scope_selectable_param_decisions_own_input_tests
-description: Source-binding review scope treats selectable param decisions as owners for grounded input membership tests.
+description: Source-binding review scope treats selectable param decisions as owners for resolved input membership tests.
 kind: algorithm
 algorithm: source_binding.review_scope
 input:

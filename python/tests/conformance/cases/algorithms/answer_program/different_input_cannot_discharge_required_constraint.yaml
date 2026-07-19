@@ -1,0 +1,28 @@
+id: different_input_cannot_discharge_required_constraint
+description: A structurally compatible filter from another input cannot discharge the required input's population test.
+kind: algorithm
+algorithm: answer_program.population_coverage
+input:
+  question_contract: {$ref: ../../../fixtures/population_constraint_coverage.yaml#/question_contracts/sales_in_nairobi_with_other_area}
+  inputs:
+    - {id: nairobi, value: Nairobi, entity_kind: area, key_component_id: area_id, canonical_value: area-nairobi}
+    - {id: mombasa, value: Mombasa, entity_kind: area, key_component_id: area_id, canonical_value: area-mombasa}
+  relations:
+    - id: sales
+      fields: [sale_id, sale_location_id, amount]
+      identity_fields: [sale_id]
+    - id: locations
+      fields: [location_id, area_id]
+      identity_fields: [location_id]
+      applied_inputs: [{input_id: mombasa, field_id: area_id}]
+  operations:
+    - id: join_sales_locations
+      output_relation: joined
+      spec:
+        kind: join
+        left: sales
+        right: locations
+        join_keys: [{left: sale_location_id, right: location_id}]
+  result: {relation_id: joined, field_id: amount}
+expect:
+  result_contains: {status: rejected}

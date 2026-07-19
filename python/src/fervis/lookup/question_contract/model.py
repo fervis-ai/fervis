@@ -227,6 +227,8 @@ class RequestedFactGroupKey:
         )
         if refs != self.question_input_refs:
             object.__setattr__(self, "question_input_refs", refs)
+        if len(set(refs)) != len(refs):
+            raise ValueError("group key repeats question input")
         if self.domain == GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS and not refs:
             raise ValueError("specified group key requires question inputs")
         if self.domain == GroupKeyDomainKind.SOURCE_RESULT_VALUES and refs:
@@ -530,6 +532,18 @@ class RequestedFactAnswerSubject:
                 )
             ),
         }
+
+
+@dataclass(frozen=True)
+class MembershipTestRef:
+    requested_fact_id: str
+    membership_test_id: str
+
+    def __post_init__(self) -> None:
+        if not self.requested_fact_id.strip():
+            raise ValueError("membership test reference requires requested fact")
+        if not self.membership_test_id.strip():
+            raise ValueError("membership test reference requires membership test")
 
 
 @dataclass(frozen=True)
@@ -862,6 +876,19 @@ class RequestedFact:
             ),
             *answer_outputs,
         )
+
+    def specified_group_key(self) -> RequestedFactGroupKey | None:
+        """Return the expression-owned closed group-key domain, when present."""
+
+        expression = self.answer_expression
+        if (
+            expression is None
+            or expression.group_key is None
+            or expression.group_key.domain
+            is not GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS
+        ):
+            return None
+        return expression.group_key
 
     def answer_request_model_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {

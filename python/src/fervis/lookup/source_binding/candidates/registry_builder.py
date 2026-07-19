@@ -293,6 +293,7 @@ def _applied_filters(card: JsonObject) -> tuple[SourceAppliedFilter, ...]:
             predicate_field_ids=_texts(item.get("field_ids")),
             value_id=_text(item.get("value_id")),
             value_kind=_text(item.get("kind")),
+            value_component=_text(item.get("value_component")) or "value",
             display_value=_text(item.get("display_value")),
             matched_field_ref=_text(item.get("matched_field_ref")),
             matched_field_path=_text(item.get("matched_field_path")),

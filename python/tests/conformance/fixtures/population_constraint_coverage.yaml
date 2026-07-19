@@ -1,0 +1,167 @@
+question_contracts:
+  sales_in_nairobi:
+    requested_facts:
+      - id: fact_1
+        description: total sales in Nairobi
+        answer_subject: {subject_text: sales}
+        answer_expression: {family: scalar_aggregate}
+        answer_outputs:
+          - {id: answer_1, description: total sales, role: MEASURED_VALUE}
+        known_inputs:
+          - id: nairobi
+            kind: literal_text
+            role: reference_value
+            text: Nairobi
+            resolved_value_text: Nairobi
+            value_meaning_hint: area
+        input_refs: [nairobi]
+        answer_population:
+          population_label: sales in Nairobi
+          counted_unit: sale
+          membership_tests:
+            - id: sale_subject
+              kind: SUBJECT_IDENTITY
+              polarity: MUST_PASS
+              test_question: Does this row represent a sale?
+            - id: in_nairobi
+              kind: EXPLICIT_USER_CONSTRAINT
+              polarity: MUST_PASS
+              test_question: Did this sale occur in Nairobi?
+              owned_question_input_refs: [nairobi]
+
+  sales_in_nairobi_with_other_area:
+    requested_facts:
+      - id: fact_1
+        description: total sales in Nairobi
+        answer_subject: {subject_text: sales}
+        answer_expression: {family: scalar_aggregate}
+        answer_outputs:
+          - {id: answer_1, description: total sales, role: MEASURED_VALUE}
+        known_inputs:
+          - id: nairobi
+            kind: literal_text
+            role: reference_value
+            text: Nairobi
+            resolved_value_text: Nairobi
+            value_meaning_hint: area
+          - id: mombasa
+            kind: literal_text
+            role: reference_value
+            text: Mombasa
+            resolved_value_text: Mombasa
+            value_meaning_hint: area
+        input_refs: [nairobi, mombasa]
+        answer_population:
+          population_label: sales in Nairobi
+          counted_unit: sale
+          membership_tests:
+            - id: sale_subject
+              kind: SUBJECT_IDENTITY
+              polarity: MUST_PASS
+              test_question: Does this row represent a sale?
+            - id: in_nairobi
+              kind: EXPLICIT_USER_CONSTRAINT
+              polarity: MUST_PASS
+              test_question: Did this sale occur in Nairobi?
+              owned_question_input_refs: [nairobi]
+
+  named_staff_without_sales:
+    requested_facts:
+      - id: fact_1
+        description: staff member named Nadia without a sale
+        answer_subject: {subject_text: staff member}
+        answer_expression: {family: set_difference}
+        answer_outputs:
+          - {id: answer_1, description: staff member, role: ANSWER_VALUE}
+        known_inputs:
+          - id: nadia
+            kind: literal_text
+            role: reference_value
+            text: Nadia
+            resolved_value_text: Nadia
+            value_meaning_hint: staff member
+        input_refs: [nadia]
+        answer_population:
+          population_label: staff member named Nadia without a sale
+          counted_unit: staff member
+          membership_tests:
+            - id: staff_subject
+              kind: SUBJECT_IDENTITY
+              polarity: MUST_PASS
+              test_question: Does this row represent a staff member?
+            - id: named_nadia
+              kind: EXPLICIT_USER_CONSTRAINT
+              polarity: MUST_PASS
+              test_question: Is this the staff member named Nadia?
+              owned_question_input_refs: [nadia]
+
+  stores_in_nairobi:
+    requested_facts:
+      - id: fact_1
+        description: stores in Nairobi
+        answer_subject: {subject_text: stores}
+        answer_expression: {family: list_rows, selection_kind: all_results}
+        answer_outputs:
+          - {id: answer_1, description: store, role: ANSWER_VALUE}
+        known_inputs:
+          - id: nairobi
+            kind: literal_text
+            role: reference_value
+            text: Nairobi
+            resolved_value_text: Nairobi
+            value_meaning_hint: area
+        input_refs: [nairobi]
+        answer_population:
+          population_label: stores in Nairobi
+          counted_unit: store
+          membership_tests:
+            - id: store_subject
+              kind: SUBJECT_IDENTITY
+              polarity: MUST_PASS
+              test_question: Does this row represent a store?
+            - id: in_nairobi
+              kind: EXPLICIT_USER_CONSTRAINT
+              polarity: MUST_PASS
+              test_question: Is this store in Nairobi?
+              owned_question_input_refs: [nairobi]
+
+  products_available_in_every_store:
+    requested_facts:
+      - id: fact_1
+        description: products available in every active store
+        answer_subject: {subject_text: products}
+        answer_expression: {family: list_rows, selection_kind: all_results}
+        answer_outputs:
+          - {id: answer_1, description: product, role: ANSWER_VALUE}
+        known_inputs:
+          - id: active
+            kind: literal_text
+            role: reference_value
+            text: active
+            resolved_value_text: active
+            value_meaning_hint: store status
+          - id: available
+            kind: literal_text
+            role: reference_value
+            text: available
+            resolved_value_text: available
+            value_meaning_hint: inventory status
+        input_refs: [active, available]
+        answer_population:
+          population_label: products available in every active store
+          counted_unit: product
+          membership_tests:
+            - id: product_subject
+              kind: SUBJECT_IDENTITY
+              polarity: MUST_PASS
+              test_question: Does this row represent a product?
+            - id: active_store_dimension
+              kind: EXPLICIT_USER_CONSTRAINT
+              polarity: MUST_PASS
+              test_question: Does the required dimension contain active stores?
+              owned_question_input_refs: [active]
+            - id: observed_availability
+              kind: EXPLICIT_USER_CONSTRAINT
+              polarity: MUST_PASS
+              test_question: Does the observation establish product availability?
+              owned_question_input_refs: [available]

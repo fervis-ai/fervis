@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from fervis.lookup.fact_planning.value_components import value_component
+from fervis.lookup.fact_planning.value_components import grounded_input_value
 from fervis.lookup.answer_program.values import FactValue, ValueComponentValue
 from fervis.lookup.grounding.model import GroundedInputUse
 
@@ -25,22 +25,26 @@ def unique_grounded_param_values(
     *,
     values: tuple[FactValue, ...],
     grounded_input_uses: tuple[GroundedInputUse, ...],
+    requested_fact_id: str = "",
 ) -> dict[tuple[str, str], GroundedParamValue]:
     values_by_id = {item.id: item for item in values}
     grouped: dict[tuple[str, str], dict[ValueComponentValue, GroundedParamValue]] = {}
     for use in grounded_input_uses:
+        if requested_fact_id and use.requested_fact_id != requested_fact_id:
+            continue
         row_source_id = use.row_source_id
         param_id = use.param_id
         field_id = use.field_id
         entity_kind = use.entity_kind
-        if not row_source_id or not param_id:
+        if not row_source_id or (not param_id and not field_id):
             continue
         value = values_by_id.get(use.value_id)
         if value is None:
             continue
-        concrete_value = value_component(value, use.value_component)
+        concrete_value = grounded_input_value(value, use)
         value_key = _value_key(concrete_value)
-        group = grouped.setdefault((row_source_id, param_id), {})
+        target_id = param_id or f"field:{field_id}"
+        group = grouped.setdefault((row_source_id, target_id), {})
         existing = group.get(value_key)
         proof_refs = tuple(
             dict.fromkeys(
@@ -76,7 +80,8 @@ def unique_grounded_param_ids_by_row_source(
         values=values,
         grounded_input_uses=grounded_input_uses,
     ):
-        output.setdefault(row_source_id, set()).add(param_id)
+        if not param_id.startswith("field:"):
+            output.setdefault(row_source_id, set()).add(param_id)
     return {
         row_source_id: frozenset(param_ids)
         for row_source_id, param_ids in output.items()

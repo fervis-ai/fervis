@@ -1,0 +1,31 @@
+id: anti_join_observed_constraint_does_not_constrain_candidates
+description: Constraining only anti-join observations cannot satisfy a constraint on the returned candidate population.
+kind: algorithm
+algorithm: answer_program.population_coverage
+input:
+  question_contract: {$ref: ../../../fixtures/population_constraint_coverage.yaml#/question_contracts/named_staff_without_sales}
+  inputs: [{id: nadia, value: Nadia, entity_kind: staff, key_component_id: staff_id, canonical_value: staff-nadia}]
+  relations:
+    - id: staff
+      fields: [staff_id]
+      identity_fields: [staff_id]
+    - id: sales
+      fields: [staff_id]
+      identity_fields: [staff_id]
+      entity_references:
+        - id: sale_staff
+          target_entity_kind: staff
+          components: [{target_component_id: staff_id, local_field_id: staff_id}]
+      applied_inputs: [{input_id: nadia, field_id: staff_id}]
+  operations:
+    - id: staff_without_sales
+      output_relation: remaining_staff
+      spec:
+        kind: anti_join
+        candidate: {relation_id: staff, role: anti_join.candidate, required_identity_fields: [staff_id]}
+        observed: {relation_id: sales, role: anti_join.observed, required_identity_fields: [staff_id]}
+        join_keys: [{left: staff_id, right: staff_id}]
+        output_fields: [{source: staff_id, output: staff_id}]
+  result: {relation_id: remaining_staff, field_id: staff_id}
+expect:
+  result_contains: {status: rejected}

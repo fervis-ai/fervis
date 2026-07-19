@@ -9,8 +9,6 @@ from fervis.lookup.relation_catalog import (
     CatalogFact,
     CatalogField,
     EndpointRead,
-    EntityKeyComponentTarget,
-    ParamSource,
 )
 from fervis.lookup.relation_catalog.selection.model import (
     CatalogSelectionRanking,
@@ -24,11 +22,6 @@ from fervis.lookup.relation_catalog.selection.results import (
     selected_read_ids_from_fact_selections,
 )
 from fervis.lookup.question_contract import RequestedFact
-from fervis.lookup.answer_program.values import (
-    FactValue,
-    IdentitySetValuePayload,
-    IdentityValuePayload,
-)
 
 from .constants import (
     _CATALOG_TERM_SCORE,
@@ -141,6 +134,7 @@ class _SourceTextSelection:
 @dataclass(frozen=True)
 class _ResourceNameRanking:
     is_exact_resource_name: bool
+    requires_caller_supplied_input: bool
     ranking: CatalogSelectionRanking
 
 
@@ -203,7 +197,6 @@ def _rank_for_source_text(
     query_terms = _explicit_catalog_search_query_terms(
         resource_name_request.resource_names,
     )
-    reads_by_id = {read.id: read for read in request.relation_catalog.reads}
     positive_groups = tuple(
         _positive_rankings(
             _rankings_for_resource_name(
@@ -211,8 +204,6 @@ def _rank_for_source_text(
                 request=request,
                 read_facts=read_facts,
             ),
-            reads_by_id=reads_by_id,
-            available_values=request.available_values,
         )
         for resource_name in resource_name_request.resource_names
     )
@@ -303,6 +294,9 @@ def _rankings_for_resource_name(
                 ranked_matches.append(
                     _ResourceNameRanking(
                         is_exact_resource_name=False,
+                        requires_caller_supplied_input=(
+                            _requires_caller_supplied_input(read)
+                        ),
                         ranking=ranking,
                     )
                 )
@@ -310,6 +304,7 @@ def _rankings_for_resource_name(
         ranked_matches.append(
             _ResourceNameRanking(
                 is_exact_resource_name=match.is_exact_resource_name,
+                requires_caller_supplied_input=_requires_caller_supplied_input(read),
                 ranking=_resource_name_match_ranking(
                     _rank_resource_read(
                         read,
@@ -327,10 +322,15 @@ def _rankings_for_resource_name(
             key=lambda item: (
                 not item.is_exact_resource_name,
                 -item.ranking.score,
+                item.requires_caller_supplied_input,
                 item.ranking.read_id,
             ),
         )
     )
+
+
+def _requires_caller_supplied_input(read: EndpointRead) -> bool:
+    return any(param.required and param.default is None for param in read.params)
 
 
 def _catalog_evidence_ranking(
@@ -436,78 +436,8 @@ def _unselected_positive_read_ids(
 
 def _positive_rankings(
     rankings: tuple[_ResourceNameRanking, ...],
-    *,
-    reads_by_id: dict[str, EndpointRead],
-    available_values: tuple[FactValue, ...] = (),
 ) -> tuple[_ResourceNameRanking, ...]:
-    positive = tuple(item for item in rankings if item.ranking.score > 0)
-    positive = _drop_unbound_required_reads_with_open_alternatives(
-        positive,
-        reads_by_id=reads_by_id,
-        available_values=available_values,
-    )
-    return positive
-
-
-def _drop_unbound_required_reads_with_open_alternatives(
-    rankings: tuple[_ResourceNameRanking, ...],
-    *,
-    reads_by_id: dict[str, EndpointRead],
-    available_values: tuple[FactValue, ...] = (),
-) -> tuple[_ResourceNameRanking, ...]:
-    open_rankings = tuple(
-        ranking
-        for ranking in rankings
-        if not _requires_unbound_required_input(
-            reads_by_id[ranking.ranking.read_id],
-            available_values=available_values,
-        )
-    )
-    if not open_rankings:
-        return rankings
-    return open_rankings
-
-
-def _requires_unbound_required_input(
-    read: EndpointRead,
-    *,
-    available_values: tuple[FactValue, ...] = (),
-) -> bool:
-    for param in read.params:
-        if not param.required or param.default is not None:
-            continue
-        if param.entity_target is not None and _has_matching_entity_value(
-            param.entity_target,
-            available_values,
-        ):
-            continue
-        if param.source == ParamSource.PATH or param.entity_target is not None:
-            return True
-    return False
-
-
-def _has_matching_entity_value(
-    target: EntityKeyComponentTarget,
-    values: tuple[FactValue, ...],
-) -> bool:
-    for value in values:
-        payload = value.payload
-        if not isinstance(payload, (IdentityValuePayload, IdentitySetValuePayload)):
-            continue
-        if (
-            payload.entity_kind == target.entity_kind
-            and payload.key_id == target.key_id
-            and target.component_id in _identity_component_ids(payload)
-        ):
-            return True
-    return False
-
-
-def _identity_component_ids(
-    payload: IdentityValuePayload | IdentitySetValuePayload,
-) -> frozenset[str]:
-    key = payload.key if isinstance(payload, IdentityValuePayload) else payload.keys[0]
-    return frozenset(component.component_id for component in key.components)
+    return tuple(item for item in rankings if item.ranking.score > 0)
 
 
 @dataclass(frozen=True)

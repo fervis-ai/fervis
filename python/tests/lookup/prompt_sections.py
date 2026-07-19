@@ -43,6 +43,15 @@ def _xml_section_payload(raw: str) -> dict[str, Any]:
                 if group.tag == "requested_fact"
             ]
         }
+    if root.tag == "known_input_binding_tasks":
+        question_text = _child_text(root, "question_text")
+        return {
+            "known_input_binding_tasks": [
+                _grounding_binding_task_payload(child, question_text=question_text)
+                for child in root
+                if child.tag == "known_input"
+            ]
+        }
     if root.tag == "plan_selection_source_strategies":
         return {
             "requested_fact_source_strategies": [
@@ -89,6 +98,59 @@ def _xml_section_payload(raw: str) -> dict[str, Any]:
                 payload[key] = [_source_payload(child) for child in group]
         return payload
     raise AssertionError(f"unsupported XML prompt section: {root.tag}")
+
+
+def _grounding_binding_task_payload(
+    element: ElementTree.Element,
+    *,
+    question_text: str,
+) -> dict[str, Any]:
+    task = _attrs(element, attr_map={"id": "known_input_id"})
+    if question_text:
+        task["question_text"] = question_text
+    shown_resource_types = element.find("shown_resource_types")
+    if shown_resource_types is not None:
+        task["shown_resource_types"] = [
+            str(child.text or "")
+            for child in shown_resource_types
+            if child.tag == "resource_type"
+        ]
+    task["binding_options"] = [
+        _grounding_binding_option_payload(child)
+        for child in element
+        if child.tag == "binding_option"
+    ]
+    return task
+
+
+def _grounding_binding_option_payload(
+    element: ElementTree.Element,
+) -> dict[str, Any]:
+    option = _attrs(element, attr_map={"id": "binding_option_id"})
+    option["resource_type"] = _child_text(element, "resource_type")
+    option["resolver_fit_question"] = _child_text(
+        element,
+        "resolver_fit_question",
+    )
+    api_read = element.find("api_read")
+    if api_read is not None:
+        api_read_payload = _api_read_payload(api_read)
+        api_read_payload.pop("source_candidate_id", None)
+        api_read_payload.setdefault("resource_names", [])
+        api_read_payload.setdefault("input_params", [])
+        api_read_payload.setdefault("response_rows", [])
+        option["api_read"] = api_read_payload
+    canonical_result = element.find("canonical_result")
+    if canonical_result is not None:
+        option["canonical_result"] = {
+            **_attrs(canonical_result),
+            "components": [
+                _attrs(component)
+                for component in canonical_result
+                if component.tag == "component"
+            ],
+        }
+    return option
 
 
 def _source_strategy_payload(element: ElementTree.Element) -> dict[str, Any]:

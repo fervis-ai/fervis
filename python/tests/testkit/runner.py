@@ -118,6 +118,9 @@ from tests.testkit.algorithms.source_binding import (
     run_source_binding_review_scope_case,
     run_source_binding_schema_surface_case,
 )
+from tests.testkit.algorithms.population_coverage import (
+    run_population_constraint_coverage_case,
+)
 from tests.testkit.adapters.host_api import run_host_api_projection_case
 from tests.testkit.case_loader import ConformanceCase
 
@@ -133,6 +136,9 @@ _RUNNERS: dict[tuple[str, str], CaseRunner] = {
     ("algorithm", "answer_program.compile"): run_answer_program_compile_case,
     ("algorithm", "answer_program.decode"): run_answer_program_decode_case,
     ("algorithm", "answer_program.instantiate"): (run_answer_program_instantiate_case),
+    ("algorithm", "answer_program.population_coverage"): (
+        run_population_constraint_coverage_case
+    ),
     ("algorithm", "answer_program.invoke"): run_answer_program_invoke_case,
     ("algorithm", "answer_program.patch"): run_answer_program_patch_case,
     ("algorithm", "answer_program.rank_limit"): run_answer_program_rank_limit_case,

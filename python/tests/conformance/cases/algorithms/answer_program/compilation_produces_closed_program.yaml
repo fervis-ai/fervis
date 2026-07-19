@@ -19,7 +19,7 @@ input:
 expect:
   result_contains:
     status: compiled
-    program_id: ap_5db3a7abbc7368ab9fc17a635c25908fa8026f72f49c7e92255773d75d79b463
+    program_id: ap_c9e8b46655313467e38e3234fbb4a04ad497b593f239f5c66abdddc819171354
     bindings:
       question.store_ids: [store_1]
     compatibility:
@@ -33,7 +33,7 @@ expect:
         - source.read_relation
       source_keys: [{kind: catalog_read, source_id: sales}]
     program:
-      schema_revision: 2
+      schema_revision: 3
       program:
         fields:
           relations:

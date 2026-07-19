@@ -1,7 +1,7 @@
 """Value and generated-calendar source candidates."""
 
 from ._shared import Any, FactValue
-from .api_sources import _bindable_param_payloads
+from .api_sources import _source_parameter_payloads
 
 
 def _calendar_candidate_payload(
@@ -20,7 +20,7 @@ def _calendar_candidate_payload(
         if isinstance(item, dict)
         for param_id in _applied_filter_param_ids(item)
     }
-    output["params"] = _bindable_param_payloads(
+    output["params"] = _source_parameter_payloads(
         tuple(
             item
             for item in output.get("params") or ()

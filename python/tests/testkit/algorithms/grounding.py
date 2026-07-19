@@ -46,8 +46,7 @@ def _run_grounding_runtime_case(payload: dict[str, Any]) -> list[str]:
         question=str(input_payload["question"]),
         question_contract=_question_contract_from_input(input_payload),
         full_catalog=RelationCatalog(),
-        resolver_catalog=RelationCatalog(),
-        data_access_port=_NoDataAccess(),
+        resolver_selections=(),
         runtime_values=RuntimeValueContext(
             runtime_date="2026-07-04",
             timezone="Africa/Nairobi",

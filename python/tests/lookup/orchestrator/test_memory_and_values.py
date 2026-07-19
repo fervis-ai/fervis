@@ -183,6 +183,31 @@ def test_lookup_cutover_list_rows_projected_identity_field_becomes_memory_identi
 
 def test_lookup_cutover_grounded_named_entity_is_stored_as_memory_identity():
     planner = _ToolNamePlannerPort(
+        read_eligibility_retention_specs=(
+            ReadEligibilityRetentionSpec(
+                requested_fact_id="fact_1",
+                read_id="sales",
+                known_input_resolver_results=(
+                    ("fact_1_entity_1", "location:primary_key"),
+                ),
+            ),
+        ),
+        source_binding_invocation_overrides=(
+            {
+                "requested_fact_id": "fact_1",
+                "resolved_input_applications": (
+                    {
+                        "value_id": (
+                            "grounded_fact_1_entity_1_location_primary_key_"
+                            "location_id_loc_1"
+                        ),
+                        "value_component": "canonical_key",
+                        "target_kind": "request_parameter",
+                        "target_id": "location_id",
+                    },
+                ),
+            },
+        ),
         responses={
             "submit_question_contract_outcome": _question_contract_response(
                 subject="sales at ABC Mall",
@@ -341,6 +366,15 @@ def test_lookup_orchestrator_repeated_named_target_does_not_reuse_inactive_memor
         ),
     )
     planner = _ToolNamePlannerPort(
+        read_eligibility_retention_specs=(
+            ReadEligibilityRetentionSpec(
+                requested_fact_id="fact_1",
+                read_id="sales",
+                known_input_resolver_results=(
+                    ("fact_1_entity_1", "location:primary_key"),
+                ),
+            ),
+        ),
         responses={
             CONVERSATION_RESOLUTION_TOOL_NAME: (
                 lambda prompt: _conversation_resolution_payload_from_prompt(prompt)
@@ -1781,6 +1815,11 @@ class _SameScopeReadOutputPlannerPort:
                 forbidden=(),
             )
             candidate_id = str(candidate["source_candidate_id"])
+            binding_target_id = source_binding_target_id_for_candidate(
+                prompt,
+                requested_fact_id="fact_1",
+                source_candidate_id=candidate_id,
+            )
             arguments = source_binding_payload_for_one_call(
                 {
                     "outcome": {
@@ -1791,7 +1830,7 @@ class _SameScopeReadOutputPlannerPort:
                                 "source_candidate_id": candidate_id,
                                 "answer_population": source_candidate_answer_population(
                                     prompt,
-                                    source_candidate_id=candidate_id,
+                                    binding_target_id=binding_target_id,
                                 ),
                                 "param_decisions": {},
                             }
@@ -2795,7 +2834,7 @@ def _location_sales_catalog() -> RelationCatalog:
                     ref="locations.field.location_id",
                     path="data.location_id",
                     row_path_id="data",
-                    type="uuid",
+                    type="string",
                 ),
                 CatalogField(
                     ref="locations.field.name",
@@ -2824,7 +2863,7 @@ def _location_sales_catalog() -> RelationCatalog:
                     ref="sales.query.location_id",
                     name="location_id",
                     source=ParamSource.QUERY,
-                    type="uuid",
+                    type="string",
                     entity_target=_entity_target("location", "location_id"),
                 ),
             ),
@@ -2836,13 +2875,13 @@ def _location_sales_catalog() -> RelationCatalog:
                     ref="sales.field.sale_id",
                     path="data.sale_id",
                     row_path_id="data",
-                    type="uuid",
+                    type="string",
                 ),
                 CatalogField(
                     ref="sales.field.location_id",
                     path="data.location_id",
                     row_path_id="data",
-                    type="uuid",
+                    type="string",
                 ),
             ),
             candidate_keys=_primary_key("sale", "sale_id", "sales.field.sale_id"),

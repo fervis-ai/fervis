@@ -195,9 +195,16 @@ def source_fulfills_by_row_population_for_candidate(
 def source_candidate_answer_population(
     prompt: str,
     *,
-    source_candidate_id: str,
+    binding_target_id: str,
 ) -> dict[str, str]:
-    return _answer_population(prompt, source_candidate_id)
+    target = _binding_target_by_id(prompt).get(binding_target_id)
+    if target is None:
+        raise AssertionError(f"source binding target not found: {binding_target_id}")
+    return _answer_population(
+        prompt,
+        target.source_candidate_id,
+        binding_target=target,
+    )
 
 
 def source_candidate_with_fields(
@@ -525,6 +532,7 @@ _SOURCE_BINDING_INVOCATION_FIELDS = frozenset(
         "answer_population",
         "fulfillment_decisions",
         "param_decisions",
+        "resolved_input_applications",
         "row_predicate_reviews",
         "finite_choice_param_reviews",
     }
@@ -553,6 +561,11 @@ def source_binding_payload_from_fact_plan_with_invocation_overrides(
                 param_ids=tuple(override.get("use_default_param_ids") or ()),
             )
         )
+        resolved_applications = resolved_input_applications_for_target(
+            prompt,
+            binding_target_id=str(invocation["binding_target_id"]),
+            selections=tuple(override.get("resolved_input_applications") or ()),
+        )
         invocation.update(
             {
                 field: value
@@ -565,9 +578,11 @@ def source_binding_payload_from_fact_plan_with_invocation_overrides(
                     "plan_shape",
                     "row_predicate_choices",
                     "use_default_param_ids",
+                    "resolved_input_applications",
                 }
             }
         )
+        invocation["resolved_input_applications"] = resolved_applications
     normalized = source_binding_payload_for_one_call(payload, prompt=prompt)
     normalized_invocations = _source_binding_invocations(normalized.get("outcome", {}))
     for override, default_decisions in zip(
@@ -724,19 +739,23 @@ def _first_source_binding_payload_from_prompt(prompt: str) -> dict[str, Any]:
         )
         answer_output_id = str(support_set.get("answer_output_id") or "answer_1")
         source_candidate_id = _candidate_id(candidate)
+        target = _binding_target_for_candidate(
+            prompt,
+            requested_fact_id=requested_fact_id,
+            source_candidate_id=source_candidate_id,
+        )
         source_invocations.append(
             {
-                "binding_target_id": _binding_target_id_for_candidate(
-                    prompt,
-                    requested_fact_id=requested_fact_id,
-                    source_candidate_id=source_candidate_id,
-                ),
+                "binding_target_id": target.binding_target_id,
                 "answer_population": {
                     "population_binding_id": _first_population_binding_id(candidate),
                     "intent_text": "fixture-selected source population",
                     "match_basis_explanation": (
                         "The fixture selects the first source population exposed "
                         "for the prompt."
+                    ),
+                    "population_test_results": (
+                        satisfying_source_population_test_results(target)
                     ),
                 },
                 "fulfillment_decisions": {
@@ -751,6 +770,9 @@ def _first_source_binding_payload_from_prompt(prompt: str) -> dict[str, Any]:
                     }
                 },
                 "param_decisions": {},
+                "resolved_input_applications": (
+                    _unambiguous_resolved_input_applications(target)
+                ),
                 "row_predicate_reviews": {},
             }
         )
@@ -762,6 +784,138 @@ def _first_source_binding_payload_from_prompt(prompt: str) -> dict[str, Any]:
                 prompt=prompt,
             ),
         }
+    }
+
+
+def satisfying_source_population_test_results(
+    binding_target: dict[str, Any] | _PromptBindingTarget,
+) -> dict[str, dict[str, str]]:
+    target_payload = (
+        binding_target.payload
+        if isinstance(binding_target, _PromptBindingTarget)
+        else binding_target
+    )
+    basis = target_payload.get("answer_population_test_basis")
+    if not isinstance(basis, dict):
+        return {}
+    return {
+        str(test_id): {
+            "test_id": str(test_id),
+            "test_question": str(test_basis["test_question"]),
+            "role_scoped_test_question": str(
+                test_basis["role_scoped_test_question"]
+            ),
+            "because": "The selected source population satisfies this test.",
+            "test_effect": "SATISFIES_TEST",
+        }
+        for test_id, test_basis in basis.items()
+        if isinstance(test_basis, dict)
+    }
+
+
+def satisfying_source_population_test_results_for_target(
+    prompt: str,
+    *,
+    binding_target_id: str,
+) -> dict[str, dict[str, str]]:
+    target = _binding_target_by_id(prompt).get(binding_target_id)
+    if target is None:
+        raise AssertionError(f"source binding target not found: {binding_target_id}")
+    return satisfying_source_population_test_results(target)
+
+
+def resolved_input_applications_for_target(
+    prompt: str,
+    *,
+    binding_target_id: str,
+    selections: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not selections:
+        return []
+    target = _binding_target_by_id(prompt).get(binding_target_id)
+    if target is None:
+        raise AssertionError(f"source binding target not found: {binding_target_id}")
+    application_surface = target.payload.get("resolved_input_application")
+    if not isinstance(application_surface, dict):
+        raise AssertionError("source binding target has no resolved-input surface")
+    return [
+        _resolved_input_application_from_selection(
+            selection,
+            application_surface=application_surface,
+        )
+        for selection in selections
+    ]
+
+
+def _resolved_input_application_from_selection(
+    selection: dict[str, Any],
+    *,
+    application_surface: dict[str, Any],
+) -> dict[str, Any]:
+    selected_identity = (
+        str(selection["target_kind"]),
+        str(selection["target_id"]),
+        str(selection["value_id"]),
+        str(selection["value_component"]),
+    )
+    values = tuple(
+        item
+        for item in application_surface.get("resolved_values") or ()
+        if isinstance(item, dict)
+    )
+    matching_values = tuple(
+        value for value in values if value.get("value_id") == selected_identity[2]
+    )
+    targets_by_kind = application_surface.get("targets_by_kind") or {}
+    if len(matching_values) != 1 or not isinstance(targets_by_kind, dict):
+        raise AssertionError(
+            "resolved-input application fixture must select one shown value: "
+            f"{selected_identity!r}"
+        )
+    value = matching_values[0]
+    components_by_kind = value.get("components_by_target_kind") or {}
+    shown_components = components_by_kind.get(selected_identity[0]) or ()
+    shown_targets = targets_by_kind.get(selected_identity[0]) or ()
+    if selected_identity[1] not in shown_targets or selected_identity[3] not in shown_components:
+        raise AssertionError(
+            "resolved-input application fixture must select shown target and component: "
+            f"{selected_identity!r}"
+        )
+    return {
+        "target_kind": selected_identity[0],
+        "target_id": selected_identity[1],
+        "value_id": selected_identity[2],
+        "value_component": selected_identity[3],
+        "match_basis_explanation": (
+            "Apply the selected resolved input to the selected source target."
+        ),
+        "population_test_results": _satisfying_application_test_results(value),
+    }
+
+
+def undecided_source_population_test_results(
+    binding_target: dict[str, Any] | _PromptBindingTarget,
+) -> dict[str, dict[str, str]]:
+    target_payload = (
+        binding_target.payload
+        if isinstance(binding_target, _PromptBindingTarget)
+        else binding_target
+    )
+    basis = target_payload.get("answer_population_test_basis")
+    if not isinstance(basis, dict):
+        return {}
+    return {
+        str(test_id): {
+            "test_id": str(test_id),
+            "test_question": str(test_basis["test_question"]),
+            "role_scoped_test_question": str(
+                test_basis["role_scoped_test_question"]
+            ),
+            "because": "The source population alone does not decide this test.",
+            "test_effect": "DOES_NOT_DECIDE_TEST",
+        }
+        for test_id, test_basis in basis.items()
+        if isinstance(test_basis, dict)
     }
 
 
@@ -857,6 +1011,15 @@ def source_binding_payload_for_one_call(
             requested_fact_id=target.requested_fact_id,
         )
         invocation["binding_target_id"] = target.binding_target_id
+        answer_population = invocation.get("answer_population")
+        if not isinstance(answer_population, dict):
+            raise AssertionError(
+                "source binding fixture invocation requires answer_population"
+            )
+        answer_population.setdefault(
+            "population_test_results",
+            satisfying_source_population_test_results(target),
+        )
         _canonicalize_invocation_fulfillment_support_sets(
             invocation,
             fulfillment_support_sets=fulfillment_support_sets.get(candidate_id, ()),
@@ -895,6 +1058,10 @@ def source_binding_payload_for_one_call(
                 ).items()
             }
         invocation["param_decisions"] = param_decisions
+        if "resolved_input_applications" not in invocation:
+            invocation["resolved_input_applications"] = (
+                _unambiguous_resolved_input_applications(target)
+            )
     return output
 
 
@@ -2194,7 +2361,11 @@ def extract_source_bindings(
                 )
             return replacements[key]
         binding_id = f"sb_{len(bindings) + 1}"
-        answer_population = _answer_population(prompt, source_candidate_id)
+        answer_population = _answer_population(
+            prompt,
+            source_candidate_id,
+            binding_target=binding_target,
+        )
         item = {
             "binding_target_id": binding_target_id,
             "answer_population": answer_population,
@@ -2224,6 +2395,9 @@ def extract_source_bindings(
                 ),
                 prompt=prompt,
             ),
+            "resolved_input_applications": (
+                _unambiguous_resolved_input_applications(binding_target)
+            ),
             "row_predicate_reviews": dict(source.get("row_predicate_reviews") or {}),
         }
         bindings.append(item)
@@ -2248,6 +2422,58 @@ def extract_source_bindings(
                     source_role=f"value_{index}",
                 )
     return bindings, replacements
+
+
+def _unambiguous_resolved_input_applications(
+    target: _PromptBindingTarget,
+) -> list[dict[str, object]]:
+    surface = target.payload.get("resolved_input_application")
+    raw_options = (
+        surface.get("application_options") if isinstance(surface, dict) else ()
+    )
+    options = tuple(option for option in raw_options or () if isinstance(option, dict))
+    options_by_target: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for option in options:
+        target_key = (
+            str(option.get("target_kind") or ""),
+            str(option.get("target_id") or ""),
+        )
+        options_by_target.setdefault(target_key, []).append(option)
+    return [
+        {
+            "target_kind": target_kind,
+            "target_id": target_id,
+            "value_id": str(option["value_id"]),
+            "value_component": str(option["value_component"]),
+            "match_basis_explanation": (
+                "Apply the only shown resolved input option for this target."
+            ),
+            "population_test_results": _satisfying_application_test_results(option),
+        }
+        for (target_kind, target_id), target_options in options_by_target.items()
+        if len(target_options) == 1
+        for option in target_options
+    ]
+
+
+def _satisfying_application_test_results(
+    option: dict[str, Any],
+) -> dict[str, dict[str, str]]:
+    raw_basis = option.get("population_test_basis")
+    basis = raw_basis if isinstance(raw_basis, dict) else {}
+    return {
+        str(test_id): {
+            "test_id": str(test_id),
+            "test_question": str(test_basis["test_question"]),
+            "role_scoped_test_question": str(
+                test_basis["role_scoped_test_question"]
+            ),
+            "because": "The selected application enforces this constraint.",
+            "test_effect": "SATISFIES_TEST",
+        }
+        for test_id, test_basis in basis.items()
+        if isinstance(test_basis, dict)
+    }
 
 
 def _source_candidate_id_for_requested_fact(
@@ -3245,7 +3471,7 @@ def _source_param_decision_items(
             continue
         selected_option = _selected_bind_option(
             param_id=param_id,
-            value=value,
+            value=value or "",
             options=options,
         )
         if selected_option is not None:
@@ -3258,36 +3484,40 @@ def _source_param_decision_items(
                 param_decision_id=selected_option["param_decision_id"],
             )
             continue
-        if not value:
-            inferred_option = _single_or_preferred_bind_option(
-                param_id=param_id,
-                options=options,
-            )
-            if inferred_option is None:
-                meaning = str(
-                    options.get("omit_meaning") or f"do not filter {param_id}"
-                )
-                non_bind_decision_id = str(options.get("non_bind_decision_id") or "")
-                if not non_bind_decision_id:
-                    continue
-                output[param_id] = _test_param_decision(
-                    options=options,
-                    population_intent=(
-                        f"{param_id} is not part of the requested population"
-                    ),
-                    match_basis_explanation=(
-                        f"{meaning} This matches {param_id} is not part of the requested population because it is the selected source argument scope."
-                    ),
-                    param_decision_id=non_bind_decision_id,
-                )
-                continue
+        inferred_option = _single_or_preferred_bind_option(
+            param_id=param_id,
+            options=options,
+        )
+        if inferred_option is not None:
             output[param_id] = _test_param_decision(
                 options=options,
                 population_intent=population_intent_text,
                 match_basis_explanation=(
-                    f"{inferred_option['meaning']} This matches {population_intent_text} because it is the grounded value selected for this param."
+                    f"{inferred_option['meaning']} This matches "
+                    f"{population_intent_text} because it is the resolved value "
+                    "selected for this param."
                 ),
                 param_decision_id=inferred_option["param_decision_id"],
+            )
+            continue
+        if not value:
+            meaning = str(
+                options.get("omit_meaning") or f"do not filter {param_id}"
+            )
+            non_bind_decision_id = str(options.get("non_bind_decision_id") or "")
+            if not non_bind_decision_id:
+                continue
+            output[param_id] = _test_param_decision(
+                options=options,
+                population_intent=(
+                    f"{param_id} is not part of the requested population"
+                ),
+                match_basis_explanation=(
+                    f"{meaning} This matches {param_id} is not part of the "
+                    "requested population because it is the selected source "
+                    "argument scope."
+                ),
+                param_decision_id=non_bind_decision_id,
             )
             continue
         meaning = str(options.get("omit_meaning") or f"do not filter {param_id}")
@@ -3339,18 +3569,6 @@ def _single_or_preferred_bind_option(
             "meaning": str(candidates[0].get("meaning") or ""),
             "param_decision_id": str(candidates[0].get("param_decision_id") or ""),
         }
-    grounded_candidates = tuple(
-        candidate
-        for candidate in candidates
-        if str(candidate.get("value") or "").startswith("grounded_input")
-    )
-    if len(grounded_candidates) == 1:
-        return {
-            "meaning": str(grounded_candidates[0].get("meaning") or ""),
-            "param_decision_id": str(
-                grounded_candidates[0].get("param_decision_id") or ""
-            ),
-        }
     preferred_component = _preferred_time_component_for_test_param(param_id)
     for candidate in candidates:
         if str(candidate.get("value_component") or "") == preferred_component:
@@ -3390,9 +3608,9 @@ def _selected_bind_option(
 
 
 def _preferred_time_component_for_test_param(param_id: str) -> str:
-    if param_id in {"start_date", "start_time", "from"}:
+    if param_id in {"interval_start", "start_date", "start_time", "from"}:
         return "start"
-    if param_id in {"end_date", "end_time", "to"}:
+    if param_id in {"interval_end", "end_date", "end_time", "to"}:
         return "end"
     return "instant"
 
@@ -3410,8 +3628,17 @@ def _param_decisions_for_prompt(
     ]
 
 
-def _answer_population(prompt: str, source_candidate_id: str) -> dict[str, str]:
+def _answer_population(
+    prompt: str,
+    source_candidate_id: str,
+    *,
+    binding_target: _PromptBindingTarget | None = None,
+) -> dict[str, Any]:
     intent_text = _current_question_text(prompt) or "sales"
+    target = binding_target or _only_target_for_candidate(
+        prompt,
+        source_candidate_id=source_candidate_id,
+    )
     return {
         "population_binding_id": _source_population_binding_id(
             prompt,
@@ -3419,7 +3646,23 @@ def _answer_population(prompt: str, source_candidate_id: str) -> dict[str, str]:
         ),
         "intent_text": intent_text,
         "match_basis_explanation": f"{intent_text} defines the source population",
+        "population_test_results": (
+            satisfying_source_population_test_results(target) if target else {}
+        ),
     }
+
+
+def _only_target_for_candidate(
+    prompt: str,
+    *,
+    source_candidate_id: str,
+) -> _PromptBindingTarget | None:
+    matches = tuple(
+        target
+        for target in _binding_targets(prompt)
+        if target.source_candidate_id == source_candidate_id
+    )
+    return matches[0] if len(matches) == 1 else None
 
 
 def _source_population_binding_id(prompt: str, source_candidate_id: str) -> str:

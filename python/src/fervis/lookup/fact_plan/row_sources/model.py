@@ -167,6 +167,7 @@ class RowSource:
     kind: RowSourceKind
     label: str
     read_id: str = ""
+    endpoint_name: str = ""
     resource_names: tuple[str, ...] = ()
     memory_ref: str = ""
     description: str = ""
@@ -186,6 +187,20 @@ class RowSource:
             if item.id == field_id:
                 return item
         raise KeyError(field_id)
+
+    @property
+    def related_resource_field_ids(self) -> frozenset[str]:
+        component_field_ids = (
+            component.local_field_id
+            for reference in self.entity_references
+            for component in reference.components
+        )
+        context_field_ids = (
+            field_id
+            for reference in self.entity_references
+            for field_id in reference.context_field_ids
+        )
+        return frozenset(component_field_ids) | frozenset(context_field_ids)
 
     def param(self, param_id: str) -> RowSourceParam:
         for item in self.params:

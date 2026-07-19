@@ -8,11 +8,13 @@ from ._shared import (
     VerificationError,
 )
 from .contract_types import (
+    PopulationCoverage,
     ProofLineage,
     RelationContract,
     RelationEntityKey,
     RelationEntityKeyComponent,
 )
+from .contracts import _scalar_contracts
 from .operations import _operation_input_refs
 from .scalars import _operation_scalar_inputs
 from fervis.lookup.plan_execution.operation_runtime import ResolvedOperationInput
@@ -28,49 +30,56 @@ def _result_output_fact_refs(
     relation_contracts: dict[str, RelationContract],
     operation_inputs: tuple[ResolvedOperationInput, ...],
 ) -> dict[str, frozenset[str]]:
-    refs: dict[str, frozenset[str]] = {}
+    proofs = _result_output_proofs(
+        answer,
+        relation_contracts=relation_contracts,
+        operation_inputs=operation_inputs,
+    )
+    return {
+        output_id: proof.fulfillment_refs()
+        for output_id, proof in proofs.items()
+    }
+
+
+def _result_output_proofs(
+    answer: AnswerProgram,
+    *,
+    relation_contracts: dict[str, RelationContract],
+    operation_inputs: tuple[ResolvedOperationInput, ...],
+) -> dict[str, ProofLineage]:
+    proofs: dict[str, ProofLineage] = {}
     for result_output in answer.result_projection.relation_outputs:
         contract = relation_contracts.get(result_output.relation_id)
         if contract is None:
             continue
         field_ids = _result_output_field_ids(result_output)
-        proof = ProofLineage()
-        for field_id in field_ids:
-            proof = proof.merge(contract.field_proofs.get(field_id, ProofLineage()))
-        refs[result_output.id] = proof.fulfillment_refs()
-    scalar_refs = _compute_scalar_fact_refs(
+        field_proofs = tuple(
+            contract.field_proofs.get(field_id, ProofLineage())
+            for field_id in field_ids
+        )
+        proofs[result_output.id] = ProofLineage(
+            value_refs=frozenset(
+                ref for field_proof in field_proofs for ref in field_proof.value_refs
+            ),
+            population_coverage=PopulationCoverage.guaranteed_by_every(
+                tuple(
+                    field_proof.population_coverage for field_proof in field_proofs
+                )
+            ),
+        )
+    scalar_contracts = _scalar_contracts(
         answer,
+        relation_contracts=relation_contracts,
         operation_inputs=operation_inputs,
     )
     for scalar_output in answer.result_projection.scalar_outputs:
-        refs[scalar_output.id] = scalar_refs.get(scalar_output.scalar_id, frozenset())
-    return refs
-
-
-def _compute_scalar_fact_refs(
-    answer: AnswerProgram,
-    *,
-    operation_inputs: tuple[ResolvedOperationInput, ...],
-) -> dict[str, frozenset[str]]:
-    scalar_inputs = {
-        (item.operation_id, item.input_id): frozenset(item.proof_refs)
-        for item in operation_inputs
-    }
-    output: dict[str, frozenset[str]] = {}
-    for operation in answer.operations:
-        if not isinstance(operation.spec, ComputeSpec):
-            continue
-        refs: set[str] = set()
-        refs.update(
-            proof_ref
-            for (operation_id, _input_id), proof_refs in scalar_inputs.items()
-            if operation_id == operation.id
-            for proof_ref in proof_refs
+        scalar_contract = scalar_contracts.get(scalar_output.scalar_id)
+        proofs[scalar_output.id] = (
+            scalar_contract.proof
+            if scalar_contract is not None
+            else ProofLineage()
         )
-        for input_id in _operation_scalar_inputs(operation):
-            refs.update(output.get(input_id, frozenset()))
-        output[operation.spec.output_scalar] = frozenset(refs)
-    return output
+    return proofs
 
 
 def _verify_result_references(

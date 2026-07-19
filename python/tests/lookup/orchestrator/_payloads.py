@@ -1,6 +1,7 @@
 from dataclasses import replace
 import re
 from typing import cast, Iterable
+from xml.etree import ElementTree
 
 from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 
@@ -36,6 +37,7 @@ class ReadEligibilityRetentionSpec:
     measured_value_fields: tuple[str, ...] = ()
     group_key_fields: tuple[str, ...] = ()
     population_scope_fields: tuple[str, ...] = ()
+    known_input_resolver_results: tuple[tuple[str, str], ...] = ()
 
 
 def read_eligibility_response_from_prompt(
@@ -169,9 +171,14 @@ def read_eligibility_payload_from_prompt(
                 requested_fact_id=spec.requested_fact_id,
             )
         ].append(spec)
-    requested_fact_assessments: list[dict[str, Any]] = []
+    requested_fact_assessments: dict[str, dict[str, Any]] = {}
     for group in candidate_groups:
         requested_fact_id = group["requested_fact_id"]
+        fact_retention_specs = tuple(retention_specs_by_fact.get(requested_fact_id, ()))
+        canonical_inputs = _canonical_inputs_for_fact(
+            group,
+            specs=fact_retention_specs,
+        )
         cards_by_source_id = {
             str(card.get("source_candidate_id") or ""): card
             for card in group.get("read_candidates") or ()
@@ -184,14 +191,14 @@ def read_eligibility_payload_from_prompt(
         retention_specs_by_source_id: dict[str, list[ReadEligibilityRetentionSpec]] = (
             defaultdict(list)
         )
-        for spec in retention_specs_by_fact.get(requested_fact_id, ()):
+        for spec in fact_retention_specs:
             card = _read_eligibility_card_for_retention_spec(
                 spec,
                 cards_by_source_id=cards_by_source_id,
                 cards_by_read_id=cards_by_read_id,
             )
             retention_specs_by_source_id[str(card["source_candidate_id"])].append(spec)
-        read_candidate_reviews = []
+        read_candidate_reviews: dict[str, dict[str, Any]] = {}
         for card in group.get("read_candidates") or ():
             if not isinstance(card, dict):
                 continue
@@ -203,35 +210,43 @@ def read_eligibility_payload_from_prompt(
                     source_candidate_id=source_candidate_id,
                     specs=tuple(retention_specs_by_source_id[source_candidate_id]),
                 )
-                read_candidate_reviews.append(
+                read_candidate_reviews[source_candidate_id] = (
                     _retention_review_payload_from_spec(
                         merged_spec,
                         card=card,
                     )
                 )
                 continue
-            read_candidate_reviews.append(
-                {
-                    "source_candidate_id": source_candidate_id,
-                    "read_id": str(card.get("read_id") or ""),
-                    "relevant_row_path_tokens": [],
-                    "relevant_field_tokens": [],
-                    "retention_basis": (
-                        "This test fixture did not declare this read candidate "
-                        "as retained for the requested fact."
-                    ),
-                    "retention_decision": "DROP",
-                }
-            )
-        requested_fact_assessments.append(
-            {
-                "requested_fact_id": requested_fact_id,
-                "read_candidate_reviews": read_candidate_reviews,
+            read_candidate_reviews[source_candidate_id] = {
+                "retention_basis": (
+                    "This test fixture did not declare this read candidate "
+                    "as retained for the requested fact."
+                ),
+                "retention_decision": "DROP",
             }
-        )
+        requested_fact_assessments[requested_fact_id] = {
+            "read_candidate_reviews": read_candidate_reviews,
+            "canonical_inputs": {
+                binding["known_input_id"]: {
+                    key: value
+                    for key, value in binding.items()
+                    if key not in {"known_input_id", "canonical_result"}
+                }
+                for binding in canonical_inputs
+            },
+        }
     return {
         "requested_fact_assessments": requested_fact_assessments,
     }
+
+
+def _cards_by_read_id(
+    cards: Iterable[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    output: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for card in cards:
+        output[str(card.get("read_id") or "")].append(card)
+    return output
 
 
 def _canonical_read_eligibility_requested_fact_id(
@@ -286,6 +301,13 @@ def _merged_read_eligibility_retention_spec(
         ),
         population_scope_fields=_unique(
             field for spec in specs for field in spec.population_scope_fields
+        ),
+        known_input_resolver_results=tuple(
+            dict.fromkeys(
+                binding
+                for spec in specs
+                for binding in spec.known_input_resolver_results
+            )
         ),
     )
 
@@ -574,8 +596,6 @@ def _retention_review_payload_from_spec(
     row_tokens = list(dict.fromkeys(row_tokens))
     field_tokens = list(dict.fromkeys(field_tokens))
     return {
-        "source_candidate_id": str(card["source_candidate_id"]),
-        "read_id": str(card.get("read_id") or ""),
         "relevant_row_path_tokens": row_tokens,
         "relevant_field_tokens": field_tokens,
         "retention_basis": (
@@ -584,6 +604,72 @@ def _retention_review_payload_from_spec(
         ),
         "retention_decision": "RETAIN",
     }
+
+
+def _canonical_inputs_for_fact(
+    group: dict[str, Any],
+    *,
+    specs: tuple[ReadEligibilityRetentionSpec, ...],
+) -> list[dict[str, Any]]:
+    requested_results = dict(
+        binding for spec in specs for binding in spec.known_input_resolver_results
+    )
+    selected: list[dict[str, str]] = []
+    for known_input in group.get("known_inputs") or ():
+        if not isinstance(known_input, dict):
+            continue
+        options = tuple(
+            option
+            for option in known_input.get("canonical_options") or ()
+            if isinstance(option, dict)
+        )
+        if not options:
+            continue
+        known_input_id = str(known_input.get("id") or "")
+        requested_result = requested_results.get(known_input_id, "")
+        matches = tuple(
+            option
+            for option in options
+            if not requested_result
+            or str(option.get("result") or "") == requested_result
+        )
+        if len(matches) != 1:
+            raise AssertionError(
+                "fixture canonical selection must match one shown option"
+            )
+        option = matches[0]
+        canonical_option_assessments = {
+            str(candidate["id"]): (
+                f"{candidate['result']}: this fixture assessed the shown "
+                "canonical option against the retained read evidence."
+            )
+            for candidate in options
+        }
+        selection: dict[str, Any] = {
+            "known_input_id": known_input_id,
+            "interpretation_question": str(
+                known_input.get("interpretation_question") or ""
+            ),
+            "canonical_option_assessments": canonical_option_assessments,
+            "because": (
+                "This fixture selects the declared canonical result for "
+                "the named input in the requested fact."
+            ),
+            "canonical_option_id": str(option.get("id") or ""),
+            "canonical_result": str(option.get("result") or ""),
+        }
+        resolver_option_ids = tuple(option.get("resolver_option_ids") or ())
+        selection["resolver_option_assessments"] = {
+            str(option_id): (
+                "This fixture assessed the shown lookup request parameters and "
+                "returned identity verification fields for this resolver route."
+            )
+            for option_id in resolver_option_ids
+        }
+        if resolver_option_ids:
+            selection["resolver_option_id"] = str(resolver_option_ids[0])
+        selected.append(selection)
+    return selected
 
 
 def _resolve_field_path(card: dict[str, Any], identifier: str) -> str:
@@ -675,7 +761,115 @@ def _read_eligibility_prompt_json_section(
     *,
     label: str,
 ) -> dict[str, Any]:
-    return prompt_section_payload(prompt, label)
+    try:
+        return prompt_section_payload(prompt, label)
+    except (AssertionError, ValueError):
+        context = _read_eligibility_xml_context(prompt)
+        if label == "Candidate API reads":
+            return {
+                "requested_fact_read_candidates": [
+                    {
+                        "requested_fact_id": fact.attrib.get("id", ""),
+                        "known_inputs": [
+                            _read_eligibility_xml_known_input(known_input)
+                            for known_input in fact.findall(
+                                "./known_inputs/known_input"
+                            )
+                        ],
+                        "read_candidates": [
+                            _read_eligibility_xml_card(card)
+                            for card in fact.findall("./candidate_api_reads/api_read")
+                        ],
+                    }
+                    for fact in context.findall("./requested_fact")
+                ]
+            }
+        if label == "Requested facts":
+            return {
+                "requested_facts": [
+                    {"requested_fact_id": fact.attrib.get("id", "")}
+                    for fact in context.findall("./requested_fact")
+                ]
+            }
+        raise
+
+
+def _read_eligibility_xml_context(prompt: str) -> ElementTree.Element:
+    start = prompt.index("<read_eligibility_context>")
+    end_tag = "</read_eligibility_context>"
+    end = prompt.index(end_tag, start) + len(end_tag)
+    return ElementTree.fromstring(prompt[start:end])
+
+
+def _read_eligibility_xml_card(card: ElementTree.Element) -> dict[str, Any]:
+    return {
+        "source_candidate_id": card.attrib.get("id", ""),
+        "read_id": card.attrib.get("read", ""),
+        "endpoint_name": card.attrib.get("endpoint", ""),
+        "row_source_id": card.attrib.get("row_source", ""),
+        "docstring": card.findtext("./description", default=""),
+        "canonical_targets": [
+            {
+                "id": target.attrib.get("id", ""),
+                "known_input": target.attrib.get("known_input", ""),
+                "accepts": target.attrib.get("accepts", ""),
+            }
+            for target in card.findall("./canonical_targets/canonical_target")
+        ],
+        "response_rows": [
+            row
+            for element in card.findall("./response/row")
+            for row in _read_eligibility_xml_rows(element)
+        ],
+    }
+
+
+def _read_eligibility_xml_known_input(
+    known_input: ElementTree.Element,
+) -> dict[str, Any]:
+    return {
+        "id": known_input.attrib.get("id", ""),
+        "interpretation_question": known_input.findtext(
+            "./interpretation_question",
+            default="",
+        ),
+        "canonical_options": [
+            {
+                "id": option.attrib.get("id", ""),
+                "result": option.attrib.get("result", ""),
+                "resolver_option_ids": [
+                    resolver.attrib.get("option_id", "")
+                    for resolver in option.findall("./resolver")
+                ],
+            }
+            for option in known_input.findall("./canonical_options/canonical_option")
+        ],
+    }
+
+
+def _read_eligibility_xml_rows(
+    element: ElementTree.Element,
+) -> list[dict[str, Any]]:
+    row = {
+        "path": element.attrib.get("path", ""),
+        "cardinality": element.attrib.get("cardinality", ""),
+        "evidence_token": element.attrib.get("evidence_token", ""),
+        "fields": [
+            {
+                "field_id": field.attrib.get("name", ""),
+                "path": field.attrib.get("path", ""),
+                "type": field.attrib.get("type", ""),
+                "evidence_token": field.attrib.get("evidence_token", ""),
+            }
+            for field in element.findall("./field")
+        ],
+    }
+    children = [
+        child
+        for element_child in element.findall("./row")
+        for child in _read_eligibility_xml_rows(element_child)
+    ]
+    return [row, *children]
 
 
 def _planner_prompt_json_section(prompt: str, *, label: str) -> dict[str, Any]:

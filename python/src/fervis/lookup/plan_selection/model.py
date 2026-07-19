@@ -10,6 +10,7 @@ from fervis.lookup.relation_catalog import RelationCatalog
 from fervis.lookup.fact_plan.fact_plan import PlanImpossible
 from fervis.lookup.fact_planning.plan_shapes import ALL_PLAN_SHAPES
 from fervis.lookup.question_contract import QuestionContract, RequestedFact
+from fervis.lookup.answer_program.values import FactValue
 from fervis.lookup.turn_prompts.context import HostPromptContext
 from fervis.lookup.source_binding.compiler_ir import SourceAppliedFilter
 from fervis.lookup.source_binding.candidates.model import SourceCandidateRegistry
@@ -38,6 +39,7 @@ class PlanSelectionRequest:
     relation_catalog: RelationCatalog
     source_candidates: SourceCandidateRegistry
     conversation_context: dict[str, Any]
+    available_values: tuple[FactValue, ...] = ()
     host: HostPromptContext = field(default_factory=HostPromptContext)
 
 

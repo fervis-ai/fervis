@@ -53,6 +53,7 @@ from fervis.lookup.answer_program.values import (
     value_expression_constant,
 )
 from fervis.lookup.question_contract import QuestionContract, RequestedFact
+from fervis.lookup.question_contract import MembershipTestRef
 from fervis.lookup.plan_execution.operation_runtime import (
     ExecutableOperation,
     ResolvedComputeBinary,
@@ -68,6 +69,9 @@ from fervis.lookup.plan_execution.operation_runtime import (
 if TYPE_CHECKING:
     from fervis.lookup.plan_execution.authorized_sources import (
         AuthorizedExecutionSources,
+    )
+    from fervis.lookup.plan_execution.verification.contract_types import (
+        PopulationCoverage,
     )
 
 
@@ -88,6 +92,8 @@ class ExecutionProofNode:
     label: str = ""
     value: Any = None
     operator: str = ""
+    row_population_test_refs: tuple[MembershipTestRef, ...] = ()
+    condition_test_refs: tuple[MembershipTestRef, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -307,6 +313,14 @@ def _materialize_execution(
         values=_program_input_values(answer, bindings=bindings),
         operation_inputs=operation_inputs,
     )
+    proof_graph = _with_population_coverage(
+        proof_graph,
+        answer=answer,
+        catalog=catalog,
+        row_sources=row_sources,
+        instantiated_inputs=instantiated_inputs,
+        operation_inputs=operation_inputs,
+    )
     effective_requested_facts = materialize_requested_facts(
         answer.fact_template,
         population_choices=instantiated_inputs.population_choices,
@@ -323,6 +337,108 @@ def _materialize_execution(
         effective_requested_facts=effective_requested_facts,
         operation_inputs=operation_inputs,
     )
+
+
+def _with_population_coverage(
+    graph: ExecutionProofGraph,
+    *,
+    answer: AnswerProgram,
+    catalog: RelationCatalog | None,
+    row_sources: RowSourceCatalog,
+    instantiated_inputs: InstantiatedProgramInputs,
+    operation_inputs: tuple[ResolvedOperationInput, ...],
+) -> ExecutionProofGraph:
+    from fervis.lookup.plan_execution.verification.contracts import (
+        _relation_contracts,
+        _scalar_contracts,
+    )
+    from fervis.lookup.plan_execution.verification.execution_proof import (
+        ExecutionProofContext,
+    )
+    from fervis.lookup.plan_execution.verification.result_projection import (
+        _result_output_proofs,
+    )
+
+    proof_context = ExecutionProofContext(
+        endpoint_arg_scope_refs=_instantiated_endpoint_arg_refs(instantiated_inputs),
+        operation_refs=_operation_input_refs(graph),
+        row_filter_scope_refs=_instantiated_row_filter_refs(instantiated_inputs),
+    )
+    relation_contracts = _relation_contracts(
+        answer,
+        catalog=catalog,
+        row_sources=row_sources,
+        proof_context=proof_context,
+    )
+    scalar_contracts = _scalar_contracts(
+        answer,
+        relation_contracts=relation_contracts,
+        operation_inputs=operation_inputs,
+    )
+    result_proofs = _result_output_proofs(
+        answer,
+        relation_contracts=relation_contracts,
+        operation_inputs=operation_inputs,
+    )
+    coverage_by_node_id = {
+        **{
+            f"relation:{relation_id}": contract.population_proof.population_coverage
+            for relation_id, contract in relation_contracts.items()
+        },
+        **{
+            f"scalar:{scalar_id}": contract.proof.population_coverage
+            for scalar_id, contract in scalar_contracts.items()
+        },
+        **{
+            _answer_output_node_id(fulfillment): result_proofs[
+                fulfillment.result_output_id
+            ].population_coverage
+            for fulfillment in answer.fulfillment
+            if fulfillment.result_output_id in result_proofs
+        },
+    }
+    return ExecutionProofGraph(
+        nodes=tuple(
+            _node_with_population_coverage(
+                node,
+                coverage_by_node_id.get(node.id),
+            )
+            for node in graph.nodes
+        ),
+        edges=graph.edges,
+        contributions=graph.contributions,
+    )
+
+
+def _instantiated_endpoint_arg_refs(
+    inputs: InstantiatedProgramInputs,
+) -> dict[str, frozenset[str]]:
+    refs: dict[str, set[str]] = {}
+    for item in inputs.endpoint_args:
+        refs.setdefault(item.relation_id, set()).update(item.proof_refs)
+    return {relation_id: frozenset(items) for relation_id, items in refs.items()}
+
+
+def _instantiated_row_filter_refs(
+    inputs: InstantiatedProgramInputs,
+) -> dict[str, frozenset[str]]:
+    refs: dict[str, set[str]] = {}
+    for item in inputs.row_filters:
+        refs.setdefault(item.relation_id, set()).update(item.proof_refs)
+    return {relation_id: frozenset(items) for relation_id, items in refs.items()}
+
+
+def _operation_input_refs(
+    graph: ExecutionProofGraph,
+) -> dict[str, frozenset[str]]:
+    refs: dict[str, set[str]] = {}
+    for node in graph.nodes:
+        if node.kind is not ProofNodeKind.OPERATION_INPUT:
+            continue
+        operation_id = _operation_id_from_node(node.id)
+        if operation_id:
+            refs.setdefault(operation_id, set()).update(node.proof_refs)
+    return {operation_id: frozenset(items) for operation_id, items in refs.items()}
 
 
 def _instantiate_operations(
@@ -961,6 +1077,42 @@ def _node_with_proof_refs(
         label=node.label,
         value=node.value,
         operator=node.operator,
+        row_population_test_refs=node.row_population_test_refs,
+        condition_test_refs=node.condition_test_refs,
+    )
+
+
+def _node_with_population_coverage(
+    node: ExecutionProofNode,
+    coverage: PopulationCoverage | None,
+) -> ExecutionProofNode:
+    if coverage is None:
+        return node
+    return ExecutionProofNode(
+        id=node.id,
+        kind=node.kind,
+        proof_refs=node.proof_refs,
+        label=node.label,
+        value=node.value,
+        operator=node.operator,
+        row_population_test_refs=tuple(
+            sorted(
+                coverage.row_tests,
+                key=lambda ref: (
+                    ref.requested_fact_id,
+                    ref.membership_test_id,
+                ),
+            )
+        ),
+        condition_test_refs=tuple(
+            sorted(
+                coverage.condition_tests,
+                key=lambda ref: (
+                    ref.requested_fact_id,
+                    ref.membership_test_id,
+                ),
+            )
+        ),
     )
 
 

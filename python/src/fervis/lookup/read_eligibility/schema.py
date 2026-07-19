@@ -7,56 +7,48 @@ from fervis.lookup.read_eligibility import provider_contract as provider_output
 
 def build_read_eligibility_schema(
     *,
+    canonical_options_by_requested_fact_id: dict[
+        str,
+        tuple[dict[str, object], ...],
+    ],
     candidate_reviews_by_requested_fact_id: dict[str, tuple[dict[str, object], ...]],
 ) -> dict[str, object]:
-    requested_fact_assessment_variants = tuple(
-        _requested_fact_assessment_schema(
-            requested_fact_id=requested_fact_id,
+    requested_fact_assessments: dict[str, object] = {
+        requested_fact_id: _requested_fact_assessment_schema(
+            canonical_specs=canonical_options_by_requested_fact_id.get(
+                requested_fact_id,
+                (),
+            ),
             candidate_specs=candidate_specs,
         )
         for requested_fact_id, candidate_specs in (
             candidate_reviews_by_requested_fact_id.items()
         )
-    )
-    requested_fact_assessments_schema: dict[str, object] = {
-        "type": "array",
-        "items": {"type": "object"},
-        "minItems": len(candidate_reviews_by_requested_fact_id),
-        "maxItems": len(candidate_reviews_by_requested_fact_id),
     }
-    if requested_fact_assessment_variants:
-        requested_fact_assessments_schema["prefixItems"] = list(
-            requested_fact_assessment_variants
-        )
     return provider_output.ReadEligibilityOutput.schema(
         {
-            "requested_fact_assessments": requested_fact_assessments_schema,
+            "requested_fact_assessments": _closed_object_schema(
+                requested_fact_assessments
+            ),
         },
     )
 
 
 def _requested_fact_assessment_schema(
     *,
-    requested_fact_id: str,
+    canonical_specs: tuple[dict[str, object], ...],
     candidate_specs: tuple[dict[str, object], ...],
 ) -> dict[str, object]:
-    read_candidate_reviews_schema: dict[str, object] = {
-        "type": "array",
-        "items": {"type": "object"},
-        "minItems": len(candidate_specs),
-        "maxItems": len(candidate_specs),
+    read_candidate_reviews: dict[str, object] = {
+        str(candidate_spec["source_candidate_id"]): (
+            _candidate_read_candidate_review_schema(candidate_spec=candidate_spec)
+        )
+        for candidate_spec in candidate_specs
     }
-    if candidate_specs:
-        read_candidate_reviews_schema["prefixItems"] = [
-            _candidate_read_candidate_review_schema(
-                candidate_spec=candidate_spec,
-            )
-            for candidate_spec in candidate_specs
-        ]
     return provider_output.RequestedFactAssessmentOutput.schema(
         {
-            "requested_fact_id": _string_schema(enum_values=(requested_fact_id,)),
-            "read_candidate_reviews": read_candidate_reviews_schema,
+            "read_candidate_reviews": _closed_object_schema(read_candidate_reviews),
+            "canonical_inputs": _canonical_inputs_schema(canonical_specs),
         },
     )
 
@@ -67,70 +59,46 @@ def _candidate_read_candidate_review_schema(
 ) -> dict[str, object]:
     return {
         "oneOf": [
-            _read_candidate_review_schema(
-                candidate_id_schema=_string_schema(
-                    enum_values=(str(candidate_spec["source_candidate_id"]),),
-                ),
-                read_id_schema=_string_schema(
-                    enum_values=(str(candidate_spec["read_id"]),),
-                ),
+            _retained_read_review_schema(
                 row_path_token_schema=_string_schema(
-                    enum_values=_candidate_spec_values(
-                        candidate_spec,
-                        key="row_path_tokens",
-                    ),
+                    enum_values=_spec_values(candidate_spec, key="row_path_tokens"),
                 ),
                 field_token_schema=_string_schema(
-                    enum_values=_candidate_spec_values(
-                        candidate_spec,
-                        key="field_tokens",
-                    ),
+                    enum_values=_spec_values(candidate_spec, key="field_tokens"),
                 ),
-                retention_decision="RETAIN",
             ),
-            _read_candidate_review_schema(
-                candidate_id_schema=_string_schema(
-                    enum_values=(str(candidate_spec["source_candidate_id"]),),
-                ),
-                read_id_schema=_string_schema(
-                    enum_values=(str(candidate_spec["read_id"]),),
-                ),
-                row_path_token_schema={"type": "string"},
-                field_token_schema={"type": "string"},
-                retention_decision="DROP",
-            ),
+            _dropped_read_review_schema(),
         ]
     }
 
 
-def _read_candidate_review_schema(
+def _retained_read_review_schema(
     *,
-    candidate_id_schema: dict[str, object],
-    read_id_schema: dict[str, object],
     row_path_token_schema: dict[str, object],
     field_token_schema: dict[str, object],
-    retention_decision: str,
 ) -> dict[str, object]:
-    relevant_row_path_tokens_schema: dict[str, object] = {
-        "type": "array",
-        "items": row_path_token_schema,
-    }
-    relevant_field_tokens_schema: dict[str, object] = {
-        "type": "array",
-        "items": field_token_schema,
-    }
-    if retention_decision == "DROP":
-        relevant_row_path_tokens_schema["maxItems"] = 0
-        relevant_field_tokens_schema["maxItems"] = 0
-    return provider_output.ReadCandidateReviewOutput.schema(
+    return provider_output.RetainedReadReviewOutput.schema(
         {
-            "source_candidate_id": candidate_id_schema,
-            "read_id": read_id_schema,
-            "relevant_row_path_tokens": relevant_row_path_tokens_schema,
-            "relevant_field_tokens": relevant_field_tokens_schema,
+            "relevant_row_path_tokens": {
+                "type": "array",
+                "items": row_path_token_schema,
+            },
+            "relevant_field_tokens": {
+                "type": "array",
+                "items": field_token_schema,
+            },
             "retention_basis": {"type": "string", "minLength": 1},
-            "retention_decision": {"enum": [retention_decision]},
+            "retention_decision": {"enum": ["RETAIN"]},
         },
+    )
+
+
+def _dropped_read_review_schema() -> dict[str, object]:
+    return provider_output.DroppedReadReviewOutput.schema(
+        {
+            "retention_basis": {"type": "string", "minLength": 1},
+            "retention_decision": {"enum": ["DROP"]},
+        }
     )
 
 
@@ -141,11 +109,81 @@ def _string_schema(*, enum_values: tuple[str, ...]) -> dict[str, object]:
     return schema
 
 
-def _candidate_spec_values(
-    candidate_spec: dict[str, object],
+def _closed_object_schema(properties: dict[str, object]) -> dict[str, object]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": properties,
+        "required": list(properties),
+    }
+
+
+def _canonical_inputs_schema(
+    canonical_specs: tuple[dict[str, object], ...],
+) -> dict[str, object]:
+    canonical_inputs: dict[str, object] = {
+        str(spec["known_input_id"]): _canonical_input_schema(spec)
+        for spec in canonical_specs
+    }
+    return _closed_object_schema(canonical_inputs)
+
+
+def _canonical_input_schema(spec: dict[str, object]) -> dict[str, object]:
+    canonical_options = _canonical_option_specs(spec)
+    canonical_option_ids = tuple(
+        str(option["canonical_option_id"]) for option in canonical_options
+    )
+    common_properties = {
+        "interpretation_question": _string_schema(
+            enum_values=(str(spec["interpretation_question"]),)
+        ),
+        "canonical_option_assessments": _closed_object_schema(
+            {
+                option_id: {"type": "string", "minLength": 1}
+                for option_id in canonical_option_ids
+            }
+        ),
+        "because": {"type": "string", "minLength": 1},
+    }
+    variants: list[dict[str, object]] = []
+    for option in canonical_options:
+        canonical_option_id = str(option["canonical_option_id"])
+        resolver_option_ids = _spec_values(option, key="resolver_option_ids")
+        properties: dict[str, object] = {
+            **common_properties,
+            "canonical_option_id": _string_schema(enum_values=(canonical_option_id,)),
+            "resolver_option_assessments": _closed_object_schema(
+                {
+                    resolver_option_id: {"type": "string", "minLength": 1}
+                    for resolver_option_id in resolver_option_ids
+                }
+            ),
+        }
+        if resolver_option_ids:
+            properties["resolver_option_id"] = _string_schema(
+                enum_values=resolver_option_ids
+            )
+        variant = provider_output.CanonicalInputSelectionOutput.schema(properties)
+        if resolver_option_ids:
+            required = variant["required"]
+            if not isinstance(required, list):
+                raise TypeError("canonical input schema requires a field list")
+            variant["required"] = [*required, "resolver_option_id"]
+        variants.append(variant)
+    return {"oneOf": variants}
+
+
+def _canonical_option_specs(spec: dict[str, object]) -> tuple[dict[str, object], ...]:
+    value = spec.get("canonical_options")
+    values = value if isinstance(value, (list, tuple)) else ()
+    return tuple(item for item in values if isinstance(item, dict))
+
+
+def _spec_values(
+    spec: dict[str, object],
     *,
     key: str,
 ) -> tuple[str, ...]:
-    raw_values = candidate_spec.get(key)
+    raw_values = spec.get(key)
     values = raw_values if isinstance(raw_values, (list, tuple)) else ()
     return tuple(str(value) for value in values if str(value))

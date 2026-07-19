@@ -63,7 +63,11 @@ def __getattr__(name: str):
         from . import payload
 
         return getattr(payload, name)
-    if name in {"api_read_source_groups", "read_row_source_counts"}:
+    if name in {
+        "api_read_source_groups",
+        "endpoint_parameter_source",
+        "read_row_source_counts",
+    }:
         from . import source_groups
 
         return getattr(source_groups, name)
@@ -94,6 +98,7 @@ __all__ = (
     "api_row_source_id",
     "api_read_source_groups",
     "build_row_source_catalog",
+    "endpoint_parameter_source",
     "executable_field_ids_for_row_path",
     "memory_row_source_id",
     "memory_row_source_prompt_payload",

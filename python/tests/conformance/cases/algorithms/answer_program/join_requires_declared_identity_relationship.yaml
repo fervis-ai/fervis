@@ -1,0 +1,33 @@
+id: join_requires_declared_identity_relationship
+description: Population coverage cannot cross an inner join whose fields have compatible types but no declared identity relationship.
+kind: algorithm
+algorithm: answer_program.population_coverage
+input:
+  question_contract: {$ref: ../../../fixtures/population_constraint_coverage.yaml#/question_contracts/sales_in_nairobi}
+  inputs: [{id: nairobi, value: Nairobi, entity_kind: area, key_component_id: area_id, canonical_value: area-nairobi}]
+  relations:
+    - id: sales
+      fields: [sale_id, unrelated_code, amount]
+      identity_fields: [sale_id]
+    - id: locations
+      fields: [location_id, unrelated_code, area_id]
+      identity_fields: [location_id]
+      applied_inputs: [{input_id: nairobi, field_id: area_id}]
+      coverage_claims: [{membership_test_id: in_nairobi, role: row_population, proof_ref: returned_filter:locations.area_id}]
+  operations:
+    - id: join_sales_locations
+      output_relation: joined
+      spec:
+        kind: join
+        left: sales
+        right: locations
+        join_keys: [{left: unrelated_code, right: unrelated_code}]
+    - id: total_sales
+      output_relation: totals
+      spec:
+        kind: aggregate
+        input_relation: joined
+        aggregations: [{function: sum, input_field: amount, output_field: total}]
+  result: {relation_id: totals, field_id: total}
+expect:
+  result_contains: {status: rejected}

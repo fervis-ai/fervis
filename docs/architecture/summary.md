@@ -229,8 +229,8 @@ question + visible conversation context
      raw question + any typed resolution
        -> question contract
        -> query enrichment and catalog selection
-       -> grounding
-       -> read eligibility
+       -> resolver capability review
+       -> read eligibility, selected resolver execution, and canonical constraints
        -> plan selection and source binding
        -> fact planning
        -> AnswerProgram compilation + initial BindingSet
@@ -276,10 +276,10 @@ factual answer cannot outlive failure to persist its audit truth.
 | Conversation resolution | Complete resolved clauses, attributed values, retained fixed frame parts, an optional complete call to a shown prior frame, or a structured unresolved outcome. | Canonical context sources and frames, source-reference parsing, frame-call signature checking, persisted-program loading, and the execution-path split. |
 | Question contract | Requested facts, answer shapes, outputs, populations, and literal or row-set question inputs from the raw question plus typed prior meaning. | Stable IDs, catalog blindness, contract parsing, omission of duplicate current-only values, and preservation of uncompiled time text. |
 | Query enrichment | Resource and entity search terms grounded in the current question contract. | Catalog and resolver recall. |
-| Grounding | A shown resolver route or candidate when semantic selection is required. | Exact-literal verification, deterministic time resolution, resolver execution, canonical values, and ambiguity detection. |
-| Read eligibility | Candidate-local retain/drop decisions plus relevant row paths and field evidence hints. | Read-card construction, candidate identity, structural filtering, and retained-read caps. |
+| Grounding | Whether each shown resolver read can resolve one named input and produce its declared canonical key, including selected request values and exact returned-resource match fields. More than one typed binding may be positive. | Resolver-option construction from catalog authority and the shared API-read projection, typed binding validation, and deterministic time resolution. |
+| Read eligibility | Fact-local canonical interpretation, retain/drop decisions, and relevant evidence hints. | Read-card construction, structural option validation, execution of selected typed resolver bindings, exact verification, canonical-key production, and retained-read caps. |
 | Plan selection | Which source strategy to evaluate. | Strategy construction from retained reads. |
-| Source binding | Source invocations, answer population, params and omission, finite-choice effects, fulfillment evidence, metric fit, and role-qualified targets. | Review-scope construction, ID and param validation, target compatibility, deterministic bindings, and executable consistency. |
+| Source binding | Source invocations, resolved-input applications to selected invocation targets, answer population, params and omission, finite-choice effects, fulfillment evidence, metric fit, and role-qualified targets. | Review-scope construction, ID and param validation, resolved-input application validation and compilation, target compatibility, and executable consistency. |
 | Fact planning | A typed operation plan. | Parsing the planning IR and compiling one closed `AnswerProgram` plus initial bindings. |
 
 `requested_facts` are immutable inside a run. Downstream turns satisfy,
