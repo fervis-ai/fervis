@@ -69,7 +69,7 @@ from fervis.lookup.plan_selection import (
 
 
 _APPROVED_CHARS = {
-    "question contract": (364, 20099, 29637),
+    "question contract": (364, 20095, 29633),
     "query enrichment": (364, 5185, 7408),
     "grounding": (364, 7202, 10861),
     "source binding": (364, 16485, 20357),
@@ -192,6 +192,22 @@ def test_question_contract_prompt_assigns_input_ownership_once() -> None:
     assert "owned_question_input_refs" not in invocation.prompt_text
     assert "question_input_refs" not in invocation.prompt_text
     assert "computation operand" not in invocation.prompt_text
+
+
+def test_question_contract_prompt_resolves_prior_references_before_contracting() -> None:
+    invocation = next(
+        item for item in _turn_invocations() if item.turn_name == "question contract"
+    )
+
+    assert (
+        "First state whether the current wording identifies a requested fact and whether "
+        "any required referent can only be identified from an earlier utterance."
+    ) in invocation.prompt_text
+    assert (
+        "If a required referent can only be identified from an earlier utterance "
+        "and typed conversation resolution does not supply it, return "
+        "kind=unresolved_prior_turn_references instead of a question_contract."
+    ) in invocation.prompt_text
 
 
 def test_source_binding_prompt_distinguishes_ranked_physical_operations():

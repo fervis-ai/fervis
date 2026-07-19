@@ -228,13 +228,13 @@ class QuestionContractTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Clarification Boundary",
                 (
-                    "Write decision_basis first. State whether the current wording identifies a complete factual request, then list every reference_value, time_value, and result_limit the question contains and outcome must declare without assigning owners or predicates.",
+                    "Write decision_basis first. First state whether the current wording identifies a requested fact and whether any required referent can only be identified from an earlier utterance.",
+                    "Then list every reference_value, time_value, and result_limit the question contains and outcome must declare without assigning owners or predicates.",
                     "Relational structure belongs in outcome; do not assess grounding, time compilation, or execution in decision_basis.",
                     "Do not use a clarification outcome when visible context is sufficient to author a complete factual question contract.",
                     "Use kind=missing_requested_fact only when explicit wording states no business fact, property, measure, relationship, comparison, or row set to return.",
                     "Use missing_requested_fact only when no answer_fact can be authored from explicit question wording; an unresolved subject or input does not erase a stated answer_fact.",
-                    "Use kind=unresolved_prior_turn_references when the factual result is identifiable but one or more required references depend on prior-turn context that typed conversation resolution does not supply.",
-                    "Do not drop an unresolved target reference and proceed with a broader factual request.",
+                    "If a required referent can only be identified from an earlier utterance and typed conversation resolution does not supply it, return kind=unresolved_prior_turn_references instead of a question_contract.",
                     "A named property requested for a subject is a complete answer definition; its unknown value is the requested answer, not missing context.",
                     "An explicitly named factual measure or business result is a sufficient answer definition; do not request a narrower metric merely because several API fields or calculations might later implement it.",
                     "An explicit name, code, key, date, number, or other value is sufficient to author a question input; grounding determines whether it exists or resolves uniquely.",

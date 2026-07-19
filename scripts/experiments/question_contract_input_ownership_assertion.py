@@ -17,12 +17,26 @@ _QUESTIONS = {
     "choice_and_time": "How many in-person sales happened this month?",
     "one_input_two_tests": "How many records have both owner and reviewer equal to her?",
     "result_limit": "Which 3 stores had the most sales this month?",
+    "unresolved_prior_reference": "What were her sales last week?",
 }
 
 
 def validate(arguments: dict[str, Any], context: dict[str, Any]) -> list[str]:
     errors: list[str] = []
+    label = context.get("label")
     outcome = arguments.get("outcome")
+    if label == "unresolved_prior_reference":
+        if not isinstance(outcome, dict):
+            return ["outcome is not an object"]
+        if outcome.get("kind") != "unresolved_prior_turn_references":
+            return ["unresolved pronoun did not require prior-turn clarification"]
+        references = outcome.get("references")
+        if not isinstance(references, list) or not any(
+            isinstance(item, dict) and item.get("source_text") == "her"
+            for item in references
+        ):
+            return ["clarification does not identify the unresolved pronoun"]
+        return []
     if not isinstance(outcome, dict) or outcome.get("kind") != "question_contract":
         return ["outcome is not a question contract"]
     inputs = outcome.get("question_inputs")
@@ -60,7 +74,6 @@ def validate(arguments: dict[str, Any], context: dict[str, Any]) -> list[str]:
         for item in uses
         if isinstance(item, dict)
     }
-    label = context.get("label")
     question = _QUESTIONS.get(str(label))
     if question is not None:
         try:
@@ -174,7 +187,7 @@ def _conversation_resolution(
                 value_source_text="her",
                 resolved_value_text="Azraah",
                 role=LiteralInputRole.REFERENCE_VALUE,
-                field_label_text="owner and reviewer",
+                field_label_text="person",
                 value_meaning_hint="person",
             ),
         ),
