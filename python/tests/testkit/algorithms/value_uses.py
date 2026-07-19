@@ -105,6 +105,11 @@ def run_value_uses_case(payload: dict[str, Any]) -> list[str]:
             value.id: ParameterRef(parameter_id=parameter_ids[value.id])
             for value in values
         },
+        population_coverage_by_value_id={},
+        value_types_by_value_id={
+            value.id: parameter.value_type
+            for value, parameter in zip(values, parameter_declarations, strict=True)
+        },
     )
     try:
         parameters = {item.id: item for item in parameter_declarations}

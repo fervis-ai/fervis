@@ -235,6 +235,9 @@ class PatternFactPlanTurnPrompt(TurnPromptBase):
                 )
                 for fact in self.request.question_contract.requested_facts
             },
+            value_ids_by_requested_fact_id=_value_ids_by_requested_fact_id(
+                self.request
+            ),
         )
 
 
@@ -651,4 +654,18 @@ def _schema_clarification_inputs(
     return {
         "required_catalog_input_ids": tuple(required_input_ids),
         "required_catalog_choice_input_ids": tuple(choice_input_ids),
+    }
+
+
+def _value_ids_by_requested_fact_id(
+    request: FactPlanRequest,
+) -> dict[str, tuple[str, ...]]:
+    return {
+        fact.id: tuple(
+            value.id
+            for value in request.available_values
+            if not value.applies_to_requested_fact_ids
+            or fact.id in value.applies_to_requested_fact_ids
+        )
+        for fact in request.question_contract.requested_facts
     }

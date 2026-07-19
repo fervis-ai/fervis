@@ -21,9 +21,11 @@ def computed_scalar_pattern_answer_variants(
     *,
     requested_fact_id_schema: dict[str, object] | None,
     require_pattern: bool,
+    value_ids: tuple[str, ...] | None = None,
 ) -> list[dict[str, object]]:
     schema = _computed_scalar_pattern_schema(
         requested_fact_id_schema=requested_fact_id_schema,
+        value_ids=value_ids,
     )
     return [schema if require_pattern else optional_pattern_schema(schema)]
 
@@ -31,13 +33,14 @@ def computed_scalar_pattern_answer_variants(
 def _computed_scalar_pattern_schema(
     *,
     requested_fact_id_schema: dict[str, object] | None,
+    value_ids: tuple[str, ...] | None,
 ) -> dict[str, object]:
     return strict_object(
         {
             "requested_fact_id": requested_fact_id_schema or handle_schema(),
             "answer_output_ids": non_empty_string_array(),
             "pattern": {"enum": ["computed_scalar"]},
-            "scalar_inputs": non_empty_array_items(_source_scalar_input_schema()),
+            "scalar_inputs": non_empty_array_items(_scalar_input_schema(value_ids)),
             "expression": non_empty_array_items(_compute_expression_token_schema()),
             "output": _scalar_output_schema(),
         },
@@ -52,13 +55,15 @@ def _computed_scalar_pattern_schema(
     )
 
 
-def _source_scalar_input_schema() -> dict[str, object]:
+def _scalar_input_schema(value_ids: tuple[str, ...] | None) -> dict[str, object]:
     return strict_object(
         {
             "input_id": field_id_schema(),
-            "source_binding_id": handle_schema(),
+            "value_id": (
+                {"enum": list(value_ids)} if value_ids is not None else handle_schema()
+            ),
         },
-        required=("input_id", "source_binding_id"),
+        required=("input_id", "value_id"),
     )
 
 

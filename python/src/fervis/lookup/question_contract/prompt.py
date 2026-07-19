@@ -179,7 +179,7 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                 (
                     "question_inputs is declared before answer_requests.",
                     "question_inputs declares each literal value or resolved row-set reference once.",
-                    "Create question_inputs for concrete values supplied by the question or conversation resolution that a population predicate, result key, time constraint, or result limit consumes.",
+                    "Create question_inputs for concrete values supplied by the question or conversation resolution that a population predicate, result key, time constraint, compute expression, or result limit consumes.",
                     "Do not create a question_inputs item for answer_subject.subject_text itself.",
                 ),
             ),
@@ -215,6 +215,13 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                 ),
             ),
             builder.instruction_block(
+                "Formula Values",
+                (
+                    "Use formula_value when a supplied literal is an arithmetic operand used to compute the returned answer, such as 10% in '10% of the total measured value.'",
+                    "A formula_value is not a population predicate and does not determine which candidates qualify.",
+                ),
+            ),
+            builder.instruction_block(
                 "Result Limits",
                 (
                     "A result_limit is an explicit positive integer stating how many ordered results to return.",
@@ -228,12 +235,12 @@ class QuestionContractTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Question Input Inventory",
                 (
-                    "Before finalizing question_inputs, actively inventory every word or phrase that is a reference value, time value, result limit, or resolved row-set reference.",
+                    "Before finalizing question_inputs, actively inventory every word or phrase that is a reference value, time value, formula value, result limit, or resolved row-set reference.",
                     "Declare exactly one question_inputs item for every inventoried phrase.",
-                    "Question inputs are atomic value rows. Each question_input represents one value, time, limit, or reference that the answer contract may use. If the question names multiple values, create one question_input per value. Put the input's semantic role in field_label_text; do not combine several values into one value_source_text or operand_text.",
+                    "Question inputs are atomic value rows. Each question_input represents one value, time, formula operand, limit, or reference that the answer contract may use. If the question names multiple values, create one question_input per value. Put the input's semantic role in field_label_text; do not combine several values into one value_source_text or operand_text.",
                     "Question-input identity comes from the copied occurrence, not from the predicate or field that consumes it. One copied occurrence remains one input when several predicates consume it.",
                     "Each question_inputs item must include inventory_check.why_this_is_an_input explaining which input category it belongs to and why it constrains an answer request or supplies a value.",
-                    "Each question_input must have one primary contract role: population predicate operand, result key, time constraint, or result limit.",
+                    "Each question_input must have one primary contract role: population predicate operand, result key, time constraint, compute-expression operand, or result limit.",
                     "Result-shape and result-axis inputs belong to answer_expression, not answer_population membership tests.",
                     "Use answer_population membership_tests only for predicates that narrow subject instances independently of answer_expression's result axis.",
                     "question_inputs declares concrete user/context values that those predicates, time predicates, or result limits depend on and that downstream stages must ground, compile, verify, or bind.",
@@ -246,7 +253,7 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                 "Clarification Boundary",
                 (
                     "Write decision_basis first. First state whether the current wording identifies a requested fact and whether any required referent can only be identified from an earlier utterance.",
-                    "Then list every reference_value, time_value, and result_limit the question contains and outcome must declare without assigning owners or predicates.",
+                    "Then list every reference_value, time_value, formula_value, and result_limit the question contains and outcome must declare without assigning owners or predicates.",
                     "Relational structure belongs in outcome; do not assess grounding, time compilation, or execution in decision_basis.",
                     "Do not use a clarification outcome when visible context is sufficient to author a complete factual question contract.",
                     "Use kind=missing_requested_fact only when explicit wording states no business fact, property, measure, relationship, comparison, or row set to return.",
@@ -271,11 +278,12 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                     "A SPECIFIED_QUESTION_INPUTS group key restricts results to its GROUP_KEY inputs and groups by them.",
                     "GROUP_KEY inputs are not candidate-row predicates; create no EXPLICIT_USER_CONSTRAINT for them.",
                     "Use POPULATION_TESTS when the input is an operand of one or more EXPLICIT_USER_CONSTRAINT membership tests, and give that use a unique use_id.",
+                    "Use COMPUTE_EXPRESSION when a formula_value is an operand in the requested computed_scalar expression.",
                     "Use RESULT_LIMIT when the input supplies answer_expression's requested result limit.",
                     "One population test may reference several POPULATION_TESTS use_ids.",
                     "Build EXPLICIT_USER_CONSTRAINT tests only from prior POPULATION_TESTS uses; an input without use_id cannot be a question_input_use_ref.",
                     "Each EXPLICIT_USER_CONSTRAINT lists the use_id of every POPULATION_TESTS operand it consumes in question_input_use_refs.",
-                    "question_input_use_refs may name only POPULATION_TESTS uses; GROUP_KEY and RESULT_LIMIT inputs are never membership-test operands.",
+                    "question_input_use_refs may name only POPULATION_TESTS uses. GROUP_KEY, COMPUTE_EXPRESSION, and RESULT_LIMIT inputs are never membership-test operands.",
                     "SUBJECT_IDENTITY asks only whether the candidate is an instance of answer_subject and has no input operands.",
                     "An input identifying a related entity uses POPULATION_TESTS unless it is a SPECIFIED_QUESTION_INPUTS group member, in which case it uses GROUP_KEY only.",
                     "SUBJECT_IDENTITY, NORMAL_INSTANCE_GUARD, and RAW_RECORD_GUARD use an empty question_input_use_refs array.",
@@ -315,7 +323,7 @@ class QuestionContractTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Output",
                 (
-                    "Before returning a complete contract, verify that each copied question occurrence is declared once, every fact-local input appears once in question_input_uses, group-key inputs appear in no population test, and every EXPLICIT_USER_CONSTRAINT references its POPULATION_TESTS operands.",
+                    "Before returning a complete contract, verify that each copied question occurrence is declared once, every fact-local input appears once in question_input_uses, group-key and compute-expression inputs appear in no population test, and every EXPLICIT_USER_CONSTRAINT references its POPULATION_TESTS operands.",
                     "Return exactly one provider-native tool call.",
                     "Set kind=question_contract when visible context is sufficient to author complete answer requests.",
                     "Set kind=missing_requested_fact only when no complete factual result is identifiable.",

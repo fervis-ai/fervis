@@ -396,6 +396,8 @@ def compile_pattern_answer_plan(
         input_context=CompilerInputContext(
             program_inputs=ProgramInputs(parameters=(), bindings=BindingSet()),
             expressions_by_value_id={},
+            population_coverage_by_value_id={},
+            value_types_by_value_id={},
         ),
         requested_facts=requested_facts,
     )

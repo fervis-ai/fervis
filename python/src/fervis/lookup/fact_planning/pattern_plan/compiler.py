@@ -190,7 +190,6 @@ def _compile_pattern_answer(
                 answer=answer,
                 index=index,
                 namespace_result_outputs=namespace_result_outputs,
-                bound_sources=bound_sources,
                 input_context=input_context,
                 relation_builder=relation_builder,
             )

@@ -60,6 +60,7 @@ class _ParsedQuestionInputUses:
     input_refs: tuple[str, ...]
     group_key_input_refs: tuple[str, ...]
     population_input_refs_by_use_id: dict[str, str]
+    compute_input_refs: tuple[str, ...]
     result_limit_input_ref: str
 
 
@@ -277,6 +278,7 @@ def _requested_facts(
         answer_expression = _answer_expression(
             parsed.answer_expression,
             group_key_input_refs=input_uses.group_key_input_refs,
+            compute_input_refs=input_uses.compute_input_refs,
             limit_input_ref=input_uses.result_limit_input_ref,
             path=f"{path}.answer_expression",
         )
@@ -302,6 +304,7 @@ def _answer_expression(
     item: provider_output.AnswerExpressionOutput,
     *,
     group_key_input_refs: tuple[str, ...],
+    compute_input_refs: tuple[str, ...],
     limit_input_ref: str,
     path: str,
 ) -> RequestedFactAnswerExpression:
@@ -333,6 +336,7 @@ def _answer_expression(
         ordering_direction=ordering_direction,
         selection_kind=selection_kind,
         limit_input_ref=limit_input_ref,
+        compute_input_refs=compute_input_refs,
     )
 
 
@@ -603,6 +607,7 @@ def _question_input_uses(
     input_refs: list[str] = []
     group_key_input_refs: list[str] = []
     population_input_refs_by_use_id: dict[str, str] = {}
+    compute_input_refs: list[str] = []
     result_limit_input_ref = ""
     seen_inputs: set[str] = set()
     seen_use_ids: set[str] = set()
@@ -629,6 +634,7 @@ def _question_input_uses(
         _validate_input_owner_kind(
             known_input,
             owner_kind=owner_kind,
+            answer_expression=answer_expression,
             path=f"{item_path}.owner_kind",
         )
         input_refs.append(input_ref)
@@ -648,6 +654,10 @@ def _question_input_uses(
             result_limit_input_ref = input_ref
             continue
 
+        if owner_kind is provider_output.QuestionInputOwnerKind.COMPUTE_EXPRESSION:
+            compute_input_refs.append(input_ref)
+            continue
+
         use_id = _required_text(item.use_id or "", path=f"{item_path}.use_id")
         if use_id in seen_use_ids:
             raise ValueError(f"{item_path}.use_id duplicates use ID")
@@ -665,6 +675,7 @@ def _question_input_uses(
         input_refs=tuple(input_refs),
         group_key_input_refs=tuple(group_key_input_refs),
         population_input_refs_by_use_id=population_input_refs_by_use_id,
+        compute_input_refs=tuple(compute_input_refs),
         result_limit_input_ref=result_limit_input_ref,
     )
 
@@ -684,12 +695,31 @@ def _validate_input_owner_kind(
     known_input: RequestedFactKnownInput,
     *,
     owner_kind: provider_output.QuestionInputOwnerKind,
+    answer_expression: provider_output.AnswerExpressionOutput,
     path: str,
 ) -> None:
     if owner_kind is provider_output.QuestionInputOwnerKind.RESULT_LIMIT:
         if not known_input.is_result_limit:
             raise ValueError(f"{path} RESULT_LIMIT requires a result_limit input")
         return
+    if owner_kind is provider_output.QuestionInputOwnerKind.COMPUTE_EXPRESSION:
+        if not (
+            isinstance(known_input, RequestedFactLiteralInput)
+            and known_input.is_formula_value
+        ):
+            raise ValueError(
+                f"{path} COMPUTE_EXPRESSION requires a formula_value input"
+            )
+        if answer_expression.family != (
+            RequestedFactAnswerExpressionFamily.COMPUTED_SCALAR.value
+        ):
+            raise ValueError(f"{path} COMPUTE_EXPRESSION requires computed_scalar")
+        return
+    if (
+        isinstance(known_input, RequestedFactLiteralInput)
+        and known_input.is_formula_value
+    ):
+        raise ValueError(f"{path} for formula_value input must be COMPUTE_EXPRESSION")
     if known_input.is_result_limit:
         raise ValueError(f"{path} for result_limit input must be RESULT_LIMIT")
 

@@ -17,6 +17,7 @@ from fervis.lookup.question_contract._text_spans import contains_copied_span
 from fervis.lookup.question_inputs import (
     KnownInputKind,
     LiteralInputRole,
+    normalize_scalar_literal_text,
 )
 from fervis.lookup.turn_prompts.context import HostPromptContext
 from fervis.lookup.clarification.model import QuestionContractResponse
@@ -300,6 +301,7 @@ class RequestedFactAnswerExpression:
     ordering_direction: RequestedFactOrderingDirection | None = None
     selection_kind: ResultSelectionKind | None = None
     limit_input_ref: str = ""
+    compute_input_refs: tuple[str, ...] = ()
 
     @property
     def is_ordered(self) -> bool:
@@ -336,6 +338,12 @@ class RequestedFactAnswerExpression:
                 raise ValueError("take selection requires a limit input")
         elif self.limit_input_ref:
             raise ValueError("limit input requires take selection")
+        if self.compute_input_refs and (
+            self.family is not RequestedFactAnswerExpressionFamily.COMPUTED_SCALAR
+        ):
+            raise ValueError("compute inputs require computed_scalar")
+        if len(self.compute_input_refs) != len(set(self.compute_input_refs)):
+            raise ValueError("compute input refs must be unique")
 
     def to_answer_request_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {"family": self.family.value}
@@ -350,6 +358,8 @@ class RequestedFactAnswerExpression:
             payload["selection_kind"] = self.selection_kind.value
         if self.limit_input_ref:
             payload["limit_input_ref"] = self.limit_input_ref
+        if self.compute_input_refs:
+            payload["compute_input_refs"] = list(self.compute_input_refs)
         return payload
 
 
@@ -387,6 +397,10 @@ class RequestedFactLiteralInput:
                 "resolved_value_text",
                 str(int(self.resolved_value_text)),
             )
+        if self.role == LiteralInputRole.FORMULA_VALUE:
+            literal_type, _ = normalize_scalar_literal_text(self.resolved_value_text)
+            if literal_type != "number":
+                raise ValueError("formula_value requires a numeric scalar literal")
         if self.source == KnownInputSource.CONVERSATION_RESOLUTION:
             if not self.resolved_input_ref.strip():
                 raise ValueError(
@@ -412,6 +426,10 @@ class RequestedFactLiteralInput:
     @property
     def is_result_limit(self) -> bool:
         return self.role == LiteralInputRole.RESULT_LIMIT
+
+    @property
+    def is_formula_value(self) -> bool:
+        return self.role == LiteralInputRole.FORMULA_VALUE
 
     def to_model_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {

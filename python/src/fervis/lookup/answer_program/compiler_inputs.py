@@ -22,6 +22,7 @@ from fervis.lookup.answer_program.expressions import (
     NodeOutputRef,
     ParameterRef,
 )
+from fervis.lookup.answer_program.relations import PopulationCoverageClaim
 from fervis.lookup.question_contract import QuestionContract
 
 
@@ -29,6 +30,8 @@ from fervis.lookup.question_contract import QuestionContract
 class CompilerInputContext:
     program_inputs: ProgramInputs
     expressions_by_value_id: dict[str, Expression]
+    population_coverage_by_value_id: dict[str, tuple[PopulationCoverageClaim, ...]]
+    value_types_by_value_id: dict[str, str]
 
     def expression_for_value(
         self,
@@ -62,6 +65,17 @@ class CompilerInputContext:
             return expression
         raise ValueError(f"{value_id} cannot be used as a compute operand")
 
+    def population_coverage_for_value(
+        self, value_id: str
+    ) -> tuple[PopulationCoverageClaim, ...]:
+        return self.population_coverage_by_value_id.get(value_id, ())
+
+    def value_type(self, value_id: str) -> str:
+        value_type = self.value_types_by_value_id.get(value_id)
+        if value_type is None:
+            raise ValueError(f"no declared value type for {value_id}")
+        return value_type
+
     def expression_for_question_input(self, question_input_id: str) -> Expression:
         value_ids = tuple(
             binding.value.id
@@ -79,6 +93,8 @@ def compiler_input_context(
     *,
     values: tuple[FactValue, ...],
     question_contract: QuestionContract,
+    population_coverage_by_value_id: dict[str, tuple[PopulationCoverageClaim, ...]]
+    | None = None,
 ) -> CompilerInputContext:
     """Classify current values once from their explicit owning contracts."""
 
@@ -135,4 +151,8 @@ def compiler_input_context(
             bindings=BindingSet.from_bindings(tuple(bindings)),
         ),
         expressions_by_value_id=expressions,
+        population_coverage_by_value_id=dict(population_coverage_by_value_id or {}),
+        value_types_by_value_id={
+            value.id: parameter_value_type(value) for value in values
+        },
     )

@@ -38,7 +38,6 @@ input:
         - requested_fact_id: fact_1
           answer_output_ids: [answer_1]
           pattern: computed_scalar
-          source: {kind: values}
           scalar_inputs:
             - {input_id: current, value_id: prior_totals.value.current}
             - {input_id: previous, value_id: prior_totals.value.previous}

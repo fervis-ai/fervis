@@ -12,6 +12,7 @@ from fervis.types.enums import StrEnum
 class QuestionInputOwnerKind(StrEnum):
     GROUP_KEY = "GROUP_KEY"
     POPULATION_TESTS = "POPULATION_TESTS"
+    COMPUTE_EXPRESSION = "COMPUTE_EXPRESSION"
     RESULT_LIMIT = "RESULT_LIMIT"
 
 

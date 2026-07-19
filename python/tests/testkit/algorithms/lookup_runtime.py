@@ -732,13 +732,20 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
         for item in question_inputs
         if item.get("role") == LiteralInputRole.RESULT_LIMIT.value
     )
+    compute_refs = tuple(
+        str(item["input_ref"])
+        for item in question_inputs
+        if item.get("role") == LiteralInputRole.FORMULA_VALUE.value
+    )
     population_refs = tuple(
         str(item["input_ref"])
         for item in question_inputs
-        if str(item["input_ref"]) not in {*group_refs, *result_limit_refs}
+        if str(item["input_ref"])
+        not in {*group_refs, *compute_refs, *result_limit_refs}
     )
     ownership = provider_question_input_ownership(
         group_key_input_refs=group_refs,
+        compute_input_refs=compute_refs,
         population_input_refs_by_test_id=(
             {
                 f"input_constraint_{index}": (input_ref,)

@@ -123,11 +123,11 @@ def fact_plan_instruction_sections(
             builder.instruction_block(
                 "Computed Scalar",
                 (
-                    "Use computed_scalar only with bound value sources.",
-                    "scalar_inputs are the bound value sources used by computed_scalar.",
-                    "Copy source_binding_id values verbatim from Bound sources where kind is value.",
+                    "Use computed_scalar only with values shown in Operation input values.",
+                    "Each scalar_inputs item maps one expression input_id to one shown value_id.",
+                    "Each input_id used by expression must appear exactly once in scalar_inputs.",
                     "expression is reverse-Polish tokens: input_id operands followed by add, subtract, multiply, divide, or negate operators.",
-                    "output.scalar_id is the ID for the computed scalar result.",
+                    "output.scalar_id identifies the computed scalar result.",
                     "output.label is an optional output name.",
                 ),
             )

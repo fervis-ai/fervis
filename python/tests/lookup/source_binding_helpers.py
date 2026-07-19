@@ -4587,15 +4587,6 @@ def replace_answer_sources(
             answer[key]["source_binding_id"] = replacements[
                 json.dumps(answer[key].pop("source"), sort_keys=True)
             ]
-    if answer.get("pattern") == "computed_scalar":
-        for scalar_input in answer.get("scalar_inputs") or ():
-            source = {"kind": "value", "value_id": scalar_input.pop("value_id")}
-            scalar_input["source_binding_id"] = replacements[
-                json.dumps(source, sort_keys=True)
-            ]
-        answer.pop("source", None)
-
-
 def remove_raw_field_labels(answer: dict[str, Any]) -> None:
     """Emit the current fact-plan contract from older concise test fixtures."""
 

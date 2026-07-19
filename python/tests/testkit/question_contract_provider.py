@@ -46,6 +46,7 @@ def provider_membership_tests(
 def provider_question_input_ownership(
     *,
     group_key_input_refs: Iterable[str] = (),
+    compute_input_refs: Iterable[str] = (),
     population_input_refs_by_test_id: Mapping[str, Iterable[str]] | None = None,
     result_limit_input_ref: str = "",
 ) -> ProviderQuestionInputOwnership:
@@ -75,6 +76,9 @@ def provider_question_input_ownership(
 
     for input_ref in group_key_input_refs:
         add(input_ref, "GROUP_KEY")
+
+    for input_ref in compute_input_refs:
+        add(input_ref, "COMPUTE_EXPRESSION")
 
     refs_by_test_id: dict[str, tuple[str, ...]] = {}
     for test_id, input_refs in (population_input_refs_by_test_id or {}).items():

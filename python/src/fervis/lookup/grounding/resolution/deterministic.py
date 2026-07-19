@@ -28,6 +28,7 @@ from fervis.lookup.answer_program.values import (
     LiteralType,
     TimeComponent,
 )
+from fervis.lookup.question_inputs import normalize_scalar_literal_text
 from fervis.lookup.question_contract import (
     QuestionContract,
     RequestedFactKnownInput,
@@ -56,6 +57,13 @@ def _deterministic_known_inputs(
             )
             values.append(literal)
             continue
+        if known.is_formula_value:
+            values.append(
+                _formula_value(
+                    known,
+                    applies_to_requested_fact_ids=requested_fact_ids,
+                )
+            )
     return CanonicalInputLedger(
         values=tuple(values),
         issues=(),
@@ -270,6 +278,25 @@ def _result_limit_value(
         known_input_id=known.id,
         literal_type=LiteralType.NUMBER,
         value=known.resolved_value_text,
+        label=known.text,
+        proof_refs=(f"known_input:{known.id}",),
+        applies_to_requested_fact_ids=applies_to_requested_fact_ids,
+    )
+
+
+def _formula_value(
+    known: RequestedFactLiteralInput,
+    *,
+    applies_to_requested_fact_ids: tuple[str, ...],
+) -> FactValue:
+    literal_type, value = normalize_scalar_literal_text(known.resolved_value_text)
+    if literal_type != LiteralType.NUMBER.value:
+        raise ValueError("formula_value requires a numeric scalar literal")
+    return FactValue.literal(
+        id=_grounded_value_id(known.id),
+        known_input_id=known.id,
+        literal_type=LiteralType(literal_type),
+        value=value,
         label=known.text,
         proof_refs=(f"known_input:{known.id}",),
         applies_to_requested_fact_ids=applies_to_requested_fact_ids,

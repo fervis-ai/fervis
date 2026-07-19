@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from fervis.types.enums import StrEnum
 from typing import TYPE_CHECKING
 
@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from fervis.lookup.answer_program.expressions import Expression
 
 from fervis.lookup.answer_program.errors import AnswerProgramContractError
+from fervis.lookup.question_inputs import normalize_decimal_text
 from fervis.lookup.canonical_data import (
     EntityKeyComponentValue,
     EntityKeyValue,
@@ -422,20 +423,12 @@ class StringSetValuePayload:
 
 def _normalized_number(value: str) -> str:
     try:
-        parsed = Decimal(value.strip())
-    except InvalidOperation as exc:
+        return normalize_decimal_text(value)
+    except ValueError as exc:
         raise AnswerProgramContractError(
             "binding_type_mismatch",
             "number binding contains a non-numeric value",
         ) from exc
-    if not parsed.is_finite():
-        raise AnswerProgramContractError(
-            "binding_type_mismatch",
-            "number binding must be finite",
-        )
-    if parsed == 0:
-        return "0"
-    return format(parsed.normalize(), "f")
 
 
 def _decimal_number(value: str) -> Decimal:

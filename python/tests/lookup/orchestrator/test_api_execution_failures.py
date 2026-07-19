@@ -365,7 +365,6 @@ def test_lookup_cutover_stops_before_fact_planning_when_no_source_candidates_exi
                         "requested_fact_id": "rf_answer",
                         "answer_output_ids": ["metric_total"],
                         "pattern": "computed_scalar",
-                        "source": {"kind": "values"},
                         "scalar_inputs": [
                             {
                                 "input_id": "location_a",

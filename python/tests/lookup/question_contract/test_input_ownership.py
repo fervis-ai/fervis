@@ -347,6 +347,84 @@ def test_result_limit_use_lowers_to_the_existing_expression_field() -> None:
     assert expression.limit_input_ref == "qi_limit"
 
 
+def test_formula_value_is_owned_by_the_computed_scalar_expression() -> None:
+    payload = _grouped_staff_contract()
+    payload["question_inputs"] = [
+        _input(input_ref="qi_rate", text="10%", role="formula_value")
+    ]
+    payload["answer_requests"] = [
+        _answer_request(
+            answer_fact="10% of the total measured value",
+            expression={"family": "computed_scalar"},
+            membership_tests=[
+                _membership_test(
+                    test_id="t_subject",
+                    kind="SUBJECT_IDENTITY",
+                    question="Is this a measured total?",
+                )
+            ],
+            question_input_uses=[
+                {
+                    "input_ref": "qi_rate",
+                    "owner_kind": "COMPUTE_EXPRESSION",
+                }
+            ],
+        )
+    ]
+
+    result = _parse(payload, question="What is 10% of the total measured value?")
+
+    expression = result.outcome.requested_facts[0].answer_expression
+    assert expression is not None
+    assert expression.compute_input_refs == ("qi_rate",)
+
+
+def test_formula_value_cannot_be_owned_by_population_tests() -> None:
+    payload = _grouped_staff_contract()
+    payload["question_inputs"] = [
+        _input(input_ref="qi_rate", text="10%", role="formula_value")
+    ]
+    payload["answer_requests"] = [
+        _answer_request(
+            answer_fact="10% of the total measured value",
+            expression={"family": "computed_scalar"},
+            membership_tests=[
+                _membership_test(
+                    test_id="t_subject",
+                    kind="SUBJECT_IDENTITY",
+                    question="Is this a measured total?",
+                ),
+                _membership_test(
+                    test_id="t_rate",
+                    kind="EXPLICIT_USER_CONSTRAINT",
+                    question="Does this value equal 10%?",
+                    question_input_use_refs=["use_rate"],
+                ),
+            ],
+            question_input_uses=[
+                {
+                    "use_id": "use_rate",
+                    "input_ref": "qi_rate",
+                    "owner_kind": "POPULATION_TESTS",
+                }
+            ],
+        )
+    ]
+
+    with pytest.raises(ValueError, match="formula_value.*COMPUTE_EXPRESSION"):
+        _parse(payload, question="What is 10% of the total measured value?")
+
+
+def test_formula_value_rejects_unit_bearing_text_without_typed_unit_authority() -> None:
+    payload = _grouped_staff_contract()
+    payload["question_inputs"] = [
+        _input(input_ref="qi_amount", text="10 widgets", role="formula_value")
+    ]
+
+    with pytest.raises(ValueError, match="formula_value requires a numeric scalar"):
+        _parse(payload, question="What is the total plus 10 widgets?")
+
+
 @pytest.mark.parametrize(
     ("mutate", "error"),
     [
@@ -575,6 +653,7 @@ def test_schema_exposes_only_the_single_ownership_ledger() -> None:
     ] == [
         "GROUP_KEY",
         "POPULATION_TESTS",
+        "COMPUTE_EXPRESSION",
         "RESULT_LIMIT",
     ]
     assert "use_id" not in use_schema["oneOf"][0]["properties"]

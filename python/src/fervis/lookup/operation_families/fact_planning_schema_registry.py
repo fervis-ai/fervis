@@ -63,6 +63,7 @@ def build_pattern_answer_schema(
         str, tuple[dict[str, object], ...]
     ],
     ordering_required_by_requested_fact_id: Mapping[str, bool],
+    value_ids_by_requested_fact_id: Mapping[str, tuple[str, ...]],
 ) -> dict[str, object] | None:
     variants = _selected_pattern_answer_variants(
         selected_plan_shapes_by_requested_fact_id=(
@@ -87,9 +88,8 @@ def build_pattern_answer_schema(
         identity_field_ids_by_source_binding_id=(
             identity_field_ids_by_source_binding_id or {}
         ),
-        ordering_required_by_requested_fact_id=(
-            ordering_required_by_requested_fact_id
-        ),
+        ordering_required_by_requested_fact_id=(ordering_required_by_requested_fact_id),
+        value_ids_by_requested_fact_id=value_ids_by_requested_fact_id,
     )
     if len(variants) == 1:
         return variants[0]
@@ -157,6 +157,7 @@ def _pattern_answer_variants(
     field_ids: tuple[str, ...] | None,
     include_source_binding_id: bool = True,
     ordering_required: bool = False,
+    value_ids: tuple[str, ...] | None = None,
 ) -> list[dict[str, object]]:
     if not pattern_names:
         return []
@@ -192,6 +193,7 @@ def _pattern_answer_variants(
             _computed_scalar_pattern_answer_variants(
                 requested_fact_id_schema=requested_fact_id_schema,
                 require_pattern=require_pattern,
+                value_ids=value_ids,
             )
         )
     if _SET_DIFFERENCE_PATTERN_NAMES.intersection(other_pattern_names):
@@ -231,6 +233,7 @@ def _selected_pattern_answer_variants(
     field_ids_by_source_binding_id: Mapping[str, tuple[str, ...]],
     identity_field_ids_by_source_binding_id: Mapping[str, tuple[str, ...]],
     ordering_required_by_requested_fact_id: Mapping[str, bool],
+    value_ids_by_requested_fact_id: Mapping[str, tuple[str, ...]],
 ) -> list[dict[str, object]]:
     variants: list[dict[str, object]] = []
     for (
@@ -275,6 +278,7 @@ def _selected_pattern_answer_variants(
                     ordering_required=ordering_required_by_requested_fact_id.get(
                         requested_fact_id, False
                     ),
+                    value_ids=value_ids_by_requested_fact_id.get(requested_fact_id, ()),
                 )
             )
     return variants
@@ -303,6 +307,7 @@ def _selected_plan_shape_answer_variants(
     field_ids_by_source_binding_id: Mapping[str, tuple[str, ...]],
     identity_field_ids_by_source_binding_id: Mapping[str, tuple[str, ...]],
     ordering_required: bool,
+    value_ids: tuple[str, ...],
 ) -> list[dict[str, object]]:
     variants: list[dict[str, object]] = []
     if plan_shape == "aggregate_by_group":
@@ -395,6 +400,7 @@ def _selected_plan_shape_answer_variants(
             source_binding_id=None,
             field_ids=None,
             ordering_required=ordering_required,
+            value_ids=value_ids,
         )
     )
     return variants

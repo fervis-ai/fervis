@@ -26,6 +26,11 @@ from fervis.lookup.fact_planning.grouped_aggregate_choices import (
     GROUPED_AGGREGATE_PLAN_SHAPES,
 )
 from fervis.lookup.answer_program.compiler_inputs import compiler_input_context
+from fervis.lookup.answer_program.relations import (
+    PopulationCoverageClaim,
+    merge_population_coverage_claims,
+)
+from fervis.lookup.source_binding import BoundSource
 
 
 @dataclass(frozen=True)
@@ -88,6 +93,9 @@ def generate_pattern_fact_plan(
             input_context=compiler_input_context(
                 values=request.available_values,
                 question_contract=request.question_contract,
+                population_coverage_by_value_id=(
+                    _value_population_coverage_by_id(request.bound_sources)
+                ),
             ),
             selected_source_strategy_ids=tuple(
                 plan.source_strategy_id for plan in plan_selection.plan_selections
@@ -107,6 +115,23 @@ def generate_pattern_fact_plan(
         duration_ms=output.duration_ms,
         artifact=output.artifact,
     )
+
+
+def _value_population_coverage_by_id(
+    bound_sources: tuple[BoundSource, ...],
+) -> dict[str, tuple[PopulationCoverageClaim, ...]]:
+    value_ids = {source.value_id for source in bound_sources if source.value_id}
+    return {
+        value_id: merge_population_coverage_claims(
+            tuple(
+                claim
+                for source in bound_sources
+                if source.value_id == value_id
+                for claim in source.value_population_coverage_claims
+            )
+        )
+        for value_id in value_ids
+    }
 
 
 def _with_selected_plan_shapes(

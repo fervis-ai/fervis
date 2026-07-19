@@ -126,9 +126,9 @@ class JoinedRowsAnswerOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
-class SourceScalarInputOutput(ProviderOutput):
+class ScalarInputOutput(ProviderOutput):
     input_id: str
-    source_binding_id: str
+    value_id: str
 
 
 @dataclass(frozen=True)
@@ -163,7 +163,7 @@ class ComputedScalarAnswerOutput(ProviderOutput):
     requested_fact_id: str
     answer_output_ids: tuple[str, ...]
     pattern: str
-    scalar_inputs: tuple[SourceScalarInputOutput, ...]
+    scalar_inputs: tuple[ScalarInputOutput, ...]
     expression: tuple[ProviderObject, ...]
     output: ScalarOutputOutput
 

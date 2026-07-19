@@ -48,6 +48,7 @@ def build_fact_plan_schema(
         str, tuple[dict[str, object], ...]
     ],
     ordering_required_by_requested_fact_id: Mapping[str, bool] | None = None,
+    value_ids_by_requested_fact_id: Mapping[str, tuple[str, ...]] | None = None,
 ) -> dict[str, object]:
     plan_outcome_schema = _plan_outcome_schema(
         required_catalog_input_ids=required_catalog_input_ids,
@@ -79,6 +80,7 @@ def build_fact_plan_schema(
         ordering_required_by_requested_fact_id=(
             ordering_required_by_requested_fact_id or {}
         ),
+        value_ids_by_requested_fact_id=value_ids_by_requested_fact_id or {},
     )
     return provider_output.FactPlanOutput.schema(
         {
@@ -110,6 +112,7 @@ def _plan_outcome_schema(
         str, tuple[dict[str, object], ...]
     ],
     ordering_required_by_requested_fact_id: Mapping[str, bool],
+    value_ids_by_requested_fact_id: Mapping[str, tuple[str, ...]],
 ) -> dict[str, object]:
     answer_schema = _answer_schema(
         pattern_names=pattern_names,
@@ -136,6 +139,7 @@ def _plan_outcome_schema(
         ordering_required_by_requested_fact_id=(
             ordering_required_by_requested_fact_id
         ),
+        value_ids_by_requested_fact_id=value_ids_by_requested_fact_id,
     )
     outcome_variants = []
     if answer_schema is not None:
@@ -170,6 +174,7 @@ def _answer_schema(
         str, tuple[dict[str, object], ...]
     ],
     ordering_required_by_requested_fact_id: Mapping[str, bool],
+    value_ids_by_requested_fact_id: Mapping[str, tuple[str, ...]],
 ) -> dict[str, object] | None:
     pattern_schema = build_pattern_answer_schema(
         pattern_names=pattern_names,
@@ -198,6 +203,7 @@ def _answer_schema(
         ordering_required_by_requested_fact_id=(
             ordering_required_by_requested_fact_id
         ),
+        value_ids_by_requested_fact_id=value_ids_by_requested_fact_id,
     )
     if pattern_schema is None:
         return None

@@ -747,7 +747,6 @@ def test_lookup_cutover_preserves_scalar_memory_proofs_for_undefined_compute():
                                 "requested_fact_id": "rf_answer",
                                 "answer_output_ids": ["ratio"],
                                 "pattern": "computed_scalar",
-                                "source": {"kind": "values"},
                                 "scalar_inputs": [
                                     {
                                         "input_id": "current",
@@ -891,7 +890,6 @@ def test_lookup_cutover_computes_across_single_cell_prior_answer_relations():
                                 "requested_fact_id": "rf_answer",
                                 "answer_output_ids": ["total"],
                                 "pattern": "computed_scalar",
-                                "source": {"kind": "values"},
                                 "scalar_inputs": [
                                     {
                                         "input_id": "day_1",
@@ -1035,7 +1033,6 @@ def test_lookup_cutover_computes_increase_across_multi_row_prior_answer_relation
                                 "requested_fact_id": "rf_answer",
                                 "answer_output_ids": ["increase"],
                                 "pattern": "computed_scalar",
-                                "source": {"kind": "values"},
                                 "scalar_inputs": [
                                     {
                                         "input_id": "previous",

@@ -1,0 +1,57 @@
+id: scripted_pattern_computed_scalar_with_formula_value
+description: Lookup runtime normalizes a formula literal and combines it with a prior scalar through the canonical computed-scalar path.
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: What is 10% of the prior measured total?
+  conversation_resolution:
+    mode: use_visible_memory
+    contextualized_question: What is 10% of the prior measured total?
+  memory_artifacts:
+    - artifact_id: prior_total
+      outcome: answered
+      source_question: What was the prior measured total?
+      source_answer: The prior measured total was 1000.
+      addresses:
+        - address: value.total
+          kind: value
+          value: {type: number, value: "1000"}
+          evidence: {stepIds: [prior_total_step]}
+  question_contract:
+    fact_description: ten percent of the prior measured total
+    subject_text: computed amount
+    answer_expression_family: computed_scalar
+    answer_outputs: [computed amount]
+    known_inputs:
+      - input_ref: fraction
+        kind: literal_text
+        text: 10%
+        operand_text: 10%
+        role: formula_value
+  catalog:
+    reads: []
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers:
+        - requested_fact_id: fact_1
+          answer_output_ids: [answer_1]
+          pattern: computed_scalar
+          scalar_inputs:
+            - {input_id: total, value_id: prior_total.value.total}
+            - {input_id: fraction, value_id: grounded_fraction}
+          expression:
+            - {input_id: total}
+            - {input_id: fraction}
+            - {operator: multiply}
+          output: {scalar_id: computed_amount, label: computed amount}
+  responses: {}
+expect:
+  result_contains:
+    status: COMPLETED
+    rendered_scalars:
+      computed_amount: "100.0"
+    proof_refs:
+      - known_input:fraction
+      - memory:prior_total.value.total

@@ -1298,11 +1298,11 @@ def _required_output_fields_from_prompt(
     return [{"field_id": field_id} for field_id in field_ids]
 
 
-def _computed_scalar_from_bound_value_payload(
+def _computed_scalar_from_value_payload(
     *,
     requested_fact_id: str,
     answer_output_ids: tuple[str, ...],
-    source_binding_id: str,
+    value_id: str,
 ) -> dict[str, Any]:
     return {
         "outcome": {
@@ -1315,7 +1315,7 @@ def _computed_scalar_from_bound_value_payload(
                     "scalar_inputs": [
                         {
                             "input_id": "value",
-                            "source_binding_id": source_binding_id,
+                            "value_id": value_id,
                         }
                     ],
                     "expression": [{"input_id": "value"}],
@@ -1963,10 +1963,10 @@ def test_selected_prior_request_outputs_reach_question_contract():
                     }
                 ],
             ),
-            "submit_pattern_fact_plan": _computed_scalar_from_bound_value_payload(
+            "submit_pattern_fact_plan": _computed_scalar_from_value_payload(
                 requested_fact_id="fact_1",
                 answer_output_ids=("answer_1",),
-                source_binding_id="sb_1",
+                value_id="turn_staff_sales.value.answer_output_1",
             ),
         }
     )
@@ -2066,10 +2066,10 @@ def test_clause_resolution_prior_answer_frame_reaches_question_contract():
                     }
                 ],
             ),
-            "submit_pattern_fact_plan": _computed_scalar_from_bound_value_payload(
+            "submit_pattern_fact_plan": _computed_scalar_from_value_payload(
                 requested_fact_id="fact_1",
                 answer_output_ids=("answer_1",),
-                source_binding_id="sb_1",
+                value_id="turn_staff_sales.value.answer_output_1",
             ),
         }
     )

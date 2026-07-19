@@ -19,7 +19,6 @@ from fervis.lookup.answer_program.operations import (
 from fervis.lookup.answer_program.relations import merge_population_coverage_claims
 from fervis.lookup.answer_program.result_projection import ScalarResultOutput
 from fervis.lookup.provider_contract import ProviderObject
-from fervis.lookup.source_binding import BoundSource
 from fervis.lookup.answer_program.compiler_inputs import CompilerInputContext
 from fervis.lookup.fact_planning.provider_contract import (
     ComputeInputTokenOutput,
@@ -38,7 +37,6 @@ def _compile_computed_scalar_answer(
     index: int,
     answer: ComputedScalarAnswerOutput,
     namespace_result_outputs: bool,
-    bound_sources: dict[str, BoundSource],
     input_context: CompilerInputContext,
     relation_builder: RelationBuilder,
 ) -> CompiledPattern:
@@ -54,16 +52,16 @@ def _compile_computed_scalar_answer(
     inputs: dict[str, Expression] = {}
     population_claims_by_input: dict[str, list] = {}
     for item in answer.scalar_inputs:
-        bound = bound_sources.get(item.source_binding_id)
-        if bound is None or not bound.value_id:
-            raise ValueError("scalar input requires value source binding")
-        expression = input_context.compute_expression_for_value(bound.value_id)
+        if item.input_id in inputs:
+            raise ValueError("computed scalar input id must be unique")
+        if input_context.value_type(item.value_id) != "number":
+            raise ValueError("computed scalar inputs must be numeric")
+        expression = input_context.compute_expression_for_value(item.value_id)
         inputs[item.input_id] = expression
-        if bound.value_is_population_derived:
+        claims = input_context.population_coverage_for_value(item.value_id)
+        if claims:
             input_ref = compute_value_input_id(expression)
-            population_claims_by_input.setdefault(input_ref, []).extend(
-                bound.value_population_coverage_claims
-            )
+            population_claims_by_input.setdefault(input_ref, []).extend(claims)
     fulfillment = tuple(
         FactFulfillment(
             requested_fact_id=answer.requested_fact_id,
@@ -116,6 +114,7 @@ def _compute_expression(
     if not values:
         raise ValueError("computed scalar expression must be a non-empty token array")
     stack: list[Expression] = []
+    used_input_ids: set[str] = set()
     for value in values:
         token = parse_compute_expression_token(value)
         match token:
@@ -123,6 +122,7 @@ def _compute_expression(
                 input_id = token.input_id
                 if input_id not in inputs:
                     raise ValueError("computed scalar expression input is not declared")
+                used_input_ids.add(input_id)
                 stack.append(inputs[input_id])
             case ComputeOperatorTokenOutput(operator="negate"):
                 if not stack:
@@ -144,4 +144,6 @@ def _compute_expression(
                 )
     if len(stack) != 1:
         raise ValueError("computed scalar expression must produce one value")
+    if used_input_ids != set(inputs):
+        raise ValueError("computed scalar declares an unused scalar input")
     return stack[0]

@@ -86,6 +86,7 @@ PROMPT_SURFACE_CONTRACTS = {
             "Question Inputs Overview",
             "Literal Reference Inputs",
             "Literal Time Inputs",
+            "Formula Values",
             "Result Limits",
             "Question Input Inventory",
             "Clarification Boundary",
