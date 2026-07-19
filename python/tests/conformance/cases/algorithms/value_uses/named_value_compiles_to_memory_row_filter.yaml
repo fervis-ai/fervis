@@ -1,5 +1,5 @@
 id: named_value_compiles_to_memory_row_filter
-description: A named value row-filter sink can target a bound memory relation field.
+description: A named value constraint compiles to a canonical filter over memory rows.
 migrates:
   - api/tests/fervis/lookup/fact_planning/test_values.py::test_named_value_compiles_to_memory_row_filter_when_sink_selects_bound_field
 kind: algorithm
@@ -30,8 +30,10 @@ input:
       text: Alpha
 expect:
   result_contains:
-    row_filters:
-      - relation_id: prior_rows
+    filters:
+      - input_relation: prior_rows__source
+        output_relation: prior_rows
         field_id: label
         operator: equals
-        value: Alpha
+        value_ref: parameter:value.alpha
+        proof_refs: []

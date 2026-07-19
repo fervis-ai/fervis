@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import TYPE_CHECKING, Any
@@ -16,7 +15,6 @@ from fervis.lookup.canonical_data import (
     canonical_runtime_json,
 )
 from fervis.lookup.plan_execution.declared_values import (
-    declared_equal,
     parse_declared_value,
 )
 from fervis.lookup.plan_execution.errors import (
@@ -45,6 +43,7 @@ from fervis.lookup.answer_program.instantiation import (
 )
 from fervis.lookup.plan_execution.operation_runtime import (
     RelationEngineInput,
+    ScalarInput,
 )
 from fervis.lookup.plan_execution.relations import (
     RelationEvidence,
@@ -63,7 +62,6 @@ from fervis.lookup.lineage.source_reads import (
 )
 from fervis.lookup.answer_program.expression_instantiation import (
     ResolvedPopulationChoice,
-    ResolvedRowFilter,
 )
 from fervis.lookup.outcomes.model import FactResult
 from fervis.lookup.outcomes.classification import classify_answer_result
@@ -84,10 +82,7 @@ from fervis.lookup.answer_program.relations import (
     RelationSource,
     SourceKind,
 )
-from fervis.lookup.answer_program.values import (
-    BindingSet,
-    ValueFilterOperator,
-)
+from fervis.lookup.answer_program.values import BindingSet
 from fervis.lookup.answer_program.codec import answer_program_id
 from fervis.lookup.answer_program.persistence import ProgramInvocationBinding
 from fervis.lineage.enums import ProgramInvocationKind
@@ -194,11 +189,6 @@ def execute_verified_program(
             endpoint_arg_proofs=endpoint_arg_proofs,
             endpoint_arg_proofs_by_param=endpoint_arg_proofs_by_param,
             authority_ref=execution.authority_ref,
-            row_filters=tuple(
-                item
-                for item in instantiated_inputs.row_filters
-                if item.relation_id == relation.id
-            ),
             population_choices=tuple(
                 item
                 for item in instantiated_inputs.population_choices
@@ -219,6 +209,7 @@ def execute_verified_program(
         RelationEngineInput(
             relations=relations,
             operations=execution.operations,
+            scalar_inputs=_operation_scalar_inputs(execution),
             operation_proof_refs=execution.operation_proof_refs,
         )
     )
@@ -260,6 +251,35 @@ def execute_verified_program(
     )
 
 
+def _operation_scalar_inputs(execution: VerifiedExecution) -> tuple[ScalarInput, ...]:
+    by_id: dict[str, ScalarInput] = {}
+    for item in execution.operation_inputs:
+        candidate = ScalarInput(
+            id=item.input_id,
+            value=item.value,
+            value_type=item.value_type,
+            proof_refs=item.proof_refs,
+        )
+        existing = by_id.get(candidate.id)
+        if existing is not None and (
+            existing.value != candidate.value
+            or existing.value_type != candidate.value_type
+        ):
+            raise VerificationError(f"conflicting operation input {candidate.id}")
+        if existing is None:
+            by_id[candidate.id] = candidate
+            continue
+        by_id[candidate.id] = ScalarInput(
+            id=candidate.id,
+            value=candidate.value,
+            value_type=candidate.value_type,
+            proof_refs=tuple(
+                dict.fromkeys((*existing.proof_refs, *candidate.proof_refs))
+            ),
+        )
+    return tuple(by_id.values())
+
+
 def _relation_rows(
     relation: Relation,
     *,
@@ -271,7 +291,6 @@ def _relation_rows(
     endpoint_arg_proofs: dict[str, tuple[str, ...]],
     endpoint_arg_proofs_by_param: dict[str, dict[str, tuple[str, ...]]],
     authority_ref: str,
-    row_filters: tuple[ResolvedRowFilter, ...],
     population_choices: tuple[ResolvedPopulationChoice, ...],
 ) -> _RelationExecutionRows:
     rows = _source_relation_rows(
@@ -289,38 +308,9 @@ def _relation_rows(
     scope_fingerprint = _scope_fingerprint(
         endpoint_args.get(relation.id) or {},
         endpoint_arg_proofs_by_param.get(relation.id, {}),
-        row_filters,
         population_choices,
     )
-    if row_filters:
-        filter_proof_refs = _dedupe_refs(
-            (
-                *_row_filter_proof_refs(row_filters),
-                *_population_choice_proof_refs(population_choices),
-            )
-        )
-        kept = tuple(
-            (row, context)
-            for row, context in _rows_with_context(rows)
-            if all(
-                _row_filter_matches(
-                    row,
-                    field_types=rows.relation.field_types or {},
-                    row_filter=item,
-                )
-                for item in row_filters
-            )
-        )
-        kept_rows = tuple(row for row, _context in kept)
-        rows = _RelationExecutionRows(
-            relation=rows.relation.with_filtered_rows(
-                kept_rows,
-                proof_refs=filter_proof_refs,
-                scope_fingerprint=scope_fingerprint,
-            ),
-            row_context=tuple(context for _row, context in kept),
-        )
-    elif population_choices:
+    if population_choices:
         rows = _RelationExecutionRows(
             relation=rows.relation.with_scope(
                 proof_refs=_population_choice_proof_refs(population_choices),
@@ -329,14 +319,6 @@ def _relation_rows(
             row_context=rows.row_context,
         )
     return rows
-
-
-def _rows_with_context(
-    rows: _RelationExecutionRows,
-) -> tuple[tuple[Row, Row], ...]:
-    if not rows.row_context:
-        return tuple((row, {}) for row in rows.relation.rows)
-    return tuple(zip(rows.relation.rows, rows.row_context))
 
 
 def _source_relation_rows(
@@ -790,12 +772,6 @@ def _endpoint_arg_proofs_by_relation_param(
     return grouped
 
 
-def _row_filter_proof_refs(
-    row_filters: tuple[ResolvedRowFilter, ...],
-) -> tuple[str, ...]:
-    return _dedupe_refs(tuple(ref for item in row_filters for ref in item.proof_refs))
-
-
 def _population_choice_proof_refs(
     population_choices: tuple[ResolvedPopulationChoice, ...],
 ) -> tuple[str, ...]:
@@ -807,24 +783,15 @@ def _population_choice_proof_refs(
 def _scope_fingerprint(
     endpoint_args: dict[str, Any],
     endpoint_arg_proof_refs: dict[str, tuple[str, ...]],
-    row_filters: tuple[ResolvedRowFilter, ...],
     population_choices: tuple[ResolvedPopulationChoice, ...] = (),
 ) -> str:
-    scope = {
+    scope: dict[str, Any] = {
         "endpointArgs": endpoint_args,
         "endpointArgProofRefs": {
             param_ref: list(proof_refs)
             for param_ref, proof_refs in endpoint_arg_proof_refs.items()
             if param_ref in endpoint_args and proof_refs
         },
-        "rowFilters": [
-            {
-                "fieldId": item.field_id,
-                "operator": item.operator.value,
-                "value": item.value,
-            }
-            for item in row_filters
-        ],
     }
     if population_choices:
         scope["populationChoices"] = [
@@ -881,30 +848,6 @@ def _bound_memory_row(row: Row, *, relation: Relation) -> dict[str, RuntimeValue
         else:
             raise ValueError(f"unknown memory relation field {relation_field.field_id}")
     return output
-
-
-def _row_filter_matches(
-    row: Row,
-    *,
-    field_types: Mapping[str, str],
-    row_filter: ResolvedRowFilter,
-) -> bool:
-    value = row.get(row_filter.field_id)
-    field_type = field_types.get(row_filter.field_id)
-    if row_filter.operator == ValueFilterOperator.EQUALS:
-        return declared_equal(value, field_type, row_filter.value, None)
-    if row_filter.operator == ValueFilterOperator.IN:
-        return any(
-            declared_equal(value, field_type, item, None)
-            for item in row_filter.value or ()
-        )
-    if row_filter.operator == ValueFilterOperator.CONTAINS:
-        if not isinstance(value, list | tuple):
-            return False
-        return any(
-            declared_equal(item, None, row_filter.value, None) for item in value
-        )
-    raise ValueError(f"unsupported row filter operator: {row_filter.operator.value}")
 
 
 def _row_source_for_relation(

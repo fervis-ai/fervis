@@ -9,8 +9,8 @@ from fervis.lookup.answer_program.values import (
     ParameterBinding,
     ParameterDeclaration,
     ParameterValueType,
-    ValueFilterOperator,
 )
+from fervis.lookup.answer_program.operations import PredicateOperator
 
 
 class CapabilityKind(StrEnum):
@@ -23,7 +23,7 @@ class NarrowPopulationCapability:
     parameter: ParameterDeclaration
     relation_id: str
     field_id: str
-    operator: ValueFilterOperator
+    operator: PredicateOperator
     requested_fact_ids: tuple[str, ...]
     proof_refs: tuple[str, ...]
     function_semantics_version: str = "1"
@@ -41,8 +41,8 @@ class NarrowPopulationCapability:
             raise ValueError("capability requires id")
         if not isinstance(self.parameter, ParameterDeclaration):
             raise TypeError("capability parameter must be ParameterDeclaration")
-        if not isinstance(self.operator, ValueFilterOperator):
-            raise TypeError("capability operator must be ValueFilterOperator")
+        if not isinstance(self.operator, PredicateOperator):
+            raise TypeError("capability operator must be PredicateOperator")
         if (
             not isinstance(self.relation_id, str)
             or not self.relation_id
@@ -51,7 +51,7 @@ class NarrowPopulationCapability:
         ):
             raise ValueError("population capability requires relation and field")
         if (
-            self.operator is not ValueFilterOperator.IN
+            self.operator is not PredicateOperator.IN
             or self.parameter.value_type is not ParameterValueType.STRING_SET
         ):
             raise ValueError("population capability requires string-set membership")

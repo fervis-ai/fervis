@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from fervis.lookup.answer_program.model import FactFulfillment
+from fervis.lookup.answer_program.expressions import (
+    BinaryExpression,
+    Expression,
+    ExpressionBinaryOperator,
+    ExpressionUnaryOperator,
+    UnaryExpression,
+)
 from fervis.lookup.answer_program.operations import (
-    ComputeBinary,
-    ComputeBinaryOperator,
-    ComputeExpression,
     ComputeInputPopulationCoverage,
-    ComputeNegation,
     ComputeSpec,
     Operation,
     compute_value_input_id,
@@ -48,7 +51,7 @@ def _compile_computed_scalar_answer(
         namespace_result_outputs=namespace_result_outputs,
     )
     operation_id = f"{_pattern_output_relation_id(index)}_compute"
-    inputs: dict[str, ComputeExpression] = {}
+    inputs: dict[str, Expression] = {}
     population_claims_by_input: dict[str, list] = {}
     for item in answer.scalar_inputs:
         bound = bound_sources.get(item.source_binding_id)
@@ -108,11 +111,11 @@ def _compile_computed_scalar_answer(
 def _compute_expression(
     values: tuple[ProviderObject, ...],
     *,
-    inputs: dict[str, ComputeExpression],
-) -> ComputeExpression:
+    inputs: dict[str, Expression],
+) -> Expression:
     if not values:
         raise ValueError("computed scalar expression must be a non-empty token array")
-    stack: list[ComputeExpression] = []
+    stack: list[Expression] = []
     for value in values:
         token = parse_compute_expression_token(value)
         match token:
@@ -124,14 +127,21 @@ def _compute_expression(
             case ComputeOperatorTokenOutput(operator="negate"):
                 if not stack:
                     raise ValueError("computed scalar negation requires one operand")
-                stack.append(ComputeNegation(operand=stack.pop()))
+                stack.append(
+                    UnaryExpression(
+                        operator=ExpressionUnaryOperator.NEGATE,
+                        operand=stack.pop(),
+                    )
+                )
             case ComputeOperatorTokenOutput():
-                operator = ComputeBinaryOperator(token.operator)
+                operator = ExpressionBinaryOperator(token.operator)
                 if len(stack) < 2:
                     raise ValueError("computed scalar operator requires two operands")
                 right = stack.pop()
                 left = stack.pop()
-                stack.append(ComputeBinary(operator=operator, left=left, right=right))
+                stack.append(
+                    BinaryExpression(operator=operator, left=left, right=right)
+                )
     if len(stack) != 1:
         raise ValueError("computed scalar expression must produce one value")
     return stack[0]

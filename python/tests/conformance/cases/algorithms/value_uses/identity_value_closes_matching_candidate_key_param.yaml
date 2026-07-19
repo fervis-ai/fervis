@@ -61,4 +61,3 @@ expect:
         param_ref: shipment_detail.path.tracking_number
         value: TRK-42
         proof_refs: [source_read:get_shipment]
-    row_filters: []

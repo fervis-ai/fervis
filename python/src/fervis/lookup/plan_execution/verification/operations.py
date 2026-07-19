@@ -21,8 +21,8 @@ from .scalars import _operation_scalar_inputs
 from fervis.lookup.answer_program.operations import (
     Predicate,
     RelationRoleRef,
-    compute_expression_references,
 )
+from fervis.lookup.answer_program.expressions import expression_references
 
 
 def _verify_answer_uses_evidence_input(answer: AnswerProgram) -> None:
@@ -39,7 +39,7 @@ def _compute_uses_direct_value(operation: Operation) -> bool:
     spec = operation.spec
     if not isinstance(spec, ComputeSpec):
         return False
-    references = compute_expression_references(spec.expression)
+    references = expression_references(spec.expression)
     return bool(references.parameters or references.constants)
 
 
@@ -93,7 +93,9 @@ def _operation_field_outputs(operations: tuple[Operation, ...]) -> set[str]:
 
 
 def _verify_compute_scalar_availability(answer: AnswerProgram) -> None:
-    available_outputs: dict[str, str] = {}
+    available_outputs = {
+        f"parameter:{parameter.id}": parameter.id for parameter in answer.parameters
+    }
     for operation in answer.operations:
         spec = operation.spec
         if not isinstance(spec, ComputeSpec):
@@ -108,7 +110,7 @@ def _require_available_compute_outputs(
     spec: ComputeSpec,
     available_outputs: dict[str, str],
 ) -> None:
-    references = compute_expression_references(spec.expression).outputs
+    references = expression_references(spec.expression).outputs
     if any(
         available_outputs.get(reference.node_id) != reference.output_id
         for reference in references
@@ -232,9 +234,16 @@ def _verify_coverage_operation_relation_contracts(
                 )
                 _verify_role_relation_fields(
                     contract=observation,
-                    fields=(
-                        spec.predicate.left,
-                        *(field for field in (spec.predicate.right,) if field),
+                    fields=tuple(
+                        item.field_id
+                        for item in expression_references(
+                            spec.predicate.left,
+                            *(
+                                (spec.predicate.right,)
+                                if spec.predicate.right is not None
+                                else ()
+                            ),
+                        ).fields
                     ),
                     expected_role=FieldBindingRole.PREDICATE,
                     role="universal_condition.observation",
@@ -297,9 +306,12 @@ def _verify_predicate_fields(
     predicate: Predicate,
     label: str,
 ) -> None:
-    _field_roles(contract, predicate.left, label)
-    if predicate.right:
-        _field_roles(contract, predicate.right, label)
+    references = expression_references(
+        predicate.left,
+        *((predicate.right,) if predicate.right is not None else ()),
+    )
+    for field in references.fields:
+        _field_roles(contract, field.field_id, label)
 
 
 def _verify_role_relation_fields(

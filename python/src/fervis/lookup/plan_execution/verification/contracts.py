@@ -25,8 +25,9 @@ from .operation_contracts import _operation_relation_contract
 from fervis.lookup.answer_program.operations import (
     ComputeSpec,
     Operation,
-    fold_compute_expression,
 )
+from fervis.lookup.answer_program.expressions import fold_expression
+from fervis.lookup.answer_program.expressions import expression_input_id
 from fervis.lookup.answer_program.values import NodeOutputRef
 from fervis.lookup.plan_execution.operation_runtime import ResolvedOperationInput
 from .sources import _row_source_for_relation, _source_mechanic_proof_refs
@@ -73,9 +74,7 @@ def _scalar_contracts(
         declared = inputs.get(key, ScalarContract())
         inputs[key] = ScalarContract(
             proof=ProofLineage(
-                value_refs=frozenset(
-                    {*declared.proof.value_refs, *item.proof_refs}
-                ),
+                value_refs=frozenset({*declared.proof.value_refs, *item.proof_refs}),
                 population_coverage=declared.proof.population_coverage,
             ),
             population_derived=declared.population_derived,
@@ -87,29 +86,41 @@ def _scalar_contracts(
         spec = operation.spec
         if not isinstance(spec, ComputeSpec):
             continue
-        proof = fold_compute_expression(
+        proof = fold_expression(
             spec.expression,
+            field=lambda _item: ScalarContract(),
             parameter=lambda item: _scalar_input_contract(
                 inputs,
                 operation_id=operation.id,
-                input_id=f"parameter:{item.parameter_id}",
+                input_id=expression_input_id(item),
             ),
             constant=lambda item: _scalar_input_contract(
                 inputs,
                 operation_id=operation.id,
-                input_id=f"constant:{item.constant_id}@{item.version_ref}",
+                input_id=expression_input_id(item),
             ),
+            environment=lambda _item: ScalarContract(),
             output=lambda item: _node_output_contract(
                 item,
                 operations=operations,
                 relation_contracts=relation_contracts,
                 scalar_contracts=scalars,
             ),
-            negation=lambda _item, operand: operand,
+            unary=lambda _item, operand: operand,
             binary=lambda _item, left, right: left.combine(right),
+            function=lambda _item, arguments: _combine_scalar_contracts(arguments),
         )
         scalars[spec.output_scalar] = proof
     return scalars
+
+
+def _combine_scalar_contracts(
+    contracts: tuple[ScalarContract, ...],
+) -> ScalarContract:
+    output = ScalarContract()
+    for contract in contracts:
+        output = output.combine(contract)
+    return output
 
 
 def _declared_scalar_input_contracts(
@@ -125,22 +136,18 @@ def _declared_scalar_input_contracts(
             contracts[(operation.id, input_coverage.input_id)] = ScalarContract(
                 proof=ProofLineage(
                     value_refs=frozenset(
-                        proof_ref
-                        for claim in claims
-                        for proof_ref in claim.proof_refs
+                        proof_ref for claim in claims for proof_ref in claim.proof_refs
                     ),
                     population_coverage=PopulationCoverage(
                         row_tests=frozenset(
                             claim.test_ref
                             for claim in claims
-                            if claim.role
-                            is PopulationCoverageRole.ROW_POPULATION
+                            if claim.role is PopulationCoverageRole.ROW_POPULATION
                         ),
                         condition_tests=frozenset(
                             claim.test_ref
                             for claim in claims
-                            if claim.role
-                            is PopulationCoverageRole.OPERATION_CONDITION
+                            if claim.role is PopulationCoverageRole.OPERATION_CONDITION
                         ),
                     ),
                 ),
@@ -196,7 +203,6 @@ def _base_relation_contract(
         catalog=catalog,
         row_sources=row_sources,
         endpoint_arg_scope_refs=proof_context.endpoint_arg_scope_refs,
-        row_filter_scope_refs=proof_context.row_filter_scope_refs,
     )
     field_proofs = {
         field.field_id: _binding_proof(
@@ -257,9 +263,7 @@ def _relation_entity_keys(
             ),
         )
         for key in row_source.candidate_keys
-        if all(
-            component.field_id in relation_field_ids for component in key.components
-        )
+        if all(component.field_id in relation_field_ids for component in key.components)
     ]
     keys.extend(
         RelationEntityKey(
@@ -288,7 +292,6 @@ def _relation_source_population_proof(
     catalog: RelationCatalog | None,
     row_sources: RowSourceCatalog,
     endpoint_arg_scope_refs: dict[str, frozenset[str]],
-    row_filter_scope_refs: dict[str, frozenset[str]],
 ) -> ProofLineage:
     if catalog is None or relation.source.kind not in {
         SourceKind.API_READ,
@@ -306,7 +309,6 @@ def _relation_source_population_proof(
         value_refs.add(read_evidence_ref(row_source.read_id))
     else:
         value_refs.add(row_source_evidence_ref(row_source.id))
-    proof_refs.update(row_filter_scope_refs.get(relation.id, frozenset()))
     proof_refs.update(endpoint_arg_scope_refs.get(relation.id, frozenset()))
     row_tests = frozenset(
         claim.test_ref

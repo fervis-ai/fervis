@@ -37,6 +37,8 @@ from .contract_types import (
 )
 from .execution_proof import ExecutionProofContext
 from fervis.lookup.answer_program.operations import JoinKey, Predicate
+from fervis.lookup.answer_program.relations import PopulationCoverageRole
+from fervis.lookup.answer_program.expressions import expression_references
 from fervis.lookup.plan_execution.errors import VerificationError
 from fervis.lookup.plan_execution.declared_values import declared_types_compatible
 
@@ -50,11 +52,26 @@ def _operation_relation_contract(
     spec = operation.spec
     if isinstance(spec, FilterSpec):
         source = _contract(contracts, spec.input_relation)
-        return _with_dependency_proof(
-            _copy_contract(contracts, spec.input_relation),
-            _predicate_dependency_proof(source, spec.predicate).merge(
-                _operation_value_proof(proof_context, operation.id)
+        claim_coverage = PopulationCoverage(
+            row_tests=frozenset(
+                claim.test_ref
+                for claim in spec.population_coverage_claims
+                if claim.role is PopulationCoverageRole.ROW_POPULATION
             ),
+            condition_tests=frozenset(
+                claim.test_ref
+                for claim in spec.population_coverage_claims
+                if claim.role is PopulationCoverageRole.OPERATION_CONDITION
+            ),
+        )
+        return _with_filter_proof(
+            _copy_contract(contracts, spec.input_relation),
+            _predicate_dependency_proof(source, spec.predicate)
+            .merge(
+                _operation_value_proof(proof_context, operation.id),
+                ProofLineage.value(frozenset(spec.proof_refs)),
+            )
+            .with_population_coverage(claim_coverage),
         )
     if isinstance(spec, ProjectSpec):
         return _project_contract(spec, contracts)
@@ -112,7 +129,7 @@ def _with_dependency_proof(
     contract: RelationContract,
     proof: ProofLineage,
 ) -> RelationContract:
-    if not proof.fulfillment_refs():
+    if not proof.fulfillment_refs() and not proof.population_coverage.all_tests:
         return contract
     return RelationContract(
         fields=dict(contract.fields),
@@ -124,6 +141,30 @@ def _with_dependency_proof(
         field_types=dict(contract.field_types),
         entity_keys=contract.entity_keys,
         population_proof=contract.population_proof.merge(proof),
+    )
+
+
+def _with_filter_proof(
+    contract: RelationContract,
+    proof: ProofLineage,
+) -> RelationContract:
+    coverage = contract.population_proof.population_coverage.additive(
+        proof.population_coverage
+    )
+    return RelationContract(
+        fields=dict(contract.fields),
+        grain_keys=contract.grain_keys,
+        field_proofs={
+            field: field_proof.merge(proof).with_population_coverage(
+                field_proof.population_coverage.additive(proof.population_coverage)
+            )
+            for field, field_proof in contract.field_proofs.items()
+        },
+        field_types=dict(contract.field_types),
+        entity_keys=contract.entity_keys,
+        population_proof=contract.population_proof.merge(
+            proof
+        ).with_population_coverage(coverage),
     )
 
 
@@ -142,9 +183,13 @@ def _predicate_dependency_proof(
     contract: RelationContract,
     predicate: Predicate,
 ) -> ProofLineage:
-    fields = [predicate.left]
-    if predicate.right:
-        fields.append(predicate.right)
+    fields = [
+        item.field_id
+        for item in expression_references(
+            predicate.left,
+            *((predicate.right,) if predicate.right is not None else ()),
+        ).fields
+    ]
     return _fields_dependency_proof(
         contract,
         tuple(field for field in fields if field),
@@ -174,9 +219,7 @@ def _project_contract(
         output = field.output or field.source
         fields[output] = _field_roles(source, field.source, "project")
         field_proofs[output] = _field_proof(source, field.source, "project")
-    projections = {
-        field.source: field.output or field.source for field in spec.fields
-    }
+    projections = {field.source: field.output or field.source for field in spec.fields}
     return RelationContract(
         fields=fields,
         grain_keys=_project_contract_grain(source, spec.fields),
@@ -271,9 +314,8 @@ def _join_dependency_proof(
     *,
     require_identity_authority: bool = False,
 ) -> ProofLineage:
-    if (
-        require_identity_authority
-        and not _join_keys_include_shared_entity_key(left, right, join_keys)
+    if require_identity_authority and not _join_keys_include_shared_entity_key(
+        left, right, join_keys
     ):
         raise VerificationError("join keys lack declared identity authority")
     proof = ProofLineage()
@@ -389,9 +431,7 @@ def _role_expand_contract(
         )
     for output_field, proofs in alternative_proofs.items():
         field_proofs[output_field] = ProofLineage(
-            value_refs=frozenset(
-                ref for proof in proofs for ref in proof.value_refs
-            ),
+            value_refs=frozenset(ref for proof in proofs for ref in proof.value_refs),
             population_coverage=PopulationCoverage.guaranteed_by_every(
                 tuple(proof.population_coverage for proof in proofs)
             ),
@@ -521,9 +561,7 @@ def _anti_join_contract(
         )
         field_types[output] = candidate.field_types.get(field.source, "")
     projections = {
-        **{
-            field: field for field in spec.candidate.required_identity_fields
-        },
+        **{field: field for field in spec.candidate.required_identity_fields},
         **{field.source: field.output or field.source for field in spec.output_fields},
     }
     return RelationContract(
@@ -596,10 +634,7 @@ def _universal_condition_contract(
         )
         field_types[output] = candidate.field_types.get(field.source, "")
     projections = {
-        **{
-            field: field
-            for field in spec.candidate_subject.required_identity_fields
-        },
+        **{field: field for field in spec.candidate_subject.required_identity_fields},
         **{field.source: field.output or field.source for field in spec.output_fields},
     }
     return RelationContract(

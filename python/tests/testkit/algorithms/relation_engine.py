@@ -12,11 +12,6 @@ from fervis.lookup.plan_execution.operation_engine import execute_operations
 from fervis.lookup.plan_execution.operation_runtime import (
     ExecutableOperation,
     RelationEngineInput,
-    ResolvedComputeBinary,
-    ResolvedComputeNegation,
-    ResolvedComputeOutput,
-    ResolvedComputeSpec,
-    ResolvedComputeValue,
     ResolvedRankSpec,
     ScalarInput,
 )
@@ -32,7 +27,7 @@ from fervis.lookup.answer_program.operations import (
     AggregationFunction,
     AggregationSpec,
     AntiJoinSpec,
-    ComputeBinaryOperator,
+    ComputeSpec,
     CrossJoinSpec,
     FilterSpec,
     JoinKey,
@@ -52,6 +47,13 @@ from fervis.lookup.answer_program.operations import (
     UnionSpec,
     UniversalConditionSpec,
 )
+from fervis.lookup.answer_program.expressions import (
+    BinaryExpression,
+    ExpressionBinaryOperator,
+    ExpressionUnaryOperator,
+    UnaryExpression,
+)
+from fervis.lookup.answer_program.values import NodeOutputRef, ParameterRef
 
 from tests.testkit.assertions import (
     exact_mismatches,
@@ -143,17 +145,56 @@ def run_calendar_relation_case(payload: dict[str, Any]) -> list[str]:
 
 
 def engine_input_from_payload(payload: dict[str, Any]) -> RelationEngineInput:
+    operation_payloads = tuple(payload.get("operations") or ())
     return RelationEngineInput(
-        scalar_inputs=tuple(
-            ScalarInput(
-                id=str(item["id"]),
-                value=item["value"],
-                value_type=str(item.get("value_type") or ""),
-            )
-            for item in payload.get("scalar_inputs") or ()
-        ),
+        scalar_inputs=_scalar_inputs(payload, operation_payloads=operation_payloads),
         relations=tuple(_relation(item) for item in payload.get("relations") or ()),
-        operations=tuple(_operation(item) for item in payload.get("operations") or ()),
+        operations=tuple(_operation(item) for item in operation_payloads),
+    )
+
+
+def _scalar_inputs(
+    payload: dict[str, Any],
+    *,
+    operation_payloads: tuple[dict[str, Any], ...],
+) -> tuple[ScalarInput, ...]:
+    explicit = tuple(
+        ScalarInput(
+            id=f"parameter:{item['id']}",
+            value=item["value"],
+            value_type=str(item.get("value_type") or ""),
+        )
+        for item in payload.get("scalar_inputs") or ()
+    )
+    embedded = tuple(
+        scalar
+        for operation in operation_payloads
+        for scalar in _expression_scalar_inputs(
+            (operation.get("spec") or {}).get("expression")
+        )
+    )
+    return tuple({item.id: item for item in (*explicit, *embedded)}.values())
+
+
+def _expression_scalar_inputs(payload: object) -> tuple[ScalarInput, ...]:
+    if not isinstance(payload, dict):
+        return ()
+    if set(payload) == {"value"}:
+        value = payload["value"]
+        if not isinstance(value, dict):
+            return ()
+        return (
+            ScalarInput(
+                id=f"parameter:{value['input_ref']}",
+                value=value["value"],
+                value_type=str(value.get("value_type") or "decimal"),
+                proof_refs=tuple(str(ref) for ref in value.get("proof_refs") or ()),
+            ),
+        )
+    return tuple(
+        scalar
+        for child in payload.values()
+        for scalar in _expression_scalar_inputs(child)
     )
 
 
@@ -274,7 +315,7 @@ def operation_spec_from_payload(payload: dict[str, Any]) -> Any:
             ),
         )
     if kind == "compute":
-        return ResolvedComputeSpec(
+        return ComputeSpec(
             expression=_compute_expression(payload["expression"]),
             output_scalar=str(payload.get("output_scalar") or ""),
         )
@@ -284,22 +325,21 @@ def operation_spec_from_payload(payload: dict[str, Any]) -> Any:
 def _compute_expression(payload: dict[str, Any]):
     if set(payload) == {"value"}:
         value = payload["value"]
-        return ResolvedComputeValue(
-            input_ref=str(value["input_ref"]),
-            value=value["value"],
-            proof_refs=tuple(str(ref) for ref in value.get("proof_refs") or ()),
-        )
+        return ParameterRef(parameter_id=str(value["input_ref"]))
     if set(payload) == {"output"}:
         output = payload["output"]
-        return ResolvedComputeOutput(
+        return NodeOutputRef(
             node_id=str(output["node_id"]),
             output_id=str(output["output_id"]),
         )
     if set(payload) == {"negate"}:
-        return ResolvedComputeNegation(operand=_compute_expression(payload["negate"]))
+        return UnaryExpression(
+            operator=ExpressionUnaryOperator.NEGATE,
+            operand=_compute_expression(payload["negate"]),
+        )
     if set(payload) == {"operator", "left", "right"}:
-        return ResolvedComputeBinary(
-            operator=ComputeBinaryOperator(str(payload["operator"])),
+        return BinaryExpression(
+            operator=ExpressionBinaryOperator(str(payload["operator"])),
             left=_compute_expression(payload["left"]),
             right=_compute_expression(payload["right"]),
         )
@@ -351,9 +391,18 @@ def _sort_key(payload: dict[str, Any]) -> SortKey:
 
 
 def _predicate(payload: dict[str, Any]) -> Predicate:
+    from fervis.lookup.answer_program.expressions import FieldRef, ParameterRef
+
+    right_field = str(payload.get("right") or "")
+    right_scalar = str(payload.get("right_scalar") or "")
     return Predicate(
-        left=str(payload["left"]),
+        left=FieldRef(str(payload["left"])),
         operator=PredicateOperator(str(payload["operator"])),
-        right=str(payload.get("right") or ""),
-        right_scalar=str(payload.get("right_scalar") or ""),
+        right=(
+            FieldRef(right_field)
+            if right_field
+            else ParameterRef(right_scalar)
+            if right_scalar
+            else None
+        ),
     )

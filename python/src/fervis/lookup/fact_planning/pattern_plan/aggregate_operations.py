@@ -12,6 +12,7 @@ from fervis.lookup.answer_program.operations import (
     SortKey,
     TiePolicy,
 )
+from fervis.lookup.answer_program.expressions import FieldRef
 from fervis.lookup.fact_planning.compiled_patterns import CompiledMetric, CompiledRank
 from fervis.lookup.answer_program.compiler_inputs import CompilerInputContext
 
@@ -110,7 +111,7 @@ def _not_null_group_filters(
                 spec=FilterSpec(
                     input_relation=current_relation,
                     predicate=Predicate(
-                        left=field_id,
+                        left=FieldRef(field_id),
                         operator=PredicateOperator.NOT_NULL,
                     ),
                 ),

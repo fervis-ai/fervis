@@ -57,8 +57,6 @@ from fervis.lookup.answer_program.operations import (
     AggregationFunction,
     AggregationSpec,
     AntiJoinSpec,
-    ComputeBinary,
-    ComputeBinaryOperator,
     ComputeSpec,
     CrossJoinSpec,
     FilterSpec,
@@ -79,14 +77,18 @@ from fervis.lookup.answer_program.operations import (
     SortKey,
     TiePolicy,
 )
+from fervis.lookup.answer_program.expressions import (
+    BinaryExpression,
+    ExpressionBinaryOperator,
+    FieldRef,
+    ParameterRef,
+)
 from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
     EndpointParamBinding,
     Relation,
     RelationField,
     RelationSource,
-    RelationSourceAppliedFilter,
-    RelationSourceRowFilter,
     SourceKind,
 )
 from fervis.lookup.fact_plan.row_sources import (
@@ -97,7 +99,6 @@ from fervis.lookup.answer_program.values import (
     ConstantRef,
     FactValue,
     NodeOutputRef,
-    ParameterRef,
     TimeComponent,
     ValueComponent,
 )
@@ -711,63 +712,47 @@ def _rows_relation() -> Relation:
     )
 
 
-def _rows_relation_with_filter(
+def _row_filter_operation(
     expression,
     *,
     field_id: str = "name",
-) -> Relation:
-    relation = _rows_relation()
-    return replace(
-        relation,
-        source=replace(
-            relation.source,
-            row_filters=(
-                RelationSourceRowFilter(
-                    field_id=field_id,
-                    operator="equals",
-                    value_expr=expression,
-                ),
+) -> Operation:
+    return Operation(
+        id="filter_rows",
+        spec=FilterSpec(
+            input_relation="rows",
+            predicate=Predicate(
+                left=FieldRef(field_id),
+                operator=PredicateOperator.EQUALS,
+                right=expression,
             ),
         ),
+        output_relation="filtered_rows",
     )
 
 
-def _rows_relation_filtered_by_known_input(known_input_id: str) -> Relation:
-    return Relation(
-        id="rows",
-        source=RelationSource(
-            kind=SourceKind.API_READ,
-            read_id="records",
-            row_filters=(
-                RelationSourceRowFilter(
-                    field_id="name",
-                    operator="equals",
-                    value_expr=_constant_expression(
-                        FactValue.named(
-                            id=f"filter_{known_input_id}",
-                            text="yesterday",
-                            proof_refs=(f"known_input:{known_input_id}",),
-                        ),
-                        ref_id=f"filter_{known_input_id}",
-                    ),
-                    proof_refs=(f"known_input:{known_input_id}",),
-                ),
+def _known_input_filter(known_input_id: str) -> Operation:
+    return _row_filter_operation(
+        _constant_expression(
+            FactValue.named(
+                id=f"filter_{known_input_id}",
+                text="yesterday",
+                proof_refs=(f"known_input:{known_input_id}",),
             ),
+            ref_id=f"filter_{known_input_id}",
         ),
-        fields=(
-            RelationField(
-                field_id="name",
-                roles=(FieldBindingRole.OUTPUT,),
-            ),
-        ),
+        field_id="name",
     )
 
 
-def test_row_filter_references_existing_value():
+def test_filter_references_existing_value():
     plan = FactPlan(
         outcome=_answer_plan(
-            relations=(_rows_relation_with_filter(ParameterRef("missing")),),
-            operations=(_project_operation(input_relation="rows"),),
+            relations=(_rows_relation(),),
+            operations=(
+                _row_filter_operation(ParameterRef("missing")),
+                _project_operation(input_relation="filtered_rows"),
+            ),
             result_projection=ResultProjection(
                 relation_outputs=(
                     RelationResultOutput(
@@ -784,13 +769,14 @@ def test_row_filter_references_existing_value():
         verify_fact_plan(plan)
 
 
-def test_row_filter_can_reference_known_question_input():
+def test_filter_can_reference_known_question_input():
     plan = FactPlan(
         outcome=_answer_plan(
-            relations=(
-                _rows_relation_with_filter(ParameterRef("question.person_name")),
+            relations=(_rows_relation(),),
+            operations=(
+                _row_filter_operation(ParameterRef("question.person_name")),
+                _project_operation(input_relation="filtered_rows"),
             ),
-            operations=(_project_operation(input_relation="rows"),),
             result_projection=ResultProjection(
                 relation_outputs=(
                     RelationResultOutput(
@@ -846,11 +832,14 @@ def test_known_inputs_are_inventory_not_automatic_obligations():
     )
 
 
-def test_unclassified_literal_cannot_supply_row_filter_value():
+def test_unclassified_literal_cannot_supply_filter_value():
     plan = FactPlan(
         outcome=_answer_plan(
-            relations=(_rows_relation_with_filter({"literal": "Alice"}),),
-            operations=(_project_operation(input_relation="rows"),),
+            relations=(_rows_relation(),),
+            operations=(
+                _row_filter_operation({"literal": "Alice"}),
+                _project_operation(input_relation="filtered_rows"),
+            ),
             result_projection=ResultProjection(
                 relation_outputs=(
                     RelationResultOutput(
@@ -911,7 +900,7 @@ def test_endpoint_time_param_can_reference_grounded_time_input():
         start="2026-04-08",
         end="2026-04-08",
     )
-    relation = _rows_relation_filtered_by_known_input("period")
+    relation = _rows_relation()
     relation = replace(
         relation,
         source=replace(
@@ -932,7 +921,10 @@ def test_endpoint_time_param_can_reference_grounded_time_input():
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(relation,),
-            operations=(_project_operation(input_relation="rows"),),
+            operations=(
+                _known_input_filter("period"),
+                _project_operation(input_relation="filtered_rows"),
+            ),
             result_projection=ResultProjection(
                 relation_outputs=(
                     RelationResultOutput(
@@ -1209,8 +1201,11 @@ def test_shared_question_input_refs_are_valid_across_answer_requests():
                     result_output_id="store",
                 ),
             ),
-            relations=(_rows_relation_filtered_by_known_input("period"),),
-            operations=(_project_operation(input_relation="rows"),),
+            relations=(_rows_relation(),),
+            operations=(
+                _known_input_filter("period"),
+                _project_operation(input_relation="filtered_rows"),
+            ),
             result_projection=ResultProjection(
                 relation_outputs=(
                     RelationResultOutput(
@@ -1548,8 +1543,8 @@ def test_proof_backed_scalar_output_can_satisfy_requested_derived_fact():
                 Operation(
                     id="compute",
                     spec=ComputeSpec(
-                        expression=ComputeBinary(
-                            operator=ComputeBinaryOperator.SUBTRACT,
+                        expression=BinaryExpression(
+                            operator=ExpressionBinaryOperator.SUBTRACT,
                             left=_constant_expression(
                                 target_value,
                                 ref_id="target_value",
@@ -1637,8 +1632,8 @@ def test_chained_compute_scalar_output_preserves_evidence_proof():
                 Operation(
                     id="subtotal",
                     spec=ComputeSpec(
-                        expression=ComputeBinary(
-                            operator=ComputeBinaryOperator.SUBTRACT,
+                        expression=BinaryExpression(
+                            operator=ExpressionBinaryOperator.SUBTRACT,
                             left=_constant_expression(
                                 target_value,
                                 ref_id="target_value",
@@ -2514,32 +2509,25 @@ def _execute_location_id_plan_with_observed_label():
     )
 
 
-def test_relation_source_applied_filter_constrains_rows_before_operation():
+def test_filter_operation_constrains_rows_before_aggregate():
     area_expression = _constant_expression(
         FactValue.identity(
             id="nairobi_area",
-            key=entity_key_value(
-                "area", "primary_key", {"area_id": "area_nairobi"}
-            ),
+            key=entity_key_value("area", "primary_key", {"area_id": "area_nairobi"}),
             display_value="Nairobi",
             proof_refs=("known_input:input_1",),
         ),
         ref_id="nairobi_area",
     )
+    area_expression = replace(area_expression, component="key_component:area_id")
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(
                 Relation(
-                    id="rows",
+                    id="source_rows",
                     source=RelationSource(
                         kind=SourceKind.API_READ,
                         read_id="locations",
-                        applied_filters=(
-                            RelationSourceAppliedFilter(
-                                predicate_field_ids=("area_id",),
-                                value_expr=area_expression,
-                            ),
-                        ),
                     ),
                     fields=(
                         RelationField(
@@ -2558,6 +2546,18 @@ def test_relation_source_applied_filter_constrains_rows_before_operation():
                 ),
             ),
             operations=(
+                Operation(
+                    id="filter_area",
+                    spec=FilterSpec(
+                        input_relation="source_rows",
+                        predicate=Predicate(
+                            left=FieldRef("area_id"),
+                            operator=PredicateOperator.EQUALS,
+                            right=area_expression,
+                        ),
+                    ),
+                    output_relation="rows",
+                ),
                 Operation(
                     id="sum_metric",
                     spec=AggregateSpec(
@@ -2664,7 +2664,8 @@ def test_relation_source_applied_filter_constrains_rows_before_operation():
         memory=LookupMemory(),
     )
 
-    assert result.relations[0].rows == (
+    filtered_rows = next(item for item in result.relations if item.id == "rows")
+    assert filtered_rows.rows == (
         {
             "location_id": "loc_1",
             "area_id": "area_nairobi",
@@ -2740,16 +2741,17 @@ def test_fulfillment_rejects_rendered_scalar_without_evidence_proof():
         )
 
 
-def test_row_filter_targets_are_verified_against_catalog_and_relations():
+def test_filter_targets_are_verified_against_catalog_and_relations():
     plan = FactPlan(
         outcome=_answer_plan(
-            relations=(
-                _rows_relation_with_filter(
+            relations=(_rows_relation(),),
+            operations=(
+                _row_filter_operation(
                     ParameterRef("question.known"),
                     field_id="field.missing",
                 ),
+                _project_operation(input_relation="filtered_rows"),
             ),
-            operations=(_project_operation(input_relation="rows"),),
             result_projection=ResultProjection(
                 relation_outputs=(
                     RelationResultOutput(
@@ -2788,25 +2790,10 @@ def test_fulfillment_rejects_known_input_proof_from_unrelated_join_branch():
                     ),
                 ),
                 Relation(
-                    id="scoped_rows",
+                    id="scoped_source_rows",
                     source=RelationSource(
                         kind=SourceKind.API_READ,
                         read_id="records",
-                        row_filters=(
-                            RelationSourceRowFilter(
-                                field_id="entity_id",
-                                operator="equals",
-                                value_expr=_constant_expression(
-                                    FactValue.named(
-                                        id="filter_entity_1",
-                                        text="entity_1",
-                                        proof_refs=("known_input:input_1",),
-                                    ),
-                                    ref_id="filter_entity_1",
-                                ),
-                                proof_refs=("known_input:input_1",),
-                            ),
-                        ),
                     ),
                     fields=(
                         RelationField(
@@ -2817,6 +2804,25 @@ def test_fulfillment_rejects_known_input_proof_from_unrelated_join_branch():
                 ),
             ),
             operations=(
+                Operation(
+                    id="filter_scoped_rows",
+                    spec=FilterSpec(
+                        input_relation="scoped_source_rows",
+                        predicate=Predicate(
+                            left=FieldRef("entity_id"),
+                            operator=PredicateOperator.EQUALS,
+                            right=_constant_expression(
+                                FactValue.named(
+                                    id="filter_entity_1",
+                                    text="entity_1",
+                                    proof_refs=("known_input:input_1",),
+                                ),
+                                ref_id="filter_entity_1",
+                            ),
+                        ),
+                    ),
+                    output_relation="scoped_rows",
+                ),
                 Operation(
                     id="join_unrelated_scope",
                     spec=CrossJoinSpec(
@@ -3523,9 +3529,9 @@ def test_predicate_scalar_rhs_requires_prior_scalar_output():
         spec=FilterSpec(
             input_relation="rows",
             predicate=Predicate(
-                left="amount",
+                left=FieldRef("amount"),
                 operator=PredicateOperator.LTE,
-                right_scalar="max_amount",
+                right=NodeOutputRef(node_id="missing", output_id="max_amount"),
             ),
         ),
         output_relation="filtered",
@@ -3658,9 +3664,9 @@ def test_operation_field_references_must_exist_on_input_relation_contracts():
             spec=FilterSpec(
                 input_relation="rows",
                 predicate=Predicate(
-                    left="missing",
+                    left=FieldRef("missing"),
                     operator=PredicateOperator.EQUALS,
-                    right="name",
+                    right=FieldRef("name"),
                 ),
             ),
             output_relation="filtered",

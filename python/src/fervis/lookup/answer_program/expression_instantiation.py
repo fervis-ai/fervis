@@ -14,7 +14,6 @@ from fervis.lookup.answer_program.relations import (
     Relation,
     RelationSourcePopulationChoice,
     RelationSourceReviewScopeDecision,
-    RelationSourceRowFilter,
     SourceKind,
 )
 from fervis.lookup.fact_plan.row_sources import (
@@ -33,7 +32,6 @@ from fervis.lookup.answer_program.values import (
     FactValue,
     LiteralType,
     ParameterRef,
-    ValueFilterOperator,
 )
 from fervis.lookup.answer_program.contracts import (
     AnswerProgramContractError,
@@ -56,15 +54,6 @@ class ResolvedEndpointArg:
 
 
 @dataclass(frozen=True)
-class ResolvedRowFilter:
-    relation_id: str
-    field_id: str
-    operator: ValueFilterOperator
-    value: Any
-    proof_refs: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
 class ResolvedPopulationChoice:
     relation_id: str
     controller_kind: PopulationChoiceControllerKind
@@ -81,7 +70,6 @@ class ResolvedPopulationChoice:
 @dataclass(frozen=True)
 class InstantiatedProgramInputs:
     endpoint_args: tuple[ResolvedEndpointArg, ...] = ()
-    row_filters: tuple[ResolvedRowFilter, ...] = ()
     population_choices: tuple[ResolvedPopulationChoice, ...] = ()
 
 
@@ -100,16 +88,9 @@ def instantiate_program_expressions(
     )
 
     endpoint_args: list[ResolvedEndpointArg] = []
-    row_filters: list[ResolvedRowFilter] = []
     population_choices: list[ResolvedPopulationChoice] = []
     endpoint_arg_targets: set[tuple[str, str]] = set()
 
-    _append_relation_source_row_filters(
-        row_filters,
-        bindings=bindings,
-        parameters=parameters,
-        relations=relations,
-    )
     _append_relation_source_endpoint_args(
         endpoint_args,
         endpoint_arg_targets=endpoint_arg_targets,
@@ -120,135 +101,19 @@ def instantiate_program_expressions(
     )
     _append_relation_source_population_choices(
         population_choices,
-        row_filters=row_filters,
         relations=relations,
         bindings=bindings,
         parameters=parameters,
     )
     return InstantiatedProgramInputs(
         endpoint_args=tuple(endpoint_args),
-        row_filters=_canonical_row_filters(tuple(row_filters)),
         population_choices=tuple(population_choices),
     )
-
-
-def _canonical_row_filters(
-    row_filters: tuple[ResolvedRowFilter, ...],
-) -> tuple[ResolvedRowFilter, ...]:
-    output: list[ResolvedRowFilter] = []
-    by_field: dict[tuple[str, str], ResolvedRowFilter] = {}
-    for row_filter in row_filters:
-        key = (row_filter.relation_id, row_filter.field_id)
-        existing = by_field.get(key)
-        if existing is None:
-            by_field[key] = row_filter
-            output.append(row_filter)
-            continue
-        if not _same_row_filter_constraint(existing, row_filter):
-            raise VerificationError(
-                "relation "
-                f"{row_filter.relation_id} has conflicting row filters for "
-                f"field {row_filter.field_id}"
-            )
-        merged = ResolvedRowFilter(
-            relation_id=existing.relation_id,
-            field_id=existing.field_id,
-            operator=existing.operator,
-            value=existing.value,
-            proof_refs=_dedupe_refs((*existing.proof_refs, *row_filter.proof_refs)),
-        )
-        by_field[key] = merged
-        output[output.index(existing)] = merged
-    return tuple(output)
-
-
-def _same_row_filter_constraint(
-    left: ResolvedRowFilter,
-    right: ResolvedRowFilter,
-) -> bool:
-    return left.operator == right.operator and left.value == right.value
-
-
-def _append_relation_source_row_filters(
-    row_filters: list[ResolvedRowFilter],
-    *,
-    bindings: BindingSet,
-    parameters: tuple[ParameterDeclaration, ...],
-    relations: tuple[Relation, ...],
-) -> None:
-    for relation in relations:
-        for source_row_filter in relation.source.row_filters:
-            _require_bound_relation_field(relation, source_row_filter.field_id)
-            resolved = _resolve_omittable_expression(
-                source_row_filter.value_expr,
-                bindings=bindings,
-                parameters=parameters,
-            )
-            if resolved is None:
-                continue
-            _require_filter_value(resolved.fact_value)
-            row_filters.append(
-                ResolvedRowFilter(
-                    relation_id=relation.id,
-                    field_id=source_row_filter.field_id,
-                    operator=_source_row_filter_operator(source_row_filter),
-                    value=_source_row_filter_value(
-                        source_row_filter,
-                        resolved.value,
-                    ),
-                    proof_refs=_dedupe_refs(
-                        (*source_row_filter.proof_refs, *resolved.proof_refs)
-                    ),
-                )
-            )
-        for source_filter in relation.source.applied_filters:
-            resolved = _resolve_omittable_expression(
-                source_filter.value_expr,
-                bindings=bindings,
-                parameters=parameters,
-            )
-            if resolved is None:
-                continue
-            _require_filter_value(resolved.fact_value)
-            for field_id in source_filter.predicate_field_ids:
-                _require_bound_relation_field(relation, field_id)
-                row_filters.append(
-                    ResolvedRowFilter(
-                        relation_id=relation.id,
-                        field_id=field_id,
-                        operator=ValueFilterOperator(source_filter.operator),
-                        value=resolved.value,
-                        proof_refs=resolved.proof_refs,
-                    )
-                )
-
-
-def _source_row_filter_operator(
-    source_filter: RelationSourceRowFilter,
-) -> ValueFilterOperator:
-    try:
-        return ValueFilterOperator(source_filter.operator)
-    except ValueError as exc:
-        raise VerificationError(
-            f"unsupported relation source row filter operator: {source_filter.operator}"
-        ) from exc
-
-
-def _source_row_filter_value(
-    source_filter: RelationSourceRowFilter,
-    value: object,
-) -> object:
-    operator = _source_row_filter_operator(source_filter)
-    values = value if isinstance(value, tuple) else (value,)
-    if operator == ValueFilterOperator.EQUALS and len(values) == 1:
-        return values[0]
-    return tuple(values)
 
 
 def _append_relation_source_population_choices(
     population_choices: list[ResolvedPopulationChoice],
     *,
-    row_filters: list[ResolvedRowFilter],
     relations: tuple[Relation, ...],
     bindings: BindingSet,
     parameters: tuple[ParameterDeclaration, ...],
@@ -263,21 +128,6 @@ def _append_relation_source_population_choices(
             )
             if compiled is not None:
                 population_choices.append(compiled)
-                if (
-                    compiled.controller_kind
-                    is PopulationChoiceControllerKind.ROW_PREDICATE
-                    and compiled.excluded_values
-                ):
-                    _require_bound_relation_field(relation, compiled.field_id)
-                    row_filters.append(
-                        ResolvedRowFilter(
-                            relation_id=relation.id,
-                            field_id=compiled.field_id,
-                            operator=ValueFilterOperator.IN,
-                            value=compiled.included_values,
-                            proof_refs=compiled.proof_refs,
-                        )
-                    )
 
 
 def _compiled_population_choice(
@@ -596,17 +446,6 @@ def _row_source_for_relation(
     if row_source is None:
         raise VerificationError(f"unknown plan relation {relation_id}")
     return row_source
-
-
-def _require_filter_value(value: FactValue) -> None:
-    if value.payload.row_filter_error:
-        raise VerificationError(f"{value.payload.row_filter_error}: {value.id}")
-
-
-def _require_bound_relation_field(relation: Relation, field_id: str) -> None:
-    if any(field.field_id == field_id for field in relation.fields):
-        return
-    raise VerificationError(f"unknown field {field_id} on relation {relation.id}")
 
 
 def _relation(relations: tuple[Relation, ...], relation_id: str) -> Relation:

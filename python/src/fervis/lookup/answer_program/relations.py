@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from fervis.types.enums import StrEnum
 
-from fervis.lookup.answer_program.values import ParameterRef, ValueExpression
+from fervis.lookup.answer_program.expressions import Expression, ParameterRef
 from fervis.lookup.question_contract import MembershipTestRef
 
 
@@ -86,9 +86,7 @@ def merge_population_coverage_claims(
         merged[key] = PopulationCoverageClaim(
             test_ref=claim.test_ref,
             role=claim.role,
-            proof_refs=tuple(
-                dict.fromkeys((*existing.proof_refs, *claim.proof_refs))
-            ),
+            proof_refs=tuple(dict.fromkeys((*existing.proof_refs, *claim.proof_refs))),
         )
     return tuple(merged.values())
 
@@ -114,40 +112,12 @@ class RelationSourceReviewScopeDecision:
 @dataclass(frozen=True)
 class EndpointParamBinding:
     param_id: str
-    value_expr: ValueExpression
+    value_expr: Expression
     proof_refs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.param_id:
             raise ValueError("endpoint param binding requires param")
-
-
-@dataclass(frozen=True)
-class RelationSourceAppliedFilter:
-    predicate_field_ids: tuple[str, ...]
-    value_expr: ValueExpression
-    operator: str = "equals"
-    proof_refs: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        if not self.predicate_field_ids:
-            raise ValueError("relation source applied filter requires predicate fields")
-        if not self.operator:
-            raise ValueError("relation source applied filter requires operator")
-
-
-@dataclass(frozen=True)
-class RelationSourceRowFilter:
-    field_id: str
-    operator: str
-    value_expr: ValueExpression
-    proof_refs: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        if not self.field_id:
-            raise ValueError("relation source row filter requires field")
-        if not self.operator:
-            raise ValueError("relation source row filter requires operator")
 
 
 @dataclass(frozen=True)
@@ -184,8 +154,6 @@ class RelationSource:
     calendar_id: str = ""
     memory_relation_id: str = ""
     param_bindings: tuple[EndpointParamBinding, ...] = ()
-    applied_filters: tuple[RelationSourceAppliedFilter, ...] = ()
-    row_filters: tuple[RelationSourceRowFilter, ...] = ()
     population_choices: tuple[RelationSourcePopulationChoice, ...] = ()
     population_binding: RelationSourcePopulationBinding | None = None
     population_coverage_claims: tuple[PopulationCoverageClaim, ...] = ()

@@ -17,7 +17,7 @@ from fervis.lookup.answer_program.values import (
 from fervis.lookup.question_contract import RequestedFact
 
 
-ANSWER_PROGRAM_SCHEMA_REVISION = 3
+ANSWER_PROGRAM_SCHEMA_REVISION = 4
 
 
 @dataclass(frozen=True)

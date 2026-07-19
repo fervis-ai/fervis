@@ -35,10 +35,7 @@ def _result_output_fact_refs(
         relation_contracts=relation_contracts,
         operation_inputs=operation_inputs,
     )
-    return {
-        output_id: proof.fulfillment_refs()
-        for output_id, proof in proofs.items()
-    }
+    return {output_id: proof.fulfillment_refs() for output_id, proof in proofs.items()}
 
 
 def _result_output_proofs(
@@ -62,9 +59,7 @@ def _result_output_proofs(
                 ref for field_proof in field_proofs for ref in field_proof.value_refs
             ),
             population_coverage=PopulationCoverage.guaranteed_by_every(
-                tuple(
-                    field_proof.population_coverage for field_proof in field_proofs
-                )
+                tuple(field_proof.population_coverage for field_proof in field_proofs)
             ),
         )
     scalar_contracts = _scalar_contracts(
@@ -75,9 +70,7 @@ def _result_output_proofs(
     for scalar_output in answer.result_projection.scalar_outputs:
         scalar_contract = scalar_contracts.get(scalar_output.scalar_id)
         proofs[scalar_output.id] = (
-            scalar_contract.proof
-            if scalar_contract is not None
-            else ProofLineage()
+            scalar_contract.proof if scalar_contract is not None else ProofLineage()
         )
     return proofs
 

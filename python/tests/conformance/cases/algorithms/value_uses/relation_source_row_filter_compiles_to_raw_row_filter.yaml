@@ -1,5 +1,5 @@
-id: relation_source_row_filter_compiles_to_raw_row_filter
-description: Relation-source row filters compile to raw row filters with lineage proof refs.
+id: relation_source_constraint_compiles_to_filter_operation
+description: Relation-source constraints compile to FilterSpec operations with lineage proof refs.
 migrates:
   - api/tests/fervis/lookup/plan_execution/test_relations.py::test_relation_source_row_filter_compiles_to_raw_row_filter
 kind: algorithm
@@ -23,9 +23,10 @@ input:
         - {field_id: is_open, roles: [predicate]}
 expect:
   result_contains:
-    row_filters:
-      - relation_id: store_rows
+    filters:
+      - input_relation: store_rows__source
+        output_relation: store_rows
         field_id: is_open
         operator: in
-        value: ["true"]
+        value_ref: constant:fixture.store_rows.is_open@conformance-fixture@1
         proof_refs: [row_predicate:rp.source_1.is_open]

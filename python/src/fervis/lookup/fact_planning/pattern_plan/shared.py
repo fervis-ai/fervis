@@ -21,7 +21,6 @@ from fervis.lookup.source_binding.compiler_ir import (
 from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
     PopulationChoiceControllerKind,
-    Relation,
     RelationField,
 )
 from fervis.lookup.answer_program.result_projection import (
@@ -39,6 +38,7 @@ from fervis.lookup.fact_planning.fulfillment_evidence import (
 from fervis.lookup.source_binding import BoundSource
 
 from .result_ids import _safe_field_id
+from .parameterization import ParameterizedRelation
 from fervis.lookup.fact_planning.compiled_patterns import (
     CompiledMetric,
     CompiledPattern,
@@ -48,7 +48,7 @@ from fervis.lookup.fact_planning.compiled_patterns import (
 
 RelationBuilder = Callable[
     [str, DraftRelationSource, tuple[RelationField, ...]],
-    Relation,
+    ParameterizedRelation,
 ]
 
 
@@ -161,23 +161,22 @@ def _relations_for_bound_source(
         (bound.source,) if bound.source is not None else ()
     )
     if len(invocations) <= 1:
-        return {
-            "relations": (
-                _relation_for_bound(
-                    relation_id=relation_id,
-                    address=address,
-                    bound=bound,
-                    relation_fields=relation_fields,
-                    required_answer_evidence_ids_by_output=(
-                        required_answer_evidence_ids_by_output
-                    ),
-                    selected_metric=selected_metric,
-                    relation_builder=relation_builder,
-                ),
+        built = _relation_for_bound(
+            relation_id=relation_id,
+            address=address,
+            bound=bound,
+            relation_fields=relation_fields,
+            required_answer_evidence_ids_by_output=(
+                required_answer_evidence_ids_by_output
             ),
-            "operations": (),
+            selected_metric=selected_metric,
+            relation_builder=relation_builder,
+        )
+        return {
+            "relations": (built.relation,),
+            "operations": built.operations,
         }
-    relations = tuple(
+    built_relations = tuple(
         _relation_for_bound(
             relation_id=f"{relation_id}_invocation_{index}",
             address=address,
@@ -192,12 +191,15 @@ def _relations_for_bound_source(
         for index, source in enumerate(invocations, start=1)
     )
     return {
-        "relations": relations,
+        "relations": tuple(item.relation for item in built_relations),
         "operations": (
+            *(operation for item in built_relations for operation in item.operations),
             Operation(
                 id=f"{relation_id}_union",
                 spec=UnionSpec(
-                    inputs=tuple(relation.id for relation in relations),
+                    inputs=tuple(
+                        relation.output_relation_id for relation in built_relations
+                    ),
                     output_fields=tuple(field.field_id for field in relation_fields),
                     identity_fields=tuple(
                         field.field_id
@@ -220,7 +222,7 @@ def _relation_for_bound_source(
     relation_builder: RelationBuilder,
     required_answer_evidence_ids_by_output: Mapping[str, tuple[str, ...]] | None = None,
     selected_metric: CompiledMetric | None = None,
-) -> Relation:
+) -> ParameterizedRelation:
     bound = _bound_source(address.source_binding_id, bound_sources=bound_sources)
     return _relation_for_bound(
         relation_id=relation_id,
@@ -261,7 +263,7 @@ def _relation_for_bound(
     relation_builder: RelationBuilder,
     required_answer_evidence_ids_by_output: Mapping[str, tuple[str, ...]] | None = None,
     selected_metric: CompiledMetric | None = None,
-) -> Relation:
+) -> ParameterizedRelation:
     if bound.source is None:
         raise ValueError("fact plan references unknown relation source binding")
     source_filters = _relation_source_filters(bound.applied_filters)

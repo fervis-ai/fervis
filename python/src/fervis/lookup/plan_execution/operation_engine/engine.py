@@ -10,7 +10,6 @@ from fervis.lookup.plan_execution.operation_runtime import (
     RelationEngineOutput,
     ScalarInput,
     ExecutableOperation,
-    ResolvedComputeSpec,
     ResolvedRankSpec,
 )
 from fervis.lookup.plan_execution.relations import RelationRows
@@ -24,6 +23,7 @@ from fervis.lookup.answer_program.operations import (
     AggregateSpec,
     AntiJoinSpec,
     CrossJoinSpec,
+    ComputeSpec,
     FilterSpec,
     JoinSpec,
     ProjectSpec,
@@ -121,7 +121,7 @@ def execute_operations(engine_input: RelationEngineInput) -> RelationEngineOutpu
             if result.id in relations:
                 raise RelationEngineError(f"duplicate relation {result.id}")
             relations[result.id] = result
-        elif isinstance(operation.spec, ResolvedComputeSpec):
+        elif isinstance(operation.spec, ComputeSpec):
             output_scalar = operation.spec.output_scalar
             if output_scalar in scalars:
                 raise RelationEngineError(f"duplicate scalar {output_scalar}")
@@ -205,6 +205,11 @@ def _execute_operation(
             relations,
             operation_refs=operation_proof_refs.get(operation.id, ()),
         )
-    if isinstance(spec, ResolvedComputeSpec):
-        return _compute(spec, computed_outputs)
+    if isinstance(spec, ComputeSpec):
+        return _compute(
+            spec,
+            computed_outputs,
+            scalars=scalars,
+            scalar_types=scalar_types,
+        )
     assert_never(spec)

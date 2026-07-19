@@ -13,10 +13,7 @@ from fervis.lookup.answer_program.relations import (
     RelationSourceReviewScopeDecision,
     SourceKind,
 )
-from fervis.lookup.answer_program.values import (
-    ParameterRef,
-    ValueExpression,
-)
+from fervis.lookup.answer_program.expressions import Expression, ParameterRef
 
 
 _SourceAppliedFilterPayloadValue: TypeAlias = str | list[str]
@@ -32,7 +29,7 @@ class RelationInputOrigin(StrEnum):
 class DraftEndpointParamBinding:
     param_id: str
     value: object | None = None
-    value_expr: ValueExpression | None = None
+    value_expr: Expression | None = None
     origin_kind: RelationInputOrigin = RelationInputOrigin.CONTEXT_CONSTANT
     value_id: str = ""
     value_component: str = "value"
@@ -64,7 +61,7 @@ class DraftRelationSourceAppliedFilter:
     predicate_field_ids: tuple[str, ...]
     known_input_id: str
     value_id: str = ""
-    value_expr: ValueExpression | None = None
+    value_expr: Expression | None = None
     value_kind: str = ""
     value_component: str = "value"
     operator: str = "equals"
@@ -145,7 +142,7 @@ class DraftRelationSourceRowFilter:
     field_id: str
     operator: str
     values: tuple[object, ...] = ()
-    value_expr: ValueExpression | None = None
+    value_expr: Expression | None = None
     parameter_id: str = ""
     proof_refs: tuple[str, ...] = ()
 

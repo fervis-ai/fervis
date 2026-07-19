@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import NoReturn
 
 from fervis.lookup.answer_program.contracts import (
     BindingProvenance,
@@ -15,22 +14,21 @@ from fervis.lookup.answer_program.contracts import (
     ProgramInputs,
     parameter_value_type,
 )
-from fervis.lookup.answer_program.values import (
+from fervis.lookup.answer_program.values import FactValue
+from fervis.lookup.answer_program.expressions import (
     ConstantRef,
-    FactValue,
+    Expression,
+    ExpressionLeaf,
     NodeOutputRef,
     ParameterRef,
-    ValueExpression,
 )
-from fervis.lookup.answer_program.operations import ComputeExpressionLeaf
-from fervis.lookup.answer_program.values import fold_value_expression
 from fervis.lookup.question_contract import QuestionContract
 
 
 @dataclass(frozen=True)
 class CompilerInputContext:
     program_inputs: ProgramInputs
-    expressions_by_value_id: dict[str, ValueExpression]
+    expressions_by_value_id: dict[str, Expression]
 
     def expression_for_value(
         self,
@@ -38,7 +36,7 @@ class CompilerInputContext:
         *,
         component: str = "value",
         item_index: int | None = None,
-    ) -> ValueExpression:
+    ) -> Expression:
         expression = self.expressions_by_value_id.get(value_id)
         if expression is None:
             raise ValueError(f"no declared value origin for {value_id}")
@@ -58,31 +56,11 @@ class CompilerInputContext:
             raise ValueError(f"{value_id} does not support value components")
         return expression
 
-    def compute_expression_for_value(self, value_id: str) -> ComputeExpressionLeaf:
+    def compute_expression_for_value(self, value_id: str) -> ExpressionLeaf:
         expression = self.expression_for_value(value_id)
-        return fold_value_expression(
-            expression,
-            parameter=_compute_parameter,
-            output=_compute_output,
-            constant=_compute_constant,
-            environment=lambda _item: _unsupported_compute_environment(value_id),
-        )
-
-
-def _compute_parameter(item: ParameterRef) -> ComputeExpressionLeaf:
-    return item
-
-
-def _compute_output(item: NodeOutputRef) -> ComputeExpressionLeaf:
-    return item
-
-
-def _compute_constant(item: ConstantRef) -> ComputeExpressionLeaf:
-    return item
-
-
-def _unsupported_compute_environment(value_id: str) -> NoReturn:
-    raise ValueError(f"{value_id} cannot be used as a compute operand")
+        if isinstance(expression, (ParameterRef, NodeOutputRef, ConstantRef)):
+            return expression
+        raise ValueError(f"{value_id} cannot be used as a compute operand")
 
 
 def compiler_input_context(
@@ -95,7 +73,7 @@ def compiler_input_context(
     question_inputs = {item.id: item for item in question_contract.question_inputs}
     parameters: list[ParameterDeclaration] = []
     bindings: list[ParameterBinding] = []
-    expressions: dict[str, ValueExpression] = {}
+    expressions: dict[str, Expression] = {}
     seen_parameters: set[str] = set()
     for value in values:
         known_input_id = value.known_input_id

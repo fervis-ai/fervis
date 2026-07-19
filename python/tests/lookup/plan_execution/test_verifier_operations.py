@@ -14,8 +14,6 @@ from fervis.lookup.answer_program.operations import (
     AggregationSpec,
     AntiJoinSpec,
     ComputeSpec,
-    ComputeBinary,
-    ComputeBinaryOperator,
     FilterSpec,
     JoinKey,
     Operation,
@@ -30,6 +28,11 @@ from fervis.lookup.answer_program.operations import (
     SortKey,
     TiePolicy,
     UniversalConditionSpec,
+)
+from fervis.lookup.answer_program.expressions import (
+    BinaryExpression,
+    ExpressionBinaryOperator,
+    FieldRef,
 )
 from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
@@ -85,9 +88,9 @@ def _number_ref(
     )
 
 
-def _subtract(left, right) -> ComputeBinary:
-    return ComputeBinary(
-        operator=ComputeBinaryOperator.SUBTRACT,
+def _subtract(left, right) -> BinaryExpression:
+    return BinaryExpression(
+        operator=ExpressionBinaryOperator.SUBTRACT,
         left=left,
         right=right,
     )
@@ -411,7 +414,7 @@ def test_universal_condition_requires_subject_dimension_and_predicate():
             ),
             subject_keys=(JoinKey(left="subject_id", right="obs_subject_id"),),
             dimension_keys=(JoinKey(left="dimension_id", right="obs_dimension_id"),),
-            predicate=Predicate(left="", operator=""),
+            predicate=Predicate(left=FieldRef("invalid"), operator=""),
             output_fields=(ProjectField(source="subject_name"),),
         ),
         output_relation="result",
@@ -437,9 +440,9 @@ def test_universal_condition_requires_subject_dimension_and_predicate():
             subject_keys=(JoinKey(left="subject_id", right="obs_subject_id"),),
             dimension_keys=(JoinKey(left="dimension_id", right="obs_dimension_id"),),
             predicate=Predicate(
-                left="field.quantity",
+                left=FieldRef("field.quantity"),
                 operator=PredicateOperator.LTE,
-                right="field.other",
+                right=FieldRef("field.other"),
             ),
             output_fields=(ProjectField(source="subject_name"),),
         ),
@@ -850,33 +853,20 @@ def test_project_requires_output_relation():
         verify_fact_plan(plan)
 
 
-def test_predicate_requires_exactly_one_rhs_for_binary_operators():
+def test_predicate_requires_rhs_for_binary_operators():
     missing_rhs = Operation(
         id="filter",
         spec=FilterSpec(
             input_relation="rows",
-            predicate=Predicate(left="field.value", operator=PredicateOperator.EQUALS),
-        ),
-        output_relation="result",
-    )
-    duplicate_rhs = Operation(
-        id="filter",
-        spec=FilterSpec(
-            input_relation="rows",
             predicate=Predicate(
-                left="field.value",
+                left=FieldRef("field.value"),
                 operator=PredicateOperator.EQUALS,
-                right="field.other",
-                right_scalar="literal",
             ),
         ),
         output_relation="result",
     )
-
     with pytest.raises(VerificationError, match="right-hand side"):
         verify_fact_plan(_plan_with(missing_rhs))
-    with pytest.raises(VerificationError, match="right-hand side"):
-        verify_fact_plan(_plan_with(duplicate_rhs))
 
 
 def test_predicate_rejects_rhs_for_unary_operators():
@@ -886,9 +876,9 @@ def test_predicate_rejects_rhs_for_unary_operators():
             spec=FilterSpec(
                 input_relation="rows",
                 predicate=Predicate(
-                    left="field.value",
+                    left=FieldRef("field.value"),
                     operator=PredicateOperator.IS_NULL,
-                    right_scalar="literal",
+                    right=_number_ref(input_id="literal", value="1"),
                 ),
             ),
             output_relation="result",

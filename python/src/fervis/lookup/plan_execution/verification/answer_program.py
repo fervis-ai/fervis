@@ -100,6 +100,7 @@ def _verify_answer_program_structure(
         answer,
         question_contract=question_contract,
         row_sources=row_sources,
+        bindings=bindings,
     )
     _verify_compute_input_population_coverage_claims(
         answer,
@@ -290,7 +291,5 @@ def _verify_population_fulfillment(
         if missing:
             raise VerificationError(
                 "fulfillment result does not enforce answer population tests: "
-                + ", ".join(
-                    sorted(test.membership_test_id for test in missing)
-                )
+                + ", ".join(sorted(test.membership_test_id for test in missing))
             )

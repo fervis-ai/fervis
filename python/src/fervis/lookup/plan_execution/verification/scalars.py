@@ -3,16 +3,21 @@
 from ._shared import ComputeSpec, FilterSpec, Operation, UniversalConditionSpec
 from fervis.lookup.answer_program.operations import (
     Predicate,
-    compute_expression_references,
 )
+from fervis.lookup.answer_program.expressions import expression_references
 
 
 def _operation_scalar_inputs(operation: Operation) -> tuple[str, ...]:
     spec = operation.spec
     if isinstance(spec, ComputeSpec):
+        references = expression_references(spec.expression)
         return tuple(
-            reference.output_id
-            for reference in compute_expression_references(spec.expression).outputs
+            dict.fromkeys(
+                (
+                    *(reference.output_id for reference in references.outputs),
+                    *(reference.parameter_id for reference in references.parameters),
+                )
+            )
         )
     if isinstance(spec, FilterSpec):
         return _predicate_scalar_inputs(spec.predicate)
@@ -22,4 +27,24 @@ def _operation_scalar_inputs(operation: Operation) -> tuple[str, ...]:
 
 
 def _predicate_scalar_inputs(predicate: Predicate) -> tuple[str, ...]:
-    return (predicate.right_scalar,) if predicate.right_scalar else ()
+    references = expression_references(predicate.left)
+    if predicate.right is not None:
+        right = expression_references(predicate.right)
+        return tuple(
+            dict.fromkeys(
+                (
+                    *(item.output_id for item in references.outputs),
+                    *(item.parameter_id for item in references.parameters),
+                    *(item.output_id for item in right.outputs),
+                    *(item.parameter_id for item in right.parameters),
+                )
+            )
+        )
+    return tuple(
+        dict.fromkeys(
+            (
+                *(item.output_id for item in references.outputs),
+                *(item.parameter_id for item in references.parameters),
+            )
+        )
+    )

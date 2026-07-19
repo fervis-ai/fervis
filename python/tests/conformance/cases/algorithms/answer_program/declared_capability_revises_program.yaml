@@ -33,8 +33,8 @@ expect:
         - answer.materialize
         - fact.materialize
         - proof.construct
+        - relation.filter
         - relation.project
-        - relation.row_filter
         - source.instantiate_read
         - source.read_relation
       source_keys: [{kind: catalog_read, source_id: sales}]
@@ -44,20 +44,21 @@ expect:
     program:
       program:
         fields:
-          relations:
+          operations:
             $tuple:
               - fields:
-                  source:
+                  spec:
+                    $type: FilterSpec
                     fields:
-                      population_choices:
-                        $tuple:
-                          - fields:
-                              controller_kind: {value: row_predicate}
-                              controller_id: sales.channel_population
-                              field_id: channel
-                              requested_fact_ids: {$tuple: [fact_1]}
-                              selection_expr:
-                                $type: ParameterRef
-                                fields: {parameter_id: semantic.sale_channels}
+                      input_relation: sales_rows__capability_source
+                      predicate:
+                        fields:
+                          left:
+                            $type: FieldRef
+                            fields: {field_id: channel}
+                          operator: {value: in}
+                          right:
+                            $type: ParameterRef
+                            fields: {parameter_id: semantic.sale_channels}
     reads: 0
     model_calls: 0

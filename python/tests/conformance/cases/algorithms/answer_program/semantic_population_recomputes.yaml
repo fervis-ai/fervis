@@ -1,7 +1,7 @@
 id: semantic_population_recomputes
 kind: algorithm
 algorithm: answer_program.invoke
-description: Changing a typed population binding recomputes filtering and the answer without changing the program.
+description: Changing a typed predicate binding recomputes FilterSpec and the answer without changing the program.
 input:
   schema_revision: 1
   program: {$ref: ../../../fixtures/answer_program_v1.yaml#/programs/population_required}
@@ -50,24 +50,11 @@ expect:
     invocations:
       - id: base
         status: completed
-        effective_requested_facts:
-          - id: fact_1
-            description: sales for selected stores
-            population_constraints:
-              - id: stores.population
-                included_values: [store_1]
-                excluded_values: [store_2]
         relations:
+          - id: sales_rows__source
           - id: sales_rows
             rows:
               - {sale_id: sale_1, store_id: store_1}
-            row_count: 1
-            snapshot_hash: sha256:d12ea335c0f81c47aecc48fe155282d51efcf141be27bfa426df71ed8b9c7dae
-            scope_fingerprint: '{"endpointArgProofRefs":{"sales.query.store_id":["row_source:rs_c9f84da27ca2f8d1:param:store_id"]},"endpointArgs":{"sales.query.store_id":{"$tuple":["store_1","store_2"]}},"populationChoices":[{"controllerId":"stores.population","controllerKind":"row_predicate","excludedValues":["store_2"],"fieldId":"store_id","includedValues":["store_1"],"requestedFactIds":["fact_1"],"semanticControlRef":"stores.population"}],"rowFilters":[{"fieldId":"store_id","operator":"in","value":{"$tuple":["store_1"]}}]}'
-            proof_refs:
-              - read:list_sale_list
-              - row_source:rs_c9f84da27ca2f8d1:param:store_id
-              - semantic:store_population
           - id: answer_rows
             rows:
               - {store_id: store_1}
@@ -76,25 +63,12 @@ expect:
           - {endpoint_name: list_sale_list, args: {sales.query.store_id: store_2}}
       - id: revised
         status: completed
-        effective_requested_facts:
-          - id: fact_1
-            description: sales for selected stores
-            population_constraints:
-              - id: stores.population
-                included_values: [store_1, store_2]
-                excluded_values: []
         relations:
+          - id: sales_rows__source
           - id: sales_rows
             rows:
               - {sale_id: sale_1, store_id: store_1}
               - {sale_id: sale_2, store_id: store_2}
-            row_count: 2
-            snapshot_hash: sha256:d51b20a0331dec621c7ad2eaaeea0d299e78b9f22dc7fbedd8184365cbe57ce6
-            scope_fingerprint: '{"endpointArgProofRefs":{"sales.query.store_id":["row_source:rs_c9f84da27ca2f8d1:param:store_id"]},"endpointArgs":{"sales.query.store_id":{"$tuple":["store_1","store_2"]}},"populationChoices":[{"controllerId":"stores.population","controllerKind":"row_predicate","excludedValues":[],"fieldId":"store_id","includedValues":["store_1","store_2"],"requestedFactIds":["fact_1"],"semanticControlRef":"stores.population"}],"rowFilters":[]}'
-            proof_refs:
-              - read:list_sale_list
-              - row_source:rs_c9f84da27ca2f8d1:param:store_id
-              - semantic:store_population
           - id: answer_rows
             rows:
               - {store_id: store_1}

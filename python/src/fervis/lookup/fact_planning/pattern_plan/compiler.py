@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from fervis.lookup.answer_program.model import AnswerProgram
-from fervis.lookup.answer_program.relations import Relation, RelationField
+from fervis.lookup.answer_program.relations import RelationField
 from fervis.lookup.answer_program.result_projection import ResultProjection
 from fervis.lookup.fact_planning.provider_contract import (
     AggregateScalarAnswerOutput,
@@ -38,7 +38,11 @@ from .row_patterns import (
     _compile_project_pattern_answer,
 )
 from .scalar_patterns import _compile_computed_scalar_answer
-from .parameterization import compiled_program_inputs, parameterize_relation
+from .parameterization import (
+    ParameterizedRelation,
+    compiled_program_inputs,
+    parameterize_relation,
+)
 from .shared import RelationBuilder
 from fervis.lookup.fact_planning.compiled_patterns import CompiledPattern
 
@@ -65,7 +69,7 @@ def compile_pattern_answer_program(
         relation_id: str,
         source: DraftRelationSource,
         fields: tuple[RelationField, ...],
-    ) -> Relation:
+    ) -> ParameterizedRelation:
         return parameterize_relation(
             relation_id=relation_id,
             source=source,
@@ -137,7 +141,11 @@ def _compile_pattern_answer(
     relation_builder: RelationBuilder,
 ) -> CompiledPattern:
     match answer:
-        case ListRowsAnswerOutput() | RankedRowsAnswerOutput() | GroupedRowsAnswerOutput():
+        case (
+            ListRowsAnswerOutput()
+            | RankedRowsAnswerOutput()
+            | GroupedRowsAnswerOutput()
+        ):
             _require_source_binding_selected(
                 answer.requested_fact_id,
                 answer.source_binding_id,

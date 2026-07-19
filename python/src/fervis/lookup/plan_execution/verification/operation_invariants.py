@@ -16,7 +16,6 @@ from fervis.lookup.answer_program.operations import (
     AggregationFunction,
     AntiJoinSpec,
     ComputeSpec,
-    compute_expression_leaves,
     CrossJoinSpec,
     FilterSpec,
     JoinSpec,
@@ -35,6 +34,7 @@ from fervis.lookup.answer_program.operations import (
     UnionSpec,
     UniversalConditionSpec,
 )
+from fervis.lookup.answer_program.expressions import expression_references
 
 
 BINARY_PREDICATE_OPERATORS = frozenset(
@@ -45,6 +45,7 @@ BINARY_PREDICATE_OPERATORS = frozenset(
         PredicateOperator.LTE,
         PredicateOperator.GT,
         PredicateOperator.GTE,
+        PredicateOperator.IN,
         PredicateOperator.CONTAINS,
     }
 )
@@ -207,7 +208,7 @@ def _require_rank(spec: RankSpec) -> None:
 
 
 def _require_compute(spec: ComputeSpec) -> None:
-    if not compute_expression_leaves(spec.expression):
+    if not expression_references(spec.expression).leaves:
         raise VerificationError("compute requires scalar inputs")
     if not spec.output_scalar:
         raise VerificationError("compute requires output scalar")
@@ -218,15 +219,11 @@ def _require_predicate(predicate: Predicate, label: str) -> None:
         raise VerificationError(f"{label} requires predicate")
     if predicate.operator not in set(PredicateOperator):
         raise VerificationError(f"{label} requires supported predicate operator")
-    has_field_rhs = bool(predicate.right)
-    has_scalar_rhs = bool(predicate.right_scalar)
     if predicate.operator in BINARY_PREDICATE_OPERATORS:
-        if has_field_rhs == has_scalar_rhs:
-            raise VerificationError(f"{label} requires exactly one right-hand side")
+        if predicate.right is None:
+            raise VerificationError(f"{label} requires a right-hand side")
         return
-    if predicate.operator in UNARY_PREDICATE_OPERATORS and (
-        has_field_rhs or has_scalar_rhs
-    ):
+    if predicate.operator in UNARY_PREDICATE_OPERATORS and predicate.right is not None:
         raise VerificationError(f"{label} does not accept a right-hand side")
 
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pytest
 
 from fervis.lineage.enums import ContributionOrigin, ProofEdgeRole, ProofNodeKind
 from fervis.lookup.relation_catalog import (
@@ -12,18 +11,10 @@ from fervis.lookup.relation_catalog import (
 )
 from fervis.lookup.fact_plan.row_sources import (
     RowSourceCatalog,
-    build_row_source_catalog,
 )
 from fervis.lookup.answer_program.relations import (
-    FieldBindingRole,
-    Relation,
-    RelationField,
-    RelationSource,
-    RelationSourceAppliedFilter,
-    RelationSourceRowFilter,
     PopulationCoverageClaim,
     PopulationCoverageRole,
-    SourceKind,
 )
 from fervis.lookup.answer_program.instantiation import (
     ExecutionProofContribution,
@@ -32,7 +23,6 @@ from fervis.lookup.answer_program.instantiation import (
     ExecutionProofNode,
     _materialize_execution,
 )
-from fervis.lookup.plan_execution.errors import VerificationError
 from fervis.lookup.plan_execution.relations import (
     CompletenessProof,
     CompletenessSourceKind,
@@ -44,26 +34,22 @@ from fervis.lookup.memory.projection import LookupMemory, MemoryValue
 from fervis.memory.identities import MemoryIdentitySet, MemoryIdentityValue
 from fervis.lookup.answer_program.model import AnswerProgram
 from fervis.lookup.answer_program.operations import (
-    ComputeBinary,
-    ComputeBinaryOperator,
     ComputeInputPopulationCoverage,
     ComputeSpec,
     Operation,
+)
+from fervis.lookup.answer_program.expressions import (
+    BinaryExpression,
+    ExpressionBinaryOperator,
 )
 from fervis.lookup.answer_program.values import (
     BindingSet,
     ConstantRef,
     FactValue,
     LiteralType,
-    ValueFilterOperator,
 )
 from fervis.lookup.canonical_data import entity_key_value
 from fervis.lookup.question_contract import (
-    KnownInputSource,
-    LiteralInputRole,
-    RequestedFact,
-    RequestedFactAnswerOutput,
-    RequestedFactLiteralInput,
     MembershipTestRef,
 )
 
@@ -103,8 +89,8 @@ def test_compute_intersects_every_population_derived_operand() -> None:
                 Operation(
                     id="net_sales",
                     spec=ComputeSpec(
-                        expression=ComputeBinary(
-                            operator=ComputeBinaryOperator.SUBTRACT,
+                        expression=BinaryExpression(
+                            operator=ExpressionBinaryOperator.SUBTRACT,
                             left=constrained,
                             right=unconstrained,
                         ),
@@ -134,7 +120,9 @@ def test_compute_intersects_every_population_derived_operand() -> None:
         row_sources=RowSourceCatalog(),
     )
 
-    scalar = next(node for node in compiled.proof_graph.nodes if node.id == "scalar:net_sales")
+    scalar = next(
+        node for node in compiled.proof_graph.nodes if node.id == "scalar:net_sales"
+    )
 
     assert scalar.row_population_test_refs == ()
 
@@ -241,8 +229,8 @@ def test_repeated_compute_origin_has_one_operation_input_node() -> None:
                 Operation(
                     id="double",
                     spec=ComputeSpec(
-                        expression=ComputeBinary(
-                            operator=ComputeBinaryOperator.ADD,
+                        expression=BinaryExpression(
+                            operator=ExpressionBinaryOperator.ADD,
                             left=expression,
                             right=expression,
                         ),
@@ -311,160 +299,6 @@ def test_executed_memory_relation_adds_current_run_contribution() -> None:
             ),
         ),
     )
-
-
-def test_compile_merges_equivalent_applied_and_concrete_row_filters() -> None:
-    catalog = _sales_catalog()
-    staff_value = FactValue.identity(
-        id="value_staff",
-        key=entity_key_value("staff", "primary_key", {"staff_id": "staff_1"}),
-        display_value="Nadia Wanjiku",
-        proof_refs=("known_input:qi_staff",),
-    )
-    compiled = _materialize_execution(
-        answer=AnswerProgram(
-            fact_template=(
-                RequestedFact(
-                    id="fact_1",
-                    description="sales by Nadia",
-                    answer_outputs=(
-                        RequestedFactAnswerOutput(
-                            id="answer_1",
-                            role="ANSWER_VALUE",
-                        ),
-                    ),
-                    known_inputs=(
-                        RequestedFactLiteralInput(
-                            id="qi_staff",
-                            source=KnownInputSource.QUESTION_CONTEXT,
-                            role=LiteralInputRole.REFERENCE_VALUE,
-                            text="Nadia",
-                            resolved_value_text="Nadia",
-                        ),
-                    ),
-                    input_refs=("qi_staff",),
-                ),
-            ),
-            relations=(
-                Relation(
-                    id="sales",
-                    source=RelationSource(
-                        kind=SourceKind.API_READ,
-                        read_id="list_sales",
-                        applied_filters=(
-                            RelationSourceAppliedFilter(
-                                predicate_field_ids=("staff_id",),
-                                value_expr=_constant_ref(
-                                    staff_value,
-                                    constant_id="question.qi_staff",
-                                ),
-                            ),
-                        ),
-                        row_filters=(
-                            RelationSourceRowFilter(
-                                field_id="staff_id",
-                                operator=ValueFilterOperator.EQUALS.value,
-                                value_expr=_constant_ref(
-                                    FactValue.string_set(
-                                        id="closed_key_staff",
-                                        values=("staff_1",),
-                                        proof_refs=("backend:closed_key",),
-                                    ),
-                                    constant_id="closed-key.staff",
-                                ),
-                                proof_refs=("backend:closed_key",),
-                            ),
-                        ),
-                    ),
-                    fields=(
-                        RelationField(
-                            field_id="staff_id",
-                            roles=(FieldBindingRole.PREDICATE,),
-                        ),
-                    ),
-                ),
-            ),
-        ),
-        bindings=BindingSet(),
-        catalog=catalog,
-        row_sources=build_row_source_catalog(catalog),
-    )
-
-    row_filter_nodes = tuple(
-        node
-        for node in compiled.proof_graph.nodes
-        if node.kind is ProofNodeKind.ROW_FILTER
-    )
-
-    assert row_filter_nodes == (
-        ExecutionProofNode(
-            id="row_filter:sales:staff_id",
-            kind=ProofNodeKind.ROW_FILTER,
-            proof_refs=("backend:closed_key", "known_input:qi_staff"),
-            label="staff_id=staff_1",
-            value="staff_1",
-            operator=ValueFilterOperator.EQUALS.value,
-        ),
-    )
-    explicit_labels = tuple(
-        contribution.label
-        for contribution in compiled.proof_graph.contributions
-        if contribution.origin is ContributionOrigin.EXPLICIT
-    )
-    assert explicit_labels == ("Nadia",)
-
-
-def test_compile_rejects_conflicting_same_field_row_filters() -> None:
-    catalog = _sales_catalog()
-    with pytest.raises(VerificationError, match="conflicting row filters"):
-        _materialize_execution(
-            answer=AnswerProgram(
-                relations=(
-                    Relation(
-                        id="sales",
-                        source=RelationSource(
-                            kind=SourceKind.API_READ,
-                            read_id="list_sales",
-                            row_filters=(
-                                RelationSourceRowFilter(
-                                    field_id="staff_id",
-                                    operator=ValueFilterOperator.EQUALS.value,
-                                    value_expr=_constant_ref(
-                                        FactValue.string_set(
-                                            id="staff_1",
-                                            values=("staff_1",),
-                                        ),
-                                        constant_id="staff.1",
-                                    ),
-                                    proof_refs=("known_input:qi_staff_1",),
-                                ),
-                                RelationSourceRowFilter(
-                                    field_id="staff_id",
-                                    operator=ValueFilterOperator.EQUALS.value,
-                                    value_expr=_constant_ref(
-                                        FactValue.string_set(
-                                            id="staff_2",
-                                            values=("staff_2",),
-                                        ),
-                                        constant_id="staff.2",
-                                    ),
-                                    proof_refs=("known_input:qi_staff_2",),
-                                ),
-                            ),
-                        ),
-                        fields=(
-                            RelationField(
-                                field_id="staff_id",
-                                roles=(FieldBindingRole.PREDICATE,),
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            bindings=BindingSet(),
-            catalog=catalog,
-            row_sources=build_row_source_catalog(catalog),
-        )
 
 
 def _sales_catalog() -> RelationCatalog:

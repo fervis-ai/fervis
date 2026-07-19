@@ -1,4 +1,4 @@
-schema_revision: 3
+schema_revision: 4
 program:
   $type: AnswerProgram
   fields:
@@ -19,14 +19,11 @@ program:
                 row_source_id: ""
                 calendar_id: ""
                 memory_relation_id: ""
-                param_bindings: {$tuple: []}
-                applied_filters: {$tuple: []}
-                row_filters:
+                param_bindings:
                   $tuple:
-                    - $type: RelationSourceRowFilter
+                    - $type: EndpointParamBinding
                       fields:
-                        field_id: amount
-                        operator: equals
+                        param_id: amount
                         value_expr:
                           $type: ConstantRef
                           fields:
@@ -76,7 +73,7 @@ program:
     compatibility:
       $type: ProgramCompatibility
       fields:
-        schema_revision: 3
+        schema_revision: 4
         compiler_version: ""
         function_semantics: {$tuple: []}
         source_contracts: {$tuple: []}

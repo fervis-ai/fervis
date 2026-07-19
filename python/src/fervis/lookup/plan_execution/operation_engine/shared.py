@@ -24,6 +24,7 @@ from fervis.lookup.answer_program.operations import (
     AggregationSpec,
     AntiJoinSpec,
     CrossJoinSpec,
+    ComputeSpec,
     FilterSpec,
     JoinKey,
     JoinSpec,
@@ -39,10 +40,10 @@ from fervis.lookup.answer_program.operations import (
 )
 from fervis.lookup.plan_execution.operation_runtime import (
     ExecutableOperation,
-    ResolvedComputeSpec,
     ResolvedRankSpec,
-    resolved_compute_references,
 )
+from fervis.lookup.answer_program.expressions import expression_references
+from fervis.lookup.answer_program.expressions import expression_input_id
 from fervis.lookup.outcomes.errors import UndefinedOperationError
 from fervis.lookup.outcomes.operation_semantics import (
     empty_aggregation_undefined_reason,
@@ -242,8 +243,13 @@ def _input_scalar_proof_refs(
 
 def _operation_scalar_refs(operation: ExecutableOperation) -> tuple[str, ...]:
     spec = operation.spec
-    if isinstance(spec, ResolvedComputeSpec):
-        return resolved_compute_references(spec.expression).output_refs
+    if isinstance(spec, ComputeSpec):
+        references = expression_references(spec.expression)
+        return (
+            *(item.output_id for item in references.outputs),
+            *(expression_input_id(item) for item in references.parameters),
+            *(expression_input_id(item) for item in references.constants),
+        )
     if isinstance(spec, FilterSpec):
         return _predicate_scalar_refs(spec.predicate)
     if isinstance(spec, UniversalConditionSpec):
@@ -252,7 +258,14 @@ def _operation_scalar_refs(operation: ExecutableOperation) -> tuple[str, ...]:
 
 
 def _predicate_scalar_refs(predicate: Predicate) -> tuple[str, ...]:
-    return (predicate.right_scalar,) if predicate.right_scalar else ()
+    if predicate.right is None:
+        return ()
+    references = expression_references(predicate.right)
+    return (
+        *(item.output_id for item in references.outputs),
+        *(expression_input_id(item) for item in references.parameters),
+        *(expression_input_id(item) for item in references.constants),
+    )
 
 
 def _input_relations(

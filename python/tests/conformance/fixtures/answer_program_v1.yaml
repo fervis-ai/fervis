@@ -1,7 +1,7 @@
 schema_revision: 1
 programs:
   canonical_a:
-    schema_revision: 3
+    schema_revision: 4
     program:
       $type: AnswerProgram
       fields:
@@ -53,14 +53,14 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 3
+            schema_revision: 4
             compiler_version: ''
             function_semantics:
               $tuple: []
             source_contracts:
               $tuple: []
   canonical_b:
-    schema_revision: 3
+    schema_revision: 4
     program:
       $type: AnswerProgram
       fields:
@@ -108,14 +108,14 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 3
+            schema_revision: 4
             compiler_version: ''
             function_semantics:
               $tuple: []
             source_contracts:
               $tuple: []
   compile_catalog_default:
-    schema_revision: 3
+    schema_revision: 4
     program:
       $type: AnswerProgram
       fields:
@@ -176,10 +176,6 @@ programs:
                               value: parameter
                         proof_refs:
                           $tuple: []
-                  applied_filters:
-                    $tuple: []
-                  row_filters:
-                    $tuple: []
                   population_choices:
                     $tuple: []
                   population_binding: null
@@ -243,14 +239,14 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 3
+            schema_revision: 4
             compiler_version: ''
             function_semantics:
               $tuple: []
             source_contracts:
               $tuple: []
   compile_hidden_value:
-    schema_revision: 3
+    schema_revision: 4
     program:
       $type: AnswerProgram
       fields:
@@ -313,10 +309,6 @@ programs:
                         parameter_id: ''
                         proof_refs:
                           $tuple: []
-                  applied_filters:
-                    $tuple: []
-                  row_filters:
-                    $tuple: []
                   population_choices:
                     $tuple: []
                   population_binding: null
@@ -380,14 +372,14 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 3
+            schema_revision: 4
             compiler_version: ''
             function_semantics:
               $tuple: []
             source_contracts:
               $tuple: []
   invocation:
-    schema_revision: 3
+    schema_revision: 4
     program:
       $type: AnswerProgram
       fields:
@@ -495,10 +487,6 @@ programs:
                               value: parameter
                         proof_refs:
                           $tuple: [known_input:store_ids]
-                  applied_filters:
-                    $tuple: []
-                  row_filters:
-                    $tuple: []
                   population_choices:
                     $tuple: []
                   population_binding: null
@@ -562,7 +550,7 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 3
+            schema_revision: 4
             compiler_version: fervis.answer_program.compiler@1
             function_semantics:
               $tuple:
@@ -604,7 +592,7 @@ programs:
                   source_id: sales
                   fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   memory_backed:
-    schema_revision: 3
+    schema_revision: 4
     program:
       $type: AnswerProgram
       fields:
@@ -626,8 +614,6 @@ programs:
                   calendar_id: ''
                   memory_relation_id: prior_sales
                   param_bindings: {$tuple: []}
-                  applied_filters: {$tuple: []}
-                  row_filters: {$tuple: []}
                   population_choices: {$tuple: []}
                   population_binding: null
                   population_coverage_claims: {$tuple: []}
@@ -645,7 +631,7 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 3
+            schema_revision: 4
             compiler_version: fervis.answer_program.compiler@1
             function_semantics:
               $tuple:
@@ -665,7 +651,7 @@ programs:
                   source_id: mem_fe7f674c7ac59e4a
                   fingerprint: 8a2f05f7e1f6c2aee3b39cb8f1d4572306d28bfbd81a671f099af87d915638f2
   population_required:
-    schema_revision: 3
+    schema_revision: 4
     program:
       $type: AnswerProgram
       fields:
@@ -736,7 +722,7 @@ programs:
           $tuple:
           - $type: Relation
             fields:
-              id: sales_rows
+              id: sales_rows__source
               source:
                 $type: RelationSource
                 fields:
@@ -763,39 +749,8 @@ programs:
                               value: parameter
                         proof_refs:
                           $tuple: []
-                  applied_filters:
-                    $tuple: []
-                  row_filters:
-                    $tuple: []
                   population_choices:
-                    $tuple:
-                    - $type: RelationSourcePopulationChoice
-                      fields:
-                        controller_kind:
-                          $enum: PopulationChoiceControllerKind
-                          value: row_predicate
-                        controller_id: stores.population
-                        field_id: store_id
-                        requested_fact_ids:
-                          $tuple:
-                          - fact_1
-                        selection_expr:
-                          $type: ParameterRef
-                          fields:
-                            parameter_id: semantic.store_population
-                            component: value
-                            item_index: null
-                            origin:
-                              $enum: ValueExpressionOrigin
-                              value: parameter
-                        allowed_values:
-                          $tuple:
-                          - store_1
-                          - store_2
-                        proof_refs:
-                          $tuple: []
-                        review_scope_decisions:
-                          $tuple: []
+                    $tuple: []
                   population_binding: null
                   population_coverage_claims: {$tuple: []}
                   proof_refs:
@@ -816,8 +771,37 @@ programs:
                       $tuple:
                       - $enum: FieldBindingRole
                         value: output
+                      - $enum: FieldBindingRole
+                        value: predicate
         operations: &population_operations
           $tuple:
+          - $type: Operation
+            fields:
+              id: filter_store_population
+              spec:
+                $type: FilterSpec
+                fields:
+                  input_relation: sales_rows__source
+                  predicate:
+                    $type: Predicate
+                    fields:
+                      left:
+                        $type: FieldRef
+                        fields: {field_id: store_id}
+                      operator:
+                        $enum: PredicateOperator
+                        value: in
+                      right:
+                        $type: ParameterRef
+                        fields:
+                          parameter_id: semantic.store_population
+                          component: value
+                          item_index: null
+                          origin: {$enum: ValueExpressionOrigin, value: parameter}
+                  proof_refs: {$tuple: []}
+                  population_coverage_claims: {$tuple: []}
+                  kind: {$enum: OperationKind, value: filter}
+              output_relation: sales_rows
           - $type: Operation
             fields:
               id: project_sales
@@ -857,7 +841,7 @@ programs:
         compatibility: &population_compatibility
           $type: ProgramCompatibility
           fields:
-            schema_revision: 3
+            schema_revision: 4
             compiler_version: fervis.answer_program.compiler@1
             function_semantics:
               $tuple:
@@ -879,11 +863,11 @@ programs:
                   version: '1'
               - $type: FunctionSemanticVersion
                 fields:
-                  function_key: relation.project
+                  function_key: relation.filter
                   version: '1'
               - $type: FunctionSemanticVersion
                 fields:
-                  function_key: relation.row_filter
+                  function_key: relation.project
                   version: '1'
               - $type: FunctionSemanticVersion
                 fields:
@@ -903,7 +887,7 @@ programs:
                   source_id: sales
                   fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   population_scalar_invalid:
-    schema_revision: 3
+    schema_revision: 4
     program:
       $type: AnswerProgram
       fields:
@@ -926,7 +910,7 @@ programs:
         result_projection: *population_result_projection
         compatibility: *population_compatibility
   population_plan_control_invalid:
-    schema_revision: 3
+    schema_revision: 4
     program:
       $type: AnswerProgram
       fields:
@@ -949,7 +933,7 @@ programs:
         result_projection: *population_result_projection
         compatibility: *population_compatibility
   population_optional:
-    schema_revision: 3
+    schema_revision: 4
     program:
       $type: AnswerProgram
       fields:
@@ -1046,10 +1030,6 @@ programs:
                               value: parameter
                         proof_refs:
                           $tuple: []
-                  applied_filters:
-                    $tuple: []
-                  row_filters:
-                    $tuple: []
                   population_choices:
                     $tuple:
                     - $type: RelationSourcePopulationChoice
@@ -1140,7 +1120,7 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 3
+            schema_revision: 4
             compiler_version: fervis.answer_program.compiler@1
             function_semantics:
               $tuple:
@@ -1186,7 +1166,7 @@ programs:
                   source_id: sales
                   fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   capability:
-    schema_revision: 3
+    schema_revision: 4
     program:
       $type: AnswerProgram
       fields:
@@ -1259,7 +1239,7 @@ programs:
               relation_id: sales_rows
               field_id: channel
               operator:
-                $enum: ValueFilterOperator
+                $enum: PredicateOperator
                 value: in
               requested_fact_ids:
                 $tuple:
@@ -1302,10 +1282,6 @@ programs:
                               value: parameter
                         proof_refs:
                           $tuple: []
-                  applied_filters:
-                    $tuple: []
-                  row_filters:
-                    $tuple: []
                   population_choices:
                     $tuple: []
                   population_binding: null
@@ -1376,7 +1352,7 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 3
+            schema_revision: 4
             compiler_version: fervis.answer_program.compiler@1
             function_semantics:
               $tuple:
@@ -1406,7 +1382,7 @@ programs:
                   version: '1'
               - $type: FunctionSemanticVersion
                 fields:
-                  function_key: relation.row_filter
+                  function_key: program.capability.narrow_population
                   version: '1'
               - $type: FunctionSemanticVersion
                 fields:
@@ -1426,7 +1402,7 @@ programs:
                   source_id: sales
                   fingerprint: e7351d0771a04bb0704b7babf7f953eb634c0b1f8a0e9d88dffbf3ed981ab612
   incompatible_compiler:
-    schema_revision: 3
+    schema_revision: 4
     program:
       $type: AnswerProgram
       fields:
@@ -1523,10 +1499,6 @@ programs:
                               value: parameter
                         proof_refs:
                           $tuple: []
-                  applied_filters:
-                    $tuple: []
-                  row_filters:
-                    $tuple: []
                   population_choices:
                     $tuple: []
                   population_binding: null
@@ -1590,7 +1562,7 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 3
+            schema_revision: 4
             compiler_version: incompatible.compiler@1
             function_semantics:
               $tuple:
@@ -1632,7 +1604,7 @@ programs:
                   source_id: sales
                   fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   incompatible_function:
-    schema_revision: 3
+    schema_revision: 4
     program:
       $type: AnswerProgram
       fields:
@@ -1729,10 +1701,6 @@ programs:
                               value: parameter
                         proof_refs:
                           $tuple: []
-                  applied_filters:
-                    $tuple: []
-                  row_filters:
-                    $tuple: []
                   population_choices:
                     $tuple: []
                   population_binding: null
@@ -1796,7 +1764,7 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 3
+            schema_revision: 4
             compiler_version: fervis.answer_program.compiler@1
             function_semantics:
               $tuple:
@@ -1838,7 +1806,7 @@ programs:
                   source_id: sales
                   fingerprint: 7f6014665f227b8deff50f0e6f6dba3693aeea09286d900beef66e61af99a369
   compute_versioned_constant:
-    schema_revision: 3
+    schema_revision: 4
     program:
       $type: AnswerProgram
       fields:
@@ -1878,10 +1846,10 @@ programs:
                 $type: ComputeSpec
                 fields:
                   expression:
-                    $type: ComputeBinary
+                    $type: BinaryExpression
                     fields:
                       operator:
-                        $enum: ComputeBinaryOperator
+                        $enum: ExpressionBinaryOperator
                         value: multiply
                       left:
                         $type: ConstantRef
@@ -1948,7 +1916,7 @@ programs:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 3
+            schema_revision: 4
             compiler_version: fervis.answer_program.compiler@1
             function_semantics:
               $tuple:

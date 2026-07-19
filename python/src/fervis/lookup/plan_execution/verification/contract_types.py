@@ -61,9 +61,7 @@ class ProofLineage:
     def value(cls, refs: frozenset[str]) -> "ProofLineage":
         return cls(value_refs=refs)
 
-    def with_population_coverage(
-        self, coverage: PopulationCoverage
-    ) -> "ProofLineage":
+    def with_population_coverage(self, coverage: PopulationCoverage) -> "ProofLineage":
         return ProofLineage(
             value_refs=self.value_refs,
             population_coverage=coverage,
@@ -122,9 +120,7 @@ class ScalarContract:
         return ScalarContract(
             proof=ProofLineage(
                 value_refs=frozenset(
-                    ref
-                    for operand in operands
-                    for ref in operand.proof.value_refs
+                    ref for operand in operands for ref in operand.proof.value_refs
                 ),
                 population_coverage=PopulationCoverage.guaranteed_by_every(
                     tuple(

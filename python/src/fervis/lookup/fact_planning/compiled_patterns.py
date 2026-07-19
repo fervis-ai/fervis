@@ -13,8 +13,8 @@ from fervis.lookup.answer_program.values import (
     ConstantRef,
     FactValue,
     LiteralType,
-    ValueExpression,
 )
+from fervis.lookup.answer_program.expressions import Expression
 from fervis.lookup.answer_program.relations import Relation
 from fervis.lookup.answer_program.result_projection import (
     RelationResultOutput,
@@ -59,7 +59,7 @@ class CompiledRank:
     def limit_expression(
         self,
         input_context: CompilerInputContext,
-    ) -> ValueExpression:
+    ) -> Expression:
         if self.limit_value_id:
             return input_context.expression_for_value(self.limit_value_id)
         return ConstantRef(

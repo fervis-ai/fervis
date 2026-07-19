@@ -11,7 +11,7 @@ input:
 expect:
   result_contains:
     status: compiled
-    program_id: ap_4fe07a1fc36764a673ab8b43c8585336c753308952d9f489c99baa8612783d6f
+    program_id: ap_f19ca3929125a43dbca1c0c185acbb1ea9e7927ebc20766908bd344aa926f608
     program:
       program:
         fields:
@@ -21,7 +21,7 @@ expect:
                   spec:
                     fields:
                       expression:
-                        $type: ComputeBinary
+                        $type: BinaryExpression
                         fields:
                           operator: {value: multiply}
                           left:
