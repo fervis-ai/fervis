@@ -2289,7 +2289,7 @@ class _TwoFactActiveMemoryPlannerPort:
                                     "role": "ANSWER_VALUE",
                                 }
                             ],
-                            "used_question_inputs": [],
+                            "question_input_uses": [],
                         },
                         {
                             "answer_fact": "current inventory",
@@ -2305,7 +2305,7 @@ class _TwoFactActiveMemoryPlannerPort:
                                     "role": "ANSWER_VALUE",
                                 }
                             ],
-                            "used_question_inputs": [],
+                            "question_input_uses": [],
                         },
                     ],
                     "question_input_inventory_check": {
@@ -2547,7 +2547,7 @@ class _TwoSalesFactActiveMemoryPlannerPort:
                                     "role": "ANSWER_VALUE",
                                 }
                             ],
-                            "used_question_inputs": [],
+                            "question_input_uses": [],
                         },
                         {
                             "answer_fact": "sale id",
@@ -2563,7 +2563,7 @@ class _TwoSalesFactActiveMemoryPlannerPort:
                                     "role": "ANSWER_VALUE",
                                 }
                             ],
-                            "used_question_inputs": [],
+                            "question_input_uses": [],
                         },
                     ],
                     "question_input_inventory_check": {

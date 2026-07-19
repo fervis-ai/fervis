@@ -1585,9 +1585,28 @@ def test_lookup_cutover_resolves_generated_calendar_dates_from_time_values():
                         }
                     ],
                 }
-            },
-            question_contract=question_contract,
-        ),
+                },
+                question_contract=question_contract,
+                source_binding_invocation_overrides=(
+                    {
+                        "requested_fact_id": "fact_1",
+                        "resolved_input_applications": (
+                            {
+                                "value_id": "grounded_fact_1_time_1",
+                                "value_component": "start",
+                                "target_kind": "request_parameter",
+                                "target_id": "interval_start",
+                            },
+                            {
+                                "value_id": "grounded_fact_1_time_1",
+                                "value_component": "end",
+                                "target_kind": "request_parameter",
+                                "target_id": "interval_end",
+                            },
+                        ),
+                    },
+                ),
+            ),
     )
 
     result = run_lookup_question(

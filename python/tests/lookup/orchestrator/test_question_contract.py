@@ -13,6 +13,29 @@ from fervis.lookup.question_contract.tools import (
     QUESTION_CONTRACT_TOOL_NAME,
 )
 from tests.lookup.orchestrator._helpers import *  # noqa: F403
+from tests.testkit.question_contract_provider import (
+    provider_membership_tests,
+    provider_question_input_ownership,
+)
+
+
+def _provider_answer_population(
+    *,
+    description: str,
+    subject_text: str,
+) -> dict[str, object]:
+    population = default_answer_population(
+        description=description,
+        subject_text=subject_text,
+        instance_interpretation=RequestedFactAnswerSubject(
+            subject_text=subject_text
+        ).instance_interpretation,
+    ).to_question_contract_dict()
+    population["membership_tests"] = provider_membership_tests(
+        population["membership_tests"],
+        ownership=provider_question_input_ownership(),
+    )
+    return population
 
 
 def _question_contract_payload(
@@ -24,6 +47,10 @@ def _question_contract_payload(
     answer_output_role: str = "MEASURED_VALUE",
 ) -> dict[str, object]:
     answer_expression: dict[str, object] = {"family": answer_expression_family}
+    population = _provider_answer_population(
+        description=subject,
+        subject_text=answer_subject or subject,
+    )
     return {
         "kind": "question_contract",
         "answer_requests_count": 1,
@@ -33,17 +60,11 @@ def _question_contract_payload(
                 "answer_fact": subject,
                 "answer_expression": answer_expression,
                 "answer_subject": _answer_subject_payload(answer_subject or subject),
-                "answer_population": default_answer_population(
-                    description=subject,
-                    subject_text=answer_subject or subject,
-                    instance_interpretation=RequestedFactAnswerSubject(
-                        subject_text=answer_subject or subject
-                    ).instance_interpretation,
-                ).to_question_contract_dict(),
+                "answer_population": population,
                 "answer_outputs": [
                     {"description": part, "role": answer_output_role} for part in parts
                 ],
-                "used_question_inputs": [],
+                "question_input_uses": [],
             }
         ],
         "question_input_inventory_check": {
@@ -205,17 +226,14 @@ def test_lookup_carries_answer_subject_instance_interpretation_to_source_binding
                                 "kind": "NORMAL_BUSINESS_INSTANCE"
                             },
                         },
-                        "answer_population": default_answer_population(
+                        "answer_population": _provider_answer_population(
                             description="in-person sales this month",
                             subject_text="sales",
-                            instance_interpretation=RequestedFactAnswerSubject(
-                                subject_text="sales"
-                            ).instance_interpretation,
-                        ).to_question_contract_dict(),
+                        ),
                         "answer_outputs": [
                             {"description": "amount", "role": "MEASURED_VALUE"}
                         ],
-                        "used_question_inputs": [],
+                        "question_input_uses": [],
                     }
                 ],
                 "question_input_inventory_check": {
@@ -652,8 +670,8 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_with_typed_resolutio
                         "source": "question_context",
                         "kind": "literal_text",
                         "role": "time_value",
-                        "source_text": "the day before",
-                        "resolved_value_text": "the day before",
+                        "value_source_text": "the day before",
+                        "operand_text": "the day before",
                         "inventory_check": {
                             "why_this_is_an_input": ("the day before is a time scope")
                         },
@@ -663,6 +681,13 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_with_typed_resolutio
                     {
                         "answer_fact": "total sales amount for the day before",
                         "answer_expression": {"family": "scalar_aggregate"},
+                        "question_input_uses": [
+                            {
+                                "use_id": "use_period",
+                                "input_ref": "input_period",
+                                "owner_kind": "POPULATION_TESTS",
+                            }
+                        ],
                         "answer_subject": _answer_subject_payload("the day before"),
                         "answer_population": {
                             "population_label": "sales for the day before",
@@ -675,6 +700,7 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_with_typed_resolutio
                                     "test_question": (
                                         "Does the row/value represent a sale?"
                                     ),
+                                    "question_input_use_refs": [],
                                 },
                                 {
                                     "test_id": "normal_instance",
@@ -683,6 +709,16 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_with_typed_resolutio
                                     "test_question": (
                                         "Is this an ordinary domain instance of a sale?"
                                     ),
+                                    "question_input_use_refs": [],
+                                },
+                                {
+                                    "test_id": "period",
+                                    "kind": "EXPLICIT_USER_CONSTRAINT",
+                                    "polarity": "MUST_PASS",
+                                    "test_question": (
+                                        "Did this sale occur during the requested period?"
+                                    ),
+                                    "question_input_use_refs": ["use_period"],
                                 },
                             ],
                         },
@@ -692,7 +728,6 @@ def test_lookup_resolved_follow_up_reaches_query_enrichment_with_typed_resolutio
                                 "role": "ANSWER_VALUE",
                             }
                         ],
-                        "used_question_inputs": ["input_period"],
                     }
                 ],
                 "question_input_inventory_check": {

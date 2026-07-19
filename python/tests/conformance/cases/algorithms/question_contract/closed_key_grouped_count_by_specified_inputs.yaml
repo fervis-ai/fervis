@@ -39,7 +39,10 @@ input:
       group_key:
         description: specified staff member
         domain: SPECIFIED_QUESTION_INPUTS
-        question_input_refs: [staff_a, staff_b]
+    question_input_uses:
+    - {input_ref: staff_a, owner_kind: GROUP_KEY}
+    - {input_ref: staff_b, owner_kind: GROUP_KEY}
+    - {use_id: use_today, input_ref: today, owner_kind: POPULATION_TESTS}
     answer_subject:
       subject_text: sales
       instance_interpretation:
@@ -48,20 +51,19 @@ input:
       population_label: sales by specified staff members today
       counted_unit: sale
       membership_tests:
-      - test_id: subject_identity
+      - question_input_use_refs: []
+        test_id: subject_identity
         kind: SUBJECT_IDENTITY
         polarity: MUST_PASS
         test_question: Is this a sale?
-        owned_question_input_refs: []
-      - test_id: today_scope
+      - question_input_use_refs: [use_today]
+        test_id: today_scope
         kind: EXPLICIT_USER_CONSTRAINT
         polarity: MUST_PASS
         test_question: Is this sale in the requested time scope?
-        owned_question_input_refs: [today]
     answer_outputs:
     - description: sales count
       role: ROW_COUNT
-    used_question_inputs: [staff_a, staff_b, today]
 expect:
   result_contains:
     requested_facts:

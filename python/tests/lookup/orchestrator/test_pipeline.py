@@ -554,7 +554,7 @@ def test_lookup_derives_finite_choice_membership_from_answer_population_tests():
                             "kind": "SUBJECT_IDENTITY",
                             "polarity": "MUST_PASS",
                             "test_question": "Does the row/value represent a sale?",
-                            "owned_question_input_refs": [],
+                            "question_input_use_refs": [],
                         },
                         {
                             "test_id": "pop_test_3",
@@ -566,12 +566,12 @@ def test_lookup_derives_finite_choice_membership_from_answer_population_tests():
                                 "storage representation unless the user explicitly "
                                 "requested that state?"
                             ),
-                            "owned_question_input_refs": [],
+                            "question_input_use_refs": [],
                         },
                     ],
                 },
                 "answer_outputs": [{"description": "count", "role": "ANSWER_VALUE"}],
-                "used_question_inputs": [],
+                "question_input_uses": [],
             }
         ],
         "question_input_inventory_check": {

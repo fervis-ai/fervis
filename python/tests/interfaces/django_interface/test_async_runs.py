@@ -830,7 +830,7 @@ def test_worker_fails_before_answer_synthesis_when_budget_is_exceeded(
                                                         "test_question": (
                                                             "Does the row/value represent restricted fact?"
                                                         ),
-                                                        "owned_question_input_refs": [],
+                                                        "question_input_use_refs": [],
                                                     }
                                                 ],
                                             },
@@ -840,7 +840,7 @@ def test_worker_fails_before_answer_synthesis_when_budget_is_exceeded(
                                                     "role": "ANSWER_VALUE",
                                                 }
                                             ],
-                                            "used_question_inputs": [],
+                                            "question_input_uses": [],
                                         }
                                     ],
                                     "question_input_inventory_check": {

@@ -67,6 +67,11 @@ expect:
             polarity: MUST_PASS
             test_question: Does the row/value represent sales?
             owned_question_input_refs: []
+          - test_id: input_constraint_1
+            kind: EXPLICIT_USER_CONSTRAINT
+            polarity: MUST_PASS
+            test_question: Does this candidate satisfy the supplied input?
+            owned_question_input_refs: [staff]
         answer_outputs:
         - description: sales total
           role: MEASURED_VALUE

@@ -1,3 +1,11 @@
+from dataclasses import replace
+
+from fervis.lookup.question_contract import (
+    AnswerPopulationMembershipTestKind,
+    AnswerPopulationMembershipTestPolarity,
+    RequestedFactAnswerPopulationMembershipTest,
+)
+
 from tests.lookup.orchestrator._catalogs import *  # noqa: F403
 
 
@@ -194,6 +202,39 @@ def _question_contract_for(
     output_role = answer_output_role or _default_answer_output_role(
         answer_expression_family
     )
+    answer_subject = RequestedFactAnswerSubject(subject_text=subject_text or text)
+    population = default_answer_population(
+        description=text,
+        subject_text=answer_subject.subject_text,
+        instance_interpretation=answer_subject.instance_interpretation,
+    )
+    population_input_refs = tuple(
+        known.id for known in known_inputs if not known.is_result_limit
+    )
+    if population_input_refs:
+        population = replace(
+            population,
+            membership_tests=(
+                *population.membership_tests,
+                *(
+                    RequestedFactAnswerPopulationMembershipTest(
+                        id=f"input_constraint_{index}",
+                        kind=(
+                            AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT
+                        ),
+                        polarity=AnswerPopulationMembershipTestPolarity.MUST_PASS,
+                        test_question=(
+                            "Does this candidate satisfy the supplied input?"
+                        ),
+                        owned_question_input_refs=(input_ref,),
+                    )
+                    for index, input_ref in enumerate(
+                        population_input_refs,
+                        start=1,
+                    )
+                ),
+            ),
+        )
     return QuestionContract(
         requested_facts=(
             RequestedFact(
@@ -203,9 +244,8 @@ def _question_contract_for(
                     answer_expression_family,
                     known_inputs=known_inputs,
                 ),
-                answer_subject=RequestedFactAnswerSubject(
-                    subject_text=subject_text or text
-                ),
+                answer_subject=answer_subject,
+                answer_population=population,
                 answer_outputs=tuple(
                     RequestedFactAnswerOutput(
                         id=binding_target_id,
@@ -214,6 +254,7 @@ def _question_contract_for(
                     for binding_target_id in binding_target_ids
                 ),
                 known_inputs=known_inputs,
+                input_refs=tuple(known.id for known in known_inputs),
             ),
         )
     )

@@ -34,6 +34,7 @@ def _decision_payload(outcome: dict[str, object]) -> dict[str, object]:
 
 def _single_input_payload(question_input: dict[str, object]) -> dict[str, object]:
     input_ref = str(question_input["input_ref"])
+    use_id = f"use_{input_ref}"
     return {
         "kind": "question_contract",
         "answer_requests_count": 1,
@@ -60,17 +61,56 @@ def _single_input_payload(question_input: dict[str, object]) -> dict[str, object
                             "kind": "SUBJECT_IDENTITY",
                             "polarity": "MUST_PASS",
                             "test_question": "Is this a sale?",
-                            "owned_question_input_refs": [],
+                            "question_input_use_refs": [],
+                        },
+                        {
+                            "test_id": "test_input",
+                            "kind": "EXPLICIT_USER_CONSTRAINT",
+                            "polarity": "MUST_PASS",
+                            "test_question": "Does this sale match the specified input?",
+                            "question_input_use_refs": [use_id],
                         }
                     ],
                 },
                 "answer_outputs": [
                     {"description": "sales total", "role": "ANSWER_VALUE"}
                 ],
-                "used_question_inputs": [input_ref],
+                "question_input_uses": [
+                    {
+                        "use_id": use_id,
+                        "input_ref": input_ref,
+                        "owner_kind": "POPULATION_TESTS",
+                    }
+                ],
             }
         ],
     }
+
+
+def _set_population_inputs(
+    answer_request: dict[str, object],
+    *input_refs: str,
+) -> None:
+    uses = [
+        {
+            "use_id": f"use_{input_ref}",
+            "input_ref": input_ref,
+            "owner_kind": "POPULATION_TESTS",
+        }
+        for input_ref in input_refs
+    ]
+    answer_request["question_input_uses"] = uses
+    population = answer_request["answer_population"]
+    assert isinstance(population, dict)
+    tests = population["membership_tests"]
+    assert isinstance(tests, list)
+    explicit = next(
+        test
+        for test in tests
+        if isinstance(test, dict)
+        and test.get("kind") == "EXPLICIT_USER_CONSTRAINT"
+    )
+    explicit["question_input_use_refs"] = [use["use_id"] for use in uses]
 
 
 def _time_input(input_id: str, text: str) -> RequestedFactKnownInput:
@@ -336,9 +376,25 @@ def test_parse_question_contract_accepts_group_key_on_grouped_expression():
                     "group_key": {
                         "description": "staff member",
                         "domain": "SPECIFIED_QUESTION_INPUTS",
-                        "question_input_refs": ["qi_staff_1", "qi_staff_2"],
                     },
                 },
+                "question_input_uses": [
+                    {
+                        "use_id": "use_staff_1",
+                        "input_ref": "qi_staff_1",
+                        "owner_kind": "GROUP_KEY",
+                    },
+                    {
+                        "use_id": "use_staff_2",
+                        "input_ref": "qi_staff_2",
+                        "owner_kind": "GROUP_KEY",
+                    },
+                    {
+                        "use_id": "use_today",
+                        "input_ref": "qi_today",
+                        "owner_kind": "POPULATION_TESTS",
+                    },
+                ],
                 "answer_subject": {
                     "subject_text": "sales",
                     "instance_interpretation": {
@@ -354,26 +410,25 @@ def test_parse_question_contract_accepts_group_key_on_grouped_expression():
                             "kind": "SUBJECT_IDENTITY",
                             "polarity": "MUST_PASS",
                             "test_question": "Is this a sale?",
-                            "owned_question_input_refs": [],
+                            "question_input_use_refs": [],
                         },
                         {
                             "test_id": "test_2",
                             "kind": "EXPLICIT_USER_CONSTRAINT",
                             "polarity": "MUST_PASS",
                             "test_question": "Did the sale occur today?",
-                            "owned_question_input_refs": ["qi_today"],
+                            "question_input_use_refs": ["use_today"],
                         },
                         {
                             "test_id": "test_3",
                             "kind": "NORMAL_INSTANCE_GUARD",
                             "polarity": "MUST_PASS",
                             "test_question": "Is this an ordinary business sale?",
-                            "owned_question_input_refs": [],
+                            "question_input_use_refs": [],
                         },
                     ],
                 },
                 "answer_outputs": [{"description": "sales count", "role": "ROW_COUNT"}],
-                "used_question_inputs": ["qi_staff_1", "qi_staff_2", "qi_today"],
             }
         ],
         "question_input_inventory_check": {
@@ -508,7 +563,7 @@ def test_question_contract_serializes_fact_local_known_inputs_as_question_inputs
     }
 
 
-def test_question_contract_parser_accepts_positive_used_question_inputs():
+def test_question_contract_parser_accepts_fact_local_question_input_uses():
     staff_a = {
         "input_ref": "staff_a",
         "kind": "literal_text",
@@ -551,12 +606,19 @@ def test_question_contract_parser_accepts_positive_used_question_inputs():
     payload["question_inputs"] = [staff_a, staff_b, today]
     first_request = payload["answer_requests"][0]
     first_request["answer_fact"] = "sales for first staff member today"
-    first_request["used_question_inputs"] = ["staff_a", "today"]
+    _set_population_inputs(first_request, "staff_a", "today")
     second_request = {
         **first_request,
         "answer_fact": "sales for second staff member today",
-        "used_question_inputs": ["staff_b", "today"],
     }
+    second_request["answer_population"] = {
+        **first_request["answer_population"],
+        "membership_tests": [
+            dict(test)
+            for test in first_request["answer_population"]["membership_tests"]
+        ],
+    }
+    _set_population_inputs(second_request, "staff_b", "today")
     payload["answer_requests"] = [first_request, second_request]
 
     parsed = parse_question_contract(
@@ -610,14 +672,14 @@ def test_question_contract_parser_fails_closed_on_unparsed_fields():
                             "kind": "SUBJECT_IDENTITY",
                             "polarity": "MUST_PASS",
                             "test_question": "Is this a sale?",
-                            "owned_question_input_refs": [],
+                            "question_input_use_refs": [],
                         }
                     ],
                 },
                 "answer_outputs": [
                     {"description": "sales count", "role": "ANSWER_VALUE"}
                 ],
-                "used_question_inputs": [],
+                "question_input_uses": [],
                 "resolver_choice": "not part of the contract",
             }
         ],
@@ -670,14 +732,27 @@ def test_conversation_resolution_resolved_text_requires_conversation_source():
                             "kind": "SUBJECT_IDENTITY",
                             "polarity": "MUST_PASS",
                             "test_question": "Is this a sale?",
-                            "owned_question_input_refs": [],
+                            "question_input_use_refs": [],
+                        },
+                        {
+                            "test_id": "test_staff",
+                            "kind": "EXPLICIT_USER_CONSTRAINT",
+                            "polarity": "MUST_PASS",
+                            "test_question": "Does this sale belong to the staff member?",
+                            "question_input_use_refs": ["use_input_staff"],
                         }
                     ],
                 },
                 "answer_outputs": [
                     {"description": "sales total", "role": "ANSWER_VALUE"}
                 ],
-                "used_question_inputs": ["input_staff"],
+                "question_input_uses": [
+                    {
+                        "use_id": "use_input_staff",
+                        "input_ref": "input_staff",
+                        "owner_kind": "POPULATION_TESTS",
+                    }
+                ],
             }
         ],
     }
@@ -730,14 +805,20 @@ def test_result_limit_requires_canonical_digit_text_at_parse_boundary():
                             "kind": "SUBJECT_IDENTITY",
                             "polarity": "MUST_PASS",
                             "test_question": "Is this a sale?",
-                            "owned_question_input_refs": [],
+                            "question_input_use_refs": [],
                         }
                     ],
                 },
                 "answer_outputs": [
                     {"description": "top sales", "role": "ANSWER_VALUE"}
                 ],
-                "used_question_inputs": ["input_limit"],
+                "question_input_uses": [
+                    {
+                        "use_id": "use_input_limit",
+                        "input_ref": "input_limit",
+                        "owner_kind": "RESULT_LIMIT",
+                    }
+                ],
             }
         ],
     }
@@ -845,10 +926,11 @@ def test_question_contract_parser_allows_field_label_hint_for_id_values():
     }
     payload = _single_input_payload(first)
     payload["question_inputs"] = [first, second]
-    payload["answer_requests"][0]["used_question_inputs"] = [
+    _set_population_inputs(
+        payload["answer_requests"][0],
         "input_staff_a",
         "input_staff_b",
-    ]
+    )
 
     parsed = parse_question_contract(
         tool_name="submit_question_contract_outcome",
@@ -897,10 +979,11 @@ def test_question_contract_parser_allows_field_label_scoped_over_coordinated_val
     }
     payload = _single_input_payload(first)
     payload["question_inputs"] = [first, second]
-    payload["answer_requests"][0]["used_question_inputs"] = [
+    _set_population_inputs(
+        payload["answer_requests"][0],
         "input_staff_a",
         "input_staff_b",
-    ]
+    )
 
     parsed = parse_question_contract(
         tool_name="submit_question_contract_outcome",
@@ -949,10 +1032,11 @@ def test_question_contract_parser_allows_repeated_field_label_for_later_value():
     }
     payload = _single_input_payload(first)
     payload["question_inputs"] = [first, second]
-    payload["answer_requests"][0]["used_question_inputs"] = [
+    _set_population_inputs(
+        payload["answer_requests"][0],
         "input_staff_a",
         "input_staff_b",
-    ]
+    )
 
     parsed = parse_question_contract(
         tool_name="submit_question_contract_outcome",

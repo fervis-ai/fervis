@@ -50,6 +50,9 @@ input:
       - answer_fact: work locations from Nadia Wanjiku's first two shifts
         answer_expression:
           family: ranked_selection
+        question_input_uses:
+          - {use_id: use_nadia, input_ref: nadia, owner_kind: POPULATION_TESTS}
+          - {use_id: use_limit, input_ref: first_two, owner_kind: RESULT_LIMIT}
         answer_subject:
           subject_text: shifts
           instance_interpretation:
@@ -62,21 +65,20 @@ input:
               kind: SUBJECT_IDENTITY
               polarity: MUST_PASS
               test_question: Does the candidate represent a shift?
-              owned_question_input_refs: []
+              question_input_use_refs: []
             - test_id: selected_staff
               kind: EXPLICIT_USER_CONSTRAINT
               polarity: MUST_PASS
               test_question: Is the shift associated with the selected staff member?
-              owned_question_input_refs: [nadia]
+              question_input_use_refs: [use_nadia]
             - test_id: ordinary_shift
               kind: NORMAL_INSTANCE_GUARD
               polarity: MUST_PASS
               test_question: Is this an ordinary business instance of a shift?
-              owned_question_input_refs: []
+              question_input_use_refs: []
         answer_outputs:
           - description: work location
             role: ANSWER_VALUE
-        used_question_inputs: [nadia, first_two]
     question_input_inventory_check:
       all_input_like_phrases_declared: true
 expect:
