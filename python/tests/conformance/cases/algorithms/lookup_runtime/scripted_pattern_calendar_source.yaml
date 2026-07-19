@@ -36,6 +36,19 @@ input:
           calendar_id: calendar_days
         output_fields:
         - field_id: runtime_date
+  source_binding:
+  - requested_fact_id: fact_1
+    resolved_input_applications:
+    - value_id: grounded_input_1
+      value_component: start
+      target_kind: request_parameter
+      target_id: interval_start
+      match_basis_explanation: The requested period supplies the calendar start.
+    - value_id: grounded_input_1
+      value_component: end
+      target_kind: request_parameter
+      target_id: interval_end
+      match_basis_explanation: The requested period supplies the calendar end.
   responses: {}
 expect:
   result_contains:

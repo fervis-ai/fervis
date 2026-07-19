@@ -10,7 +10,7 @@ input:
   - kind=literal_text with role=result_limit
   - Use source=conversation_resolution only for declared resolved question inputs.
   - operand_text contains only the operand.
-  - A complete phrase used as answer_subject.subject_text or answer_population.counted_unit is not a reference_value; do not split it into a generic noun plus modifier merely to create an attribute_value.
+  - A reference_value is a concrete identity, property, category, status, channel, or other predicate value, such as completed or in-person; create one kind=literal_text with role=reference_value input for each and, when it modifies a candidate kind, copy only the property-value span.
 expect:
   result_contains:
     contains:
@@ -21,5 +21,5 @@ expect:
       : true
       ? operand_text contains only the operand.
       : true
-      ? A complete phrase used as answer_subject.subject_text or answer_population.counted_unit is not a reference_value; do not split it into a generic noun plus modifier merely to create an attribute_value.
+      ? A reference_value is a concrete identity, property, category, status, channel, or other predicate value, such as completed or in-person; create one kind=literal_text with role=reference_value input for each and, when it modifies a candidate kind, copy only the property-value span.
       : true

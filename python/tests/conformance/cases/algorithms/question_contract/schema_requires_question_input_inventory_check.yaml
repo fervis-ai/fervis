@@ -13,6 +13,7 @@ input:
     answer_requests:
       - answer_fact: sales at ABC Mall
         answer_expression: {family: scalar_aggregate}
+        question_input_uses: []
         answer_subject:
           subject_text: sales
           instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
@@ -20,15 +21,14 @@ input:
           population_label: sales
           counted_unit: sales
           membership_tests:
-            - test_id: pop_test_1
+            - question_input_use_refs: []
+              test_id: pop_test_1
               kind: SUBJECT_IDENTITY
               polarity: MUST_PASS
               test_question: Does the row/value represent sales?
-              owned_question_input_refs: []
         answer_outputs:
           - description: sales total
             role: ANSWER_VALUE
-        used_question_inputs: []
 expect:
   result_contains:
     status: rejected

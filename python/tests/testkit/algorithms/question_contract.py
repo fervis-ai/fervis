@@ -26,6 +26,10 @@ from tests.testkit.assertions import (
     status_mismatches,
     subset_mismatches,
 )
+from tests.testkit.question_contract_provider import (
+    provider_membership_tests,
+    provider_question_input_ownership,
+)
 
 
 def _conversation_identity_payload(
@@ -523,7 +527,9 @@ def run_question_contract_prompt_case(payload: dict[str, Any]) -> list[str]:
 
 def _model_payload_from_case_input(input_payload: dict[str, Any]) -> dict[str, object]:
     question_inputs = _question_inputs_from_case_input(input_payload)
-    answer_requests = list(input_payload.get("answer_requests") or ())
+    answer_requests = [
+        dict(item) for item in input_payload.get("answer_requests") or ()
+    ]
     if not answer_requests:
         answer_requests = [
             _answer_request(input_payload, question_inputs=question_inputs)
@@ -563,7 +569,9 @@ def _answer_request(
     *,
     question_inputs: list[dict[str, Any]],
 ) -> dict[str, object]:
-    used_input_refs = set(input_payload.get("used_input_refs") or ())
+    used_input_refs = tuple(
+        str(input_ref) for input_ref in input_payload.get("used_input_refs") or ()
+    )
     request = {
         "answer_fact": str(input_payload.get("answer_fact") or "sales at ABC Mall"),
         "answer_expression": dict(
@@ -587,7 +595,7 @@ def _answer_request(
                         "kind": "SUBJECT_IDENTITY",
                         "polarity": "MUST_PASS",
                         "test_question": "Does the row/value represent sales?",
-                        "owned_question_input_refs": [],
+                        "question_input_use_refs": [],
                     }
                 ],
             }
@@ -596,13 +604,63 @@ def _answer_request(
             input_payload.get("answer_outputs")
             or [{"description": "sales total", "role": "MEASURED_VALUE"}]
         ),
-        "used_question_inputs": [
-            input_ref
-            for item in question_inputs
-            if isinstance(item, dict)
-            and (input_ref := str(item.get("input_ref") or "").strip())
-            and input_ref in used_input_refs
-        ],
     }
     request.update(dict(input_payload.get("answer_request_overrides") or {}))
+    if "question_input_uses" in request:
+        return request
+    return _provider_answer_request_from_test_dsl(
+        request,
+        question_inputs=question_inputs,
+        used_input_refs=used_input_refs,
+    )
+
+
+def _provider_answer_request_from_test_dsl(
+    request: dict[str, Any],
+    *,
+    question_inputs: list[dict[str, Any]],
+    used_input_refs: tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    declared_refs = {
+        str(item.get("input_ref") or "").strip()
+        for item in question_inputs
+        if isinstance(item, dict)
+    }
+    requested_refs = tuple(
+        str(input_ref)
+        for input_ref in used_input_refs or ()
+        if str(input_ref) in declared_refs
+    )
+
+    population = request["answer_population"]
+    tests = population["membership_tests"]
+    population_refs_by_test_id: dict[str, tuple[str, ...]] = {}
+
+    roles_by_ref = {
+        str(item.get("input_ref") or ""): str(item.get("role") or "")
+        for item in question_inputs
+    }
+    result_limit_refs = tuple(
+        ref
+        for ref in requested_refs
+        if roles_by_ref.get(ref) == "result_limit"
+    )
+    explicitly_owned = {
+        *result_limit_refs,
+    }
+    remaining_population_refs = tuple(
+        ref for ref in requested_refs if ref not in explicitly_owned
+    )
+    for index, input_ref in enumerate(remaining_population_refs, start=1):
+        population_refs_by_test_id[f"input_constraint_{index}"] = (input_ref,)
+
+    ownership = provider_question_input_ownership(
+        population_input_refs_by_test_id=population_refs_by_test_id,
+        result_limit_input_ref=result_limit_refs[0] if result_limit_refs else "",
+    )
+    request["question_input_uses"] = list(ownership.question_input_uses)
+    population["membership_tests"] = provider_membership_tests(
+        tests,
+        ownership=ownership,
+    )
     return request

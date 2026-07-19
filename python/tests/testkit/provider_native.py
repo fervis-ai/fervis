@@ -36,7 +36,7 @@ def provider_native_test_arguments(
                                     "test_question": (
                                         "Does the row/value represent test adapter answer?"
                                     ),
-                                    "owned_question_input_refs": [],
+                                    "question_input_use_refs": [],
                                 }
                             ],
                         },
@@ -46,7 +46,7 @@ def provider_native_test_arguments(
                                 "role": "ANSWER_VALUE",
                             }
                         ],
-                        "used_question_inputs": [],
+                        "question_input_uses": [],
                     }
                 ],
                 "question_input_inventory_check": {

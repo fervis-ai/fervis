@@ -347,7 +347,14 @@ def _question_contract_with_time_value_input() -> dict[str, object]:
                                 "kind": "SUBJECT_IDENTITY",
                                 "polarity": "MUST_PASS",
                                 "test_question": "Is this a sale?",
-                                "owned_question_input_refs": [],
+                                "question_input_use_refs": [],
+                            },
+                            {
+                                "test_id": "test_time",
+                                "kind": "EXPLICIT_USER_CONSTRAINT",
+                                "polarity": "MUST_PASS",
+                                "test_question": "Did this sale occur today?",
+                                "question_input_use_refs": ["use_time"],
                             }
                         ],
                     },
@@ -357,7 +364,13 @@ def _question_contract_with_time_value_input() -> dict[str, object]:
                             "role": "ANSWER_VALUE",
                         }
                     ],
-                    "used_question_inputs": ["time_1"],
+                    "question_input_uses": [
+                        {
+                            "use_id": "use_time",
+                            "input_ref": "time_1",
+                            "owner_kind": "POPULATION_TESTS",
+                        }
+                    ],
                 }
             ],
             "question_input_inventory_check": {
@@ -388,7 +401,7 @@ def test_question_contract_schema_rejects_answer_text():
                                 "role": "ANSWER_VALUE",
                             }
                         ],
-                        "used_question_inputs": [],
+                        "question_input_uses": [],
                     }
                 ],
             },

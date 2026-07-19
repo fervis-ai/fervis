@@ -66,6 +66,10 @@ from tests.lookup.orchestrator._runtime_ports import (
     _grounding_payload_from_prompt,
 )
 from tests.lookup.prompt_sections import prompt_section_payload
+from tests.testkit.question_contract_provider import (
+    provider_membership_tests,
+    provider_question_input_ownership,
+)
 
 
 def _conversation_resolution_tool_name_for_payload(payload: dict[str, Any]) -> str:
@@ -431,17 +435,14 @@ def test_pattern_contract_same_scope_candidate_keeps_field_params_together_end_t
                             "answer_fact": "shade names",
                             "answer_expression": {"family": "list_rows"},
                             "answer_subject": _answer_subject_payload("shade names"),
-                            "answer_population": default_answer_population(
+                            "answer_population": _answer_population_payload(
                                 description="shade names",
                                 subject_text="shade names",
-                                instance_interpretation=RequestedFactAnswerSubject(
-                                    subject_text="shade names"
-                                ).instance_interpretation,
-                            ).to_question_contract_dict(),
+                            ),
                             "answer_outputs": [
                                 {"description": "shade names", "role": "ANSWER_VALUE"}
                             ],
-                            "used_question_inputs": [],
+                            "question_input_uses": [],
                         }
                     ],
                 },
@@ -523,9 +524,9 @@ def _question_contract(
                 {"reference_text": item["text"]}
                 if item["kind"] == "row_set_reference"
                 else {
-                    "source_text": item["text"],
+                    "value_source_text": item["text"],
                     "role": item["role"],
-                    "resolved_value_text": item["resolved_value_text"],
+                    "operand_text": item["resolved_value_text"],
                 }
             ),
             "inventory_check": {
@@ -544,6 +545,23 @@ def _question_contract(
         }
         for index, item in enumerate(known_inputs, start=1)
     ]
+    population_input_refs = tuple(
+        str(item["input_ref"])
+        for item in question_inputs
+        if item.get("role") != "result_limit"
+    )
+    result_limit_refs = tuple(
+        str(item["input_ref"])
+        for item in question_inputs
+        if item.get("role") == "result_limit"
+    )
+    ownership = provider_question_input_ownership(
+        population_input_refs_by_test_id={
+            f"input_constraint_{index}": (input_ref,)
+            for index, input_ref in enumerate(population_input_refs, start=1)
+        },
+        result_limit_input_ref=result_limit_refs[0] if result_limit_refs else "",
+    )
     return {
         "kind": "question_contract",
         "answer_requests_count": 1,
@@ -557,6 +575,7 @@ def _question_contract(
                 "answer_population": _answer_population_payload(
                     description=fact_description,
                     subject_text=subject_text or fact_description,
+                    ownership=ownership,
                 ),
                 "answer_outputs": [
                     {"description": description, "role": role}
@@ -566,10 +585,7 @@ def _question_contract(
                         strict=True,
                     )
                 ],
-                "used_question_inputs": [
-                    f"input_{index}"
-                    for index, _item in enumerate(known_inputs, start=1)
-                ],
+                "question_input_uses": list(ownership.question_input_uses),
             }
         ],
         "question_input_inventory_check": {
@@ -649,14 +665,22 @@ def _answer_population_payload(
     *,
     description: str,
     subject_text: str,
+    ownership=None,
 ) -> dict[str, object]:
-    return default_answer_population(
+    payload = default_answer_population(
         description=description,
         subject_text=subject_text,
         instance_interpretation=RequestedFactAnswerSubject(
             subject_text=subject_text,
         ).instance_interpretation,
     ).to_question_contract_dict()
+    if ownership is None:
+        ownership = provider_question_input_ownership()
+    payload["membership_tests"] = provider_membership_tests(
+        payload["membership_tests"],
+        ownership=ownership,
+    )
+    return payload
 
 
 def _question_contract_with_prompt_memory(

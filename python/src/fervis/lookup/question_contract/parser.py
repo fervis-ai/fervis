@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import re
 
 from fervis.lookup.conversation_resolution.compilation import (
@@ -44,6 +45,23 @@ from fervis.lookup.question_contract.tools import (
 from fervis.lookup.provider_contract import ProviderObject
 
 
+@dataclass(frozen=True, slots=True)
+class _ParsedMembershipTest:
+    id: str
+    kind: AnswerPopulationMembershipTestKind
+    polarity: AnswerPopulationMembershipTestPolarity
+    test_question: str
+    owned_question_input_refs: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _ParsedQuestionInputUses:
+    input_refs: tuple[str, ...]
+    group_key_input_refs: tuple[str, ...]
+    population_input_refs_by_use_id: dict[str, str]
+    result_limit_input_ref: str
+
+
 def parse_question_contract(
     *,
     tool_name: str,
@@ -80,7 +98,7 @@ def parse_question_contract(
                         question_context_texts=context_texts,
                     ),
                 ),
-            )
+            ),
         )
     if outcome_kind == "unresolved_prior_turn_references":
         unresolved_references = outcome.parse_as(
@@ -93,7 +111,7 @@ def parse_question_contract(
                     unresolved_references.references,
                     question_context_texts=context_texts,
                 ),
-            )
+            ),
         )
 
     parsed = outcome.parse_as(provider_output.QuestionContractOutput)
@@ -141,7 +159,7 @@ def parse_question_contract(
                 if conversation_resolution is not None
                 else ()
             ),
-        )
+        ),
     )
 
 
@@ -167,9 +185,7 @@ def _unresolved_prior_turn_reference(
     path: str,
 ) -> IncompleteFactualRequestItem:
     return IncompleteFactualRequestItem(
-        missing_kind=(
-            IncompleteFactualRequestKind.UNRESOLVED_PRIOR_TURN_REFERENCE
-        ),
+        missing_kind=(IncompleteFactualRequestKind.UNRESOLVED_PRIOR_TURN_REFERENCE),
         source_text=_copied_text(
             parsed.source_text,
             question_context_texts=question_context_texts,
@@ -230,28 +246,37 @@ def _requested_facts(
             parsed.answer_outputs,
             path=f"{path}.answer_outputs",
         )
-        input_refs = _used_question_inputs(
-            parsed.used_question_inputs,
+        input_uses = _question_input_uses(
+            parsed.question_input_uses,
             inputs_by_id=inputs_by_id,
-            path=f"{path}.used_question_inputs",
+            answer_expression=parsed.answer_expression,
+            expression_path=f"{path}.answer_expression",
+            path=f"{path}.question_input_uses",
+        )
+        membership_tests = _parsed_membership_tests(
+            parsed.answer_population.membership_tests,
+            population_input_refs_by_use_id=(
+                input_uses.population_input_refs_by_use_id
+            ),
+            path=f"{path}.answer_population.membership_tests",
         )
         answer_subject = _answer_subject(
             parsed.answer_subject,
             question_context_texts=question_context_texts,
             path=f"{path}.answer_subject",
         )
-        known_inputs = tuple(inputs_by_id[input_ref] for input_ref in input_refs)
-        population_input_refs = tuple(
-            known.id for known in known_inputs if not known.is_result_limit
+        known_inputs = tuple(
+            inputs_by_id[input_ref] for input_ref in input_uses.input_refs
         )
         answer_population = _answer_population(
             parsed.answer_population,
-            population_input_refs=population_input_refs,
+            membership_tests=membership_tests,
             path=f"{path}.answer_population",
         )
         answer_expression = _answer_expression(
             parsed.answer_expression,
-            limit_input_ref=_result_limit_input_ref(known_inputs),
+            group_key_input_refs=input_uses.group_key_input_refs,
+            limit_input_ref=input_uses.result_limit_input_ref,
             path=f"{path}.answer_expression",
         )
         output.append(
@@ -266,7 +291,7 @@ def _requested_facts(
                 answer_population=answer_population,
                 answer_outputs=answer_outputs,
                 known_inputs=known_inputs,
-                input_refs=input_refs,
+                input_refs=input_uses.input_refs,
             )
         )
     return tuple(output)
@@ -275,6 +300,7 @@ def _requested_facts(
 def _answer_expression(
     item: provider_output.AnswerExpressionOutput,
     *,
+    group_key_input_refs: tuple[str, ...],
     limit_input_ref: str,
     path: str,
 ) -> RequestedFactAnswerExpression:
@@ -290,6 +316,7 @@ def _answer_expression(
         family=family,
         group_key=_answer_expression_group_key(
             item.group_key,
+            question_input_refs=group_key_input_refs,
             path=f"{path}.group_key",
         ),
         selection_kind=selection_kind,
@@ -297,34 +324,30 @@ def _answer_expression(
     )
 
 
-def _result_limit_input_ref(
-    known_inputs: tuple[RequestedFactKnownInput, ...],
-) -> str:
-    result_limits = tuple(known for known in known_inputs if known.is_result_limit)
-    if len(result_limits) > 1:
-        raise ValueError("answer request may use at most one result limit")
-    return result_limits[0].id if result_limits else ""
-
-
 def _answer_expression_group_key(
     item: provider_output.GroupKeyOutput | None,
     *,
+    question_input_refs: tuple[str, ...],
     path: str,
 ) -> RequestedFactGroupKey | None:
     if item is None:
         return None
-    try:
-        domain = GroupKeyDomainKind(_required_text(item.domain, path=f"{path}.domain"))
-    except ValueError as exc:
-        raise ValueError(f"{path}.domain is invalid") from exc
     return RequestedFactGroupKey(
         description=_required_text(item.description, path=f"{path}.description"),
-        domain=domain,
-        question_input_refs=_answer_expression_group_key_refs(
-            item.question_input_refs or (),
-            path=f"{path}.question_input_refs",
-        ),
+        domain=_group_key_domain(item, path=path),
+        question_input_refs=question_input_refs,
     )
+
+
+def _group_key_domain(
+    item: provider_output.GroupKeyOutput,
+    *,
+    path: str,
+) -> GroupKeyDomainKind:
+    try:
+        return GroupKeyDomainKind(_required_text(item.domain, path=f"{path}.domain"))
+    except ValueError as exc:
+        raise ValueError(f"{path}.domain is invalid") from exc
 
 
 def _answer_subject(
@@ -355,7 +378,7 @@ def _instance_interpretation(
 def _answer_population(
     item: provider_output.AnswerPopulationOutput,
     *,
-    population_input_refs: tuple[str, ...],
+    membership_tests: tuple[_ParsedMembershipTest, ...],
     path: str,
 ) -> RequestedFactAnswerPopulation:
     return RequestedFactAnswerPopulation(
@@ -368,67 +391,84 @@ def _answer_population(
             path=f"{path}.counted_unit",
         ),
         membership_tests=_answer_population_membership_tests(
-            item.membership_tests,
-            population_input_refs=population_input_refs,
-            path=f"{path}.membership_tests",
+            membership_tests,
         ),
     )
 
 
-def _answer_population_membership_tests(
+def _parsed_membership_tests(
     items: tuple[provider_output.AnswerPopulationMembershipTestOutput, ...],
     *,
-    population_input_refs: tuple[str, ...],
+    population_input_refs_by_use_id: dict[str, str],
     path: str,
-) -> tuple[RequestedFactAnswerPopulationMembershipTest, ...]:
-    output: list[RequestedFactAnswerPopulationMembershipTest] = []
+) -> tuple[_ParsedMembershipTest, ...]:
+    output: list[_ParsedMembershipTest] = []
+    seen_ids: set[str] = set()
+    consumed_use_ids: set[str] = set()
     for index, item in enumerate(items):
         item_path = f"{path}[{index}]"
+        test_id = _required_text(item.test_id, path=f"{item_path}.test_id")
+        if test_id in seen_ids:
+            raise ValueError(f"{item_path}.test_id duplicates membership test")
+        seen_ids.add(test_id)
+        kind = AnswerPopulationMembershipTestKind(item.kind.strip())
+        owned_input_refs: list[str] = []
+        seen_use_refs: set[str] = set()
+        for use_index, raw_use_ref in enumerate(item.question_input_use_refs):
+            use_path = f"{item_path}.question_input_use_refs[{use_index}]"
+            use_ref = _required_text(raw_use_ref, path=use_path)
+            if use_ref in seen_use_refs:
+                raise ValueError(f"{use_path} duplicates question input use")
+            seen_use_refs.add(use_ref)
+            input_ref = population_input_refs_by_use_id.get(use_ref)
+            if input_ref is None:
+                raise ValueError(f"{use_path} references unknown question input use")
+            owned_input_refs.append(input_ref)
+            consumed_use_ids.add(use_ref)
+        if kind is AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT:
+            if not owned_input_refs:
+                raise ValueError(
+                    f"explicit membership test {test_id} requires at least one "
+                    "question input"
+                )
+        elif owned_input_refs:
+            raise ValueError(f"{item_path} non-explicit membership test has operands")
         output.append(
-            RequestedFactAnswerPopulationMembershipTest(
-                id=_required_text(item.test_id, path=f"{item_path}.test_id"),
-                kind=AnswerPopulationMembershipTestKind(
-                    item.kind.strip(),
-                ),
-                polarity=AnswerPopulationMembershipTestPolarity(
-                    item.polarity.strip(),
-                ),
+            _ParsedMembershipTest(
+                id=test_id,
+                kind=kind,
+                polarity=AnswerPopulationMembershipTestPolarity(item.polarity.strip()),
                 test_question=_required_text(
                     item.test_question,
                     path=f"{item_path}.test_question",
                 ),
-                owned_question_input_refs=_owned_question_input_refs(
-                    item.owned_question_input_refs,
-                    population_input_refs=population_input_refs,
-                    path=f"{item_path}.owned_question_input_refs",
-                ),
+                owned_question_input_refs=tuple(owned_input_refs),
             )
         )
     if not output:
         raise ValueError(f"{path} must not be empty")
+    unused_use_ids = set(population_input_refs_by_use_id) - consumed_use_ids
+    if unused_use_ids:
+        raise ValueError(
+            "POPULATION_TESTS input uses must be consumed by a membership test: "
+            + ", ".join(sorted(unused_use_ids))
+        )
     return tuple(output)
 
 
-def _owned_question_input_refs(
-    raw: tuple[str, ...],
-    *,
-    population_input_refs: tuple[str, ...],
-    path: str,
-) -> tuple[str, ...]:
-    allowed_refs = set(population_input_refs)
-    output: list[str] = []
-    seen: set[str] = set()
-    for index, item in enumerate(raw):
-        input_ref = _required_text(item, path=f"{path}[{index}]")
-        if input_ref not in allowed_refs:
-            raise ValueError(
-                f"{path}[{index}] references input unavailable to answer population"
-            )
-        if input_ref in seen:
-            raise ValueError(f"{path}[{index}] duplicates question input")
-        seen.add(input_ref)
-        output.append(input_ref)
-    return tuple(output)
+def _answer_population_membership_tests(
+    items: tuple[_ParsedMembershipTest, ...],
+) -> tuple[RequestedFactAnswerPopulationMembershipTest, ...]:
+    return tuple(
+        RequestedFactAnswerPopulationMembershipTest(
+            id=item.id,
+            kind=item.kind,
+            polarity=item.polarity,
+            test_question=item.test_question,
+            owned_question_input_refs=item.owned_question_input_refs,
+        )
+        for item in items
+    )
 
 
 def _referenced_question_inputs(
@@ -540,18 +580,106 @@ def _answer_outputs(
     return tuple(output)
 
 
-def _answer_expression_group_key_refs(
-    raw: tuple[str, ...], *, path: str
-) -> tuple[str, ...]:
-    refs: list[str] = []
-    seen: set[str] = set()
-    for index, item in enumerate(raw):
-        input_ref = _required_text(item, path=f"{path}[{index}]")
-        if input_ref in seen:
-            raise ValueError(f"{path}[{index}] duplicates question input")
-        seen.add(input_ref)
-        refs.append(input_ref)
-    return tuple(refs)
+def _question_input_uses(
+    raw: tuple[ProviderObject, ...],
+    *,
+    inputs_by_id: dict[str, RequestedFactKnownInput],
+    answer_expression: provider_output.AnswerExpressionOutput,
+    expression_path: str,
+    path: str,
+) -> _ParsedQuestionInputUses:
+    input_refs: list[str] = []
+    group_key_input_refs: list[str] = []
+    population_input_refs_by_use_id: dict[str, str] = {}
+    result_limit_input_ref = ""
+    seen_inputs: set[str] = set()
+    seen_use_ids: set[str] = set()
+    group_domain = (
+        None
+        if answer_expression.group_key is None
+        else _group_key_domain(
+            answer_expression.group_key,
+            path=f"{expression_path}.group_key",
+        )
+    )
+
+    for index, raw_item in enumerate(raw):
+        item_path = f"{path}[{index}]"
+        item = raw_item.parse_as(provider_output.QuestionInputUseOutput)
+        owner_kind = _question_input_owner_kind(item, path=item_path)
+        input_ref = _required_text(item.input_ref, path=f"{item_path}.input_ref")
+        if input_ref not in inputs_by_id:
+            raise ValueError(f"{item_path}.input_ref references unknown question input")
+        if input_ref in seen_inputs:
+            raise ValueError(f"{item_path}.input_ref duplicates question input")
+        seen_inputs.add(input_ref)
+        known_input = inputs_by_id[input_ref]
+        _validate_input_owner_kind(
+            known_input,
+            owner_kind=owner_kind,
+            path=f"{item_path}.owner_kind",
+        )
+        input_refs.append(input_ref)
+
+        if owner_kind is provider_output.QuestionInputOwnerKind.GROUP_KEY:
+            if group_domain is not GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS:
+                raise ValueError(
+                    f"{item_path}.owner_kind GROUP_KEY requires "
+                    "SPECIFIED_QUESTION_INPUTS"
+                )
+            group_key_input_refs.append(input_ref)
+            continue
+
+        if owner_kind is provider_output.QuestionInputOwnerKind.RESULT_LIMIT:
+            if result_limit_input_ref:
+                raise ValueError("answer request may use at most one result limit")
+            result_limit_input_ref = input_ref
+            continue
+
+        use_id = _required_text(item.use_id or "", path=f"{item_path}.use_id")
+        if use_id in seen_use_ids:
+            raise ValueError(f"{item_path}.use_id duplicates use ID")
+        seen_use_ids.add(use_id)
+        population_input_refs_by_use_id[use_id] = input_ref
+
+    if (
+        group_domain is GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS
+        and not group_key_input_refs
+    ):
+        raise ValueError(
+            "SPECIFIED_QUESTION_INPUTS requires at least one GROUP_KEY input use"
+        )
+    return _ParsedQuestionInputUses(
+        input_refs=tuple(input_refs),
+        group_key_input_refs=tuple(group_key_input_refs),
+        population_input_refs_by_use_id=population_input_refs_by_use_id,
+        result_limit_input_ref=result_limit_input_ref,
+    )
+
+
+def _question_input_owner_kind(
+    item: provider_output.QuestionInputUseOutput,
+    *,
+    path: str,
+) -> provider_output.QuestionInputOwnerKind:
+    try:
+        return provider_output.QuestionInputOwnerKind(item.owner_kind)
+    except ValueError as exc:
+        raise ValueError(f"{path}.owner_kind is invalid") from exc
+
+
+def _validate_input_owner_kind(
+    known_input: RequestedFactKnownInput,
+    *,
+    owner_kind: provider_output.QuestionInputOwnerKind,
+    path: str,
+) -> None:
+    if owner_kind is provider_output.QuestionInputOwnerKind.RESULT_LIMIT:
+        if not known_input.is_result_limit:
+            raise ValueError(f"{path} RESULT_LIMIT requires a result_limit input")
+        return
+    if known_input.is_result_limit:
+        raise ValueError(f"{path} for result_limit input must be RESULT_LIMIT")
 
 
 def _question_inputs(
@@ -699,25 +827,6 @@ def _question_input(
                 ),
             )
     raise ValueError("unsupported question input kind")
-
-
-def _used_question_inputs(
-    raw: tuple[str, ...],
-    *,
-    inputs_by_id: dict[str, RequestedFactKnownInput],
-    path: str,
-) -> tuple[str, ...]:
-    used_input_refs: list[str] = []
-    seen: set[str] = set()
-    for index, item in enumerate(raw):
-        input_ref = _required_text(item, path=f"{path}[{index}]")
-        if input_ref not in inputs_by_id:
-            raise ValueError(f"{path}[{index}] references unknown question input")
-        if input_ref in seen:
-            raise ValueError(f"{path}[{index}] duplicates question input")
-        seen.add(input_ref)
-        used_input_refs.append(input_ref)
-    return tuple(used_input_refs)
 
 
 def _question_input_kind(value: str, *, path: str) -> KnownInputKind:

@@ -22,6 +22,8 @@ input:
     - answer_fact: count of priority jobs
       answer_expression:
         family: scalar_aggregate
+      question_input_uses:
+      - {use_id: use_priority, input_ref: priority, owner_kind: POPULATION_TESTS}
       answer_subject:
         subject_text: jobs
         instance_interpretation:
@@ -34,16 +36,15 @@ input:
           kind: SUBJECT_IDENTITY
           polarity: MUST_PASS
           test_question: Does the instance represent a job?
-          owned_question_input_refs: []
+          question_input_use_refs: []
         - test_id: requested_priority
           kind: EXPLICIT_USER_CONSTRAINT
           polarity: MUST_PASS
           test_question: Does the job have the requested priority?
-          owned_question_input_refs: [priority]
+          question_input_use_refs: [use_priority]
       answer_outputs:
       - description: job count
         role: ROW_COUNT
-      used_question_inputs: [priority]
     question_input_inventory_check:
       all_input_like_phrases_declared: true
 expect:

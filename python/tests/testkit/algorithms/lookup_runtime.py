@@ -81,6 +81,10 @@ from fervis.lookup.clarification import clarification_payload
 from tests.testkit.assertions import subset_mismatches
 from tests.testkit.catalog import catalog_from_payload
 from tests.testkit.answer_program_contracts import binding_set_from_payload
+from tests.testkit.question_contract_provider import (
+    provider_membership_tests,
+    provider_question_input_ownership,
+)
 
 
 def run_lookup_runtime_case(payload: dict[str, Any]) -> list[str]:
@@ -713,6 +717,47 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
         _scripted_question_input(index=index, payload=item)
         for index, item in enumerate(known_inputs, start=1)
     ]
+    answer_expression = _scripted_answer_expression(payload)
+    group_key = answer_expression.get("group_key")
+    group_refs = tuple(
+        str(ref)
+        for ref in (
+            group_key.pop("question_input_refs", ())
+            if isinstance(group_key, dict)
+            else ()
+        )
+    )
+    result_limit_refs = tuple(
+        str(item["input_ref"])
+        for item in question_inputs
+        if item.get("role") == LiteralInputRole.RESULT_LIMIT.value
+    )
+    population_refs = tuple(
+        str(item["input_ref"])
+        for item in question_inputs
+        if str(item["input_ref"]) not in {*group_refs, *result_limit_refs}
+    )
+    ownership = provider_question_input_ownership(
+        group_key_input_refs=group_refs,
+        population_input_refs_by_test_id=(
+            {
+                f"input_constraint_{index}": (input_ref,)
+                for index, input_ref in enumerate(population_refs, start=1)
+            }
+        ),
+        result_limit_input_ref=result_limit_refs[0] if result_limit_refs else "",
+    )
+    population = default_answer_population(
+        description=fact_description,
+        subject_text=subject_text,
+        instance_interpretation=RequestedFactAnswerSubject(
+            subject_text=subject_text
+        ).instance_interpretation,
+    ).to_question_contract_dict()
+    population["membership_tests"] = provider_membership_tests(
+        population["membership_tests"],
+        ownership=ownership,
+    )
     return {
         "kind": "question_contract",
         "answer_requests_count": 1,
@@ -720,24 +765,16 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
         "answer_requests": [
             {
                 "answer_fact": fact_description,
-                "answer_expression": _scripted_answer_expression(payload),
+                "answer_expression": answer_expression,
+                "question_input_uses": list(ownership.question_input_uses),
                 "answer_subject": _answer_subject_payload(subject_text),
-                "answer_population": default_answer_population(
-                    description=fact_description,
-                    subject_text=subject_text,
-                    instance_interpretation=RequestedFactAnswerSubject(
-                        subject_text=subject_text
-                    ).instance_interpretation,
-                ).to_question_contract_dict(),
+                "answer_population": population,
                 "answer_outputs": [
                     _scripted_answer_output(
                         answer_output,
                         default_role=str(payload.get("support_role") or "ROW_COUNT"),
                     )
                     for answer_output in answer_outputs
-                ],
-                "used_question_inputs": [
-                    str(item["input_ref"]) for item in question_inputs
                 ],
             }
         ],
@@ -1488,6 +1525,23 @@ def _variant_staff_sales_catalog() -> RelationCatalog:
 
 def _question_contract_decisions_payload() -> dict[str, Any]:
     fact = _variant_grounding_question_contract().requested_facts[0]
+    ownership = provider_question_input_ownership(
+        population_input_refs_by_test_id={
+            "input_constraint_1": ("input_1",),
+            "input_constraint_2": ("input_2",),
+        }
+    )
+    population = default_answer_population(
+        description=fact.description,
+        subject_text="products",
+        instance_interpretation=RequestedFactAnswerSubject(
+            subject_text="products"
+        ).instance_interpretation,
+    ).to_question_contract_dict()
+    population["membership_tests"] = provider_membership_tests(
+        population["membership_tests"],
+        ownership=ownership,
+    )
     return {
         "kind": "question_contract",
         "answer_requests_count": 1,
@@ -1520,14 +1574,9 @@ def _question_contract_decisions_payload() -> dict[str, Any]:
             {
                 "answer_fact": fact.description,
                 "answer_expression": {"family": "list_rows"},
+                "question_input_uses": list(ownership.question_input_uses),
                 "answer_subject": _answer_subject_payload("products"),
-                "answer_population": default_answer_population(
-                    description=fact.description,
-                    subject_text="products",
-                    instance_interpretation=RequestedFactAnswerSubject(
-                        subject_text="products"
-                    ).instance_interpretation,
-                ).to_question_contract_dict(),
+                "answer_population": population,
                 "answer_outputs": [
                     {"description": "products sold", "role": "ANSWER_VALUE"},
                     {
@@ -1535,7 +1584,6 @@ def _question_contract_decisions_payload() -> dict[str, Any]:
                         "role": "ANSWER_VALUE",
                     },
                 ],
-                "used_question_inputs": ["input_1", "input_2"],
             }
         ],
         "question_input_inventory_check": {

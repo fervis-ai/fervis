@@ -7,6 +7,11 @@ from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 
 from tests.lookup.orchestrator._plans import *  # noqa: F403
 from tests.lookup.prompt_sections import prompt_section_payload
+from tests.testkit.question_contract_provider import (
+    ProviderQuestionInputOwnership,
+    provider_membership_tests,
+    provider_question_input_ownership,
+)
 
 
 def _question_contract_decision(outcome: dict[str, Any]) -> dict[str, Any]:
@@ -1067,16 +1072,12 @@ def _question_contract_answer_request_payload(
     *,
     id_map: _QuestionContractIdMap,
 ) -> dict[str, Any]:
-    used_input_refs = {
-        id_map.known_input_ids[known.id]
-        for known in fact.known_inputs
-        if known.id in id_map.known_input_ids
-    }
     subject_text = (
         fact.answer_subject.subject_text
         if fact.answer_subject is not None
         else fact.description
     )
+    ownership = _provider_question_input_ownership(fact, id_map=id_map)
     payload = {
         "answer_fact": fact.description,
         "answer_expression": _answer_expression_payload(fact),
@@ -1084,17 +1085,65 @@ def _question_contract_answer_request_payload(
         "answer_population": _answer_population_payload(
             fact,
             subject_text=subject_text,
+            ownership=ownership,
         ),
         "answer_outputs": [
             output.to_answer_request_dict() for output in fact.answer_outputs
         ],
-        "used_question_inputs": [
-            id_map.known_input_ids[known.id]
-            for known in fact.known_inputs
-            if id_map.known_input_ids[known.id] in used_input_refs
-        ],
+        "question_input_uses": list(ownership.question_input_uses),
     }
     return payload
+
+
+def _provider_question_input_ownership(
+    fact: RequestedFact,
+    *,
+    id_map: _QuestionContractIdMap,
+) -> ProviderQuestionInputOwnership:
+    def provider_ref(input_ref: str) -> str:
+        return id_map.known_input_ids.get(input_ref, input_ref)
+
+    expression = fact.answer_expression
+    group_refs = (
+        tuple(provider_ref(ref) for ref in expression.group_key.question_input_refs)
+        if expression is not None and expression.group_key is not None
+        else ()
+    )
+    population_refs = {
+        test.id: tuple(provider_ref(ref) for ref in test.owned_question_input_refs)
+        for test in (
+            fact.answer_population.membership_tests
+            if fact.answer_population is not None
+            else ()
+        )
+        if test.owned_question_input_refs
+    }
+    result_limit_ref = (
+        provider_ref(expression.limit_input_ref)
+        if expression is not None and expression.limit_input_ref
+        else ""
+    )
+    owned_refs = {
+        *group_refs,
+        *(ref for refs in population_refs.values() for ref in refs),
+        *([result_limit_ref] if result_limit_ref else []),
+    }
+    unowned_refs = tuple(
+        provider_ref(known.id)
+        for known in fact.known_inputs
+        if known.id in id_map.known_input_ids
+        and provider_ref(known.id) not in owned_refs
+    )
+    if unowned_refs:
+        raise ValueError(
+            "test Question Contract fixture has unowned inputs: "
+            + ", ".join(unowned_refs)
+        )
+    return provider_question_input_ownership(
+        group_key_input_refs=group_refs,
+        population_input_refs_by_test_id=population_refs,
+        result_limit_input_ref=result_limit_ref,
+    )
 
 
 def _answer_expression_payload(
@@ -1105,7 +1154,10 @@ def _answer_expression_payload(
         return {"family": "scalar_aggregate"}
     payload: dict[str, Any] = {"family": expression.family.value}
     if expression.group_key is not None:
-        payload["group_key"] = expression.group_key.to_answer_request_dict()
+        payload["group_key"] = {
+            "description": expression.group_key.description,
+            "domain": expression.group_key.domain.value,
+        }
     return payload
 
 
@@ -1205,19 +1257,37 @@ def _question_contract_response(
         raise ValueError("answer output roles must match answer outputs")
     answer_expression: dict[str, Any] = {"family": answer_expression_family}
     input_refs = [str(item["input_ref"]) for item in input_payloads]
+    result_limit_refs = [
+        str(item["input_ref"])
+        for item in input_payloads
+        if item.get("role") == LiteralInputRole.RESULT_LIMIT.value
+    ]
+    population_refs = tuple(ref for ref in input_refs if ref not in result_limit_refs)
+    ownership = provider_question_input_ownership(
+        population_input_refs_by_test_id=(
+            {
+                f"input_constraint_{index}": (input_ref,)
+                for index, input_ref in enumerate(population_refs, start=1)
+            }
+        ),
+        result_limit_input_ref=result_limit_refs[0] if result_limit_refs else "",
+    )
     answer_request = {
         "answer_fact": subject,
         "answer_expression": answer_expression,
         "answer_subject": _answer_subject_payload(answer_subject or subject),
-        "answer_population": _answer_population_payload_from_text(
-            description=subject,
-            subject_text=answer_subject or subject,
+        "answer_population": _provider_answer_population_payload(
+            _answer_population_payload_from_text(
+                description=subject,
+                subject_text=answer_subject or subject,
+            ),
+            ownership=ownership,
         ),
         "answer_outputs": [
             {"description": part, "role": role}
             for part, role in zip(parts, output_roles, strict=True)
         ],
-        "used_question_inputs": input_refs,
+        "question_input_uses": list(ownership.question_input_uses),
     }
     return {
         "kind": "question_contract",
@@ -1244,21 +1314,36 @@ def _answer_population_payload(
     fact: RequestedFact,
     *,
     subject_text: str,
+    ownership: ProviderQuestionInputOwnership,
 ) -> dict[str, Any]:
     if fact.answer_population is not None:
-        return fact.answer_population.to_question_contract_dict()
-    instance_interpretation = (
-        fact.answer_subject.instance_interpretation
-        if fact.answer_subject is not None
-        else RequestedFactAnswerSubject(
-            subject_text=subject_text
-        ).instance_interpretation
+        payload = fact.answer_population.to_question_contract_dict()
+    else:
+        instance_interpretation = (
+            fact.answer_subject.instance_interpretation
+            if fact.answer_subject is not None
+            else RequestedFactAnswerSubject(
+                subject_text=subject_text
+            ).instance_interpretation
+        )
+        payload = default_answer_population(
+            description=fact.description,
+            subject_text=subject_text,
+            instance_interpretation=instance_interpretation,
+        ).to_question_contract_dict()
+    return _provider_answer_population_payload(payload, ownership=ownership)
+
+
+def _provider_answer_population_payload(
+    payload: dict[str, Any],
+    *,
+    ownership: ProviderQuestionInputOwnership,
+) -> dict[str, Any]:
+    payload["membership_tests"] = provider_membership_tests(
+        payload["membership_tests"],
+        ownership=ownership,
     )
-    return default_answer_population(
-        description=fact.description,
-        subject_text=subject_text,
-        instance_interpretation=instance_interpretation,
-    ).to_question_contract_dict()
+    return payload
 
 
 def _answer_population_payload_from_text(
@@ -1266,13 +1351,17 @@ def _answer_population_payload_from_text(
     description: str,
     subject_text: str,
 ) -> dict[str, Any]:
-    return default_answer_population(
+    payload = default_answer_population(
         description=description,
         subject_text=subject_text,
         instance_interpretation=RequestedFactAnswerSubject(
             subject_text=subject_text
         ).instance_interpretation,
     ).to_question_contract_dict()
+    return _provider_answer_population_payload(
+        payload,
+        ownership=provider_question_input_ownership(),
+    )
 
 
 def _question_input_ref_for_response_item(

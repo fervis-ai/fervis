@@ -121,16 +121,16 @@ def _answer_request_schema() -> dict[str, object]:
     properties: dict[str, object] = {
         "answer_fact": {"type": "string", "minLength": 1},
         "answer_expression": _answer_expression_schema(),
+        "question_input_uses": {
+            "type": "array",
+            "items": _question_input_use_schema(),
+        },
         "answer_subject": _answer_subject_schema(),
         "answer_population": _answer_population_schema(),
         "answer_outputs": {
             "type": "array",
             "minItems": 1,
             "items": _answer_output_schema(),
-        },
-        "used_question_inputs": {
-            "type": "array",
-            "items": {"type": "string", "minLength": 1},
         },
     }
     return provider_output.AnswerRequestOutput.schema(
@@ -217,12 +217,10 @@ def _answer_population_membership_test_schema() -> dict[str, object]:
         "oneOf": [
             _answer_population_membership_test_variant(
                 kind="EXPLICIT_USER_CONSTRAINT",
-                minimum_owned_inputs=1,
             ),
             *(
                 _answer_population_membership_test_variant(
                     kind=kind,
-                    minimum_owned_inputs=0,
                 )
                 for kind in (
                     "SUBJECT_IDENTITY",
@@ -237,23 +235,22 @@ def _answer_population_membership_test_schema() -> dict[str, object]:
 def _answer_population_membership_test_variant(
     *,
     kind: str,
-    minimum_owned_inputs: int,
 ) -> dict[str, object]:
-    maximum_owned_inputs = None if minimum_owned_inputs else 0
-    owned_inputs_schema: dict[str, object] = {
+    use_refs: dict[str, object] = {
         "type": "array",
-        "minItems": minimum_owned_inputs,
         "items": {"type": "string", "minLength": 1},
     }
-    if maximum_owned_inputs is not None:
-        owned_inputs_schema["maxItems"] = maximum_owned_inputs
+    if kind == "EXPLICIT_USER_CONSTRAINT":
+        use_refs["minItems"] = 1
+    else:
+        use_refs["maxItems"] = 0
     return provider_output.AnswerPopulationMembershipTestOutput.schema(
         {
+            "question_input_use_refs": use_refs,
             "test_id": {"type": "string", "minLength": 1},
             "kind": {"enum": [kind]},
             "polarity": {"enum": ["MUST_PASS", "MUST_FAIL"]},
             "test_question": {"type": "string", "minLength": 1},
-            "owned_question_input_refs": owned_inputs_schema,
         }
     )
 
@@ -283,19 +280,12 @@ def _group_key_schema() -> dict[str, object]:
 
 
 def _specified_question_inputs_group_key_schema() -> dict[str, object]:
-    schema = provider_output.GroupKeyOutput.schema(
+    return provider_output.GroupKeyOutput.schema(
         {
             "description": {"type": "string", "minLength": 1},
             "domain": {"enum": ["SPECIFIED_QUESTION_INPUTS"]},
-            "question_input_refs": {
-                "type": "array",
-                "minItems": 1,
-                "items": {"type": "string", "minLength": 1},
-            },
         },
     )
-    schema["required"] = ["description", "domain", "question_input_refs"]
-    return schema
 
 
 def _source_result_values_group_key_schema() -> dict[str, object]:
@@ -305,6 +295,37 @@ def _source_result_values_group_key_schema() -> dict[str, object]:
             "domain": {"enum": ["SOURCE_RESULT_VALUES"]},
         },
     )
+
+
+def _question_input_use_schema() -> dict[str, object]:
+    return {
+        "oneOf": [
+            _question_input_use_variant(
+                provider_output.QuestionInputOwnerKind.GROUP_KEY,
+            ),
+            _question_input_use_variant(
+                provider_output.QuestionInputOwnerKind.POPULATION_TESTS,
+                include_use_id=True,
+            ),
+            _question_input_use_variant(
+                provider_output.QuestionInputOwnerKind.RESULT_LIMIT,
+            ),
+        ]
+    }
+
+
+def _question_input_use_variant(
+    owner_kind: provider_output.QuestionInputOwnerKind,
+    *,
+    include_use_id: bool = False,
+) -> dict[str, object]:
+    properties: dict[str, object] = {
+        "input_ref": {"type": "string", "minLength": 1},
+        "owner_kind": {"enum": [owner_kind.value]},
+    }
+    if include_use_id:
+        properties["use_id"] = {"type": "string", "minLength": 1}
+    return provider_output.QuestionInputUseOutput.schema(properties)
 
 
 def _question_input_schema(

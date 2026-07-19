@@ -6,6 +6,13 @@ from dataclasses import dataclass
 from typing import Optional
 
 from fervis.lookup.provider_contract import ProviderObject, ProviderOutput
+from fervis.types.enums import StrEnum
+
+
+class QuestionInputOwnerKind(StrEnum):
+    GROUP_KEY = "GROUP_KEY"
+    POPULATION_TESTS = "POPULATION_TESTS"
+    RESULT_LIMIT = "RESULT_LIMIT"
 
 
 @dataclass(frozen=True)
@@ -58,11 +65,11 @@ class AnswerOutputOutput(ProviderOutput):
 
 @dataclass(frozen=True)
 class AnswerPopulationMembershipTestOutput(ProviderOutput):
+    question_input_use_refs: tuple[str, ...]
     test_id: str
     kind: str
     polarity: str
     test_question: str
-    owned_question_input_refs: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -87,7 +94,6 @@ class AnswerSubjectOutput(ProviderOutput):
 class GroupKeyOutput(ProviderOutput):
     description: str
     domain: str
-    question_input_refs: Optional[tuple[str, ...]] = None
 
 
 @dataclass(frozen=True)
@@ -97,13 +103,20 @@ class AnswerExpressionOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
+class QuestionInputUseOutput(ProviderOutput):
+    input_ref: str
+    owner_kind: str
+    use_id: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class AnswerRequestOutput(ProviderOutput):
     answer_fact: str
     answer_expression: AnswerExpressionOutput
+    question_input_uses: tuple[ProviderObject, ...]
     answer_subject: AnswerSubjectOutput
     answer_population: AnswerPopulationOutput
     answer_outputs: tuple[AnswerOutputOutput, ...]
-    used_question_inputs: tuple[str, ...]
 
 
 @dataclass(frozen=True)
