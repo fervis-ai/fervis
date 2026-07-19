@@ -1368,6 +1368,27 @@ def test_openai_adapter_strips_validator_only_schema_metadata():
     ) == (True, False, {"type": "string"})
 
 
+def test_openai_adapter_leaves_array_uniqueness_to_local_validation():
+    schema = {
+        "type": "array",
+        "items": {"type": "string", "enum": ["first", "second"]},
+        "minItems": 1,
+        "maxItems": 2,
+        "uniqueItems": True,
+    }
+
+    projected = openai_compatible_loop._openai_strict_schema(schema)
+
+    assert schema["uniqueItems"] is True
+    assert "uniqueItems" not in projected
+    assert projected == {
+        "type": "array",
+        "items": {"type": "string", "enum": ["first", "second"]},
+        "minItems": 1,
+        "maxItems": 2,
+    }
+
+
 def test_anthropic_adapter_projects_one_of_to_supported_strict_schema():
     runtime = AnthropicLoopRuntime(config=_anthropic_test_config())
     payload = runtime.request_payload(

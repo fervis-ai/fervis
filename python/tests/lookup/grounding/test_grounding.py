@@ -31,8 +31,11 @@ from fervis.lookup.grounding.model import (
     GroundingCompatibilityResult,
     GroundingTerminalKind,
     GroundedValueCertificationMethod,
+    IdentifierKind,
     InputBindingCompatibility,
     InputBindingOption,
+    NO_SHOWN_RESOURCE_TYPE,
+    ResourceTypeMatch,
     ResolverRequestValue,
     resolver_fit_question_for_option,
 )
@@ -302,6 +305,24 @@ class _NoCompatibleResolverGroundingModel:
         }
 
 
+class _NoShownResourceTypeGroundingModel:
+    def generate(self, **kwargs):
+        prompt = str(kwargs.get("prompt") or "")
+        arguments = _grounding_review_arguments(prompt, selected_by_input={})
+        for review in arguments["known_input_binding_reviews"].values():
+            review["resource_type_x"] = NO_SHOWN_RESOURCE_TYPE
+            for option_review in review["option_reviews"].values():
+                option_review["resource_type_match"] = (
+                    ResourceTypeMatch.DIFFERENT_RESOURCE_TYPE.value
+                )
+        return {
+            "answer": json.dumps(
+                {"tool": "submit_grounding", "arguments": arguments}
+            ),
+            "usage": {},
+        }
+
+
 class _EndpointDataAccess:
     def __init__(self, responses):
         self.responses = responses
@@ -367,9 +388,31 @@ def _grounding_review_arguments(
         selected = selected_by_input.get(known_input_id, ())
         positive_ids = {selected} if isinstance(selected, str) else set(selected)
         lookup_text = task["lookup_text"]
+        options_by_id = {
+            option["binding_option_id"]: option
+            for option in task["binding_options"]
+        }
+        selected_resource_types = {
+            options_by_id[option_id]["resource_type"] for option_id in positive_ids
+        }
+        resource_type_x = (
+            next(iter(selected_resource_types))
+            if len(selected_resource_types) == 1
+            else task["shown_resource_types"][0]
+        )
         reviews[known_input_id] = {
+            "resource_type_basis": "The input identifies the selected resource type.",
+            "resource_type_x": resource_type_x,
+            "identifier_kind_basis": "The lookup is a descriptive identifier.",
+            "identifier_kind": "DESCRIPTIVE",
             "option_reviews": {
                 option["binding_option_id"]: {
+                    "resource_type": option["resource_type"],
+                    "resource_type_match": (
+                        "SAME_RESOURCE_TYPE"
+                        if option["resource_type"] == resource_type_x
+                        else "DIFFERENT_RESOURCE_TYPE"
+                    ),
                     "resolver_fit_question": option["resolver_fit_question"],
                     "because": "The read capability was reviewed by the test model.",
                     "request_values": (
@@ -532,42 +575,189 @@ def test_grounding_prompt_instructs_binding_id_copying_verbatim():
     assert "Known input binding tasks:" in prompt
     assert "<known_input_binding_tasks>" in prompt
     assert '<known_input id="input_location"' in prompt
+    assert "<shown_resource_types>" in prompt
+    assert "<resource_type>flow</resource_type>" in prompt
     assert "<binding_option" in prompt
     assert "<api_read" in prompt
     assert '"binding_options":' not in prompt
-    assert (
-        'For CAN_RESOLVE_LOOKUP_TEXT, write the because field as: "The route can '
-        "look up {lookup_text} using {selected request parameters} because {what "
-        "those parameters accept or search}. If returned, {selected response fields} "
-        "can exact-match {lookup_text} on the returned {resource}. The route returns "
-        '{canonical result}."' in prompt
-    )
-    assert (
-        'For CANNOT_RESOLVE_LOOKUP_TEXT, write the because field as: "The route '
-        "cannot resolve {lookup_text}. Its shown request parameters {can/cannot} "
-        "perform this lookup because {what those parameters accept or search}. If "
-        "returned, {shown response fields} {can/cannot} exact-match {lookup_text} on "
-        "the returned {resource}. The route returns {canonical result}." in prompt
-    )
-    assert "At least one stated mechanic must be cannot." in prompt
+    assert "Write resource_type_basis first" in prompt
+    assert "set resource_type_x to exactly one shown_resource_type" in prompt
+    assert "SAME_RESOURCE_TYPE means it exactly equals resource_type_x" in prompt
+    assert "Within each known-input review, write fields in this order: resource_type_basis, resource_type_x, identifier_kind_basis, identifier_kind, option_reviews." in prompt
+    assert "Include each selected field exactly once." not in prompt
     assert "can/cannot identify the returned" not in prompt
     assert "because briefly explains the capability decision" not in prompt
     schema = GroundingTurnPrompt(request).response_contract().provider_schema
     bindings_schema = schema["properties"]["known_input_binding_reviews"]
     assert bindings_schema["type"] == "object"
     assert bindings_schema["required"] == [task.known_input_id]
-    option_reviews = bindings_schema["properties"][task.known_input_id]["properties"][
-        "option_reviews"
+    known_input_review = bindings_schema["properties"][task.known_input_id]
+    assert list(known_input_review["properties"]) == [
+        "resource_type_basis",
+        "resource_type_x",
+        "identifier_kind_basis",
+        "identifier_kind",
+        "option_reviews",
     ]
+    assert known_input_review["properties"]["resource_type_x"]["enum"] == [
+        "flow",
+        NO_SHOWN_RESOURCE_TYPE,
+    ]
+    option_reviews = known_input_review["properties"]["option_reviews"]
     assert option_reviews["required"] == [option.id for option in task.options]
-    first_review = option_reviews["properties"][task.options[0].id]["oneOf"][0]
+    first_review = option_reviews["properties"][task.options[0].id]
+    assert "oneOf" not in first_review
     assert list(first_review["properties"]) == [
+        "resource_type",
+        "resource_type_match",
         "resolver_fit_question",
         "because",
+        "decision",
         "request_values",
         "response_match_alternatives",
-        "decision",
     ]
+    match_alternatives = first_review["properties"]["response_match_alternatives"]
+    assert match_alternatives["type"] == "array"
+    assert match_alternatives["maxItems"] == len(match_alternatives["items"]["enum"])
+    assert match_alternatives["uniqueItems"] is True
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    (
+        (
+            lambda review: review.update(resource_type_x="staff"),
+            "resource_type_x was not shown",
+        ),
+        (
+            lambda review: next(iter(review["option_reviews"].values())).update(
+                resource_type="staff"
+            ),
+            "option resource_type mismatch",
+        ),
+        (
+            lambda review: next(iter(review["option_reviews"].values())).update(
+                resource_type_match=ResourceTypeMatch.DIFFERENT_RESOURCE_TYPE.value
+            ),
+            "resource_type_match contradicts resource types",
+        ),
+    ),
+)
+def test_grounding_parser_rejects_inconsistent_resource_type_contract(
+    mutate,
+    message: str,
+) -> None:
+    catalog = RelationCatalog(reads=(_location_read(),))
+    [task] = reference_input_binding_tasks(
+        _question_contract("Nairobi", description="location"),
+        resolver_catalog=catalog,
+        resolver_sources_by_known_input={
+            "input_location": build_row_source_catalog(catalog),
+        },
+    )
+    request = GroundingRequest(
+        question="How many stores are in Nairobi?",
+        tasks=(task,),
+        resolver_catalog=catalog,
+    )
+    payload = _grounding_review_arguments(
+        _grounding_prompt(request),
+        selected_by_input={},
+    )
+    review = payload["known_input_binding_reviews"][task.known_input_id]
+    mutate(review)
+
+    with pytest.raises(ValueError, match=message):
+        parse_grounding_compatibility(payload, request=request)
+
+
+def test_grounding_parser_accepts_no_shown_resource_type_only_with_negative_options(
+) -> None:
+    catalog = RelationCatalog(reads=(_location_read(),))
+    [task] = reference_input_binding_tasks(
+        _question_contract("Nairobi", description="place"),
+        resolver_catalog=catalog,
+        resolver_sources_by_known_input={
+            "input_location": build_row_source_catalog(catalog),
+        },
+    )
+    request = GroundingRequest(
+        question="How many stores are in Nairobi?",
+        tasks=(task,),
+        resolver_catalog=catalog,
+    )
+    payload = _grounding_review_arguments(
+        _grounding_prompt(request),
+        selected_by_input={},
+    )
+    review = payload["known_input_binding_reviews"][task.known_input_id]
+    review["resource_type_x"] = NO_SHOWN_RESOURCE_TYPE
+    for option_review in review["option_reviews"].values():
+        option_review["resource_type_match"] = (
+            ResourceTypeMatch.DIFFERENT_RESOURCE_TYPE.value
+        )
+
+    result = parse_grounding_compatibility(payload, request=request)
+
+    assert result.compatibilities == (
+        InputBindingCompatibility(known_input_id=task.known_input_id, bindings=()),
+    )
+
+
+def test_grounding_selects_one_resource_type_before_reviewing_resolver_mechanics(
+) -> None:
+    catalog = RelationCatalog(
+        reads=(_staff_read(), _staff_detail_read(), _location_detail_read())
+    )
+    [task] = reference_input_binding_tasks(
+        _staff_question_contract(
+            "staff-1",
+            description="staff identifier",
+            field_label_text="staff_id",
+        ),
+        resolver_catalog=catalog,
+        resolver_sources_by_known_input={
+            "input_staff": build_row_source_catalog(catalog),
+        },
+    )
+    option_by_read = {
+        option.candidate.resolver_read_id: option for option in task.options
+    }
+    request = GroundingRequest(
+        question="How many sales did the staff with staff_id staff-1 sell?",
+        tasks=(task,),
+        resolver_catalog=catalog,
+    )
+    payload = _grounding_review_arguments(
+        _grounding_prompt(request),
+        selected_by_input={
+            task.known_input_id: option_by_read["get_staff_detail"].id,
+        },
+    )
+    review = payload["known_input_binding_reviews"][task.known_input_id]
+    review["identifier_kind_basis"] = "staff-1 is the supplied primary key."
+    review["identifier_kind"] = IdentifierKind.PRIMARY_KEY.value
+
+    result = parse_grounding_compatibility(payload, request=request)
+
+    assert review["resource_type_x"] == "staff"
+    assert {
+        option_by_read[read_id].candidate.entity_kind: option_review[
+            "resource_type_match"
+        ]
+        for read_id, option_review in (
+            (
+                option.candidate.resolver_read_id,
+                review["option_reviews"][option.id],
+            )
+            for option in task.options
+        )
+    } == {
+        "staff": ResourceTypeMatch.SAME_RESOURCE_TYPE.value,
+        "location": ResourceTypeMatch.DIFFERENT_RESOURCE_TYPE.value,
+    }
+    [binding] = result.compatibilities[0].bindings
+    assert binding.option_id == option_by_read["get_staff_detail"].id
 
 
 @pytest.mark.parametrize(
@@ -627,6 +817,34 @@ def test_grounding_schema_rejects_lookup_value_for_incompatible_parameter_type(
         )
 
 
+def test_grounding_schema_rejects_repeated_response_match_field() -> None:
+    catalog = RelationCatalog(reads=(_uuid_person_read(),))
+    [task] = reference_input_binding_tasks(
+        _question_contract(
+            "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            description="person",
+        ),
+        resolver_catalog=catalog,
+        resolver_sources_by_known_input={
+            "input_location": build_row_source_catalog(catalog),
+        },
+    )
+    [option] = task.options
+    request = GroundingRequest(
+        question="Which person?",
+        tasks=(task,),
+        resolver_catalog=catalog,
+    )
+    schema = GroundingTurnPrompt(request).response_contract().provider_schema
+    option_schema = schema["properties"]["known_input_binding_reviews"][
+        "properties"
+    ][task.known_input_id]["properties"]["option_reviews"]["properties"][option.id]
+    match_schema = option_schema["properties"]["response_match_alternatives"]
+
+    with pytest.raises(ValidationError):
+        validate(["data.person_id", "data.person_id"], match_schema)
+
+
 def test_grounding_schema_requires_no_default_resolver_parameters() -> None:
     read = _staff_detail_read()
     catalog = RelationCatalog(reads=(read,))
@@ -648,9 +866,7 @@ def test_grounding_schema_requires_no_default_resolver_parameters() -> None:
     option_schema = schema["properties"]["known_input_binding_reviews"][
         "properties"
     ]["input_staff"]["properties"]["option_reviews"]["properties"][option.id]
-    request_values_schema = option_schema["oneOf"][0]["properties"][
-        "request_values"
-    ]
+    request_values_schema = option_schema["properties"]["request_values"]["anyOf"][0]
 
     assert request_values_schema["type"] == "object"
     assert request_values_schema["required"] == ["get_staff_detail.path.staff_id"]
@@ -802,8 +1018,7 @@ def test_grounding_does_not_offer_related_resource_fields_as_match_fields() -> N
     ]["input_location"]["properties"]["option_reviews"]["properties"][
         option.id
     ]
-    positive_review = option_review["oneOf"][0]
-    legal_match_paths = positive_review["properties"][
+    legal_match_paths = option_review["properties"][
         "response_match_alternatives"
     ]["items"]["enum"]
     assert "data.name" in legal_match_paths
@@ -842,8 +1057,14 @@ def test_selected_staff_lookup_fields_produce_one_canonical_staff_key() -> None:
             "known_time_resolutions": {},
             "known_input_binding_reviews": {
                 "input_staff": {
+                    "resource_type_basis": "Azraah identifies a staff member.",
+                    "resource_type_x": "staff",
+                    "identifier_kind_basis": "Azraah is a descriptive name.",
+                    "identifier_kind": "DESCRIPTIVE",
                     "option_reviews": {
                         option.id: {
+                            "resource_type": "staff",
+                            "resource_type_match": "SAME_RESOURCE_TYPE",
                             "resolver_fit_question": resolver_fit_question_for_option(
                                 task=task,
                                 option=option,
@@ -1072,8 +1293,14 @@ def test_resolver_verifies_the_typed_request_value_against_typed_response_fields
             "known_time_resolutions": {},
             "known_input_binding_reviews": {
                 "input_location": {
+                    "resource_type_basis": "The UUID identifies a person.",
+                    "resource_type_x": "person",
+                    "identifier_kind_basis": "The lookup is a primary key.",
+                    "identifier_kind": "PRIMARY_KEY",
                     "option_reviews": {
                         option.id: {
+                            "resource_type": "person",
+                            "resource_type_match": "SAME_RESOURCE_TYPE",
                             "resolver_fit_question": resolver_fit_question_for_option(
                                 task=task,
                                 option=option,
@@ -1199,6 +1426,34 @@ def test_named_reference_with_no_positive_resolver_requires_clarification() -> N
             timezone="Africa/Nairobi",
         ),
         model_port=_NoCompatibleResolverGroundingModel(),
+        provider="test",
+        model_key="test",
+        max_thinking_tokens=0,
+    )
+
+    [issue] = output.ledger.issues
+    assert issue.kind is GroundingTerminalKind.UNSUPPORTED_REFERENCE
+    assert issue.known_input_id == "input_location"
+
+
+def test_no_shown_resource_type_requires_clarification() -> None:
+    catalog = RelationCatalog(reads=(_location_read(),))
+    output = ground_question_inputs(
+        question="How many stores are in Nairobi?",
+        question_contract=_question_contract("Nairobi", description="place"),
+        full_catalog=catalog,
+        resolver_selections=(
+            EntityTargetResolverSelection(
+                target_id="input_location",
+                catalog_search_terms=("location",),
+                selected_read_ids=("list_location_list",),
+            ),
+        ),
+        runtime_values=RuntimeValueContext(
+            runtime_date="2026-07-15",
+            timezone="Africa/Nairobi",
+        ),
+        model_port=_NoShownResourceTypeGroundingModel(),
         provider="test",
         model_key="test",
         max_thinking_tokens=0,

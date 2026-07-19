@@ -5,7 +5,10 @@ from __future__ import annotations
 from fervis.lookup.grounding import provider_contract as provider_output
 from fervis.lookup.grounding.model import (
     GroundingRequest,
+    IdentifierKind,
     LookupTextResolutionDecision,
+    NO_SHOWN_RESOURCE_TYPE,
+    ResourceTypeMatch,
     resolver_fit_question_for_option,
 )
 from fervis.lookup.grounding.surface import (
@@ -32,6 +35,22 @@ def build_grounding_schema(request: GroundingRequest) -> dict[str, object]:
         review_properties[task.known_input_id] = (
             provider_output.KnownInputBindingReviewOutput.schema(
                 {
+                    "resource_type_basis": {"type": "string", "minLength": 1},
+                    "resource_type_x": {
+                        "type": "string",
+                        "enum": [
+                            *task.shown_resource_types,
+                            NO_SHOWN_RESOURCE_TYPE,
+                        ],
+                    },
+                    "identifier_kind_basis": {
+                        "type": "string",
+                        "minLength": 1,
+                    },
+                    "identifier_kind": {
+                        "type": "string",
+                        "enum": [kind.value for kind in IdentifierKind],
+                    },
                     "option_reviews": {
                         "type": "object",
                         "additionalProperties": False,
@@ -82,66 +101,75 @@ def _option_review_schema(
     surface: ResolverOptionSurface,
     lookup_text: str,
 ) -> dict[str, object]:
-    common = {
+    properties: dict[str, object] = {
+        "resource_type": {
+            "type": "string",
+            "enum": [surface.option.candidate.entity_kind],
+        },
+        "resource_type_match": {
+            "type": "string",
+            "enum": [match.value for match in ResourceTypeMatch],
+        },
         "resolver_fit_question": {
             "type": "string",
             "enum": [resolver_fit_question],
         },
         "because": {"type": "string", "minLength": 1},
     }
-    variants = []
-    if surface.response_match_fields and surface.required_request_parameters_accept(
-        lookup_text=lookup_text
-    ):
-        variants.append(
-            provider_output.OptionReviewOutput.schema(
-                {
-                    **common,
-                    "request_values": _request_values_schema(
-                        surface,
-                        lookup_text=lookup_text,
-                    ),
-                    "response_match_alternatives": {
-                        "type": "array",
-                        "items": {
-                            "type": "string",
-                            "enum": [
-                                field.path for field in surface.response_match_fields
-                            ],
-                        },
-                        "minItems": 1,
-                    },
-                    "decision": {
-                        "type": "string",
-                        "enum": [
-                            LookupTextResolutionDecision.CAN_RESOLVE_LOOKUP_TEXT.value
-                        ],
-                    },
-                }
-            )
+    positive_allowed = (
+        bool(surface.response_match_fields)
+        and surface.required_request_parameters_accept(
+            lookup_text=lookup_text
         )
-    variants.append(
-        provider_output.OptionReviewOutput.schema(
+    )
+    if positive_allowed:
+        positive_request_values = _request_values_schema(
+            surface,
+            lookup_text=lookup_text,
+        )
+        properties.update(
             {
-                **common,
+                "decision": {
+                    "type": "string",
+                    "enum": [
+                        LookupTextResolutionDecision.CAN_RESOLVE_LOOKUP_TEXT.value,
+                        LookupTextResolutionDecision.CANNOT_RESOLVE_LOOKUP_TEXT.value,
+                    ],
+                },
                 "request_values": {
-                    **_empty_object_schema(),
+                    "anyOf": [positive_request_values, _empty_object_schema()],
                 },
                 "response_match_alternatives": {
                     "type": "array",
-                    "items": {"type": "string"},
-                    "maxItems": 0,
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            field.path for field in surface.response_match_fields
+                        ],
+                    },
+                    "maxItems": len(surface.response_match_fields),
+                    "uniqueItems": True,
                 },
+            }
+        )
+    else:
+        properties.update(
+            {
                 "decision": {
                     "type": "string",
                     "enum": [
                         LookupTextResolutionDecision.CANNOT_RESOLVE_LOOKUP_TEXT.value
                     ],
                 },
+                "request_values": _empty_object_schema(),
+                "response_match_alternatives": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "maxItems": 0,
+                },
             }
         )
-    )
-    return {"oneOf": variants}
+    return provider_output.OptionReviewOutput.schema(properties)
 
 
 def _request_values_schema(

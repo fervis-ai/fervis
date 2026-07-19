@@ -30,6 +30,19 @@ class LookupTextResolutionDecision(StrEnum):
     CANNOT_RESOLVE_LOOKUP_TEXT = "CANNOT_RESOLVE_LOOKUP_TEXT"
 
 
+class IdentifierKind(StrEnum):
+    PRIMARY_KEY = "PRIMARY_KEY"
+    DESCRIPTIVE = "DESCRIPTIVE"
+
+
+class ResourceTypeMatch(StrEnum):
+    SAME_RESOURCE_TYPE = "SAME_RESOURCE_TYPE"
+    DIFFERENT_RESOURCE_TYPE = "DIFFERENT_RESOURCE_TYPE"
+
+
+NO_SHOWN_RESOURCE_TYPE = "NO_SHOWN_RESOURCE_TYPE"
+
+
 @dataclass(frozen=True)
 class ExpectedInputIdentity:
     entity_kind: str
@@ -166,6 +179,10 @@ class KnownInputBindingTask:
         if len(option_ids) != len(set(option_ids)):
             raise ValueError("known input binding task repeats a resolver option")
 
+    @property
+    def shown_resource_types(self) -> tuple[str, ...]:
+        return tuple(sorted({option.candidate.entity_kind for option in self.options}))
+
 
 @dataclass(frozen=True)
 class GroundingRequestedFactCard:
@@ -253,13 +270,12 @@ def resolver_fit_question_for_option(
     option: InputBindingOption,
 ) -> str:
     candidate = option.candidate
-    meaning = (
-        task.known_input_description or task.field_label_text or "the supplied value"
-    )
     return (
-        f"Can read {candidate.resolver_read_id} resolve {task.lookup_text} as the "
-        f"returned resource and produce {candidate.result_surface} for target "
-        f"meaning {meaning}?"
+        f"Does read {candidate.resolver_read_id}, which returns resource_type "
+        f"{candidate.entity_kind}, return the resource type described by the "
+        "input-wide resource_type_x? If not, it cannot resolve "
+        f"{task.lookup_text}. If it does, can this route resolve {task.lookup_text} "
+        "under the input-wide identifier_kind?"
     )
 
 

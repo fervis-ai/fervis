@@ -66,6 +66,7 @@ class ResolverOptionSurface:
             ]
         return {
             "binding_option_id": self.option.id,
+            "resource_type": candidate.entity_kind,
             "api_read": read_payload,
             "canonical_result": {
                 "entity_kind": candidate.entity_kind,

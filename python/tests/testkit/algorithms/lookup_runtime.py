@@ -63,6 +63,7 @@ from tests.lookup.orchestrator._payloads import (
 )
 from tests.lookup.orchestrator._runtime_ports import (
     _grounding_payload_from_prompt,
+    _grounding_review_for_task,
     _time_resolution_payload_from_prompt,
 )
 from tests.lookup.prompt_sections import prompt_section_payload
@@ -417,36 +418,14 @@ class _VariantGroundingPlannerPort:
             "known_input_binding_tasks"
         ]
         reviews = {
-            task["known_input_id"]: {
-                "option_reviews": {
-                    option["binding_option_id"]: {
-                        "resolver_fit_question": option["resolver_fit_question"],
-                        "because": (
-                            "The staff route can search the supplied staff name."
-                            if option["api_read"]["read_id"] == "list_staff_list"
-                            else "This route does not return the named staff entity."
-                        ),
-                        "request_values": (
-                            {
-                                "list_staff_list.query.name": task["lookup_text"],
-                            }
-                            if option["api_read"]["read_id"] == "list_staff_list"
-                            else {}
-                        ),
-                        "response_match_alternatives": (
-                            ["data.first_name"]
-                            if option["api_read"]["read_id"] == "list_staff_list"
-                            else []
-                        ),
-                        "decision": (
-                            "CAN_RESOLVE_LOOKUP_TEXT"
-                            if option["api_read"]["read_id"] == "list_staff_list"
-                            else "CANNOT_RESOLVE_LOOKUP_TEXT"
-                        ),
-                    }
+            task["known_input_id"]: _grounding_review_for_task(
+                task,
+                compatible_option_ids={
+                    str(option["binding_option_id"])
                     for option in task["binding_options"]
-                }
-            }
+                    if option["api_read"]["read_id"] == "list_staff_list"
+                },
+            )
             for task in tasks
         }
         return {
@@ -628,54 +607,21 @@ def _grounding_payload_for_compatible_resolver_reads(
     return {
         "known_time_resolutions": _time_resolution_payload_from_prompt(prompt),
         "known_input_binding_reviews": {
-            task["known_input_id"]: {
-                "option_reviews": {
-                    option["binding_option_id"]: {
-                        "resolver_fit_question": option["resolver_fit_question"],
-                        "because": "The declared route capability was reviewed.",
-                        "request_values": (
-                            _scripted_resolver_request_values(
-                                option,
-                                lookup_text=str(task["lookup_text"]),
-                            )
-                            if _grounding_option_is_compatible(
-                                option,
-                                known_input_id=str(task["known_input_id"]),
-                                compatible_by_input=compatible_by_input,
-                                compatible_surfaces_by_input=(
-                                    compatible_surfaces_by_input
-                                ),
-                            )
-                            else {}
-                        ),
-                        "response_match_alternatives": (
-                            _scripted_resolver_match_fields(option)
-                            if _grounding_option_is_compatible(
-                                option,
-                                known_input_id=str(task["known_input_id"]),
-                                compatible_by_input=compatible_by_input,
-                                compatible_surfaces_by_input=(
-                                    compatible_surfaces_by_input
-                                ),
-                            )
-                            else []
-                        ),
-                        "decision": (
-                            "CAN_RESOLVE_LOOKUP_TEXT"
-                            if _grounding_option_is_compatible(
-                                option,
-                                known_input_id=str(task["known_input_id"]),
-                                compatible_by_input=compatible_by_input,
-                                compatible_surfaces_by_input=(
-                                    compatible_surfaces_by_input
-                                ),
-                            )
-                            else "CANNOT_RESOLVE_LOOKUP_TEXT"
-                        ),
-                    }
+            task["known_input_id"]: _grounding_review_for_task(
+                task,
+                compatible_option_ids={
+                    str(option["binding_option_id"])
                     for option in task["binding_options"]
-                }
-            }
+                    if _grounding_option_is_compatible(
+                        option,
+                        known_input_id=str(task["known_input_id"]),
+                        compatible_by_input=compatible_by_input,
+                        compatible_surfaces_by_input=compatible_surfaces_by_input,
+                    )
+                },
+                request_values_for_option=_scripted_resolver_request_values,
+                match_fields_for_option=_scripted_resolver_match_fields,
+            )
             for task in tasks
         },
     }

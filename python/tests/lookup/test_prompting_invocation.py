@@ -69,9 +69,9 @@ from fervis.lookup.plan_selection import (
 
 
 _APPROVED_CHARS = {
-    "question contract": (364, 18074, 27161),
+    "question contract": (364, 18398, 27489),
     "query enrichment": (364, 5185, 7408),
-    "grounding": (364, 6620, 9483),
+    "grounding": (364, 6804, 9800),
     "source binding": (364, 16485, 20357),
     "pattern fact planning": (364, 3497, 5311),
 }
@@ -137,6 +137,26 @@ def test_question_contract_prompt_states_relational_ownership_together():
     )
 
     assert ownership in invocation.prompt_text
+
+
+def test_question_contract_prompt_groups_alternative_predicate_operands():
+    invocation = next(
+        item for item in _turn_invocations() if item.turn_name == "question contract"
+    )
+
+    assert (
+        "Question inputs are predicate operands, not separate tests. One predicate "
+        "may own one or more inputs; the number of inputs does not determine the "
+        "number of tests."
+    ) in invocation.prompt_text
+    assert (
+        "When multiple inputs are alternative values for the same predicate, "
+        "create one test owning all those inputs."
+    ) in invocation.prompt_text
+    assert (
+        "A value identifying a particular subject member is a separate "
+        "EXPLICIT_USER_CONSTRAINT."
+    ) not in invocation.prompt_text
 
 
 def test_source_binding_prompt_distinguishes_ranked_physical_operations():

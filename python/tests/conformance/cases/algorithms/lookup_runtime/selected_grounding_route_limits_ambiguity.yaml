@@ -1,5 +1,5 @@
 id: selected_grounding_route_limits_ambiguity
-description: Source binding chooses the retained read's semantic input target from multiple positive resolver results.
+description: A grounded Area identity constrains the retained Location read through its declared Area reference.
 kind: algorithm
 algorithm: lookup.orchestration
 input:
@@ -31,7 +31,6 @@ input:
     compatible_resolver_reads:
       input_1:
       - list_area_list
-      - list_location_list
   catalog:
     reads:
     - id: list_location_list

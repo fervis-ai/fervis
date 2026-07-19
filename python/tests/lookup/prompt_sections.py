@@ -108,6 +108,13 @@ def _grounding_binding_task_payload(
     task = _attrs(element, attr_map={"id": "known_input_id"})
     if question_text:
         task["question_text"] = question_text
+    shown_resource_types = element.find("shown_resource_types")
+    if shown_resource_types is not None:
+        task["shown_resource_types"] = [
+            str(child.text or "")
+            for child in shown_resource_types
+            if child.tag == "resource_type"
+        ]
     task["binding_options"] = [
         _grounding_binding_option_payload(child)
         for child in element
@@ -120,6 +127,7 @@ def _grounding_binding_option_payload(
     element: ElementTree.Element,
 ) -> dict[str, Any]:
     option = _attrs(element, attr_map={"id": "binding_option_id"})
+    option["resource_type"] = _child_text(element, "resource_type")
     option["resolver_fit_question"] = _child_text(
         element,
         "resolver_fit_question",

@@ -419,6 +419,18 @@ def grounding_binding_tasks_xml(payload: dict[str, Any]) -> str:
             "value_meaning_hint": task.get("value_meaning_hint"),
         }
         lines.append(f"  <known_input{_xml_attrs(task_attrs)}>")
+        shown_resource_types = _array(task.get("shown_resource_types"))
+        if shown_resource_types:
+            lines.append("    <shown_resource_types>")
+            for resource_type in shown_resource_types:
+                lines.extend(
+                    _text_node_xml_lines(
+                        "resource_type",
+                        resource_type,
+                        indent="      ",
+                    )
+                )
+            lines.append("    </shown_resource_types>")
         for option in _array(task.get("binding_options")):
             if not isinstance(option, Mapping):
                 continue
@@ -427,6 +439,13 @@ def grounding_binding_tasks_xml(payload: dict[str, Any]) -> str:
                 "purpose": option.get("purpose"),
             }
             lines.append(f"    <binding_option{_xml_attrs(option_attrs)}>")
+            lines.extend(
+                _text_node_xml_lines(
+                    "resource_type",
+                    option.get("resource_type"),
+                    indent="      ",
+                )
+            )
             lines.extend(
                 _text_node_xml_lines(
                     "resolver_fit_question",

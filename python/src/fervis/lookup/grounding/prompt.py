@@ -28,7 +28,7 @@ GROUNDING_TOOL_NAME = "submit_grounding"
 
 class GroundingTurnPrompt(TurnPromptBase):
     turn_name = "grounding"
-    turn_task = "resolve time inputs and review named-reference resolver options"
+    turn_task = "resolve time inputs and review identity resolver options"
 
     def __init__(self, request: GroundingRequest) -> None:
         self.request = request
@@ -63,9 +63,6 @@ class GroundingTurnPrompt(TurnPromptBase):
             "Grounding Objective",
             (
                 "Resolve time inputs and review the resolver options available for each reference input.",
-                "Review every binding option independently. More than one option may be positive.",
-                "A positive review means only that the read can validate or match the supplied lookup text and produce its declared canonical result through the selected request values and exact-match fields.",
-                "Do not choose one resolver. Do not decide which answer read will consume the result. Do not execute a resolver read during this turn.",
                 "known_input_text is the original question span. lookup_text and time_expression are the resolved values to search, match, or compile.",
             ),
         )
@@ -100,17 +97,16 @@ class GroundingTurnPrompt(TurnPromptBase):
         return builder.instruction_block(
             "Resolver Compatibility",
             (
-                "A route can resolve lookup_text only when both mechanics work: its selected declared request parameters can perform this lookup, and its selected returned-resource fields can exact-match lookup_text on the returned resource.",
-                "Use CAN_RESOLVE_LOOKUP_TEXT when both mechanics work. Use CANNOT_RESOLVE_LOOKUP_TEXT when either mechanic fails.",
+                "Use question_text, field_label_text, and value_meaning_hint as catalog-blind semantic evidence. Write resource_type_basis first, stating which resource the input identifies. Then set resource_type_x to exactly one shown_resource_type. Use NO_SHOWN_RESOURCE_TYPE only when none represents that resource.",
+                "Keep resource_type_x fixed across every option. Copy each option's shown resource_type first. SAME_RESOURCE_TYPE means it exactly equals resource_type_x; otherwise use DIFFERENT_RESOURCE_TYPE.",
+                "SAME_RESOURCE_TYPE means an instance returned by the resolver is itself an instance of resource_type_x. A resource that references, contains information about, records activity for, or otherwise relates to resource_type_x is DIFFERENT_RESOURCE_TYPE.",
+                "Before option_reviews, write identifier_kind_basis and then identifier_kind once for the known input. Use PRIMARY_KEY when lookup_text is intended as the complete primary-key value of resource_type_x. Use DESCRIPTIVE when lookup_text is a non-primary-key value used to refer to resource_type_x.",
+                "DIFFERENT_RESOURCE_TYPE always requires CANNOT_RESOLVE_LOOKUP_TEXT. Only SAME_RESOURCE_TYPE proceeds to resolver_fit_question and route-mechanics assessment.",
                 "For every option, answer the shown resolver_fit_question.",
-                "A positive option must use the lookup text to identify the returned resource itself. An exact match in a field that describes another entity, category, or surrounding context does not identify the returned resource.",
-                "Use field_label_text and value_meaning_hint together to understand what the supplied text means. Both are catalog-blind approximations, not authoritative catalog names.",
-                "For a positive review, include every required request parameter with no default. Include an optional request parameter only when it performs the lookup. Key request_values by param_ref. Select every returned-resource field that may exactly equal lookup_text.",
-                "response_match_alternatives has OR semantics: an exact match in any selected field verifies the returned resource. Do not select fields that describe another entity, category, or surrounding context.",
-                "canonical_result identifies the returned resource's complete canonical key. Match fields establish which resource was named, but they never become computation values. Do not substitute a related resource's key.",
+                "An exact match in a field that describes another entity, category, or surrounding context does not identify the returned resource.",
+                "For a positive review, include every required request parameter with no default. Include an optional request parameter only when it performs the lookup. Key request_values by param_ref.",
+                "canonical_result identifies the returned resource's complete canonical key. Match fields never become computation values. Do not substitute a related resource's key.",
                 "Use question_text to interpret field_label_text and value_meaning_hint. Do not infer or decide final source use.",
-                "Judge business meaning, not word equality between the input hint and the returned entity kind.",
-                "Do not reject an option because its result might not fit the final answer source. Later stages own that decision.",
             ),
         )
 
@@ -124,10 +120,12 @@ class GroundingTurnPrompt(TurnPromptBase):
                 "Return known_time_resolutions as an object keyed by known_input_id and include every shown time input exactly once.",
                 "Return known_input_binding_reviews as an object keyed by known_input_id. Within each review, return option_reviews keyed by binding_option_id and include every shown binding option exactly once.",
                 "Copy all IDs and each resolver_fit_question exactly.",
-                'For CAN_RESOLVE_LOOKUP_TEXT, write the because field as: "The route can look up {lookup_text} using {selected request parameters} because {what those parameters accept or search}. If returned, {selected response fields} can exact-match {lookup_text} on the returned {resource}. The route returns {canonical result}."',
-                'For CANNOT_RESOLVE_LOOKUP_TEXT, write the because field as: "The route cannot resolve {lookup_text}. Its shown request parameters {can/cannot} perform this lookup because {what those parameters accept or search}. If returned, {shown response fields} {can/cannot} exact-match {lookup_text} on the returned {resource}. The route returns {canonical result}." At least one stated mechanic must be cannot.',
-                "Replace every template term with concrete text from the option. Write decision after because.",
-                "For CAN_RESOLVE_LOOKUP_TEXT, return request_values keyed by param_ref and at least one response_match_alternative.",
+                "Within each known-input review, write fields in this order: resource_type_basis, resource_type_x, identifier_kind_basis, identifier_kind, option_reviews.",
+                "Within each option review, write fields in this order: resource_type, resource_type_match, resolver_fit_question, because, decision, request_values, response_match_alternatives.",
+                'For CAN_RESOLVE_LOOKUP_TEXT, write because as: "{resource_type} represents {resource_type_x}. With identifier_kind={identifier_kind}, this route can resolve {lookup_text} because {route evidence}."',
+                'For CANNOT_RESOLVE_LOOKUP_TEXT, write because as either: "{resource_type} does not represent {resource_type_x}." or "{resource_type} represents {resource_type_x}, but with identifier_kind={identifier_kind}, this route cannot resolve {lookup_text} because {route evidence}."',
+                "Write decision after because.",
+                "For CAN_RESOLVE_LOOKUP_TEXT, return request_values keyed by param_ref and select at least one valid exact-match response field. For PRIMARY_KEY, only fields declared by canonical_result.components are valid. For DESCRIPTIVE, a field is valid only when its declared type and choices accept lookup_text and it describes the returned resource itself.",
                 "For CANNOT_RESOLVE_LOOKUP_TEXT, return an empty request_values object and an empty response_match_alternatives array.",
             ),
         )
@@ -166,6 +164,7 @@ class GroundingTurnPrompt(TurnPromptBase):
                     "lookup_text": task.lookup_text,
                     "field_label_text": task.field_label_text,
                     "value_meaning_hint": task.known_input_description,
+                    "shown_resource_types": list(task.shown_resource_types),
                     "question_text": self.request.question,
                     "binding_options": [
                         self._binding_option_payload(option, task=task)

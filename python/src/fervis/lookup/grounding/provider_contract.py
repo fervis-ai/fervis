@@ -37,15 +37,21 @@ class KnownTimeResolutionOutput(ProviderOutput):
 
 @dataclass(frozen=True)
 class OptionReviewOutput(ProviderOutput):
+    resource_type: str
+    resource_type_match: str
     resolver_fit_question: str
     because: str
+    decision: str
     request_values: dict[str, str | int | float | bool]
     response_match_alternatives: tuple[str, ...]
-    decision: str
 
 
 @dataclass(frozen=True)
 class KnownInputBindingReviewOutput(ProviderOutput):
+    resource_type_basis: str
+    resource_type_x: str
+    identifier_kind_basis: str
+    identifier_kind: str
     option_reviews: dict[str, OptionReviewOutput]
 
 

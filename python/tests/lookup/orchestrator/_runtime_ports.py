@@ -239,34 +239,102 @@ def _grounding_payload_from_prompt(prompt: str) -> dict[str, Any]:
             options,
             value_meaning_hint=str(task.get("value_meaning_hint") or ""),
         )
-        lookup_text = str(task["lookup_text"])
-        reviews[task["known_input_id"]] = {
-            "option_reviews": {
-                option["binding_option_id"]: {
-                    "resolver_fit_question": option["resolver_fit_question"],
-                    "because": "The declared route capability was reviewed.",
-                    "request_values": (
-                        _resolver_request_values(option, lookup_text=lookup_text)
-                        if option["binding_option_id"] == selected["binding_option_id"]
-                        else {}
-                    ),
-                    "response_match_alternatives": (
-                        _resolver_match_fields(option)
-                        if option["binding_option_id"] == selected["binding_option_id"]
-                        else []
-                    ),
-                    "decision": (
-                        "CAN_RESOLVE_LOOKUP_TEXT"
-                        if option["binding_option_id"] == selected["binding_option_id"]
-                        else "CANNOT_RESOLVE_LOOKUP_TEXT"
-                    ),
-                }
-                for option in options
-            }
-        }
+        reviews[task["known_input_id"]] = _grounding_review_for_task(
+            task,
+            compatible_option_ids={str(selected["binding_option_id"])},
+        )
     return {
         "known_time_resolutions": _time_resolution_payload_from_prompt(prompt),
         "known_input_binding_reviews": reviews,
+    }
+
+
+def _grounding_review_for_task(
+    task: dict[str, Any],
+    *,
+    compatible_option_ids: set[str],
+    request_values_for_option: Any = None,
+    match_fields_for_option: Any = None,
+) -> dict[str, Any]:
+    options = task["binding_options"]
+    compatible_options = tuple(
+        option
+        for option in options
+        if str(option["binding_option_id"]) in compatible_option_ids
+    )
+    if not compatible_options:
+        resource_type_x = "NO_SHOWN_RESOURCE_TYPE"
+        identifier_kind = "DESCRIPTIVE"
+    else:
+        resource_types = {str(option["resource_type"]) for option in compatible_options}
+        if len(resource_types) != 1:
+            raise AssertionError("scripted compatible resolvers return different types")
+        [resource_type_x] = resource_types
+        purposes = {str(option.get("purpose") or "") for option in compatible_options}
+        if len(purposes) != 1:
+            raise AssertionError("scripted compatible resolvers use different purposes")
+        identifier_kind = (
+            "PRIMARY_KEY" if purposes == {"identity_validation"} else "DESCRIPTIVE"
+        )
+    request_values = request_values_for_option or _resolver_request_values
+    match_fields = match_fields_for_option or _resolver_match_fields
+    lookup_text = str(task["lookup_text"])
+    return {
+        "resource_type_basis": f"The input identifies {resource_type_x}.",
+        "resource_type_x": resource_type_x,
+        "identifier_kind_basis": (
+            f"The input uses a {identifier_kind.lower()} identifier."
+        ),
+        "identifier_kind": identifier_kind,
+        "option_reviews": {
+            option["binding_option_id"]: _grounding_option_review(
+                option,
+                lookup_text=lookup_text,
+                resource_type_x=resource_type_x,
+                compatible=str(option["binding_option_id"]) in compatible_option_ids,
+                request_values_for_option=request_values,
+                match_fields_for_option=match_fields,
+            )
+            for option in options
+        },
+    }
+
+
+def _grounding_option_review(
+    option: dict[str, Any],
+    *,
+    lookup_text: str,
+    resource_type_x: str,
+    compatible: bool,
+    request_values_for_option: Any,
+    match_fields_for_option: Any,
+) -> dict[str, Any]:
+    resource_type = str(option["resource_type"])
+    same_resource_type = resource_type == resource_type_x
+    if compatible and not same_resource_type:
+        raise AssertionError("scripted compatible resolver returns a different type")
+    return {
+        "resource_type": resource_type,
+        "resource_type_match": (
+            "SAME_RESOURCE_TYPE"
+            if same_resource_type
+            else "DIFFERENT_RESOURCE_TYPE"
+        ),
+        "resolver_fit_question": option["resolver_fit_question"],
+        "because": "The declared route capability was reviewed.",
+        "decision": (
+            "CAN_RESOLVE_LOOKUP_TEXT"
+            if compatible
+            else "CANNOT_RESOLVE_LOOKUP_TEXT"
+        ),
+        "request_values": (
+            request_values_for_option(option, lookup_text=lookup_text)
+            if compatible
+            else {}
+        ),
+        "response_match_alternatives": (
+            match_fields_for_option(option) if compatible else []
+        ),
     }
 
 
