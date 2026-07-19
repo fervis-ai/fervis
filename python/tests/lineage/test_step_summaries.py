@@ -58,6 +58,9 @@ def test_source_binding_model_turn_summary_projects_metric_fit_basis() -> None:
         StepSummaryItem(
             text="metric_1: row-level payroll amount -> FITS_REQUESTED_ANSWER",
             is_explanation=True,
+            subject="metric_1",
+            disposition="FITS_REQUESTED_ANSWER",
+            basis="row-level payroll amount",
             path=("outcome", "metric_fit_bases", "fact_1", "metric_1", "fit_basis"),
         )
     )
@@ -156,6 +159,9 @@ def test_source_binding_model_turn_summary_projects_decision_basis() -> None:
             detail=StepSummaryDetail.VERBOSE,
             is_explanation=True,
             path=("answer_population", "match_basis_explanation"),
+            subject="answer_population",
+            disposition="selected",
+            basis="Payroll summary rows match the requested staff population.",
         ),
         StepSummaryItem(
             text=(
@@ -169,6 +175,9 @@ def test_source_binding_model_turn_summary_projects_decision_basis() -> None:
                 "answer_1",
                 "match_basis_explanation",
             ),
+            subject="answer_1",
+            disposition="choice_staff_name",
+            basis="staff_name identifies the returned staff.",
         ),
         StepSummaryItem(
             text=(
@@ -178,6 +187,9 @@ def test_source_binding_model_turn_summary_projects_decision_basis() -> None:
             detail=StepSummaryDetail.VERBOSE,
             is_explanation=True,
             path=("param_decisions", "month", "match_basis_explanation"),
+            subject="month",
+            disposition="param_month",
+            basis="The requested month must bind the month param.",
         ),
     )
 
@@ -226,6 +238,9 @@ def test_model_turn_summary_projects_generic_explanation_fields() -> None:
             ),
             detail=StepSummaryDetail.VERBOSE,
             is_explanation=True,
+            subject="source_1",
+            disposition="RETAIN",
+            basis="Area rows can ground the named London population scope.",
         ),
     )
 
@@ -271,11 +286,17 @@ def test_plan_selection_model_turn_summary_projects_reviewed_candidates() -> Non
             ),
             detail=StepSummaryDetail.VERBOSE,
             is_explanation=True,
+            subject="source_1",
+            disposition="NOT_ALIGNED",
+            basis="Location rows do not expose compensation measures.",
         ),
         StepSummaryItem(
             text="source_8: PARTIAL - Payout rows expose amounts but no location key.",
             detail=StepSummaryDetail.VERBOSE,
             is_explanation=True,
+            subject="source_8",
+            disposition="PARTIAL",
+            basis="Payout rows expose amounts but no location key.",
         ),
     )
 

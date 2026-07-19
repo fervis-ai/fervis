@@ -4,6 +4,15 @@
   padding: 0;
 }
 
+.evidence-panel.answering {
+  border-color: var(--ink);
+  box-shadow: inset 3px 0 0 var(--ink);
+}
+
+.evidence-panel.answering > summary {
+  background: color-mix(in srgb, var(--panel) 82%, var(--ink));
+}
+
 .evidence-panel summary {
   align-items: center;
   color: var(--muted);
@@ -41,11 +50,174 @@
   text-transform: uppercase;
 }
 
+.evidence-summary-label + .ask-answer-control {
+  margin-left: 24px;
+}
+
 .evidence-summary-meta {
   color: var(--faint);
   font-family: var(--mono);
   font-size: 11px;
   margin-left: auto;
+}
+
+.ask-answer-control {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+  position: relative;
+}
+
+.ask-answer-button {
+  align-items: center;
+  appearance: none;
+  background: var(--paper);
+  border: 1px solid var(--rule-strong);
+  color: var(--ink);
+  display: inline-flex;
+  font-family: var(--mono);
+  font-size: 10px;
+  gap: 8px;
+  justify-content: center;
+  letter-spacing: 0.07em;
+  min-height: 32px;
+  min-width: 70px;
+  padding: 4px 10px 4px 7px;
+  position: relative;
+  text-transform: uppercase;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease,
+    transform 80ms ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.ask-answer-button:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.ask-answer-button[data-state="idle"]:hover {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+
+.ask-answer-button[data-state="idle"]:active,
+.ask-answer-button[data-state="recording"] {
+  transform: translate(1px, 1px);
+}
+
+.ask-answer-button[data-state="recording"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+  min-width: 144px;
+}
+
+.ask-answer-button[data-state="requesting_permission"],
+.ask-answer-button[data-state="thinking"] {
+  background: var(--panel);
+  border-color: var(--ink);
+}
+
+.ask-answer-button[data-state="speaking"] {
+  background: var(--paper);
+  border-color: var(--rule-strong);
+  box-shadow: inset 3px 0 0 #db0025;
+  color: var(--ink);
+  min-width: 74px;
+}
+
+.microphone-icon {
+  fill: currentColor;
+  height: 17px;
+  shape-rendering: crispEdges;
+  width: 17px;
+}
+
+.recording-pulse {
+  background: #db3b2f;
+  box-shadow: 0 0 0 0 color-mix(in srgb, #db3b2f 55%, transparent);
+  height: 9px;
+  width: 9px;
+  animation: recording-pulse 1.15s steps(2, end) infinite;
+}
+
+.fervis-thinking-mark {
+  display: grid;
+  height: 18px;
+  place-items: center;
+  width: 18px;
+}
+
+.fervis-thinking-mark .fervis-mark {
+  color: #db0025;
+  height: 17px;
+  width: 17px;
+  animation: fervis-thinking-wheel 850ms linear infinite;
+}
+
+.fervis-speaking-mark {
+  display: grid;
+  height: 18px;
+  place-items: center;
+  width: 18px;
+}
+
+.fervis-speaking-mark .fervis-mark {
+  color: #db0025;
+  height: 17px;
+  width: 17px;
+  animation: fervis-speaking-bob 700ms ease-in-out infinite alternate;
+}
+
+.ask-answer-error {
+  background: var(--paper);
+  border: 1px solid var(--error, #8b2d24);
+  color: var(--error, #8b2d24);
+  font-family: var(--mono);
+  font-size: 10px;
+  max-width: 280px;
+  padding: 6px 8px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 10;
+}
+
+.ask-answer-control audio {
+  display: none;
+}
+
+@keyframes fervis-thinking-wheel {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes recording-pulse {
+  50% {
+    box-shadow: 0 0 0 5px transparent;
+    transform: scale(0.82);
+  }
+}
+
+@keyframes fervis-speaking-bob {
+  from {
+    transform: translateY(3px);
+  }
+
+  to {
+    transform: translateY(-3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fervis-thinking-mark .fervis-mark,
+  .fervis-speaking-mark .fervis-mark,
+  .recording-pulse {
+    animation-duration: 2s;
+  }
 }
 
 .evidence-body {

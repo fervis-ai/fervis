@@ -43,7 +43,11 @@ from fervis.lookup.plan_execution.verification import (
     verify_fact_plan as verify_fact_plan_impl,
 )
 from fervis.lineage.enums import ProofNodeKind, SourceReadStatus
-from fervis.lineage.recorder import CatalogEndpointWrite, SourceReadWrite
+from fervis.lineage.recorder import (
+    CatalogEndpointWrite,
+    RunArtifactWrite,
+    SourceReadWrite,
+)
 from fervis.lookup.grounding.model import GroundedInputUse
 from fervis.lookup.memory.projection import LookupMemory
 from fervis.lookup.answer_program.model import AnswerProgram, FactFulfillment
@@ -651,6 +655,7 @@ class _SourceReadRecorder:
     def __init__(self) -> None:
         self.catalog_endpoints: list[CatalogEndpointWrite] = []
         self.source_reads: list[SourceReadWrite] = []
+        self.artifacts: list[RunArtifactWrite] = []
 
     def record_catalog_endpoint(
         self,
@@ -662,6 +667,10 @@ class _SourceReadRecorder:
     def record_source_read(self, source_read: SourceReadWrite) -> SourceReadWrite:
         self.source_reads.append(source_read)
         return source_read
+
+    def record_artifact(self, artifact: RunArtifactWrite) -> RunArtifactWrite:
+        self.artifacts.append(artifact)
+        return artifact
 
 
 def _canonical_json_hash(payload: object) -> str:

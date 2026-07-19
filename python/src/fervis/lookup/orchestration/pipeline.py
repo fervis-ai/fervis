@@ -790,6 +790,7 @@ def _run_read_eligibility_phase(state: _LookupPipelineState) -> LookupResult | N
             step=state.read_eligibility_step,
             catalog_endpoints=source_lineage.catalog_endpoints,
             source_reads=source_lineage.source_reads,
+            artifacts=source_lineage.artifacts,
         )
         return _runtime_error_terminal(
             state,
@@ -807,6 +808,7 @@ def _run_read_eligibility_phase(state: _LookupPipelineState) -> LookupResult | N
         step=state.read_eligibility_step,
         catalog_endpoints=source_lineage.catalog_endpoints,
         source_reads=source_lineage.source_reads,
+        artifacts=source_lineage.artifacts,
     )
     state.grounding = replace(
         state.grounding,

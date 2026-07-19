@@ -78,11 +78,22 @@ class InputLineageView:
 
 
 @dataclass(frozen=True)
+class StepDecisionItemView:
+    text: str
+    is_explanation: bool = False
+    path: tuple[str, ...] = ()
+    subject: str = ""
+    disposition: str = ""
+    basis: str = ""
+
+
+@dataclass(frozen=True)
 class StepDecisionView:
     step_key: str
     lines: tuple[str, ...]
     detail: StepSummaryDetail = StepSummaryDetail.COMPACT
     is_explanation: bool = False
+    items: tuple[StepDecisionItemView, ...] = ()
 
 
 @dataclass(frozen=True)

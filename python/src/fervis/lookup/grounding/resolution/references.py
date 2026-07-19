@@ -843,6 +843,7 @@ def _resolved_lookup_rows(
         catalog_endpoint=catalog_read.catalog_endpoint,
         args=args,
         observation=observation,
+        response_body=body.get("responseBody"),
         completeness_json=completeness,
     )
     if not observation.succeeded:

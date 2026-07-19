@@ -500,6 +500,7 @@ lineage/                    Canonical audit models, payloads, and views
 memory/                     Conversation memory projection
 model_io/                   Provider routing, structured output, pricing
 observability/              Lineage-backed inspect, usage, prompt views
+delivery/                   Disposable presentation delivery use cases
 interfaces/                 CLI and framework HTTP adapters
 evaluation/goldsets/        Path-loaded runtime goldset runner
 storage/                    SQL-backed storage helpers

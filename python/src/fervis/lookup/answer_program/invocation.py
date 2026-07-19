@@ -712,6 +712,7 @@ def _cached_api_read(
             catalog_endpoint=catalog_endpoint,
             args=args,
             observation=observation,
+            response_body=result.get("responseBody"),
             completeness_json=source_read_completeness(result),
         )
         source_read_refs = (f"source_read:{source_read_id}",) if source_read_id else ()

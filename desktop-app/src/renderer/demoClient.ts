@@ -42,6 +42,9 @@ export function createDemoFervisClient(): FervisApiClient {
       }
       return run;
     },
+    askAboutAnswer: async () => {
+      throw new Error("Ask is unavailable in demo mode.");
+    },
     askQuestion: async (): Promise<QuestionStatePayload> =>
       createDemoFervisClient().getQuestion(demoConversations[0].summary.latestQuestionId),
     answerClarification: async (): Promise<QuestionStatePayload> =>

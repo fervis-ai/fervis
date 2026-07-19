@@ -23,14 +23,24 @@ class StepSummaryItem:
     detail: StepSummaryDetail = StepSummaryDetail.COMPACT
     is_explanation: bool = False
     path: tuple[str, ...] = ()
+    subject: str = ""
+    disposition: str = ""
+    basis: str = ""
 
     def to_json(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "text": self.text,
             "detail": self.detail.value,
             "is_explanation": self.is_explanation,
             "path": list(self.path),
         }
+        if self.subject:
+            payload["subject"] = self.subject
+        if self.disposition:
+            payload["disposition"] = self.disposition
+        if self.basis:
+            payload["basis"] = self.basis
+        return payload
 
 
 @dataclass(frozen=True)
@@ -118,6 +128,9 @@ def _step_summary_item(raw: dict[Any, Any]) -> StepSummaryItem | None:
         detail=_detail(raw.get("detail")),
         is_explanation=bool(raw.get("is_explanation")),
         path=tuple(str(item) for item in raw.get("path") or () if item),
+        subject=str(raw.get("subject") or "").strip(),
+        disposition=str(raw.get("disposition") or "").strip(),
+        basis=str(raw.get("basis") or "").strip(),
     )
 
 

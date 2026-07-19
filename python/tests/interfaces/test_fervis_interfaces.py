@@ -24,6 +24,7 @@ def test_fervis_django_urls_expose_question_lifecycle_routes() -> None:
         "questions/<str:question_id>/",
         "questions/<str:question_id>/runs/",
         "questions/<str:question_id>/runs/<uuid:run_id>/",
+        "questions/<str:question_id>/runs/<uuid:run_id>/ask/",
     }
     assert names == {
         "fervis-runtime-status",
@@ -32,6 +33,7 @@ def test_fervis_django_urls_expose_question_lifecycle_routes() -> None:
         "fervis-question-detail",
         "fervis-question-run-list",
         "fervis-question-run-detail",
+        "fervis-question-run-ask",
     }
 
 
@@ -43,6 +45,7 @@ def test_fervis_django_views_use_fervis_throttle_scope() -> None:
         QuestionCreateView,
         QuestionDetailView,
         QuestionRunDetailView,
+        QuestionRunAnswerQuestionView,
         QuestionRunListView,
     )
 
@@ -55,6 +58,7 @@ def test_fervis_django_views_use_fervis_throttle_scope() -> None:
             QuestionDetailView,
             QuestionRunListView,
             QuestionRunDetailView,
+            QuestionRunAnswerQuestionView,
         )
     } == {(FervisQuestionThrottle,)}
 
@@ -815,6 +819,10 @@ def test_fervis_fastapi_router_exposes_question_lifecycle_routes() -> None:
         ("GET", "/fervis/questions/{question_id}/"),
         ("GET", "/fervis/questions/{question_id}/runs/"),
         ("GET", "/fervis/questions/{question_id}/runs/{run_id}/"),
+        (
+            "POST",
+            "/fervis/questions/{question_id}/runs/{run_id}/ask/",
+        ),
     }
 
 
@@ -1157,6 +1165,10 @@ def test_fervis_flask_blueprint_exposes_question_lifecycle_routes() -> None:
         ("GET", "/fervis/questions/<question_id>/runs/"),
         ("POST", "/fervis/questions/<question_id>/runs/"),
         ("GET", "/fervis/questions/<question_id>/runs/<run_id>/"),
+        (
+            "POST",
+            "/fervis/questions/<question_id>/runs/<run_id>/ask/",
+        ),
     }
 
 

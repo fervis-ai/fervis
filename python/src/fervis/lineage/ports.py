@@ -40,6 +40,8 @@ class SourceReadRecorderPort(Protocol):
 
     def record_source_read(self, source_read: SourceReadWrite) -> SourceReadWrite: ...
 
+    def record_artifact(self, artifact: RunArtifactWrite) -> RunArtifactWrite: ...
+
 
 class LineageRecorderPort(Protocol):
     def ensure_conversation(
@@ -65,6 +67,7 @@ class LineageRecorderPort(Protocol):
         step: RunStepWrite,
         catalog_endpoints: tuple[CatalogEndpointWrite, ...],
         source_reads: tuple[SourceReadWrite, ...],
+        artifacts: tuple[RunArtifactWrite, ...],
     ) -> RunStepWrite: ...
 
     def record_model_call(self, model_call: ModelCallWrite) -> ModelCallWrite: ...

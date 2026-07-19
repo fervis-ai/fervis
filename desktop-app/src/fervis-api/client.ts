@@ -25,6 +25,12 @@ export interface FervisApiClient {
   readonly getQuestion: (questionId: string) => Promise<QuestionStatePayload>;
   readonly listQuestionRuns: (questionId: string) => Promise<QuestionRunListPayload>;
   readonly getRun: (questionId: string, runId: string) => Promise<RunPayload>;
+  readonly askAboutAnswer: (
+    questionId: string,
+    runId: string,
+    question: Blob,
+    options?: { readonly signal?: AbortSignal }
+  ) => Promise<Blob>;
   readonly askQuestion: (
     request: AskQuestionRequest
   ) => Promise<QuestionStatePayload>;
@@ -82,6 +88,13 @@ export function createFervisHttpClient(
         ),
         decodeRun
       ),
+    askAboutAnswer: async (questionId, runId, question, options) =>
+      requestAudio(
+        connection,
+        `/questions/${encodeURIComponent(questionId)}/runs/${encodeURIComponent(runId)}/ask/`,
+        question,
+        options?.signal
+      ),
     askQuestion: async (request) =>
       decodePayload(
         "question state",
@@ -126,19 +139,40 @@ export function createFervisHttpClient(
   };
 }
 
+async function requestAudio(
+  connection: FervisConnection,
+  path: string,
+  question: Blob,
+  signal?: AbortSignal
+): Promise<Blob> {
+  const headers = requestHeaders(connection, "audio/wav");
+  headers.set("Content-Type", question.type || "audio/wav");
+  const response = await fetch(`${trimTrailingSlash(connection.baseUrl)}${path}`, {
+    headers,
+    body: question,
+    method: "POST",
+    signal
+  });
+  if (!response.ok) {
+    const body = await responseJson(response);
+    throw new FervisApiError(response.status, errorMessage(body));
+  }
+  const contentType = response.headers.get("Content-Type") ?? "";
+  if (!contentType.toLowerCase().startsWith("audio/wav")) {
+    throw new FervisApiError(0, "Fervis returned an invalid explanation audio response");
+  }
+  return response.blob();
+}
+
 async function requestJson(
   connection: FervisConnection,
   path: string,
   init: RequestInit = {}
 ): Promise<unknown> {
-  const headers = new Headers(init.headers);
-  headers.set("Accept", "application/json");
+  const headers = requestHeaders(connection, "application/json", init.headers);
   if (init.body !== undefined) {
     headers.set("Content-Type", "application/json");
     headers.set("Idempotency-Key", crypto.randomUUID());
-  }
-  if (connection.authToken.trim() !== "") {
-    headers.set("Authorization", `Bearer ${connection.authToken}`);
   }
 
   const response = await fetch(`${trimTrailingSlash(connection.baseUrl)}${path}`, {
@@ -151,6 +185,19 @@ async function requestJson(
     throw new FervisApiError(response.status, errorMessage(body));
   }
   return body;
+}
+
+function requestHeaders(
+  connection: FervisConnection,
+  accept: string,
+  initial?: HeadersInit
+): Headers {
+  const headers = new Headers(initial);
+  headers.set("Accept", accept);
+  if (connection.authToken.trim() !== "") {
+    headers.set("Authorization", `Bearer ${connection.authToken}`);
+  }
+  return headers;
 }
 
 function decodePayload<T>(

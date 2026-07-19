@@ -304,6 +304,11 @@ def test_lookup_runtime_records_source_reads_against_canonical_execute_step():
     ] == [
         (lineage.catalog_endpoints[0].catalog_endpoint_id, execute_steps[0].step_id, 1)
     ]
+    assert len(lineage.artifacts) == 1
+    source_artifact = lineage.artifacts[0]
+    assert lineage.source_reads[0].artifact_id == source_artifact.artifact_id
+    assert source_artifact.content == '{"data":[{"total_revenue":"14.00"}]}'
+    assert source_artifact.content_hash == lineage.source_reads[0].response_hash
     assert (
         f"source_read:{lineage.source_reads[0].source_read_id}"
         in result.rendered_fact.proof_refs
@@ -1077,6 +1082,7 @@ class _LineageRecorder:
     runtime_error_results: list[RuntimeErrorResultWrite] = field(default_factory=list)
     model_call_audits: list[object] = field(default_factory=list)
     program_invocations: list[object] = field(default_factory=list)
+    artifacts: list[object] = field(default_factory=list)
 
     def record_step(self, step: RunStepWrite) -> RunStepWrite:
         self.steps.append(step)
@@ -1094,10 +1100,12 @@ class _LineageRecorder:
         step: RunStepWrite,
         catalog_endpoints: tuple[CatalogEndpointWrite, ...],
         source_reads: tuple[SourceReadWrite, ...],
+        artifacts: tuple[object, ...],
     ) -> RunStepWrite:
         self.catalog_endpoints.extend(catalog_endpoints)
         self.steps.append(step)
         self.source_reads.extend(source_reads)
+        self.artifacts.extend(artifacts)
         return step
 
     def record_answered_result(

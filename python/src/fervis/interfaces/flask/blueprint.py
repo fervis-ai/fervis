@@ -21,7 +21,7 @@ def fervis_flask_blueprint(
     delegated_credential_capture=None,
     require_read_context: bool = True,
 ):
-    from flask import Blueprint, jsonify, request
+    from flask import Blueprint, Response, jsonify, request
 
     blueprint = Blueprint("fervis", __name__)
 
@@ -105,6 +105,28 @@ def fervis_flask_blueprint(
             principal=request_principal(),
         )
         return json_response(response.status_code, response.payload)
+
+    @blueprint.route(
+        "/questions/<question_id>/runs/<run_id>/ask/",
+        methods=["POST"],
+    )
+    def answer_computation_question(question_id: str, run_id: str):
+        response = questions().answer_computation_question(
+            question_id,
+            run_id,
+            principal=request_principal(),
+            audio_data=request.get_data(cache=False),
+            content_type=request.content_type or "",
+        )
+        if response.status_code != 200:
+            return json_response(response.status_code, response.payload)
+        audio = response.payload
+        return Response(
+            audio.data,
+            status=200,
+            content_type=audio.content_type,
+            headers={"Cache-Control": "no-store"},
+        )
 
     return blueprint
 

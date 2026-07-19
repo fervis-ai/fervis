@@ -42,7 +42,11 @@ export function RunBlock({
             run={run}
             onClarificationState={onClarificationState}
           />
-          <EvidencePanel defaultOpen={run.status === "COMPLETED"} run={run} />
+          <EvidencePanel
+            apiClient={apiClient}
+            defaultOpen={run.status === "COMPLETED"}
+            run={run}
+          />
         </div>
       ) : null}
     </section>
