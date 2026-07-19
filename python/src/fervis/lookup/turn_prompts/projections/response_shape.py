@@ -1019,6 +1019,7 @@ def _canonical_options_xml_lines(
             "id": item.get("id"),
             "result": item.get("result"),
             "canonical_value": item.get("canonical_value"),
+            "identifier_kind": item.get("identifier_kind"),
         }
         resolvers = tuple(
             resolver
@@ -1043,27 +1044,25 @@ def _resolver_xml_lines(resolver: Mapping[str, object], *, indent: str) -> list[
     api_read = resolver.get("api_read")
     if isinstance(api_read, Mapping):
         lines.extend(_resolver_api_read_xml_lines(api_read, indent=indent + "  "))
-    request_values = tuple(
+    lookup_parameters = tuple(
         item
-        for item in _array(resolver.get("request_values"))
+        for item in _array(resolver.get("lookup_request_parameters"))
         if isinstance(item, Mapping)
     )
-    if request_values:
-        lines.append(f"{indent}  <request_values>")
-        for item in request_values:
+    if lookup_parameters:
+        lines.append(f"{indent}  <lookup_request_parameters>")
+        for item in lookup_parameters:
             lines.append(
-                f"{indent}    <request_value"
-                f"{_xml_attrs({'param_ref': item.get('param_ref'), 'value': item.get('value')})} />"
+                f"{indent}    <parameter"
+                f"{_xml_attrs({'param_ref': item.get('param_ref'), 'source': item.get('source'), 'value': item.get('value')})} />"
             )
-        lines.append(f"{indent}  </request_values>")
-    match_fields = _array(resolver.get("response_match_alternatives"))
-    if match_fields:
-        lines.append(f"{indent}  <response_match_alternatives>")
-        for field_path in match_fields:
-            lines.append(
-                f"{indent}    <match_field{_xml_attrs({'path': field_path})} />"
-            )
-        lines.append(f"{indent}  </response_match_alternatives>")
+        lines.append(f"{indent}  </lookup_request_parameters>")
+    verification_fields = _array(resolver.get("returned_identity_verification_fields"))
+    if verification_fields:
+        lines.append(f"{indent}  <returned_identity_verification_fields>")
+        for field_path in verification_fields:
+            lines.append(f"{indent}    <field{_xml_attrs({'path': field_path})} />")
+        lines.append(f"{indent}  </returned_identity_verification_fields>")
     canonical_result = resolver.get("canonical_result")
     if isinstance(canonical_result, Mapping):
         lines.extend(

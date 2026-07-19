@@ -151,8 +151,12 @@ def _canonical_input_schema(spec: dict[str, object]) -> dict[str, object]:
         resolver_option_ids = _spec_values(option, key="resolver_option_ids")
         properties: dict[str, object] = {
             **common_properties,
-            "canonical_option_id": _string_schema(
-                enum_values=(canonical_option_id,)
+            "canonical_option_id": _string_schema(enum_values=(canonical_option_id,)),
+            "resolver_option_assessments": _closed_object_schema(
+                {
+                    resolver_option_id: {"type": "string", "minLength": 1}
+                    for resolver_option_id in resolver_option_ids
+                }
             ),
         }
         if resolver_option_ids:

@@ -14,7 +14,7 @@ from fervis.lookup.grounding.model import (
     LookupTextResolutionDecision,
     NO_SHOWN_RESOURCE_TYPE,
     ResourceTypeMatch,
-    ResolverRequestValue,
+    LookupRequestParameter,
     TimeResolutionIntent,
     resolver_fit_question_for_option,
 )
@@ -59,13 +59,14 @@ def parse_grounding_compatibility(
         }:
             raise ValueError("grounding resource_type_x was not shown")
         _required_text(review.identifier_kind_basis)
-        IdentifierKind(review.identifier_kind)
+        identifier_kind = IdentifierKind(review.identifier_kind)
         compatible_bindings = _compatible_bindings(
             review.option_reviews,
             request=request,
             task=task,
             options_by_id=options_by_task[known_input_id],
             resource_type_x=resource_type_x,
+            identifier_kind=identifier_kind,
         )
         seen.add(known_input_id)
         compatibilities.append(
@@ -119,6 +120,7 @@ def _compatible_bindings(
     task: KnownInputBindingTask,
     options_by_id: dict[str, InputBindingOption],
     resource_type_x: str,
+    identifier_kind: IdentifierKind,
 ) -> tuple[CompatibleInputBinding, ...]:
     if set(reviews) != set(options_by_id):
         raise ValueError("grounding option reviews must cover every binding option")
@@ -156,6 +158,7 @@ def _compatible_bindings(
                     request=request,
                     lookup_text=task.lookup_text,
                     option=option,
+                    identifier_kind=identifier_kind,
                 )
             )
         elif (
@@ -172,13 +175,13 @@ def _compatible_binding(
     request: GroundingRequest,
     lookup_text: str,
     option: InputBindingOption,
+    identifier_kind: IdentifierKind,
 ) -> CompatibleInputBinding:
     surface = resolver_option_surface(request, option)
-    request_values: list[ResolverRequestValue] = []
+    lookup_request_parameters: list[LookupRequestParameter] = []
     compiled_lookup_values: list[CatalogScalarParameterValue] = []
     selected_param_refs = tuple(
-        request_param.param_ref
-        for request_param in resolution.lookup_request_params
+        request_param.param_ref for request_param in resolution.lookup_request_params
     )
     if len(selected_param_refs) != len(set(selected_param_refs)):
         raise ValueError("grounding review repeats a request parameter")
@@ -204,8 +207,8 @@ def _compatible_binding(
         if not _same_scalar_value(parsed_value, expected_value):
             raise ValueError("grounding request value must equal the lookup value")
         compiled_lookup_values.append(expected_value)
-        request_values.append(
-            ResolverRequestValue(param_ref=param_ref, value=parsed_value)
+        lookup_request_parameters.append(
+            LookupRequestParameter(param_ref=param_ref, value=parsed_value)
         )
     missing_required_params = {
         parameter.param_ref
@@ -234,8 +237,9 @@ def _compatible_binding(
     return CompatibleInputBinding(
         option_id=option.id,
         lookup_value=lookup_value,
-        request_values=tuple(request_values),
-        response_match_field_paths=match_paths,
+        identifier_kind=identifier_kind,
+        lookup_request_parameters=tuple(lookup_request_parameters),
+        returned_identity_verification_field_paths=match_paths,
     )
 
 

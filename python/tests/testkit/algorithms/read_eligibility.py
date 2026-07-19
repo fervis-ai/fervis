@@ -17,7 +17,8 @@ from fervis.lookup.grounding.resolution.references import (
 )
 from fervis.lookup.grounding.model import (
     CompatibleInputBinding,
-    ResolverRequestValue,
+    IdentifierKind,
+    LookupRequestParameter,
 )
 from fervis.lookup.turn_prompts import build_turn_prompt_context
 from fervis.lookup.read_eligibility.model import (
@@ -87,6 +88,9 @@ def run_read_eligibility_parse_case(payload: dict[str, Any]) -> list[str]:
                     "interpretation_question": item.interpretation_question,
                     "canonical_option_assessments": dict(
                         item.canonical_option_assessments
+                    ),
+                    "resolver_option_assessments": dict(
+                        item.resolver_option_assessments
                     ),
                     "because": item.because,
                 }
@@ -338,11 +342,12 @@ def _compatible_binding(
     return CompatibleInputBinding(
         option_id=option.id,
         lookup_value=lookup_text,
-        request_values=tuple(
-            ResolverRequestValue(param_ref=parameter.ref, value=lookup_text)
+        identifier_kind=IdentifierKind.DESCRIPTIVE,
+        lookup_request_parameters=tuple(
+            LookupRequestParameter(param_ref=parameter.ref, value=lookup_text)
             for parameter in lookup_params[:1]
         ),
-        response_match_field_paths=match_paths,
+        returned_identity_verification_field_paths=match_paths,
     )
 
 

@@ -658,7 +658,7 @@ def _reference_execution_key(
     return (
         resolver_source.id,
         canonical_runtime_json(dict(args)),
-        binding.response_match_field_paths,
+        binding.returned_identity_verification_field_paths,
     )
 
 
@@ -683,7 +683,9 @@ def _resolver_request_args(
         for parameter in resolver_source.params
         if parameter.default is not None
     }
-    args.update({item.param_ref: item.value for item in binding.request_values})
+    args.update(
+        {item.param_ref: item.value for item in binding.lookup_request_parameters}
+    )
     return args
 
 
@@ -913,7 +915,7 @@ def _lookup_fields_for_binding(
     *,
     resolver_source: RowSource,
 ) -> tuple[_LookupField, ...]:
-    selected_field_paths = set(binding.response_match_field_paths)
+    selected_field_paths = set(binding.returned_identity_verification_field_paths)
     selected_fields = tuple(
         field for field in resolver_source.fields if field.path in selected_field_paths
     )
@@ -1023,7 +1025,7 @@ def _binding_purpose(
             for parameter in candidate.resolver_source.params
             if parameter.param_ref == item.param_ref
         )
-        for item in binding.request_values
+        for item in binding.lookup_request_parameters
     }
     selected_targets = {
         (

@@ -36,7 +36,7 @@ from fervis.lookup.grounding.model import (
     InputBindingOption,
     NO_SHOWN_RESOURCE_TYPE,
     ResourceTypeMatch,
-    ResolverRequestValue,
+    LookupRequestParameter,
     resolver_fit_question_for_option,
 )
 from fervis.lookup.grounding.parser import parse_grounding_compatibility
@@ -164,11 +164,12 @@ def _compatible_binding(
     return CompatibleInputBinding(
         option_id=option.id,
         lookup_value=lookup_text,
-        request_values=tuple(
-            ResolverRequestValue(param_ref=parameter.ref, value=lookup_text)
+        identifier_kind=IdentifierKind.DESCRIPTIVE,
+        lookup_request_parameters=tuple(
+            LookupRequestParameter(param_ref=parameter.ref, value=lookup_text)
             for parameter in lookup_params
         ),
-        response_match_field_paths=match_paths,
+        returned_identity_verification_field_paths=match_paths,
     )
 
 
@@ -424,9 +425,8 @@ def _grounding_review_arguments(
                         "lookup_request_params": (
                             [
                                 {
-                                    "param_ref": option["api_read"][
-                                        "input_params"
-                                    ][0]["param_ref"],
+                                    "param_ref": option["api_read"]
+                                    ["input_params"][0]["param_ref"],
                                     "value": lookup_text,
                                 }
                             ]
@@ -1187,7 +1187,7 @@ def test_selected_staff_lookup_fields_produce_one_canonical_staff_key() -> None:
         data_access_port=data_access,
     )[option.id]
 
-    assert binding.response_match_field_paths == (
+    assert binding.returned_identity_verification_field_paths == (
         "data.first_name",
         "data.last_name",
         "data.full_name",
@@ -1302,13 +1302,14 @@ def test_resolver_row_source_variants_keep_distinct_identity_and_defaults() -> N
         CompatibleInputBinding(
             option_id=option.id,
             lookup_value="Azraah",
-            request_values=(
-                ResolverRequestValue(
+            identifier_kind=IdentifierKind.DESCRIPTIVE,
+            lookup_request_parameters=(
+                LookupRequestParameter(
                     param_ref="list_people.query.name",
                     value="Azraah",
                 ),
             ),
-            response_match_field_paths=("data.name",),
+            returned_identity_verification_field_paths=("data.name",),
         )
         for option in task.options
     )
@@ -1386,7 +1387,7 @@ def test_resolver_verifies_the_typed_request_value_against_typed_response_fields
                                 ],
                             },
                         }
-                    }
+                    },
                 }
             },
         },
@@ -2003,6 +2004,12 @@ def test_selected_canonical_identity_resolves_without_a_read_target() -> None:
                     (canonical_option.id, "The location read exposes this identity."),
                 ),
                 because="Nairobi denotes the returned location.",
+                resolver_option_assessments=(
+                    (
+                        canonical_option.resolver_bindings[0].option_id,
+                        "The name parameter retrieves the returned location.",
+                    ),
+                ),
             ),
         ),
     )
@@ -2125,6 +2132,13 @@ def test_read_eligibility_executes_only_the_selected_reference_option() -> None:
                             "Nairobi denotes the location returned by this read."
                         ),
                         "canonical_option_id": canonical_option.id,
+                        "resolver_option_assessments": {
+                            binding.option_id: (
+                                "The shown lookup parameters retrieve the location "
+                                "and its returned fields verify that location."
+                            )
+                            for binding in canonical_option.resolver_bindings
+                        },
                         "resolver_option_id": selected_resolver_binding.option_id,
                     }
                 },

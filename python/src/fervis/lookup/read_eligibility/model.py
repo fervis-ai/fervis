@@ -11,6 +11,7 @@ from fervis.lookup.relation_catalog.selection import CatalogSelectionResult
 from fervis.lookup.grounding.model import (
     CanonicalInputLedger,
     CompatibleInputBinding,
+    IdentifierKind,
     KnownInputBindingTask,
 )
 from fervis.lookup.question_contract import QuestionContract, RequestedFact
@@ -71,10 +72,22 @@ class CanonicalInputOption:
         )
         if len(set(resolver_option_ids)) != len(resolver_option_ids):
             raise ValueError("canonical input option repeats a resolver route")
+        if len(
+            {binding.identifier_kind for binding in self.resolver_bindings}
+        ) > 1:
+            raise ValueError(
+                "canonical input resolver routes disagree on identifier kind"
+            )
 
     @property
     def result(self) -> tuple[str, str]:
         return (self.entity_kind, self.key_id)
+
+    @property
+    def identifier_kind(self) -> IdentifierKind | None:
+        if not self.resolver_bindings:
+            return None
+        return self.resolver_bindings[0].identifier_kind
 
 
 @dataclass(frozen=True)
@@ -83,6 +96,7 @@ class CanonicalInputSelection:
     interpretation_question: str
     canonical_option_assessments: tuple[tuple[str, str], ...]
     because: str
+    resolver_option_assessments: tuple[tuple[str, str], ...]
     selected_resolver_binding: CompatibleInputBinding | None = None
 
     def __post_init__(self) -> None:
@@ -94,6 +108,14 @@ class CanonicalInputSelection:
                 for option_id, assessment in self.canonical_option_assessments
             )
             or not self.because.strip()
+            or (
+                bool(self.option.resolver_bindings)
+                != bool(self.resolver_option_assessments)
+            )
+            or any(
+                not option_id.strip() or not assessment.strip()
+                for option_id, assessment in self.resolver_option_assessments
+            )
         ):
             raise ValueError("canonical input selection requires its assessment")
         if self.option.canonical_value_id:

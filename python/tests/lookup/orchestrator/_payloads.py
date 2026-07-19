@@ -659,6 +659,13 @@ def _canonical_inputs_for_fact(
             "canonical_result": str(option.get("result") or ""),
         }
         resolver_option_ids = tuple(option.get("resolver_option_ids") or ())
+        selection["resolver_option_assessments"] = {
+            str(option_id): (
+                "This fixture assessed the shown lookup request parameters and "
+                "returned identity verification fields for this resolver route."
+            )
+            for option_id in resolver_option_ids
+        }
         if resolver_option_ids:
             selection["resolver_option_id"] = str(resolver_option_ids[0])
         selected.append(selection)

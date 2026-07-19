@@ -10,6 +10,7 @@ from fervis.lookup.relation_catalog import (
     CatalogFactAvailability,
     CatalogFact,
     EndpointRead,
+    ParamSource,
     RelationCatalog,
 )
 from fervis.lookup.relation_catalog.selection import CatalogSelectionResult
@@ -234,6 +235,9 @@ def _canonical_option_payload(
         payload["canonical_value"] = option.canonical_value_id
         return payload
 
+    if option.identifier_kind is None:
+        raise ValueError("canonical input resolver routes require identifier kind")
+    payload["identifier_kind"] = option.identifier_kind.value
     payload["resolvers"] = [
         _resolver_payload(
             resolver_binding,
@@ -258,16 +262,28 @@ def _resolver_payload(
         resolver_catalog,
         resolver_option,
     )
+    parameters_by_ref = {
+        parameter.param_ref: parameter
+        for parameter in resolver_surface.request_parameters
+    }
     return {
         **resolver_surface.prompt_payload(),
-        "request_values": [
-            {"param_ref": item.param_ref, "value": item.value}
-            for item in resolver_binding.request_values
+        "lookup_request_parameters": [
+            {
+                "param_ref": item.param_ref,
+                "source": _parameter_source(parameters_by_ref[item.param_ref].source),
+                "value": item.value,
+            }
+            for item in resolver_binding.lookup_request_parameters
         ],
-        "response_match_alternatives": list(
-            resolver_binding.response_match_field_paths
+        "returned_identity_verification_fields": list(
+            resolver_binding.returned_identity_verification_field_paths
         ),
     }
+
+
+def _parameter_source(source: ParamSource | str) -> str:
+    return source.value if isinstance(source, ParamSource) else source
 
 
 def _known_input_tokens_by_id(

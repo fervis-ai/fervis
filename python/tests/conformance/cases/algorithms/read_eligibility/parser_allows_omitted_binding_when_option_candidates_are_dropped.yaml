@@ -18,6 +18,8 @@ input:
               london_qi_1.area.primary_key.area_id: "area:primary_key: the candidate reads were assessed under this identity."
             because: London denotes the area constraining the requested store population, and the Area result represents that area directly.
             canonical_option_id: london_qi_1.area.primary_key.area_id
+            resolver_option_assessments:
+              bind_qi1_rs_7de03e00183c6709_area_primary_key: The name lookup parameter retrieves the Area and its returned fields verify that Area.
             resolver_option_id: bind_qi1_rs_7de03e00183c6709_area_primary_key
 expect:
   result_contains:

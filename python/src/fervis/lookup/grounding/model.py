@@ -208,7 +208,7 @@ class KnownTimeResolutionTask:
 
 
 @dataclass(frozen=True)
-class ResolverRequestValue:
+class LookupRequestParameter:
     param_ref: str
     value: str | int | float | bool
 
@@ -221,19 +221,26 @@ class ResolverRequestValue:
 class CompatibleInputBinding:
     option_id: str
     lookup_value: CatalogScalarParameterValue
-    request_values: tuple[ResolverRequestValue, ...]
-    response_match_field_paths: tuple[str, ...]
+    identifier_kind: IdentifierKind
+    lookup_request_parameters: tuple[LookupRequestParameter, ...]
+    returned_identity_verification_field_paths: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        if not self.option_id or not self.response_match_field_paths:
+        if (
+            not self.option_id
+            or not isinstance(self.identifier_kind, IdentifierKind)
+            or not self.returned_identity_verification_field_paths
+        ):
             raise ValueError("compatible input binding is incomplete")
-        param_refs = tuple(item.param_ref for item in self.request_values)
+        param_refs = tuple(item.param_ref for item in self.lookup_request_parameters)
         if len(param_refs) != len(set(param_refs)):
             raise ValueError("compatible input binding repeats a parameter")
-        if len(self.response_match_field_paths) != len(
-            set(self.response_match_field_paths)
+        if len(self.returned_identity_verification_field_paths) != len(
+            set(self.returned_identity_verification_field_paths)
         ):
-            raise ValueError("compatible input binding repeats a match field")
+            raise ValueError(
+                "compatible input binding repeats a returned identity verification field"
+            )
 
 
 @dataclass(frozen=True)

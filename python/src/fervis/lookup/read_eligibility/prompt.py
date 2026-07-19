@@ -77,8 +77,10 @@ class ReadEligibilityTurnPrompt(TurnPromptBase):
                     "After assessing every candidate read, interpret each named input using its supplied text, field-label approximation, value-meaning hint, complete requested fact, resolver cards, and the completed read reviews.",
                     'In canonical_option_assessments, assess every shown canonical meaning exactly once. Use the canonical_option_id as the key and write: "{canonical result}: {which reviewed reads expose this identity and what those reads contribute to the requested fact}." Resolver routes nested under one canonical option all produce that same meaning; do not assess them as different meanings.',
                     'After all option assessments, write because as: "Use {selected canonical result} because {its reviewed reads contribute the requested fact using that identity}. Do not use {each alternative canonical result} because {its reviewed reads contribute different evidence or require an undeclared identity conversion}. Therefore, {input} denotes {selected canonical result}." Then select exactly one shown canonical_option_id and copy it exactly.',
-                    "When the selected canonical option shows resolver routes, select exactly one nested resolver option and copy its option_id as resolver_option_id. This chooses how to obtain or validate the fixed meaning; it does not create another meaning decision.",
-                    "The selected canonical option fixes the named input's meaning for subsequent steps. Text match fields are identity evidence, not computation values. This turn does not choose an application target.",
+                    "Before resolver_option_id, assess every shown resolver route under the selected canonical option in resolver_option_assessments. For each route, state whether its lookup_request_parameters represent the supplied input under identifier_kind.",
+                    "A returned_identity_verification_field verifies only the resource retrieved by that request. It cannot make an unsuitable lookup request parameter suitable.",
+                    "After all resolver route assessments, select exactly one nested resolver option and copy its option_id as resolver_option_id. This chooses how to obtain or validate the fixed meaning; it does not create another meaning decision.",
+                    "The selected canonical option fixes the named input's meaning for subsequent steps. Returned identity verification fields are identity evidence, not computation values. This turn does not choose an application target.",
                 ),
             ),
             builder.instruction_block(
@@ -108,7 +110,7 @@ class ReadEligibilityTurnPrompt(TurnPromptBase):
                 (
                     "In requested_fact_assessments, use every shown requested_fact id as a key.",
                     "In read_candidate_reviews, use every shown source_candidate id for that requested fact as a key.",
-                    "After read_candidate_reviews, write canonical_inputs. Use every shown known_input id as a key. Copy interpretation_question, assess every shown canonical meaning in canonical_option_assessments, then write because, canonical_option_id, and resolver_option_id when the selected option shows resolver routes.",
+                    "After read_candidate_reviews, write canonical_inputs. Use every shown known_input id as a key. Copy interpretation_question, assess every shown canonical meaning in canonical_option_assessments, then write because and canonical_option_id. Write resolver_option_assessments next, then resolver_option_id when the selected option shows resolver routes.",
                     "For RETAIN, first cite relevant_row_path_tokens and relevant_field_tokens, then write retention_basis.",
                     "For DROP, do not write relevant_row_path_tokens or relevant_field_tokens.",
                     "relevant_row_path_tokens cites zero or more response_rows evidence_token values from the same read_candidate.",
@@ -122,7 +124,7 @@ class ReadEligibilityTurnPrompt(TurnPromptBase):
                 "Validity",
                 (
                     "Copy every requested_fact, known_input, source_candidate, canonical_option_id, and evidence_token exactly from the prompt.",
-                    "Copy resolver_option_id exactly from the selected nested resolver's option_id.",
+                    "Copy every resolver option ID in resolver_option_assessments exactly from the selected canonical option. Copy resolver_option_id exactly from the selected nested resolver's option_id.",
                     "Every evidence_token must come from the read_candidate keyed by its read_candidate_reviews entry.",
                     "Do not invent endpoints, params, output fields, catalog facts, or IDs.",
                     "Do not use host-domain assumptions that are not in requested facts, conversation context, or API read cards.",

@@ -215,6 +215,14 @@ def _canonical_selections(
         if not matching:
             raise ValueError("known input binding references unknown canonical option")
         selected_option = matching[0]
+        expected_resolver_option_ids = tuple(
+            binding.option_id for binding in selected_option.resolver_bindings
+        )
+        resolver_option_assessments = item.resolver_option_assessments
+        if set(resolver_option_assessments) != set(expected_resolver_option_ids):
+            raise ValueError(
+                "resolver option assessments must cover every shown resolver route"
+            )
         selected_resolver_binding = _selected_resolver_binding(
             item.resolver_option_id,
             option=selected_option,
@@ -238,6 +246,13 @@ def _canonical_selections(
                 for option_id in expected_option_ids
             ),
             because=_required_text(item.because),
+            resolver_option_assessments=tuple(
+                (
+                    option_id,
+                    _required_text(resolver_option_assessments[option_id]),
+                )
+                for option_id in expected_resolver_option_ids
+            ),
             selected_resolver_binding=selected_resolver_binding,
         )
     return output
