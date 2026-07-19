@@ -473,7 +473,7 @@ def test_shape_compatible_payload_keeps_candidate_key_fields():
         ],
     }
 
-    result = _shape_compatible_bound_source(source, plan_shape="ranked_aggregate")
+    result = _shape_compatible_bound_source(source, plan_shape="aggregate_by_group")
 
     assert [field["field_id"] for field in result["fields"]] == [
         "location_id",
@@ -579,7 +579,7 @@ def test_pattern_schema_uses_shape_compatible_bound_source_fields():
             ),
         ),
     )
-    plan_selection = _plan_selection_for_request(request, plan_shape="ranked_aggregate")
+    plan_selection = _plan_selection_for_request(request, plan_shape="aggregate_by_group")
     prompt = PatternFactPlanTurnPrompt(request, plan_selection=plan_selection)
     prompt_text = prompt.to_model_payload(
         build_turn_prompt_context(

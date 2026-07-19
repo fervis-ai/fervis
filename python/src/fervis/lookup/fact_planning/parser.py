@@ -76,6 +76,7 @@ def parse_fact_plan(
                 source_binding_ids_by_requirement_by_requested_fact_id
             ),
             input_context=input_context,
+            question_contract=question_contract,
         )
         program, bindings = compile_answer_program(
             draft,
@@ -125,6 +126,7 @@ def _answer_plan(
         str, Mapping[str, tuple[str, ...]]
     ],
     input_context: CompilerInputContext,
+    question_contract: QuestionContract,
 ) -> tuple[AnswerProgram, BindingSet]:
     answers = tuple(
         provider_output.parse_pattern_answer(answer) for answer in payload.answers
@@ -139,6 +141,7 @@ def _answer_plan(
             source_binding_ids_by_requirement_by_requested_fact_id
         ),
         input_context=input_context,
+        requested_facts=question_contract.requested_facts,
     )
 
 

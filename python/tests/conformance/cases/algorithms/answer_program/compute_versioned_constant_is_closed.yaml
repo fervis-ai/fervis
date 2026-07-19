@@ -11,7 +11,7 @@ input:
 expect:
   result_contains:
     status: compiled
-    program_id: ap_f19ca3929125a43dbca1c0c185acbb1ea9e7927ebc20766908bd344aa926f608
+    program_id: ap_3a5f4861b48ac0615fc986f8f5726dce7b1e36056e76ca179f4665a99a79f726
     program:
       program:
         fields:

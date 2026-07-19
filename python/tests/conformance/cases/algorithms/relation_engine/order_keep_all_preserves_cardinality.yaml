@@ -1,0 +1,27 @@
+id: order_keep_all_preserves_cardinality
+description: Ordering all qualifying rows changes order without changing cardinality.
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  relations:
+    - id: records
+      rows:
+        - {record_id: b, occurred_at: "2026-01-02T00:00:00Z"}
+        - {record_id: a, occurred_at: "2026-01-01T00:00:00Z"}
+      grain_keys: [record_id]
+      field_types: {record_id: string, occurred_at: datetime}
+  operations:
+    - id: ordered
+      output_relation: ordered_records
+      spec:
+        kind: order
+        input_relation: records
+        order_by: [{field: occurred_at, direction: asc}]
+        tie_breakers: [{field: record_id, direction: asc}]
+        selection: {kind: keep_all}
+expect:
+  result_contains:
+    ordered_records:
+      rows:
+        - {record_id: a, occurred_at: "2026-01-01T00:00:00Z"}
+        - {record_id: b, occurred_at: "2026-01-02T00:00:00Z"}

@@ -2235,10 +2235,7 @@ def _allowed_answer_properties_for_schema(
         properties = schema.get("properties")
         if not isinstance(properties, dict):
             continue
-        if (
-            "requested_fact_id" not in properties
-            or "answer_output_ids" not in properties
-        ):
+        if "requested_fact_id" not in properties:
             continue
         if not _schema_property_accepts(
             properties.get("requested_fact_id"),
@@ -4618,10 +4615,7 @@ def remove_raw_field_labels(answer: dict[str, Any]) -> None:
 
 
 def _answer_uses_aggregate_choice(answer: dict[str, Any]) -> bool:
-    if str(answer.get("pattern") or "") not in {
-        "aggregate_by_group",
-        "ranked_aggregate",
-    }:
+    if str(answer.get("pattern") or "") != "aggregate_by_group":
         return False
     return isinstance(answer.get("aggregate_choice"), dict) or (
         isinstance(answer.get("group"), dict)
@@ -4641,7 +4635,7 @@ def replace_answer_metric(answer: dict[str, Any], *, prompt: str = "") -> None:
     if not isinstance(metric, dict):
         return
     source_binding_id = str(answer.get("source_binding_id") or "")
-    if str(answer.get("pattern") or "") in {"aggregate_by_group", "ranked_aggregate"}:
+    if str(answer.get("pattern") or "") == "aggregate_by_group":
         return
     if str(answer.get("pattern") or "") == "aggregate_scalar":
         replacement = _matching_scalar_aggregate_selection(
@@ -4712,10 +4706,7 @@ def replace_aggregate_choice_selection(
     *,
     prompt: str,
 ) -> None:
-    if str(answer.get("pattern") or "") not in {
-        "aggregate_by_group",
-        "ranked_aggregate",
-    }:
+    if str(answer.get("pattern") or "") != "aggregate_by_group":
         return
     aggregate_choice = (
         answer.get("aggregate_choice")
@@ -4725,10 +4716,10 @@ def replace_aggregate_choice_selection(
     if not aggregate_choice:
         return
     try:
-        grouped_choices = _grouped_ranked_choices_from_prompt(prompt)
+        grouped_choices = _grouped_aggregate_choices_from_prompt(prompt)
     except (AssertionError, ValueError):
         return
-    replacement = _matching_grouped_ranked_selection(
+    replacement = _matching_grouped_aggregate_selection(
         grouped_choices,
         answer=answer,
         aggregate_choice=aggregate_choice,
@@ -4736,11 +4727,10 @@ def replace_aggregate_choice_selection(
     if not replacement:
         return
     answer.update(replacement)
-    _normalize_grouped_ranked_rank(answer)
     answer.pop("aggregate_choice", None)
 
 
-def _matching_grouped_ranked_selection(
+def _matching_grouped_aggregate_selection(
     choices: tuple[dict[str, Any], ...],
     *,
     answer: dict[str, Any],
@@ -4771,31 +4761,18 @@ def _matching_grouped_ranked_selection(
             return {
                 "source_binding_id": choice["source_binding_id"],
                 "metric": {
-                    "selection_basis": "Selected from grouped/ranked operation choices.",
+                    "selection_basis": "Selected from grouped aggregate operation choices.",
                     "id": metric["id"],
                     "kind": metric["kind"],
                     **({"field_id": metric["field"]} if metric.get("field") else {}),
                 },
                 "function": {
-                    "selection_basis": "Selected from grouped/ranked operation choices.",
+                    "selection_basis": "Selected from grouped aggregate operation choices.",
                     "id": function["id"],
                     "value": function["value"],
                 },
             }
     return {}
-
-
-def _normalize_grouped_ranked_rank(answer: dict[str, Any]) -> None:
-    if str(answer.get("pattern") or "") != "ranked_aggregate":
-        return
-    rank = answer.get("rank")
-    if not isinstance(rank, dict):
-        rank = {}
-    rank.setdefault("selection_basis", "Selected from grouped/ranked rank choices.")
-    rank.setdefault("id", "rank_top_1_desc")
-    rank.setdefault("sort", "desc")
-    rank.setdefault("limit", 1)
-    answer["rank"] = rank
 
 
 def _matching_group_candidate(
@@ -4836,10 +4813,10 @@ def _matching_function_candidate(
     return {}
 
 
-def _grouped_ranked_choices_from_prompt(prompt: str) -> tuple[dict[str, Any], ...]:
+def _grouped_aggregate_choices_from_prompt(prompt: str) -> tuple[dict[str, Any], ...]:
     section = _prompt_text_section(
         prompt,
-        label="Grouped/ranked operation choices",
+        label="Grouped aggregate operation choices",
     )
     choices: list[dict[str, Any]] = []
     for source_match in re.finditer(

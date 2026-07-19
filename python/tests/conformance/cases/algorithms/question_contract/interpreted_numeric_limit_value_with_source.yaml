@@ -11,7 +11,9 @@ input:
     instance_interpretation:
       kind: NORMAL_BUSINESS_INSTANCE
   answer_expression:
-    family: ranked_selection
+    family: list_rows
+    ordering: {basis: sales total, direction: descending}
+    selection: {kind: take}
   answer_outputs:
   - description: sales total
     role: ANSWER_VALUE
@@ -41,7 +43,7 @@ expect:
     requested_facts:
     - id: fact_1
       description: sales at ABC Mall
-      answer_expression_family: ranked_selection
+      answer_expression_family: list_rows
       answer_subject_text: stores
       input_refs: [limit]
       known_inputs:
@@ -61,8 +63,11 @@ expect:
       answer_request:
         answer_fact: sales at ABC Mall
         answer_expression:
-          family: ranked_selection
-          selection_kind: limited_results
+          family: list_rows
+          ordering:
+            basis: sales total
+            direction: descending
+          selection_kind: take
           limit_input_ref: limit
         answer_subject:
           subject_text: stores

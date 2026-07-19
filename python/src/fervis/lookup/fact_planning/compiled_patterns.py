@@ -1,12 +1,17 @@
 """Typed intermediate results shared by pattern selection and compilation."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 from fervis.lookup.answer_program.model import FactFulfillment
 from fervis.lookup.answer_program.operations import (
     AggregationFunction,
+    KeepAll,
     Operation,
+    OrderSelection,
     SortDirection,
+    Take,
 )
 from fervis.lookup.answer_program.compiler_inputs import CompilerInputContext
 from fervis.lookup.answer_program.values import (
@@ -14,13 +19,17 @@ from fervis.lookup.answer_program.values import (
     FactValue,
     LiteralType,
 )
-from fervis.lookup.answer_program.expressions import Expression
 from fervis.lookup.answer_program.relations import Relation
 from fervis.lookup.answer_program.result_projection import (
     RelationResultOutput,
     ScalarResultOutput,
 )
 from fervis.lookup.fact_planning.executable_support import RowPopulationBasis
+from fervis.lookup.question_contract import (
+    RequestedFact,
+    RequestedFactOrderingDirection,
+    ResultSelectionKind,
+)
 
 
 @dataclass(frozen=True)
@@ -51,23 +60,46 @@ class CompiledMetric:
 
 
 @dataclass(frozen=True)
-class CompiledRank:
+class CompiledOrdering:
     direction: SortDirection
-    limit: int
-    limit_value_id: str
+    selection: OrderSelection
 
-    def limit_expression(
-        self,
+    @classmethod
+    def from_requested_fact(
+        cls,
+        fact: RequestedFact,
+        *,
         input_context: CompilerInputContext,
-    ) -> Expression:
-        if self.limit_value_id:
-            return input_context.expression_for_value(self.limit_value_id)
-        return ConstantRef(
-            constant_id=f"rank-limit.{self.limit}",
-            version_ref="rank@1",
-            value=FactValue.literal(
-                id=f"rank-limit.{self.limit}",
-                literal_type=LiteralType.NUMBER,
-                value=str(self.limit),
-            ),
+    ) -> CompiledOrdering | None:
+        expression = fact.answer_expression
+        if expression is None or expression.ordering_direction is None:
+            return None
+        direction = (
+            SortDirection.ASC
+            if expression.ordering_direction
+            is RequestedFactOrderingDirection.ASCENDING
+            else SortDirection.DESC
         )
+        if expression.selection_kind is ResultSelectionKind.ALL_RESULTS:
+            selection: OrderSelection = KeepAll()
+        elif expression.selection_kind is ResultSelectionKind.TAKE_ONE:
+            selection = Take(
+                ConstantRef(
+                    constant_id="selection.take-one",
+                    version_ref="selection@1",
+                    value=FactValue.literal(
+                        id="selection.take-one",
+                        literal_type=LiteralType.NUMBER,
+                        value="1",
+                    ),
+                )
+            )
+        elif expression.selection_kind is ResultSelectionKind.TAKE:
+            selection = Take(
+                input_context.expression_for_question_input(
+                    expression.limit_input_ref
+                )
+            )
+        else:
+            raise ValueError("ordered fact requires a result selection")
+        return cls(direction=direction, selection=selection)

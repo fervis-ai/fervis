@@ -102,7 +102,7 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                 (
                     "answer_subject: Kind of candidate instance to which answer_expression applies.",
                     "answer_population: Candidate instances qualifying independently, before cross-instance operations.",
-                    "answer_expression: Operation over candidates: list, order, compare, rank, limit, or aggregate.",
+                    "answer_expression: The base operation over qualifying candidates, plus any requested ordering and result selection.",
                     "answer_outputs: Values or facts projected from the result.",
                 ),
             ),
@@ -111,7 +111,9 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                 (
                     "answer_fact concisely and completely describes the requested factual result, including any user-stated ordering, comparison, or selection.",
                     "answer_expression.family is required and classifies the catalog-blind answer shape, not API execution.",
-                    "Use: list_rows when every qualifying row is requested; ranked_selection when ranking, ordering, or optimization selects a bounded subset of otherwise qualifying rows; scalar_value for one direct value; scalar_aggregate for one computed row aggregate; grouped_aggregate for grouped aggregate values; computed_scalar for arithmetic over facts or values; set_difference for members of A not evidenced in B; coverage_check for required coverage present/missing; existence_check for any-match questions; comparison_check for comparing facts, sets, or values.",
+                    "Choose family for the base result.",
+                    "Use list_rows for qualifying rows; scalar_value for one direct value; scalar_aggregate for one aggregate over all qualifying candidates; grouped_aggregate for one aggregate per group; computed_scalar for arithmetic over facts or values; and set_difference, coverage_check, existence_check, and comparison_check for their stated set or comparison operations.",
+                    "Ordering and result selection are separate from family.",
                     "Use scalar_aggregate for count answers only when the requested result is one scalar count for the whole requested population, such as how many X, number of X, or count of X.",
                     "If the question asks for counts per group, by group, or for each specified key, use grouped_aggregate.",
                     "For grouped_aggregate, set answer_expression.group_key.",
@@ -125,7 +127,7 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                     "answer_subject.instance_interpretation.kind is required.",
                     "Use NORMAL_BUSINESS_INSTANCE for ordinary business reporting questions over the subject as business users normally understand it.",
                     "Use RAW_DATA_RECORD only when the user explicitly asks for persisted records, rows, logs, audit entries, raw data, database entries, or another data artifact.",
-                    "answer_population is required. It defines candidate instances qualifying independently, before cross-instance ordering, comparison, ranking, limiting, or aggregation.",
+                    "answer_population is required. It defines candidate instances qualifying independently, before cross-instance ordering, comparison, selection, or aggregation.",
                     "answer_population.population_label is a concise phrase for those independently qualifying candidate instances.",
                     "answer_population.counted_unit names one business unit in that population.",
                     "answer_population.membership_tests must include one SUBJECT_IDENTITY test.",
@@ -141,6 +143,21 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                     "answer_requests_count must equal the number of answer_requests.",
                     "Do not put API details, endpoint names, field names, params, enum values, or execution operations in answer_subject.",
                     "Do not include caveats, proof, data availability checks, endpoint/API terms, execution instructions, or underlying calculation support unless the user explicitly asks for that support as an answer part.",
+                ),
+            ),
+            builder.instruction_block(
+                "Ordering And Selection",
+                (
+                    "ordering states what result value determines order and which direction it uses.",
+                    "ordering.basis describes that value without naming an API field.",
+                    "Use direction=ascending when smaller or earlier values come first.",
+                    "Use direction=descending when larger or later values come first.",
+                    "For list_rows and grouped_aggregate, selection states which results survive.",
+                    "all_results keeps every result; take_one keeps exactly one result; take keeps the explicit number supplied by one result_limit input.",
+                    "take_one and take require ordering. all_results may be ordered or unordered.",
+                    "Use take_one for a singular first, last, highest, or lowest result. Do not create a result_limit input for take_one.",
+                    "Use take only when the question explicitly supplies a positive result count.",
+                    "The result_limit input owns that count through RESULT_LIMIT; do not copy its input_ref into answer_expression.",
                 ),
             ),
             builder.instruction_block(
@@ -200,7 +217,7 @@ class QuestionContractTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Result Limits",
                 (
-                    "A result_limit is an explicit positive integer stating the cardinality of a ranked or ordered result set.",
+                    "A result_limit is an explicit positive integer stating how many ordered results to return.",
                     "The positive integer in 'which N', 'top N', or 'first N' is a result_limit.",
                     "Use kind=literal_text with role=result_limit for every supplied result_limit; it is a question input, not merely answer-shape wording.",
                     "Set operand_text to canonical positive integer digits for that copied integer.",

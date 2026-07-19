@@ -1,4 +1,4 @@
-id: identified_entity_ranked_selection_owns_limit_and_output
+id: identified_entity_take_owns_limit_and_output
 description: A typed identified entity constrains the candidate population while ordinal selection, its explicit limit, and the projected property retain separate owners.
 kind: algorithm
 algorithm: question_contract.parse
@@ -49,7 +49,9 @@ input:
     answer_requests:
       - answer_fact: work locations from Nadia Wanjiku's first two shifts
         answer_expression:
-          family: ranked_selection
+          family: list_rows
+          ordering: {basis: shift chronology, direction: ascending}
+          selection: {kind: take}
         question_input_uses:
           - {use_id: use_nadia, input_ref: nadia, owner_kind: POPULATION_TESTS}
           - {use_id: use_limit, input_ref: first_two, owner_kind: RESULT_LIMIT}
@@ -105,13 +107,16 @@ expect:
         role: result_limit
     requested_facts:
       - description: work locations from Nadia Wanjiku's first two shifts
-        answer_expression_family: ranked_selection
+        answer_expression_family: list_rows
         answer_subject_text: shifts
         input_refs: [nadia, first_two]
         answer_request:
           answer_expression:
-            family: ranked_selection
-            selection_kind: limited_results
+            family: list_rows
+            ordering:
+              basis: shift chronology
+              direction: ascending
+            selection_kind: take
             limit_input_ref: first_two
           answer_population:
             population_label: Nadia Wanjiku's shifts

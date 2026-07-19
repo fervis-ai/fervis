@@ -15,6 +15,7 @@ from fervis.lookup.question_contract import (
     RequestedFact,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
+    RequestedFactOrderingDirection,
     ResultSelectionKind,
     RequestedFactGroupKey,
     RequestedFactAnswerOutput,
@@ -165,17 +166,25 @@ def _requested_fact(payload: dict[str, Any]) -> RequestedFact:
             family=family,
             group_key=_group_key(payload.get("group_key")),
             selection_kind=(
-                ResultSelectionKind.LIMITED_RESULTS
-                if family is RequestedFactAnswerExpressionFamily.RANKED_SELECTION
-                else ResultSelectionKind.ALL_RESULTS
-                if family is RequestedFactAnswerExpressionFamily.LIST_ROWS
+                ResultSelectionKind(
+                    str(payload.get("selection_kind") or "all_results")
+                )
+                if family
+                in {
+                    RequestedFactAnswerExpressionFamily.LIST_ROWS,
+                    RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
+                }
                 else None
             ),
-            limit_input_ref=(
-                "limit"
-                if family is RequestedFactAnswerExpressionFamily.RANKED_SELECTION
-                else ""
+            ordering_basis=str(payload.get("ordering_basis") or ""),
+            ordering_direction=(
+                RequestedFactOrderingDirection(
+                    str(payload.get("ordering_direction"))
+                )
+                if payload.get("ordering_direction")
+                else None
             ),
+            limit_input_ref=str(payload.get("limit_input_ref") or ""),
         ),
         answer_subject=RequestedFactAnswerSubject(
             subject_text=str(payload["subject_text"])

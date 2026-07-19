@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from typing_extensions import assert_never
 
 from fervis.lookup.plan_execution.operation_runtime import (
     ExecutableOperation,
@@ -17,12 +18,17 @@ from fervis.lookup.outcomes.errors import IncompleteEvidenceError
 from fervis.lookup.answer_program.operations import (
     AggregateSpec,
     SortDirection,
-    TiePolicy,
 )
-from fervis.lookup.plan_execution.operation_runtime import ResolvedRankSpec
+from fervis.lookup.canonical_data import RuntimeValue
+from fervis.lookup.answer_program.operations import KeepAll, OrderSpec, Take
+from fervis.lookup.plan_execution.operation_engine.expression_evaluator import (
+    ExpressionEnvironment,
+    evaluate_expression,
+)
 from fervis.lookup.plan_execution.declared_values import (
     declared_key,
     declared_order_key,
+    exact_positive_integer,
 )
 
 from .shared import (
@@ -93,15 +99,15 @@ def _aggregate(
     )
 
 
-def _rank(
+def _order(
     operation: ExecutableOperation,
-    spec: ResolvedRankSpec,
+    spec: OrderSpec,
     relations: dict[str, RelationRows],
     *,
+    scalars: dict[str, RuntimeValue],
+    scalar_types: dict[str, str],
     operation_refs: tuple[str, ...] = (),
 ) -> RelationRows:
-    if spec.limit < 1:
-        raise RelationEngineError("rank requires positive limit")
     input_relation = _relation(relations, spec.input_relation)
     rows = tuple(input_relation.rows)
     field_types = dict(input_relation.field_types or {})
@@ -116,16 +122,29 @@ def _rank(
             values.append(
                 _Descending(value) if sort.direction == SortDirection.DESC else value
             )
-        if spec.tie_policy != TiePolicy.FIELD:
-            raise RelationEngineError(f"unsupported tie policy {spec.tie_policy}")
         return tuple(values)
 
     sorted_keyed_rows = sorted(
         ((key(row), row) for row in rows),
         key=lambda item: item[0],
     )
-    _verify_rank_keys_are_unique_at_limit(sorted_keyed_rows, limit=spec.limit)
-    sorted_rows = [dict(row) for _, row in sorted_keyed_rows[: spec.limit]]
+    limit = len(sorted_keyed_rows)
+    if isinstance(spec.selection, Take):
+        evaluated = evaluate_expression(
+            spec.selection.limit,
+            environment=ExpressionEnvironment(
+                scalars=scalars,
+                scalar_types=scalar_types,
+            ),
+        )
+        try:
+            limit = exact_positive_integer(evaluated.value)
+        except (TypeError, ValueError) as exc:
+            raise RelationEngineError("order take requires a positive integer") from exc
+    elif not isinstance(spec.selection, KeepAll):
+        assert_never(spec.selection)
+    _verify_order_keys_are_unique_at_limit(sorted_keyed_rows, limit=limit)
+    sorted_rows = [dict(row) for _, row in sorted_keyed_rows[:limit]]
     return _operation_relation(
         operation,
         sorted_rows,
@@ -136,13 +155,13 @@ def _rank(
     )
 
 
-def _verify_rank_keys_are_unique_at_limit(
+def _verify_order_keys_are_unique_at_limit(
     keyed_rows: list[tuple[tuple[object, ...], Row]],
     *,
     limit: int,
 ) -> None:
     for index in range(1, min(limit, len(keyed_rows))):
         if keyed_rows[index - 1][0] == keyed_rows[index][0]:
-            raise RelationEngineError("rank requires unique ordering keys")
+            raise RelationEngineError("order requires unique ordering keys")
     if limit < len(keyed_rows) and keyed_rows[limit - 1][0] == keyed_rows[limit][0]:
-        raise RelationEngineError("rank requires unique ordering keys")
+        raise RelationEngineError("order requires unique ordering keys")

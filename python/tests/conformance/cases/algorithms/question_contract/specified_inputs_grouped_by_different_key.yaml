@@ -39,6 +39,7 @@ input:
       group_key:
         description: store
         domain: SOURCE_RESULT_VALUES
+      selection: {kind: all_results}
     question_input_uses:
     - {use_id: use_staff_a, input_ref: staff_a, owner_kind: POPULATION_TESTS}
     - {use_id: use_staff_b, input_ref: staff_b, owner_kind: POPULATION_TESTS}
@@ -81,6 +82,7 @@ expect:
           group_key:
             description: store
             domain: SOURCE_RESULT_VALUES
+          selection_kind: all_results
         answer_outputs:
         - description: sales count
           role: ROW_COUNT

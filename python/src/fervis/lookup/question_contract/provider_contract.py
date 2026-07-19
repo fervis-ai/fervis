@@ -97,9 +97,22 @@ class GroupKeyOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
+class OrderingOutput(ProviderOutput):
+    basis: str
+    direction: str
+
+
+@dataclass(frozen=True)
+class ResultSelectionOutput(ProviderOutput):
+    kind: str
+
+
+@dataclass(frozen=True)
 class AnswerExpressionOutput(ProviderOutput):
     family: str
     group_key: Optional[GroupKeyOutput] = None
+    ordering: Optional[OrderingOutput] = None
+    selection: Optional[ResultSelectionOutput] = None
 
 
 @dataclass(frozen=True)

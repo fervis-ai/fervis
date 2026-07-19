@@ -12,7 +12,7 @@ from ._shared import (
     Operation,
     ProjectSpec,
     ProjectToKeySpec,
-    RankSpec,
+    OrderSpec,
     UniversalConditionSpec,
     VerificationError,
 )
@@ -285,10 +285,10 @@ def _verify_operation_field_references(
             for aggregation in spec.aggregations:
                 if aggregation.function != AggregationFunction.COUNT:
                     _field_roles(source, aggregation.input_field, "aggregate")
-        elif isinstance(spec, RankSpec):
+        elif isinstance(spec, OrderSpec):
             source = _contract(relation_contracts, spec.input_relation)
             for sort_key in (*spec.order_by, *spec.tie_breakers):
-                _field_roles(source, sort_key.field, "rank")
+                _field_roles(source, sort_key.field, "order")
         elif isinstance(spec, UniversalConditionSpec):
             _verify_predicate_fields(
                 contract=_contract(

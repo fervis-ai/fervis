@@ -5,12 +5,6 @@ from __future__ import annotations
 from typing_extensions import assert_never
 
 from fervis.lookup.plan_execution.errors import VerificationError
-from fervis.lookup.answer_program.values import (
-    ConstantRef,
-    EnvironmentRef,
-    NodeOutputRef,
-    ParameterRef,
-)
 from fervis.lookup.answer_program.operations import (
     AggregateSpec,
     AggregationFunction,
@@ -24,13 +18,14 @@ from fervis.lookup.answer_program.operations import (
     PredicateOperator,
     ProjectSpec,
     ProjectToKeySpec,
-    RankSpec,
+    KeepAll,
+    OrderSpec,
+    Take,
     RelationRole,
     RelationRoleRef,
     RoleExpandSpec,
     SortDirection,
     SortKey,
-    TiePolicy,
     UnionSpec,
     UniversalConditionSpec,
 )
@@ -121,8 +116,8 @@ def verify_operation(operation: Operation) -> None:
         if not spec.aggregations:
             raise VerificationError("aggregate requires aggregations")
         _require_aggregations(spec)
-    elif isinstance(spec, RankSpec):
-        _require_rank(spec)
+    elif isinstance(spec, OrderSpec):
+        _require_order(spec)
     elif isinstance(spec, ComputeSpec):
         _require_compute(spec)
     else:
@@ -188,23 +183,20 @@ def _require_relation_role(
         raise VerificationError(f"{label} requires grain obligation")
 
 
-def _require_rank(spec: RankSpec) -> None:
-    _require_input(spec.input_relation, "rank")
+def _require_order(spec: OrderSpec) -> None:
+    _require_input(spec.input_relation, "order")
     if not spec.order_by:
-        raise VerificationError("rank requires ordering and deterministic tie policy")
-    if not spec.tie_policy:
-        raise VerificationError("rank requires deterministic tie policy")
-    _require_sort_keys(spec.order_by, "rank")
-    if spec.tie_policy not in set(TiePolicy):
-        raise VerificationError("rank requires deterministic tie policy")
-    if not isinstance(
-        spec.limit,
-        (ParameterRef, NodeOutputRef, ConstantRef, EnvironmentRef),
-    ):
-        raise VerificationError("rank limit has unclassified value origin")
+        raise VerificationError("order requires ordering keys")
+    _require_sort_keys(spec.order_by, "order")
+    if not isinstance(spec.selection, (KeepAll, Take)):
+        raise VerificationError("order requires a selection")
+    if isinstance(spec.selection, Take) and not expression_references(
+        spec.selection.limit
+    ).leaves:
+        raise VerificationError("order take limit requires an expression")
     if not spec.tie_breakers:
-        raise VerificationError("field tie policy requires tie breakers")
-    _require_sort_keys(spec.tie_breakers, "rank")
+        raise VerificationError("order requires deterministic tie breakers")
+    _require_sort_keys(spec.tie_breakers, "order")
 
 
 def _require_compute(spec: ComputeSpec) -> None:

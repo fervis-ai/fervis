@@ -45,7 +45,8 @@ from fervis.lookup.answer_program.operations import (
     Predicate,
     ProjectSpec,
     ProjectToKeySpec,
-    RankSpec,
+    OrderSpec,
+    Take,
     RoleExpandSpec,
     UnionSpec,
     UniversalConditionSpec,
@@ -188,11 +189,11 @@ def _operation_value_expressions(
     operation: Operation,
 ) -> tuple[NamedValueExpression, ...]:
     spec = operation.spec
-    if isinstance(spec, RankSpec):
+    if isinstance(spec, OrderSpec) and isinstance(spec.selection, Take):
         return (
             NamedValueExpression(
-                sink=f"operation.{operation.id}.rank.limit",
-                expression=spec.limit,
+                sink=f"operation.{operation.id}.order.limit",
+                expression=spec.selection.limit,
             ),
         )
     if isinstance(spec, ComputeSpec):
@@ -220,6 +221,7 @@ def _operation_value_expressions(
             CrossJoinSpec,
             AntiJoinSpec,
             AggregateSpec,
+            OrderSpec,
         ),
     ):
         return ()

@@ -4,22 +4,27 @@ from fervis.lookup.plan_execution.operation_engine import execute_operations
 from fervis.lookup.plan_execution.operation_runtime import (
     ExecutableOperation,
     RelationEngineInput,
-    ResolvedRankSpec,
+    ScalarInput,
 )
 from fervis.lookup.plan_execution.relations import (
     CompletenessProof,
     CompletenessStatus,
     RelationRows,
 )
-from fervis.lookup.fact_planning.grouped_ranked_choices import (
-    selected_grouped_ranked_operation,
+from fervis.lookup.fact_planning.grouped_aggregate_choices import (
+    selected_grouped_aggregate_operation,
 )
-from fervis.lookup.answer_program.inputs import resolve_value_expression
-from fervis.lookup.answer_program import BindingSet
-from fervis.lookup.answer_program.operations import RankSpec
+from fervis.lookup.question_contract import (
+    GroupKeyDomainKind,
+    RequestedFactAnswerExpression,
+    RequestedFactAnswerExpressionFamily,
+    RequestedFactGroupKey,
+    RequestedFactOrderingDirection,
+    ResultSelectionKind,
+)
 
 
-def _ranked_payload(
+def _ordered_grouped_payload(
     *,
     metric_id="metric_1",
     metric_field_id="metric_total",
@@ -30,7 +35,7 @@ def _ranked_payload(
         "answers": [
             {
                 "requested_fact_id": "rf_answer",
-                "pattern": "ranked_aggregate",
+                "pattern": "aggregate_by_group",
                 "source_binding_id": "sb_1",
                 "metric": {
                     "selection_basis": "The requested measure is metric_total.",
@@ -43,15 +48,34 @@ def _ranked_payload(
                     "id": function_id,
                     "value": function_value,
                 },
-                "rank": {
-                    "selection_basis": "The question asks for the highest group.",
-                    "id": "rank_top_1_desc",
-                    "sort": "desc",
-                    "limit": 1,
-                },
             }
         ]
     }
+
+
+def _ordered_grouped_fact() -> RequestedFact:
+    return RequestedFact(
+        id="rf_answer",
+        description="group with the highest total",
+        answer_expression=RequestedFactAnswerExpression(
+            family=RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
+            group_key=RequestedFactGroupKey(
+                id="answer_1",
+                description="result group",
+                domain=GroupKeyDomainKind.SOURCE_RESULT_VALUES,
+            ),
+            ordering_basis="aggregate value",
+            ordering_direction=RequestedFactOrderingDirection.DESCENDING,
+            selection_kind=ResultSelectionKind.TAKE_ONE,
+        ),
+        answer_outputs=(
+            RequestedFactAnswerOutput(
+                id="answer_2",
+                role="ANSWER_VALUE",
+                description="aggregate value",
+            ),
+        ),
+    )
 
 
 def test_aggregate_by_group_fulfillment_maps_answer_outputs_by_selected_parts():
@@ -87,8 +111,8 @@ def test_aggregate_by_group_fulfillment_maps_answer_outputs_by_selected_parts():
     }
 
 
-def test_grouped_ranked_group_is_backend_owned_not_model_selected():
-    selection = selected_grouped_ranked_operation(
+def test_grouped_aggregate_group_is_backend_owned_not_model_selected():
+    selection = selected_grouped_aggregate_operation(
         pattern_answer(
             {
                 "requested_fact_id": "rf_answer",
@@ -149,8 +173,8 @@ def test_aggregate_by_group_fulfillment_maps_answer_outputs_by_evidence_not_orde
     }
 
 
-def test_grouped_ranked_selection_roles_outputs_by_selected_evidence_kind():
-    selection = selected_grouped_ranked_operation(
+def test_grouped_aggregate_selection_roles_outputs_by_selected_evidence_kind():
+    selection = selected_grouped_aggregate_operation(
         pattern_answer(
             {
                 "requested_fact_id": "rf_answer",
@@ -177,8 +201,8 @@ def test_grouped_ranked_selection_roles_outputs_by_selected_evidence_kind():
     }
 
 
-def test_grouped_ranked_count_metric_keeps_answer_output_identity():
-    selection = selected_grouped_ranked_operation(
+def test_grouped_aggregate_count_metric_keeps_answer_output_identity():
+    selection = selected_grouped_aggregate_operation(
         pattern_answer(
             {
                 "requested_fact_id": "rf_answer",
@@ -234,8 +258,8 @@ def test_aggregate_by_group_count_plan_keeps_count_output_through_validation():
     }
 
 
-def test_grouped_ranked_measured_metric_keeps_answer_output_identity():
-    selection = selected_grouped_ranked_operation(
+def test_grouped_aggregate_measured_metric_keeps_answer_output_identity():
+    selection = selected_grouped_aggregate_operation(
         pattern_answer(
             {
                 "requested_fact_id": "rf_answer",
@@ -338,10 +362,11 @@ def test_pattern_compiler_rejects_multi_relation_source_outside_selected_role():
         )
 
 
-def test_ranked_aggregate_metric_answer_output_is_rendered_as_answer_value():
+def test_ordered_grouped_aggregate_metric_is_rendered_as_answer_value():
     plan = compile_pattern_answer_plan(
-        _ranked_payload(),
+        _ordered_grouped_payload(),
         bound_sources=(_two_output_aggregate_bound_source(),),
+        requested_facts=(_ordered_grouped_fact(),),
     )
 
     fulfillment_by_output = {
@@ -358,27 +383,12 @@ def test_ranked_aggregate_metric_answer_output_is_rendered_as_answer_value():
     assert render_by_id["answer_2"].role == "answer_value"
 
 
-def test_ranked_aggregate_prompt_exposes_compact_linear_choice_surface():
+def test_grouped_aggregate_prompt_exposes_compact_linear_choice_surface():
     request = FactPlanRequest(
         question="Which store had the highest sales this month?",
         question_contract=QuestionContract(
             requested_facts=(
-                RequestedFact(
-                    id="rf_answer",
-                    description="store with the highest sales this month",
-                    answer_outputs=(
-                        RequestedFactAnswerOutput(
-                            id="answer_1",
-                            role="ANSWER_VALUE",
-                            description="store name",
-                        ),
-                        RequestedFactAnswerOutput(
-                            id="answer_2",
-                            role="ANSWER_VALUE",
-                            description="sales amount",
-                        ),
-                    ),
-                ),
+                _ordered_grouped_fact(),
             )
         ),
         relation_catalog=RelationCatalog(reads=()),
@@ -390,9 +400,9 @@ def test_ranked_aggregate_prompt_exposes_compact_linear_choice_surface():
             plan_selections=(
                 BoundSelectedSourceStrategy(
                     requested_fact_id="rf_answer",
-                    plan_selection_id="rf_answer.ranked_aggregate.sb_1",
-                    source_strategy_id="source_strategy.rf_answer.ranked_aggregate.1",
-                    plan_shape="ranked_aggregate",
+                    plan_selection_id="rf_answer.aggregate_by_group.sb_1",
+                    source_strategy_id="source_strategy.rf_answer.aggregate_by_group.1",
+                    plan_shape="aggregate_by_group",
                     required_answer_output_ids=("answer_1", "answer_2"),
                     source_members=(
                         _bound_plan_member(request, source_binding_ids=("sb_1",)),
@@ -402,7 +412,7 @@ def test_ranked_aggregate_prompt_exposes_compact_linear_choice_surface():
         ),
     )
 
-    assert "Grouped/ranked operation choices:" in prompt
+    assert "Grouped aggregate operation choices:" in prompt
     assert (
         '<group fields="location_id" key_id="location_key" entity_kind="location" source="source_binding" />'
         in prompt
@@ -420,27 +430,12 @@ def test_ranked_aggregate_prompt_exposes_compact_linear_choice_surface():
     assert prompt.count("<metric ") == 1
 
 
-def test_ranked_aggregate_schema_does_not_request_model_group_selection():
+def test_grouped_aggregate_schema_does_not_request_model_group_selection():
     request = FactPlanRequest(
         question="Which store had the highest sales this month?",
         question_contract=QuestionContract(
             requested_facts=(
-                RequestedFact(
-                    id="rf_answer",
-                    description="store with the highest sales this month",
-                    answer_outputs=(
-                        RequestedFactAnswerOutput(
-                            id="answer_1",
-                            role="ANSWER_VALUE",
-                            description="store name",
-                        ),
-                        RequestedFactAnswerOutput(
-                            id="answer_2",
-                            role="ANSWER_VALUE",
-                            description="sales amount",
-                        ),
-                    ),
-                ),
+                _ordered_grouped_fact(),
             )
         ),
         relation_catalog=RelationCatalog(reads=()),
@@ -452,9 +447,9 @@ def test_ranked_aggregate_schema_does_not_request_model_group_selection():
             plan_selections=(
                 BoundSelectedSourceStrategy(
                     requested_fact_id="rf_answer",
-                    plan_selection_id="rf_answer.ranked_aggregate.sb_1",
-                    source_strategy_id="source_strategy.rf_answer.ranked_aggregate.1",
-                    plan_shape="ranked_aggregate",
+                    plan_selection_id="rf_answer.aggregate_by_group.sb_1",
+                    source_strategy_id="source_strategy.rf_answer.aggregate_by_group.1",
+                    plan_shape="aggregate_by_group",
                     required_answer_output_ids=("answer_1", "answer_2"),
                     source_members=(
                         _bound_plan_member(request, source_binding_ids=("sb_1",)),
@@ -468,10 +463,11 @@ def test_ranked_aggregate_schema_does_not_request_model_group_selection():
     assert '"group"' not in schema_text
 
 
-def test_ranked_aggregate_choice_keeps_canonical_group_key_for_render_contract():
+def test_ordered_grouped_aggregate_keeps_canonical_group_key_for_render_contract():
     plan = compile_pattern_answer_plan(
-        _ranked_payload(),
+        _ordered_grouped_payload(),
         bound_sources=(_ranked_group_key_with_display_bound_source(),),
+        requested_facts=(_ordered_grouped_fact(),),
     )
 
     fulfillment_by_output = {
@@ -500,13 +496,13 @@ def test_ranked_aggregate_choice_keeps_canonical_group_key_for_render_contract()
     }
 
 
-def test_ranked_aggregate_choice_compiles_count_metric():
+def test_ordered_grouped_aggregate_compiles_count_metric():
     plan = compile_pattern_answer_plan(
         {
             "answers": [
                 {
                     "requested_fact_id": "rf_answer",
-                    "pattern": "ranked_aggregate",
+                    "pattern": "aggregate_by_group",
                     "source_binding_id": "sb_1",
                     "metric": {
                         "selection_basis": "Orders are counted as records.",
@@ -518,16 +514,11 @@ def test_ranked_aggregate_choice_compiles_count_metric():
                         "id": "function_count",
                         "value": "count",
                     },
-                    "rank": {
-                        "selection_basis": "The question asks for the most orders.",
-                        "id": "rank_top_1_desc",
-                        "sort": "desc",
-                        "limit": 1,
-                    },
                 }
             ]
         },
         bound_sources=(_ranked_count_by_store_bound_source(),),
+        requested_facts=(_ordered_grouped_fact(),),
     )
 
     fulfillment_by_output = {
@@ -552,13 +543,13 @@ def test_ranked_aggregate_choice_compiles_count_metric():
     assert render_by_id["answer_2"].field_id == "count"
 
 
-def test_ranked_aggregate_excludes_null_answer_group_keys_before_ranking():
+def test_ordered_grouped_aggregate_excludes_null_group_keys_before_ordering():
     plan = compile_pattern_answer_plan(
         {
             "answers": [
                 {
                     "requested_fact_id": "rf_answer",
-                    "pattern": "ranked_aggregate",
+                    "pattern": "aggregate_by_group",
                     "source_binding_id": "sb_1",
                     "metric": {
                         "selection_basis": "Orders are counted as records.",
@@ -570,16 +561,11 @@ def test_ranked_aggregate_excludes_null_answer_group_keys_before_ranking():
                         "id": "function_count",
                         "value": "count",
                     },
-                    "rank": {
-                        "selection_basis": "The question asks for the most orders.",
-                        "id": "rank_top_1_desc",
-                        "sort": "desc",
-                        "limit": 1,
-                    },
                 }
             ]
         },
         bound_sources=(_ranked_count_by_store_bound_source(),),
+        requested_facts=(_ordered_grouped_fact(),),
     )
 
     result = execute_operations(
@@ -601,27 +587,16 @@ def test_ranked_aggregate_excludes_null_answer_group_keys_before_ranking():
             operations=tuple(
                 ExecutableOperation(
                     id=operation.id,
-                    spec=ResolvedRankSpec(
-                        input_relation=operation.spec.input_relation,
-                        order_by=operation.spec.order_by,
-                        tie_policy=operation.spec.tie_policy,
-                        limit=int(
-                            resolve_value_expression(
-                                operation.spec.limit,
-                                bindings=BindingSet(),
-                            ).value
-                        ),
-                        tie_breakers=operation.spec.tie_breakers,
-                    ),
-                    output_relation=operation.output_relation,
-                )
-                if isinstance(operation.spec, RankSpec)
-                else ExecutableOperation(
-                    id=operation.id,
                     spec=operation.spec,
                     output_relation=operation.output_relation,
                 )
                 for operation in plan.operations
+            ),
+            scalar_inputs=(
+                ScalarInput(
+                    id="constant:selection.take-one@selection@1",
+                    value=1,
+                ),
             ),
         )
     )
@@ -629,33 +604,3 @@ def test_ranked_aggregate_excludes_null_answer_group_keys_before_ranking():
     assert result.relation("answer_1_rows").rows == (
         {"store_id": "store_a", "count": 3},
     )
-
-
-def test_ranked_aggregate_keeps_metric_render_artifact_role_scoped_for_single_output():
-    plan = compile_pattern_answer_plan(
-        _ranked_payload(),
-        bound_sources=(_single_output_ranked_aggregate_bound_source(),),
-    )
-
-    relation_outputs = plan.result_projection.relation_outputs  # type: ignore[union-attr]
-    result_output_ids = tuple(item.id for item in relation_outputs)
-    fulfillment_by_output = {
-        item.answer_output_id: item.result_output_id for item in plan.fulfillment
-    }
-    render_by_id = {item.id: item for item in relation_outputs}
-    metric_outputs = tuple(
-        item for item in relation_outputs if item.field_id == "metric_total"
-    )
-
-    assert len(result_output_ids) == len(set(result_output_ids))
-    assert fulfillment_by_output["answer_1"] == "answer_1"
-    assert render_by_id["answer_1"].entity_key is not None
-    assert render_by_id["answer_1"].entity_key.entity_kind == "location"
-    assert render_by_id["answer_1"].entity_key.key_id == "location_key"
-    assert tuple(
-        component.field_id
-        for component in render_by_id["answer_1"].entity_key.components
-    ) == ("location_id",)
-    assert len(metric_outputs) == 1
-    assert metric_outputs[0].id != "answer_1"
-    assert metric_outputs[0].role == "ranking_metric"

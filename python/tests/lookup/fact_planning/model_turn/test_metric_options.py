@@ -300,9 +300,9 @@ def test_pattern_prompt_uses_metric_measure_evidence_not_generic_scope_for_metri
             plan_selections=(
                 BoundSelectedSourceStrategy(
                     requested_fact_id="fact_1",
-                    plan_selection_id="fact_1.ranked_aggregate.sb_1",
-                    source_strategy_id="source_strategy.fact_1.ranked_aggregate.1",
-                    plan_shape="ranked_aggregate",
+                    plan_selection_id="fact_1.aggregate_by_group.sb_1",
+                    source_strategy_id="source_strategy.fact_1.aggregate_by_group.1",
+                    plan_shape="aggregate_by_group",
                     required_answer_output_ids=("answer_1",),
                     source_members=(
                         _bound_plan_member(request, source_binding_ids=("sb_1",)),
@@ -312,7 +312,7 @@ def test_pattern_prompt_uses_metric_measure_evidence_not_generic_scope_for_metri
         ),
     )
 
-    assert "Grouped/ranked operation choices:" in prompt
+    assert "Grouped aggregate operation choices:" in prompt
     assert 'field="calculated_pay"' in prompt
     assert 'field="amount_paid"' not in prompt
 
@@ -503,9 +503,9 @@ def test_pattern_prompt_requires_metric_evidence_even_when_answer_value_exists()
             plan_selections=(
                 BoundSelectedSourceStrategy(
                     requested_fact_id="fact_1",
-                    plan_selection_id="fact_1.ranked_aggregate.sb_1",
-                    source_strategy_id="source_strategy.fact_1.ranked_aggregate.1",
-                    plan_shape="ranked_aggregate",
+                    plan_selection_id="fact_1.aggregate_by_group.sb_1",
+                    source_strategy_id="source_strategy.fact_1.aggregate_by_group.1",
+                    plan_shape="aggregate_by_group",
                     required_answer_output_ids=("answer_1",),
                     source_members=(
                         _bound_plan_member(request, source_binding_ids=("sb_1",)),
@@ -515,7 +515,7 @@ def test_pattern_prompt_requires_metric_evidence_even_when_answer_value_exists()
         ),
     )
 
-    assert "Grouped/ranked operation choices:" in prompt
+    assert "Grouped aggregate operation choices:" in prompt
     assert (
         '<group fields="location_id" key_id="location_key" entity_kind="location" source="source_binding" />'
         in prompt
@@ -641,9 +641,9 @@ def test_pattern_prompt_does_not_offer_identity_source_numeric_fields_as_metrics
         plan_selections=(
             BoundSelectedSourceStrategy(
                 requested_fact_id="fact_1",
-                plan_selection_id="fact_1.ranked_aggregate.relations",
-                source_strategy_id="source_strategy.fact_1.ranked_aggregate.1",
-                plan_shape="ranked_aggregate",
+                plan_selection_id="fact_1.aggregate_by_group.relations",
+                source_strategy_id="source_strategy.fact_1.aggregate_by_group.1",
+                plan_shape="aggregate_by_group",
                 required_answer_output_ids=("answer_1",),
                 source_members=(
                     _bound_plan_member(
@@ -656,7 +656,7 @@ def test_pattern_prompt_does_not_offer_identity_source_numeric_fields_as_metrics
     )
 
     prompt = _pattern_fact_plan_prompt(request, plan_selection=plan_selection)
-    assert "Grouped/ranked operation choices:" in prompt
+    assert "Grouped aggregate operation choices:" in prompt
     assert '<source_binding id="sb_2" read="list_shift_compensation">' in prompt
     assert 'field="amount_paid"' in prompt
     assert "daily_base_pay" not in prompt

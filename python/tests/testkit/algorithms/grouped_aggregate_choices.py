@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from fervis.lookup.fact_planning.grouped_ranked_choices import (
-    grouped_ranked_choice_payload,
+from fervis.lookup.fact_planning.grouped_aggregate_choices import (
+    grouped_aggregate_choice_payload,
 )
 from fervis.lookup.source_binding.compiler_ir import DraftRelationSource
 from fervis.lookup.answer_program.relations import SourceKind
@@ -22,12 +22,12 @@ from fervis.lookup.source_binding import (
 from tests.testkit.assertions import subset_mismatches
 
 
-def run_grouped_ranked_choices_case(payload: dict[str, Any]) -> list[str]:
+def run_grouped_aggregate_choices_case(payload: dict[str, Any]) -> list[str]:
     source = _bound_source(payload["input"]["source"])
-    choices = grouped_ranked_choice_payload(
+    choices = grouped_aggregate_choice_payload(
         (source,),
         requested_fact_id=str(payload["input"].get("requested_fact_id") or "fact_1"),
-        plan_shape=str(payload["input"].get("plan_shape") or "ranked_aggregate"),
+        plan_shape=str(payload["input"].get("plan_shape") or "aggregate_by_group"),
     )
     metrics = [
         metric

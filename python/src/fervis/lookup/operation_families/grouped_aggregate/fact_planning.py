@@ -1,4 +1,4 @@
-"""Fact-planning schema fragments for grouped/ranked aggregate choices."""
+"""Fact-planning schema fragments for grouped aggregate choices."""
 
 from __future__ import annotations
 
@@ -6,47 +6,43 @@ from fervis.lookup.fact_planning.fact_planning_family_schema import (
     optional_pattern_schema,
 )
 from fervis.lookup.fact_planning.schema_helpers import (
-    handle_schema,
+    field_id_schema,
     strict_object,
 )
 
 
-GROUPED_RANKED_PATTERN_NAMES = frozenset(
+GROUPED_AGGREGATE_PATTERN_NAMES = frozenset(
     {
         "aggregate_by_group",
-        "ranked_aggregate",
     }
 )
 
 
-def grouped_ranked_pattern_answer_variants(
+def grouped_aggregate_pattern_answer_variants(
     *,
     plan_shape: str,
     requested_fact_id_schema: dict[str, object],
     choices: tuple[dict[str, object], ...],
     require_pattern: bool,
-    rank_limit_value_ids: tuple[str, ...] | None,
 ) -> list[dict[str, object]]:
     variants: list[dict[str, object]] = []
     for choice in choices:
         if not _valid_choice(choice):
             continue
-        schema = _grouped_ranked_pattern_answer_schema(
+        schema = _grouped_aggregate_pattern_answer_schema(
             plan_shape=plan_shape,
             requested_fact_id_schema=requested_fact_id_schema,
             choice=choice,
-            rank_limit_value_ids=rank_limit_value_ids,
         )
         variants.append(schema if require_pattern else optional_pattern_schema(schema))
     return variants
 
 
-def _grouped_ranked_pattern_answer_schema(
+def _grouped_aggregate_pattern_answer_schema(
     *,
     plan_shape: str,
     requested_fact_id_schema: dict[str, object],
     choice: dict[str, object],
-    rank_limit_value_ids: tuple[str, ...] | None,
 ) -> dict[str, object]:
     properties: dict[str, object] = {
         "requested_fact_id": requested_fact_id_schema,
@@ -61,6 +57,21 @@ def _grouped_ranked_pattern_answer_schema(
             kind="function",
         ),
     }
+    if choice.get("ordering_required"):
+        group = choice.get("group")
+        group_payload = group if isinstance(group, dict) else {}
+        ordering_field_ids = tuple(
+            str(field_id)
+            for field_id in group_payload.get("field_ids", ())
+        )
+        if ordering_field_ids:
+            properties["ordering_field"] = strict_object(
+                {
+                    "selection_basis": {"type": "string", "minLength": 1},
+                    "field_id": field_id_schema(ordering_field_ids),
+                },
+                required=("selection_basis", "field_id"),
+            )
     required: tuple[str, ...] = (
         "requested_fact_id",
         "pattern",
@@ -68,31 +79,7 @@ def _grouped_ranked_pattern_answer_schema(
         "metric",
         "function",
     )
-    if plan_shape == "ranked_aggregate":
-        properties["rank"] = _rank_schema(rank_limit_value_ids=rank_limit_value_ids)
-        required = (*required, "rank")
     return strict_object(properties, required=required)
-
-
-def _rank_schema(
-    *,
-    rank_limit_value_ids: tuple[str, ...] | None = None,
-) -> dict[str, object]:
-    limit_value_id_schema = handle_schema()
-    if rank_limit_value_ids:
-        limit_value_id_schema = {"type": "string", "enum": list(rank_limit_value_ids)}
-    elif rank_limit_value_ids is not None:
-        limit_value_id_schema = {"type": "string", "maxLength": 0}
-    return strict_object(
-        {
-            "selection_basis": {"type": "string", "minLength": 1},
-            "id": {"enum": ["rank_top_1_desc"]},
-            "sort": {"enum": ["asc", "desc"]},
-            "limit": {"type": "integer", "minimum": 1},
-            "limit_value_id": limit_value_id_schema,
-        },
-        required=("selection_basis", "id", "sort", "limit"),
-    )
 
 
 def _candidate_selection_schema(
@@ -124,7 +111,7 @@ def _candidate_schema(candidate: dict[str, object], *, kind: str) -> dict[str, o
         properties["value"] = {"enum": [_text(candidate.get("value"))]}
         required = (*required, "value")
     else:
-        raise ValueError(f"unsupported grouped/ranked candidate kind: {kind}")
+        raise ValueError(f"unsupported grouped aggregate candidate kind: {kind}")
     return strict_object(properties, required=required)
 
 

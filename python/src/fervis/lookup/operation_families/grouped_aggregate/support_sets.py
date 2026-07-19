@@ -1,4 +1,4 @@
-"""Plan-selection support grouping for grouped/ranked operations."""
+"""Plan-selection support grouping for grouped aggregate operations."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from fervis.lookup.source_binding.candidates.contracts import (
 )
 
 
-def grouped_ranked_support_set_groups(
+def grouped_aggregate_support_set_groups(
     support_sets: tuple[FulfillmentSupportSet, ...],
     *,
     requirement_id: str,

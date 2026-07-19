@@ -293,8 +293,6 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                     "For each requested fact, complete its bindings_for_<requested_fact_id> object: choose one shown plan_shape and bind every role shown for that shape exactly once, including roles with no answer outputs.",
                     "Choose each binding_target_id only from its enclosing role and obey the shape's member_constraint.",
                     "The role binding also chooses its answer population, required fulfillment, params, and population reviews.",
-                    "ranked_rows ranks individual source rows without grouping or aggregation.",
-                    "ranked_aggregate groups source rows by an entity key, aggregates a measure within each group, and ranks the resulting groups.",
                     "Bind sources under the fixed meanings in resolved_inputs.",
                     "Apply resolved question inputs through resolved_input_applications on the selected source invocation.",
                 ),
@@ -317,7 +315,7 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                     "Do not treat metric context fields as selectable fulfillment evidence.",
                     "metric_fit_bases is keyed by requested_fact_id, then metric_evidence_id from Metric fit candidates.",
                     "metric_meaning states what the reviewed metric_evidence_id appears to measure from field_path, field_type, resource_names, and the referenced metric_context.",
-                    "fit_basis evaluates whether the metric is the row-level or scalar measure that should be aggregated, ranked, compared, or otherwise computed to determine the requested answer.",
+                    "fit_basis evaluates whether the metric is the row-level or scalar measure that should be aggregated, used to order results, compared, or otherwise computed to determine the requested answer.",
                     "A metric fits when it is the correct measure input to the requested computation. Do not reject it merely because aggregation or another later operation produces the final answer value.",
                     "After all fit_basis entries, write fit_basis_interpretations with the same keys, using only the already-written fit_basis text.",
                     "Use interpretation=FITS_REQUESTED_ANSWER when the written fit_basis says the metric fits that role; otherwise use DOES_NOT_FIT_REQUESTED_ANSWER.",
@@ -661,6 +659,10 @@ class SourceBindingTurnPrompt(TurnPromptBase):
             target_fulfillment_supports[target_id] = _grain_safe_fulfillment_supports(
                 candidate,
                 target=target,
+                ordered=_target_fact_is_ordered(
+                    self.request,
+                    requested_fact_id=target.requested_fact_id,
+                ),
                 fulfillment_supports=visible_fulfillment_supports,
             )
             target_required_fulfillment_output_ids[target_id] = (
@@ -729,9 +731,10 @@ def _grain_safe_fulfillment_supports(
     candidate: SourceCandidate,
     *,
     target: SourceBindingTarget,
+    ordered: bool,
     fulfillment_supports: dict[str, tuple[str, ...]],
 ) -> dict[str, tuple[str, ...]]:
-    if target.plan_shape != "ranked_rows":
+    if target.plan_shape != "list_rows" or not ordered:
         return fulfillment_supports
     return {
         answer_output_id: tuple(
@@ -741,6 +744,22 @@ def _grain_safe_fulfillment_supports(
         )
         for answer_output_id, support_set_ids in fulfillment_supports.items()
     }
+
+
+def _target_fact_is_ordered(
+    request: SourceBindingRequest,
+    *,
+    requested_fact_id: str,
+) -> bool:
+    fact = next(
+        (item for item in request.requested_facts if item.id == requested_fact_id),
+        None,
+    )
+    return bool(
+        fact is not None
+        and fact.answer_expression is not None
+        and fact.answer_expression.is_ordered
+    )
 
 
 def _plan_families_payload(

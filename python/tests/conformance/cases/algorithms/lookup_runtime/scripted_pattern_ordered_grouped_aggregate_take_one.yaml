@@ -1,7 +1,7 @@
-id: scripted_pattern_ranked_aggregate
-description: Lookup runtime executes a scripted ranked aggregate and renders the selected group plus ranking metric.
+id: scripted_pattern_ordered_grouped_aggregate_take_one
+description: Lookup runtime executes an ordered grouped aggregate and renders the selected group plus metric.
 migrates:
-  - api/tests/fervis/lookup/test_pattern_fact_plan_contract.py::test_pattern_contract_executes_ranked_aggregate_end_to_end
+  - api/tests/fervis/lookup/test_pattern_fact_plan_contract.py::test_pattern_contract_executes_ordered_grouped_aggregate_end_to_end
 kind: algorithm
 algorithm: lookup.orchestration
 input:
@@ -10,17 +10,16 @@ input:
   question_contract:
     fact_description: top location by metric total
     subject_text: location
-    answer_expression_family: ranked_selection
+    answer_expression_family: grouped_aggregate
+    group_key:
+      description: location
+      domain: SOURCE_RESULT_VALUES
+    ordering: {basis: aggregate metric total, direction: descending}
+    selection: {kind: take_one}
     answer_outputs:
       - {description: location, role: ANSWER_VALUE}
     resource_terms: [metric]
     support_role: MEASURED_VALUE
-    known_inputs:
-      - kind: literal_text
-        source: question_context
-        text: top 1
-        resolved_value_text: '1'
-        role: result_limit
   catalog:
     reads:
       - id: metric_read
@@ -48,16 +47,12 @@ input:
       kind: fact_plan
       answers:
         - requested_fact_id: fact_1
-          pattern: ranked_aggregate
+          pattern: aggregate_by_group
           source_hint: {kind: read, read_id: metric_read}
           aggregate_choice:
             group_field_ids: [location_id]
             metric_field_id: metric_total
             metric_function: sum
-          rank:
-            sort: desc
-            limit: 1
-            limit_value_id: grounded_input_1
   read_eligibility:
     - requested_fact_id: fact_1
       read_id: metric_read
@@ -81,4 +76,4 @@ expect:
           entityKind: location
           keyId: location_key
           components: {location_id: location_2}
-        answer_1.ranking_metric: "20.00"
+        answer_1: "20.00"

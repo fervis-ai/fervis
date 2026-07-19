@@ -1,4 +1,4 @@
-id: scripted_pattern_ranked_rows
+id: scripted_pattern_ordered_rows_take
 description: Lookup runtime orders source rows and applies the explicit typed result limit before projection.
 kind: algorithm
 algorithm: lookup.orchestration
@@ -8,7 +8,9 @@ input:
   question_contract:
     fact_description: first two event codes
     subject_text: events
-    answer_expression_family: ranked_selection
+    answer_expression_family: list_rows
+    ordering: {basis: event chronology, direction: ascending}
+    selection: {kind: take}
     answer_outputs:
       - {description: event code, role: ANSWER_VALUE}
     resource_terms: [event]
@@ -38,16 +40,12 @@ input:
       answers:
         - requested_fact_id: fact_1
           answer_output_ids: [answer_1]
-          pattern: ranked_rows
+          pattern: list_rows
           source: {kind: read, read_id: event_read}
           output_fields: [{field_id: event_code}]
-          order_field:
+          ordering_field:
             selection_basis: started_at establishes chronological order.
             field_id: started_at
-          rank:
-            selection_basis: first orders ascending and two supplies the limit.
-            sort: asc
-            limit_value_id: grounded_input_1
   responses:
     event_read:
       data:

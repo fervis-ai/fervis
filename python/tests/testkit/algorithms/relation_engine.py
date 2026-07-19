@@ -12,7 +12,6 @@ from fervis.lookup.plan_execution.operation_engine import execute_operations
 from fervis.lookup.plan_execution.operation_runtime import (
     ExecutableOperation,
     RelationEngineInput,
-    ResolvedRankSpec,
     ScalarInput,
 )
 from fervis.lookup.plan_execution.relations import (
@@ -32,6 +31,8 @@ from fervis.lookup.answer_program.operations import (
     FilterSpec,
     JoinKey,
     JoinSpec,
+    KeepAll,
+    OrderSpec,
     Predicate,
     PredicateOperator,
     ProjectField,
@@ -43,7 +44,7 @@ from fervis.lookup.answer_program.operations import (
     RoleMapping,
     SortDirection,
     SortKey,
-    TiePolicy,
+    Take,
     UnionSpec,
     UniversalConditionSpec,
 )
@@ -304,12 +305,21 @@ def operation_spec_from_payload(payload: dict[str, Any]) -> Any:
             group_by=tuple(str(item) for item in payload.get("group_by") or ()),
             aggregations=tuple(_aggregation(item) for item in payload["aggregations"]),
         )
-    if kind == "rank":
-        return ResolvedRankSpec(
+    if kind == "order":
+        selection_payload = payload["selection"]
+        selection = (
+            KeepAll()
+            if selection_payload["kind"] == "keep_all"
+            else Take(
+                limit=ParameterRef(
+                    parameter_id=str(selection_payload["limit_input_id"])
+                )
+            )
+        )
+        return OrderSpec(
             input_relation=str(payload["input_relation"]),
             order_by=tuple(_sort_key(item) for item in payload["order_by"]),
-            tie_policy=TiePolicy(str(payload.get("tie_policy") or "field")),
-            limit=int(payload["limit"]),
+            selection=selection,
             tie_breakers=tuple(
                 _sort_key(item) for item in payload.get("tie_breakers") or ()
             ),

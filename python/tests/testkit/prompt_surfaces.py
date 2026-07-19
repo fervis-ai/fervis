@@ -81,6 +81,7 @@ PROMPT_SURFACE_CONTRACTS = {
             "Question Boundary",
             "Relational Ownership",
             "Answer Requests",
+            "Ordering And Selection",
             "Answer Outputs",
             "Question Inputs Overview",
             "Literal Reference Inputs",

@@ -25,10 +25,10 @@ from fervis.lookup.fact_planning.metric_options import (
     scalar_aggregate_choices_for_source,
     scalar_aggregate_choices_prompt,
 )
-from fervis.lookup.fact_planning.grouped_ranked_choices import (
-    GROUPED_RANKED_PLAN_SHAPES,
-    grouped_ranked_choices_by_requested_fact_id,
-    grouped_ranked_choices_prompt,
+from fervis.lookup.fact_planning.grouped_aggregate_choices import (
+    GROUPED_AGGREGATE_PLAN_SHAPES,
+    grouped_aggregate_choices_by_requested_fact_id,
+    grouped_aggregate_choices_prompt,
 )
 from fervis.lookup.fact_planning.prompt_sections import (
     fact_plan_instruction_sections,
@@ -100,7 +100,7 @@ class PatternFactPlanTurnPrompt(TurnPromptBase):
     ) -> None:
         self.request = request
         self.plan_selection = plan_selection
-        self._grouped_ranked_choices = _grouped_ranked_choices_by_requested_fact_id(
+        self._grouped_aggregate_choices = _grouped_aggregate_choices_by_requested_fact_id(
             request,
             plan_selection=plan_selection,
         )
@@ -136,14 +136,14 @@ class PatternFactPlanTurnPrompt(TurnPromptBase):
                 ),
             ),
         ]
-        grouped_ranked_prompt = grouped_ranked_choices_prompt(
-            self._grouped_ranked_choices
+        grouped_aggregate_prompt = grouped_aggregate_choices_prompt(
+            self._grouped_aggregate_choices
         )
-        if grouped_ranked_prompt:
+        if grouped_aggregate_prompt:
             sections.append(
                 builder.text_section(
-                    "Grouped/ranked operation choices:",
-                    grouped_ranked_prompt,
+                    "Grouped aggregate operation choices:",
+                    grouped_aggregate_prompt,
                 )
             )
         scalar_aggregate_prompt = scalar_aggregate_choices_prompt(
@@ -224,11 +224,17 @@ class PatternFactPlanTurnPrompt(TurnPromptBase):
             source_binding_ids_by_requirement_by_requested_fact_id=(
                 self.plan_selection.source_binding_ids_by_requirement_by_requested_fact_id()
             ),
-            grouped_ranked_choices_by_requested_fact_id=(self._grouped_ranked_choices),
+            grouped_aggregate_choices_by_requested_fact_id=(self._grouped_aggregate_choices),
             scalar_aggregate_choices_by_requested_fact_id=(
                 self._scalar_aggregate_choices
             ),
-            rank_limit_value_ids=_rank_limit_value_ids(self.request.available_values),
+            ordering_required_by_requested_fact_id={
+                fact.id: bool(
+                    fact.answer_expression
+                    and fact.answer_expression.ordering_direction is not None
+                )
+                for fact in self.request.question_contract.requested_facts
+            },
         )
 
 
@@ -355,7 +361,7 @@ def _required_fulfillment_evidence_items(
         if allowed_source_ids is not None and source.id not in allowed_source_ids:
             continue
         plan_shape = (shape_by_fact or {}).get(fulfillment.requested_fact_id, "")
-        if plan_shape in GROUPED_RANKED_PLAN_SHAPES:
+        if plan_shape in GROUPED_AGGREGATE_PLAN_SHAPES:
             continue
         if _plan_shape_uses_count_metric_for_source(
             source,
@@ -399,12 +405,12 @@ def _required_fulfillment_evidence_items(
     return tuple(output)
 
 
-def _grouped_ranked_choices_by_requested_fact_id(
+def _grouped_aggregate_choices_by_requested_fact_id(
     request: FactPlanRequest,
     *,
     plan_selection: BoundPlanSelectionSet,
 ) -> dict[str, Any]:
-    return grouped_ranked_choices_by_requested_fact_id(
+    return grouped_aggregate_choices_by_requested_fact_id(
         request.bound_sources,
         selected_plan_shapes_by_requested_fact_id=(
             plan_selection.plan_shapes_by_requested_fact_id()
@@ -425,7 +431,6 @@ def _plan_shape_uses_count_metric_for_source(
     if plan_shape not in {
         "aggregate_scalar",
         "aggregate_by_group",
-        "ranked_aggregate",
     }:
         return False
     choice = scalar_aggregate_choices_for_source(
@@ -517,7 +522,6 @@ _MANY_ROW_PLAN_SHAPES = frozenset(
         "grouped_rows",
         "aggregate_scalar",
         "aggregate_by_group",
-        "ranked_aggregate",
     }
 )
 

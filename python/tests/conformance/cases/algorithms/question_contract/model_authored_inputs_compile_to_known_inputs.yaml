@@ -11,7 +11,9 @@ input:
     instance_interpretation:
       kind: NORMAL_BUSINESS_INSTANCE
   answer_expression:
-    family: ranked_selection
+    family: list_rows
+    ordering: {basis: display order, direction: ascending}
+    selection: {kind: take}
   answer_outputs:
   - description: sales total
     role: ANSWER_VALUE

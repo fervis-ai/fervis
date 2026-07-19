@@ -41,13 +41,13 @@ def build_fact_plan_schema(
     source_binding_ids_by_requirement_by_requested_fact_id: Mapping[
         str, Mapping[str, tuple[str, ...]]
     ],
-    grouped_ranked_choices_by_requested_fact_id: Mapping[
+    grouped_aggregate_choices_by_requested_fact_id: Mapping[
         str, tuple[dict[str, object], ...]
     ],
     scalar_aggregate_choices_by_requested_fact_id: Mapping[
         str, tuple[dict[str, object], ...]
     ],
-    rank_limit_value_ids: tuple[str, ...] | None = None,
+    ordering_required_by_requested_fact_id: Mapping[str, bool] | None = None,
 ) -> dict[str, object]:
     plan_outcome_schema = _plan_outcome_schema(
         required_catalog_input_ids=required_catalog_input_ids,
@@ -70,13 +70,15 @@ def build_fact_plan_schema(
         source_binding_ids_by_requirement_by_requested_fact_id=(
             source_binding_ids_by_requirement_by_requested_fact_id
         ),
-        grouped_ranked_choices_by_requested_fact_id=(
-            grouped_ranked_choices_by_requested_fact_id
+        grouped_aggregate_choices_by_requested_fact_id=(
+            grouped_aggregate_choices_by_requested_fact_id
         ),
         scalar_aggregate_choices_by_requested_fact_id=(
             scalar_aggregate_choices_by_requested_fact_id
         ),
-        rank_limit_value_ids=rank_limit_value_ids,
+        ordering_required_by_requested_fact_id=(
+            ordering_required_by_requested_fact_id or {}
+        ),
     )
     return provider_output.FactPlanOutput.schema(
         {
@@ -101,13 +103,13 @@ def _plan_outcome_schema(
     source_binding_ids_by_requirement_by_requested_fact_id: Mapping[
         str, Mapping[str, tuple[str, ...]]
     ],
-    grouped_ranked_choices_by_requested_fact_id: Mapping[
+    grouped_aggregate_choices_by_requested_fact_id: Mapping[
         str, tuple[dict[str, object], ...]
     ],
     scalar_aggregate_choices_by_requested_fact_id: Mapping[
         str, tuple[dict[str, object], ...]
     ],
-    rank_limit_value_ids: tuple[str, ...] | None,
+    ordering_required_by_requested_fact_id: Mapping[str, bool],
 ) -> dict[str, object]:
     answer_schema = _answer_schema(
         pattern_names=pattern_names,
@@ -125,13 +127,15 @@ def _plan_outcome_schema(
         source_binding_ids_by_requirement_by_requested_fact_id=(
             source_binding_ids_by_requirement_by_requested_fact_id
         ),
-        grouped_ranked_choices_by_requested_fact_id=(
-            grouped_ranked_choices_by_requested_fact_id
+        grouped_aggregate_choices_by_requested_fact_id=(
+            grouped_aggregate_choices_by_requested_fact_id
         ),
         scalar_aggregate_choices_by_requested_fact_id=(
             scalar_aggregate_choices_by_requested_fact_id
         ),
-        rank_limit_value_ids=rank_limit_value_ids,
+        ordering_required_by_requested_fact_id=(
+            ordering_required_by_requested_fact_id
+        ),
     )
     outcome_variants = []
     if answer_schema is not None:
@@ -159,13 +163,13 @@ def _answer_schema(
     source_binding_ids_by_requirement_by_requested_fact_id: Mapping[
         str, Mapping[str, tuple[str, ...]]
     ],
-    grouped_ranked_choices_by_requested_fact_id: Mapping[
+    grouped_aggregate_choices_by_requested_fact_id: Mapping[
         str, tuple[dict[str, object], ...]
     ],
     scalar_aggregate_choices_by_requested_fact_id: Mapping[
         str, tuple[dict[str, object], ...]
     ],
-    rank_limit_value_ids: tuple[str, ...] | None,
+    ordering_required_by_requested_fact_id: Mapping[str, bool],
 ) -> dict[str, object] | None:
     pattern_schema = build_pattern_answer_schema(
         pattern_names=pattern_names,
@@ -185,13 +189,15 @@ def _answer_schema(
         source_binding_ids_by_requirement_by_requested_fact_id=(
             source_binding_ids_by_requirement_by_requested_fact_id
         ),
-        grouped_ranked_choices_by_requested_fact_id=(
-            grouped_ranked_choices_by_requested_fact_id
+        grouped_aggregate_choices_by_requested_fact_id=(
+            grouped_aggregate_choices_by_requested_fact_id
         ),
         scalar_aggregate_choices_by_requested_fact_id=(
             scalar_aggregate_choices_by_requested_fact_id
         ),
-        rank_limit_value_ids=rank_limit_value_ids,
+        ordering_required_by_requested_fact_id=(
+            ordering_required_by_requested_fact_id
+        ),
     )
     if pattern_schema is None:
         return None

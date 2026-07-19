@@ -39,7 +39,7 @@ def required_fulfillment_evidence_ids(
     count_ids = fulfillment.row_count_basis_evidence_ids
     direct_value_ids = fulfillment.value_evidence_ids
     entity_field_ids = entity_field_evidence_ids(fulfillment)
-    if plan_shape in {"aggregate_by_group", "ranked_aggregate"}:
+    if plan_shape == "aggregate_by_group":
         value_ids = metric_ids or count_ids
     elif plan_shape == "aggregate_scalar":
         value_ids = metric_ids or count_ids
@@ -51,7 +51,7 @@ def required_fulfillment_evidence_ids(
                 *value_ids,
                 *(
                     entity_field_ids
-                    if plan_shape in {"aggregate_by_group", "ranked_aggregate"}
+                    if plan_shape == "aggregate_by_group"
                     else ()
                 ),
             )
@@ -154,7 +154,6 @@ def evidence_is_compatible_with_plan_shape(
         "list_rows",
         "grouped_rows",
         "aggregate_by_group",
-        "ranked_aggregate",
     }:
         return row_cardinality in {"one", "many"}
     if plan_shape == "direct_field_value":

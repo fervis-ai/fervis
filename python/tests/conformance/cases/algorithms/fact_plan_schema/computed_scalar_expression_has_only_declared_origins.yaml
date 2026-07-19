@@ -15,7 +15,7 @@ input:
     sb_current: [answer_1]
     sb_previous: [answer_1]
   source_binding_ids_by_requirement_by_requested_fact_id: {}
-  grouped_ranked_choices_by_requested_fact_id: {}
+  grouped_aggregate_choices_by_requested_fact_id: {}
   scalar_aggregate_choices_by_requested_fact_id: {}
   field_ids_by_source_binding_id:
     sb_current: [amount]

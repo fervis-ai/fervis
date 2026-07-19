@@ -338,6 +338,7 @@ def compile_pattern_answer_plan(
     source_binding_ids_by_requirement_by_requested_fact_id: (
         dict[str, dict[str, tuple[str, ...]]] | None
     ) = None,
+    requested_facts: tuple[RequestedFact, ...] | None = None,
 ):
     if source_binding_ids_by_requested_fact_id is None:
         source_binding_ids_by_requested_fact_id = _selected_source_ids_by_fact(
@@ -352,6 +353,37 @@ def compile_pattern_answer_plan(
         parse_pattern_answer(ProviderObject(answer))
         for answer in payload.get("answers", ())
     )
+    if requested_facts is None:
+        requested_facts = tuple(
+            RequestedFact(
+                id=fact_id,
+                description=fact_id,
+                answer_outputs=tuple(
+                    RequestedFactAnswerOutput(id=output_id, role="ANSWER_VALUE")
+                    for output_id in (
+                        next(
+                            (
+                                tuple(getattr(answer, "answer_output_ids", ()))
+                                for answer in answers
+                                if answer.requested_fact_id == fact_id
+                                and getattr(answer, "answer_output_ids", ())
+                            ),
+                            (),
+                        )
+                        or tuple(
+                            fulfillment.answer_output_id
+                            for source in bound_sources
+                            if source.requested_fact_id == fact_id
+                            for fulfillment in source.fulfillments
+                            if fulfillment.answer_output_id
+                        )
+                    )
+                ),
+            )
+            for fact_id in dict.fromkeys(
+                answer.requested_fact_id for answer in answers
+            )
+        )
     program, _bindings = _compile_pattern_answer_program(
         answers,
         bound_sources=bound_sources,
@@ -365,6 +397,7 @@ def compile_pattern_answer_plan(
             program_inputs=ProgramInputs(parameters=(), bindings=BindingSet()),
             expressions_by_value_id={},
         ),
+        requested_facts=requested_facts,
     )
     return program
 
@@ -643,55 +676,6 @@ def _ranked_count_by_store_bound_source() -> BoundSource:
                     match_basis_explanation="The order row population is countable.",
                     row_count_basis_evidence_ids=(
                         "row_population.source_1.data",
-                    ),
-                ),
-            ),
-        )
-    )
-
-
-def _single_output_ranked_aggregate_bound_source() -> BoundSource:
-    return _bound_source_fixture(
-        BoundSource(
-            id="sb_1",
-            requested_fact_id="rf_answer",
-            answer_population=_answer_population(),
-            source=DraftRelationSource(
-                kind=SourceKind.API_READ,
-                read_id="list_metric_by_location",
-            ),
-            cardinality="many",
-            available_field_ids=("location_id", "metric_total"),
-            available_fields=(
-                SourceField(field_id="location_id", type="string"),
-                SourceField(field_id="metric_total", type="decimal"),
-            ),
-            evidence_items=(
-                SourceEvidenceItem(
-                    evidence_id="source_1.data.location_id",
-                    field_id="location_id",
-                    row_cardinality="many",
-                ),
-                SourceEvidenceItem(
-                    evidence_id="source_1.data.metric_total",
-                    field_id="metric_total",
-                    row_cardinality="many",
-                ),
-            ),
-            fulfillments=(
-                SourceFulfillment(
-                    requested_fact_id="rf_answer",
-                    answer_output_id="answer_1",
-                    match_basis_explanation=(
-                        "The answer output is the winning location; metric_total "
-                        "ranks locations but is not the location display value."
-                    ),
-                    metric_measure_evidence_ids=("source_1.data.metric_total",),
-                    entity_evidence=candidate_key_evidence(
-                        "location_id",
-                        entity_kind="location",
-                        key_id="location_key",
-                        field_evidence_ids=("source_1.data.location_id",),
                     ),
                 ),
             ),

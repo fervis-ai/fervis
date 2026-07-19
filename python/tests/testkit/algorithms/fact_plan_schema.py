@@ -38,8 +38,8 @@ def run_fact_plan_schema_case(payload: dict) -> list[str]:
                 {},
             )
         ),
-        grouped_ranked_choices_by_requested_fact_id=dict(
-            input_payload.get("grouped_ranked_choices_by_requested_fact_id", {})
+        grouped_aggregate_choices_by_requested_fact_id=dict(
+            input_payload.get("grouped_aggregate_choices_by_requested_fact_id", {})
         ),
         scalar_aggregate_choices_by_requested_fact_id=dict(
             input_payload.get("scalar_aggregate_choices_by_requested_fact_id", {})

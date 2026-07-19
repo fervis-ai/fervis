@@ -86,7 +86,7 @@ class PlanSelectionShapeSpec:
                 "MEASURED_VALUE" in option.support_roles for option in support_options
             )
             if (
-                self.plan_shape in {"aggregate_by_group", "ranked_aggregate"}
+                self.plan_shape == "aggregate_by_group"
                 and has_measured_value
             ):
                 return frozenset(("MEASURED_VALUE",))

@@ -15,6 +15,7 @@ from fervis.lookup.question_contract import (
     RequestedFact,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
+    RequestedFactOrderingDirection,
     RequestedFactGroupKey,
     RequestedFactAnswerOutput,
     RequestedFactKnownInput,
@@ -213,7 +214,7 @@ def test_answer_output_schema_requires_a_computation_role():
     assert answer_output_schema["required"] == ["description", "role"]
 
 
-def test_ranked_selection_remains_one_catalog_blind_answer_shape():
+def test_ordered_take_one_is_orthogonal_to_list_rows():
     question = "Which salesperson made the most revenue today?"
     payload = _single_input_payload(
         {
@@ -229,7 +230,9 @@ def test_ranked_selection_remains_one_catalog_blind_answer_shape():
         }
     )
     payload["answer_requests"][0]["answer_expression"] = {
-        "family": "ranked_selection"
+        "family": "list_rows",
+        "ordering": {"basis": "revenue", "direction": "descending"},
+        "selection": {"kind": "take_one"},
     }
 
     parsed = parse_question_contract(
@@ -241,8 +244,13 @@ def test_ranked_selection_remains_one_catalog_blind_answer_shape():
     expression = parsed.outcome.requested_facts[0].answer_expression
 
     assert expression is not None
-    assert expression.family is RequestedFactAnswerExpressionFamily.RANKED_SELECTION
-    assert expression.selection_kind is ResultSelectionKind.LIMITED_RESULTS
+    assert expression.family is RequestedFactAnswerExpressionFamily.LIST_ROWS
+    assert expression.ordering_basis == "revenue"
+    assert (
+        expression.ordering_direction
+        is RequestedFactOrderingDirection.DESCENDING
+    )
+    assert expression.selection_kind is ResultSelectionKind.TAKE_ONE
 
 
 def test_grouped_aggregate_requires_expression_group_key():
@@ -274,7 +282,7 @@ def test_grouped_aggregate_provider_schema_requires_expression_group_key():
         if branch["properties"]["family"]["enum"] == ["grouped_aggregate"]
     )
 
-    assert grouped_branch["required"] == ["family", "group_key"]
+    assert grouped_branch["required"] == ["family", "selection", "group_key"]
 
 
 def test_group_key_rejects_repeated_question_inputs():
@@ -292,6 +300,7 @@ def test_grouped_aggregate_serializes_group_key_on_answer_expression():
         description="sales count for each specified staff member today",
         answer_expression=RequestedFactAnswerExpression(
             family=RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
+            selection_kind=ResultSelectionKind.ALL_RESULTS,
             group_key=RequestedFactGroupKey(
                 description="staff member",
                 domain=GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS,
@@ -315,6 +324,7 @@ def test_grouped_aggregate_serializes_group_key_on_answer_expression():
             "domain": "SPECIFIED_QUESTION_INPUTS",
             "question_input_refs": ["qi_staff_1", "qi_staff_2"],
         },
+        "selection_kind": "all_results",
     }
     assert fact.answer_request_model_dict()["answer_outputs"] == [
         {
@@ -371,8 +381,9 @@ def test_parse_question_contract_accepts_group_key_on_grouped_expression():
         "answer_requests": [
             {
                 "answer_fact": "sales count for each specified staff member today",
-                "answer_expression": {
-                    "family": "grouped_aggregate",
+                    "answer_expression": {
+                        "family": "grouped_aggregate",
+                        "selection": {"kind": "all_results"},
                     "group_key": {
                         "description": "staff member",
                         "domain": "SPECIFIED_QUESTION_INPUTS",
@@ -789,7 +800,7 @@ def test_result_limit_requires_canonical_digit_text_at_parse_boundary():
         "answer_requests": [
             {
                 "answer_fact": "top five sales",
-                "answer_expression": {"family": "ranked_list"},
+                "answer_expression": {"family": "unsupported_family"},
                 "answer_subject": {
                     "subject_text": "sales",
                     "instance_interpretation": {

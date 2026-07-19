@@ -7,11 +7,16 @@ algorithm: question_contract.parse
 input:
   question_context: Which store had the highest sales?
   answer_expression:
-    family: ranked_selection
+    family: grouped_aggregate
+    group_key:
+      description: store
+      domain: SOURCE_RESULT_VALUES
+    ordering: {basis: total sales, direction: descending}
+    selection: {kind: take_one}
 expect:
   result_contains:
     requested_facts:
-    - answer_expression_family: ranked_selection
+    - answer_expression_family: grouped_aggregate
   result_exact_fields:
     question_inputs: []
     requested_fact_input_handoff:

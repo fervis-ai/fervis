@@ -13,12 +13,10 @@ from fervis.lookup.answer_program.operations import (
     CrossJoinSpec,
     FilterSpec,
     JoinSpec,
-    OperationKind,
+    OrderSpec,
     ProjectSpec,
     ProjectToKeySpec,
     RoleExpandSpec,
-    SortKey,
-    TiePolicy,
     UnionSpec,
     UniversalConditionSpec,
 )
@@ -45,16 +43,6 @@ class ResolvedOperationInput:
     proof_refs: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True)
-class ResolvedRankSpec:
-    input_relation: str
-    order_by: tuple[SortKey, ...]
-    tie_policy: TiePolicy
-    limit: int
-    tie_breakers: tuple[SortKey, ...] = ()
-    kind: OperationKind = OperationKind.RANK
-
-
 ExecutableOperationSpec: TypeAlias = (
     FilterSpec
     | ProjectSpec
@@ -66,7 +54,7 @@ ExecutableOperationSpec: TypeAlias = (
     | AntiJoinSpec
     | UniversalConditionSpec
     | AggregateSpec
-    | ResolvedRankSpec
+    | OrderSpec
     | ComputeSpec
 )
 

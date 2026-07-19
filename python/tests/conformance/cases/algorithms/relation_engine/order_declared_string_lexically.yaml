@@ -1,22 +1,22 @@
 id: rank_declared_string_lexically
 kind: algorithm
 algorithm: execution.relation_engine
-description: Ranking uses lexical ordering for a field declared as string even when its values look numeric.
+description: Ordering uses lexical comparison for a field declared as string even when values look numeric.
 input:
+  scalar_inputs: [{id: limit, value: 2, value_type: integer}]
   relations:
     - id: codes
       rows: [{code: "10"}, {code: "2"}]
       field_types: {code: string}
   operations:
-    - id: rank
+    - id: order
       output_relation: ranked
       spec:
-        kind: rank
+        kind: order
         input_relation: codes
         order_by: [{field: code, direction: asc}]
-        tie_policy: field
-        tie_breakers: [{field: code, direction: asc}]
-        limit: 2
+        tie_breakers: []
+        selection: {kind: take, limit_input_id: limit}
 expect:
   result_contains:
     ranked:

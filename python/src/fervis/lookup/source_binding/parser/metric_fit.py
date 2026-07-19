@@ -218,4 +218,4 @@ def _metric_fit_review_interpretation(review: dict[str, str]) -> str:
 
 
 def plan_shape_uses_row_count_as_metric(plan_shape: str) -> bool:
-    return plan_shape in {"aggregate_scalar", "aggregate_by_group", "ranked_aggregate"}
+    return plan_shape in {"aggregate_scalar", "aggregate_by_group"}

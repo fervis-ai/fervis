@@ -28,6 +28,7 @@ from fervis.lookup.answer_program.operations import (
     FilterSpec,
     JoinKey,
     JoinSpec,
+    OrderSpec,
     Predicate,
     ProjectField,
     ProjectSpec,
@@ -40,7 +41,6 @@ from fervis.lookup.answer_program.operations import (
 )
 from fervis.lookup.plan_execution.operation_runtime import (
     ExecutableOperation,
-    ResolvedRankSpec,
 )
 from fervis.lookup.answer_program.expressions import expression_references
 from fervis.lookup.answer_program.expressions import expression_input_id
@@ -277,11 +277,12 @@ def _input_relations(
         spec,
         (
             FilterSpec,
-            ProjectSpec,
+    ProjectSpec,
+    OrderSpec,
             ProjectToKeySpec,
             RoleExpandSpec,
             AggregateSpec,
-            ResolvedRankSpec,
+            OrderSpec,
         ),
     ):
         return (_relation(relations, spec.input_relation),)

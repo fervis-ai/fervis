@@ -22,8 +22,8 @@ from fervis.lookup.fact_planning.request import (
 )
 from fervis.lookup.turn_prompts import build_turn_prompt_context
 from fervis.lookup.plan_selection import BoundPlanSelectionSet
-from fervis.lookup.fact_planning.grouped_ranked_choices import (
-    GROUPED_RANKED_PLAN_SHAPES,
+from fervis.lookup.fact_planning.grouped_aggregate_choices import (
+    GROUPED_AGGREGATE_PLAN_SHAPES,
 )
 from fervis.lookup.answer_program.compiler_inputs import compiler_input_context
 
@@ -146,10 +146,10 @@ def _with_selected_plan_shapes(
         authored_answer_output_ids = tuple(
             str(item) for item in normalized_answer.get("answer_output_ids") or ()
         )
-        if selected_shape in GROUPED_RANKED_PLAN_SHAPES:
+        if selected_shape in GROUPED_AGGREGATE_PLAN_SHAPES:
             if authored_answer_output_ids:
                 raise ValueError(
-                    "grouped/ranked fact plan authored backend-selected outputs"
+                    "grouped aggregate fact plan authored backend-selected outputs"
                 )
             covered_answer_output_ids_by_fact.setdefault(
                 requested_fact_id,

@@ -5,7 +5,7 @@ description: Canonical decoding parses collection fields according to their decl
 input:
   schema_revision: 1
   program:
-    schema_revision: 4
+    schema_revision: 5
     program:
       $type: AnswerProgram
       fields:
@@ -19,7 +19,7 @@ input:
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 4
+            schema_revision: 5
             compiler_version: ""
             function_semantics: {$tuple: []}
             source_contracts: {$tuple: []}

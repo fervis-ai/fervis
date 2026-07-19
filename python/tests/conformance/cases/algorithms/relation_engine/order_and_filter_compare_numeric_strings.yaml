@@ -1,11 +1,13 @@
 id: rank_and_filter_compare_numeric_strings
-description: Rank and filter compare source-shaped numeric strings by their declared numeric type.
+description: Order/take and filter compare source-shaped numeric strings by their declared numeric type.
 migrates:
   - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_rank_and_filter_compare_numeric_strings_as_numbers
 kind: algorithm
 algorithm: execution.relation_engine
 input:
-  scalar_inputs: [{id: minimum, value: "50", value_type: decimal}]
+  scalar_inputs:
+    - {id: minimum, value: "50", value_type: decimal}
+    - {id: limit, value: 1, value_type: integer}
   relations:
     - id: items
       rows:
@@ -21,15 +23,14 @@ input:
         kind: filter
         input_relation: items
         predicate: {left: amount, operator: gt, right_scalar: minimum}
-    - id: ranked
+    - id: ordered
       output_relation: top_item
       spec:
-        kind: rank
+        kind: order
         input_relation: items
         order_by: [{field: amount, direction: desc}]
-        tie_policy: field
         tie_breakers: [{field: item_id, direction: asc}]
-        limit: 1
+        selection: {kind: take, limit_input_id: limit}
 expect:
   result_contains:
     large_items:

@@ -7,7 +7,8 @@ input:
   requested_fact:
     description: location with the highest total
     subject_text: location
-    answer_expression_family: ranked_selection
+    answer_expression_family: grouped_aggregate
+    group_key: {description: location, domain: SOURCE_RESULT_VALUES}
   catalog:
     reads:
       - id: list_summary
@@ -35,4 +36,4 @@ expect:
   result_contains:
     value_field_ids: [location_id]
     metric_fields:
-      total: false
+      total: true

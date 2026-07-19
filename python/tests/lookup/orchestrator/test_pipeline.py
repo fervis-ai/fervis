@@ -543,7 +543,10 @@ def test_lookup_derives_finite_choice_membership_from_answer_population_tests():
         "answer_requests": [
             {
                 "answer_fact": "count of sales",
-                "answer_expression": {"family": "list_rows"},
+                "answer_expression": {
+                    "family": "list_rows",
+                    "selection": {"kind": "all_results"},
+                },
                 "answer_subject": _answer_subject_payload("sales"),
                 "answer_population": {
                     "population_label": "sales",

@@ -160,4 +160,4 @@ expect:
     - submit_grounding
     - submit_read_eligibility
     invocation_kind: continue_prior_request
-    base_invocation_id: pi_d1697c35cea33b3d21cc1df9a8807bdf2a208bbdcc019cb80c24a60da76eb35c
+    base_invocation_id: pi_92c9926940d30bb7ce23470afafbecf8c5bf9a675cf57d91496091c106352ee1

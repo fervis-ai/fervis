@@ -20,7 +20,7 @@ from fervis.lookup.answer_program.operations import (
     Operation,
     ProjectField,
     ProjectSpec,
-    RankSpec,
+    OrderSpec,
     RelationRole,
     RelationRoleRef,
 )
@@ -80,6 +80,7 @@ from fervis.lookup.question_contract import (
     RequestedFactGroupKey,
     RequestedFactKnownInput,
     RequestedFactLiteralInput,
+    RequestedFactOrderingDirection,
     ResultSelectionKind,
     default_answer_population,
     requested_fact_evidence_ref,

@@ -5,10 +5,12 @@ from fervis.lookup.plan_selection import (
 )
 from fervis.lookup.plan_selection.model import OperationEvidence
 from fervis.lookup.question_contract import (
+    GroupKeyDomainKind,
     RequestedFact,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
     ResultSelectionKind,
+    RequestedFactGroupKey,
     RequestedFactAnswerOutput,
 )
 from fervis.lookup.source_binding.model import (
@@ -27,9 +29,13 @@ def test_role_binding_preserves_every_plan_supported_by_admitted_evidence():
         id="fact_1",
         description="top staff compensation",
         answer_expression=RequestedFactAnswerExpression(
-            RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
-            selection_kind=ResultSelectionKind.LIMITED_RESULTS,
-            limit_input_ref="limit",
+            RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
+            group_key=RequestedFactGroupKey(
+                id="answer_1",
+                description="staff",
+                domain=GroupKeyDomainKind.SOURCE_RESULT_VALUES,
+            ),
+            selection_kind=ResultSelectionKind.ALL_RESULTS,
         ),
         answer_outputs=(
             RequestedFactAnswerOutput(
@@ -50,7 +56,7 @@ def test_role_binding_preserves_every_plan_supported_by_admitted_evidence():
             BoundSource(
                 id="sb_1",
                 requested_fact_id="fact_1",
-                binding_target_id=("target.fact_1.ranked_aggregate.source_1.operation"),
+                binding_target_id=("target.fact_1.aggregate_by_group.source_1.operation"),
                 requirement_id="operation",
                 answer_population=AnswerPopulation(
                     population_binding_id="population_1",
@@ -197,7 +203,7 @@ def _ranked_plan(
         plan_selection_id=plan_id,
         requested_fact_id="fact_1",
         source_strategy_id=f"strategy_{plan_id}",
-        plan_shape="ranked_aggregate",
+        plan_shape="aggregate_by_group",
         required_answer_output_ids=("answer_1",),
         source_members=(member,),
         basis="The source supports the ranked aggregate.",

@@ -426,7 +426,6 @@ def _metric_evidence_policy(
     row_count_is_answer = "ROW_COUNT" in roles
     row_count_is_intermediate = plan_shape in {
         "aggregate_by_group",
-        "ranked_aggregate",
     }
     return _MetricEvidencePolicy(
         include_measured_fields=bool(roles & {"ANSWER_VALUE", "MEASURED_VALUE"}),
@@ -510,7 +509,6 @@ def _plan_shape_supports_row_count_metric(plan_shape: str) -> bool:
     return plan_shape in {
         "aggregate_scalar",
         "aggregate_by_group",
-        "ranked_aggregate",
     }
 
 

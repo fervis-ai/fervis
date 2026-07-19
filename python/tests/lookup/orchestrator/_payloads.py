@@ -410,7 +410,7 @@ def _row_path_fields_for_answer(
         "grouped_rows",
         "aggregate_scalar",
         "aggregate_by_group",
-        "ranked_aggregate",
+        "aggregate_by_group",
     }:
         return ()
     return _unique(
@@ -1158,6 +1158,13 @@ def _answer_expression_payload(
             "description": expression.group_key.description,
             "domain": expression.group_key.domain.value,
         }
+    if expression.ordering_direction is not None:
+        payload["ordering"] = {
+            "basis": expression.ordering_basis,
+            "direction": expression.ordering_direction.value,
+        }
+    if expression.selection_kind is not None:
+        payload["selection"] = {"kind": expression.selection_kind.value}
     return payload
 
 
@@ -1262,6 +1269,8 @@ def _question_contract_response(
         for item in input_payloads
         if item.get("role") == LiteralInputRole.RESULT_LIMIT.value
     ]
+    if answer_expression_family == "list_rows":
+        answer_expression["selection"] = {"kind": "all_results"}
     population_refs = tuple(ref for ref in input_refs if ref not in result_limit_refs)
     ownership = provider_question_input_ownership(
         population_input_refs_by_test_id=(
@@ -1464,8 +1473,8 @@ def _answer_expression_family_for_pattern(pattern: str) -> str:
         return "scalar_aggregate"
     if pattern == "aggregate_by_group":
         return "grouped_aggregate"
-    if pattern == "ranked_aggregate":
-        return "ranked_selection"
+    if pattern == "aggregate_by_group":
+        return "grouped_aggregate"
     if pattern == "computed_scalar":
         return "computed_scalar"
     if pattern == "set_difference":

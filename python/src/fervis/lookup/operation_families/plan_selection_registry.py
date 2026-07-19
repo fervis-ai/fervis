@@ -38,9 +38,6 @@ def _plan_shapes_by_family() -> dict[
     from fervis.lookup.operation_families.list_rows.plan_selection import (
         PLAN_SELECTION_SHAPES as LIST_ROWS_PLAN_SELECTION_SHAPES,
     )
-    from fervis.lookup.operation_families.ranked.plan_selection import (
-        PLAN_SELECTION_SHAPES as RANKED_SELECTION_PLAN_SELECTION_SHAPES,
-    )
     from fervis.lookup.operation_families.scalar_aggregate.plan_selection import (
         PLAN_SELECTION_SHAPES as SCALAR_AGGREGATE_PLAN_SELECTION_SHAPES,
     )
@@ -61,9 +58,6 @@ def _plan_shapes_by_family() -> dict[
         ),
         RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE: (
             GROUPED_AGGREGATE_PLAN_SELECTION_SHAPES
-        ),
-        RequestedFactAnswerExpressionFamily.RANKED_SELECTION: (
-            RANKED_SELECTION_PLAN_SELECTION_SHAPES
         ),
         RequestedFactAnswerExpressionFamily.COMPUTED_SCALAR: (
             COMPUTED_SCALAR_PLAN_SELECTION_SHAPES

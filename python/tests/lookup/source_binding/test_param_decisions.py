@@ -44,6 +44,7 @@ from fervis.lookup.question_contract import (
     RequestedFact,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
+    ResultSelectionKind,
     RequestedFactAnswerOutput,
     RequestedFactGroupKey,
 )
@@ -296,6 +297,7 @@ def test_grouped_identity_inputs_compile_as_parameter_alternatives() -> None:
                 domain=GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS,
                 question_input_refs=("staff_id_1", "staff_id_2"),
             ),
+            selection_kind=ResultSelectionKind.ALL_RESULTS,
         ),
         answer_outputs=(
             RequestedFactAnswerOutput(

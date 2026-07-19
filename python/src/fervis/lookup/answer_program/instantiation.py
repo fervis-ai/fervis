@@ -35,11 +35,9 @@ from fervis.lookup.answer_program.values import (
 from fervis.lookup.answer_program.operations import (
     ComputeSpec,
     FilterSpec,
-    RankSpec,
+    OrderSpec,
+    Take,
     UniversalConditionSpec,
-)
-from fervis.lookup.answer_program.contracts import (
-    AnswerProgramContractError,
 )
 from fervis.lookup.answer_program.inputs import (
     compile_answer_program_inputs,
@@ -64,7 +62,6 @@ from fervis.lookup.question_contract import MembershipTestRef
 from fervis.lookup.plan_execution.operation_runtime import (
     ExecutableOperation,
     ResolvedOperationInput,
-    ResolvedRankSpec,
 )
 
 if TYPE_CHECKING:
@@ -456,7 +453,7 @@ def _instantiate_operations(
                         operation_id=operation.id,
                     )
                 )
-        if not isinstance(spec, RankSpec):
+        if not isinstance(spec, OrderSpec):
             operations.append(
                 ExecutableOperation(
                     id=operation.id,
@@ -465,43 +462,26 @@ def _instantiate_operations(
                 )
             )
             continue
-        try:
-            resolved_limit = resolve_value_expression(
-                spec.limit,
-                bindings=bindings,
-            )
-        except AnswerProgramContractError as exc:
-            raise VerificationError(f"{exc.code}: {exc}") from exc
-        try:
-            limit = exact_positive_integer(resolved_limit.value)
-        except (TypeError, ValueError) as exc:
-            message = str(exc)
-            if "positive integer" in message:
-                raise VerificationError(
-                    "rank limit must be a positive integer"
-                ) from exc
-            raise VerificationError("rank limit must be numeric") from exc
         operations.append(
             ExecutableOperation(
                 id=operation.id,
-                spec=ResolvedRankSpec(
-                    input_relation=spec.input_relation,
-                    order_by=spec.order_by,
-                    tie_policy=spec.tie_policy,
-                    limit=limit,
-                    tie_breakers=spec.tie_breakers,
-                ),
+                spec=spec,
                 output_relation=operation.output_relation,
             )
         )
-        inputs.append(
-            ResolvedOperationInput(
+        if isinstance(spec.selection, Take):
+            limit_inputs = _resolve_expression_inputs(
+                spec.selection.limit,
+                bindings=bindings,
                 operation_id=operation.id,
-                input_id="rank_limit",
-                value=limit,
-                proof_refs=resolved_limit.proof_refs,
             )
-        )
+            try:
+                exact_positive_integer(limit_inputs[0].value)
+            except (IndexError, TypeError, ValueError) as exc:
+                raise VerificationError(
+                    "order take requires a positive integer limit"
+                ) from exc
+            inputs.extend(limit_inputs)
     return tuple(operations), _dedupe_operation_inputs(inputs)
 
 

@@ -24,7 +24,7 @@ def test_lookup_provider_schemas_do_not_emit_internal_model_schemas_metadata():
             answer_output_ids_by_requested_fact_id={},
             answer_output_ids_by_source_binding_id={},
             source_binding_ids_by_requirement_by_requested_fact_id={},
-            grouped_ranked_choices_by_requested_fact_id={},
+            grouped_aggregate_choices_by_requested_fact_id={},
             scalar_aggregate_choices_by_requested_fact_id={},
         ),
         build_source_binding_schema(

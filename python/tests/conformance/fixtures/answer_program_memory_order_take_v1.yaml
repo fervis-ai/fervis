@@ -1,0 +1,72 @@
+schema_revision: 5
+program:
+  $type: AnswerProgram
+  fields:
+    fact_template: {$tuple: []}
+    fulfillment: {$tuple: []}
+    parameters: {$tuple: []}
+    capabilities: {$tuple: []}
+    relations: {$tuple: []}
+    operations:
+      $tuple:
+        - $type: Operation
+          fields:
+            id: order_from_prior_answer
+            spec:
+              $type: OrderSpec
+              fields:
+                input_relation: sales
+                order_by:
+                  $tuple:
+                    - $type: SortKey
+                      fields:
+                        field: amount
+                        direction: {$enum: SortDirection, value: desc}
+                selection:
+                  $type: Take
+                  fields:
+                    limit:
+                      $type: ConstantRef
+                      fields:
+                        constant_id: prior_limit
+                        version_ref: memory-value@1
+                        value:
+                          $type: FactValue
+                          fields:
+                            id: prior_limit
+                            payload:
+                              $type: LiteralValuePayload
+                              fields:
+                                literal_type: {$enum: LiteralType, value: number}
+                                value: "5"
+                            known_input_id: ""
+                            label: ""
+                            proof_refs: {$tuple: []}
+                            source_refs: {$tuple: []}
+                            dependencies:
+                              $tuple:
+                                - $type: ValueDependency
+                                  fields:
+                                    kind:
+                                      $enum: ValueDependencyKind
+                                      value: conversation_memory
+                                    ref: prior.value.limit
+                            applies_to_requested_fact_ids: {$tuple: []}
+                        component: value
+                        item_index: null
+                        origin: {$enum: ValueExpressionOrigin, value: constant}
+                tie_breakers: {$tuple: []}
+                kind: {$enum: OperationKind, value: order}
+            output_relation: ordered_sales
+    result_projection:
+      $type: ResultProjection
+      fields:
+        relation_outputs: {$tuple: []}
+        scalar_outputs: {$tuple: []}
+    compatibility:
+      $type: ProgramCompatibility
+      fields:
+        schema_revision: 5
+        compiler_version: ""
+        function_semantics: {$tuple: []}
+        source_contracts: {$tuple: []}

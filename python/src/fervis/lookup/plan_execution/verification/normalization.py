@@ -8,7 +8,7 @@ from ._shared import (
     Operation,
     ProjectField,
     ProjectSpec,
-    RankSpec,
+    OrderSpec,
     Relation,
     RelationCatalog,
     RelationField,
@@ -145,6 +145,6 @@ def _operation_output_grain(
         return ()
     if isinstance(spec, AggregateSpec):
         return spec.group_by
-    if isinstance(spec, RankSpec):
+    if isinstance(spec, OrderSpec):
         return grain_by_relation.get(spec.input_relation, ())
     return ()

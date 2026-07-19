@@ -73,7 +73,6 @@ class RequestedFactAnswerExpressionFamily(StrEnum):
     SCALAR_VALUE = "scalar_value"
     SCALAR_AGGREGATE = "scalar_aggregate"
     GROUPED_AGGREGATE = "grouped_aggregate"
-    RANKED_SELECTION = "ranked_selection"
     COMPUTED_SCALAR = "computed_scalar"
     SET_DIFFERENCE = "set_difference"
     COVERAGE_CHECK = "coverage_check"
@@ -83,7 +82,13 @@ class RequestedFactAnswerExpressionFamily(StrEnum):
 
 class ResultSelectionKind(StrEnum):
     ALL_RESULTS = "all_results"
-    LIMITED_RESULTS = "limited_results"
+    TAKE_ONE = "take_one"
+    TAKE = "take"
+
+
+class RequestedFactOrderingDirection(StrEnum):
+    ASCENDING = "ascending"
+    DESCENDING = "descending"
 
 
 class IncompleteFactualRequestKind(StrEnum):
@@ -291,8 +296,14 @@ class RequestedFactAnswerOutput:
 class RequestedFactAnswerExpression:
     family: RequestedFactAnswerExpressionFamily
     group_key: RequestedFactGroupKey | None = None
+    ordering_basis: str = ""
+    ordering_direction: RequestedFactOrderingDirection | None = None
     selection_kind: ResultSelectionKind | None = None
     limit_input_ref: str = ""
+
+    @property
+    def is_ordered(self) -> bool:
+        return self.ordering_direction is not None
 
     def __post_init__(self) -> None:
         if (
@@ -305,38 +316,36 @@ class RequestedFactAnswerExpression:
             and self.group_key is not None
         ):
             raise ValueError("group key requires grouped_aggregate answer expression")
-        selects_rows = self.family in {
+        relation_valued = self.family in {
             RequestedFactAnswerExpressionFamily.LIST_ROWS,
-            RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+            RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
         }
-        if selects_rows and self.selection_kind is None:
-            raise ValueError("row answer expression requires result selection")
-        if not selects_rows and self.selection_kind is not None:
-            raise ValueError("result selection requires a row answer expression")
-        if (
-            self.family is RequestedFactAnswerExpressionFamily.LIST_ROWS
-            and self.selection_kind is not ResultSelectionKind.ALL_RESULTS
-        ):
-            raise ValueError("list rows requires all results")
-        if (
-            self.family is RequestedFactAnswerExpressionFamily.RANKED_SELECTION
-            and self.selection_kind is not ResultSelectionKind.LIMITED_RESULTS
-        ):
-            raise ValueError("ranked selection requires a limited result selection")
-        if self.selection_kind is ResultSelectionKind.LIMITED_RESULTS:
-            if (
-                not self.limit_input_ref
-                and self.family
-                is not RequestedFactAnswerExpressionFamily.RANKED_SELECTION
-            ):
-                raise ValueError("limited result selection requires a limit input")
+        if relation_valued and self.selection_kind is None:
+            raise ValueError("relation-valued answer expression requires selection")
+        if not relation_valued and self.selection_kind is not None:
+            raise ValueError("selection requires a relation-valued answer expression")
+        if bool(self.ordering_basis) != (self.ordering_direction is not None):
+            raise ValueError("ordering requires basis and direction")
+        if not relation_valued and self.ordering_direction is not None:
+            raise ValueError("ordering requires a relation-valued answer expression")
+        if self.selection_kind in {ResultSelectionKind.TAKE_ONE, ResultSelectionKind.TAKE}:
+            if self.ordering_direction is None:
+                raise ValueError("take selection requires ordering")
+        if self.selection_kind is ResultSelectionKind.TAKE:
+            if not self.limit_input_ref:
+                raise ValueError("take selection requires a limit input")
         elif self.limit_input_ref:
-            raise ValueError("limit input requires limited result selection")
+            raise ValueError("limit input requires take selection")
 
     def to_answer_request_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {"family": self.family.value}
         if self.group_key is not None:
             payload["group_key"] = self.group_key.to_answer_request_dict()
+        if self.ordering_direction is not None:
+            payload["ordering"] = {
+                "basis": self.ordering_basis,
+                "direction": self.ordering_direction.value,
+            }
         if self.selection_kind is not None:
             payload["selection_kind"] = self.selection_kind.value
         if self.limit_input_ref:

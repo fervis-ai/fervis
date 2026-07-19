@@ -21,12 +21,12 @@ from fervis.lookup.answer_program.operations import (
     PredicateOperator,
     ProjectField,
     ProjectSpec,
-    RankSpec,
+    OrderSpec,
     RelationRole,
     RelationRoleRef,
     SortDirection,
     SortKey,
-    TiePolicy,
+    Take,
     UniversalConditionSpec,
 )
 from fervis.lookup.answer_program.expressions import (
@@ -251,7 +251,7 @@ def _input_relation_ids(operation: Operation) -> set[str]:
             spec.required_dimension.relation_id,
             spec.observation.relation_id,
         }
-    if isinstance(spec, RankSpec):
+    if isinstance(spec, OrderSpec):
         return {spec.input_relation}
     if isinstance(spec, ProjectSpec):
         return {spec.input_relation}
@@ -454,30 +454,28 @@ def test_universal_condition_requires_subject_dimension_and_predicate():
     verify_fact_plan(_plan_with(valid))
 
 
-def test_rank_requires_ordering_and_deterministic_tie_policy():
+def test_order_requires_ordering_and_deterministic_tie_breakers():
     invalid = Operation(
         id="ranked",
-        spec=RankSpec(
+        spec=OrderSpec(
             input_relation="totals",
             order_by=(),
-            tie_policy="",
-            limit=_rank_limit(1),
+            selection=Take(limit=_rank_limit(1)),
         ),
         output_relation="result",
     )
     valid = Operation(
         id="ranked",
-        spec=RankSpec(
+        spec=OrderSpec(
             input_relation="totals",
             order_by=(SortKey(field="total", direction=SortDirection.DESC),),
-            tie_policy=TiePolicy.FIELD,
             tie_breakers=(SortKey(field="name", direction=SortDirection.ASC),),
-            limit=_rank_limit(1),
+            selection=Take(limit=_rank_limit(1)),
         ),
         output_relation="result",
     )
 
-    with pytest.raises(VerificationError, match="tie policy"):
+    with pytest.raises(VerificationError, match="ordering keys"):
         verify_fact_plan(_plan_with(invalid))
     verify_fact_plan(_plan_with(valid))
 
@@ -976,18 +974,17 @@ def test_project_and_aggregate_reject_duplicate_output_fields():
         verify_fact_plan(_plan_with(duplicate_aggregate))
 
 
-def test_rank_rejects_non_positive_limit():
+def test_order_rejects_non_positive_take_limit():
     plan = _plan_with(
         Operation(
             id="ranked",
-            spec=RankSpec(
+            spec=OrderSpec(
                 input_relation="rows",
                 order_by=(SortKey(field="field.value", direction=SortDirection.ASC),),
-                tie_policy=TiePolicy.FIELD,
                 tie_breakers=(
                     SortKey(field="field.value", direction=SortDirection.ASC),
                 ),
-                limit=_rank_limit(0),
+                selection=Take(limit=_rank_limit(0)),
             ),
             output_relation="result",
         )

@@ -576,7 +576,7 @@ def _entity_field_evidence_ids_for_plan(
     *,
     plan_shape: str,
 ) -> tuple[str, ...]:
-    if plan_shape not in {"aggregate_by_group", "ranked_aggregate"}:
+    if plan_shape != "aggregate_by_group":
         return ()
     return entity_field_evidence_ids(fulfillment)
 

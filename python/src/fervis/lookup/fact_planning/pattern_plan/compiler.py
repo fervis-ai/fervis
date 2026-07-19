@@ -15,9 +15,7 @@ from fervis.lookup.fact_planning.provider_contract import (
     GroupedRowsAnswerOutput,
     JoinedRowsAnswerOutput,
     ListRowsAnswerOutput,
-    RankedRowsAnswerOutput,
     PatternAnswerOutput,
-    RankedAggregateAnswerOutput,
     SetDifferenceAnswerOutput,
 )
 from fervis.lookup.source_binding import BoundSource
@@ -25,10 +23,7 @@ from fervis.lookup.answer_program.compiler_inputs import CompilerInputContext
 from fervis.lookup.answer_program.values import BindingSet
 from fervis.lookup.source_binding.compiler_ir import DraftRelationSource
 
-from .aggregate_patterns import (
-    _compile_aggregate_pattern_answer,
-    _compile_ranked_aggregate_answer,
-)
+from .aggregate_patterns import _compile_aggregate_pattern_answer
 from .relation_patterns import (
     _compile_joined_rows_answer,
     _compile_set_difference_answer,
@@ -45,6 +40,7 @@ from .parameterization import (
 )
 from .shared import RelationBuilder
 from fervis.lookup.fact_planning.compiled_patterns import CompiledPattern
+from fervis.lookup.question_contract import RequestedFact
 
 
 def compile_pattern_answer_program(
@@ -56,8 +52,10 @@ def compile_pattern_answer_program(
         str, Mapping[str, tuple[str, ...]]
     ],
     input_context: CompilerInputContext,
+    requested_facts: tuple[RequestedFact, ...],
 ) -> tuple[AnswerProgram, BindingSet]:
     bound_sources_by_id = {item.id: item for item in bound_sources}
+    requested_facts_by_id = {item.id: item for item in requested_facts}
     namespace_result_outputs = len(answers) > 1
     parameters = {item.id: item for item in input_context.program_inputs.parameters}
     bindings = {
@@ -92,6 +90,7 @@ def compile_pattern_answer_program(
                 source_binding_ids_by_requirement_by_requested_fact_id
             ),
             input_context=input_context,
+            requested_facts_by_id=requested_facts_by_id,
             relation_builder=build_relation,
         )
         for index, answer in enumerate(answers)
@@ -138,14 +137,11 @@ def _compile_pattern_answer(
         str, Mapping[str, tuple[str, ...]]
     ],
     input_context: CompilerInputContext,
+    requested_facts_by_id: Mapping[str, RequestedFact],
     relation_builder: RelationBuilder,
 ) -> CompiledPattern:
     match answer:
-        case (
-            ListRowsAnswerOutput()
-            | RankedRowsAnswerOutput()
-            | GroupedRowsAnswerOutput()
-        ):
+        case ListRowsAnswerOutput() | GroupedRowsAnswerOutput():
             _require_source_binding_selected(
                 answer.requested_fact_id,
                 answer.source_binding_id,
@@ -158,6 +154,7 @@ def _compile_pattern_answer(
                 bound_sources=bound_sources,
                 relation_builder=relation_builder,
                 input_context=input_context,
+                requested_fact=requested_facts_by_id[answer.requested_fact_id],
             )
         case DirectFieldValueAnswerOutput():
             _require_source_binding_selected(
@@ -185,20 +182,8 @@ def _compile_pattern_answer(
                 namespace_result_outputs=namespace_result_outputs,
                 bound_sources=bound_sources,
                 relation_builder=relation_builder,
-            )
-        case RankedAggregateAnswerOutput():
-            _require_source_binding_selected(
-                answer.requested_fact_id,
-                answer.source_binding_id,
-                source_binding_ids_by_requested_fact_id,
-            )
-            return _compile_ranked_aggregate_answer(
-                answer=answer,
-                index=index,
-                namespace_result_outputs=namespace_result_outputs,
-                bound_sources=bound_sources,
                 input_context=input_context,
-                relation_builder=relation_builder,
+                requested_fact=requested_facts_by_id[answer.requested_fact_id],
             )
         case ComputedScalarAnswerOutput():
             return _compile_computed_scalar_answer(

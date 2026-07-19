@@ -28,6 +28,7 @@ from fervis.lookup.question_contract.model import (
     RequestedFact,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
+    RequestedFactOrderingDirection,
     ResultSelectionKind,
     RequestedFactGroupKey,
     RequestedFactAnswerPopulation,
@@ -307,11 +308,20 @@ def _answer_expression(
     family = RequestedFactAnswerExpressionFamily(
         _required_text(item.family, path=f"{path}.family")
     )
-    selection_kind = None
-    if family is RequestedFactAnswerExpressionFamily.LIST_ROWS:
-        selection_kind = ResultSelectionKind.ALL_RESULTS
-    elif family is RequestedFactAnswerExpressionFamily.RANKED_SELECTION:
-        selection_kind = ResultSelectionKind.LIMITED_RESULTS
+    selection_kind = (
+        ResultSelectionKind(item.selection.kind) if item.selection is not None else None
+    )
+    ordering_basis = ""
+    ordering_direction = None
+    if item.ordering is not None:
+        ordering_basis = _required_text(
+            item.ordering.basis, path=f"{path}.ordering.basis"
+        )
+        ordering_direction = RequestedFactOrderingDirection(
+            _required_text(
+                item.ordering.direction, path=f"{path}.ordering.direction"
+            )
+        )
     return RequestedFactAnswerExpression(
         family=family,
         group_key=_answer_expression_group_key(
@@ -319,6 +329,8 @@ def _answer_expression(
             question_input_refs=group_key_input_refs,
             path=f"{path}.group_key",
         ),
+        ordering_basis=ordering_basis,
+        ordering_direction=ordering_direction,
         selection_kind=selection_kind,
         limit_input_ref=limit_input_ref,
     )

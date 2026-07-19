@@ -69,10 +69,10 @@ from fervis.lookup.plan_selection import (
 
 
 _APPROVED_CHARS = {
-    "question contract": (364, 20095, 29633),
+    "question contract": (364, 20882, 35181),
     "query enrichment": (364, 5185, 7408),
     "grounding": (364, 7202, 10861),
-    "source binding": (364, 16485, 20357),
+    "source binding": (364, 16300, 20170),
     "pattern fact planning": (364, 3497, 5311),
 }
 
@@ -131,7 +131,7 @@ def test_question_contract_prompt_states_relational_ownership_together():
             "Relational Ownership",
             "answer_subject: Kind of candidate instance to which answer_expression applies.",
             "answer_population: Candidate instances qualifying independently, before cross-instance operations.",
-            "answer_expression: Operation over candidates: list, order, compare, rank, limit, or aggregate.",
+        "answer_expression: The base operation over qualifying candidates, plus any requested ordering and result selection.",
             "answer_outputs: Values or facts projected from the result.",
         )
     )
@@ -210,19 +210,11 @@ def test_question_contract_prompt_resolves_prior_references_before_contracting()
     ) in invocation.prompt_text
 
 
-def test_source_binding_prompt_distinguishes_ranked_physical_operations():
+def test_source_binding_prompt_explains_metric_role_before_later_operations():
     invocation = next(
         item for item in _turn_invocations() if item.turn_name == "source binding"
     )
 
-    assert (
-        "ranked_rows ranks individual source rows without grouping or aggregation."
-        in invocation.prompt_text
-    )
-    assert (
-        "ranked_aggregate groups source rows by an entity key, aggregates a measure "
-        "within each group, and ranks the resulting groups." in invocation.prompt_text
-    )
     assert (
         "A metric fits when it is the correct measure input to the requested "
         "computation. Do not reject it merely because aggregation or another later "

@@ -141,30 +141,56 @@ def _answer_request_schema() -> dict[str, object]:
 def _answer_expression_schema() -> dict[str, object]:
     return {
         "oneOf": [
-            _grouped_answer_expression_schema(),
-            _ordinary_answer_expression_schema(),
+            *(
+                _relation_answer_expression_schema(
+                    family=family,
+                    selection=selection,
+                    ordered=ordered,
+                )
+                for family in ("list_rows", "grouped_aggregate")
+                for selection, ordered in (
+                    ("all_results", False),
+                    ("all_results", True),
+                    ("take_one", True),
+                    ("take", True),
+                )
+            ),
+            _scalar_or_set_answer_expression_schema(),
         ]
     }
 
 
-def _grouped_answer_expression_schema() -> dict[str, object]:
-    schema = provider_output.AnswerExpressionOutput.schema(
-        {
-            "family": {"enum": ["grouped_aggregate"]},
-            "group_key": _group_key_schema(),
-        },
-    )
-    schema["required"] = ["family", "group_key"]
+def _relation_answer_expression_schema(
+    *, family: str, selection: str, ordered: bool
+) -> dict[str, object]:
+    properties: dict[str, object] = {
+        "family": {"enum": [family]},
+        "selection": provider_output.ResultSelectionOutput.schema(
+            {"kind": {"enum": [selection]}}
+        ),
+    }
+    required = ["family", "selection"]
+    if family == "grouped_aggregate":
+        properties["group_key"] = _group_key_schema()
+        required.append("group_key")
+    if ordered:
+        properties["ordering"] = provider_output.OrderingOutput.schema(
+            {
+                "basis": {"type": "string", "minLength": 1},
+                "direction": {"enum": ["ascending", "descending"]},
+            }
+        )
+        required.append("ordering")
+    schema = provider_output.AnswerExpressionOutput.schema(properties)
+    schema["required"] = required
     return schema
 
 
-def _ordinary_answer_expression_schema() -> dict[str, object]:
+def _scalar_or_set_answer_expression_schema() -> dict[str, object]:
     return provider_output.AnswerExpressionOutput.schema(
         {
             "family": {
                 "enum": [
-                    "list_rows",
-                    "ranked_selection",
                     "scalar_value",
                     "scalar_aggregate",
                     "computed_scalar",

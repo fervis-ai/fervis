@@ -503,7 +503,10 @@ class _PromptSurfacePlannerPort:
                 "answer_requests": [
                     {
                         "answer_fact": "salespeople with sales",
-                        "answer_expression": {"family": "list_rows"},
+                        "answer_expression": {
+                            "family": "list_rows",
+                            "selection": {"kind": "all_results"},
+                        },
                         "answer_subject": _answer_subject_payload("salespeople"),
                         "answer_population": _provider_population_without_input_uses(
                             description="salespeople with sales",
@@ -738,7 +741,10 @@ class _QuestionIntentAwarePlannerPort:
                     "answer_requests": [
                         {
                             "answer_fact": "total for the prior referenced sales amount",
-                            "answer_expression": {"family": "list_rows"},
+                            "answer_expression": {
+                                "family": "list_rows",
+                                "selection": {"kind": "all_results"},
+                            },
                             "answer_subject": _answer_subject_payload("total"),
                             "answer_population": _provider_population_without_input_uses(
                                 description="total for the prior referenced sales amount",

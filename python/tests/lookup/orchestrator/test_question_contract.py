@@ -47,6 +47,8 @@ def _question_contract_payload(
     answer_output_role: str = "MEASURED_VALUE",
 ) -> dict[str, object]:
     answer_expression: dict[str, object] = {"family": answer_expression_family}
+    if answer_expression_family == "list_rows":
+        answer_expression["selection"] = {"kind": "all_results"}
     population = _provider_answer_population(
         description=subject,
         subject_text=answer_subject or subject,

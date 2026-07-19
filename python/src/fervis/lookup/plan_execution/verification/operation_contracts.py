@@ -14,7 +14,7 @@ from ._shared import (
     Operation,
     ProjectToKeySpec,
     ProjectSpec,
-    RankSpec,
+    OrderSpec,
     RoleExpandSpec,
     UnionSpec,
     UniversalConditionSpec,
@@ -94,11 +94,11 @@ def _operation_relation_contract(
         )
     if isinstance(spec, AggregateSpec):
         return _aggregate_contract(spec, contracts)
-    if isinstance(spec, RankSpec):
+    if isinstance(spec, OrderSpec):
         source = _contract(contracts, spec.input_relation)
         return _with_dependency_proof(
             _copy_contract(contracts, spec.input_relation),
-            _rank_dependency_proof(source, spec).merge(
+            _order_dependency_proof(source, spec).merge(
                 _operation_value_proof(proof_context, operation.id)
             ),
         )
@@ -197,14 +197,14 @@ def _predicate_dependency_proof(
     )
 
 
-def _rank_dependency_proof(
+def _order_dependency_proof(
     contract: RelationContract,
-    spec: RankSpec,
+    spec: OrderSpec,
 ) -> ProofLineage:
     return _fields_dependency_proof(
         contract,
         tuple(sort.field for sort in (*spec.order_by, *spec.tie_breakers)),
-        "rank",
+        "order",
     )
 
 

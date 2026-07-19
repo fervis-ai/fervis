@@ -23,7 +23,7 @@ class OperationKind(StrEnum):
     ANTI_JOIN = "anti_join"
     UNIVERSAL_CONDITION = "universal_condition"
     AGGREGATE = "aggregate"
-    RANK = "rank"
+    ORDER = "order"
     COMPUTE = "compute"
 
 
@@ -51,10 +51,6 @@ class AggregationFunction(StrEnum):
     MIN = "min"
     MAX = "max"
     AVG = "avg"
-
-
-class TiePolicy(StrEnum):
-    FIELD = "field"
 
 
 class RelationRole(StrEnum):
@@ -200,13 +196,25 @@ class AggregateSpec:
 
 
 @dataclass(frozen=True)
-class RankSpec:
+class KeepAll:
+    pass
+
+
+@dataclass(frozen=True)
+class Take:
+    limit: Expression
+
+
+OrderSelection: TypeAlias = KeepAll | Take
+
+
+@dataclass(frozen=True)
+class OrderSpec:
     input_relation: str
     order_by: tuple[SortKey, ...]
-    tie_policy: TiePolicy
-    limit: Expression
+    selection: OrderSelection
     tie_breakers: tuple[SortKey, ...] = ()
-    kind: OperationKind = field(default=OperationKind.RANK, init=False)
+    kind: OperationKind = field(default=OperationKind.ORDER, init=False)
 
 
 @dataclass(frozen=True)
@@ -249,7 +257,7 @@ OperationSpec: TypeAlias = (
     | AntiJoinSpec
     | UniversalConditionSpec
     | AggregateSpec
-    | RankSpec
+    | OrderSpec
     | ComputeSpec
 )
 
@@ -284,7 +292,7 @@ def operation_input_relation_ids(spec: OperationSpec) -> tuple[str, ...]:
             ProjectToKeySpec,
             RoleExpandSpec,
             AggregateSpec,
-            RankSpec,
+            OrderSpec,
         ),
     ):
         return (spec.input_relation,)

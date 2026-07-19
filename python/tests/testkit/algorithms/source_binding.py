@@ -60,6 +60,7 @@ from fervis.lookup.question_contract import (
     RequestedFactAnswerPopulationMembershipTest,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
+    RequestedFactOrderingDirection,
     ResultSelectionKind,
     RequestedFactGroupKey,
     RequestedFactAnswerOutput,
@@ -1747,7 +1748,7 @@ def _source_binding_request(
     if mode == "multi_row_summary_metric":
         return _multi_row_summary_metric_request()
     if mode == "multi_row_summary_ranked_metric":
-        return _multi_row_summary_metric_request(plan_shape="ranked_aggregate")
+        return _multi_row_summary_metric_request(plan_shape="aggregate_by_group")
     if mode == "optional_population_params":
         return _optional_population_params_request()
     if mode == "grounded_time_filter":
@@ -1805,8 +1806,10 @@ def _result_limit_source_param_request() -> SourceBindingRequest:
         known_inputs=(result_limit,),
         input_refs=(result_limit.id,),
         answer_expression=RequestedFactAnswerExpression(
-            family=RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
-            selection_kind=ResultSelectionKind.LIMITED_RESULTS,
+            family=RequestedFactAnswerExpressionFamily.LIST_ROWS,
+            ordering_basis="sale amount",
+            ordering_direction=RequestedFactOrderingDirection.DESCENDING,
+            selection_kind=ResultSelectionKind.TAKE,
             limit_input_ref=result_limit.id,
         ),
     )
@@ -1850,7 +1853,7 @@ def _result_limit_source_param_request() -> SourceBindingRequest:
     plan = _plan_for_sources(
         requested_fact_id=fact.id,
         source_candidate_ids=(scope.source_candidate_id,),
-        plan_shape="ranked_aggregate",
+        plan_shape="aggregate_by_group",
     )
     read_eligibility = ResolvedRetainedReadSet(
         retained_reads=(
@@ -3712,23 +3715,26 @@ def _answer_expression(data: dict[str, Any]) -> RequestedFactAnswerExpression | 
     if not family:
         return None
     expression_family = RequestedFactAnswerExpressionFamily(family)
+    relation_valued = expression_family in {
+        RequestedFactAnswerExpressionFamily.LIST_ROWS,
+        RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
+    }
+    selection_kind = (
+        ResultSelectionKind(str(data.get("selection_kind") or "all_results"))
+        if relation_valued
+        else None
+    )
     return RequestedFactAnswerExpression(
         family=expression_family,
         group_key=_group_key(data.get("group_key")),
-        selection_kind=(
-            ResultSelectionKind.LIMITED_RESULTS
-            if expression_family
-            is RequestedFactAnswerExpressionFamily.RANKED_SELECTION
-            else ResultSelectionKind.ALL_RESULTS
-            if expression_family is RequestedFactAnswerExpressionFamily.LIST_ROWS
+        ordering_basis=str(data.get("ordering_basis") or ""),
+        ordering_direction=(
+            RequestedFactOrderingDirection(str(data["ordering_direction"]))
+            if data.get("ordering_direction")
             else None
         ),
-        limit_input_ref=(
-            "limit"
-            if expression_family
-            is RequestedFactAnswerExpressionFamily.RANKED_SELECTION
-            else ""
-        ),
+        selection_kind=selection_kind,
+        limit_input_ref=str(data.get("limit_input_ref") or ""),
     )
 
 

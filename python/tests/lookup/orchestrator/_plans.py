@@ -283,7 +283,7 @@ def _requested_fact_answer_expression(
     )
     selects_rows = family in {
         RequestedFactAnswerExpressionFamily.LIST_ROWS,
-        RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+        RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
     }
     return RequestedFactAnswerExpression(
         family=family,
@@ -295,8 +295,14 @@ def _requested_fact_answer_expression(
             if family == RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE
             else None
         ),
+        ordering_basis=("requested order" if limit_input is not None else ""),
+        ordering_direction=(
+            RequestedFactOrderingDirection.DESCENDING
+            if limit_input is not None
+            else None
+        ),
         selection_kind=(
-            ResultSelectionKind.LIMITED_RESULTS
+            ResultSelectionKind.TAKE
             if limit_input is not None
             else ResultSelectionKind.ALL_RESULTS
             if selects_rows
@@ -358,8 +364,6 @@ def _answer_expression_family_for_plan(
         return RequestedFactAnswerExpressionFamily.LIST_ROWS
     if any(isinstance(spec, ComputeSpec) for spec in operation_specs):
         return RequestedFactAnswerExpressionFamily.COMPUTED_SCALAR
-    if any(isinstance(spec, RankSpec) for spec in operation_specs):
-        return RequestedFactAnswerExpressionFamily.RANKED_SELECTION
     aggregate_specs = tuple(
         spec for spec in operation_specs if isinstance(spec, AggregateSpec)
     )

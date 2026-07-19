@@ -2277,7 +2277,10 @@ class _TwoFactActiveMemoryPlannerPort:
                     "answer_requests": [
                         {
                             "answer_fact": "the prior sales",
-                            "answer_expression": {"family": "list_rows"},
+                            "answer_expression": {
+                                "family": "list_rows",
+                                "selection": {"kind": "all_results"},
+                            },
                             "answer_subject": _answer_subject_payload("sales"),
                             "answer_population": _answer_population_payload_from_text(
                                 description="the prior sales",
@@ -2293,7 +2296,10 @@ class _TwoFactActiveMemoryPlannerPort:
                         },
                         {
                             "answer_fact": "current inventory",
-                            "answer_expression": {"family": "list_rows"},
+                            "answer_expression": {
+                                "family": "list_rows",
+                                "selection": {"kind": "all_results"},
+                            },
                             "answer_subject": _answer_subject_payload("inventory"),
                             "answer_population": _answer_population_payload_from_text(
                                 description="current inventory",
@@ -2535,7 +2541,10 @@ class _TwoSalesFactActiveMemoryPlannerPort:
                     "answer_requests": [
                         {
                             "answer_fact": "the prior sales",
-                            "answer_expression": {"family": "list_rows"},
+                            "answer_expression": {
+                                "family": "list_rows",
+                                "selection": {"kind": "all_results"},
+                            },
                             "answer_subject": _answer_subject_payload("sales"),
                             "answer_population": _answer_population_payload_from_text(
                                 description="the prior sales",
@@ -2551,7 +2560,10 @@ class _TwoSalesFactActiveMemoryPlannerPort:
                         },
                         {
                             "answer_fact": "sale id",
-                            "answer_expression": {"family": "list_rows"},
+                            "answer_expression": {
+                                "family": "list_rows",
+                                "selection": {"kind": "all_results"},
+                            },
                             "answer_subject": _answer_subject_payload("sale id"),
                             "answer_population": _answer_population_payload_from_text(
                                 description="sale id",

@@ -62,6 +62,18 @@ class CompilerInputContext:
             return expression
         raise ValueError(f"{value_id} cannot be used as a compute operand")
 
+    def expression_for_question_input(self, question_input_id: str) -> Expression:
+        value_ids = tuple(
+            binding.value.id
+            for binding in self.program_inputs.bindings.bindings
+            if binding.value.known_input_id == question_input_id
+        )
+        if len(value_ids) != 1:
+            raise ValueError(
+                f"question input {question_input_id} requires exactly one value"
+            )
+        return self.expression_for_value(value_ids[0])
+
 
 def compiler_input_context(
     *,

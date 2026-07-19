@@ -796,6 +796,12 @@ def _scripted_answer_expression(payload: dict[str, Any]) -> dict[str, Any]:
     output = {"family": family}
     if isinstance(payload.get("group_key"), dict):
         output["group_key"] = dict(payload["group_key"])
+    if family in {"list_rows", "grouped_aggregate"}:
+        output["selection"] = dict(
+            payload.get("selection") or {"kind": "all_results"}
+        )
+        if isinstance(payload.get("ordering"), dict):
+            output["ordering"] = dict(payload["ordering"])
     return output
 
 
@@ -1573,7 +1579,10 @@ def _question_contract_decisions_payload() -> dict[str, Any]:
         "answer_requests": [
             {
                 "answer_fact": fact.description,
-                "answer_expression": {"family": "list_rows"},
+                "answer_expression": {
+                    "family": "list_rows",
+                    "selection": {"kind": "all_results"},
+                },
                 "question_input_uses": list(ownership.question_input_uses),
                 "answer_subject": _answer_subject_payload("products"),
                 "answer_population": population,

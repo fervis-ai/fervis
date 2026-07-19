@@ -1,7 +1,7 @@
 id: metric_fit_excludes_nonfitting_unselected_metrics
 description: Source binding excludes nearby metric fields that were reviewed and found not to fit the selected answer.
 migrates:
-  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_parse_source_binding_grouped_ranked_filters_nonfit_unselected_metric_evidence
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_parse_source_binding_grouped_aggregate_filters_nonfit_unselected_metric_evidence
 kind: algorithm
 algorithm: source_binding.metric_fit_parse
 input:

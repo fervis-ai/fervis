@@ -68,14 +68,14 @@ from fervis.lookup.answer_program.operations import (
     ProjectField,
     ProjectSpec,
     ProjectToKeySpec,
-    RankSpec,
+    OrderSpec,
     RelationRole,
     RelationRoleRef,
     RoleExpandSpec,
     RoleMapping,
     SortDirection,
     SortKey,
-    TiePolicy,
+    Take,
 )
 from fervis.lookup.answer_program.expressions import (
     BinaryExpression,
@@ -1229,21 +1229,22 @@ def test_shared_question_input_refs_are_valid_across_answer_requests():
     )
 
 
-def test_known_limit_input_must_match_rank_limit():
+def test_known_limit_input_must_match_order_take_limit():
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(_rows_relation(),),
             operations=(
                 Operation(
                     id="top_rows",
-                    spec=RankSpec(
+                    spec=OrderSpec(
                         input_relation="rows",
                         order_by=(SortKey(field="name", direction=SortDirection.DESC),),
-                        tie_policy=TiePolicy.FIELD,
                         tie_breakers=(
                             SortKey(field="name", direction=SortDirection.ASC),
                         ),
-                        limit=ParameterRef("question.result_limit"),
+                        selection=Take(
+                            limit=ParameterRef("question.result_limit")
+                        ),
                     ),
                     output_relation="result",
                 ),
@@ -1268,21 +1269,20 @@ def test_known_limit_input_must_match_rank_limit():
     )
 
 
-def test_rank_limit_allows_literal_limit_without_bound_known_input():
+def test_order_take_allows_literal_limit_without_bound_known_input():
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(_rows_relation(),),
             operations=(
                 Operation(
                     id="top_rows",
-                    spec=RankSpec(
+                    spec=OrderSpec(
                         input_relation="rows",
                         order_by=(SortKey(field="name", direction=SortDirection.DESC),),
-                        tie_policy=TiePolicy.FIELD,
                         tie_breakers=(
                             SortKey(field="name", direction=SortDirection.ASC),
                         ),
-                        limit=_rank_limit_constant(5),
+                        selection=Take(limit=_rank_limit_constant(5)),
                     ),
                     output_relation="result",
                 ),
@@ -1302,7 +1302,7 @@ def test_rank_limit_allows_literal_limit_without_bound_known_input():
     verify_fact_plan(plan)
 
 
-def test_rank_limit_expression_requires_positive_integer_value():
+def test_order_take_expression_requires_positive_integer_value():
     for value in ("0", "-1", "5.5"):
         with pytest.raises(VerificationError, match="positive integer"):
             plan = FactPlan(
@@ -1311,7 +1311,7 @@ def test_rank_limit_expression_requires_positive_integer_value():
                     operations=(
                         Operation(
                             id="top_rows",
-                            spec=RankSpec(
+                            spec=OrderSpec(
                                 input_relation="rows",
                                 order_by=(
                                     SortKey(
@@ -1319,20 +1319,21 @@ def test_rank_limit_expression_requires_positive_integer_value():
                                         direction=SortDirection.DESC,
                                     ),
                                 ),
-                                tie_policy=TiePolicy.FIELD,
                                 tie_breakers=(
                                     SortKey(
                                         field="name",
                                         direction=SortDirection.ASC,
                                     ),
                                 ),
-                                limit=_constant_expression(
-                                    FactValue.literal(
-                                        id=f"rank_limit_{value}",
-                                        literal_type=LiteralType.NUMBER,
-                                        value=value,
-                                    ),
-                                    ref_id=f"rank_limit_{value}",
+                                selection=Take(
+                                    limit=_constant_expression(
+                                        FactValue.literal(
+                                            id=f"rank_limit_{value}",
+                                            literal_type=LiteralType.NUMBER,
+                                            value=value,
+                                        ),
+                                        ref_id=f"rank_limit_{value}",
+                                    )
                                 ),
                             ),
                             output_relation="result",
@@ -1344,27 +1345,28 @@ def test_rank_limit_expression_requires_positive_integer_value():
             verify_fact_plan(plan)
 
 
-def test_rank_limit_rejects_non_numeric_expression():
+def test_order_take_rejects_non_numeric_expression():
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(_rows_relation(),),
             operations=(
                 Operation(
                     id="top_rows",
-                    spec=RankSpec(
+                    spec=OrderSpec(
                         input_relation="rows",
                         order_by=(SortKey(field="name", direction=SortDirection.DESC),),
-                        tie_policy=TiePolicy.FIELD,
                         tie_breakers=(
                             SortKey(field="name", direction=SortDirection.ASC),
                         ),
-                        limit=_constant_expression(
-                            FactValue.literal(
-                                id="rank_limit_four",
-                                literal_type=LiteralType.STRING,
-                                value="four",
-                            ),
-                            ref_id="rank_limit_four",
+                        selection=Take(
+                            limit=_constant_expression(
+                                FactValue.literal(
+                                    id="rank_limit_four",
+                                    literal_type=LiteralType.STRING,
+                                    value="four",
+                                ),
+                                ref_id="rank_limit_four",
+                            )
                         ),
                     ),
                     output_relation="result",
@@ -1382,7 +1384,7 @@ def test_rank_limit_rejects_non_numeric_expression():
         )
     )
 
-    with pytest.raises(VerificationError, match="numeric"):
+    with pytest.raises(VerificationError, match="positive integer"):
         verify_fact_plan(plan)
 
 
@@ -3682,12 +3684,11 @@ def test_operation_field_references_must_exist_on_input_relation_contracts():
         ),
         Operation(
             id="rank",
-            spec=RankSpec(
+            spec=OrderSpec(
                 input_relation="rows",
                 order_by=(SortKey(field="missing", direction=SortDirection.ASC),),
-                tie_policy=TiePolicy.FIELD,
                 tie_breakers=(SortKey(field="name", direction=SortDirection.ASC),),
-                limit=_rank_limit_constant(5),
+                selection=Take(limit=_rank_limit_constant(5)),
             ),
             output_relation="ranked",
         ),

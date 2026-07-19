@@ -10,7 +10,7 @@ from tests.testkit.algorithms.answer_program import (
     run_answer_program_instantiate_case,
     run_answer_program_invoke_case,
     run_answer_program_patch_case,
-    run_answer_program_rank_limit_case,
+    run_answer_program_order_take_case,
 )
 
 from tests.testkit.algorithms.business_time import run_business_time_case
@@ -30,8 +30,8 @@ from tests.testkit.algorithms.fact_requirements import (
 from tests.testkit.algorithms.fact_plan_schema import (
     run_fact_plan_schema_case,
 )
-from tests.testkit.algorithms.grouped_ranked_choices import (
-    run_grouped_ranked_choices_case,
+from tests.testkit.algorithms.grouped_aggregate_choices import (
+    run_grouped_aggregate_choices_case,
 )
 from tests.testkit.algorithms.grounding import run_grounding_contract_case
 from tests.testkit.algorithms.endpoint_response import (
@@ -141,7 +141,7 @@ _RUNNERS: dict[tuple[str, str], CaseRunner] = {
     ),
     ("algorithm", "answer_program.invoke"): run_answer_program_invoke_case,
     ("algorithm", "answer_program.patch"): run_answer_program_patch_case,
-    ("algorithm", "answer_program.rank_limit"): run_answer_program_rank_limit_case,
+    ("algorithm", "answer_program.order_take"): run_answer_program_order_take_case,
     ("adapter", "host_api.endpoint_contract_projection"): run_host_api_projection_case,
     ("algorithm", "business_time.resolve"): run_business_time_case,
     (
@@ -197,7 +197,7 @@ _RUNNERS: dict[tuple[str, str], CaseRunner] = {
     ),
     ("algorithm", "planning.fact_endpoint_requirements"): run_fact_requirements_case,
     ("algorithm", "planning.fact_plan_schema"): run_fact_plan_schema_case,
-    ("algorithm", "planning.grouped_ranked_choices"): run_grouped_ranked_choices_case,
+    ("algorithm", "planning.grouped_aggregate_choices"): run_grouped_aggregate_choices_case,
     ("algorithm", "planning.relation_contract"): run_relation_contract_case,
     ("algorithm", "planning.value_contract"): run_value_contract_case,
     ("algorithm", "planning.value_uses"): run_value_uses_case,

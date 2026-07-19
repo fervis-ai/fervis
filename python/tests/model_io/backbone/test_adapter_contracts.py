@@ -96,7 +96,7 @@ def _selected_fact_plan_schema() -> dict[str, object]:
         answer_output_ids_by_requested_fact_id={"fact_1": ("answer_1",)},
         answer_output_ids_by_source_binding_id={"sb_1": ("answer_1",)},
         source_binding_ids_by_requirement_by_requested_fact_id={},
-        grouped_ranked_choices_by_requested_fact_id={},
+        grouped_aggregate_choices_by_requested_fact_id={},
         scalar_aggregate_choices_by_requested_fact_id={},
         field_ids_by_source_binding_id={"sb_1": ("amount",)},
     )

@@ -39,6 +39,7 @@ input:
       group_key:
         description: specified staff member
         domain: SPECIFIED_QUESTION_INPUTS
+      selection: {kind: all_results}
     question_input_uses:
     - {input_ref: staff_a, owner_kind: GROUP_KEY}
     - {input_ref: staff_b, owner_kind: GROUP_KEY}
@@ -77,6 +78,7 @@ expect:
             description: specified staff member
             domain: SPECIFIED_QUESTION_INPUTS
             question_input_refs: [staff_a, staff_b]
+          selection_kind: all_results
         answer_outputs:
         - description: sales count
           role: ROW_COUNT

@@ -1,12 +1,12 @@
-id: grouped_ranked_choices_preserve_executable_group_keys
+id: grouped_aggregate_choices_preserve_executable_group_keys
 description: Grouped/ranked planning preserves the executable source-binding selected group key instead of narrowing to the source row primary identity.
 migrates:
-  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_grouped_ranked_choices_use_single_identity_group_candidates
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_grouped_aggregate_choices_use_single_identity_group_candidates
 kind: algorithm
-algorithm: planning.grouped_ranked_choices
+algorithm: planning.grouped_aggregate_choices
 input:
   requested_fact_id: fact_1
-  plan_shape: ranked_aggregate
+  plan_shape: aggregate_by_group
   source:
     id: sb_1
     requested_fact_id: fact_1

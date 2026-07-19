@@ -1,4 +1,4 @@
-"""Fact-planning choices for grouped and ranked aggregate operations."""
+"""Fact-planning choices for grouped aggregate operations."""
 
 from __future__ import annotations
 
@@ -33,7 +33,6 @@ from fervis.lookup.fact_planning.source_binding_basis import (
 )
 from fervis.lookup.fact_planning.provider_contract import (
     GroupedAggregateAnswerOutput,
-    RankedAggregateAnswerOutput,
 )
 from fervis.lookup.fact_planning.compiled_patterns import CompiledMetric
 from fervis.lookup.source_binding import (
@@ -45,11 +44,11 @@ from fervis.lookup.source_binding import (
 )
 
 
-GROUPED_RANKED_PLAN_SHAPES = frozenset({"aggregate_by_group", "ranked_aggregate"})
+GROUPED_AGGREGATE_PLAN_SHAPES = frozenset({"aggregate_by_group"})
 
 
 @dataclass(frozen=True)
-class GroupedRankedAnswerOutput:
+class GroupedAggregateResultOutput:
     answer_output_id: str
     role: str
     field_ids: tuple[str, ...]
@@ -68,7 +67,7 @@ class GroupedRankedAnswerOutput:
 
 
 @dataclass(frozen=True)
-class GroupedRankedSelection:
+class GroupedAggregateSelection:
     source_binding_id: str
     fulfills_answer_output_ids: tuple[str, ...]
     group_field_ids: tuple[str, ...]
@@ -76,7 +75,7 @@ class GroupedRankedSelection:
     group_entity_kind: str
     group_entity_components: tuple[tuple[str, str], ...]
     metric: CompiledMetric
-    answer_outputs: tuple[GroupedRankedAnswerOutput, ...]
+    answer_outputs: tuple[GroupedAggregateResultOutput, ...]
 
 
 @dataclass(frozen=True)
@@ -129,14 +128,14 @@ class _GroupCandidate:
         )
 
 
-def grouped_ranked_choice_payload(
+def grouped_aggregate_choice_payload(
     sources: tuple[BoundSource, ...],
     *,
     requested_fact_id: str,
     plan_shape: str,
     allowed_source_binding_ids: tuple[str, ...] = (),
 ) -> tuple[dict[str, Any], ...]:
-    if plan_shape not in GROUPED_RANKED_PLAN_SHAPES:
+    if plan_shape not in GROUPED_AGGREGATE_PLAN_SHAPES:
         return ()
     allowed = set(allowed_source_binding_ids)
     return tuple(
@@ -154,7 +153,7 @@ def grouped_ranked_choice_payload(
     )
 
 
-def grouped_ranked_choices_prompt(
+def grouped_aggregate_choices_prompt(
     choices_by_requested_fact_id: Mapping[str, tuple[dict[str, Any], ...]],
 ) -> str:
     lines: list[str] = []
@@ -168,7 +167,7 @@ def grouped_ranked_choices_prompt(
     return "\n".join(lines)
 
 
-def grouped_ranked_choices_by_requested_fact_id(
+def grouped_aggregate_choices_by_requested_fact_id(
     sources: tuple[BoundSource, ...],
     *,
     selected_plan_shapes_by_requested_fact_id: Mapping[str, tuple[str, ...]],
@@ -181,10 +180,10 @@ def grouped_ranked_choices_by_requested_fact_id(
     ) in selected_plan_shapes_by_requested_fact_id.items():
         fact_choices: list[dict[str, Any]] = []
         for plan_shape in plan_shapes:
-            if plan_shape not in GROUPED_RANKED_PLAN_SHAPES:
+            if plan_shape not in GROUPED_AGGREGATE_PLAN_SHAPES:
                 continue
             fact_choices.extend(
-                grouped_ranked_choice_payload(
+                grouped_aggregate_choice_payload(
                     sources,
                     requested_fact_id=requested_fact_id,
                     plan_shape=plan_shape,
@@ -199,11 +198,11 @@ def grouped_ranked_choices_by_requested_fact_id(
     return output
 
 
-def selected_grouped_ranked_operation(
-    answer: GroupedAggregateAnswerOutput | RankedAggregateAnswerOutput,
+def selected_grouped_aggregate_operation(
+    answer: GroupedAggregateAnswerOutput,
     *,
     bound_sources: dict[str, BoundSource],
-) -> GroupedRankedSelection:
+) -> GroupedAggregateSelection:
     requested_fact_id = answer.requested_fact_id
     plan_shape = answer.pattern
     source_binding_id = answer.source_binding_id
@@ -216,7 +215,7 @@ def selected_grouped_ranked_operation(
         plan_shape=plan_shape,
     )
     if choice is None:
-        raise ValueError("fact plan references unavailable grouped/ranked choices")
+        raise ValueError("fact plan references unavailable grouped aggregate choices")
     group = _parse_group_candidate(_dict(choice.get("group")))
     metric = _selected_candidate(
         answer.metric.id,
@@ -240,8 +239,8 @@ def selected_grouped_ranked_operation(
         plan_shape=plan_shape,
     )
     if not answer_outputs:
-        raise ValueError("grouped/ranked selection produces no answer outputs")
-    return GroupedRankedSelection(
+        raise ValueError("grouped aggregate selection produces no answer outputs")
+    return GroupedAggregateSelection(
         source_binding_id=source_binding_id,
         fulfills_answer_output_ids=tuple(
             dict.fromkeys(item.answer_output_id for item in answer_outputs)
@@ -294,20 +293,6 @@ def _choice_payload_for_source(
         "group": group,
         "metric_candidates": metrics,
         "function_candidates": functions,
-        **(
-            {
-                "rank_candidates": (
-                    {
-                        "id": "rank_top_1_desc",
-                        "sort": "desc",
-                        "limit": 1,
-                        "meaning": "return the single group with the largest computed metric",
-                    },
-                )
-            }
-            if plan_shape == "ranked_aggregate"
-            else {}
-        ),
     }
 
 
@@ -532,7 +517,7 @@ def _compiled_metric(
 
 def _metric_answer_output_id(
     metric: Mapping[str, object],
-    answer_outputs: tuple[GroupedRankedAnswerOutput, ...],
+    answer_outputs: tuple[GroupedAggregateResultOutput, ...],
 ) -> str:
     expected_role = (
         "ROW_COUNT"
@@ -558,11 +543,11 @@ def _answer_outputs_for_selection(
     group_candidate: _GroupCandidate,
     metric_candidate: Mapping[str, Any],
     plan_shape: str,
-) -> tuple[GroupedRankedAnswerOutput, ...]:
+) -> tuple[GroupedAggregateResultOutput, ...]:
     group_field_ids = group_candidate.field_ids
     metric_field_id = _text(metric_candidate.get("field_id"))
     count_basis = _dict_or_empty(metric_candidate.get("count_basis"))
-    output: list[GroupedRankedAnswerOutput] = []
+    output: list[GroupedAggregateResultOutput] = []
     for fulfillment in (
         item
         for item in source.fulfillments
@@ -576,7 +561,7 @@ def _answer_outputs_for_selection(
         )
         if group_evidence is not None:
             output.append(
-                GroupedRankedAnswerOutput(
+                GroupedAggregateResultOutput(
                     answer_output_id=fulfillment.answer_output_id,
                     role="GROUP_KEY",
                     field_ids=group_field_ids,
@@ -595,7 +580,7 @@ def _answer_outputs_for_selection(
         )
         if metric_evidence_id:
             output.append(
-                GroupedRankedAnswerOutput(
+                GroupedAggregateResultOutput(
                     answer_output_id=fulfillment.answer_output_id,
                     role="MEASURED_VALUE",
                     field_ids=(metric_field_id,),
@@ -611,7 +596,7 @@ def _answer_outputs_for_selection(
         )
         if count_evidence_id:
             output.append(
-                GroupedRankedAnswerOutput(
+                GroupedAggregateResultOutput(
                     answer_output_id=fulfillment.answer_output_id,
                     role="ROW_COUNT",
                     field_ids=("count",),
@@ -809,7 +794,7 @@ def _selected_candidate(
 
 
 def _validate_metric_selection(
-    answer: GroupedAggregateAnswerOutput | RankedAggregateAnswerOutput,
+    answer: GroupedAggregateAnswerOutput,
     candidate: Mapping[str, Any],
 ) -> None:
     if answer.metric.kind != _text(candidate.get("kind")):
@@ -821,7 +806,7 @@ def _validate_metric_selection(
 
 
 def _validate_function_selection(
-    answer: GroupedAggregateAnswerOutput | RankedAggregateAnswerOutput,
+    answer: GroupedAggregateAnswerOutput,
     candidate: Mapping[str, Any],
 ) -> None:
     if answer.function.value != _text(candidate.get("value")):

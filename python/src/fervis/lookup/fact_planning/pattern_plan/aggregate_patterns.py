@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from fervis.lookup.fact_planning.grouped_ranked_choices import (
-    GroupedRankedSelection,
-    selected_grouped_ranked_operation,
+from fervis.lookup.fact_planning.grouped_aggregate_choices import (
+    GroupedAggregateSelection,
+    selected_grouped_aggregate_operation,
 )
 from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
@@ -17,21 +17,19 @@ from fervis.lookup.answer_program.relations import (
 from fervis.lookup.fact_planning.metric_options import metric_for_selection
 from fervis.lookup.source_binding import BoundSource
 from fervis.lookup.answer_program.compiler_inputs import CompilerInputContext
-from fervis.lookup.answer_program.operations import SortDirection
 from fervis.lookup.fact_planning.provider_contract import (
     AggregateScalarAnswerOutput,
     GroupedAggregateAnswerOutput,
-    RankedAggregateAnswerOutput,
 )
 from fervis.lookup.fact_planning.executable_support import RowPopulationBasis
 
 from .aggregate_operations import (
     _aggregate_operations,
-    _ranked_aggregate_operations,
+    _ordered_aggregate_operations,
 )
 from .aggregate_outputs import (
     _aggregate_relation_outputs,
-    _grouped_ranked_relation_outputs,
+    _grouped_aggregate_relation_outputs,
 )
 from .shared import (
     RelationBuilder,
@@ -48,9 +46,10 @@ from .shared import (
 from fervis.lookup.fact_planning.compiled_patterns import (
     CompiledMetric,
     CompiledPattern,
-    CompiledRank,
+    CompiledOrdering,
     PatternAddress,
 )
+from fervis.lookup.question_contract import RequestedFact
 
 
 def _compile_aggregate_pattern_answer(
@@ -60,15 +59,19 @@ def _compile_aggregate_pattern_answer(
     namespace_result_outputs: bool,
     bound_sources: dict[str, BoundSource],
     relation_builder: RelationBuilder,
+    input_context: CompilerInputContext,
+    requested_fact: RequestedFact,
 ) -> CompiledPattern:
     match answer:
         case GroupedAggregateAnswerOutput():
-            return _compile_grouped_ranked_aggregate_answer(
+            return _compile_grouped_aggregate_answer(
                 index=index,
                 answer=answer,
                 namespace_result_outputs=namespace_result_outputs,
                 bound_sources=bound_sources,
                 relation_builder=relation_builder,
+                input_context=input_context,
+                requested_fact=requested_fact,
             )
         case AggregateScalarAnswerOutput():
             pass
@@ -169,117 +172,26 @@ def _bound_source_with_row_population_basis(
     )
 
 
-def _compile_ranked_aggregate_answer(
-    *,
-    index: int,
-    answer: RankedAggregateAnswerOutput,
-    namespace_result_outputs: bool,
-    bound_sources: dict[str, BoundSource],
-    input_context: CompilerInputContext,
-    relation_builder: RelationBuilder,
-) -> CompiledPattern:
-    return _compile_grouped_ranked_ranked_aggregate_answer(
-        index=index,
-        answer=answer,
-        namespace_result_outputs=namespace_result_outputs,
-        bound_sources=bound_sources,
-        input_context=input_context,
-        relation_builder=relation_builder,
-    )
-
-
-def _compile_grouped_ranked_aggregate_answer(
+def _compile_grouped_aggregate_answer(
     *,
     index: int,
     answer: GroupedAggregateAnswerOutput,
     namespace_result_outputs: bool,
     bound_sources: dict[str, BoundSource],
     relation_builder: RelationBuilder,
-) -> CompiledPattern:
-    relation_id = _pattern_relation_id(index)
-    output_relation_id = _pattern_output_relation_id(index)
-    selection = selected_grouped_ranked_operation(
-        answer,
-        bound_sources=bound_sources,
-    )
-    address = PatternAddress(
-        requested_fact_id=answer.requested_fact_id,
-        answer_output_ids=selection.fulfills_answer_output_ids,
-        plan_shape=answer.pattern,
-        source_binding_id=selection.source_binding_id,
-    )
-    bound = bound_sources[selection.source_binding_id]
-    metric = selection.metric
-    row_population_basis = metric.row_population_basis
-    if row_population_basis and bound.source is not None:
-        bound = _bound_source_with_row_population_basis(
-            bound,
-            row_population_basis=row_population_basis,
-        )
-        bound_sources = {**bound_sources, bound.id: bound}
-    group_fields = _grouped_ranked_group_fields(selection)
-    relation_fields = _grouped_ranked_relation_fields(
-        group_fields=group_fields,
-        metric=metric,
-    )
-    _validate_relation_fields_for_bound(
-        address=address,
-        bound=bound,
-        relation_fields=relation_fields,
-        required_answer_evidence_ids_by_output=(
-            _grouped_ranked_answer_evidence_ids_by_output(selection)
-        ),
-        selected_metric=metric,
-    )
-    relation_outputs = _grouped_ranked_relation_outputs(
-        index=index,
-        output_relation_id=output_relation_id,
-        answer_outputs=selection.answer_outputs,
-        metric=metric,
-        namespace_result_outputs=namespace_result_outputs,
-    )
-    return _compiled_pattern(
-        address=address,
-        relation_id=relation_id,
-        relation_fields=relation_fields,
-        operations=_aggregate_operations(
-            input_relation_id=relation_id,
-            output_relation_id=output_relation_id,
-            group_fields=group_fields,
-            metric=metric,
-            required_group_fields=_answer_result_group_fields(
-                selection=selection,
-                group_fields=group_fields,
-            ),
-        ),
-        relation_outputs=relation_outputs,
-        fulfillment_result_ids=_grouped_ranked_fulfillment_result_ids(
-            selection=selection,
-            relation_outputs=relation_outputs,
-        ),
-        bound_sources=bound_sources,
-        relation_builder=relation_builder,
-        required_answer_evidence_ids_by_output=(
-            _grouped_ranked_answer_evidence_ids_by_output(selection)
-        ),
-        selected_metric=metric,
-    )
-
-
-def _compile_grouped_ranked_ranked_aggregate_answer(
-    *,
-    index: int,
-    answer: RankedAggregateAnswerOutput,
-    namespace_result_outputs: bool,
-    bound_sources: dict[str, BoundSource],
     input_context: CompilerInputContext,
-    relation_builder: RelationBuilder,
+    requested_fact: RequestedFact,
 ) -> CompiledPattern:
     relation_id = _pattern_relation_id(index)
-    aggregate_relation_id = f"{_pattern_output_relation_id(index)}_aggregate"
     output_relation_id = _pattern_output_relation_id(index)
-    rank_operation_id = f"{output_relation_id}_rank"
-    selection = selected_grouped_ranked_operation(
+    ordering = CompiledOrdering.from_requested_fact(
+        requested_fact,
+        input_context=input_context,
+    )
+    aggregate_relation_id = (
+        f"{output_relation_id}_aggregate" if ordering is not None else output_relation_id
+    )
+    selection = selected_grouped_aggregate_operation(
         answer,
         bound_sources=bound_sources,
     )
@@ -298,8 +210,8 @@ def _compile_grouped_ranked_ranked_aggregate_answer(
             row_population_basis=row_population_basis,
         )
         bound_sources = {**bound_sources, bound.id: bound}
-    group_fields = _grouped_ranked_group_fields(selection)
-    relation_fields = _grouped_ranked_relation_fields(
+    group_fields = _grouped_aggregate_group_fields(selection)
+    relation_fields = _grouped_aggregate_relation_fields(
         group_fields=group_fields,
         metric=metric,
     )
@@ -308,16 +220,11 @@ def _compile_grouped_ranked_ranked_aggregate_answer(
         bound=bound,
         relation_fields=relation_fields,
         required_answer_evidence_ids_by_output=(
-            _grouped_ranked_answer_evidence_ids_by_output(selection)
+            _grouped_aggregate_answer_evidence_ids_by_output(selection)
         ),
         selected_metric=metric,
     )
-    rank = CompiledRank(
-        direction=SortDirection(answer.rank.sort),
-        limit=answer.rank.limit,
-        limit_value_id=answer.rank.limit_value_id or "",
-    )
-    relation_outputs = _grouped_ranked_relation_outputs(
+    relation_outputs = _grouped_aggregate_relation_outputs(
         index=index,
         output_relation_id=output_relation_id,
         answer_outputs=selection.answer_outputs,
@@ -328,43 +235,60 @@ def _compile_grouped_ranked_ranked_aggregate_answer(
         address=address,
         relation_id=relation_id,
         relation_fields=relation_fields,
-        operations=_ranked_aggregate_operations(
-            input_relation_id=relation_id,
-            aggregate_relation_id=aggregate_relation_id,
-            output_relation_id=output_relation_id,
-            rank_operation_id=rank_operation_id,
-            group_fields=group_fields,
-            metric=metric,
-            rank=rank,
-            input_context=input_context,
-            required_group_fields=_answer_result_group_fields(
-                selection=selection,
+        operations=(
+            _ordered_aggregate_operations(
+                input_relation_id=relation_id,
+                aggregate_relation_id=aggregate_relation_id,
+                output_relation_id=output_relation_id,
+                order_operation_id=f"{output_relation_id}_order",
                 group_fields=group_fields,
-            ),
+                metric=metric,
+                ordering=ordering,
+                ordering_field_id=(
+                    answer.ordering_field.field_id
+                    if answer.ordering_field is not None
+                    else metric.output_field_id
+                ),
+                required_group_fields=_answer_result_group_fields(
+                    selection=selection,
+                    group_fields=group_fields,
+                ),
+            )
+            if ordering is not None
+            else _aggregate_operations(
+                input_relation_id=relation_id,
+                output_relation_id=output_relation_id,
+                group_fields=group_fields,
+                metric=metric,
+                required_group_fields=_answer_result_group_fields(
+                    selection=selection,
+                    group_fields=group_fields,
+                ),
+            )
         ),
         relation_outputs=relation_outputs,
-        fulfillment_result_ids=_grouped_ranked_fulfillment_result_ids(
+        fulfillment_result_ids=_grouped_aggregate_fulfillment_result_ids(
             selection=selection,
             relation_outputs=relation_outputs,
         ),
         bound_sources=bound_sources,
         relation_builder=relation_builder,
         required_answer_evidence_ids_by_output=(
-            _grouped_ranked_answer_evidence_ids_by_output(selection)
+            _grouped_aggregate_answer_evidence_ids_by_output(selection)
         ),
         selected_metric=metric,
     )
 
 
-def _grouped_ranked_group_fields(
-    selection: GroupedRankedSelection,
+def _grouped_aggregate_group_fields(
+    selection: GroupedAggregateSelection,
 ) -> tuple[dict[str, str], ...]:
     return tuple(
         _field_spec({"field_id": field_id}) for field_id in selection.group_field_ids
     )
 
 
-def _grouped_ranked_relation_fields(
+def _grouped_aggregate_relation_fields(
     *,
     group_fields: tuple[dict[str, str], ...],
     metric: CompiledMetric,
@@ -384,9 +308,9 @@ def _grouped_ranked_relation_fields(
     )
 
 
-def _grouped_ranked_fulfillment_result_ids(
+def _grouped_aggregate_fulfillment_result_ids(
     *,
-    selection: GroupedRankedSelection,
+    selection: GroupedAggregateSelection,
     relation_outputs: tuple[Any, ...],
 ) -> tuple[str, ...]:
     result_id_by_answer_output: dict[str, str] = {}
@@ -425,8 +349,8 @@ def _grouped_ranked_fulfillment_result_ids(
     return tuple(output)
 
 
-def _grouped_ranked_answer_evidence_ids_by_output(
-    selection: GroupedRankedSelection,
+def _grouped_aggregate_answer_evidence_ids_by_output(
+    selection: GroupedAggregateSelection,
 ) -> dict[str, tuple[str, ...]]:
     output: dict[str, tuple[str, ...]] = {}
     for answer_output in selection.answer_outputs:
@@ -442,7 +366,7 @@ def _grouped_ranked_answer_evidence_ids_by_output(
 
 def _answer_result_group_fields(
     *,
-    selection: GroupedRankedSelection,
+    selection: GroupedAggregateSelection,
     group_fields: tuple[dict[str, str], ...],
 ) -> tuple[str, ...]:
     group_field_ids = {item["field_id"] for item in group_fields}

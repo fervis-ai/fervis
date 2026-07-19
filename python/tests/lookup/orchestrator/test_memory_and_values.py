@@ -9,7 +9,7 @@ from tests.lookup.orchestrator._helpers import *  # noqa: F403
 from tests.lookup.prompt_sections import prompt_section_payload
 
 
-def test_lookup_cutover_executes_rank_limit_value_use_as_proof_link():
+def test_lookup_cutover_executes_take_limit_value_use_as_proof_link():
     known_inputs = (
         _known_result_limit_input(
             "result_limit",
@@ -24,7 +24,7 @@ def test_lookup_cutover_executes_rank_limit_value_use_as_proof_link():
                 description="top metric totals",
                 answer_subject=RequestedFactAnswerSubject(subject_text="metric totals"),
                 answer_expression=_requested_fact_answer_expression(
-                    RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+                    RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
                     known_inputs=known_inputs,
                 ),
                 answer_outputs=(
@@ -41,18 +41,13 @@ def test_lookup_cutover_executes_rank_limit_value_use_as_proof_link():
                 "answers": [
                     {
                         "requested_fact_id": "fact_1",
-                        "pattern": "ranked_aggregate",
+                        "pattern": "aggregate_by_group",
                         "aggregate_choice": {
                             "group_field_ids": ("location_id",),
                             "metric_field_id": "metric_total",
                             "metric_function": "sum",
                         },
                         "source_hint": {"kind": "read", "read_id": "metric_read"},
-                        "rank": {
-                            "sort": "desc",
-                            "limit": 2,
-                            "limit_value_id": "grounded_fact_1_limit_1",
-                        },
                     }
                 ],
             }

@@ -10,7 +10,6 @@ from fervis.lookup.plan_execution.operation_runtime import (
     RelationEngineOutput,
     ScalarInput,
     ExecutableOperation,
-    ResolvedRankSpec,
 )
 from fervis.lookup.plan_execution.relations import RelationRows
 from fervis.lookup.canonical_data import RuntimeValue
@@ -26,6 +25,7 @@ from fervis.lookup.answer_program.operations import (
     ComputeSpec,
     FilterSpec,
     JoinSpec,
+    OrderSpec,
     ProjectSpec,
     ProjectToKeySpec,
     RoleExpandSpec,
@@ -33,7 +33,7 @@ from fervis.lookup.answer_program.operations import (
     UniversalConditionSpec,
 )
 
-from .aggregate_operations import _aggregate, _rank
+from .aggregate_operations import _aggregate, _order
 from .compute_operations import _compute
 from .relation_operations import (
     _anti_join,
@@ -198,11 +198,13 @@ def _execute_operation(
             relations,
             operation_refs=operation_proof_refs.get(operation.id, ()),
         )
-    if isinstance(spec, ResolvedRankSpec):
-        return _rank(
+    if isinstance(spec, OrderSpec):
+        return _order(
             operation,
             spec,
             relations,
+            scalars=scalars,
+            scalar_types=scalar_types,
             operation_refs=operation_proof_refs.get(operation.id, ()),
         )
     if isinstance(spec, ComputeSpec):

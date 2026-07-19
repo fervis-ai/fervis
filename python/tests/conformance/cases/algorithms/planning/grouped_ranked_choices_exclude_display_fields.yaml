@@ -1,12 +1,12 @@
-id: grouped_ranked_choices_exclude_display_fields
+id: grouped_aggregate_choices_exclude_display_fields
 description: Grouped/ranked planning uses the source-binding selected canonical group key instead of re-exposing display labels.
 migrates:
-  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_grouped_ranked_choices_do_not_include_display_fields_as_group_candidates
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_grouped_aggregate_choices_do_not_include_display_fields_as_group_candidates
 kind: algorithm
-algorithm: planning.grouped_ranked_choices
+algorithm: planning.grouped_aggregate_choices
 input:
   requested_fact_id: fact_1
-  plan_shape: ranked_aggregate
+  plan_shape: aggregate_by_group
   source:
     id: sb_1
     requested_fact_id: fact_1

@@ -325,17 +325,16 @@ def _visible_fulfillment_role_keys(
     *,
     answer_output_id: str,
 ) -> tuple[str, ...]:
-    family = (
-        requested_fact.answer_expression.family
-        if requested_fact is not None and requested_fact.answer_expression is not None
-        else None
-    )
+    expression = requested_fact.answer_expression if requested_fact is not None else None
+    family = expression.family if expression is not None else None
     answer_output_role = _answer_output_role(
         requested_fact,
         answer_output_id=answer_output_id,
     )
     if (
-        family == RequestedFactAnswerExpressionFamily.RANKED_SELECTION
+        family == RequestedFactAnswerExpressionFamily.LIST_ROWS
+        and expression is not None
+        and expression.is_ordered
         and answer_output_role != "MEASURED_VALUE"
     ):
         return ("entity_evidence", "value_evidence")

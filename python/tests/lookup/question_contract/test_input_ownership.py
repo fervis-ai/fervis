@@ -113,6 +113,7 @@ def _grouped_staff_contract() -> dict[str, object]:
                 answer_fact="sales count for each specified staff member today",
                 expression={
                     "family": "grouped_aggregate",
+                    "selection": {"kind": "all_results"},
                     "group_key": {
                         "description": "staff member",
                         "domain": "SPECIFIED_QUESTION_INPUTS",
@@ -189,7 +190,10 @@ def test_single_ownership_lowers_to_the_existing_requested_fact_contract() -> No
 def test_one_input_may_supply_multiple_population_tests() -> None:
     payload = _grouped_staff_contract()
     request = payload["answer_requests"][0]
-    request["answer_expression"] = {"family": "list_rows"}
+    request["answer_expression"] = {
+        "family": "list_rows",
+        "selection": {"kind": "all_results"},
+    }
     request["answer_population"]["membership_tests"] = [
         _membership_test(
             test_id="t_subject",
@@ -315,7 +319,11 @@ def test_result_limit_use_lowers_to_the_existing_expression_field() -> None:
     payload["answer_requests"] = [
         _answer_request(
             answer_fact="top 3 sales",
-            expression={"family": "ranked_selection"},
+            expression={
+                "family": "list_rows",
+                "ordering": {"basis": "sales amount", "direction": "descending"},
+                "selection": {"kind": "take"},
+            },
             membership_tests=[
                 _membership_test(
                     test_id="t_subject",
@@ -427,7 +435,11 @@ def test_parser_rejects_specified_input_group_key_without_owned_inputs() -> None
 def test_parser_rejects_result_limit_owner_for_non_limit_input() -> None:
     payload = _grouped_staff_contract()
     request = payload["answer_requests"][0]
-    request["answer_expression"] = {"family": "ranked_selection"}
+    request["answer_expression"] = {
+        "family": "list_rows",
+        "ordering": {"basis": "sale amount", "direction": "descending"},
+        "selection": {"kind": "take"},
+    }
     request["answer_population"]["membership_tests"] = [
         request["answer_population"]["membership_tests"][0]
     ]
@@ -451,7 +463,11 @@ def test_parser_rejects_non_limit_owner_for_result_limit_input() -> None:
     payload["answer_requests"] = [
         _answer_request(
             answer_fact="top 3 sales",
-            expression={"family": "ranked_selection"},
+            expression={
+                "family": "list_rows",
+                "ordering": {"basis": "sale amount", "direction": "descending"},
+                "selection": {"kind": "take"},
+            },
             membership_tests=[
                 _membership_test(
                     test_id="t_subject",
@@ -488,7 +504,11 @@ def test_parser_rejects_multiple_result_limits_for_one_fact() -> None:
     payload["answer_requests"] = [
         _answer_request(
             answer_fact="top sales",
-            expression={"family": "ranked_selection"},
+            expression={
+                "family": "list_rows",
+                "ordering": {"basis": "sale amount", "direction": "descending"},
+                "selection": {"kind": "take"},
+            },
             membership_tests=[
                 _membership_test(
                     test_id="t_subject",
@@ -561,11 +581,16 @@ def test_schema_exposes_only_the_single_ownership_ledger() -> None:
     assert "use_id" in use_schema["oneOf"][1]["properties"]
     assert "use_id" not in use_schema["oneOf"][2]["properties"]
     assert "used_question_inputs" not in properties
+    grouped_expression = next(
+        branch
+        for branch in properties["answer_expression"]["oneOf"]
+        if branch["properties"]["family"]["enum"] == ["grouped_aggregate"]
+    )
     assert (
         "question_input_refs"
-        not in properties["answer_expression"]["oneOf"][0]["properties"]["group_key"][
-            "oneOf"
-        ][0]["properties"]
+        not in grouped_expression["properties"]["group_key"]["oneOf"][0][
+            "properties"
+        ]
     )
     membership_variants = properties["answer_population"]["properties"][
         "membership_tests"
