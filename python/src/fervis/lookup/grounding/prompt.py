@@ -104,8 +104,8 @@ class GroundingTurnPrompt(TurnPromptBase):
                 "DIFFERENT_RESOURCE_TYPE always requires CANNOT_RESOLVE_LOOKUP_TEXT. Only SAME_RESOURCE_TYPE proceeds to resolver_fit_question and route-mechanics assessment.",
                 "For every option, answer the shown resolver_fit_question.",
                 "An exact match in a field that describes another entity, category, or surrounding context does not identify the returned resource.",
-                "For a positive review, include every required request parameter with no default. Include an optional request parameter only when it performs the lookup. Key request_values by param_ref.",
-                "canonical_result identifies the returned resource's complete canonical key. Match fields never become computation values. Do not substitute a related resource's key.",
+                "For a positive review, include every required request parameter with no default. Include an optional request parameter only when it performs the lookup.",
+                "canonical_result identifies the returned resource's complete canonical key. Returned identity verification fields never become computation values. Do not substitute a related resource's key.",
                 "Use question_text to interpret field_label_text and value_meaning_hint. Do not infer or decide final source use.",
             ),
         )
@@ -121,12 +121,14 @@ class GroundingTurnPrompt(TurnPromptBase):
                 "Return known_input_binding_reviews as an object keyed by known_input_id. Within each review, return option_reviews keyed by binding_option_id and include every shown binding option exactly once.",
                 "Copy all IDs and each resolver_fit_question exactly.",
                 "Within each known-input review, write fields in this order: resource_type_basis, resource_type_x, identifier_kind_basis, identifier_kind, option_reviews.",
-                "Within each option review, write fields in this order: resource_type, resource_type_match, resolver_fit_question, because, decision, request_values, response_match_alternatives.",
+                "Within each option review, write fields in this order: resource_type, resource_type_match, resolver_fit_question, because, resolution. Within resolution, write decision, lookup_request_params, then returned_identity_verification_fields.",
                 'For CAN_RESOLVE_LOOKUP_TEXT, write because as: "{resource_type} represents {resource_type_x}. With identifier_kind={identifier_kind}, this route can resolve {lookup_text} because {route evidence}."',
                 'For CANNOT_RESOLVE_LOOKUP_TEXT, write because as either: "{resource_type} does not represent {resource_type_x}." or "{resource_type} represents {resource_type_x}, but with identifier_kind={identifier_kind}, this route cannot resolve {lookup_text} because {route evidence}."',
                 "Write decision after because.",
-                "For CAN_RESOLVE_LOOKUP_TEXT, return request_values keyed by param_ref and select at least one valid exact-match response field. For PRIMARY_KEY, only fields declared by canonical_result.components are valid. For DESCRIPTIVE, a field is valid only when its declared type and choices accept lookup_text and it describes the returned resource itself.",
-                "For CANNOT_RESOLVE_LOOKUP_TEXT, return an empty request_values object and an empty response_match_alternatives array.",
+                "lookup_request_params answers: Which shown request parameter or parameters exactly match lookup_text's identifier meaning for resource_type_x? Return those parameter-value pairs, or an empty array when none match.",
+                "returned_identity_verification_fields are returned-resource fields that may exactly equal lookup_text. For PRIMARY_KEY, only fields declared by canonical_result.components are valid. For DESCRIPTIVE, a field is valid only when its declared type and choices accept lookup_text and it describes the returned resource itself.",
+                "For CAN_RESOLVE_LOOKUP_TEXT, resolution must contain at least one lookup_request_param and at least one returned_identity_verification_field.",
+                "For CANNOT_RESOLVE_LOOKUP_TEXT, resolution must contain empty lookup_request_params and returned_identity_verification_fields arrays.",
             ),
         )
 

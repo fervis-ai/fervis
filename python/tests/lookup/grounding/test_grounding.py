@@ -415,31 +415,36 @@ def _grounding_review_arguments(
                     ),
                     "resolver_fit_question": option["resolver_fit_question"],
                     "because": "The read capability was reviewed by the test model.",
-                    "request_values": (
-                        {
-                            option["api_read"]["input_params"][0][
-                                "param_ref"
-                            ]: lookup_text
-                        }
-                        if option["binding_option_id"] in positive_ids
-                        and option["api_read"]["input_params"]
-                        else {}
-                    ),
-                    "response_match_alternatives": (
-                        [
-                            field["path"]
-                            for row in option["api_read"]["response_rows"]
-                            for field in row["fields"]
-                            if field["type"] in {"string", "uuid"}
-                        ]
-                        if option["binding_option_id"] in positive_ids
-                        else []
-                    ),
-                    "decision": (
-                        "CAN_RESOLVE_LOOKUP_TEXT"
-                        if option["binding_option_id"] in positive_ids
-                        else "CANNOT_RESOLVE_LOOKUP_TEXT"
-                    ),
+                    "resolution": {
+                        "decision": (
+                            "CAN_RESOLVE_LOOKUP_TEXT"
+                            if option["binding_option_id"] in positive_ids
+                            else "CANNOT_RESOLVE_LOOKUP_TEXT"
+                        ),
+                        "lookup_request_params": (
+                            [
+                                {
+                                    "param_ref": option["api_read"][
+                                        "input_params"
+                                    ][0]["param_ref"],
+                                    "value": lookup_text,
+                                }
+                            ]
+                            if option["binding_option_id"] in positive_ids
+                            and option["api_read"]["input_params"]
+                            else []
+                        ),
+                        "returned_identity_verification_fields": (
+                            [
+                                field["path"]
+                                for row in option["api_read"]["response_rows"]
+                                for field in row["fields"]
+                                if field["type"] in {"string", "uuid"}
+                            ]
+                            if option["binding_option_id"] in positive_ids
+                            else []
+                        ),
+                    },
                 }
                 for option in task["binding_options"]
             }
@@ -584,6 +589,8 @@ def test_grounding_prompt_instructs_binding_id_copying_verbatim():
     assert "set resource_type_x to exactly one shown_resource_type" in prompt
     assert "SAME_RESOURCE_TYPE means it exactly equals resource_type_x" in prompt
     assert "Within each known-input review, write fields in this order: resource_type_basis, resource_type_x, identifier_kind_basis, identifier_kind, option_reviews." in prompt
+    assert "Within each option review, write fields in this order: resource_type, resource_type_match, resolver_fit_question, because, resolution." in prompt
+    assert "returned_identity_verification_fields are returned-resource fields that may exactly equal lookup_text" in prompt
     assert "Include each selected field exactly once." not in prompt
     assert "can/cannot identify the returned" not in prompt
     assert "because briefly explains the capability decision" not in prompt
@@ -612,14 +619,17 @@ def test_grounding_prompt_instructs_binding_id_copying_verbatim():
         "resource_type_match",
         "resolver_fit_question",
         "because",
-        "decision",
-        "request_values",
-        "response_match_alternatives",
+        "resolution",
     ]
-    match_alternatives = first_review["properties"]["response_match_alternatives"]
-    assert match_alternatives["type"] == "array"
-    assert match_alternatives["maxItems"] == len(match_alternatives["items"]["enum"])
-    assert match_alternatives["uniqueItems"] is True
+    resolution = first_review["properties"]["resolution"]
+    assert resolution["properties"]["decision"]["enum"] == [
+        "CANNOT_RESOLVE_LOOKUP_TEXT"
+    ]
+    assert list(resolution["properties"]) == [
+        "decision",
+        "lookup_request_params",
+        "returned_identity_verification_fields",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -787,32 +797,14 @@ def test_grounding_schema_rejects_lookup_value_for_incompatible_parameter_type(
         tasks=(task,),
         resolver_catalog=catalog,
     )
+    payload = _grounding_review_arguments(
+        _grounding_prompt(request),
+        selected_by_input={task.known_input_id: option.id},
+    )
 
     with pytest.raises(ValidationError):
         validate(
-            {
-                "known_time_resolutions": {},
-                "known_input_binding_reviews": {
-                    task.known_input_id: {
-                        "option_reviews": {
-                            option.id: {
-                                "resolver_fit_question": (
-                                    resolver_fit_question_for_option(
-                                        task=task,
-                                        option=option,
-                                    )
-                                ),
-                                "because": "The route was assessed.",
-                                "request_values": {
-                                    read.params[0].ref: lookup_text,
-                                },
-                                "response_match_alternatives": ["data.full_name"],
-                                "decision": "CAN_RESOLVE_LOOKUP_TEXT",
-                            }
-                        }
-                    }
-                },
-            },
+            payload,
             GroundingTurnPrompt(request).response_contract().provider_schema,
         )
 
@@ -839,7 +831,9 @@ def test_grounding_schema_rejects_repeated_response_match_field() -> None:
     option_schema = schema["properties"]["known_input_binding_reviews"][
         "properties"
     ][task.known_input_id]["properties"]["option_reviews"]["properties"][option.id]
-    match_schema = option_schema["properties"]["response_match_alternatives"]
+    match_schema = option_schema["properties"]["resolution"]["oneOf"][1][
+        "properties"
+    ]["returned_identity_verification_fields"]
 
     with pytest.raises(ValidationError):
         validate(["data.person_id", "data.person_id"], match_schema)
@@ -866,13 +860,81 @@ def test_grounding_schema_requires_no_default_resolver_parameters() -> None:
     option_schema = schema["properties"]["known_input_binding_reviews"][
         "properties"
     ]["input_staff"]["properties"]["option_reviews"]["properties"][option.id]
-    request_values_schema = option_schema["properties"]["request_values"]["anyOf"][0]
+    resolution_schema = option_schema["properties"]["resolution"]
+    assert [
+        branch["properties"]["decision"]["enum"]
+        for branch in resolution_schema["oneOf"]
+    ] == [
+        ["CANNOT_RESOLVE_LOOKUP_TEXT"],
+        ["CAN_RESOLVE_LOOKUP_TEXT"],
+    ]
+    positive_resolution = resolution_schema["oneOf"][1]
+    lookup_params_schema = positive_resolution["properties"][
+        "lookup_request_params"
+    ]
 
-    assert request_values_schema["type"] == "object"
-    assert request_values_schema["required"] == ["get_staff_detail.path.staff_id"]
-    assert set(request_values_schema["properties"]) == {
+    assert lookup_params_schema["type"] == "array"
+    assert lookup_params_schema["minItems"] == 1
+    assert lookup_params_schema["maxItems"] == 1
+    assert lookup_params_schema["items"]["properties"]["param_ref"]["enum"] == [
         "get_staff_detail.path.staff_id"
-    }
+    ]
+    verification_fields = positive_resolution["properties"][
+        "returned_identity_verification_fields"
+    ]
+    assert verification_fields["type"] == "array"
+    assert verification_fields["maxItems"] == len(
+        verification_fields["items"]["enum"]
+    )
+    assert verification_fields["uniqueItems"] is True
+
+
+@pytest.mark.parametrize(
+    "resolution",
+    (
+        {
+            "decision": "CAN_RESOLVE_LOOKUP_TEXT",
+            "lookup_request_params": [],
+            "returned_identity_verification_fields": [],
+        },
+        {
+            "decision": "CANNOT_RESOLVE_LOOKUP_TEXT",
+            "lookup_request_params": [
+                {
+                    "param_ref": "get_staff_detail.path.staff_id",
+                    "value": "staff-1",
+                }
+            ],
+            "returned_identity_verification_fields": ["data.staff_id"],
+        },
+    ),
+)
+def test_grounding_schema_correlates_resolution_decision_with_selected_mechanics(
+    resolution: dict[str, object],
+) -> None:
+    catalog = RelationCatalog(reads=(_staff_detail_read(),))
+    [task] = reference_input_binding_tasks(
+        _staff_question_contract("staff-1", description="staff member"),
+        resolver_catalog=catalog,
+        resolver_sources_by_known_input={
+            "input_staff": build_row_source_catalog(catalog),
+        },
+    )
+    [option] = task.options
+    request = GroundingRequest(
+        question="Show staff member staff-1",
+        tasks=(task,),
+        resolver_catalog=catalog,
+    )
+    schema = GroundingTurnPrompt(request).response_contract().provider_schema
+    resolution_schema = schema["properties"]["known_input_binding_reviews"][
+        "properties"
+    ]["input_staff"]["properties"]["option_reviews"]["properties"][option.id][
+        "properties"
+    ]["resolution"]
+
+    with pytest.raises(ValidationError):
+        validate(resolution, resolution_schema)
 
 
 def test_named_reference_options_return_canonical_entity_keys():
@@ -1018,9 +1080,9 @@ def test_grounding_does_not_offer_related_resource_fields_as_match_fields() -> N
     ]["input_location"]["properties"]["option_reviews"]["properties"][
         option.id
     ]
-    legal_match_paths = option_review["properties"][
-        "response_match_alternatives"
-    ]["items"]["enum"]
+    legal_match_paths = option_review["properties"]["resolution"]["oneOf"][1][
+        "properties"
+    ]["returned_identity_verification_fields"]["items"]["enum"]
     assert "data.name" in legal_match_paths
     assert "data.area.area_id" not in legal_match_paths
     assert "data.area.name" not in legal_match_paths
@@ -1072,15 +1134,20 @@ def test_selected_staff_lookup_fields_produce_one_canonical_staff_key() -> None:
                             "because": (
                                 "The read accepts a name and returns staff-name fields."
                             ),
-                            "request_values": {
-                                "list_staff_list.query.name": "Azraah",
+                            "resolution": {
+                                "decision": "CAN_RESOLVE_LOOKUP_TEXT",
+                                "lookup_request_params": [
+                                    {
+                                        "param_ref": "list_staff_list.query.name",
+                                        "value": "Azraah",
+                                    }
+                                ],
+                                "returned_identity_verification_fields": [
+                                    "data.first_name",
+                                    "data.last_name",
+                                    "data.full_name",
+                                ],
                             },
-                            "response_match_alternatives": [
-                                "data.first_name",
-                                "data.last_name",
-                                "data.full_name",
-                            ],
-                            "decision": "CAN_RESOLVE_LOOKUP_TEXT",
                         }
                     }
                 }
@@ -1306,11 +1373,18 @@ def test_resolver_verifies_the_typed_request_value_against_typed_response_fields
                                 option=option,
                             ),
                             "because": "The exact UUID identifies the returned person.",
-                            "request_values": {
-                                "get_person.query.person_id": canonical_uuid,
+                            "resolution": {
+                                "decision": "CAN_RESOLVE_LOOKUP_TEXT",
+                                "lookup_request_params": [
+                                    {
+                                        "param_ref": "get_person.query.person_id",
+                                        "value": canonical_uuid,
+                                    }
+                                ],
+                                "returned_identity_verification_fields": [
+                                    "data.person_id"
+                                ],
                             },
-                            "response_match_alternatives": ["data.person_id"],
-                            "decision": "CAN_RESOLVE_LOOKUP_TEXT",
                         }
                     }
                 }

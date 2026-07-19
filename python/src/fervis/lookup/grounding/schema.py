@@ -16,6 +16,7 @@ from fervis.lookup.grounding.surface import (
     resolver_option_surface,
 )
 from fervis.lookup.grounding.time_intents import TIME_INTENT_FIELDS
+from fervis.lookup.fact_plan.row_sources import RowSourceParam
 
 
 def build_grounding_schema(request: GroundingRequest) -> dict[str, object]:
@@ -116,98 +117,120 @@ def _option_review_schema(
         },
         "because": {"type": "string", "minLength": 1},
     }
+    compatible_parameters = surface.compatible_request_parameters(
+        lookup_text=lookup_text
+    )
     positive_allowed = (
         bool(surface.response_match_fields)
+        and bool(compatible_parameters)
         and surface.required_request_parameters_accept(
             lookup_text=lookup_text
         )
     )
+    resolution_schema: dict[str, object]
     if positive_allowed:
-        positive_request_values = _request_values_schema(
-            surface,
-            lookup_text=lookup_text,
-        )
-        properties.update(
-            {
-                "decision": {
-                    "type": "string",
-                    "enum": [
-                        LookupTextResolutionDecision.CAN_RESOLVE_LOOKUP_TEXT.value,
-                        LookupTextResolutionDecision.CANNOT_RESOLVE_LOOKUP_TEXT.value,
-                    ],
-                },
-                "request_values": {
-                    "anyOf": [positive_request_values, _empty_object_schema()],
-                },
-                "response_match_alternatives": {
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "enum": [
-                            field.path for field in surface.response_match_fields
-                        ],
-                    },
-                    "maxItems": len(surface.response_match_fields),
-                    "uniqueItems": True,
-                },
-            }
-        )
+        resolution_schema = {
+            "oneOf": [
+                _negative_resolution_schema(),
+                _positive_resolution_schema(
+                    surface,
+                    lookup_text=lookup_text,
+                    parameters=compatible_parameters,
+                ),
+            ]
+        }
     else:
-        properties.update(
-            {
-                "decision": {
-                    "type": "string",
-                    "enum": [
-                        LookupTextResolutionDecision.CANNOT_RESOLVE_LOOKUP_TEXT.value
-                    ],
-                },
-                "request_values": _empty_object_schema(),
-                "response_match_alternatives": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "maxItems": 0,
-                },
-            }
-        )
+        resolution_schema = _negative_resolution_schema()
+    properties["resolution"] = resolution_schema
     return provider_output.OptionReviewOutput.schema(properties)
 
 
-def _request_values_schema(
+def _positive_resolution_schema(
     surface: ResolverOptionSurface,
     *,
     lookup_text: str,
+    parameters: tuple[RowSourceParam, ...],
 ) -> dict[str, object]:
-    parameters = surface.compatible_request_parameters(lookup_text=lookup_text)
-    properties = {
-        parameter.param_ref: {
-            "enum": [
-                surface.compiled_request_value(
-                    parameter.param_ref,
-                    lookup_text=lookup_text,
-                )[1]
-            ]
-        }
+    parameter_schemas = [
+        provider_output.LookupRequestParamOutput.schema(
+            {
+                "param_ref": {
+                    "type": "string",
+                    "enum": [parameter.param_ref],
+                },
+                "value": {
+                    "enum": [
+                        surface.compiled_request_value(
+                            parameter.param_ref,
+                            lookup_text=lookup_text,
+                        )[1]
+                    ]
+                },
+            }
+        )
         for parameter in parameters
-    }
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": properties,
-        "required": [
-            parameter.param_ref
-            for parameter in parameters
-            if parameter.required and parameter.default is None
-        ],
-    }
+    ]
+    parameter_item_schema = (
+        parameter_schemas[0]
+        if len(parameter_schemas) == 1
+        else {"oneOf": parameter_schemas}
+    )
+    return provider_output.ResolverResolutionOutput.schema(
+        {
+            "decision": {
+                "type": "string",
+                "enum": [
+                    LookupTextResolutionDecision.CAN_RESOLVE_LOOKUP_TEXT.value
+                ],
+            },
+            "lookup_request_params": {
+                "type": "array",
+                "items": parameter_item_schema,
+                "minItems": 1,
+                "maxItems": len(parameters),
+            },
+            "returned_identity_verification_fields": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": [
+                        field.path for field in surface.response_match_fields
+                    ],
+                },
+                "minItems": 1,
+                "maxItems": len(surface.response_match_fields),
+                "uniqueItems": True,
+            },
+        }
+    )
 
 
-def _empty_object_schema() -> dict[str, object]:
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {},
-        "required": [],
-    }
+def _negative_resolution_schema() -> dict[str, object]:
+    return provider_output.ResolverResolutionOutput.schema(
+        {
+            "decision": {
+                "type": "string",
+                "enum": [
+                    LookupTextResolutionDecision.CANNOT_RESOLVE_LOOKUP_TEXT.value
+                ],
+            },
+            "lookup_request_params": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {},
+                    "required": [],
+                },
+                "maxItems": 0,
+            },
+            "returned_identity_verification_fields": {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": 0,
+            },
+        }
+    )
 
 
 def _time_intent_schema() -> dict[str, object]:

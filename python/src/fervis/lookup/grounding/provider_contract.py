@@ -36,14 +36,25 @@ class KnownTimeResolutionOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
+class LookupRequestParamOutput(ProviderOutput):
+    param_ref: str
+    value: str | int | float | bool
+
+
+@dataclass(frozen=True)
+class ResolverResolutionOutput(ProviderOutput):
+    decision: str
+    lookup_request_params: tuple[LookupRequestParamOutput, ...]
+    returned_identity_verification_fields: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class OptionReviewOutput(ProviderOutput):
     resource_type: str
     resource_type_match: str
     resolver_fit_question: str
     because: str
-    decision: str
-    request_values: dict[str, str | int | float | bool]
-    response_match_alternatives: tuple[str, ...]
+    resolution: ResolverResolutionOutput
 
 
 @dataclass(frozen=True)

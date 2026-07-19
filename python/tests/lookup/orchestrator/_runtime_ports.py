@@ -313,6 +313,11 @@ def _grounding_option_review(
     same_resource_type = resource_type == resource_type_x
     if compatible and not same_resource_type:
         raise AssertionError("scripted compatible resolver returns a different type")
+    request_values = (
+        request_values_for_option(option, lookup_text=lookup_text)
+        if compatible
+        else {}
+    )
     return {
         "resource_type": resource_type,
         "resource_type_match": (
@@ -322,19 +327,20 @@ def _grounding_option_review(
         ),
         "resolver_fit_question": option["resolver_fit_question"],
         "because": "The declared route capability was reviewed.",
-        "decision": (
-            "CAN_RESOLVE_LOOKUP_TEXT"
-            if compatible
-            else "CANNOT_RESOLVE_LOOKUP_TEXT"
-        ),
-        "request_values": (
-            request_values_for_option(option, lookup_text=lookup_text)
-            if compatible
-            else {}
-        ),
-        "response_match_alternatives": (
-            match_fields_for_option(option) if compatible else []
-        ),
+        "resolution": {
+            "decision": (
+                "CAN_RESOLVE_LOOKUP_TEXT"
+                if compatible
+                else "CANNOT_RESOLVE_LOOKUP_TEXT"
+            ),
+            "lookup_request_params": [
+                {"param_ref": param_ref, "value": value}
+                for param_ref, value in request_values.items()
+            ],
+            "returned_identity_verification_fields": (
+                match_fields_for_option(option) if compatible else []
+            ),
+        },
     }
 
 

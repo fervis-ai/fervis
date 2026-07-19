@@ -143,7 +143,8 @@ def _compatible_bindings(
         if _required_text(review.resolver_fit_question) != expected_question:
             raise ValueError("grounding resolver_fit_question mismatch")
         _required_text(review.because)
-        decision = LookupTextResolutionDecision(review.decision)
+        resolution = review.resolution
+        decision = LookupTextResolutionDecision(resolution.decision)
         if decision is LookupTextResolutionDecision.CAN_RESOLVE_LOOKUP_TEXT:
             if resource_type_match is not ResourceTypeMatch.SAME_RESOURCE_TYPE:
                 raise ValueError(
@@ -151,19 +152,22 @@ def _compatible_bindings(
                 )
             compatible.append(
                 _compatible_binding(
-                    review,
+                    resolution,
                     request=request,
                     lookup_text=task.lookup_text,
                     option=option,
                 )
             )
-        elif review.request_values or review.response_match_alternatives:
+        elif (
+            resolution.lookup_request_params
+            or resolution.returned_identity_verification_fields
+        ):
             raise ValueError("negative grounding review must not select read inputs")
     return tuple(compatible)
 
 
 def _compatible_binding(
-    review: provider_output.OptionReviewOutput,
+    resolution: provider_output.ResolverResolutionOutput,
     *,
     request: GroundingRequest,
     lookup_text: str,
@@ -172,7 +176,15 @@ def _compatible_binding(
     surface = resolver_option_surface(request, option)
     request_values: list[ResolverRequestValue] = []
     compiled_lookup_values: list[CatalogScalarParameterValue] = []
-    for param_ref, supplied_value in review.request_values.items():
+    selected_param_refs = tuple(
+        request_param.param_ref
+        for request_param in resolution.lookup_request_params
+    )
+    if len(selected_param_refs) != len(set(selected_param_refs)):
+        raise ValueError("grounding review repeats a request parameter")
+    for request_param in resolution.lookup_request_params:
+        param_ref = request_param.param_ref
+        supplied_value = request_param.value
         parameter, expected_value = surface.compiled_request_value(
             param_ref,
             lookup_text=lookup_text,
@@ -199,10 +211,10 @@ def _compatible_binding(
         parameter.param_ref
         for parameter in surface.request_parameters
         if parameter.required and parameter.default is None
-    } - set(review.request_values)
+    } - set(selected_param_refs)
     if missing_required_params:
         raise ValueError("grounding review omits a required request parameter")
-    match_paths = tuple(review.response_match_alternatives)
+    match_paths = tuple(resolution.returned_identity_verification_fields)
     if not match_paths:
         raise ValueError("positive grounding review requires a response match field")
     if len(match_paths) != len(set(match_paths)):

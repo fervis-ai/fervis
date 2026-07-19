@@ -1817,7 +1817,7 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
     assert ports.data_access_port.requests == [
         {
             "endpointName": "list_staff_list",
-            "args": {},
+            "args": {"list_staff_list.query.name": "Jane Doe"},
         },
         {
             "endpointName": "list_staff_list",
@@ -3685,6 +3685,14 @@ def _staff_identity_list_read() -> EndpointRead:
             route_path_template="/v1/staff/",
             handler_ref="tests.StaffListView",
             domain_resource_names=("staff",),
+        ),
+        params=(
+            CatalogParam(
+                ref="list_staff_list.query.name",
+                name="name",
+                source=ParamSource.QUERY,
+                type="string",
+            ),
         ),
         row_paths=(RowPath(id="data", path="data", cardinality=RowCardinality.MANY),),
         fields=(
