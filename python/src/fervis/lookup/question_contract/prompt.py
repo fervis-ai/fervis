@@ -137,7 +137,7 @@ class QuestionContractTurnPrompt(TurnPromptBase):
                     "answer_expression.group_key.description names the result key or grouping dimension, such as region, period, category, or supplied key.",
                     "Use answer_expression.group_key.domain=SPECIFIED_QUESTION_INPUTS when groups are exactly declared question_inputs; otherwise use SOURCE_RESULT_VALUES.",
                     "With SPECIFIED_QUESTION_INPUTS, question_input_refs must list only inputs that define the result key axis, not filter-only inputs such as time, status, lifecycle, threshold, or channel.",
-                    "Inputs referenced by a SPECIFIED_QUESTION_INPUTS group key are owned by that group key. Do not also put them in answer_population membership tests.",
+                    "SPECIFIED_QUESTION_INPUTS restricts the result to those input values and groups the result by them. The group key owns those inputs; answer_population must not repeat that restriction.",
                     "For a repeated measure over specified inputs, set answer_expression.group_key with domain=SPECIFIED_QUESTION_INPUTS and put one measure/count result column in answer_outputs, not one output per key value.",
                     "Use scalar_value only for one direct requested value, not for row/population counts.",
                     "Choose answer_expression.family from the requested answer shape, not endpoints, fields, APIs, or a single keyword.",
