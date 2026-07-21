@@ -75,7 +75,7 @@ input:
         produced_by_step_id: step_contract
         fact_key: fact_1
         description: staff member who earned the most compensation this month
-        answer_expression_family: ranked_selection
+        answer_expression_family: grouped_aggregate
     fact_results:
       - fact_result_id: fact_result_1
         run_id: run_1

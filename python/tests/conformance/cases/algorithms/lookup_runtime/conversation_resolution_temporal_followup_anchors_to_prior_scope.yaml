@@ -35,7 +35,7 @@ input:
     contextualized_question: How much money did we make the day before?
   question_contract:
     fact_description: money made the day before
-    subject_text: the day before
+    subject_text: revenue transaction
     answer_expression_family: scalar_aggregate
     answer_outputs:
     - total_money

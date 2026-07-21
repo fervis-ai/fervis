@@ -1,0 +1,98 @@
+id: extended_projection_buckets_temporal_values
+description: Extended projection buckets one timestamp by every closed temporal grain in the explicit timezone.
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  scalar_inputs:
+    - {id: day, value: day, value_type: string}
+    - {id: week, value: week, value_type: string}
+    - {id: month, value: month, value_type: string}
+    - {id: quarter, value: quarter, value_type: string}
+    - {id: year, value: year, value_type: string}
+  environment_values: {ANCHOR_TIMEZONE: America/New_York}
+  environment_types: {ANCHOR_TIMEZONE: string}
+  relations:
+    - id: events
+      rows:
+        - {event_id: e1, occurred_at: "2026-04-01T02:30:00+00:00"}
+      grain_keys: [event_id]
+      field_types: {event_id: string, occurred_at: datetime}
+  operations:
+    - &project
+      id: by_day
+      output_relation: day_rows
+      spec:
+        kind: project
+        input_relation: events
+        fields:
+          - source: occurred_at
+            output: bucket
+            expression: &day_bucket
+              function: temporal_bucket
+              arguments:
+                - {field: occurred_at}
+                - {value: {input_ref: day}}
+                - {environment: ANCHOR_TIMEZONE}
+    - id: by_week
+      output_relation: week_rows
+      spec:
+        kind: project
+        input_relation: events
+        fields:
+          - source: occurred_at
+            output: bucket
+            expression:
+              function: temporal_bucket
+              arguments:
+                - {field: occurred_at}
+                - {value: {input_ref: week}}
+                - {environment: ANCHOR_TIMEZONE}
+    - id: by_month
+      output_relation: month_rows
+      spec:
+        kind: project
+        input_relation: events
+        fields:
+          - source: occurred_at
+            output: bucket
+            expression:
+              function: temporal_bucket
+              arguments:
+                - {field: occurred_at}
+                - {value: {input_ref: month}}
+                - {environment: ANCHOR_TIMEZONE}
+    - id: by_quarter
+      output_relation: quarter_rows
+      spec:
+        kind: project
+        input_relation: events
+        fields:
+          - source: occurred_at
+            output: bucket
+            expression:
+              function: temporal_bucket
+              arguments:
+                - {field: occurred_at}
+                - {value: {input_ref: quarter}}
+                - {environment: ANCHOR_TIMEZONE}
+    - id: by_year
+      output_relation: year_rows
+      spec:
+        kind: project
+        input_relation: events
+        fields:
+          - source: occurred_at
+            output: bucket
+            expression:
+              function: temporal_bucket
+              arguments:
+                - {field: occurred_at}
+                - {value: {input_ref: year}}
+                - {environment: ANCHOR_TIMEZONE}
+expect:
+  result_contains:
+    day_rows: {rows: [{bucket: 2026-03-31}]}
+    week_rows: {rows: [{bucket: 2026-03-30}]}
+    month_rows: {rows: [{bucket: 2026-03-01}]}
+    quarter_rows: {rows: [{bucket: 2026-01-01}]}
+    year_rows: {rows: [{bucket: 2026-01-01}]}

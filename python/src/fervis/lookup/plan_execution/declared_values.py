@@ -17,7 +17,7 @@ from fervis.lookup.plan_execution.errors import RelationEngineError
 from fervis.types.enums import StrEnum
 
 
-MAX_RANK_LIMIT = 9_223_372_036_854_775_807
+MAX_SELECTION_LIMIT = 9_223_372_036_854_775_807
 
 
 class DeclaredValueKind(StrEnum):
@@ -257,11 +257,11 @@ def declared_number(value: object, type_name: str | None) -> Decimal:
     return Decimal(str(parsed.value))
 
 
-def exact_positive_integer(value: object, *, maximum: int = MAX_RANK_LIMIT) -> int:
+def exact_positive_integer(value: object, *, maximum: int = MAX_SELECTION_LIMIT) -> int:
     numeric = _decimal(value)
     integral = numeric.to_integral_value()
     if numeric != integral or integral < 1 or integral > maximum:
-        raise ValueError("rank requires positive integer limit within supported range")
+        raise ValueError("selection requires positive integer limit within supported range")
     return int(integral)
 
 

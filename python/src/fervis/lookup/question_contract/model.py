@@ -17,9 +17,11 @@ from fervis.lookup.question_contract._text_spans import contains_copied_span
 from fervis.lookup.question_inputs import (
     KnownInputKind,
     LiteralInputRole,
+    normalize_scalar_literal_text,
 )
 from fervis.lookup.turn_prompts.context import HostPromptContext
 from fervis.lookup.clarification.model import QuestionContractResponse
+from fervis.lookup.predicate_operators import PredicateOperator
 
 
 class KnownInputSource(StrEnum):
@@ -59,21 +61,11 @@ class NormalInstanceExcludedStateRole(StrEnum):
     )
 
 
-class NormalInstanceExplicitOverrideReason(StrEnum):
-    USER_EXPLICITLY_REQUESTED_STATE = "USER_EXPLICITLY_REQUESTED_STATE"
-    USER_EXPLICITLY_REQUESTED_RAW_RECORDS = "USER_EXPLICITLY_REQUESTED_RAW_RECORDS"
-    USER_EXPLICITLY_REQUESTED_ALL_RECORDS = "USER_EXPLICITLY_REQUESTED_ALL_RECORDS"
-    USER_EXPLICITLY_REQUESTED_NON_NORMAL_POPULATION = (
-        "USER_EXPLICITLY_REQUESTED_NON_NORMAL_POPULATION"
-    )
-
-
 class RequestedFactAnswerExpressionFamily(StrEnum):
     LIST_ROWS = "list_rows"
     SCALAR_VALUE = "scalar_value"
     SCALAR_AGGREGATE = "scalar_aggregate"
     GROUPED_AGGREGATE = "grouped_aggregate"
-    RANKED_SELECTION = "ranked_selection"
     COMPUTED_SCALAR = "computed_scalar"
     SET_DIFFERENCE = "set_difference"
     COVERAGE_CHECK = "coverage_check"
@@ -83,7 +75,13 @@ class RequestedFactAnswerExpressionFamily(StrEnum):
 
 class ResultSelectionKind(StrEnum):
     ALL_RESULTS = "all_results"
-    LIMITED_RESULTS = "limited_results"
+    TAKE_ONE = "take_one"
+    TAKE = "take"
+
+
+class RequestedFactOrderingDirection(StrEnum):
+    ASCENDING = "ascending"
+    DESCENDING = "descending"
 
 
 class IncompleteFactualRequestKind(StrEnum):
@@ -96,10 +94,9 @@ class GroupKeyDomainKind(StrEnum):
     SOURCE_RESULT_VALUES = "SOURCE_RESULT_VALUES"
 
 
-NORMAL_INSTANCE_EXPLICIT_USER_OVERRIDE_POLICY = (
-    "Do not exclude a state role when the user explicitly asks for that state, "
-    "raw records, all records, or a non-normal population."
-)
+class GroupKeySourceKind(StrEnum):
+    SOURCE_VALUE = "source_value"
+    TEMPORAL_BUCKET = "temporal_bucket"
 
 
 @dataclass(frozen=True)
@@ -174,7 +171,6 @@ class NormalInstanceProfile:
     excluded_state_roles: tuple[NormalInstanceExcludedStateRoleDefinition, ...] = (
         NORMAL_INSTANCE_EXCLUDED_STATE_ROLES
     )
-    explicit_user_override_policy: str = NORMAL_INSTANCE_EXPLICIT_USER_OVERRIDE_POLICY
 
     def __post_init__(self) -> None:
         if not self.subject_text.strip():
@@ -189,7 +185,6 @@ class NormalInstanceProfile:
             "excluded_state_roles": [
                 role.to_answer_request_dict() for role in self.excluded_state_roles
             ],
-            "explicit_user_override_policy": self.explicit_user_override_policy,
         }
 
 
@@ -212,6 +207,8 @@ def normal_instance_guard_question(subject_text: str) -> str:
 class RequestedFactGroupKey:
     description: str
     domain: GroupKeyDomainKind
+    source_kind: GroupKeySourceKind | None = None
+    temporal_grain: str = ""
     question_input_refs: tuple[str, ...] = ()
     id: str = "group_key"
 
@@ -231,27 +228,58 @@ class RequestedFactGroupKey:
             raise ValueError("group key repeats question input")
         if self.domain == GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS and not refs:
             raise ValueError("specified group key requires question inputs")
-        if self.domain == GroupKeyDomainKind.SOURCE_RESULT_VALUES and refs:
+        if self.domain == GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS:
+            if self.source_kind is not None or self.temporal_grain:
+                raise ValueError("specified group key cannot carry a source kind")
+            return
+        if refs:
             raise ValueError("source-result group key cannot carry input refs")
+        if not isinstance(self.source_kind, GroupKeySourceKind):
+            raise ValueError("source-result group key requires a source kind")
+        grain = self.temporal_grain.strip().casefold()
+        if self.source_kind is GroupKeySourceKind.TEMPORAL_BUCKET:
+            if grain not in {"day", "week", "month", "quarter", "year"}:
+                raise ValueError("temporal group key requires a supported grain")
+            object.__setattr__(self, "temporal_grain", grain)
+        elif grain:
+            raise ValueError("source-value group key cannot carry temporal grain")
 
     def to_model_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
             "id": self.id,
             "description": self.description,
-            "domain": self.domain.value,
+            "value_source": self._value_source_dict(),
         }
-        if self.question_input_refs:
-            payload["question_input_refs"] = list(self.question_input_refs)
         return payload
+
+    def temporal_grain_value_id(self, *, requested_fact_id: str) -> str:
+        if self.source_kind is not GroupKeySourceKind.TEMPORAL_BUCKET:
+            raise ValueError("only temporal group keys have a grain value")
+        if not requested_fact_id:
+            raise ValueError("temporal grain value requires requested fact id")
+        return f"group_key.{requested_fact_id}.{self.id}.grain"
 
     def to_answer_request_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
             "description": self.description,
-            "domain": self.domain.value,
+            "value_source": self._value_source_dict(),
         }
-        if self.question_input_refs:
-            payload["question_input_refs"] = list(self.question_input_refs)
         return payload
+
+    def _value_source_dict(self) -> dict[str, object]:
+        if self.domain is GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS:
+            return {
+                "kind": "specified_question_inputs",
+                "question_input_refs": list(self.question_input_refs),
+            }
+        if self.source_kind is GroupKeySourceKind.TEMPORAL_BUCKET:
+            return {
+                "kind": self.source_kind.value,
+                "grain": self.temporal_grain,
+            }
+        if self.source_kind is GroupKeySourceKind.SOURCE_VALUE:
+            return {"kind": self.source_kind.value}
+        raise ValueError("group key value source is incomplete")
 
 
 @dataclass(frozen=True)
@@ -291,8 +319,15 @@ class RequestedFactAnswerOutput:
 class RequestedFactAnswerExpression:
     family: RequestedFactAnswerExpressionFamily
     group_key: RequestedFactGroupKey | None = None
+    ordering_basis: str = ""
+    ordering_direction: RequestedFactOrderingDirection | None = None
     selection_kind: ResultSelectionKind | None = None
     limit_input_ref: str = ""
+    compute_input_refs: tuple[str, ...] = ()
+
+    @property
+    def is_ordered(self) -> bool:
+        return self.ordering_direction is not None
 
     def __post_init__(self) -> None:
         if (
@@ -305,42 +340,51 @@ class RequestedFactAnswerExpression:
             and self.group_key is not None
         ):
             raise ValueError("group key requires grouped_aggregate answer expression")
-        selects_rows = self.family in {
+        relation_valued = self.family in {
             RequestedFactAnswerExpressionFamily.LIST_ROWS,
-            RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+            RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
         }
-        if selects_rows and self.selection_kind is None:
-            raise ValueError("row answer expression requires result selection")
-        if not selects_rows and self.selection_kind is not None:
-            raise ValueError("result selection requires a row answer expression")
-        if (
-            self.family is RequestedFactAnswerExpressionFamily.LIST_ROWS
-            and self.selection_kind is not ResultSelectionKind.ALL_RESULTS
-        ):
-            raise ValueError("list rows requires all results")
-        if (
-            self.family is RequestedFactAnswerExpressionFamily.RANKED_SELECTION
-            and self.selection_kind is not ResultSelectionKind.LIMITED_RESULTS
-        ):
-            raise ValueError("ranked selection requires a limited result selection")
-        if self.selection_kind is ResultSelectionKind.LIMITED_RESULTS:
-            if (
-                not self.limit_input_ref
-                and self.family
-                is not RequestedFactAnswerExpressionFamily.RANKED_SELECTION
-            ):
-                raise ValueError("limited result selection requires a limit input")
+        if relation_valued and self.selection_kind is None:
+            raise ValueError("relation-valued answer expression requires selection")
+        if not relation_valued and self.selection_kind is not None:
+            raise ValueError("selection requires a relation-valued answer expression")
+        if bool(self.ordering_basis) != (self.ordering_direction is not None):
+            raise ValueError("ordering requires basis and direction")
+        if not relation_valued and self.ordering_direction is not None:
+            raise ValueError("ordering requires a relation-valued answer expression")
+        if self.selection_kind in {
+            ResultSelectionKind.TAKE_ONE,
+            ResultSelectionKind.TAKE,
+        }:
+            if self.ordering_direction is None:
+                raise ValueError("take selection requires ordering")
+        if self.selection_kind is ResultSelectionKind.TAKE:
+            if not self.limit_input_ref:
+                raise ValueError("take selection requires a limit input")
         elif self.limit_input_ref:
-            raise ValueError("limit input requires limited result selection")
+            raise ValueError("limit input requires take selection")
+        if self.compute_input_refs and (
+            self.family is not RequestedFactAnswerExpressionFamily.COMPUTED_SCALAR
+        ):
+            raise ValueError("compute inputs require computed_scalar")
+        if len(self.compute_input_refs) != len(set(self.compute_input_refs)):
+            raise ValueError("compute input refs must be unique")
 
     def to_answer_request_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {"family": self.family.value}
         if self.group_key is not None:
             payload["group_key"] = self.group_key.to_answer_request_dict()
+        if self.ordering_direction is not None:
+            payload["ordering"] = {
+                "basis": self.ordering_basis,
+                "direction": self.ordering_direction.value,
+            }
         if self.selection_kind is not None:
             payload["selection_kind"] = self.selection_kind.value
         if self.limit_input_ref:
             payload["limit_input_ref"] = self.limit_input_ref
+        if self.compute_input_refs:
+            payload["compute_input_refs"] = list(self.compute_input_refs)
         return payload
 
 
@@ -378,6 +422,17 @@ class RequestedFactLiteralInput:
                 "resolved_value_text",
                 str(int(self.resolved_value_text)),
             )
+        if self.role == LiteralInputRole.FORMULA_VALUE:
+            literal_type, _ = normalize_scalar_literal_text(self.resolved_value_text)
+            if literal_type != "number":
+                raise ValueError("formula_value requires a numeric scalar literal")
+        if self.role == LiteralInputRole.THRESHOLD_VALUE:
+            literal_type, normalized = normalize_scalar_literal_text(
+                self.resolved_value_text
+            )
+            if literal_type != "number":
+                raise ValueError("threshold_value requires a numeric scalar literal")
+            object.__setattr__(self, "resolved_value_text", normalized)
         if self.source == KnownInputSource.CONVERSATION_RESOLUTION:
             if not self.resolved_input_ref.strip():
                 raise ValueError(
@@ -401,8 +456,20 @@ class RequestedFactLiteralInput:
         return self.role == LiteralInputRole.TIME_VALUE
 
     @property
+    def is_predicate_value(self) -> bool:
+        return self.role == LiteralInputRole.PREDICATE_VALUE
+
+    @property
+    def is_threshold_value(self) -> bool:
+        return self.role == LiteralInputRole.THRESHOLD_VALUE
+
+    @property
     def is_result_limit(self) -> bool:
         return self.role == LiteralInputRole.RESULT_LIMIT
+
+    @property
+    def is_formula_value(self) -> bool:
+        return self.role == LiteralInputRole.FORMULA_VALUE
 
     def to_model_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -498,8 +565,7 @@ class RequestedFactAnswerSubjectInstanceInterpretation:
             "Answer over ordinary business instances of '{subject_text}' as they are "
             "normally understood in business operations and reporting. Do not assume "
             "this includes every persisted representation the host API may expose for "
-            "'{subject_text}'. Explicit user wording may narrow or override this "
-            "normal instance interpretation."
+            "'{subject_text}'."
         )
 
     def to_answer_request_dict(self, *, subject_text: str) -> dict[str, object]:
@@ -554,6 +620,7 @@ class RequestedFactAnswerPopulationMembershipTest:
     test_question: str
     owned_question_input_refs: tuple[str, ...] = ()
     normal_instance_profile: NormalInstanceProfile | None = None
+    comparison_operator: PredicateOperator | None = None
 
     def __post_init__(self) -> None:
         if not self.id.strip():
@@ -584,6 +651,19 @@ class RequestedFactAnswerPopulationMembershipTest:
             and self.normal_instance_profile is not None
         ):
             raise ValueError("normal instance profile requires normal instance guard")
+        if self.comparison_operator is not None and (
+            self.kind is not AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT
+            or self.comparison_operator
+            not in {
+                PredicateOperator.LT,
+                PredicateOperator.LTE,
+                PredicateOperator.GT,
+                PredicateOperator.GTE,
+            }
+        ):
+            raise ValueError(
+                "comparison operator requires an ordered explicit user constraint"
+            )
 
     def to_answer_request_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -597,27 +677,29 @@ class RequestedFactAnswerPopulationMembershipTest:
             payload["normal_instance_profile"] = (
                 self.normal_instance_profile.to_answer_request_dict()
             )
+        if self.comparison_operator is not None:
+            payload["comparison_operator"] = self.comparison_operator.value
         return payload
 
     def to_question_contract_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "test_id": self.id,
             "kind": self.kind.value,
             "polarity": self.polarity.value,
             "test_question": self.test_question,
             "owned_question_input_refs": list(self.owned_question_input_refs),
         }
+        if self.comparison_operator is not None:
+            payload["comparison_operator"] = self.comparison_operator.value
+        return payload
 
 
 @dataclass(frozen=True)
 class RequestedFactAnswerPopulation:
-    population_label: str
     counted_unit: str
     membership_tests: tuple[RequestedFactAnswerPopulationMembershipTest, ...]
 
     def __post_init__(self) -> None:
-        if not self.population_label.strip():
-            raise ValueError("answer population requires population label")
         if not self.counted_unit.strip():
             raise ValueError("answer population requires counted unit")
         if not self.membership_tests:
@@ -646,7 +728,6 @@ class RequestedFactAnswerPopulation:
 
     def to_answer_request_dict(self) -> dict[str, object]:
         return {
-            "population_label": self.population_label,
             "counted_unit": self.counted_unit,
             "membership_tests": [
                 test.to_answer_request_dict() for test in self.membership_tests
@@ -655,7 +736,6 @@ class RequestedFactAnswerPopulation:
 
     def to_question_contract_dict(self) -> dict[str, object]:
         return {
-            "population_label": self.population_label,
             "counted_unit": self.counted_unit,
             "membership_tests": [
                 test.to_question_contract_dict() for test in self.membership_tests
@@ -683,9 +763,11 @@ def _normalized_population_membership_test(
 
 def default_answer_population(
     *,
-    description: str,
     subject_text: str,
     instance_interpretation: RequestedFactAnswerSubjectInstanceInterpretation,
+    explicit_membership_tests: tuple[
+        RequestedFactAnswerPopulationMembershipTest, ...
+    ] = (),
 ) -> RequestedFactAnswerPopulation:
     guard_kind = (
         AnswerPopulationMembershipTestKind.RAW_RECORD_GUARD
@@ -702,7 +784,6 @@ def default_answer_population(
         )
     )
     return RequestedFactAnswerPopulation(
-        population_label=description or subject_text,
         counted_unit=subject_text,
         membership_tests=(
             RequestedFactAnswerPopulationMembershipTest(
@@ -728,6 +809,7 @@ def default_answer_population(
                     else None
                 ),
             ),
+            *explicit_membership_tests,
         ),
     )
 
@@ -796,7 +878,6 @@ class RequestedFact:
                 self,
                 "answer_population",
                 default_answer_population(
-                    description=self.description,
                     subject_text=self.answer_subject.subject_text,
                     instance_interpretation=(
                         self.answer_subject.instance_interpretation
@@ -830,8 +911,6 @@ class RequestedFact:
         if (
             self.answer_expression is not None
             and self.answer_expression.group_key is not None
-            and self.answer_expression.group_key.domain
-            == GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS
         ):
             input_ref_set = set(input_refs)
             unknown_refs = tuple(

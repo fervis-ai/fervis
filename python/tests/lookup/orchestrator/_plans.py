@@ -3,6 +3,7 @@ from dataclasses import replace
 from fervis.lookup.question_contract import (
     AnswerPopulationMembershipTestKind,
     AnswerPopulationMembershipTestPolarity,
+    GroupKeySourceKind,
     RequestedFactAnswerPopulationMembershipTest,
 )
 
@@ -102,9 +103,15 @@ def _metric_answer_plan() -> FactPlan:
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(
-                            ProjectField(source="location_id"),
-                            ProjectField(source="metric_total"),
+                        outputs=(
+                            NamedExpression(
+                                output_field="location_id",
+                                expression=FieldRef("location_id"),
+                            ),
+                            NamedExpression(
+                                output_field="metric_total",
+                                expression=FieldRef("metric_total"),
+                            ),
                         ),
                     ),
                     output_relation="answer_rows",
@@ -204,7 +211,6 @@ def _question_contract_for(
     )
     answer_subject = RequestedFactAnswerSubject(subject_text=subject_text or text)
     population = default_answer_population(
-        description=text,
         subject_text=answer_subject.subject_text,
         instance_interpretation=answer_subject.instance_interpretation,
     )
@@ -283,7 +289,7 @@ def _requested_fact_answer_expression(
     )
     selects_rows = family in {
         RequestedFactAnswerExpressionFamily.LIST_ROWS,
-        RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+        RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
     }
     return RequestedFactAnswerExpression(
         family=family,
@@ -291,12 +297,19 @@ def _requested_fact_answer_expression(
             RequestedFactGroupKey(
                 description="group",
                 domain=GroupKeyDomainKind.SOURCE_RESULT_VALUES,
+                source_kind=GroupKeySourceKind.SOURCE_VALUE,
             )
             if family == RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE
             else None
         ),
+        ordering_basis=("requested order" if limit_input is not None else ""),
+        ordering_direction=(
+            RequestedFactOrderingDirection.DESCENDING
+            if limit_input is not None
+            else None
+        ),
         selection_kind=(
-            ResultSelectionKind.LIMITED_RESULTS
+            ResultSelectionKind.TAKE
             if limit_input is not None
             else ResultSelectionKind.ALL_RESULTS
             if selects_rows
@@ -358,8 +371,6 @@ def _answer_expression_family_for_plan(
         return RequestedFactAnswerExpressionFamily.LIST_ROWS
     if any(isinstance(spec, ComputeSpec) for spec in operation_specs):
         return RequestedFactAnswerExpressionFamily.COMPUTED_SCALAR
-    if any(isinstance(spec, RankSpec) for spec in operation_specs):
-        return RequestedFactAnswerExpressionFamily.RANKED_SELECTION
     aggregate_specs = tuple(
         spec for spec in operation_specs if isinstance(spec, AggregateSpec)
     )
@@ -434,10 +445,15 @@ def _source_description_inner(
         return bindings.get(relation_id, {}).get(field_id, field_id)
     spec = operation.spec
     if isinstance(spec, ProjectSpec):
-        for field in spec.fields:
-            if (field.output or field.source) == field_id:
+        for field in spec.outputs:
+            if field.output_field == field_id and isinstance(
+                field.expression, FieldRef
+            ):
                 return _source_description_inner(
-                    answer, spec.input_relation, field.source, seen=seen
+                    answer,
+                    spec.input_relation,
+                    field.expression.field_id,
+                    seen=seen,
                 )
     if isinstance(spec, AggregateSpec):
         if field_id in spec.group_by:
@@ -454,11 +470,13 @@ def _source_description_inner(
                 )
     if isinstance(spec, AntiJoinSpec):
         for field in spec.output_fields:
-            if (field.output or field.source) == field_id:
+            if field.output_field == field_id and isinstance(
+                field.expression, FieldRef
+            ):
                 return _source_description_inner(
                     answer,
                     spec.candidate.relation_id,
-                    field.source,
+                    field.expression.field_id,
                     seen=seen,
                 )
     return field_id

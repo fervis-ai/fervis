@@ -25,7 +25,11 @@ input:
   requested_fact:
     id: fact_1
     description: staff person with the highest sales total for the current month
-    answer_expression_family: ranked_selection
+    answer_expression_family: grouped_aggregate
+    group_key: {description: staff person, domain: SOURCE_RESULT_VALUES, source_kind: source_value}
+    ordering_basis: sales total
+    ordering_direction: descending
+    selection_kind: take_one
     subject_text: staff person
     answer_outputs:
       - id: answer_1
@@ -86,7 +90,7 @@ expect:
         staff_id__amount:
           requested_fact_id: fact_1
           read_id: list_sale_list
-          plan_shape: ranked_aggregate
+          plan_shape: aggregate_by_group
           entity_evidence_by_id:
             staff_key:
               entity_kind: staff

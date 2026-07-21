@@ -318,6 +318,9 @@ def _normalize_binding_decisions(
         review_scope=review_scope,
         answer_population=invocation.answer_population,
         raw_param_decision_ids=tuple(visible_decisions),
+        resolved_input_param_values=_resolved_input_param_values(
+            input_applications
+        ),
         coverage_role=(
             PopulationCoverageRole.ROW_POPULATION
             if target.requires_answer_fulfillment
@@ -331,6 +334,22 @@ def _normalize_binding_decisions(
         population_coverage_claims=derived.population_coverage_claims,
         input_applications=input_applications,
     )
+
+
+def _resolved_input_param_values(
+    applications: ParsedResolvedInputApplications,
+) -> dict[str, tuple[object, ...]]:
+    values_by_param: dict[str, list[object]] = {}
+    for binding_set in applications.param_binding_sets:
+        for binding in binding_set:
+            value = binding.compiler_value
+            values = values_by_param.setdefault(binding.param_id, [])
+            if value not in values:
+                values.append(value)
+    return {
+        param_id: tuple(values)
+        for param_id, values in values_by_param.items()
+    }
 
 
 def _effective_param_ids(

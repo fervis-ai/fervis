@@ -41,4 +41,3 @@ expect:
         read_id: records
         param_ref: records.query.selector
         value: Alpha
-    row_filters: []

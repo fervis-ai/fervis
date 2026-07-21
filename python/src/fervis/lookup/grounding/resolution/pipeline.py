@@ -38,7 +38,7 @@ from fervis.lookup.question_inputs import KnownInputKind, LiteralInputRole
 from fervis.memory.projection import fact_artifacts_from_context
 
 from .deterministic import (
-    _deterministic_known_inputs,
+    _deterministic_fact_values,
     resolve_time_resolutions,
     time_anchor_period_from_memory_address,
     time_resolution_tasks,
@@ -112,7 +112,7 @@ def ground_question_inputs(
         conversation_context=dict(conversation_context or {}),
         active_memory_ids=current_active_memory_ids,
     )
-    deterministic = _deterministic_known_inputs(
+    deterministic = _deterministic_fact_values(
         question_contract,
         runtime_values=runtime_values,
         active_time_anchor_periods=active_time_anchor_periods,

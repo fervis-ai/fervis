@@ -1,0 +1,19 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Write answer_subject.subject_text as one singular catalog-blind candidate kind, without modifiers that narrow the candidates.",
+      "new": "Before classifying question inputs, write answer_subject.subject_text as the complete singular catalog-blind business kind being counted, listed, or measured. Preserve compound nouns that name the kind; exclude independently testable property modifiers.",
+      "expected_count": 1
+    },
+    {
+      "old": "Use reference_value when the input identifies one particular resource.",
+      "new": "A reference_value is a supplied name, code, or identifier that refers to one particular person, place, organization, object, or record, including when answer_subject instances relate to it.",
+      "expected_count": 1
+    },
+    {
+      "old": "After writing answer_population, inspect each EXPLICIT_USER_CONSTRAINT. A predicate_value is an explicit word or phrase that states which property value qualifying candidates must have. This includes adjectival and compound modifiers; copy the user's phrase without inferring catalog field boundaries.\nEach predicate_value supplies the membership test or tests whose required property value it states. A compound phrase may supply several tests. Do not turn the answer subject into an input.",
+      "new": "A predicate_value is a supplied non-identity value expressed as an independently testable property modifier of answer_subject instances. It is not part of the compound noun that names answer_subject.\nCopy the user's property-value phrase without inferring catalog field boundaries. One phrase may supply several membership tests.",
+      "expected_count": 1
+    }
+  ]
+}

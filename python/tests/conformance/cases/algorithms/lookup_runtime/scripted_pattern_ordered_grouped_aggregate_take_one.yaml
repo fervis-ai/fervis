@@ -1,0 +1,79 @@
+id: scripted_pattern_ordered_grouped_aggregate_take_one
+description: Lookup runtime executes an ordered grouped aggregate and renders the selected group plus metric.
+migrates:
+  - api/tests/fervis/lookup/test_pattern_fact_plan_contract.py::test_pattern_contract_executes_ordered_grouped_aggregate_end_to_end
+kind: algorithm
+algorithm: lookup.orchestration
+input:
+  scenario: scripted_pattern
+  question: Which top 1 location had the highest metric total?
+  question_contract:
+    fact_description: top location by metric total
+    subject_text: location
+    answer_expression_family: grouped_aggregate
+    group_key:
+      description: location
+      value_source: {kind: source_value}
+    ordering: {basis: aggregate metric total, direction: descending}
+    selection: {kind: take_one}
+    answer_outputs:
+      - {description: location, role: ANSWER_VALUE}
+    resource_terms: [metric]
+    support_role: MEASURED_VALUE
+  catalog:
+    reads:
+      - id: metric_read
+        endpoint_name: metric_read
+        resource_names: [metric]
+        row_paths:
+          - id: data
+            path: data
+            cardinality: many
+        fields:
+          - ref: field.location_id
+            path: data.location_id
+            row_path_id: data
+            type: uuid
+          - ref: field.metric_total
+            path: data.metric_total
+            row_path_id: data
+            type: decimal
+        candidate_keys:
+          - id: location_key
+            entity_kind: location
+            components: [{id: location_id, field_ref: field.location_id}]
+  fact_plan:
+    outcome:
+      kind: fact_plan
+      answers:
+        - requested_fact_id: fact_1
+          pattern: aggregate_by_group
+          source_hint: {kind: read, read_id: metric_read}
+          aggregate_choice:
+            group_field_ids: [location_id]
+            metric_field_id: metric_total
+            metric_function: sum
+  read_eligibility:
+    - requested_fact_id: fact_1
+      read_id: metric_read
+      answer_value_fields: [location_id]
+      measured_value_fields: [metric_total]
+      group_key_fields: [location_id]
+  responses:
+    metric_read:
+      data:
+        - location_id: location_1
+          location_name: Location Alpha
+          metric_total: "10.00"
+        - location_id: location_2
+          location_name: Location Beta
+          metric_total: "20.00"
+expect:
+  result_contains:
+    status: COMPLETED
+    rendered_rows:
+      - answer_1:
+          entityKind: location
+          keyId: location_key
+          components: {location_id: location_2}
+        answer_1: "20.00"

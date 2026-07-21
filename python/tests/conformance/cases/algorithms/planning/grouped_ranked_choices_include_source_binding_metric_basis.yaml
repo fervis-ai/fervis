@@ -1,10 +1,10 @@
-id: grouped_ranked_choices_include_source_binding_metric_basis
+id: grouped_aggregate_choices_include_source_binding_metric_basis
 description: Grouped/ranked fact-planning metric candidates carry source-binding metric meaning and fit basis beside the fitting metric option.
 kind: algorithm
-algorithm: planning.grouped_ranked_choices
+algorithm: planning.grouped_aggregate_choices
 input:
   requested_fact_id: fact_1
-  plan_shape: ranked_aggregate
+  plan_shape: aggregate_by_group
   source:
     id: sb_1
     requested_fact_id: fact_1

@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "ordering.basis describes that value without naming an API field.",
+      "new": "ordering.basis names only the value being ordered; conditions that qualify subject instances belong to answer_population.",
+      "expected_count": 1
+    }
+  ]
+}

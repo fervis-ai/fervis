@@ -6,9 +6,9 @@ from ._shared import (
     FactPlan,
     FieldBindingRole,
     Operation,
-    ProjectField,
+    NamedExpression,
     ProjectSpec,
-    RankSpec,
+    OrderSpec,
     Relation,
     RelationCatalog,
     RelationField,
@@ -18,6 +18,7 @@ from ._shared import (
     replace,
     row_source_for_relation,
 )
+from fervis.lookup.answer_program.expressions import FieldRef
 
 
 def _normalize_fact_plan_for_verification(
@@ -113,7 +114,11 @@ def _operation_with_projected_identity_fields(
     input_grain = grain_by_relation.get(spec.input_relation, ())
     if not input_grain:
         return operation
-    projected_sources = {field.source for field in spec.fields}
+    projected_sources = {
+        output.expression.field_id
+        for output in spec.outputs
+        if isinstance(output.expression, FieldRef)
+    }
     missing = tuple(field for field in input_grain if field not in projected_sources)
     if not missing:
         return operation
@@ -121,9 +126,12 @@ def _operation_with_projected_identity_fields(
         operation,
         spec=replace(
             spec,
-            fields=(
-                *(ProjectField(source=field) for field in missing),
-                *spec.fields,
+            outputs=(
+                *(
+                    NamedExpression(output_field=field, expression=FieldRef(field))
+                    for field in missing
+                ),
+                *spec.outputs,
             ),
         ),
     )
@@ -138,13 +146,15 @@ def _operation_output_grain(
     if isinstance(spec, ProjectSpec):
         input_grain = grain_by_relation.get(spec.input_relation, ())
         projections = {
-            field.source: field.output or field.source for field in spec.fields
+            output.expression.field_id: output.output_field
+            for output in spec.outputs
+            if isinstance(output.expression, FieldRef)
         }
         if all(field in projections for field in input_grain):
             return tuple(projections[field] for field in input_grain)
         return ()
     if isinstance(spec, AggregateSpec):
         return spec.group_by
-    if isinstance(spec, RankSpec):
+    if isinstance(spec, OrderSpec):
         return grain_by_relation.get(spec.input_relation, ())
     return ()

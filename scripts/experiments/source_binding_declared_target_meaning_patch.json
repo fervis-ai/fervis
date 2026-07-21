@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Do not infer predicate meaning from parameter or field names.",
+      "new": "Use the shown target metadata, including parameter or field names, to decide whether a target represents the fixed input or predicate meaning; compatible type alone is not sufficient.",
+      "expected_count": 1
+    }
+  ]
+}

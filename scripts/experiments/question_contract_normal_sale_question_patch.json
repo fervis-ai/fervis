@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "List all completed in-person sale records from March 2026.",
+      "new": "List all completed in-person sales from March 2026.",
+      "expected_count": 1
+    }
+  ]
+}

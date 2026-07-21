@@ -112,6 +112,10 @@ class AnswerProgramService:
                 authorized_sources=authorized_sources,
                 memory_relations=(),
                 authority_ref=authority.evidence_ref,
+                expression_values={
+                    "ANCHOR_TIMEZONE": self.host_api_context.host_context.timezone
+                },
+                expression_types={"ANCHOR_TIMEZONE": "string"},
             ),
             invocation_binding=StoredProgramInvocationBinding(request.invocation),
             question_contract_step_id=contract_step.step_id,

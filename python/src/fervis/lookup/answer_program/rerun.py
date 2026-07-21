@@ -18,8 +18,8 @@ from fervis.lookup.answer_program.values import (
     FactValue,
     ValueDependency,
     ValueDependencyKind,
-    value_expression_constant,
 )
+from fervis.lookup.answer_program.expressions import expression_constant
 
 
 class ProgramNotRerunnableError(ValueError):
@@ -75,7 +75,7 @@ def _program_constant_values(program: AnswerProgram) -> tuple[FactValue, ...]:
     return tuple(
         constant.value
         for named in program_value_expressions(program)
-        if (constant := value_expression_constant(named.expression)) is not None
+        if (constant := expression_constant(named.expression)) is not None
     )
 
 

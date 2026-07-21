@@ -14,7 +14,7 @@ from ._shared import (
     Operation,
     ProjectToKeySpec,
     ProjectSpec,
-    RankSpec,
+    OrderSpec,
     RoleExpandSpec,
     UnionSpec,
     UniversalConditionSpec,
@@ -36,7 +36,15 @@ from .contract_types import (
     _union_field_roles,
 )
 from .execution_proof import ExecutionProofContext
-from fervis.lookup.answer_program.operations import JoinKey, Predicate
+from fervis.lookup.answer_program.operations import JoinKey, NamedExpression, Predicate
+from fervis.lookup.answer_program.relations import PopulationCoverageRole
+from fervis.lookup.answer_program.expressions import (
+    Expression,
+    ExpressionFunction,
+    FieldRef,
+    FunctionExpression,
+    expression_references,
+)
 from fervis.lookup.plan_execution.errors import VerificationError
 from fervis.lookup.plan_execution.declared_values import declared_types_compatible
 
@@ -50,14 +58,34 @@ def _operation_relation_contract(
     spec = operation.spec
     if isinstance(spec, FilterSpec):
         source = _contract(contracts, spec.input_relation)
-        return _with_dependency_proof(
-            _copy_contract(contracts, spec.input_relation),
-            _predicate_dependency_proof(source, spec.predicate).merge(
-                _operation_value_proof(proof_context, operation.id)
+        claim_coverage = PopulationCoverage(
+            row_tests=frozenset(
+                claim.test_ref
+                for claim in spec.population_coverage_claims
+                if claim.role is PopulationCoverageRole.ROW_POPULATION
+            ),
+            condition_tests=frozenset(
+                claim.test_ref
+                for claim in spec.population_coverage_claims
+                if claim.role is PopulationCoverageRole.OPERATION_CONDITION
             ),
         )
+        return _with_filter_proof(
+            _copy_contract(contracts, spec.input_relation),
+            _predicate_dependency_proof(source, spec.predicate)
+            .merge(
+                _operation_value_proof(proof_context, operation.id),
+                ProofLineage.value(frozenset(spec.proof_refs)),
+            )
+            .with_population_coverage(claim_coverage),
+        )
     if isinstance(spec, ProjectSpec):
-        return _project_contract(spec, contracts)
+        return _project_contract(
+            operation.id,
+            spec,
+            contracts,
+            proof_context=proof_context,
+        )
     if isinstance(spec, ProjectToKeySpec):
         return _project_to_key_contract(spec, contracts)
     if isinstance(spec, JoinSpec):
@@ -77,11 +105,11 @@ def _operation_relation_contract(
         )
     if isinstance(spec, AggregateSpec):
         return _aggregate_contract(spec, contracts)
-    if isinstance(spec, RankSpec):
+    if isinstance(spec, OrderSpec):
         source = _contract(contracts, spec.input_relation)
         return _with_dependency_proof(
             _copy_contract(contracts, spec.input_relation),
-            _rank_dependency_proof(source, spec).merge(
+            _order_dependency_proof(source, spec).merge(
                 _operation_value_proof(proof_context, operation.id)
             ),
         )
@@ -112,7 +140,7 @@ def _with_dependency_proof(
     contract: RelationContract,
     proof: ProofLineage,
 ) -> RelationContract:
-    if not proof.fulfillment_refs():
+    if not proof.fulfillment_refs() and not proof.population_coverage.all_tests:
         return contract
     return RelationContract(
         fields=dict(contract.fields),
@@ -124,6 +152,30 @@ def _with_dependency_proof(
         field_types=dict(contract.field_types),
         entity_keys=contract.entity_keys,
         population_proof=contract.population_proof.merge(proof),
+    )
+
+
+def _with_filter_proof(
+    contract: RelationContract,
+    proof: ProofLineage,
+) -> RelationContract:
+    coverage = contract.population_proof.population_coverage.additive(
+        proof.population_coverage
+    )
+    return RelationContract(
+        fields=dict(contract.fields),
+        grain_keys=contract.grain_keys,
+        field_proofs={
+            field: field_proof.merge(proof).with_population_coverage(
+                field_proof.population_coverage.additive(proof.population_coverage)
+            )
+            for field, field_proof in contract.field_proofs.items()
+        },
+        field_types=dict(contract.field_types),
+        entity_keys=contract.entity_keys,
+        population_proof=contract.population_proof.merge(
+            proof
+        ).with_population_coverage(coverage),
     )
 
 
@@ -142,9 +194,13 @@ def _predicate_dependency_proof(
     contract: RelationContract,
     predicate: Predicate,
 ) -> ProofLineage:
-    fields = [predicate.left]
-    if predicate.right:
-        fields.append(predicate.right)
+    fields = [
+        item.field_id
+        for item in expression_references(
+            predicate.left,
+            *((predicate.right,) if predicate.right is not None else ()),
+        ).fields
+    ]
     return _fields_dependency_proof(
         contract,
         tuple(field for field in fields if field),
@@ -152,42 +208,68 @@ def _predicate_dependency_proof(
     )
 
 
-def _rank_dependency_proof(
+def _order_dependency_proof(
     contract: RelationContract,
-    spec: RankSpec,
+    spec: OrderSpec,
 ) -> ProofLineage:
     return _fields_dependency_proof(
         contract,
-        tuple(sort.field for sort in (*spec.order_by, *spec.tie_breakers)),
-        "rank",
+        tuple(sort.field for sort in spec.order_by),
+        "order",
     )
 
 
 def _project_contract(
+    operation_id: str,
     spec: ProjectSpec,
     contracts: dict[str, RelationContract],
+    *,
+    proof_context: ExecutionProofContext,
 ) -> RelationContract:
     source = _contract(contracts, spec.input_relation)
     fields: dict[str, frozenset[FieldBindingRole]] = {}
     field_proofs: dict[str, ProofLineage] = {}
-    for field in spec.fields:
-        output = field.output or field.source
-        fields[output] = _field_roles(source, field.source, "project")
-        field_proofs[output] = _field_proof(source, field.source, "project")
-    projections = {
-        field.source: field.output or field.source for field in spec.fields
-    }
+    field_types: dict[str, str] = {}
+    projections: dict[str, str] = {}
+    for output in spec.outputs:
+        expression = output.expression
+        references = expression_references(expression)
+        dependency = _fields_dependency_proof(
+            source,
+            tuple(ref.field_id for ref in references.fields),
+            "project",
+        ).merge(_operation_value_proof(proof_context, operation_id))
+        if isinstance(expression, FieldRef):
+            source_field = expression.field_id
+            fields[output.output_field] = _field_roles(source, source_field, "project")
+            field_proofs[output.output_field] = _field_proof(
+                source, source_field, "project"
+            )
+            field_types[output.output_field] = source.field_types.get(source_field, "")
+            projections[source_field] = output.output_field
+        else:
+            fields[output.output_field] = frozenset(
+                {FieldBindingRole.OUTPUT, FieldBindingRole.PREDICATE}
+            )
+            field_proofs[output.output_field] = dependency
+            field_types[output.output_field] = _derived_expression_type(expression)
     return RelationContract(
         fields=fields,
-        grain_keys=_project_contract_grain(source, spec.fields),
+        grain_keys=_project_contract_grain(source, spec.outputs),
         field_proofs=field_proofs,
-        field_types={
-            field.output or field.source: source.field_types.get(field.source, "")
-            for field in spec.fields
-        },
+        field_types=field_types,
         entity_keys=_project_entity_keys(source, projections),
         population_proof=source.population_proof,
     )
+
+
+def _derived_expression_type(expression: Expression) -> str:
+    if (
+        isinstance(expression, FunctionExpression)
+        and expression.function is ExpressionFunction.TEMPORAL_BUCKET
+    ):
+        return "date"
+    return ""
 
 
 def _project_to_key_contract(
@@ -271,9 +353,8 @@ def _join_dependency_proof(
     *,
     require_identity_authority: bool = False,
 ) -> ProofLineage:
-    if (
-        require_identity_authority
-        and not _join_keys_include_shared_entity_key(left, right, join_keys)
+    if require_identity_authority and not _join_keys_include_shared_entity_key(
+        left, right, join_keys
     ):
         raise VerificationError("join keys lack declared identity authority")
     proof = ProofLineage()
@@ -389,9 +470,7 @@ def _role_expand_contract(
         )
     for output_field, proofs in alternative_proofs.items():
         field_proofs[output_field] = ProofLineage(
-            value_refs=frozenset(
-                ref for proof in proofs for ref in proof.value_refs
-            ),
+            value_refs=frozenset(ref for proof in proofs for ref in proof.value_refs),
             population_coverage=PopulationCoverage.guaranteed_by_every(
                 tuple(proof.population_coverage for proof in proofs)
             ),
@@ -511,20 +590,21 @@ def _anti_join_contract(
             .merge(dependency_proof)
         )
         field_types[grain_key] = candidate.field_types.get(grain_key, "")
-    for field in spec.output_fields:
-        output = field.output or field.source
-        fields[output] = _field_roles(candidate, field.source, "anti_join")
-        field_proofs[output] = (
-            _field_proof(candidate, field.source, "anti_join")
+    for output in spec.output_fields:
+        source_field = _direct_projection_source(output)
+        fields[output.output_field] = _field_roles(candidate, source_field, "anti_join")
+        field_proofs[output.output_field] = (
+            _field_proof(candidate, source_field, "anti_join")
             .with_population_coverage(output_coverage)
             .merge(dependency_proof)
         )
-        field_types[output] = candidate.field_types.get(field.source, "")
+        field_types[output.output_field] = candidate.field_types.get(source_field, "")
     projections = {
+        **{field: field for field in spec.candidate.required_identity_fields},
         **{
-            field: field for field in spec.candidate.required_identity_fields
+            _direct_projection_source(output): output.output_field
+            for output in spec.output_fields
         },
-        **{field.source: field.output or field.source for field in spec.output_fields},
     }
     return RelationContract(
         fields=fields,
@@ -586,21 +666,23 @@ def _universal_condition_contract(
             .with_population_coverage(output_coverage)
         )
         field_types[grain_key] = candidate.field_types.get(grain_key, "")
-    for field in spec.output_fields:
-        output = field.output or field.source
-        fields[output] = _field_roles(candidate, field.source, "universal_condition")
-        field_proofs[output] = (
-            _field_proof(candidate, field.source, "universal_condition")
+    for output in spec.output_fields:
+        source_field = _direct_projection_source(output)
+        fields[output.output_field] = _field_roles(
+            candidate, source_field, "universal_condition"
+        )
+        field_proofs[output.output_field] = (
+            _field_proof(candidate, source_field, "universal_condition")
             .merge(dependency_proof)
             .with_population_coverage(output_coverage)
         )
-        field_types[output] = candidate.field_types.get(field.source, "")
+        field_types[output.output_field] = candidate.field_types.get(source_field, "")
     projections = {
+        **{field: field for field in spec.candidate_subject.required_identity_fields},
         **{
-            field: field
-            for field in spec.candidate_subject.required_identity_fields
+            _direct_projection_source(output): output.output_field
+            for output in spec.output_fields
         },
-        **{field.source: field.output or field.source for field in spec.output_fields},
     }
     return RelationContract(
         fields=fields,
@@ -620,6 +702,13 @@ def _universal_condition_contract(
             population_coverage=output_coverage,
         ),
     )
+
+
+def _direct_projection_source(output: NamedExpression) -> str:
+    expression = output.expression
+    if not isinstance(expression, FieldRef):
+        raise VerificationError("role output requires direct field expression")
+    return expression.field_id
 
 
 def _universal_dependency_proof(

@@ -210,7 +210,6 @@ def test_fact_plan_prompt_groups_pattern_details_before_copy_rules():
     assert "Joined Rows" not in prompt
     assert "grounded_input_ids" not in prompt
     assert "computed_scalar" not in prompt
-    assert "ranked_aggregate" not in prompt
     assert "rank.limit_value_id" not in prompt
 
 

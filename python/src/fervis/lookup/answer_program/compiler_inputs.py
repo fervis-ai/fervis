@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import NoReturn
 
 from fervis.lookup.answer_program.contracts import (
     BindingProvenance,
@@ -15,22 +14,24 @@ from fervis.lookup.answer_program.contracts import (
     ProgramInputs,
     parameter_value_type,
 )
-from fervis.lookup.answer_program.values import (
+from fervis.lookup.answer_program.values import FactValue
+from fervis.lookup.answer_program.expressions import (
     ConstantRef,
-    FactValue,
+    Expression,
+    ExpressionLeaf,
     NodeOutputRef,
     ParameterRef,
-    ValueExpression,
 )
-from fervis.lookup.answer_program.operations import ComputeExpressionLeaf
-from fervis.lookup.answer_program.values import fold_value_expression
+from fervis.lookup.answer_program.relations import PopulationCoverageClaim
 from fervis.lookup.question_contract import QuestionContract
 
 
 @dataclass(frozen=True)
 class CompilerInputContext:
     program_inputs: ProgramInputs
-    expressions_by_value_id: dict[str, ValueExpression]
+    expressions_by_value_id: dict[str, Expression]
+    population_coverage_by_value_id: dict[str, tuple[PopulationCoverageClaim, ...]]
+    value_types_by_value_id: dict[str, str]
 
     def expression_for_value(
         self,
@@ -38,7 +39,7 @@ class CompilerInputContext:
         *,
         component: str = "value",
         item_index: int | None = None,
-    ) -> ValueExpression:
+    ) -> Expression:
         expression = self.expressions_by_value_id.get(value_id)
         if expression is None:
             raise ValueError(f"no declared value origin for {value_id}")
@@ -58,44 +59,49 @@ class CompilerInputContext:
             raise ValueError(f"{value_id} does not support value components")
         return expression
 
-    def compute_expression_for_value(self, value_id: str) -> ComputeExpressionLeaf:
+    def compute_expression_for_value(self, value_id: str) -> ExpressionLeaf:
         expression = self.expression_for_value(value_id)
-        return fold_value_expression(
-            expression,
-            parameter=_compute_parameter,
-            output=_compute_output,
-            constant=_compute_constant,
-            environment=lambda _item: _unsupported_compute_environment(value_id),
+        if isinstance(expression, (ParameterRef, NodeOutputRef, ConstantRef)):
+            return expression
+        raise ValueError(f"{value_id} cannot be used as a compute operand")
+
+    def population_coverage_for_value(
+        self, value_id: str
+    ) -> tuple[PopulationCoverageClaim, ...]:
+        return self.population_coverage_by_value_id.get(value_id, ())
+
+    def value_type(self, value_id: str) -> str:
+        value_type = self.value_types_by_value_id.get(value_id)
+        if value_type is None:
+            raise ValueError(f"no declared value type for {value_id}")
+        return value_type
+
+    def expression_for_question_input(self, question_input_id: str) -> Expression:
+        value_ids = tuple(
+            binding.value.id
+            for binding in self.program_inputs.bindings.bindings
+            if binding.value.known_input_id == question_input_id
         )
-
-
-def _compute_parameter(item: ParameterRef) -> ComputeExpressionLeaf:
-    return item
-
-
-def _compute_output(item: NodeOutputRef) -> ComputeExpressionLeaf:
-    return item
-
-
-def _compute_constant(item: ConstantRef) -> ComputeExpressionLeaf:
-    return item
-
-
-def _unsupported_compute_environment(value_id: str) -> NoReturn:
-    raise ValueError(f"{value_id} cannot be used as a compute operand")
+        if len(value_ids) != 1:
+            raise ValueError(
+                f"question input {question_input_id} requires exactly one value"
+            )
+        return self.expression_for_value(value_ids[0])
 
 
 def compiler_input_context(
     *,
     values: tuple[FactValue, ...],
     question_contract: QuestionContract,
+    population_coverage_by_value_id: dict[str, tuple[PopulationCoverageClaim, ...]]
+    | None = None,
 ) -> CompilerInputContext:
     """Classify current values once from their explicit owning contracts."""
 
     question_inputs = {item.id: item for item in question_contract.question_inputs}
     parameters: list[ParameterDeclaration] = []
     bindings: list[ParameterBinding] = []
-    expressions: dict[str, ValueExpression] = {}
+    expressions: dict[str, Expression] = {}
     seen_parameters: set[str] = set()
     for value in values:
         known_input_id = value.known_input_id
@@ -145,4 +151,8 @@ def compiler_input_context(
             bindings=BindingSet.from_bindings(tuple(bindings)),
         ),
         expressions_by_value_id=expressions,
+        population_coverage_by_value_id=dict(population_coverage_by_value_id or {}),
+        value_types_by_value_id={
+            value.id: parameter_value_type(value) for value in values
+        },
     )

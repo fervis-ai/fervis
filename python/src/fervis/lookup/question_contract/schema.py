@@ -15,6 +15,7 @@ from fervis.lookup.conversation_resolution.compilation import (
     ResolvedQuestionInput,
     ResolvedRowSetQuestionInput,
 )
+from fervis.lookup.predicate_operators import PredicateOperator
 
 
 def build_question_contract_decisions_schema(
@@ -44,16 +45,20 @@ def build_answer_request_contract_schema(
         {
             "kind": {"enum": ["question_contract"]},
             "answer_requests_count": {"type": "integer", "minimum": 1},
-            "question_inputs": {
-                "type": "array",
-                "items": _question_input_schema(
-                    conversation_inputs=conversation_inputs,
-                ),
-            },
             "answer_requests": {
                 "type": "array",
                 "minItems": 1,
                 "items": _answer_request_schema(),
+            },
+            "question_inputs": {
+                "type": "array",
+                "description": (
+                    "Every concrete input-bearing phrase; never include text that "
+                    "belongs to the complete noun compound naming answer_subject."
+                ),
+                "items": _question_input_schema(
+                    conversation_inputs=conversation_inputs,
+                ),
             },
             "question_input_inventory_check": (
                 provider_output.QuestionInputInventoryCheckOutput.schema(
@@ -141,30 +146,56 @@ def _answer_request_schema() -> dict[str, object]:
 def _answer_expression_schema() -> dict[str, object]:
     return {
         "oneOf": [
-            _grouped_answer_expression_schema(),
-            _ordinary_answer_expression_schema(),
+            *(
+                _relation_answer_expression_schema(
+                    family=family,
+                    selection=selection,
+                    ordered=ordered,
+                )
+                for family in ("grouped_aggregate", "list_rows")
+                for selection, ordered in (
+                    ("all_results", False),
+                    ("all_results", True),
+                    ("take_one", True),
+                    ("take", True),
+                )
+            ),
+            _scalar_or_set_answer_expression_schema(),
         ]
     }
 
 
-def _grouped_answer_expression_schema() -> dict[str, object]:
-    schema = provider_output.AnswerExpressionOutput.schema(
-        {
-            "family": {"enum": ["grouped_aggregate"]},
-            "group_key": _group_key_schema(),
-        },
-    )
-    schema["required"] = ["family", "group_key"]
+def _relation_answer_expression_schema(
+    *, family: str, selection: str, ordered: bool
+) -> dict[str, object]:
+    properties: dict[str, object] = {
+        "family": {"enum": [family]},
+        "selection": provider_output.ResultSelectionOutput.schema(
+            {"kind": {"enum": [selection]}}
+        ),
+    }
+    required = ["family", "selection"]
+    if family == "grouped_aggregate":
+        properties["group_key"] = _group_key_schema()
+        required.append("group_key")
+    if ordered:
+        properties["ordering"] = provider_output.OrderingOutput.schema(
+            {
+                "basis": {"type": "string", "minLength": 1},
+                "direction": {"enum": ["ascending", "descending"]},
+            }
+        )
+        required.append("ordering")
+    schema = provider_output.AnswerExpressionOutput.schema(properties)
+    schema["required"] = required
     return schema
 
 
-def _ordinary_answer_expression_schema() -> dict[str, object]:
+def _scalar_or_set_answer_expression_schema() -> dict[str, object]:
     return provider_output.AnswerExpressionOutput.schema(
         {
             "family": {
                 "enum": [
-                    "list_rows",
-                    "ranked_selection",
                     "scalar_value",
                     "scalar_aggregate",
                     "computed_scalar",
@@ -181,7 +212,16 @@ def _ordinary_answer_expression_schema() -> dict[str, object]:
 def _answer_subject_schema() -> dict[str, object]:
     return provider_output.AnswerSubjectOutput.schema(
         {
-            "subject_text": {"type": "string", "minLength": 1},
+            "subject_text": {
+                "type": "string",
+                "minLength": 1,
+                "description": (
+                    "The complete repeated fact-bearing candidate kind. Preserve noun "
+                    "compounds that name the kind; exclude independently testable "
+                    "property modifiers. For grouped_aggregate, this is not the group "
+                    "key."
+                ),
+            },
             "instance_interpretation": (
                 provider_output.AnswerSubjectInstanceInterpretationOutput.schema(
                     {
@@ -201,11 +241,12 @@ def _answer_subject_schema() -> dict[str, object]:
 def _answer_population_schema() -> dict[str, object]:
     return provider_output.AnswerPopulationOutput.schema(
         {
-            "population_label": {"type": "string", "minLength": 1},
-            "counted_unit": {"type": "string", "minLength": 1},
             "membership_tests": {
                 "type": "array",
-                "minItems": 1,
+                "description": (
+                    "One predicate for every explicit property or time condition "
+                    "that qualifying answer_subject instances must satisfy."
+                ),
                 "items": _answer_population_membership_test_schema(),
             },
         },
@@ -213,46 +254,20 @@ def _answer_population_schema() -> dict[str, object]:
 
 
 def _answer_population_membership_test_schema() -> dict[str, object]:
-    return {
-        "oneOf": [
-            _answer_population_membership_test_variant(
-                kind="EXPLICIT_USER_CONSTRAINT",
-            ),
-            *(
-                _answer_population_membership_test_variant(
-                    kind=kind,
-                )
-                for kind in (
-                    "SUBJECT_IDENTITY",
-                    "NORMAL_INSTANCE_GUARD",
-                    "RAW_RECORD_GUARD",
-                )
-            ),
-        ]
-    }
+    return _explicit_population_membership_test_schema()
 
 
-def _answer_population_membership_test_variant(
-    *,
-    kind: str,
-) -> dict[str, object]:
-    use_refs: dict[str, object] = {
-        "type": "array",
-        "items": {"type": "string", "minLength": 1},
+def _explicit_population_membership_test_schema() -> dict[str, object]:
+    properties: dict[str, object] = {
+        "population_use_refs": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "minLength": 1},
+        },
+        "polarity": {"enum": ["MUST_PASS", "MUST_FAIL"]},
+        "test_question": {"type": "string", "minLength": 1},
     }
-    if kind == "EXPLICIT_USER_CONSTRAINT":
-        use_refs["minItems"] = 1
-    else:
-        use_refs["maxItems"] = 0
-    return provider_output.AnswerPopulationMembershipTestOutput.schema(
-        {
-            "question_input_use_refs": use_refs,
-            "test_id": {"type": "string", "minLength": 1},
-            "kind": {"enum": [kind]},
-            "polarity": {"enum": ["MUST_PASS", "MUST_FAIL"]},
-            "test_question": {"type": "string", "minLength": 1},
-        }
-    )
+    return provider_output.AnswerPopulationMembershipTestOutput.schema(properties)
 
 
 def _answer_output_schema() -> dict[str, object]:
@@ -273,8 +288,9 @@ def _answer_output_schema() -> dict[str, object]:
 def _group_key_schema() -> dict[str, object]:
     return {
         "oneOf": [
+            _source_value_group_key_schema(),
             _specified_question_inputs_group_key_schema(),
-            _source_result_values_group_key_schema(),
+            _temporal_bucket_group_key_schema(),
         ]
     }
 
@@ -283,16 +299,38 @@ def _specified_question_inputs_group_key_schema() -> dict[str, object]:
     return provider_output.GroupKeyOutput.schema(
         {
             "description": {"type": "string", "minLength": 1},
-            "domain": {"enum": ["SPECIFIED_QUESTION_INPUTS"]},
+            "value_source": provider_output.GroupKeyValueSourceOutput.schema(
+                {
+                    "kind": {"enum": ["specified_question_inputs"]},
+                }
+            ),
         },
     )
 
 
-def _source_result_values_group_key_schema() -> dict[str, object]:
+def _source_value_group_key_schema() -> dict[str, object]:
     return provider_output.GroupKeyOutput.schema(
         {
             "description": {"type": "string", "minLength": 1},
-            "domain": {"enum": ["SOURCE_RESULT_VALUES"]},
+            "value_source": provider_output.GroupKeyValueSourceOutput.schema(
+                {"kind": {"enum": ["source_value"]}}
+            ),
+        },
+    )
+
+
+def _temporal_bucket_group_key_schema() -> dict[str, object]:
+    return provider_output.GroupKeyOutput.schema(
+        {
+            "description": {"type": "string", "minLength": 1},
+            "value_source": provider_output.GroupKeyValueSourceOutput.schema(
+                {
+                    "kind": {"enum": ["temporal_bucket"]},
+                    "grain": {
+                        "enum": ["day", "week", "month", "quarter", "year"]
+                    },
+                }
+            ),
         },
     )
 
@@ -306,6 +344,9 @@ def _question_input_use_schema() -> dict[str, object]:
             _question_input_use_variant(
                 provider_output.QuestionInputOwnerKind.POPULATION_TESTS,
                 include_use_id=True,
+            ),
+            _question_input_use_variant(
+                provider_output.QuestionInputOwnerKind.COMPUTE_EXPRESSION,
             ),
             _question_input_use_variant(
                 provider_output.QuestionInputOwnerKind.RESULT_LIMIT,
@@ -338,7 +379,19 @@ def _question_input_schema(
             include_conversation_resolution_inputs=False,
         ),
         _literal_text_input_role_schema(
+            role=LiteralInputRole.PREDICATE_VALUE,
+            include_conversation_resolution_inputs=False,
+        ),
+        _literal_text_input_role_schema(
             role=LiteralInputRole.TIME_VALUE,
+            include_conversation_resolution_inputs=False,
+        ),
+        _literal_text_input_role_schema(
+            role=LiteralInputRole.THRESHOLD_VALUE,
+            include_conversation_resolution_inputs=False,
+        ),
+        _literal_text_input_role_schema(
+            role=LiteralInputRole.FORMULA_VALUE,
             include_conversation_resolution_inputs=False,
         ),
         _literal_text_input_role_schema(
@@ -386,6 +439,9 @@ def _declared_literal_input_schema(
     if item.value_meaning_hint:
         properties["value_meaning_hint"] = {"enum": [item.value_meaning_hint]}
         required_optional_fields.append("value_meaning_hint")
+    if item.role is LiteralInputRole.THRESHOLD_VALUE:
+        properties["comparison_operator"] = _ordered_comparison_operator_schema()
+        required_optional_fields.append("comparison_operator")
     schema = provider_output.LiteralTextInputOutput.schema(properties)
     required = schema["required"]
     if not isinstance(required, list):
@@ -428,15 +484,46 @@ def _literal_text_input_role_schema(
         "operand_text": {"type": "string", "minLength": 1},
         "field_label_text": {"type": "string", "minLength": 1},
         "value_meaning_hint": {"type": "string", "minLength": 1},
-        "role": {"enum": [role.value]},
+        "role": {
+            "enum": [role.value],
+            **(
+                {
+                    "description": (
+                        "A non-identity property value expressed as an "
+                        "independently testable modifier of answer_subject "
+                        "instances."
+                    )
+                }
+                if role is LiteralInputRole.PREDICATE_VALUE
+                else {}
+            ),
+        },
         "occurrence": {"type": "integer", "minimum": 1},
         "inventory_check": _question_input_inventory_check_schema(),
         "kind": {"enum": [KnownInputKind.LITERAL.value]},
     }
     if include_conversation_resolution_inputs:
         properties["resolved_input_ref"] = {"type": "string", "minLength": 1}
+    if role is LiteralInputRole.THRESHOLD_VALUE:
+        properties["comparison_operator"] = _ordered_comparison_operator_schema()
     schema = provider_output.LiteralTextInputOutput.schema(properties)
+    if role is LiteralInputRole.THRESHOLD_VALUE:
+        required = schema["required"]
+        if not isinstance(required, list):
+            raise ValueError("provider schema required fields must be an array")
+        required.append("comparison_operator")
     return schema
+
+
+def _ordered_comparison_operator_schema() -> dict[str, object]:
+    return {
+        "enum": [
+            PredicateOperator.LT.value,
+            PredicateOperator.LTE.value,
+            PredicateOperator.GT.value,
+            PredicateOperator.GTE.value,
+        ]
+    }
 
 
 def _question_input_inventory_check_schema() -> dict[str, object]:

@@ -1,0 +1,20 @@
+id: raw_record_read_needs_no_separate_rawness_proof
+description: A read of persisted records fulfills a raw-record request without inventing a separate rawness filter or proof.
+kind: algorithm
+algorithm: answer_program.population_coverage
+input:
+  question_contract: {$ref: ../../../fixtures/population_constraint_coverage.yaml#/question_contracts/raw_sale_records}
+  relations:
+    - id: sale_records
+      fields: [sale_record_id, status, created_at]
+      identity_fields: [sale_record_id]
+  operations:
+    - id: project_sale_records
+      output_relation: projected
+      spec:
+        kind: project
+        input_relation: sale_records
+        fields: [{source: sale_record_id, output: sale_record_id}]
+  result: {relation_id: projected, field_id: sale_record_id}
+expect:
+  result_contains: {status: accepted}

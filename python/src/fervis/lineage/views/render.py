@@ -250,6 +250,8 @@ def _append_model_calls(
             f"{prefix}    chars: prompt={call.prompt_chars}, "
             f"schema={call.schema_chars}, tool_spec={call.tool_spec_chars}"
         )
+        if call.duration_ms is not None:
+            lines.append(f"{prefix}    duration: {call.duration_ms} ms")
         for artifact in call.artifacts:
             lines.append(
                 f"{prefix}    {artifact.artifact_kind}: "

@@ -211,6 +211,8 @@ def _parameter(payload: JsonObject) -> CandidateParameter:
             for item in _objects(payload.get("normal_instance_role_profiles"))
         ),
         owned_membership_test_ids=_owned_membership_test_ids(population_contract),
+        description=_text(payload.get("description")),
+        semantics=_text(payload.get("param_semantics") or payload.get("semantics")),
     )
 
 
@@ -301,6 +303,8 @@ def _applied_filters(card: JsonObject) -> tuple[SourceAppliedFilter, ...]:
             resolved_end=_text(item.get("resolved_end")),
             literal_type=_text(item.get("literal_type")),
             operator=_text(item.get("operator")) or "equals",
+            application_value=_text(item.get("application_value")),
+            application_values=_texts(item.get("application_values")),
         )
         for item in _objects(card.get("applied_filters"))
     )

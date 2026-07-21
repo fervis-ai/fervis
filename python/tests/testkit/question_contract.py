@@ -4,6 +4,7 @@ from typing import Any
 
 from fervis.lookup.question_contract import (
     GroupKeyDomainKind,
+    GroupKeySourceKind,
     KnownInputKind,
     KnownInputSource,
     LiteralInputRole,
@@ -16,6 +17,7 @@ from fervis.lookup.question_contract import (
     RequestedFactPopulationConstraint,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
+    RequestedFactOrderingDirection,
     RequestedFactGroupKey,
     RequestedFactAnswerOutput,
     RequestedFactAnswerSubject,
@@ -81,7 +83,6 @@ def answer_population_from_payload(
     if not isinstance(payload, dict):
         raise ValueError("answer_population must be an object")
     return RequestedFactAnswerPopulation(
-        population_label=str(payload["population_label"]),
         counted_unit=str(payload["counted_unit"]),
         membership_tests=tuple(
             RequestedFactAnswerPopulationMembershipTest(
@@ -135,15 +136,30 @@ def answer_expression_from_payload(
         return None
     if not isinstance(payload, dict):
         raise ValueError("answer_expression must be an object")
+    family = RequestedFactAnswerExpressionFamily(str(payload["family"]))
+    selection = payload.get("selection")
+    if selection is None and family in {
+        RequestedFactAnswerExpressionFamily.LIST_ROWS,
+        RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
+    }:
+        selection = {"kind": ResultSelectionKind.ALL_RESULTS.value}
     return RequestedFactAnswerExpression(
-        family=RequestedFactAnswerExpressionFamily(str(payload["family"])),
+        family=family,
         group_key=group_key_from_payload(payload.get("group_key")),
-        selection_kind=(
-            ResultSelectionKind(str(payload["selection_kind"]))
-            if payload.get("selection_kind")
+        ordering_basis=str((payload.get("ordering") or {}).get("basis") or ""),
+        ordering_direction=(
+            RequestedFactOrderingDirection(
+                str((payload.get("ordering") or {})["direction"])
+            )
+            if payload.get("ordering")
             else None
         ),
-        limit_input_ref=str(payload.get("limit_input_ref") or ""),
+        selection_kind=(
+            ResultSelectionKind(str(selection["kind"]))
+            if selection
+            else None
+        ),
+        limit_input_ref=str((selection or {}).get("limit_input_ref") or ""),
     )
 
 
@@ -156,6 +172,12 @@ def group_key_from_payload(payload: Any) -> RequestedFactGroupKey | None:
         id=str(payload.get("id") or "group_key"),
         description=str(payload["description"]),
         domain=GroupKeyDomainKind(str(payload["domain"])),
+        source_kind=(
+            GroupKeySourceKind(str(payload["source_kind"]))
+            if payload.get("source_kind")
+            else None
+        ),
+        temporal_grain=str(payload.get("grain") or ""),
         question_input_refs=tuple(
             str(item) for item in payload.get("question_input_refs") or ()
         ),

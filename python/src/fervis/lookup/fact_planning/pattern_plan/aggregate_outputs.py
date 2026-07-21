@@ -6,8 +6,8 @@ from fervis.lookup.answer_program.result_projection import (
     RelationResultOutput,
 )
 from fervis.lookup.fact_planning.compiled_patterns import CompiledMetric
-from fervis.lookup.fact_planning.grouped_ranked_choices import (
-    GroupedRankedAnswerOutput,
+from fervis.lookup.fact_planning.grouped_aggregate_choices import (
+    GroupedAggregateResultOutput,
 )
 
 from .result_ids import _result_output_id
@@ -51,15 +51,15 @@ def _aggregate_relation_outputs(
     )
 
 
-def _grouped_ranked_relation_outputs(
+def _grouped_aggregate_relation_outputs(
     *,
     index: int,
     output_relation_id: str,
-    answer_outputs: tuple[GroupedRankedAnswerOutput, ...],
+    answer_outputs: tuple[GroupedAggregateResultOutput, ...],
     metric: CompiledMetric,
     namespace_result_outputs: bool,
 ) -> tuple[RelationResultOutput, ...]:
-    relation_answer_outputs = _grouped_ranked_answer_result_outputs(
+    relation_answer_outputs = _grouped_aggregate_answer_result_outputs(
         index=index,
         output_relation_id=output_relation_id,
         answer_outputs=answer_outputs,
@@ -76,7 +76,7 @@ def _grouped_ranked_relation_outputs(
             output_relation_id=output_relation_id,
             metric=metric,
             metric_answer_output_id=(
-                _grouped_ranked_metric_parent_output_id(
+                _grouped_aggregate_metric_parent_output_id(
                     metric=metric,
                     answer_outputs=answer_outputs,
                 )
@@ -89,11 +89,11 @@ def _grouped_ranked_relation_outputs(
     )
 
 
-def _grouped_ranked_answer_result_outputs(
+def _grouped_aggregate_answer_result_outputs(
     *,
     index: int,
     output_relation_id: str,
-    answer_outputs: tuple[GroupedRankedAnswerOutput, ...],
+    answer_outputs: tuple[GroupedAggregateResultOutput, ...],
     namespace_result_outputs: bool,
 ) -> tuple[RelationResultOutput, ...]:
     reserved: set[str] = set()
@@ -112,7 +112,7 @@ def _grouped_ranked_answer_result_outputs(
             namespace_result_outputs=namespace_result_outputs,
         )
         reserved.add(result_output_id)
-        result_output = _grouped_ranked_answer_result_output(
+        result_output = _grouped_aggregate_answer_result_output(
             item=item,
             result_output_id=result_output_id,
             output_relation_id=output_relation_id,
@@ -123,9 +123,9 @@ def _grouped_ranked_answer_result_outputs(
     return tuple(output)
 
 
-def _grouped_ranked_answer_result_output(
+def _grouped_aggregate_answer_result_output(
     *,
-    item: GroupedRankedAnswerOutput,
+    item: GroupedAggregateResultOutput,
     result_output_id: str,
     output_relation_id: str,
     field_ids: tuple[str, ...],
@@ -133,7 +133,7 @@ def _grouped_ranked_answer_result_output(
 ) -> RelationResultOutput:
     key_id = item.key_id
     field_id = field_ids[0] if len(field_ids) == 1 and not key_id else ""
-    entity_key = _grouped_ranked_entity_key(item, key_id=key_id)
+    entity_key = _grouped_aggregate_entity_key(item, key_id=key_id)
     label = " ".join(field_ids) if namespace_result_outputs else ""
     return RelationResultOutput(
         id=result_output_id,
@@ -145,8 +145,8 @@ def _grouped_ranked_answer_result_output(
     )
 
 
-def _grouped_ranked_entity_key(
-    item: GroupedRankedAnswerOutput,
+def _grouped_aggregate_entity_key(
+    item: GroupedAggregateResultOutput,
     *,
     key_id: str,
 ) -> EntityKeyProjection | None:
@@ -193,10 +193,10 @@ def _unique_result_output_id(
     return result_output_id
 
 
-def _grouped_ranked_metric_parent_output_id(
+def _grouped_aggregate_metric_parent_output_id(
     *,
     metric: CompiledMetric,
-    answer_outputs: tuple[GroupedRankedAnswerOutput, ...],
+    answer_outputs: tuple[GroupedAggregateResultOutput, ...],
 ) -> str:
     return metric.answer_output_id or (
         answer_outputs[0].answer_output_id if answer_outputs else ""

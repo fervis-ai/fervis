@@ -36,6 +36,7 @@ from fervis.lookup.read_eligibility.candidate_identity import (
 from fervis.lookup.read_eligibility import (
     retained_source_candidate_ids_by_signature,
 )
+from fervis.lookup.question_contract import RequestedFactLiteralInput
 
 
 def _raw_source_binding_candidate_payload(
@@ -158,6 +159,7 @@ def _raw_source_binding_candidate_payload(
         for item in value_payload.get("values") or ()
         if isinstance(item, dict)
         and not _is_identity_binding_value(item, request.available_values)
+        and not _is_formula_modifier_value(item, request=request)
     ]
     visible_memory_value_candidates = [
         eligible_candidate
@@ -173,7 +175,9 @@ def _raw_source_binding_candidate_payload(
         if eligible_candidate is not None
     ]
     value_sources = _with_default_requested_fact_applicability(
-        [*current_value_sources, *visible_memory_value_candidates],
+        _distinct_value_candidates(
+            [*current_value_sources, *visible_memory_value_candidates]
+        ),
         requested_fact_ids=requested_fact_ids,
     )
     payload: dict[str, Any] = {
@@ -192,6 +196,26 @@ def _raw_source_binding_candidate_payload(
     return payload
 
 
+def _is_formula_modifier_value(
+    payload: dict[str, Any],
+    *,
+    request: SourceCandidateInputRequest,
+) -> bool:
+    value_id = str(payload.get("value_id") or "")
+    value = next((item for item in request.available_values if item.id == value_id), None)
+    if value is None or not value.known_input_id:
+        return False
+    known_input = next(
+        (
+            item
+            for item in request.question_contract.question_inputs
+            if item.id == value.known_input_id
+        ),
+        None,
+    )
+    return isinstance(known_input, RequestedFactLiteralInput) and known_input.is_formula_value
+
+
 def _with_default_requested_fact_applicability(
     candidates: list[dict[str, Any]],
     *,
@@ -208,6 +232,20 @@ def _with_default_requested_fact_applicability(
                 "applies_to_requested_facts": list(requested_fact_ids),
             }
         )
+    return output
+
+
+def _distinct_value_candidates(
+    candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    seen_value_ids: set[str] = set()
+    for candidate in candidates:
+        value_id = str(candidate.get("value_id") or "")
+        if not value_id or value_id in seen_value_ids:
+            continue
+        seen_value_ids.add(value_id)
+        output.append(candidate)
     return output
 
 

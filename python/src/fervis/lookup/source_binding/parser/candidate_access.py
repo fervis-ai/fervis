@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from fervis.lookup.source_binding.compiler_ir import (
-    DraftRelationSourceRowFilter,
     SourceAppliedFilter,
 )
 from fervis.lookup.source_binding.evidence_types import evidence_item_can_measure
@@ -24,7 +23,6 @@ from fervis.lookup.source_binding.candidates.contracts import (
     ValueEvidence,
     evidence_field_ids,
 )
-from fervis.lookup.source_binding.review_surface import source_binding_review_surface
 
 
 __all__ = [
@@ -127,7 +125,6 @@ def candidate_source_fields(
     row_source_id: str = "",
     evidence_items: tuple[SourceEvidenceItem, ...] = (),
     fulfillments: tuple[SourceFulfillment, ...] = (),
-    row_filters: tuple[DraftRelationSourceRowFilter, ...] = (),
     required_field_ids: tuple[str, ...] = (),
     plan_shape: str = "",
 ) -> tuple[SourceField, ...]:
@@ -157,9 +154,6 @@ def candidate_source_fields(
         for field_id in applied_filter.predicate_field_ids
         if field_id
     )
-    selected_field_ids.update(
-        row_filter.field_id for row_filter in row_filters if row_filter.field_id
-    )
     fields = [
         SourceField(
             field_id=item.field_id,
@@ -171,6 +165,7 @@ def candidate_source_fields(
         for item in candidate.evidence_items
         if isinstance(item, FieldEvidence)
         and item.field_id in selected_field_ids
+        and _field_belongs_to_row_source(item, row_source_id=row_source_id)
         and _candidate_field_selectable_for_planning(item)
     ]
     existing_field_ids = {field.field_id for field in fields}
@@ -183,25 +178,21 @@ def candidate_source_fields(
         for item in evidence_items
         if item.evidence_id in selected_evidence_ids
         and item.field_id
+        and _field_belongs_to_row_source(item, row_source_id=row_source_id)
         and item.type != "row_population"
         and _field_type_selectable_for_planning(item.type)
         and item.field_id not in existing_field_ids
     )
     existing_field_ids.update(field.field_id for field in fields)
-    predicate_types = {
-        axis.field_id: axis.field_type
-        for axis in source_binding_review_surface(candidate).row_predicates.values()
-    }
-    fields.extend(
-        SourceField(
-            field_id=row_filter.field_id,
-            type=predicate_types.get(row_filter.field_id, ""),
-            roles=("predicate",),
-        )
-        for row_filter in row_filters
-        if row_filter.field_id and row_filter.field_id not in existing_field_ids
-    )
     return tuple(fields)
+
+
+def _field_belongs_to_row_source(
+    field: FieldEvidence | SourceEvidenceItem,
+    *,
+    row_source_id: str,
+) -> bool:
+    return not row_source_id or field.row_source_id == row_source_id
 
 
 def _entity_evidence_field_ids(candidate: SourceCandidate) -> tuple[str, ...]:

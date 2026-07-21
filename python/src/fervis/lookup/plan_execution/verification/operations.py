@@ -12,7 +12,7 @@ from ._shared import (
     Operation,
     ProjectSpec,
     ProjectToKeySpec,
-    RankSpec,
+    OrderSpec,
     UniversalConditionSpec,
     VerificationError,
 )
@@ -21,8 +21,9 @@ from .scalars import _operation_scalar_inputs
 from fervis.lookup.answer_program.operations import (
     Predicate,
     RelationRoleRef,
-    compute_expression_references,
+    operation_scalar_output_ids,
 )
+from fervis.lookup.answer_program.expressions import FieldRef, expression_references
 
 
 def _verify_answer_uses_evidence_input(answer: AnswerProgram) -> None:
@@ -39,7 +40,7 @@ def _compute_uses_direct_value(operation: Operation) -> bool:
     spec = operation.spec
     if not isinstance(spec, ComputeSpec):
         return False
-    references = compute_expression_references(spec.expression)
+    references = expression_references(spec.expression)
     return bool(references.parameters or references.constants)
 
 
@@ -86,31 +87,35 @@ def _operation_field_outputs(operations: tuple[Operation, ...]) -> set[str]:
                 elif aggregation.output_field:
                     outputs.add(aggregation.output_field)
         elif isinstance(spec, ProjectSpec):
-            outputs.update(field.output or field.source for field in spec.fields)
+            outputs.update(output.output_field for output in spec.outputs)
         elif isinstance(spec, ProjectToKeySpec):
             outputs.update(spec.key_fields)
     return outputs
 
 
 def _verify_compute_scalar_availability(answer: AnswerProgram) -> None:
-    available_outputs: dict[str, str] = {}
+    available_outputs = {
+        f"parameter:{parameter.id}": {parameter.id} for parameter in answer.parameters
+    }
     for operation in answer.operations:
         spec = operation.spec
-        if not isinstance(spec, ComputeSpec):
+        if isinstance(spec, ComputeSpec):
+            _require_available_compute_outputs(operation.id, spec, available_outputs)
+        else:
             _require_available_scalar_inputs(operation, available_outputs)
-            continue
-        _require_available_compute_outputs(operation.id, spec, available_outputs)
-        available_outputs[operation.id] = spec.output_scalar
+        node_outputs = set(operation_scalar_output_ids(spec))
+        if node_outputs:
+            available_outputs[operation.id] = node_outputs
 
 
 def _require_available_compute_outputs(
     operation_id: str,
     spec: ComputeSpec,
-    available_outputs: dict[str, str],
+    available_outputs: dict[str, set[str]],
 ) -> None:
-    references = compute_expression_references(spec.expression).outputs
+    references = expression_references(spec.expression).outputs
     if any(
-        available_outputs.get(reference.node_id) != reference.output_id
+        reference.output_id not in available_outputs.get(reference.node_id, set())
         for reference in references
     ):
         raise VerificationError(
@@ -120,9 +125,11 @@ def _require_available_compute_outputs(
 
 def _require_available_scalar_inputs(
     operation: Operation,
-    available_outputs: dict[str, str],
+    available_outputs: dict[str, set[str]],
 ) -> None:
-    available_scalar_ids = set(available_outputs.values())
+    available_scalar_ids = {
+        output_id for output_ids in available_outputs.values() for output_id in output_ids
+    }
     if any(
         scalar_input not in available_scalar_ids
         for scalar_input in _operation_scalar_inputs(operation)
@@ -155,7 +162,11 @@ def _verify_coverage_operation_relation_contracts(
                 )
                 _verify_role_relation_fields(
                     contract=candidate,
-                    fields=tuple(field.source for field in spec.output_fields),
+                    fields=tuple(
+                        output.expression.field_id
+                        for output in spec.output_fields
+                        if isinstance(output.expression, FieldRef)
+                    ),
                     expected_role=FieldBindingRole.OUTPUT,
                     role="anti_join.candidate",
                 )
@@ -197,7 +208,11 @@ def _verify_coverage_operation_relation_contracts(
                 )
                 _verify_role_relation_fields(
                     contract=candidate,
-                    fields=tuple(field.source for field in spec.output_fields),
+                    fields=tuple(
+                        output.expression.field_id
+                        for output in spec.output_fields
+                        if isinstance(output.expression, FieldRef)
+                    ),
                     expected_role=FieldBindingRole.OUTPUT,
                     role="universal_condition.candidate_subject",
                 )
@@ -232,9 +247,16 @@ def _verify_coverage_operation_relation_contracts(
                 )
                 _verify_role_relation_fields(
                     contract=observation,
-                    fields=(
-                        spec.predicate.left,
-                        *(field for field in (spec.predicate.right,) if field),
+                    fields=tuple(
+                        item.field_id
+                        for item in expression_references(
+                            spec.predicate.left,
+                            *(
+                                (spec.predicate.right,)
+                                if spec.predicate.right is not None
+                                else ()
+                            ),
+                        ).fields
                     ),
                     expected_role=FieldBindingRole.PREDICATE,
                     role="universal_condition.observation",
@@ -276,10 +298,10 @@ def _verify_operation_field_references(
             for aggregation in spec.aggregations:
                 if aggregation.function != AggregationFunction.COUNT:
                     _field_roles(source, aggregation.input_field, "aggregate")
-        elif isinstance(spec, RankSpec):
+        elif isinstance(spec, OrderSpec):
             source = _contract(relation_contracts, spec.input_relation)
-            for sort_key in (*spec.order_by, *spec.tie_breakers):
-                _field_roles(source, sort_key.field, "rank")
+            for sort_key in spec.order_by:
+                _field_roles(source, sort_key.field, "order")
         elif isinstance(spec, UniversalConditionSpec):
             _verify_predicate_fields(
                 contract=_contract(
@@ -297,9 +319,12 @@ def _verify_predicate_fields(
     predicate: Predicate,
     label: str,
 ) -> None:
-    _field_roles(contract, predicate.left, label)
-    if predicate.right:
-        _field_roles(contract, predicate.right, label)
+    references = expression_references(
+        predicate.left,
+        *((predicate.right,) if predicate.right is not None else ()),
+    )
+    for field in references.fields:
+        _field_roles(contract, field.field_id, label)
 
 
 def _verify_role_relation_fields(

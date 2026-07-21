@@ -214,6 +214,7 @@ def _model_call_inspection_view(
         prompt_chars=call.prompt_chars,
         schema_chars=call.schema_chars,
         tool_spec_chars=call.tool_spec_chars,
+        duration_ms=call.duration_ms,
         artifacts=tuple(
             ArtifactInspectionView(
                 artifact_kind=artifact.artifact_kind.value,

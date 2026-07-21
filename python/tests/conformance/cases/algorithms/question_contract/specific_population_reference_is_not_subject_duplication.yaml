@@ -23,25 +23,16 @@ input:
       answer_expression:
         family: scalar_value
       question_input_uses:
-      - {use_id: use_warehouse, input_ref: warehouse_2, owner_kind: POPULATION_TESTS}
+      - {input_ref: warehouse_2, owner_kind: POPULATION_TESTS, use_id: warehouse_use}
       answer_subject:
         subject_text: warehouse
         instance_interpretation:
           kind: NORMAL_BUSINESS_INSTANCE
       answer_population:
-        population_label: warehouse 2
-        counted_unit: warehouse
         membership_tests:
-        - test_id: subject_identity
-          kind: SUBJECT_IDENTITY
-          polarity: MUST_PASS
-          test_question: Does the row represent a warehouse?
-          question_input_use_refs: []
-        - test_id: selected_warehouse
-          kind: EXPLICIT_USER_CONSTRAINT
-          polarity: MUST_PASS
+        - polarity: MUST_PASS
           test_question: Is this warehouse the requested warehouse?
-          question_input_use_refs: [use_warehouse]
+          population_use_refs: [warehouse_use]
       answer_outputs:
       - description: warehouse name
         role: ANSWER_VALUE

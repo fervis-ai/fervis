@@ -57,8 +57,11 @@ def test_lookup_uses_semantic_read_eligibility_after_recall():
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="sales_summary",
-                        fields=(
-                            ProjectField(source="total_revenue", output="answer_1"),
+                        outputs=(
+                            NamedExpression(
+                                output_field="answer_1",
+                                expression=FieldRef("total_revenue"),
+                            ),
                         ),
                     ),
                     output_relation="answer_rows",
@@ -135,8 +138,11 @@ def test_lookup_pipeline_emits_runtime_progress_for_major_phases() -> None:
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="sales_summary",
-                        fields=(
-                            ProjectField(source="total_revenue", output="answer_1"),
+                        outputs=(
+                            NamedExpression(
+                                output_field="answer_1",
+                                expression=FieldRef("total_revenue"),
+                            ),
                         ),
                     ),
                     output_relation="answer_rows",
@@ -212,8 +218,11 @@ def test_lookup_runtime_records_source_reads_against_canonical_execute_step():
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="sales_summary",
-                        fields=(
-                            ProjectField(source="total_revenue", output="answer_1"),
+                        outputs=(
+                            NamedExpression(
+                                output_field="answer_1",
+                                expression=FieldRef("total_revenue"),
+                            ),
                         ),
                     ),
                     output_relation="answer_rows",
@@ -339,8 +348,11 @@ def test_lookup_retains_ambiguous_read_eligibility_candidates_with_docstring_con
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="sales_summary",
-                        fields=(
-                            ProjectField(source="total_revenue", output="answer_1"),
+                        outputs=(
+                            NamedExpression(
+                                output_field="answer_1",
+                                expression=FieldRef("total_revenue"),
+                            ),
                         ),
                     ),
                     output_relation="answer_rows",
@@ -449,8 +461,11 @@ def test_lookup_source_binding_can_bind_required_finite_choice_param():
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="sales_summary",
-                        fields=(
-                            ProjectField(source="total_revenue", output="answer_1"),
+                        outputs=(
+                            NamedExpression(
+                                output_field="answer_1",
+                                expression=FieldRef("total_revenue"),
+                            ),
                         ),
                     ),
                     output_relation="answer_rows",
@@ -543,32 +558,13 @@ def test_lookup_derives_finite_choice_membership_from_answer_population_tests():
         "answer_requests": [
             {
                 "answer_fact": "count of sales",
-                "answer_expression": {"family": "list_rows"},
+                "answer_expression": {
+                    "family": "list_rows",
+                    "selection": {"kind": "all_results"},
+                },
                 "answer_subject": _answer_subject_payload("sales"),
                 "answer_population": {
-                    "population_label": "sales",
-                    "counted_unit": "sale",
-                    "membership_tests": [
-                        {
-                            "test_id": "pop_test_1",
-                            "kind": "SUBJECT_IDENTITY",
-                            "polarity": "MUST_PASS",
-                            "test_question": "Does the row/value represent a sale?",
-                            "question_input_use_refs": [],
-                        },
-                        {
-                            "test_id": "pop_test_3",
-                            "kind": "NORMAL_INSTANCE_GUARD",
-                            "polarity": "MUST_PASS",
-                            "test_question": (
-                                "Is this an actual business sale instance rather "
-                                "than a draft, canceled, voided, failed, or raw "
-                                "storage representation unless the user explicitly "
-                                "requested that state?"
-                            ),
-                            "question_input_use_refs": [],
-                        },
-                    ],
+                    "membership_tests": [],
                 },
                 "answer_outputs": [{"description": "count", "role": "ANSWER_VALUE"}],
                 "question_input_uses": [],
@@ -743,8 +739,6 @@ def _finite_choice_review(
                             f"{choice} is compared to the excluded "
                             "normal-instance roles."
                         ),
-                        "explicit_user_override_evidence": [],
-                        "explicit_user_override_applies": False,
                         "population_consequence": (
                             f"{choice} effect for {test_id} is {test_effect}."
                         ),
@@ -820,8 +814,11 @@ def test_lookup_requires_explicit_optional_default_finite_choice_decision():
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="sales_summary",
-                        fields=(
-                            ProjectField(source="total_revenue", output="answer_1"),
+                        outputs=(
+                            NamedExpression(
+                                output_field="answer_1",
+                                expression=FieldRef("total_revenue"),
+                            ),
                         ),
                     ),
                     output_relation="answer_rows",
@@ -932,9 +929,15 @@ def test_lookup_cutover_runs_single_fact_plan_then_execution_then_response_rende
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="metric_rows",
-                        fields=(
-                            ProjectField(source="location_name", output="location"),
-                            ProjectField(source="metric_total"),
+                        outputs=(
+                            NamedExpression(
+                                output_field="location",
+                                expression=FieldRef("location_name"),
+                            ),
+                            NamedExpression(
+                                output_field="metric_total",
+                                expression=FieldRef("metric_total"),
+                            ),
                         ),
                     ),
                     output_relation="answer_rows",
@@ -1626,10 +1629,10 @@ def test_lookup_grounding_keeps_identity_list_resolver_visible_with_noisy_entity
             tool_name = tool_specs[0].name if tool_specs else ""
             if tool_name == "submit_source_binding":
                 from tests.lookup.source_binding_helpers import (
-                        source_candidate_answer_population,
-                        source_candidate_with_fields,
-                        resolved_input_applications_for_target,
-                        source_fulfills_for_candidate,
+                    source_candidate_answer_population,
+                    source_candidate_with_fields,
+                    resolved_input_applications_for_target,
+                    source_fulfills_for_candidate,
                     source_binding_target_id_for_candidate,
                 )
 
@@ -2022,7 +2025,9 @@ def test_lookup_read_eligibility_executes_only_selected_ambiguous_resolver_route
     assert sale_request["args"] == {"list_sale_list.query.location_id": "loc-1"}
 
 
-def test_lookup_runtime_records_selected_resolver_reads_under_read_eligibility() -> None:
+def test_lookup_runtime_records_selected_resolver_reads_under_read_eligibility() -> (
+    None
+):
     planner = _ToolNamePlannerPort(
         read_eligibility_retention_specs=(
             ReadEligibilityRetentionSpec(
@@ -2037,8 +2042,7 @@ def test_lookup_runtime_records_selected_resolver_reads_under_read_eligibility()
                 "resolved_input_applications": (
                     {
                         "value_id": (
-                            "grounded_fact_1_entity_1_staff_staff_key_"
-                            "staff_id_staff_1"
+                            "grounded_fact_1_entity_1_staff_staff_key_staff_id_staff_1"
                         ),
                         "value_component": "canonical_key",
                         "target_kind": "returned_identity",
@@ -2458,7 +2462,11 @@ def test_lookup_cutover_runs_combined_source_and_split_planning_turns():
                         id="project_answer",
                         spec=ProjectSpec(
                             input_relation="rows",
-                            fields=(ProjectField(source="amount"),),
+                            outputs=(
+                                NamedExpression(
+                                    output_field="amount", expression=FieldRef("amount")
+                                ),
+                            ),
                         ),
                         output_relation="answer_rows",
                     ),
@@ -2636,9 +2644,14 @@ def test_lookup_source_binding_uses_first_class_fulfillment_usage():
                         id="project_answer",
                         spec=ProjectSpec(
                             input_relation="rows",
-                            fields=(
-                                ProjectField(source="staff_name"),
-                                ProjectField(source="amount"),
+                            outputs=(
+                                NamedExpression(
+                                    output_field="staff_name",
+                                    expression=FieldRef("staff_name"),
+                                ),
+                                NamedExpression(
+                                    output_field="amount", expression=FieldRef("amount")
+                                ),
                             ),
                         ),
                         output_relation="answer_rows",
@@ -3296,7 +3309,11 @@ def test_lookup_model_turns_send_business_system_prompt_and_question_frame():
                     id="project_amount",
                     spec=ProjectSpec(
                         input_relation="sales_rows",
-                        fields=(ProjectField(source="amount"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="amount", expression=FieldRef("amount")
+                            ),
+                        ),
                     ),
                     output_relation="answer_rows",
                 ),
@@ -3429,9 +3446,15 @@ def test_lookup_cutover_returns_rendered_machine_truth_without_model_synthesis()
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(
-                            ProjectField(source="location_name", output="location"),
-                            ProjectField(source="metric_total"),
+                        outputs=(
+                            NamedExpression(
+                                output_field="location",
+                                expression=FieldRef("location_name"),
+                            ),
+                            NamedExpression(
+                                output_field="metric_total",
+                                expression=FieldRef("metric_total"),
+                            ),
                         ),
                     ),
                     output_relation="answer_rows",
@@ -3548,7 +3571,12 @@ def test_lookup_cutover_no_data_is_tied_to_fulfilled_requested_fact():
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="ticket_rows",
-                        fields=(ProjectField(source="ticket_id"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="ticket_id",
+                                expression=FieldRef("ticket_id"),
+                            ),
+                        ),
                     ),
                     output_relation="answer_rows",
                 ),

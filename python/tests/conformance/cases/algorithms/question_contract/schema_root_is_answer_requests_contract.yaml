@@ -17,8 +17,8 @@ expect:
     answer_contract_required:
       - kind
       - answer_requests_count
-      - question_inputs
       - answer_requests
+      - question_inputs
       - question_input_inventory_check
     answer_contract_kind_values: [question_contract]
     answer_contract_has_clarification_fields: false
@@ -52,14 +52,14 @@ expect:
     answer_contract_required:
       - kind
       - answer_requests_count
-      - question_inputs
       - answer_requests
+      - question_inputs
       - question_input_inventory_check
     answer_contract_properties:
       - kind
       - answer_requests_count
-      - question_inputs
       - answer_requests
+      - question_inputs
       - question_input_inventory_check
     answer_contract_kind_values: [question_contract]
     answer_contract_has_clarification_fields: false

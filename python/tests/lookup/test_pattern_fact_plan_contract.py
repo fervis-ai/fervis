@@ -67,7 +67,7 @@ from tests.lookup.orchestrator._runtime_ports import (
 )
 from tests.lookup.prompt_sections import prompt_section_payload
 from tests.testkit.question_contract_provider import (
-    provider_membership_tests,
+    provider_answer_population,
     provider_question_input_ownership,
 )
 
@@ -433,7 +433,10 @@ def test_pattern_contract_same_scope_candidate_keeps_field_params_together_end_t
                     "answer_requests": [
                         {
                             "answer_fact": "shade names",
-                            "answer_expression": {"family": "list_rows"},
+                                "answer_expression": {
+                                    "family": "list_rows",
+                                    "selection": {"kind": "all_results"},
+                                },
                             "answer_subject": _answer_subject_payload("shade names"),
                             "answer_population": _answer_population_payload(
                                 description="shade names",
@@ -614,6 +617,14 @@ def _question_contract_for_fact_plan(
         family = family_by_fact_id.get(requested_fact_id)
         if family:
             expression: dict[str, Any] = {"family": family}
+            if family == "list_rows":
+                expression["selection"] = {"kind": "all_results"}
+            elif family == "grouped_aggregate":
+                expression["group_key"] = {
+                    "description": "result group",
+                    "value_source": {"kind": "source_value"},
+                }
+                expression["selection"] = {"kind": "all_results"}
             answer_request["answer_expression"] = expression
     return updated
 
@@ -645,8 +656,8 @@ def _answer_expression_family_for_pattern(pattern: str) -> str:
         return "scalar_aggregate"
     if pattern == "aggregate_by_group":
         return "grouped_aggregate"
-    if pattern == "ranked_aggregate":
-        return "ranked_selection"
+    if pattern == "aggregate_by_group":
+        return "grouped_aggregate"
     if pattern == "computed_scalar":
         return "computed_scalar"
     if pattern == "set_difference":
@@ -667,8 +678,7 @@ def _answer_population_payload(
     subject_text: str,
     ownership=None,
 ) -> dict[str, object]:
-    payload = default_answer_population(
-        description=description,
+    population = default_answer_population(
         subject_text=subject_text,
         instance_interpretation=RequestedFactAnswerSubject(
             subject_text=subject_text,
@@ -676,11 +686,10 @@ def _answer_population_payload(
     ).to_question_contract_dict()
     if ownership is None:
         ownership = provider_question_input_ownership()
-    payload["membership_tests"] = provider_membership_tests(
-        payload["membership_tests"],
+    return provider_answer_population(
+        population,
         ownership=ownership,
     )
-    return payload
 
 
 def _question_contract_with_prompt_memory(

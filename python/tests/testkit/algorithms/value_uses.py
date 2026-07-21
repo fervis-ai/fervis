@@ -10,12 +10,11 @@ from fervis.lookup.plan_execution.relations import RelationRows
 from fervis.lookup.source_binding.compiler_ir import (
     DraftEndpointParamBinding,
     DraftRelationSource,
-    DraftRelationSourceRowFilter,
+    DraftRelationSourceAppliedFilter,
     RelationInputOrigin,
 )
 from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
-    Relation,
     RelationField,
     SourceKind,
 )
@@ -44,9 +43,16 @@ from fervis.lookup.answer_program import (
 from fervis.lookup.answer_program.compiler_inputs import CompilerInputContext
 from fervis.lookup.answer_program.contracts import parameter_value_type
 from fervis.lookup.fact_planning.pattern_plan.parameterization import (
+    ParameterizedRelation,
     compiled_program_inputs,
     parameterize_relation,
 )
+from fervis.lookup.answer_program.expressions import (
+    FieldRef,
+    expression_input_id,
+    expression_references,
+)
+from fervis.lookup.answer_program.operations import FilterSpec
 from fervis.lookup.fact_planning.value_components import value_component
 
 from tests.testkit.assertions import (
@@ -99,6 +105,11 @@ def run_value_uses_case(payload: dict[str, Any]) -> list[str]:
             value.id: ParameterRef(parameter_id=parameter_ids[value.id])
             for value in values
         },
+        population_coverage_by_value_id={},
+        value_types_by_value_id={
+            value.id: parameter.value_type
+            for value, parameter in zip(values, parameter_declarations, strict=True)
+        },
     )
     try:
         parameters = {item.id: item for item in parameter_declarations}
@@ -122,7 +133,7 @@ def run_value_uses_case(payload: dict[str, Any]) -> list[str]:
         compiled = instantiate_program_expressions(
             bindings=compiled_inputs.bindings,
             catalog=catalog,
-            relations=relations,
+            relations=tuple(item.relation for item in relations),
             row_sources=row_sources,
         )
     except (ValueError, VerificationError) as exc:
@@ -135,7 +146,7 @@ def run_value_uses_case(payload: dict[str, Any]) -> list[str]:
     if expects_rejection(payload["expect"]):
         return status_mismatches(actual_status="accepted", expected=payload["expect"])
     return subset_mismatches(
-        actual=_compiled_payload(compiled),
+        actual=_compiled_payload(compiled, relations=relations),
         expected_subset=payload["expect"]["result_contains"],
     )
 
@@ -205,7 +216,7 @@ def _relation(
     input_context: CompilerInputContext,
     parameters: dict[str, ParameterDeclaration],
     bindings: dict[str, ParameterBinding],
-) -> Relation:
+) -> ParameterizedRelation:
     relation_id = str(payload["id"])
     return parameterize_relation(
         relation_id=relation_id,
@@ -242,13 +253,13 @@ def _relation_source(
             )
             for item in payload.get("param_bindings") or ()
         ),
-        row_filters=tuple(
-            _source_row_filter(
+        applied_filters=tuple(
+            _source_applied_filter(
                 item,
                 relation_id=relation_id,
                 parameter_ids=parameter_ids,
             )
-            for item in payload.get("row_filters") or ()
+            for item in payload.get("applied_filters") or ()
         ),
     )
 
@@ -294,12 +305,15 @@ def _relation_field(payload: dict[str, Any]) -> RelationField:
     )
 
 
-def _source_row_filter(
+def _source_applied_filter(
     payload: dict[str, Any],
     *,
     relation_id: str,
     parameter_ids: dict[str, str],
-) -> DraftRelationSourceRowFilter:
+) -> DraftRelationSourceAppliedFilter:
+    field_ids = tuple(str(item) for item in payload.get("field_ids") or ())
+    if not field_ids:
+        raise ValueError("source applied filter requires fields")
     value_id = str(payload.get("value_id") or "")
     proof_refs = tuple(str(ref) for ref in payload.get("proof_refs") or ())
     expression = (
@@ -310,12 +324,13 @@ def _source_row_filter(
         if value_id
         else _constant_expression(
             tuple(str(value) for value in payload.get("values") or ()),
-            ref_id=f"{relation_id}.{payload['field_id']}",
+            ref_id=f"{relation_id}.{field_ids[0]}",
             proof_refs=proof_refs,
         )
     )
-    return DraftRelationSourceRowFilter(
-        field_id=str(payload["field_id"]),
+    return DraftRelationSourceAppliedFilter(
+        predicate_field_ids=field_ids,
+        known_input_id="",
         operator=str(payload["operator"]),
         value_expr=expression,
         proof_refs=proof_refs,
@@ -375,7 +390,11 @@ def _value_component(value: str) -> ValueComponent | TimeComponent:
     return ValueComponent(value)
 
 
-def _compiled_payload(compiled: Any) -> dict[str, Any]:
+def _compiled_payload(
+    compiled: Any,
+    *,
+    relations: tuple[ParameterizedRelation, ...],
+) -> dict[str, Any]:
     return {
         "endpoint_args": [
             {
@@ -389,16 +408,28 @@ def _compiled_payload(compiled: Any) -> dict[str, Any]:
             }
             for item in compiled.endpoint_args
         ],
-        "row_filters": [
-            {
-                "relation_id": item.relation_id,
-                "field_id": item.field_id,
-                "operator": item.operator.value,
-                "value": list(item.value)
-                if isinstance(item.value, tuple)
-                else item.value,
-                "proof_refs": list(item.proof_refs),
-            }
-            for item in compiled.row_filters
+        "filters": [
+            _filter_payload(operation.spec, output_relation=operation.output_relation)
+            for relation in relations
+            for operation in relation.operations
+            if isinstance(operation.spec, FilterSpec)
         ],
+    }
+
+
+def _filter_payload(spec: FilterSpec, *, output_relation: str) -> dict[str, Any]:
+    right = spec.predicate.right
+    references = expression_references(right) if right is not None else None
+    left = spec.predicate.left
+    return {
+        "input_relation": spec.input_relation,
+        "output_relation": output_relation,
+        "field_id": left.field_id if isinstance(left, FieldRef) else "",
+        "operator": spec.predicate.operator.value,
+        "value_ref": (
+            expression_input_id(references.leaves[0])
+            if references is not None and len(references.leaves) == 1
+            else ""
+        ),
+        "proof_refs": list(spec.proof_refs),
     }

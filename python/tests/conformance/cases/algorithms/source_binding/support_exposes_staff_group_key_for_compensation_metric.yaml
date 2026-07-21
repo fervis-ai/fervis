@@ -1,7 +1,7 @@
 id: support_exposes_staff_group_key_for_compensation_metric
 description: Compensation-row support exposes staff as a legal group key and calculated pay as the metric.
 migrates:
-  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_grouped_ranked_exposes_staff_group_key_for_compensation_metric
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_grouped_aggregate_exposes_staff_group_key_for_compensation_metric
 kind: algorithm
 algorithm: source_binding.fulfillment_support
 input:

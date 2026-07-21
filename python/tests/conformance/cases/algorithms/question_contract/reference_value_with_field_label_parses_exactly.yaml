@@ -28,36 +28,26 @@ input:
       - answer_fact: sales count for the specified staff member today
         answer_expression: {family: scalar_aggregate}
         question_input_uses:
-          - {use_id: use_staff, input_ref: staff, owner_kind: POPULATION_TESTS}
-          - {use_id: use_today, input_ref: today, owner_kind: POPULATION_TESTS}
+          - {input_ref: staff, owner_kind: POPULATION_TESTS, use_id: staff_use}
+          - {input_ref: today, owner_kind: POPULATION_TESTS, use_id: today_use}
         answer_subject:
           subject_text: sales
           instance_interpretation: {kind: NORMAL_BUSINESS_INSTANCE}
         answer_population:
-          population_label: sales by specified staff member today
-          counted_unit: sales
           membership_tests:
-            - test_id: pop_test_1
-              kind: SUBJECT_IDENTITY
-              polarity: MUST_PASS
-              test_question: Does the row represent a sale?
-              question_input_use_refs: []
-            - test_id: pop_test_2
-              kind: EXPLICIT_USER_CONSTRAINT
-              polarity: MUST_PASS
+            - polarity: MUST_PASS
               test_question: Is the sale by the specified staff member?
-              question_input_use_refs: [use_staff]
-            - test_id: pop_test_3
-              kind: EXPLICIT_USER_CONSTRAINT
-              polarity: MUST_PASS
+              population_use_refs: [staff_use]
+            - polarity: MUST_PASS
               test_question: Is the sale today?
-              question_input_use_refs: [use_today]
+              population_use_refs: [today_use]
         answer_outputs:
           - description: number of sales
             role: ANSWER_VALUE
-    question_input_inventory_check: {all_input_like_phrases_declared: true}
+    question_input_inventory_check:
+      all_input_like_phrases_declared: true
 expect:
-  result_equals:
+  result_contains:
     question_inputs:
       - id: staff
         kind: literal_text
@@ -83,29 +73,6 @@ expect:
         answer_expression_family: scalar_aggregate
         answer_subject_text: sales
         input_refs: [staff, today]
-        known_inputs:
-          - id: staff
-            kind: literal_text
-            source: question_context
-            text: staff_id 51515151-0000-0000-0002-000000000001
-            resolved_input_ref: ""
-            resolved_value_text: 51515151-0000-0000-0002-000000000001
-            field_label_text: staff_id
-            value_meaning_hint: staff member
-            role: reference_value
-          - id: today
-            kind: literal_text
-            source: question_context
-            text: today
-            resolved_input_ref: ""
-            resolved_value_text: today
-            field_label_text: ""
-            value_meaning_hint: ""
-            role: time_value
-        answer_outputs:
-          - id: answer_1
-            description: number of sales
-            role: ANSWER_VALUE
         answer_request:
           answer_fact: sales count for the specified staff member today
           answer_expression:
@@ -115,26 +82,24 @@ expect:
             instance_interpretation:
               kind: NORMAL_BUSINESS_INSTANCE
               short_label: ordinary business meaning of sales
-              meaning: Answer over ordinary business instances of 'sales' as they are normally understood in business operations and reporting. Do not assume this includes every persisted representation the host API may expose for 'sales'. Explicit user wording may narrow or override this normal instance interpretation.
+              meaning: Answer over ordinary business instances of 'sales' as they are normally understood in business operations and reporting. Do not assume this includes every persisted representation the host API may expose for 'sales'.
           answer_population:
-            population_label: sales by specified staff member today
             counted_unit: sales
             membership_tests:
               - test_id: pop_test_1
                 kind: SUBJECT_IDENTITY
-                polarity: MUST_PASS
-                test_question: Does the row represent a sale?
                 owned_question_input_refs: []
               - test_id: pop_test_2
+                kind: NORMAL_INSTANCE_GUARD
+                owned_question_input_refs: []
+              - test_id: explicit_user_constraint_1
                 kind: EXPLICIT_USER_CONSTRAINT
-                polarity: MUST_PASS
-                test_question: Is the sale by the specified staff member?
                 owned_question_input_refs: [staff]
-              - test_id: pop_test_3
+              - test_id: explicit_user_constraint_2
                 kind: EXPLICIT_USER_CONSTRAINT
-                polarity: MUST_PASS
-                test_question: Is the sale today?
                 owned_question_input_refs: [today]
-          answer_outputs:
-            - description: number of sales
-              role: ANSWER_VALUE
+  result_exact_fields:
+    requested_fact_input_handoff:
+      - id: fact_1
+        input_refs: [staff, today]
+        known_input_refs: [staff, today]

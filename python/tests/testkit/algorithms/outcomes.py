@@ -7,10 +7,6 @@ from fervis.lookup.clarification import (
     clarification_payload,
 )
 from fervis.lookup.plan_execution.operation_runtime import RelationEngineOutput
-from fervis.lookup.plan_execution.operation_runtime import (
-    ResolvedComputeSpec,
-    ResolvedRankSpec,
-)
 from fervis.lookup.plan_execution.operation_engine import execute_operations
 from fervis.lookup.outcomes.model import (
     EmptyRelationKind,
@@ -24,7 +20,7 @@ from fervis.lookup.outcomes.classification import (
     classify_empty_relation,
 )
 from fervis.lookup.answer_program.model import AnswerProgram, FactFulfillment
-from fervis.lookup.answer_program.operations import Operation
+from fervis.lookup.answer_program.operations import ComputeSpec, Operation, OrderSpec
 from fervis.lookup.fact_plan.fact_plan import (
     BlockedFact,
     BlockedFactBasis,
@@ -192,7 +188,7 @@ def _answer_operations(payload: dict[str, Any]) -> tuple[Operation, ...]:
             output_relation=operation.output_relation,
         )
         for operation in operations
-        if not isinstance(operation.spec, (ResolvedComputeSpec, ResolvedRankSpec))
+        if not isinstance(operation.spec, (ComputeSpec, OrderSpec))
     )
 
 

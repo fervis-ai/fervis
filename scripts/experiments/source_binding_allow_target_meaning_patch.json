@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Do not infer predicate meaning from parameter or field names.\n",
+      "new": "",
+      "expected_count": 1
+    }
+  ]
+}

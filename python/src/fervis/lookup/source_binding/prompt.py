@@ -214,7 +214,9 @@ def _binding_target_payload(
     payload = closed_key_bindings.model_visible_target_payload(target)
     surface = input_application_surfaces.get(target.binding_target_id)
     if surface is not None and (
-        surface.parameter_targets_by_id or surface.identity_targets_by_id
+        surface.parameter_targets_by_id
+        or surface.identity_targets_by_id
+        or surface.returned_field_targets_by_id
     ):
         payload["resolved_input_application"] = surface.prompt_payload()
     population_tests = _population_binding_tests(
@@ -293,8 +295,6 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                     "For each requested fact, complete its bindings_for_<requested_fact_id> object: choose one shown plan_shape and bind every role shown for that shape exactly once, including roles with no answer outputs.",
                     "Choose each binding_target_id only from its enclosing role and obey the shape's member_constraint.",
                     "The role binding also chooses its answer population, required fulfillment, params, and population reviews.",
-                    "ranked_rows ranks individual source rows without grouping or aggregation.",
-                    "ranked_aggregate groups source rows by an entity key, aggregates a measure within each group, and ranks the resulting groups.",
                     "Bind sources under the fixed meanings in resolved_inputs.",
                     "Apply resolved question inputs through resolved_input_applications on the selected source invocation.",
                 ),
@@ -317,7 +317,7 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                     "Do not treat metric context fields as selectable fulfillment evidence.",
                     "metric_fit_bases is keyed by requested_fact_id, then metric_evidence_id from Metric fit candidates.",
                     "metric_meaning states what the reviewed metric_evidence_id appears to measure from field_path, field_type, resource_names, and the referenced metric_context.",
-                    "fit_basis evaluates whether the metric is the row-level or scalar measure that should be aggregated, ranked, compared, or otherwise computed to determine the requested answer.",
+                    "fit_basis evaluates whether the metric is the row-level or scalar measure that should be aggregated, used to order results, compared, or otherwise computed to determine the requested answer.",
                     "A metric fits when it is the correct measure input to the requested computation. Do not reject it merely because aggregation or another later operation produces the final answer value.",
                     "After all fit_basis entries, write fit_basis_interpretations with the same keys, using only the already-written fit_basis text.",
                     "Use interpretation=FITS_REQUESTED_ANSWER when the written fit_basis says the metric fits that role; otherwise use DOES_NOT_FIT_REQUESTED_ANSWER.",
@@ -329,17 +329,23 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                 ),
             ),
             builder.instruction_block(
-                "Resolved Input Application",
+                "Predicate Applications",
                 (
-                    "resolved_input_applications is inside one role binding. Each item applies one resolved_values entry to one target listed under targets_by_kind for that role binding.",
-                    "Use target_kind=request_parameter to apply the resolved input to the shown request parameter named by target_id.",
-                    "Use target_kind=returned_identity to keep only returned rows whose shown candidate-key or entity-reference target equals the resolved input value.",
+                    "resolved_input_applications is inside one role binding. Each item selects one resolved_values entry by value_id and lists its physical target applications under applications.",
+                    "An application target with target_kind=request_parameter applies the resolved input to its shown request parameter.",
+                    "An application target with target_kind=returned_identity keeps only returned rows whose shown candidate-key or entity-reference target equals the resolved input value.",
+                    "For each shown predicate requirement, select the shown target or targets whose combined mechanics apply that predicate.",
+                    "A request_parameter application means the source applies the shown predicate before returning rows.",
+                    "A returned_field application means Fervis keeps returned rows satisfying the shown field, operator, and value predicate.",
+                    "For threshold_value, the requested fact already fixes the value and comparison operator; choose only where that predicate is applied.",
+                    "For predicate_value, select the shown application_target_id whose target and, when present, finite-choice value apply the fixed predicate.",
+                    "Do not infer predicate meaning from parameter or field names.",
                     "Each selected role binding must apply every fact-local resolved input that owns an explicit population constraint and exposes a compatible component and target kind on that role.",
-                    "Copy value_component from the selected value's components_by_target_kind entry for target_kind.",
+                    "Copy value_component from the selected value's components_by_target_kind entry for the application target's target_kind.",
                     "For returned identities, use value_component=canonical_key; the backend maps every declared key component to its declared returned field.",
-                    "The same resolved value may be applied to more than one target when the selected computation requires each application.",
                     "Resolved values with the same request_parameter_alternative_group are alternative operands. Apply every value in that group to the same request_parameter target; the backend creates one source invocation per value. Otherwise, use each target at most once.",
-                    "match_basis_explanation states how the resolved input restricts this source invocation.",
+                    "Each application.match_basis_explanation states how that target applies the resolved input.",
+                    "Write population_test_results once for the resolved value, using the combined effect of all selected applications in that item.",
                 ),
             ),
             builder.instruction_block(
@@ -400,7 +406,7 @@ class SourceBindingTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Normal Instance Guard",
                 (
-                    "When the membership test has kind=NORMAL_INSTANCE_GUARD, write role_match_basis, explicit_user_override_evidence, explicit_user_override_applies, population_consequence, then disposition.",
+                    "When the membership test has kind=NORMAL_INSTANCE_GUARD, write role_match_basis, population_consequence, then disposition.",
                     "For NORMAL_INSTANCE_GUARD, use the param's normal_instance_role_profiles input.",
                     "Read all excluded_state_roles in the matching normal_instance_role_profiles item before writing disposition.",
                     "role_match_basis must compare the choice domain meaning to the excluded state roles.",
@@ -411,13 +417,10 @@ class SourceBindingTurnPrompt(TurnPromptBase):
                     "Use disposition.matched_excluded_role=NONE only after considering all excluded_state_roles and finding that none applies.",
                     "Use disposition.matched_excluded_role=UNKNOWN only when the prompt data is insufficient to classify the choice against those roles.",
                     "If disposition.matched_excluded_role=UNKNOWN, use disposition.test_effect=UNKNOWN_TEST_EFFECT.",
-                    "If disposition.matched_excluded_role is an excluded role and explicit_user_override_applies=false, use disposition.test_effect=CONFLICTS_WITH_TEST.",
-                    "If disposition.matched_excluded_role is an excluded role and explicit_user_override_applies=true, use disposition.test_effect=SATISFIES_TEST.",
+                    "If disposition.matched_excluded_role is an excluded role, use disposition.test_effect=CONFLICTS_WITH_TEST.",
                     "If disposition.matched_excluded_role=NONE, use disposition.test_effect=SATISFIES_TEST only when this choice itself proves normal-instance membership; otherwise use DOES_NOT_DECIDE_TEST.",
                     "If the choice axis does not describe the answer subject, use disposition.matched_excluded_role=NONE and disposition.test_effect=DOES_NOT_DECIDE_TEST for NORMAL_INSTANCE_GUARD, and set choice_inclusion based on whether rows with this choice value should contribute to the requested answer.",
                     "Do not copy role definitions into the output.",
-                    "explicit_user_override_evidence contains copied question or conversation-resolution text only when the user explicitly asks for that matched excluded state, raw records, all records, or a non-normal population.",
-                    "For NORMAL_INSTANCE_GUARD, explicit_user_override_applies=true requires non-empty explicit_user_override_evidence and disposition.matched_excluded_role must be a role from the profile.",
                 ),
             ),
             builder.instruction_block(
@@ -661,6 +664,10 @@ class SourceBindingTurnPrompt(TurnPromptBase):
             target_fulfillment_supports[target_id] = _grain_safe_fulfillment_supports(
                 candidate,
                 target=target,
+                ordered=_target_fact_is_ordered(
+                    self.request,
+                    requested_fact_id=target.requested_fact_id,
+                ),
                 fulfillment_supports=visible_fulfillment_supports,
             )
             target_required_fulfillment_output_ids[target_id] = (
@@ -729,9 +736,10 @@ def _grain_safe_fulfillment_supports(
     candidate: SourceCandidate,
     *,
     target: SourceBindingTarget,
+    ordered: bool,
     fulfillment_supports: dict[str, tuple[str, ...]],
 ) -> dict[str, tuple[str, ...]]:
-    if target.plan_shape != "ranked_rows":
+    if target.plan_shape != "list_rows" or not ordered:
         return fulfillment_supports
     return {
         answer_output_id: tuple(
@@ -741,6 +749,22 @@ def _grain_safe_fulfillment_supports(
         )
         for answer_output_id, support_set_ids in fulfillment_supports.items()
     }
+
+
+def _target_fact_is_ordered(
+    request: SourceBindingRequest,
+    *,
+    requested_fact_id: str,
+) -> bool:
+    fact = next(
+        (item for item in request.requested_facts if item.id == requested_fact_id),
+        None,
+    )
+    return bool(
+        fact is not None
+        and fact.answer_expression is not None
+        and fact.answer_expression.is_ordered
+    )
 
 
 def _plan_families_payload(

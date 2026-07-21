@@ -30,29 +30,18 @@ input:
     answer_expression:
       family: scalar_aggregate
     question_input_uses:
-    - {use_id: use_staff, input_ref: staff, owner_kind: POPULATION_TESTS}
-    - {use_id: use_period, input_ref: period, owner_kind: POPULATION_TESTS}
+    - {input_ref: staff, owner_kind: POPULATION_TESTS}
+    - {input_ref: period, owner_kind: POPULATION_TESTS}
     answer_subject:
       subject_text: sales amount
       instance_interpretation:
         kind: NORMAL_BUSINESS_INSTANCE
     answer_population:
-      population_label: sales amount
-      counted_unit: sales amount
       membership_tests:
-      - question_input_use_refs: []
-        test_id: pop_test_1
-        kind: SUBJECT_IDENTITY
-        polarity: MUST_PASS
-        test_question: Does the row/value represent sales amount?
-      - question_input_use_refs: [use_staff]
-        test_id: staff_scope
-        kind: EXPLICIT_USER_CONSTRAINT
+      - question_input_refs: [staff]
         polarity: MUST_PASS
         test_question: Does the sales amount belong to Alice?
-      - question_input_use_refs: [use_period]
-        test_id: period_scope
-        kind: EXPLICIT_USER_CONSTRAINT
+      - question_input_refs: [period]
         polarity: MUST_PASS
         test_question: Is the sales amount from yesterday?
     answer_outputs:
@@ -62,29 +51,18 @@ input:
     answer_expression:
       family: scalar_aggregate
     question_input_uses:
-    - {use_id: use_staff, input_ref: staff, owner_kind: POPULATION_TESTS}
-    - {use_id: use_period, input_ref: period, owner_kind: POPULATION_TESTS}
+    - {input_ref: staff, owner_kind: POPULATION_TESTS}
+    - {input_ref: period, owner_kind: POPULATION_TESTS}
     answer_subject:
       subject_text: store
       instance_interpretation:
         kind: NORMAL_BUSINESS_INSTANCE
     answer_population:
-      population_label: store
-      counted_unit: store
       membership_tests:
-      - question_input_use_refs: []
-        test_id: pop_test_1
-        kind: SUBJECT_IDENTITY
-        polarity: MUST_PASS
-        test_question: Does the row/value represent store?
-      - question_input_use_refs: [use_staff]
-        test_id: staff_scope
-        kind: EXPLICIT_USER_CONSTRAINT
+      - question_input_refs: [staff]
         polarity: MUST_PASS
         test_question: Is the store associated with Alice's sales?
-      - question_input_use_refs: [use_period]
-        test_id: period_scope
-        kind: EXPLICIT_USER_CONSTRAINT
+      - question_input_refs: [period]
         polarity: MUST_PASS
         test_question: Is the association from yesterday?
     answer_outputs:

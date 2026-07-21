@@ -11,7 +11,6 @@ from fervis.lookup.answer_program.relations import (
 from fervis.lookup.question_contract import (
     AnswerPopulationMembershipTestKind,
     AnswerPopulationMembershipTestPolarity,
-    NormalInstanceExplicitOverrideReason,
 )
 from fervis.lookup.source_binding import provider_contract as provider_output
 from fervis.lookup.source_binding.membership_tests import (
@@ -60,20 +59,8 @@ def answer_population_tests_by_id(
 
 def population_choice_proof_refs(
     base_ref: str,
-    out_of_scope_decisions: tuple[ReviewScopeDecision, ...],
 ) -> tuple[str, ...]:
-    return tuple(
-        dict.fromkeys(
-            (
-                base_ref,
-                *(
-                    ref
-                    for decision in out_of_scope_decisions
-                    for ref in decision.proof_refs
-                ),
-            )
-        )
-    )
+    return (base_ref,)
 
 
 def relation_review_scope_decisions(
@@ -304,21 +291,6 @@ def _validate_normal_instance_test_effect(
         test_id=membership_test_key(test),
         path=f"{path}.disposition",
     )
-    override_applies = raw.explicit_user_override_applies
-    if not isinstance(override_applies, bool):
-        raise ValueError("normal instance review requires explicit override decision")
-    override_evidence = _normal_instance_override_evidence(
-        raw.explicit_user_override_evidence,
-        path=f"{path}.explicit_user_override_evidence",
-    )
-    if override_applies and not override_evidence:
-        raise ValueError("normal instance review override evidence is required")
-    if override_applies and not role_effect["matched"]:
-        raise ValueError("normal instance review override requires matched role")
-    if not override_applies and override_evidence:
-        raise ValueError(
-            "normal instance review override evidence conflicts with decision"
-        )
     if not _text(raw.population_consequence).strip():
         raise ValueError("normal instance review requires population consequence")
     effect = _text(disposition.test_effect)
@@ -333,7 +305,6 @@ def _validate_normal_instance_test_effect(
         effect=effect,
         matched=role_effect["matched"],
         unknown=role_effect["unknown"],
-        explicit_user_override_applies=override_applies,
     )
     return effect
 
@@ -366,7 +337,6 @@ def _validate_normal_instance_test_effect_consistency(
     effect: str,
     matched: bool,
     unknown: bool,
-    explicit_user_override_applies: bool,
 ) -> None:
     if unknown:
         if effect != "UNKNOWN_TEST_EFFECT":
@@ -374,33 +344,12 @@ def _validate_normal_instance_test_effect_consistency(
                 "normal instance review effect conflicts with unknown role"
             )
         return
-    if matched and explicit_user_override_applies:
-        if effect != "SATISFIES_TEST":
-            raise ValueError("normal instance review effect conflicts with override")
-        return
     if matched:
         if effect != "CONFLICTS_WITH_TEST":
             raise ValueError("normal instance review effect conflicts with role match")
         return
     if effect not in {"SATISFIES_TEST", "DOES_NOT_DECIDE_TEST"}:
         raise ValueError("normal instance review effect conflicts with role match")
-
-
-def _normal_instance_override_evidence(
-    items: tuple[provider_output.NormalInstanceOverrideEvidenceOutput, ...],
-    *,
-    path: str,
-) -> tuple[dict[str, str], ...]:
-    output: list[dict[str, str]] = []
-    for evidence in items:
-        source_text = _text(evidence.source_text)
-        if not source_text.strip():
-            raise ValueError(
-                "normal instance review override evidence requires source text"
-            )
-        reason = NormalInstanceExplicitOverrideReason(_text(evidence.reason))
-        output.append({"source_text": source_text, "reason": reason.value})
-    return tuple(output)
 
 
 def choice_is_included(

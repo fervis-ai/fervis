@@ -1,0 +1,10 @@
+{
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "add",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items/properties/question_input_use_refs/description",
+      "value": "use_id values copied from prior POPULATION_TESTS question_input_uses; never input_ref values."
+    }
+  ]
+}

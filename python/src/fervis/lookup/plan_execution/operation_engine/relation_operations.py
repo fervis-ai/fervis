@@ -20,7 +20,7 @@ from fervis.lookup.answer_program.operations import (
     CrossJoinSpec,
     FilterSpec,
     JoinSpec,
-    ProjectField,
+    NamedExpression,
     ProjectSpec,
     ProjectToKeySpec,
     RelationRole,
@@ -28,6 +28,8 @@ from fervis.lookup.answer_program.operations import (
     UnionSpec,
     UniversalConditionSpec,
 )
+from fervis.lookup.answer_program.expressions import FieldRef
+from .expression_evaluator import ExpressionEnvironment, evaluate_expression
 
 from .predicates import _predicate, _predicate_fact
 from .shared import (
@@ -87,25 +89,47 @@ def _project(
     operation: ExecutableOperation,
     spec: ProjectSpec,
     relations: dict[str, RelationRows],
+    scalars: dict[str, RuntimeValue],
+    scalar_proofs: dict[str, tuple[str, ...]],
+    scalar_types: dict[str, str],
+    node_outputs: dict[str, dict[str, RuntimeValue]],
+    *,
+    environment_values: dict[str, RuntimeValue],
+    environment_types: dict[str, str],
 ) -> RelationRows:
-    output_rows = []
-    for row in _relation(relations, spec.input_relation).rows:
-        output: dict[str, RuntimeValue] = {}
-        for field in spec.fields:
-            output[field.output or field.source] = _field(row, field.source)
-        output_rows.append(output)
     input_relation = _relation(relations, spec.input_relation)
+    output_rows = []
+    output_types: dict[str, str] = {}
+    for row in input_relation.rows:
+        output: dict[str, RuntimeValue] = {}
+        for named in spec.outputs:
+            evaluated = evaluate_expression(
+                named.expression,
+                environment=ExpressionEnvironment(
+                    row=row,
+                    field_types=input_relation.field_types,
+                    scalars=scalars,
+                    scalar_types=scalar_types,
+                    node_outputs=node_outputs,
+                    environment_values=environment_values,
+                    environment_types=environment_types,
+                ),
+            )
+            _assign_field(output, named.output_field, evaluated.value)
+            existing = output_types.get(named.output_field)
+            if existing is not None and not declared_types_compatible(
+                existing, evaluated.value_type
+            ):
+                raise RelationEngineError("projection output types are inconsistent")
+            output_types[named.output_field] = evaluated.value_type
+        output_rows.append(output)
     return _operation_relation(
         operation,
         output_rows,
-        grain_keys=_project_grain(input_relation, spec.fields),
+        grain_keys=_project_grain(input_relation, spec.outputs),
         inputs=(input_relation,),
-        field_types={
-            field.output or field.source: (input_relation.field_types or {}).get(
-                field.source, ""
-            )
-            for field in spec.fields
-        },
+        field_types=output_types,
+        scalar_refs=_input_scalar_proof_refs(operation, scalar_proofs),
     )
 
 
@@ -506,13 +530,17 @@ def _rows_equal(
 
 def _project_field_types(
     input_types: dict[str, str],
-    fields: tuple[ProjectField, ...],
+    fields: tuple[NamedExpression, ...],
     grain_fields: tuple[str, ...] = (),
 ) -> dict[str, str]:
     output = {field: input_types.get(field, "") for field in grain_fields}
     for projection in fields:
-        source = projection.source
-        output[projection.output or source] = input_types.get(source, "")
+        if not isinstance(projection.expression, FieldRef):
+            raise RelationEngineError(
+                "role projection requires direct field expression"
+            )
+        source = projection.expression.field_id
+        output[projection.output_field] = input_types.get(source, "")
     return output
 
 

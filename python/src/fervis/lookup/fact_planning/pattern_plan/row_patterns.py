@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from fervis.lookup.answer_program.operations import (
     Operation,
-    ProjectField,
+    OrderSpec,
+    NamedExpression,
     ProjectSpec,
-    RankSpec,
-    SortDirection,
     SortKey,
-    TiePolicy,
 )
+from fervis.lookup.answer_program.expressions import FieldRef
 from fervis.lookup.answer_program.compiler_inputs import CompilerInputContext
 from fervis.lookup.answer_program.result_projection import (
     EntityKeyProjection,
@@ -27,7 +26,6 @@ from fervis.lookup.fact_planning.provider_contract import (
     DirectFieldValueAnswerOutput,
     GroupedRowsAnswerOutput,
     ListRowsAnswerOutput,
-    RankedRowsAnswerOutput,
 )
 
 from .shared import (
@@ -41,21 +39,23 @@ from .shared import (
     _relation_fields,
 )
 from fervis.lookup.fact_planning.compiled_patterns import (
-    CompiledRank,
+    CompiledOrdering,
     CompiledPattern,
     PatternAddress,
 )
+from fervis.lookup.question_contract import RequestedFact
 from .result_ids import _result_output_id
 
 
 def _compile_project_pattern_answer(
     *,
     index: int,
-    answer: ListRowsAnswerOutput | GroupedRowsAnswerOutput | RankedRowsAnswerOutput,
+    answer: ListRowsAnswerOutput | GroupedRowsAnswerOutput,
     namespace_result_outputs: bool,
     bound_sources: dict[str, BoundSource],
     relation_builder: RelationBuilder,
     input_context: CompilerInputContext,
+    requested_fact: RequestedFact,
 ) -> CompiledPattern:
     address = PatternAddress(
         requested_fact_id=answer.requested_fact_id,
@@ -64,7 +64,10 @@ def _compile_project_pattern_answer(
         source_binding_id=answer.source_binding_id,
     )
     order_field = None
-    rank = None
+    ordering = CompiledOrdering.from_requested_fact(
+        requested_fact,
+        input_context=input_context,
+    )
     match answer:
         case GroupedRowsAnswerOutput():
             group_fields = tuple(
@@ -73,14 +76,11 @@ def _compile_project_pattern_answer(
             )
         case ListRowsAnswerOutput():
             group_fields = ()
-        case RankedRowsAnswerOutput():
-            group_fields = ()
-            order_field = _field_spec({"field_id": answer.order_field.field_id})
-            rank = CompiledRank(
-                direction=SortDirection(answer.rank.sort),
-                limit=1,
-                limit_value_id=answer.rank.limit_value_id or "",
-            )
+    if ordering is not None:
+        ordering_field = getattr(answer, "ordering_field", None)
+        if ordering_field is None:
+            raise ValueError("ordered row answer requires ordering field")
+        order_field = _field_spec({"field_id": ordering_field.field_id})
     output_fields = tuple(
         _field_spec({"field_id": field.field_id}) for field in answer.output_fields
     )
@@ -93,7 +93,7 @@ def _compile_project_pattern_answer(
         bound_sources=bound_sources,
         relation_builder=relation_builder,
         order_field=order_field,
-        rank=rank,
+        ordering=ordering,
         input_context=input_context,
     )
 
@@ -108,16 +108,12 @@ def _compile_project_fields(
     bound_sources: dict[str, BoundSource],
     relation_builder: RelationBuilder,
     order_field: dict[str, str] | None = None,
-    rank: CompiledRank | None = None,
+    ordering: CompiledOrdering | None = None,
     input_context: CompilerInputContext,
 ) -> CompiledPattern:
     relation_id = _pattern_relation_id(index)
     output_relation_id = _pattern_output_relation_id(index)
     bound = _bound_source(address.source_binding_id, bound_sources=bound_sources)
-    tie_breaker_fields = _rank_tie_breaker_fields(
-        bound,
-        order_field=order_field,
-    )
     output_fields = _without_existing_fields(
         output_fields,
         existing_field_ids={item["field_id"] for item in group_fields},
@@ -142,7 +138,10 @@ def _compile_project_fields(
         offset=len(output_fields),
     )
     project_fields = tuple(
-        ProjectField(source=item["field_id"], output=item["output_field_id"])
+        NamedExpression(
+            output_field=item["output_field_id"],
+            expression=FieldRef(item["field_id"]),
+        )
         for item in (*group_fields, *output_fields)
     )
     result_pairs = (*output_field_result_pairs, *group_field_result_pairs)
@@ -170,16 +169,11 @@ def _compile_project_fields(
         output_relation_id=output_relation_id,
         project_fields=project_fields,
         order_field=order_field,
-        tie_breaker_fields=tie_breaker_fields,
-        rank=rank,
-        input_context=input_context,
+        ordering=ordering,
     )
     support_fields = tuple(
         item
-        for item in (
-            *((order_field,) if order_field is not None else ()),
-            *tie_breaker_fields,
-        )
+        for item in ((order_field,) if order_field is not None else ())
         if item not in (*group_fields, *output_fields)
     )
     compiled = _compiled_pattern(
@@ -199,56 +193,30 @@ def _compile_project_fields(
     return compiled
 
 
-def _rank_tie_breaker_fields(
-    bound: BoundSource,
-    *,
-    order_field: dict[str, str] | None,
-) -> tuple[dict[str, str], ...]:
-    if order_field is None:
-        return ()
-    order_field_id = order_field["field_id"]
-    return tuple(
-        _field_spec({"field_id": field.field_id})
-        for field in bound.available_fields
-        if "identity" in {str(role) for role in field.roles}
-        and field.field_id != order_field_id
-    )
-
-
 def _row_operations(
     *,
     relation_id: str,
     output_relation_id: str,
-    project_fields: tuple[ProjectField, ...],
+    project_fields: tuple[NamedExpression, ...],
     order_field: dict[str, str] | None,
-    tie_breaker_fields: tuple[dict[str, str], ...],
-    rank: CompiledRank | None,
-    input_context: CompilerInputContext,
+    ordering: CompiledOrdering | None,
 ) -> tuple[Operation, ...]:
     project_input_relation = relation_id
     operations: list[Operation] = []
-    if rank is not None and order_field is not None:
-        project_input_relation = f"{output_relation_id}_ranked"
+    if ordering is not None and order_field is not None:
+        project_input_relation = f"{output_relation_id}_ordered"
         operations.append(
             Operation(
-                id=f"{output_relation_id}_rank",
-                spec=RankSpec(
+                id=f"{output_relation_id}_order",
+                spec=OrderSpec(
                     input_relation=relation_id,
                     order_by=(
                         SortKey(
                             field=order_field["field_id"],
-                            direction=rank.direction,
+                            direction=ordering.direction,
                         ),
                     ),
-                    tie_policy=TiePolicy.FIELD,
-                    limit=rank.limit_expression(input_context),
-                    tie_breakers=tuple(
-                        SortKey(
-                            field=item["field_id"],
-                            direction=SortDirection.ASC,
-                        )
-                        for item in tie_breaker_fields
-                    ),
+                    selection=ordering.selection,
                 ),
                 output_relation=project_input_relation,
             )
@@ -258,7 +226,7 @@ def _row_operations(
             id=f"{output_relation_id}_project",
             spec=ProjectSpec(
                 input_relation=project_input_relation,
-                fields=project_fields,
+                outputs=project_fields,
             ),
             output_relation=output_relation_id,
         )

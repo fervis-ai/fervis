@@ -33,9 +33,10 @@ from fervis.lookup.fact_plan.fact_plan import (
 )
 from fervis.lookup.answer_program.operations import (
     Operation,
-    ProjectField,
+    NamedExpression,
     ProjectSpec,
 )
+from fervis.lookup.answer_program.expressions import FieldRef
 from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
     Relation,
@@ -77,7 +78,9 @@ def _operation() -> Operation:
         id="op",
         spec=ProjectSpec(
             input_relation="rows",
-            fields=(ProjectField(source="name"),),
+            outputs=(
+                NamedExpression(output_field="name", expression=FieldRef("name")),
+            ),
         ),
         output_relation="result",
     )

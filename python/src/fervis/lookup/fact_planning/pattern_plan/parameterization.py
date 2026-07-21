@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any
 from typing_extensions import assert_never
 
@@ -12,7 +12,6 @@ from fervis.lookup.source_binding.compiler_ir import (
     DraftRelationSource,
     DraftRelationSourceAppliedFilter,
     DraftRelationSourcePopulationChoice,
-    DraftRelationSourceRowFilter,
     RelationInputOrigin,
 )
 from fervis.lookup.answer_program.contracts import (
@@ -32,13 +31,19 @@ from fervis.lookup.answer_program.inputs import (
 )
 from fervis.lookup.answer_program.relations import (
     EndpointParamBinding,
+    PopulationChoiceControllerKind,
+    PopulationCoverageClaim,
     Relation,
     RelationField,
     RelationSource,
-    RelationSourceAppliedFilter,
     RelationSourcePopulationChoice,
-    RelationSourceRowFilter,
     SourceKind,
+)
+from fervis.lookup.answer_program.operations import (
+    FilterSpec,
+    Operation,
+    Predicate,
+    PredicateOperator,
 )
 from fervis.lookup.fact_plan.row_sources import (
     CALENDAR_END_PARAM_ID,
@@ -51,8 +56,15 @@ from fervis.lookup.answer_program.values import (
     ParameterRef,
     TimeComponent,
     ValueKind,
-    ValueExpression,
 )
+from fervis.lookup.answer_program.expressions import FieldRef
+
+
+@dataclass(frozen=True)
+class ParameterizedRelation:
+    relation: Relation
+    output_relation_id: str
+    operations: tuple[Operation, ...] = ()
 
 
 def parameterize_relation(
@@ -63,7 +75,7 @@ def parameterize_relation(
     input_context: CompilerInputContext,
     parameters: dict[str, ParameterDeclaration],
     bindings: dict[str, ParameterBinding],
-) -> Relation:
+) -> ParameterizedRelation:
     source_param_bindings = source.param_bindings
     if source.kind == SourceKind.GENERATED_CALENDAR and not source_param_bindings:
         source_param_bindings = _calendar_param_bindings(input_context)
@@ -76,8 +88,55 @@ def parameterize_relation(
         )
         for choice in source.population_choices
     )
-    return Relation(
-        id=relation_id,
+    returned_predicates = (
+        *(
+            predicate
+            for item in source.applied_filters
+            for predicate in _parameterize_applied_filter(
+                item,
+                input_context=input_context,
+            )
+        ),
+        *(
+            Predicate(
+                left=FieldRef(choice.field_id),
+                operator=PredicateOperator.IN,
+                right=parameterized.selection_expr,
+            )
+            for choice, parameterized in zip(
+                source.population_choices,
+                population_choices,
+                strict=True,
+            )
+            if choice.controller_kind is PopulationChoiceControllerKind.ROW_PREDICATE
+            and choice.excluded_values
+        ),
+    )
+    returned_filter_proof_refs = tuple(
+        dict.fromkeys(
+            (
+                *(ref for item in source.applied_filters for ref in item.proof_refs),
+                *(
+                    ref
+                    for item in source.population_choices
+                    if item.controller_kind
+                    is PopulationChoiceControllerKind.ROW_PREDICATE
+                    and item.excluded_values
+                    for ref in item.proof_refs
+                ),
+            )
+        )
+    )
+    returned_filter_claims, source_claims = _partition_population_claims(
+        source.population_coverage_claims,
+        returned_filter_proof_refs=returned_filter_proof_refs,
+    )
+    _require_returned_predicate_fields(returned_predicates, fields=fields)
+    source_relation_id = (
+        f"{relation_id}__source" if returned_predicates else relation_id
+    )
+    relation = Relation(
+        id=source_relation_id,
         source=RelationSource(
             kind=source.kind,
             read_id=source.read_id,
@@ -95,29 +154,71 @@ def parameterize_relation(
                 )
                 for binding in source_param_bindings
             ),
-            applied_filters=tuple(
-                _parameterize_applied_filter(
-                    item,
-                    input_context=input_context,
-                )
-                for item in source.applied_filters
-            ),
-            row_filters=tuple(
-                _parameterize_row_filter(
-                    item,
-                    relation_id=relation_id,
-                    parameters=parameters,
-                    bindings=bindings,
-                )
-                for item in source.row_filters
-            ),
             population_choices=population_choices,
             population_binding=source.population_binding,
-            population_coverage_claims=source.population_coverage_claims,
+            population_coverage_claims=source_claims,
             proof_refs=source.proof_refs,
         ),
         fields=fields,
     )
+    operations: list[Operation] = []
+    input_relation_id = source_relation_id
+    for index, predicate in enumerate(returned_predicates, start=1):
+        output_relation_id = (
+            relation_id
+            if index == len(returned_predicates)
+            else f"{relation_id}__filter_{index}"
+        )
+        operations.append(
+            Operation(
+                id=f"{relation_id}__filter_operation_{index}",
+                spec=FilterSpec(
+                    input_relation=input_relation_id,
+                    predicate=predicate,
+                    proof_refs=returned_filter_proof_refs,
+                    population_coverage_claims=(
+                        returned_filter_claims
+                        if index == len(returned_predicates)
+                        else ()
+                    ),
+                ),
+                output_relation=output_relation_id,
+            )
+        )
+        input_relation_id = output_relation_id
+    return ParameterizedRelation(
+        relation=relation,
+        output_relation_id=relation_id,
+        operations=tuple(operations),
+    )
+
+
+def _partition_population_claims(
+    claims: tuple[PopulationCoverageClaim, ...],
+    *,
+    returned_filter_proof_refs: tuple[str, ...],
+) -> tuple[tuple[PopulationCoverageClaim, ...], tuple[PopulationCoverageClaim, ...]]:
+    filter_refs = set(returned_filter_proof_refs)
+    returned = tuple(
+        claim
+        for claim in claims
+        if set(claim.proof_refs).intersection(filter_refs)
+    )
+    return returned, tuple(claim for claim in claims if claim not in returned)
+
+
+def _require_returned_predicate_fields(
+    predicates: tuple[Predicate, ...],
+    *,
+    fields: tuple[RelationField, ...],
+) -> None:
+    field_ids = {field.field_id for field in fields}
+    for predicate in predicates:
+        if (
+            not isinstance(predicate.left, FieldRef)
+            or predicate.left.field_id not in field_ids
+        ):
+            raise ValueError("returned-row filter requires a bound relation field")
 
 
 def compiled_program_inputs(
@@ -240,74 +341,27 @@ def _parameterize_applied_filter(
     source_filter: DraftRelationSourceAppliedFilter,
     *,
     input_context: CompilerInputContext,
-) -> RelationSourceAppliedFilter:
+) -> tuple[Predicate, ...]:
     if source_filter.value_expr is not None:
-        return RelationSourceAppliedFilter(
-            predicate_field_ids=source_filter.predicate_field_ids,
-            value_expr=source_filter.value_expr,
-            operator=source_filter.operator,
+        expression = source_filter.value_expr
+    else:
+        value_id = source_filter.value_id or _value_id_for_known_input(
+            source_filter.known_input_id,
+            input_context=input_context,
         )
-    value_id = source_filter.value_id or _value_id_for_known_input(
-        source_filter.known_input_id,
-        input_context=input_context,
-    )
-    if not value_id:
-        raise ValueError("applied filter requires explicit input value")
-    return RelationSourceAppliedFilter(
-        predicate_field_ids=source_filter.predicate_field_ids,
-        value_expr=input_context.expression_for_value(
+        if not value_id:
+            raise ValueError("applied filter requires explicit input value")
+        expression = input_context.expression_for_value(
             value_id,
             component=source_filter.value_component,
-        ),
-        operator=source_filter.operator,
-        proof_refs=source_filter.proof_refs,
-    )
-
-
-def _parameterize_row_filter(
-    row_filter: DraftRelationSourceRowFilter,
-    *,
-    relation_id: str,
-    parameters: dict[str, ParameterDeclaration],
-    bindings: dict[str, ParameterBinding],
-) -> RelationSourceRowFilter:
-    if row_filter.value_expr is not None:
-        return RelationSourceRowFilter(
-            field_id=row_filter.field_id,
-            operator=row_filter.operator,
-            value_expr=row_filter.value_expr,
-            proof_refs=row_filter.proof_refs,
         )
-    if row_filter.parameter_id:
-        expression: ValueExpression = ParameterRef(row_filter.parameter_id)
-        if row_filter.parameter_id not in parameters:
-            expression = _add_parameter(
-                parameter_id=row_filter.parameter_id,
-                role=ParameterRole.SEMANTIC_CONTROL,
-                value=FactValue.string_set(
-                    id=f"binding.{row_filter.parameter_id}",
-                    values=tuple(str(value) for value in row_filter.values),
-                    proof_refs=row_filter.proof_refs,
-                ),
-                proof_refs=row_filter.proof_refs,
-                parameters=parameters,
-                bindings=bindings,
-            )
-    else:
-        expression = ConstantRef(
-            constant_id=f"row-filter.{relation_id}.{row_filter.field_id}",
-            version_ref="source-binding@1",
-            value=FactValue.string_set(
-                id=f"constant.{relation_id}.{row_filter.field_id}",
-                values=tuple(str(value) for value in row_filter.values),
-                proof_refs=row_filter.proof_refs,
-            ),
+    return tuple(
+        Predicate(
+            left=FieldRef(field_id),
+            operator=PredicateOperator(source_filter.operator),
+            right=expression,
         )
-    return RelationSourceRowFilter(
-        field_id=row_filter.field_id,
-        operator=row_filter.operator,
-        value_expr=expression,
-        proof_refs=row_filter.proof_refs,
+        for field_id in source_filter.predicate_field_ids
     )
 
 

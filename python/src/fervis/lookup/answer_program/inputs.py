@@ -31,8 +31,8 @@ from fervis.lookup.answer_program.values import (
     ParameterRef,
     TimeComponent,
     ValueComponent,
-    ValueExpression,
 )
+from fervis.lookup.answer_program.expressions import Expression, expression_references
 from fervis.lookup.answer_program.model import AnswerProgram
 from fervis.lookup.answer_program.operations import (
     AggregateSpec,
@@ -42,14 +42,14 @@ from fervis.lookup.answer_program.operations import (
     FilterSpec,
     JoinSpec,
     Operation,
+    Predicate,
     ProjectSpec,
     ProjectToKeySpec,
-    RankSpec,
+    OrderSpec,
+    Take,
     RoleExpandSpec,
     UnionSpec,
     UniversalConditionSpec,
-    compute_expression_leaves,
-    compute_expression_references,
 )
 from fervis.lookup.fact_planning.value_components import value_component
 
@@ -75,18 +75,19 @@ def compile_program_inputs(inputs: ProgramInputs) -> CompiledProgramInputs:
     parameters = _parameter_index(inputs.parameters)
     _validate_binding_set(parameters, inputs.bindings)
     for named in inputs.expressions:
-        expression = named.expression
-        if isinstance(expression, ParameterRef):
-            if expression.parameter_id not in parameters:
+        try:
+            references = expression_references(named.expression)
+        except (AssertionError, TypeError):
+            raise AnswerProgramContractError(
+                "unclassified_value_origin",
+                f"expression {named.sink} has no declared value origin",
+            ) from None
+        for reference in references.parameters:
+            if reference.parameter_id not in parameters:
                 raise AnswerProgramContractError(
                     "unknown_parameter",
                     f"expression {named.sink} references an unknown parameter",
                 )
-        elif not isinstance(expression, (NodeOutputRef, ConstantRef, EnvironmentRef)):
-            raise AnswerProgramContractError(
-                "unclassified_value_origin",
-                f"expression {named.sink} has no declared value origin",
-            )
     return CompiledProgramInputs(
         parameters=tuple(sorted(inputs.parameters, key=lambda item: item.id)),
         bindings=BindingSet.from_bindings(inputs.bindings.bindings),
@@ -140,7 +141,7 @@ def _validate_compute_parameters(
         spec = operation.spec
         if not isinstance(spec, ComputeSpec):
             continue
-        references = compute_expression_references(spec.expression)
+        references = expression_references(spec.expression)
         if any(
             by_id[reference.parameter_id].value_type is not ParameterValueType.NUMBER
             or reference.component != ValueComponent.VALUE.value
@@ -172,20 +173,6 @@ def program_value_expressions(
                     binding.value_expr,
                 )
             )
-        for index, source_filter in enumerate(relation.source.applied_filters):
-            expressions.append(
-                NamedValueExpression(
-                    f"relation.{relation.id}.applied_filter.{index}",
-                    source_filter.value_expr,
-                )
-            )
-        for row_filter in relation.source.row_filters:
-            expressions.append(
-                NamedValueExpression(
-                    f"relation.{relation.id}.row_filter.{row_filter.field_id}",
-                    row_filter.value_expr,
-                )
-            )
         for choice in relation.source.population_choices:
             expressions.append(
                 NamedValueExpression(
@@ -202,11 +189,11 @@ def _operation_value_expressions(
     operation: Operation,
 ) -> tuple[NamedValueExpression, ...]:
     spec = operation.spec
-    if isinstance(spec, RankSpec):
+    if isinstance(spec, OrderSpec) and isinstance(spec.selection, Take):
         return (
             NamedValueExpression(
-                sink=f"operation.{operation.id}.rank.limit",
-                expression=spec.limit,
+                sink=f"operation.{operation.id}.order.limit",
+                expression=spec.selection.limit,
             ),
         )
     if isinstance(spec, ComputeSpec):
@@ -216,26 +203,54 @@ def _operation_value_expressions(
                 expression=expression,
             )
             for index, expression in enumerate(
-                compute_expression_leaves(spec.expression)
+                expression_references(spec.expression).leaves
             )
         )
+    if isinstance(spec, FilterSpec):
+        return _predicate_value_expressions(operation.id, spec.predicate)
+    if isinstance(spec, ProjectSpec):
+        return tuple(
+            NamedValueExpression(
+                sink=f"operation.{operation.id}.project.{output.output_field}",
+                expression=output.expression,
+            )
+            for output in spec.outputs
+        )
+    if isinstance(spec, UniversalConditionSpec):
+        return _predicate_value_expressions(operation.id, spec.predicate)
     if isinstance(
         spec,
         (
-            FilterSpec,
-            ProjectSpec,
             ProjectToKeySpec,
             JoinSpec,
             UnionSpec,
             RoleExpandSpec,
             CrossJoinSpec,
             AntiJoinSpec,
-            UniversalConditionSpec,
             AggregateSpec,
+            OrderSpec,
         ),
     ):
         return ()
     assert_never(spec)
+
+
+def _predicate_value_expressions(
+    operation_id: str,
+    predicate: Predicate,
+) -> tuple[NamedValueExpression, ...]:
+    return tuple(
+        NamedValueExpression(
+            sink=f"operation.{operation_id}.predicate.{index}",
+            expression=expression,
+        )
+        for index, expression in enumerate(
+            (
+                predicate.left,
+                *((predicate.right,) if predicate.right is not None else ()),
+            )
+        )
+    )
 
 
 def apply_binding_patch(
@@ -291,7 +306,7 @@ def apply_binding_patch(
 
 
 def resolve_value_expression(
-    expression: ValueExpression,
+    expression: Expression,
     *,
     bindings: BindingSet,
 ) -> ResolvedValueExpression:
@@ -335,6 +350,26 @@ def resolve_value_expression(
         "unclassified_value_origin",
         "value expression has no declared origin",
     )
+
+
+def resolved_value_expression_type(
+    expression: ParameterRef | ConstantRef,
+    resolved: ResolvedValueExpression,
+) -> str:
+    """Return the declared comparison type of one resolved expression component."""
+
+    if expression.component != ValueComponent.VALUE.value:
+        return ""
+    return {
+        ParameterValueType.IDENTITY: "",
+        ParameterValueType.IDENTITY_SET: "list",
+        ParameterValueType.NAMED: "string",
+        ParameterValueType.TIME: "",
+        ParameterValueType.NUMBER: "number",
+        ParameterValueType.STRING: "string",
+        ParameterValueType.BOOLEAN: "boolean",
+        ParameterValueType.STRING_SET: "list",
+    }[parameter_value_type(resolved.fact_value)]
 
 
 def _fact_value_component(value: Any, component: str) -> Any:

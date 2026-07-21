@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "List all completed in-person sale records from March 2026.",
+      "new": "For an audit, list every persisted sales record from March 2026 for completed in-person sales.",
+      "expected_count": 1
+    }
+  ]
+}

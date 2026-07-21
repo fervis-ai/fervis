@@ -19,9 +19,9 @@ def parser() -> argparse.ArgumentParser:
     _add_migrate_parser(subparsers)
     _add_auth_parser(subparsers)
     _add_models_parser(subparsers)
+    _add_debug_parser(subparsers)
     _add_explain_parser(subparsers)
     _add_goldset_parser(subparsers)
-    _add_inspect_parser(subparsers)
     _add_project_parser(subparsers)
     _add_runtime_parser(subparsers)
     _add_sources_parser(subparsers)
@@ -102,8 +102,8 @@ def command_name(argv: tuple[str, ...]) -> str:
         in {
             "config",
             "auth",
+            "debug",
             "goldset",
-            "inspect",
             "model",
             "project",
             "runtime",
@@ -362,9 +362,26 @@ def _add_goldset_parser(subparsers) -> None:
     )
 
 
-def _add_inspect_parser(subparsers) -> None:
-    inspect = subparsers.add_parser("inspect", help="Inspect runtime artifacts")
-    nested = inspect.add_subparsers(dest="inspect_command", required=True)
+def _add_debug_parser(subparsers) -> None:
+    debug = subparsers.add_parser("debug", help="Troubleshoot one runtime execution")
+    debug.set_defaults(answer_id=None)
+    debug.add_argument("--question-id")
+    debug.add_argument("--run-id")
+    debug.add_argument("--conversation-id")
+    debug.add_argument("--question", help="Scope a conversation view to one question")
+    debug.add_argument("--answer-output")
+    debug.add_argument("--fact")
+    debug.add_argument("--step")
+    debug.add_argument("--run", help="Scope a question/conversation view to one run")
+    debug.add_argument("--errors", action="store_true")
+    debug.add_argument("--error", action="store_true")
+    debug.add_argument("--inputs", action="store_true")
+    debug.add_argument(
+        "--format",
+        choices=(FervisOutputFormat.AGENT.value, FervisOutputFormat.TEXT.value),
+        default=FervisOutputFormat.AGENT.value,
+    )
+    nested = debug.add_subparsers(dest="debug_command", required=False)
     prompts = nested.add_parser("prompts", help="Inspect captured model prompts")
     prompts.add_argument("--run-id", required=True)
     prompts.add_argument(
@@ -482,11 +499,5 @@ def _add_detail_arguments(command_parser) -> None:
         "--verbose",
         action="store_const",
         const=LineageRenderDetail.VERBOSE.value,
-        dest="detail",
-    )
-    detail.add_argument(
-        "--debug",
-        action="store_const",
-        const=LineageRenderDetail.DEBUG.value,
         dest="detail",
     )

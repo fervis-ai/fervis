@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Write answer_subject.subject_text as one singular catalog-blind candidate kind, without modifiers that narrow the candidates.",
+      "new": "Write answer_subject.subject_text as a concise catalog-blind kind of candidate instance established by the current question or conversation resolution, without modifiers that narrow the requested instances.",
+      "expected_count": 1
+    }
+  ]
+}

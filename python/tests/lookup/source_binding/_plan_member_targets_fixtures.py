@@ -42,6 +42,7 @@ from fervis.lookup.question_contract import (
     RequestedFact,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
+    ResultSelectionKind,
     RequestedFactAnswerPopulation,
     RequestedFactAnswerPopulationMembershipTest,
     RequestedFactGroupKey,
@@ -252,7 +253,6 @@ def _closed_key_grouped_staff_sales_request() -> SourceBindingRequest:
         description="sales count for each specified staff member today",
         answer_subject=RequestedFactAnswerSubject(subject_text="sales"),
         answer_population=RequestedFactAnswerPopulation(
-            population_label="sales by specified staff member",
             counted_unit="sales",
             membership_tests=(
                 RequestedFactAnswerPopulationMembershipTest(
@@ -284,6 +284,7 @@ def _closed_key_grouped_staff_sales_request() -> SourceBindingRequest:
                 domain=GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS,
                 question_input_refs=("staff_id_1", "staff_id_2"),
             ),
+            selection_kind=ResultSelectionKind.ALL_RESULTS,
         ),
         known_inputs=(staff_1, staff_2),
         input_refs=("staff_id_1", "staff_id_2"),
@@ -599,15 +600,12 @@ def _closed_key_model_output_with_single_staff_param(
                     },
                     "param_decisions": {},
                     "resolved_input_applications": [
-                        _resolved_input_application(
-                            target_id="start_date",
+                        _resolved_input_application_group(
                             value_id="today_value",
-                            value_component="instant",
-                        ),
-                        _resolved_input_application(
-                            target_id="end_date",
-                            value_id="today_value",
-                            value_component="instant",
+                            targets=(
+                                ("start_date", "instant"),
+                                ("end_date", "instant"),
+                            ),
                         ),
                     ],
                     "row_predicate_reviews": {},
@@ -642,20 +640,23 @@ def _single_param_decision(
     }
 
 
-def _resolved_input_application(
+def _resolved_input_application_group(
     *,
-    target_id: str,
     value_id: str,
-    value_component: str,
-) -> dict[str, str]:
+    targets: tuple[tuple[str, str], ...],
+) -> dict[str, object]:
     return {
-        "target_kind": "request_parameter",
-        "target_id": target_id,
         "value_id": value_id,
-        "value_component": value_component,
-        "match_basis_explanation": (
-            f"Apply {value_id} to the shown {target_id} request parameter."
-        ),
+        "applications": [
+            {
+                "application_target_id": f"request_parameter.{target_id}",
+                "value_component": value_component,
+                "match_basis_explanation": (
+                    f"Apply {value_id} to the shown {target_id} request parameter."
+                ),
+            }
+            for target_id, value_component in targets
+        ],
         "population_test_results": {},
     }
 

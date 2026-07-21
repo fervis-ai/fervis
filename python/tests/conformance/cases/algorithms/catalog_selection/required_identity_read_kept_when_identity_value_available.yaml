@@ -1,5 +1,5 @@
 id: required_identity_read_kept_before_identity_resolution
-description: Catalog selection keeps a relevant required-identity read before its identity value is resolved.
+description: Catalog selection keeps a relevant required-identity read after the open read that needs no caller input.
 migrates:
   - api/tests/fervis/lookup/catalog_selection/test_selector.py::test_catalog_selection_keeps_required_identity_read_with_matching_identity_value
 kind: algorithm
@@ -45,4 +45,4 @@ input:
   max_reads_per_fact: 4
 expect:
   result_contains:
-    selected_read_ids: [sale_detail, sale_list]
+    selected_read_ids: [sale_list, sale_detail]

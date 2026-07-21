@@ -12,7 +12,7 @@ input:
     - Drop a read when it is clearly unrelated
     - Drop a read when it is only related context
     - Do not retain reads whose only basis is that they might help validate
-    - Retain row-level reads that expose rows the requested fact may count, list, filter, group, rank, or aggregate
+    - Retain row-level reads that expose rows the requested fact may count, list, filter, group, order, limit, or aggregate
     - For RETAIN, retention_basis describes the rows and fields that make the read relevant to the requested fact
     - For RETAIN, first cite relevant_row_path_tokens and relevant_field_tokens, then write retention_basis
     - Assess every candidate read before selecting a canonical option
@@ -25,7 +25,7 @@ expect:
       Drop a read when it is clearly unrelated: true
       Drop a read when it is only related context: true
       Do not retain reads whose only basis is that they might help validate: true
-      Retain row-level reads that expose rows the requested fact may count, list, filter, group, rank, or aggregate: true
+      Retain row-level reads that expose rows the requested fact may count, list, filter, group, order, limit, or aggregate: true
       For RETAIN, retention_basis describes the rows and fields that make the read relevant to the requested fact: true
       For RETAIN, first cite relevant_row_path_tokens and relevant_field_tokens, then write retention_basis: true
       Assess every candidate read before selecting a canonical option: true

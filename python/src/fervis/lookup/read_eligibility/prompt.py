@@ -61,7 +61,7 @@ class ReadEligibilityTurnPrompt(TurnPromptBase):
                     "Drop a read when it is clearly unrelated to the requested fact.",
                     "Drop a read when it is only related context, audit/detail data, telemetry, receipt data, verification evidence, or an indirect helper.",
                     "Use the fact's known inputs when deciding whether a read could contribute to that fact.",
-                    "Do not require the read to contain the final answer, a precomputed aggregate, a precomputed ranking, or a final display row.",
+                    "Do not require the read to contain the final answer, a precomputed aggregate, a preordered result, or a prelimited result set.",
                 ),
             ),
             builder.instruction_block(
@@ -92,7 +92,7 @@ class ReadEligibilityTurnPrompt(TurnPromptBase):
             builder.instruction_block(
                 "Retention Rules",
                 (
-                    "Retain row-level reads that expose rows the requested fact may count, list, filter, group, rank, or aggregate.",
+                    "Retain row-level reads that expose rows the requested fact may count, list, filter, group, order, limit, or aggregate.",
                     "Retain summary/report reads when returned values may answer or measure the requested fact.",
                     "Do not reject a read only because its endpoint resource name is broader than the requested subject.",
                     "For example, location rows with a type field may remain useful for a store question.",
@@ -100,7 +100,7 @@ class ReadEligibilityTurnPrompt(TurnPromptBase):
                     "For RETAIN, retention_basis describes the rows and fields that make the read relevant to the requested fact. It must not rate, rank, or compare retained reads.",
                     "Do not claim a retained read directly answers the requested fact unless the shown response fields alone contain the requested answer value or measure.",
                     "For RETAIN, relevant_field_tokens is the answer-changing computation support set for the requested fact, not all useful fields on a retained read.",
-                    "Include a field only if its value can change the computed answer by establishing the requested row grain or identity, applying a requested filter/time/status/discriminator, grouping, ranking, joining, deduplicating, or supplying a requested measure.",
+                    "Include a field only if its value can change the computed answer by establishing the requested row grain or identity, applying a requested filter/time/status/discriminator, grouping, ordering, joining, deduplicating, or supplying a requested measure.",
                     "Do not include fields whose values only describe, decorate, audit, explain, or provide context for rows that are already in or out of the answer population.",
                     "For DROP, use empty relevant_row_path_tokens and empty relevant_field_tokens.",
                 ),

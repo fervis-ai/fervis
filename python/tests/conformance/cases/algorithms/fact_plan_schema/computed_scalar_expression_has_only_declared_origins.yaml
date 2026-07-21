@@ -9,13 +9,15 @@ input:
     fact_1: [computed_scalar]
   source_binding_ids_by_requested_fact_id:
     fact_1: [sb_current, sb_previous]
+  value_ids_by_requested_fact_id:
+    fact_1: [value_current, value_previous]
   answer_output_ids_by_requested_fact_id:
     fact_1: [answer_1]
   answer_output_ids_by_source_binding_id:
     sb_current: [answer_1]
     sb_previous: [answer_1]
   source_binding_ids_by_requirement_by_requested_fact_id: {}
-  grouped_ranked_choices_by_requested_fact_id: {}
+  grouped_aggregate_choices_by_requested_fact_id: {}
   scalar_aggregate_choices_by_requested_fact_id: {}
   field_ids_by_source_binding_id:
     sb_current: [amount]
@@ -30,8 +32,8 @@ input:
               answer_output_ids: [answer_1]
               pattern: computed_scalar
               scalar_inputs:
-                - {input_id: current, source_binding_id: sb_current}
-                - {input_id: previous, source_binding_id: sb_previous}
+                - {input_id: current, value_id: value_current}
+                - {input_id: previous, value_id: value_previous}
               expression:
                 - {input_id: current}
                 - {input_id: previous}
@@ -46,8 +48,21 @@ input:
               answer_output_ids: [answer_1]
               pattern: computed_scalar
               scalar_inputs:
-                - {input_id: current, source_binding_id: sb_current}
+                - {input_id: current, value_id: value_current}
               expression: current - 1
+              output: {scalar_id: difference}
+    - id: source_binding_origin
+      payload:
+        outcome:
+          kind: fact_plan
+          answers:
+            - requested_fact_id: fact_1
+              answer_output_ids: [answer_1]
+              pattern: computed_scalar
+              scalar_inputs:
+                - {input_id: current, source_binding_id: sb_current}
+              expression:
+                - {input_id: current}
               output: {scalar_id: difference}
     - id: numeric_literal_token
       payload:
@@ -58,7 +73,7 @@ input:
               answer_output_ids: [answer_1]
               pattern: computed_scalar
               scalar_inputs:
-                - {input_id: current, source_binding_id: sb_current}
+                - {input_id: current, value_id: value_current}
               expression:
                 - {input_id: current}
                 - 1
@@ -73,7 +88,7 @@ input:
               answer_output_ids: [answer_1]
               pattern: computed_scalar
               scalar_inputs:
-                - {input_id: current, source_binding_id: sb_current}
+                - {input_id: current, value_id: value_current}
               expression:
                 - {input_id: current}
                 - {literal: 1}
@@ -83,6 +98,7 @@ expect:
   result_contains:
     accepts:
       declared_inputs: true
+      source_binding_origin: false
       raw_expression: false
       numeric_literal_token: false
       literal_object_token: false

@@ -1,0 +1,14 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Use GROUP_KEY exactly for concrete members of a specified_question_inputs group key; source_value and temporal_bucket group keys have no GROUP_KEY inputs.\nGROUP_KEY inputs are not candidate-row predicates; create no EXPLICIT_USER_CONSTRAINT for them.",
+      "new": "Use GROUP_KEY exactly for concrete members of a specified_question_inputs group key; source_value and temporal_bucket group keys have no GROUP_KEY inputs.\nA specified_question_inputs group key restricts the result-key domain to its GROUP_KEY inputs and groups by them.\nGROUP_KEY inputs are not candidate-row predicates; create no EXPLICIT_USER_CONSTRAINT for them.",
+      "expected_count": 1
+    },
+    {
+      "old": "One population test may reference several POPULATION_TESTS use_ids, and several tests may reference the same use_id.\nEach EXPLICIT_USER_CONSTRAINT lists every POPULATION_TESTS use_id it consumes in question_input_use_refs.",
+      "new": "Build EXPLICIT_USER_CONSTRAINT tests only from prior POPULATION_TESTS uses; an input without use_id cannot be a question_input_use_ref.\nOne population test may reference several POPULATION_TESTS use_ids, and several tests may reference the same use_id.\nEach EXPLICIT_USER_CONSTRAINT lists every POPULATION_TESTS use_id it consumes in question_input_use_refs.",
+      "expected_count": 1
+    }
+  ]
+}

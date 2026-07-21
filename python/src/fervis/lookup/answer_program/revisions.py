@@ -24,8 +24,12 @@ from fervis.lookup.answer_program.inputs import compile_program_inputs
 from fervis.lookup.answer_program.model import AnswerProgram, FunctionSemanticVersion
 from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
-    PopulationChoiceControllerKind,
-    RelationSourcePopulationChoice,
+)
+from fervis.lookup.answer_program.expressions import FieldRef
+from fervis.lookup.answer_program.operations import (
+    FilterSpec,
+    Operation,
+    Predicate,
 )
 from fervis.lookup.answer_program.values import (
     BindingSet,
@@ -112,31 +116,26 @@ def apply_capability(
         program,
         parameters=(*program.parameters, capability.parameter),
         relations=tuple(
-            replace(
-                relation,
-                source=replace(
-                    relation.source,
-                    population_choices=(
-                        *relation.source.population_choices,
-                        RelationSourcePopulationChoice(
-                            controller_kind=(
-                                PopulationChoiceControllerKind.ROW_PREDICATE
-                            ),
-                            controller_id=(capability.parameter.semantic_control_ref),
-                            field_id=capability.field_id,
-                            requested_fact_ids=capability.requested_fact_ids,
-                            selection_expr=ParameterRef(
-                                parameter_id=capability.parameter.id
-                            ),
-                            allowed_values=capability.parameter.allowed_values,
-                            proof_refs=capability.proof_refs,
-                        ),
-                    ),
-                ),
-            )
+            replace(relation, id=f"{relation.id}__capability_source")
             if relation.id == capability.relation_id
             else relation
             for relation in program.relations
+        ),
+        operations=(
+            Operation(
+                id=f"capability.{capability.id}",
+                spec=FilterSpec(
+                    input_relation=f"{capability.relation_id}__capability_source",
+                    predicate=Predicate(
+                        left=FieldRef(capability.field_id),
+                        operator=capability.operator,
+                        right=ParameterRef(parameter_id=capability.parameter.id),
+                    ),
+                    proof_refs=capability.proof_refs,
+                ),
+                output_relation=capability.relation_id,
+            ),
+            *program.operations,
         ),
         capabilities=tuple(
             item for item in program.capabilities if item.id != capability.id

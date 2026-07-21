@@ -11,10 +11,12 @@ from fervis.lookup.plan_selection.source_strategies import source_strategies_by_
 from fervis.lookup.plan_selection.model import OperationEvidence
 from fervis.lookup.question_contract import (
     GroupKeyDomainKind,
+    GroupKeySourceKind,
     QuestionContract,
     RequestedFact,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
+    RequestedFactOrderingDirection,
     ResultSelectionKind,
     RequestedFactGroupKey,
     RequestedFactAnswerOutput,
@@ -165,17 +167,25 @@ def _requested_fact(payload: dict[str, Any]) -> RequestedFact:
             family=family,
             group_key=_group_key(payload.get("group_key")),
             selection_kind=(
-                ResultSelectionKind.LIMITED_RESULTS
-                if family is RequestedFactAnswerExpressionFamily.RANKED_SELECTION
-                else ResultSelectionKind.ALL_RESULTS
-                if family is RequestedFactAnswerExpressionFamily.LIST_ROWS
+                ResultSelectionKind(
+                    str(payload.get("selection_kind") or "all_results")
+                )
+                if family
+                in {
+                    RequestedFactAnswerExpressionFamily.LIST_ROWS,
+                    RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
+                }
                 else None
             ),
-            limit_input_ref=(
-                "limit"
-                if family is RequestedFactAnswerExpressionFamily.RANKED_SELECTION
-                else ""
+            ordering_basis=str(payload.get("ordering_basis") or ""),
+            ordering_direction=(
+                RequestedFactOrderingDirection(
+                    str(payload.get("ordering_direction"))
+                )
+                if payload.get("ordering_direction")
+                else None
             ),
+            limit_input_ref=str(payload.get("limit_input_ref") or ""),
         ),
         answer_subject=RequestedFactAnswerSubject(
             subject_text=str(payload["subject_text"])
@@ -200,6 +210,12 @@ def _group_key(raw_value: object) -> RequestedFactGroupKey | None:
         id=str(raw_value.get("id") or "group_key"),
         description=str(raw_value.get("description") or "group"),
         domain=GroupKeyDomainKind(str(raw_value.get("domain") or "")),
+        source_kind=(
+            GroupKeySourceKind(str(raw_value["source_kind"]))
+            if raw_value.get("source_kind")
+            else None
+        ),
+        temporal_grain=str(raw_value.get("grain") or ""),
         question_input_refs=tuple(
             str(item) for item in raw_value.get("question_input_refs") or ()
         ),

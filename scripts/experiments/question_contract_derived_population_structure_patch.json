@@ -1,0 +1,56 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Write answer_subject.subject_text as a concise catalog-blind kind of candidate instance established by the current question or conversation resolution, without modifiers that narrow the requested instances.",
+      "new": "Write answer_subject.subject_text as one singular catalog-blind candidate kind, without modifiers that narrow the candidates.",
+      "expected_count": 1
+    },
+    {
+      "old": "answer_population membership_tests define the independently qualifying candidate instances.\nanswer_population.counted_unit names one business unit in that population.\nanswer_population.membership_tests must include one SUBJECT_IDENTITY test.",
+      "new": "answer_population.membership_tests contains only explicit user-stated predicates that qualify candidates independently. Candidate identity comes from answer_subject.",
+      "expected_count": 1
+    },
+    {
+      "old": "For NORMAL_BUSINESS_INSTANCE, include a NORMAL_INSTANCE_GUARD test; the backend attaches the standard ORDINARY_BUSINESS_INSTANCE_V1 profile with typed excluded-state roles.\nFor RAW_DATA_RECORD, include a RAW_RECORD_GUARD test.",
+      "new": "The backend derives the applicable normal-instance or raw-record guard from answer_subject.instance_interpretation.",
+      "expected_count": 1
+    },
+    {
+      "old": "SUBJECT_IDENTITY asks only whether the candidate is an instance of answer_subject and has no input operands.\nAn input identifying a related entity uses POPULATION_TESTS unless group_key.value_source.question_input_refs owns it as a specified group member.\nSUBJECT_IDENTITY, NORMAL_INSTANCE_GUARD, and RAW_RECORD_GUARD use an empty question_input_refs array.",
+      "new": "An input identifying a related entity uses POPULATION_TESTS unless group_key.value_source.question_input_refs owns it as a specified group member.",
+      "expected_count": 1
+    }
+  ],
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "remove",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/counted_unit"
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "remove",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/required/0"
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "remove",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/minItems"
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "remove",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items/oneOf/3"
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "remove",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items/oneOf/2"
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "remove",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items/oneOf/1"
+    }
+  ]
+}

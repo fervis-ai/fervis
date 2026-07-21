@@ -25,11 +25,11 @@ from fervis.lookup.answer_program.values import (
     ProgramInputs,
     SetParameter,
     UnsetParameter,
-    ValueExpression,
     ValueExpressionOrigin,
     ValueDependency,
     ValueDependencyKind,
 )
+from fervis.lookup.answer_program.expressions import Expression
 
 
 def parameter_value_type(value: FactValue) -> ParameterValueType:
@@ -60,7 +60,7 @@ __all__ = [
     "ProgramInputs",
     "SetParameter",
     "UnsetParameter",
-    "ValueExpression",
+    "Expression",
     "ValueExpressionOrigin",
     "ValueDependency",
     "ValueDependencyKind",

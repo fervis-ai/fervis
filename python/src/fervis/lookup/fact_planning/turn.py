@@ -22,10 +22,15 @@ from fervis.lookup.fact_planning.request import (
 )
 from fervis.lookup.turn_prompts import build_turn_prompt_context
 from fervis.lookup.plan_selection import BoundPlanSelectionSet
-from fervis.lookup.fact_planning.grouped_ranked_choices import (
-    GROUPED_RANKED_PLAN_SHAPES,
+from fervis.lookup.fact_planning.grouped_aggregate_choices import (
+    GROUPED_AGGREGATE_PLAN_SHAPES,
 )
 from fervis.lookup.answer_program.compiler_inputs import compiler_input_context
+from fervis.lookup.answer_program.relations import (
+    PopulationCoverageClaim,
+    merge_population_coverage_claims,
+)
+from fervis.lookup.source_binding import BoundSource
 
 
 @dataclass(frozen=True)
@@ -49,10 +54,11 @@ def generate_pattern_fact_plan(
     model_key: str,
     max_thinking_tokens: int,
 ) -> FactPlanTurnResult:
-    invocation = PatternFactPlanTurnPrompt(
+    prompt = PatternFactPlanTurnPrompt(
         request,
         plan_selection=plan_selection,
-    ).to_model_invocation(
+    )
+    invocation = prompt.to_model_invocation(
         build_turn_prompt_context(
             current_question=request.question,
             conversation_context=request.conversation_context,
@@ -88,10 +94,14 @@ def generate_pattern_fact_plan(
             input_context=compiler_input_context(
                 values=request.available_values,
                 question_contract=request.question_contract,
+                population_coverage_by_value_id=(
+                    _value_population_coverage_by_id(request.bound_sources)
+                ),
             ),
             selected_source_strategy_ids=tuple(
                 plan.source_strategy_id for plan in plan_selection.plan_selections
             ),
+            source_derived_scalar_values=prompt.source_derived_scalar_values(),
         )
     except Exception as exc:
         raise FactPlanGenerationError(
@@ -107,6 +117,23 @@ def generate_pattern_fact_plan(
         duration_ms=output.duration_ms,
         artifact=output.artifact,
     )
+
+
+def _value_population_coverage_by_id(
+    bound_sources: tuple[BoundSource, ...],
+) -> dict[str, tuple[PopulationCoverageClaim, ...]]:
+    value_ids = {source.value_id for source in bound_sources if source.value_id}
+    return {
+        value_id: merge_population_coverage_claims(
+            tuple(
+                claim
+                for source in bound_sources
+                if source.value_id == value_id
+                for claim in source.value_population_coverage_claims
+            )
+        )
+        for value_id in value_ids
+    }
 
 
 def _with_selected_plan_shapes(
@@ -146,10 +173,10 @@ def _with_selected_plan_shapes(
         authored_answer_output_ids = tuple(
             str(item) for item in normalized_answer.get("answer_output_ids") or ()
         )
-        if selected_shape in GROUPED_RANKED_PLAN_SHAPES:
+        if selected_shape in GROUPED_AGGREGATE_PLAN_SHAPES:
             if authored_answer_output_ids:
                 raise ValueError(
-                    "grouped/ranked fact plan authored backend-selected outputs"
+                    "grouped aggregate fact plan authored backend-selected outputs"
                 )
             covered_answer_output_ids_by_fact.setdefault(
                 requested_fact_id,

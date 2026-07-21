@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Use disposition.matched_excluded_role=NONE only after considering all excluded_state_roles and finding that none applies.\nUse disposition.matched_excluded_role=UNKNOWN only when the prompt data is insufficient to classify the choice against those roles.",
+      "new": "Use disposition.matched_excluded_role=NONE only when the choice meaning affirmatively rules out every excluded state role.\nUse disposition.matched_excluded_role=UNKNOWN when the prompt data does not establish whether an excluded state role applies.",
+      "expected_count": 1
+    }
+  ]
+}

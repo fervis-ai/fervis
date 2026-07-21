@@ -2,7 +2,13 @@
 
 from dataclasses import field
 
-from ._shared import FieldBindingRole, ProjectField, VerificationError, dataclass
+from ._shared import (
+    FieldBindingRole,
+    FieldRef,
+    NamedExpression,
+    VerificationError,
+    dataclass,
+)
 from fervis.lookup.question_contract import MembershipTestRef
 
 
@@ -61,9 +67,7 @@ class ProofLineage:
     def value(cls, refs: frozenset[str]) -> "ProofLineage":
         return cls(value_refs=refs)
 
-    def with_population_coverage(
-        self, coverage: PopulationCoverage
-    ) -> "ProofLineage":
+    def with_population_coverage(self, coverage: PopulationCoverage) -> "ProofLineage":
         return ProofLineage(
             value_refs=self.value_refs,
             population_coverage=coverage,
@@ -122,9 +126,7 @@ class ScalarContract:
         return ScalarContract(
             proof=ProofLineage(
                 value_refs=frozenset(
-                    ref
-                    for operand in operands
-                    for ref in operand.proof.value_refs
+                    ref for operand in operands for ref in operand.proof.value_refs
                 ),
                 population_coverage=PopulationCoverage.guaranteed_by_every(
                     tuple(
@@ -198,11 +200,15 @@ def _common_entity_keys(
 
 def _project_contract_grain(
     source: RelationContract,
-    fields: tuple[ProjectField, ...],
+    fields: tuple[NamedExpression, ...],
 ) -> tuple[str, ...]:
     if not source.grain_keys:
         return ()
-    projections = {field.source: field.output or field.source for field in fields}
+    projections = {
+        output.expression.field_id: output.output_field
+        for output in fields
+        if isinstance(output.expression, FieldRef)
+    }
     if not all(field in projections for field in source.grain_keys):
         return ()
     return tuple(projections[field] for field in source.grain_keys)

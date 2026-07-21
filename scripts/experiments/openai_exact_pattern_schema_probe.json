@@ -1,0 +1,13 @@
+{
+  "schema_patches": [
+    {
+      "tool_name": "submit_pattern_fact_plan",
+      "op": "replace",
+      "path": "/properties/outcome/oneOf/0/properties/answers/items/properties/pattern",
+      "value": {
+        "type": "string",
+        "pattern": "^(?:list_rows)$"
+      }
+    }
+  ]
+}

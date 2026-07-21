@@ -9,7 +9,7 @@ from tests.lookup.orchestrator._plans import *  # noqa: F403
 from tests.lookup.prompt_sections import prompt_section_payload
 from tests.testkit.question_contract_provider import (
     ProviderQuestionInputOwnership,
-    provider_membership_tests,
+    provider_answer_population,
     provider_question_input_ownership,
 )
 
@@ -410,7 +410,7 @@ def _row_path_fields_for_answer(
         "grouped_rows",
         "aggregate_scalar",
         "aggregate_by_group",
-        "ranked_aggregate",
+        "aggregate_by_group",
     }:
         return ()
     return _unique(
@@ -1154,10 +1154,14 @@ def _answer_expression_payload(
         return {"family": "scalar_aggregate"}
     payload: dict[str, Any] = {"family": expression.family.value}
     if expression.group_key is not None:
-        payload["group_key"] = {
-            "description": expression.group_key.description,
-            "domain": expression.group_key.domain.value,
+        payload["group_key"] = expression.group_key.to_answer_request_dict()
+    if expression.ordering_direction is not None:
+        payload["ordering"] = {
+            "basis": expression.ordering_basis,
+            "direction": expression.ordering_direction.value,
         }
+    if expression.selection_kind is not None:
+        payload["selection"] = {"kind": expression.selection_kind.value}
     return payload
 
 
@@ -1262,6 +1266,8 @@ def _question_contract_response(
         for item in input_payloads
         if item.get("role") == LiteralInputRole.RESULT_LIMIT.value
     ]
+    if answer_expression_family == "list_rows":
+        answer_expression["selection"] = {"kind": "all_results"}
     population_refs = tuple(ref for ref in input_refs if ref not in result_limit_refs)
     ownership = provider_question_input_ownership(
         population_input_refs_by_test_id=(
@@ -1327,7 +1333,6 @@ def _answer_population_payload(
             ).instance_interpretation
         )
         payload = default_answer_population(
-            description=fact.description,
             subject_text=subject_text,
             instance_interpretation=instance_interpretation,
         ).to_question_contract_dict()
@@ -1339,11 +1344,7 @@ def _provider_answer_population_payload(
     *,
     ownership: ProviderQuestionInputOwnership,
 ) -> dict[str, Any]:
-    payload["membership_tests"] = provider_membership_tests(
-        payload["membership_tests"],
-        ownership=ownership,
-    )
-    return payload
+    return provider_answer_population(payload, ownership=ownership)
 
 
 def _answer_population_payload_from_text(
@@ -1352,7 +1353,6 @@ def _answer_population_payload_from_text(
     subject_text: str,
 ) -> dict[str, Any]:
     payload = default_answer_population(
-        description=description,
         subject_text=subject_text,
         instance_interpretation=RequestedFactAnswerSubject(
             subject_text=subject_text
@@ -1464,8 +1464,8 @@ def _answer_expression_family_for_pattern(pattern: str) -> str:
         return "scalar_aggregate"
     if pattern == "aggregate_by_group":
         return "grouped_aggregate"
-    if pattern == "ranked_aggregate":
-        return "ranked_selection"
+    if pattern == "aggregate_by_group":
+        return "grouped_aggregate"
     if pattern == "computed_scalar":
         return "computed_scalar"
     if pattern == "set_difference":
@@ -1936,9 +1936,10 @@ def _pattern_answer_from_answer_plan(plan: AnswerProgram) -> dict[str, Any]:
         }
         projected_result_ids = result_field_ids | result_output_ids
         output_fields = [
-            {"field_id": field.source}
-            for field in project.spec.fields
-            if (field.output or field.source) in projected_result_ids
+            {"field_id": field.expression.field_id}
+            for field in project.spec.outputs
+            if field.output_field in projected_result_ids
+            and isinstance(field.expression, FieldRef)
         ]
         return {
             **_pattern_answer_base(plan, relation_by_id[project.spec.input_relation]),

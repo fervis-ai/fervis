@@ -38,27 +38,20 @@ input:
       family: grouped_aggregate
       group_key:
         description: specified staff member
-        domain: SPECIFIED_QUESTION_INPUTS
+        value_source:
+          kind: specified_question_inputs
+      selection: {kind: all_results}
     question_input_uses:
     - {input_ref: staff_a, owner_kind: GROUP_KEY}
     - {input_ref: staff_b, owner_kind: GROUP_KEY}
-    - {use_id: use_today, input_ref: today, owner_kind: POPULATION_TESTS}
+    - {input_ref: today, owner_kind: POPULATION_TESTS}
     answer_subject:
       subject_text: sales
       instance_interpretation:
         kind: NORMAL_BUSINESS_INSTANCE
     answer_population:
-      population_label: sales by specified staff members today
-      counted_unit: sale
       membership_tests:
-      - question_input_use_refs: []
-        test_id: subject_identity
-        kind: SUBJECT_IDENTITY
-        polarity: MUST_PASS
-        test_question: Is this a sale?
-      - question_input_use_refs: [use_today]
-        test_id: today_scope
-        kind: EXPLICIT_USER_CONSTRAINT
+      - question_input_refs: [today]
         polarity: MUST_PASS
         test_question: Is this sale in the requested time scope?
     answer_outputs:
@@ -75,16 +68,20 @@ expect:
           family: grouped_aggregate
           group_key:
             description: specified staff member
-            domain: SPECIFIED_QUESTION_INPUTS
-            question_input_refs: [staff_a, staff_b]
+            value_source:
+              kind: specified_question_inputs
+              question_input_refs: [staff_a, staff_b]
+          selection_kind: all_results
         answer_outputs:
         - description: sales count
           role: ROW_COUNT
         answer_population:
           membership_tests:
-          - test_id: subject_identity
+          - test_id: pop_test_1
             owned_question_input_refs: []
-          - test_id: today_scope
+          - test_id: pop_test_2
+            owned_question_input_refs: []
+          - test_id: explicit_user_constraint_1
             owned_question_input_refs: [today]
   result_exact_fields:
     requested_fact_input_handoff:

@@ -95,10 +95,7 @@ def parse_row_predicate_filters(
         field_id = predicate.field_id
         if not field_id:
             raise ValueError("row predicate missing field")
-        proof_refs = population_choice_proof_refs(
-            f"row_predicate:{predicate_id}",
-            out_of_scope_decisions,
-        )
+        proof_refs = population_choice_proof_refs(f"row_predicate:{predicate_id}")
         population_choices.append(
             DraftRelationSourcePopulationChoice(
                 controller_kind=PopulationChoiceControllerKind.ROW_PREDICATE,

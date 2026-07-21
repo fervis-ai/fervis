@@ -15,6 +15,7 @@ from fervis.lookup.question_contract import (
     RequestedFact,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
+    RequestedFactOrderingDirection,
     RequestedFactGroupKey,
     RequestedFactAnswerOutput,
     RequestedFactKnownInput,
@@ -34,7 +35,6 @@ def _decision_payload(outcome: dict[str, object]) -> dict[str, object]:
 
 def _single_input_payload(question_input: dict[str, object]) -> dict[str, object]:
     input_ref = str(question_input["input_ref"])
-    use_id = f"use_{input_ref}"
     return {
         "kind": "question_contract",
         "answer_requests_count": 1,
@@ -53,22 +53,11 @@ def _single_input_payload(question_input: dict[str, object]) -> dict[str, object
                     },
                 },
                 "answer_population": {
-                    "population_label": "sales for specified input",
-                    "counted_unit": "sale",
                     "membership_tests": [
                         {
-                            "test_id": "test_1",
-                            "kind": "SUBJECT_IDENTITY",
-                            "polarity": "MUST_PASS",
-                            "test_question": "Is this a sale?",
-                            "question_input_use_refs": [],
-                        },
-                        {
-                            "test_id": "test_input",
-                            "kind": "EXPLICIT_USER_CONSTRAINT",
+                            "population_use_refs": [f"use_{input_ref}"],
                             "polarity": "MUST_PASS",
                             "test_question": "Does this sale match the specified input?",
-                            "question_input_use_refs": [use_id],
                         }
                     ],
                 },
@@ -77,7 +66,7 @@ def _single_input_payload(question_input: dict[str, object]) -> dict[str, object
                 ],
                 "question_input_uses": [
                     {
-                        "use_id": use_id,
+                        "use_id": f"use_{input_ref}",
                         "input_ref": input_ref,
                         "owner_kind": "POPULATION_TESTS",
                     }
@@ -104,13 +93,9 @@ def _set_population_inputs(
     assert isinstance(population, dict)
     tests = population["membership_tests"]
     assert isinstance(tests, list)
-    explicit = next(
-        test
-        for test in tests
-        if isinstance(test, dict)
-        and test.get("kind") == "EXPLICIT_USER_CONSTRAINT"
-    )
-    explicit["question_input_use_refs"] = [use["use_id"] for use in uses]
+    explicit = tests[0]
+    assert isinstance(explicit, dict)
+    explicit["population_use_refs"] = [str(use["use_id"]) for use in uses]
 
 
 def _time_input(input_id: str, text: str) -> RequestedFactKnownInput:
@@ -213,7 +198,7 @@ def test_answer_output_schema_requires_a_computation_role():
     assert answer_output_schema["required"] == ["description", "role"]
 
 
-def test_ranked_selection_remains_one_catalog_blind_answer_shape():
+def test_ordered_take_one_is_orthogonal_to_list_rows():
     question = "Which salesperson made the most revenue today?"
     payload = _single_input_payload(
         {
@@ -229,7 +214,9 @@ def test_ranked_selection_remains_one_catalog_blind_answer_shape():
         }
     )
     payload["answer_requests"][0]["answer_expression"] = {
-        "family": "ranked_selection"
+        "family": "list_rows",
+        "ordering": {"basis": "revenue", "direction": "descending"},
+        "selection": {"kind": "take_one"},
     }
 
     parsed = parse_question_contract(
@@ -241,8 +228,13 @@ def test_ranked_selection_remains_one_catalog_blind_answer_shape():
     expression = parsed.outcome.requested_facts[0].answer_expression
 
     assert expression is not None
-    assert expression.family is RequestedFactAnswerExpressionFamily.RANKED_SELECTION
-    assert expression.selection_kind is ResultSelectionKind.LIMITED_RESULTS
+    assert expression.family is RequestedFactAnswerExpressionFamily.LIST_ROWS
+    assert expression.ordering_basis == "revenue"
+    assert (
+        expression.ordering_direction
+        is RequestedFactOrderingDirection.DESCENDING
+    )
+    assert expression.selection_kind is ResultSelectionKind.TAKE_ONE
 
 
 def test_grouped_aggregate_requires_expression_group_key():
@@ -274,7 +266,33 @@ def test_grouped_aggregate_provider_schema_requires_expression_group_key():
         if branch["properties"]["family"]["enum"] == ["grouped_aggregate"]
     )
 
-    assert grouped_branch["required"] == ["family", "group_key"]
+    assert grouped_branch["required"] == ["family", "selection", "group_key"]
+
+
+def test_grouped_aggregate_schema_is_considered_before_row_selection():
+    schema = build_answer_request_contract_schema()
+    branches = schema["properties"]["answer_requests"]["items"]["properties"][
+        "answer_expression"
+    ]["oneOf"]
+
+    assert [
+        branch["properties"]["family"]["enum"]
+        for branch in branches[:4]
+    ] == [["grouped_aggregate"]] * 4
+
+
+def test_source_derived_group_key_is_considered_before_input_owned_groups():
+    schema = build_answer_request_contract_schema()
+    expression_branches = schema["properties"]["answer_requests"]["items"][
+        "properties"
+    ]["answer_expression"]["oneOf"]
+    group_key_branches = expression_branches[0]["properties"]["group_key"][
+        "oneOf"
+    ]
+
+    assert group_key_branches[0]["properties"]["value_source"]["properties"][
+        "kind"
+    ]["enum"] == ["source_value"]
 
 
 def test_group_key_rejects_repeated_question_inputs():
@@ -292,6 +310,7 @@ def test_grouped_aggregate_serializes_group_key_on_answer_expression():
         description="sales count for each specified staff member today",
         answer_expression=RequestedFactAnswerExpression(
             family=RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
+            selection_kind=ResultSelectionKind.ALL_RESULTS,
             group_key=RequestedFactGroupKey(
                 description="staff member",
                 domain=GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS,
@@ -312,9 +331,12 @@ def test_grouped_aggregate_serializes_group_key_on_answer_expression():
         "family": "grouped_aggregate",
         "group_key": {
             "description": "staff member",
-            "domain": "SPECIFIED_QUESTION_INPUTS",
-            "question_input_refs": ["qi_staff_1", "qi_staff_2"],
+            "value_source": {
+                "kind": "specified_question_inputs",
+                "question_input_refs": ["qi_staff_1", "qi_staff_2"],
+            },
         },
+        "selection_kind": "all_results",
     }
     assert fact.answer_request_model_dict()["answer_outputs"] == [
         {
@@ -328,6 +350,9 @@ def test_parse_question_contract_accepts_group_key_on_grouped_expression():
     payload = {
         "kind": "question_contract",
         "answer_requests_count": 1,
+        "question_input_inventory_check": {
+            "all_input_like_phrases_declared": True,
+        },
         "question_inputs": [
             {
                 "source": "question_context",
@@ -371,28 +396,29 @@ def test_parse_question_contract_accepts_group_key_on_grouped_expression():
         "answer_requests": [
             {
                 "answer_fact": "sales count for each specified staff member today",
-                "answer_expression": {
-                    "family": "grouped_aggregate",
-                    "group_key": {
-                        "description": "staff member",
-                        "domain": "SPECIFIED_QUESTION_INPUTS",
+                    "answer_expression": {
+                        "family": "grouped_aggregate",
+                        "selection": {"kind": "all_results"},
+                        "group_key": {
+                            "description": "staff member",
+                            "value_source": {
+                                "kind": "specified_question_inputs",
+                            },
+                        },
                     },
-                },
-                "question_input_uses": [
-                    {
-                        "use_id": "use_staff_1",
-                        "input_ref": "qi_staff_1",
-                        "owner_kind": "GROUP_KEY",
-                    },
-                    {
-                        "use_id": "use_staff_2",
-                        "input_ref": "qi_staff_2",
-                        "owner_kind": "GROUP_KEY",
-                    },
-                    {
-                        "use_id": "use_today",
-                        "input_ref": "qi_today",
-                        "owner_kind": "POPULATION_TESTS",
+                    "question_input_uses": [
+                        {
+                            "input_ref": "qi_staff_1",
+                            "owner_kind": "GROUP_KEY",
+                        },
+                        {
+                            "input_ref": "qi_staff_2",
+                            "owner_kind": "GROUP_KEY",
+                        },
+                        {
+                            "use_id": "use_qi_today",
+                            "input_ref": "qi_today",
+                            "owner_kind": "POPULATION_TESTS",
                     },
                 ],
                 "answer_subject": {
@@ -402,38 +428,17 @@ def test_parse_question_contract_accepts_group_key_on_grouped_expression():
                     },
                 },
                 "answer_population": {
-                    "population_label": "sales today",
-                    "counted_unit": "sale",
                     "membership_tests": [
                         {
-                            "test_id": "test_1",
-                            "kind": "SUBJECT_IDENTITY",
-                            "polarity": "MUST_PASS",
-                            "test_question": "Is this a sale?",
-                            "question_input_use_refs": [],
-                        },
-                        {
-                            "test_id": "test_2",
-                            "kind": "EXPLICIT_USER_CONSTRAINT",
+                            "population_use_refs": ["use_qi_today"],
                             "polarity": "MUST_PASS",
                             "test_question": "Did the sale occur today?",
-                            "question_input_use_refs": ["use_today"],
-                        },
-                        {
-                            "test_id": "test_3",
-                            "kind": "NORMAL_INSTANCE_GUARD",
-                            "polarity": "MUST_PASS",
-                            "test_question": "Is this an ordinary business sale?",
-                            "question_input_use_refs": [],
                         },
                     ],
                 },
                 "answer_outputs": [{"description": "sales count", "role": "ROW_COUNT"}],
             }
         ],
-        "question_input_inventory_check": {
-            "all_input_like_phrases_declared": True,
-        },
     }
 
     result = parse_question_contract(
@@ -641,10 +646,10 @@ def test_question_contract_parser_fails_closed_on_unparsed_fields():
     payload = {
         "kind": "question_contract",
         "answer_requests_count": 1,
-        "question_inputs": [],
         "question_input_inventory_check": {
             "all_input_like_phrases_declared": True,
         },
+        "question_inputs": [],
         "requested_facts": [
             {
                 "id": "model_authored_fact",
@@ -664,16 +669,7 @@ def test_question_contract_parser_fails_closed_on_unparsed_fields():
                     },
                 },
                 "answer_population": {
-                    "population_label": "sales",
-                    "counted_unit": "sale",
                     "membership_tests": [
-                        {
-                            "test_id": "test_1",
-                            "kind": "SUBJECT_IDENTITY",
-                            "polarity": "MUST_PASS",
-                            "test_question": "Is this a sale?",
-                            "question_input_use_refs": [],
-                        }
                     ],
                 },
                 "answer_outputs": [
@@ -697,6 +693,9 @@ def test_conversation_resolution_resolved_text_requires_conversation_source():
     payload = {
         "kind": "question_contract",
         "answer_requests_count": 1,
+        "question_input_inventory_check": {
+            "all_input_like_phrases_declared": True,
+        },
         "question_inputs": [
             {
                 "input_ref": "input_staff",
@@ -710,9 +709,6 @@ def test_conversation_resolution_resolved_text_requires_conversation_source():
                 },
             }
         ],
-        "question_input_inventory_check": {
-            "all_input_like_phrases_declared": True,
-        },
         "answer_requests": [
             {
                 "answer_fact": "her sales",
@@ -724,22 +720,11 @@ def test_conversation_resolution_resolved_text_requires_conversation_source():
                     },
                 },
                 "answer_population": {
-                    "population_label": "her sales",
-                    "counted_unit": "sale",
                     "membership_tests": [
                         {
-                            "test_id": "test_1",
-                            "kind": "SUBJECT_IDENTITY",
-                            "polarity": "MUST_PASS",
-                            "test_question": "Is this a sale?",
-                            "question_input_use_refs": [],
-                        },
-                        {
-                            "test_id": "test_staff",
-                            "kind": "EXPLICIT_USER_CONSTRAINT",
+                            "population_use_refs": ["use_input_staff"],
                             "polarity": "MUST_PASS",
                             "test_question": "Does this sale belong to the staff member?",
-                            "question_input_use_refs": ["use_input_staff"],
                         }
                     ],
                 },
@@ -770,6 +755,9 @@ def test_result_limit_requires_canonical_digit_text_at_parse_boundary():
     payload = {
         "kind": "question_contract",
         "answer_requests_count": 1,
+        "question_input_inventory_check": {
+            "all_input_like_phrases_declared": True,
+        },
         "question_inputs": [
             {
                 "input_ref": "input_limit",
@@ -783,13 +771,10 @@ def test_result_limit_requires_canonical_digit_text_at_parse_boundary():
                 },
             }
         ],
-        "question_input_inventory_check": {
-            "all_input_like_phrases_declared": True,
-        },
         "answer_requests": [
             {
                 "answer_fact": "top five sales",
-                "answer_expression": {"family": "ranked_list"},
+                "answer_expression": {"family": "unsupported_family"},
                 "answer_subject": {
                     "subject_text": "sales",
                     "instance_interpretation": {
@@ -797,16 +782,7 @@ def test_result_limit_requires_canonical_digit_text_at_parse_boundary():
                     },
                 },
                 "answer_population": {
-                    "population_label": "sales",
-                    "counted_unit": "sale",
                     "membership_tests": [
-                        {
-                            "test_id": "test_1",
-                            "kind": "SUBJECT_IDENTITY",
-                            "polarity": "MUST_PASS",
-                            "test_question": "Is this a sale?",
-                            "question_input_use_refs": [],
-                        }
                     ],
                 },
                 "answer_outputs": [
@@ -814,7 +790,6 @@ def test_result_limit_requires_canonical_digit_text_at_parse_boundary():
                 ],
                 "question_input_uses": [
                     {
-                        "use_id": "use_input_limit",
                         "input_ref": "input_limit",
                         "owner_kind": "RESULT_LIMIT",
                     }
@@ -1050,7 +1025,8 @@ def test_question_contract_parser_allows_repeated_field_label_for_later_value():
     )
 
 
-def test_question_contract_parser_rejects_answer_subject_literal_input():
+@pytest.mark.parametrize("role", ["reference_value", "predicate_value"])
+def test_question_contract_parser_rejects_answer_subject_literal_input(role: str):
     question = "How many unverified cash deposits are there?"
     payload = _single_input_payload(
         {
@@ -1059,7 +1035,7 @@ def test_question_contract_parser_rejects_answer_subject_literal_input():
             "source": "question_context",
             "value_source_text": "cash deposits",
             "operand_text": "cash deposits",
-            "role": "reference_value",
+            "role": role,
             "value_meaning_hint": "cash deposits",
             "inventory_check": {
                 "why_this_is_an_input": "cash deposits is a named reference"
@@ -1068,10 +1044,6 @@ def test_question_contract_parser_rejects_answer_subject_literal_input():
     )
     payload["answer_requests"][0]["answer_fact"] = "count of unverified cash deposits"
     payload["answer_requests"][0]["answer_subject"]["subject_text"] = "cash deposits"
-    payload["answer_requests"][0]["answer_population"]["population_label"] = (
-        "cash deposits"
-    )
-    payload["answer_requests"][0]["answer_population"]["counted_unit"] = "cash deposits"
 
     with pytest.raises(ValueError, match="answer subject"):
         parse_question_contract(

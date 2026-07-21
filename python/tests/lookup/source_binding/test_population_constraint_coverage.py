@@ -4,6 +4,9 @@ from fervis.lookup.answer_program.relations import PopulationCoverageRole
 from fervis.lookup.source_binding.population_effects import (
     population_coverage_claims_for_satisfied_tests,
 )
+from fervis.lookup.source_binding.parser.membership_effects import (
+    population_choice_proof_refs,
+)
 
 from tests.lookup.source_binding._plan_member_targets_fixtures import (
     AnswerPopulationMembershipTestKind,
@@ -48,6 +51,12 @@ def test_satisfied_input_owned_test_preserves_its_input_proof() -> None:
         "population_choice:sale_type",
         "known_input:q1",
     )
+
+
+def test_population_choice_proof_does_not_depend_on_an_out_of_scope_parameter() -> None:
+    proof_refs = population_choice_proof_refs("population_choice:sale_type")
+
+    assert proof_refs == ("population_choice:sale_type",)
 
 
 def test_observed_only_input_application_does_not_constrain_anti_join_candidates():
@@ -111,7 +120,6 @@ def _named_staff_set_difference_request():
     fact = replace(
         base.requested_facts[0],
         answer_population=RequestedFactAnswerPopulation(
-            population_label="specified staff without sales",
             counted_unit="staff",
             membership_tests=(
                 RequestedFactAnswerPopulationMembershipTest(
@@ -179,13 +187,19 @@ def _apply_staff_input(outcome, *, target, role: str, basis: str) -> None:
         iter(value["components_by_target_kind"].items())
     )
     population_test_basis = value["population_test_basis"]
+    selected_target = application["targets_by_kind"][target_kind][0]
     outcome["bindings_for_fact_1"][role]["resolved_input_applications"] = [
         {
-            "target_kind": target_kind,
-            "target_id": application["targets_by_kind"][target_kind][0],
             "value_id": value["value_id"],
-            "value_component": components[0],
-            "match_basis_explanation": basis,
+            "applications": [
+                {
+                    "application_target_id": selected_target[
+                        "application_target_id"
+                    ],
+                    "value_component": components[0],
+                    "match_basis_explanation": basis,
+                }
+            ],
             "population_test_results": {
                 test_id: {
                     "test_id": test_id,

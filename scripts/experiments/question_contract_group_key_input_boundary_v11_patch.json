@@ -1,0 +1,14 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Create question_inputs for concrete values supplied by the question or conversation resolution that a population predicate, result key, time constraint, compute expression, or result limit consumes.",
+      "new": "Create question_inputs for concrete values supplied by the question or conversation resolution that a population predicate, specified group-member set, time constraint, compute expression, or result limit consumes.",
+      "expected_count": 1
+    },
+    {
+      "old": "Use GROUP_KEY when the input is a concrete member of a specified_question_inputs group key.",
+      "new": "Use GROUP_KEY exactly for concrete members of a specified_question_inputs group key; source_value and temporal_bucket group keys have no GROUP_KEY inputs.",
+      "expected_count": 1
+    }
+  ]
+}

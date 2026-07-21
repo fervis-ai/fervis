@@ -13,14 +13,12 @@ if TYPE_CHECKING:
 class ExecutionProofContext:
     endpoint_arg_scope_refs: dict[str, frozenset[str]]
     operation_refs: dict[str, frozenset[str]]
-    row_filter_scope_refs: dict[str, frozenset[str]]
 
     @classmethod
     def empty(cls) -> "ExecutionProofContext":
         return cls(
             endpoint_arg_scope_refs={},
             operation_refs={},
-            row_filter_scope_refs={},
         )
 
     @classmethod
@@ -34,5 +32,4 @@ class ExecutionProofContext:
                 operation_id: frozenset(proof_refs)
                 for operation_id, proof_refs in materialized.operation_proof_refs.items()
             },
-            row_filter_scope_refs=materialized.row_filter_scope_refs,
         )

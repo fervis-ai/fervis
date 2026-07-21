@@ -51,7 +51,6 @@ class ResolverResolutionOutput(ProviderOutput):
 @dataclass(frozen=True)
 class OptionReviewOutput(ProviderOutput):
     resource_type: str
-    resource_type_match: str
     resolver_fit_question: str
     because: str
     resolution: ResolverResolutionOutput
@@ -60,7 +59,7 @@ class OptionReviewOutput(ProviderOutput):
 @dataclass(frozen=True)
 class KnownInputBindingReviewOutput(ProviderOutput):
     resource_type_basis: str
-    resource_type_x: str
+    resource_type_compatibility: dict[str, str]
     identifier_kind_basis: str
     identifier_kind: str
     option_reviews: dict[str, OptionReviewOutput]

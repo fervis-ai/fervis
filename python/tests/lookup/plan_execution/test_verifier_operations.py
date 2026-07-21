@@ -14,22 +14,26 @@ from fervis.lookup.answer_program.operations import (
     AggregationSpec,
     AntiJoinSpec,
     ComputeSpec,
-    ComputeBinary,
-    ComputeBinaryOperator,
     FilterSpec,
     JoinKey,
     Operation,
     Predicate,
     PredicateOperator,
-    ProjectField,
+    NamedExpression,
     ProjectSpec,
-    RankSpec,
+    OrderSpec,
     RelationRole,
     RelationRoleRef,
     SortDirection,
     SortKey,
-    TiePolicy,
+    Take,
     UniversalConditionSpec,
+)
+from fervis.lookup.answer_program.expressions import (
+    BinaryExpression,
+    ExpressionBinaryOperator,
+    FieldRef,
+    NodeOutputRef,
 )
 from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
@@ -85,9 +89,9 @@ def _number_ref(
     )
 
 
-def _subtract(left, right) -> ComputeBinary:
-    return ComputeBinary(
-        operator=ComputeBinaryOperator.SUBTRACT,
+def _subtract(left, right) -> BinaryExpression:
+    return BinaryExpression(
+        operator=ExpressionBinaryOperator.SUBTRACT,
         left=left,
         right=right,
     )
@@ -228,11 +232,11 @@ def _fulfillment(
 def _render_field(operation: Operation) -> str:
     spec = operation.spec
     if isinstance(spec, AntiJoinSpec):
-        return spec.output_fields[0].output or spec.output_fields[0].source
+        return spec.output_fields[0].output_field
     if isinstance(spec, UniversalConditionSpec):
-        return spec.output_fields[0].output or spec.output_fields[0].source
+        return spec.output_fields[0].output_field
     if isinstance(spec, ProjectSpec):
-        return spec.fields[0].output or spec.fields[0].source
+        return spec.outputs[0].output_field
     if isinstance(spec, AggregateSpec):
         return spec.group_by[0] if spec.group_by else spec.aggregations[0].output_field
     return "name"
@@ -248,7 +252,7 @@ def _input_relation_ids(operation: Operation) -> set[str]:
             spec.required_dimension.relation_id,
             spec.observation.relation_id,
         }
-    if isinstance(spec, RankSpec):
+    if isinstance(spec, OrderSpec):
         return {spec.input_relation}
     if isinstance(spec, ProjectSpec):
         return {spec.input_relation}
@@ -336,7 +340,11 @@ def test_anti_join_requires_role_refs_join_keys_and_output_fields():
                 required_identity_fields=("observed.id",),
             ),
             join_keys=(),
-            output_fields=(ProjectField(source="candidate.name"),),
+            output_fields=(
+                NamedExpression(
+                    output_field="candidate.name", expression=FieldRef("candidate.name")
+                ),
+            ),
         ),
         output_relation="result",
     )
@@ -354,7 +362,11 @@ def test_anti_join_requires_role_refs_join_keys_and_output_fields():
                 required_identity_fields=("observed.id",),
             ),
             join_keys=(JoinKey(left="candidate.id", right="observed.id"),),
-            output_fields=(ProjectField(source="candidate.name"),),
+            output_fields=(
+                NamedExpression(
+                    output_field="candidate.name", expression=FieldRef("candidate.name")
+                ),
+            ),
         ),
         output_relation="result",
     )
@@ -380,7 +392,11 @@ def test_anti_join_rejects_identity_binding_as_output_field():
                     required_identity_fields=("observed.id",),
                 ),
                 join_keys=(JoinKey(left="candidate.id", right="observed.id"),),
-                output_fields=(ProjectField(source="candidate.id"),),
+                output_fields=(
+                    NamedExpression(
+                        output_field="candidate.id", expression=FieldRef("candidate.id")
+                    ),
+                ),
             ),
             output_relation="result",
         )
@@ -411,8 +427,12 @@ def test_universal_condition_requires_subject_dimension_and_predicate():
             ),
             subject_keys=(JoinKey(left="subject_id", right="obs_subject_id"),),
             dimension_keys=(JoinKey(left="dimension_id", right="obs_dimension_id"),),
-            predicate=Predicate(left="", operator=""),
-            output_fields=(ProjectField(source="subject_name"),),
+            predicate=Predicate(left=FieldRef("invalid"), operator=""),
+            output_fields=(
+                NamedExpression(
+                    output_field="subject_name", expression=FieldRef("subject_name")
+                ),
+            ),
         ),
         output_relation="result",
     )
@@ -437,11 +457,15 @@ def test_universal_condition_requires_subject_dimension_and_predicate():
             subject_keys=(JoinKey(left="subject_id", right="obs_subject_id"),),
             dimension_keys=(JoinKey(left="dimension_id", right="obs_dimension_id"),),
             predicate=Predicate(
-                left="field.quantity",
+                left=FieldRef("field.quantity"),
                 operator=PredicateOperator.LTE,
-                right="field.other",
+                right=FieldRef("field.other"),
             ),
-            output_fields=(ProjectField(source="subject_name"),),
+            output_fields=(
+                NamedExpression(
+                    output_field="subject_name", expression=FieldRef("subject_name")
+                ),
+            ),
         ),
         output_relation="result",
     )
@@ -451,30 +475,27 @@ def test_universal_condition_requires_subject_dimension_and_predicate():
     verify_fact_plan(_plan_with(valid))
 
 
-def test_rank_requires_ordering_and_deterministic_tie_policy():
+def test_order_requires_ordering_keys():
     invalid = Operation(
         id="ranked",
-        spec=RankSpec(
+        spec=OrderSpec(
             input_relation="totals",
             order_by=(),
-            tie_policy="",
-            limit=_rank_limit(1),
+            selection=Take(limit=_rank_limit(1)),
         ),
         output_relation="result",
     )
     valid = Operation(
         id="ranked",
-        spec=RankSpec(
+        spec=OrderSpec(
             input_relation="totals",
             order_by=(SortKey(field="total", direction=SortDirection.DESC),),
-            tie_policy=TiePolicy.FIELD,
-            tie_breakers=(SortKey(field="name", direction=SortDirection.ASC),),
-            limit=_rank_limit(1),
+            selection=Take(limit=_rank_limit(1)),
         ),
         output_relation="result",
     )
 
-    with pytest.raises(VerificationError, match="tie policy"):
+    with pytest.raises(VerificationError, match="ordering keys"):
         verify_fact_plan(_plan_with(invalid))
     verify_fact_plan(_plan_with(valid))
 
@@ -520,7 +541,11 @@ def test_compute_references_declared_value_origins_only():
                         id="project_answer",
                         spec=ProjectSpec(
                             input_relation="rows",
-                            fields=(ProjectField(source="name", output="name"),),
+                            outputs=(
+                                NamedExpression(
+                                    output_field="name", expression=FieldRef("name")
+                                ),
+                            ),
                         ),
                         output_relation="result",
                     ),
@@ -594,7 +619,11 @@ def test_one_answer_output_can_be_fulfilled_by_multiple_distinct_result_outputs(
                     id="project_day_1",
                     spec=ProjectSpec(
                         input_relation="day_1_rows",
-                        fields=(ProjectField(source="amount", output="amount"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="amount", expression=FieldRef("amount")
+                            ),
+                        ),
                     ),
                     output_relation="day_1_result",
                 ),
@@ -602,7 +631,11 @@ def test_one_answer_output_can_be_fulfilled_by_multiple_distinct_result_outputs(
                     id="project_day_2",
                     spec=ProjectSpec(
                         input_relation="day_2_rows",
-                        fields=(ProjectField(source="amount", output="amount"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="amount", expression=FieldRef("amount")
+                            ),
+                        ),
                     ),
                     output_relation="day_2_result",
                 ),
@@ -693,7 +726,11 @@ def test_scalar_only_terminal_answer_cannot_launder_unrelated_relation_evidence(
                     id="project_unrelated_evidence",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(ProjectField(source="name"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="name", expression=FieldRef("name")
+                            ),
+                        ),
                     ),
                     output_relation="unrelated_evidence",
                 ),
@@ -721,6 +758,107 @@ def test_scalar_only_terminal_answer_cannot_launder_unrelated_relation_evidence(
         verify_fact_plan(plan)
 
 
+def test_scalar_result_consumes_the_relation_node_that_produces_its_operand():
+    plan = FactPlan(
+        outcome=AnswerProgram(
+            fulfillment=(
+                FactFulfillment(
+                    requested_fact_id="rf_answer",
+                    answer_output_id="answer",
+                    result_output_id="answer",
+                ),
+            ),
+            relations=(_relation("rows"),),
+            operations=(
+                Operation(
+                    id="total",
+                    spec=AggregateSpec(
+                        input_relation="rows",
+                        group_by=(),
+                        aggregations=(
+                            AggregationSpec(
+                                function=AggregationFunction.SUM,
+                                input_field="total",
+                                output_field="total",
+                            ),
+                        ),
+                    ),
+                    output_relation="total_row",
+                ),
+                Operation(
+                    id="scaled",
+                    spec=ComputeSpec(
+                        expression=BinaryExpression(
+                            operator=ExpressionBinaryOperator.MULTIPLY,
+                            left=NodeOutputRef("total", "total"),
+                            right=_number_ref(input_id="fraction", value="0.1"),
+                        ),
+                        output_scalar="scaled",
+                    ),
+                ),
+            ),
+            result_projection=ResultProjection(
+                scalar_outputs=(
+                    ScalarResultOutput(id="answer", scalar_id="scaled"),
+                ),
+            ),
+        )
+    )
+
+    verify_fact_plan(plan)
+
+
+def test_grouped_relation_output_cannot_masquerade_as_one_scalar_operand():
+    plan = FactPlan(
+        outcome=AnswerProgram(
+            fulfillment=(
+                FactFulfillment(
+                    requested_fact_id="rf_answer",
+                    answer_output_id="answer",
+                    result_output_id="answer",
+                ),
+            ),
+            relations=(_relation("rows"),),
+            operations=(
+                Operation(
+                    id="totals_by_group",
+                    spec=AggregateSpec(
+                        input_relation="rows",
+                        group_by=("field.group",),
+                        aggregations=(
+                            AggregationSpec(
+                                function=AggregationFunction.SUM,
+                                input_field="total",
+                                output_field="total",
+                            ),
+                        ),
+                    ),
+                    output_relation="group_totals",
+                ),
+                Operation(
+                    id="scaled",
+                    spec=ComputeSpec(
+                        expression=BinaryExpression(
+                            operator=ExpressionBinaryOperator.MULTIPLY,
+                            left=NodeOutputRef("totals_by_group", "total"),
+                            right=_number_ref(input_id="fraction", value="0.1"),
+                        ),
+                        output_scalar="scaled",
+                    ),
+                ),
+            ),
+            result_projection=ResultProjection(
+                scalar_outputs=(
+                    ScalarResultOutput(id="answer", scalar_id="scaled"),
+                ),
+            ),
+        )
+    )
+
+    with pytest.raises(VerificationError, match="unbound scalar input"):
+        verify_fact_plan(plan)
+
+
 def test_unprojected_compute_outputs_are_not_legal_answer_work():
     plan = FactPlan(
         outcome=AnswerProgram(
@@ -737,7 +875,11 @@ def test_unprojected_compute_outputs_are_not_legal_answer_work():
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(ProjectField(source="name"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="name", expression=FieldRef("name")
+                            ),
+                        ),
                     ),
                     output_relation="result",
                 ),
@@ -779,9 +921,13 @@ def test_result_output_ids_must_be_unique():
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(
-                            ProjectField(source="name"),
-                            ProjectField(source="total"),
+                        outputs=(
+                            NamedExpression(
+                                output_field="name", expression=FieldRef("name")
+                            ),
+                            NamedExpression(
+                                output_field="total", expression=FieldRef("total")
+                            ),
                         ),
                     ),
                     output_relation="result",
@@ -810,7 +956,9 @@ def test_relation_answer_requires_result_outputs():
             id="project",
             spec=ProjectSpec(
                 input_relation="rows",
-                fields=(ProjectField(source="name"),),
+                outputs=(
+                    NamedExpression(output_field="name", expression=FieldRef("name")),
+                ),
             ),
             output_relation="result",
         )
@@ -841,7 +989,9 @@ def test_project_requires_output_relation():
             id="project",
             spec=ProjectSpec(
                 input_relation="rows",
-                fields=(ProjectField(source="name"),),
+                outputs=(
+                    NamedExpression(output_field="name", expression=FieldRef("name")),
+                ),
             ),
         )
     )
@@ -850,33 +1000,20 @@ def test_project_requires_output_relation():
         verify_fact_plan(plan)
 
 
-def test_predicate_requires_exactly_one_rhs_for_binary_operators():
+def test_predicate_requires_rhs_for_binary_operators():
     missing_rhs = Operation(
         id="filter",
         spec=FilterSpec(
             input_relation="rows",
-            predicate=Predicate(left="field.value", operator=PredicateOperator.EQUALS),
-        ),
-        output_relation="result",
-    )
-    duplicate_rhs = Operation(
-        id="filter",
-        spec=FilterSpec(
-            input_relation="rows",
             predicate=Predicate(
-                left="field.value",
+                left=FieldRef("field.value"),
                 operator=PredicateOperator.EQUALS,
-                right="field.other",
-                right_scalar="literal",
             ),
         ),
         output_relation="result",
     )
-
     with pytest.raises(VerificationError, match="right-hand side"):
         verify_fact_plan(_plan_with(missing_rhs))
-    with pytest.raises(VerificationError, match="right-hand side"):
-        verify_fact_plan(_plan_with(duplicate_rhs))
 
 
 def test_predicate_rejects_rhs_for_unary_operators():
@@ -886,9 +1023,9 @@ def test_predicate_rejects_rhs_for_unary_operators():
             spec=FilterSpec(
                 input_relation="rows",
                 predicate=Predicate(
-                    left="field.value",
+                    left=FieldRef("field.value"),
                     operator=PredicateOperator.IS_NULL,
-                    right_scalar="literal",
+                    right=_number_ref(input_id="literal", value="1"),
                 ),
             ),
             output_relation="result",
@@ -955,9 +1092,13 @@ def test_project_and_aggregate_reject_duplicate_output_fields():
         id="project",
         spec=ProjectSpec(
             input_relation="rows",
-            fields=(
-                ProjectField(source="field.first", output="value"),
-                ProjectField(source="field.second", output="value"),
+            outputs=(
+                NamedExpression(
+                    output_field="value", expression=FieldRef("field.first")
+                ),
+                NamedExpression(
+                    output_field="value", expression=FieldRef("field.second")
+                ),
             ),
         ),
         output_relation="result",
@@ -986,18 +1127,14 @@ def test_project_and_aggregate_reject_duplicate_output_fields():
         verify_fact_plan(_plan_with(duplicate_aggregate))
 
 
-def test_rank_rejects_non_positive_limit():
+def test_order_rejects_non_positive_take_limit():
     plan = _plan_with(
         Operation(
             id="ranked",
-            spec=RankSpec(
+            spec=OrderSpec(
                 input_relation="rows",
                 order_by=(SortKey(field="field.value", direction=SortDirection.ASC),),
-                tie_policy=TiePolicy.FIELD,
-                tie_breakers=(
-                    SortKey(field="field.value", direction=SortDirection.ASC),
-                ),
-                limit=_rank_limit(0),
+                selection=Take(limit=_rank_limit(0)),
             ),
             output_relation="result",
         )

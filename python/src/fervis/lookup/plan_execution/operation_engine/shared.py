@@ -24,11 +24,13 @@ from fervis.lookup.answer_program.operations import (
     AggregationSpec,
     AntiJoinSpec,
     CrossJoinSpec,
+    ComputeSpec,
     FilterSpec,
     JoinKey,
     JoinSpec,
+    OrderSpec,
     Predicate,
-    ProjectField,
+    NamedExpression,
     ProjectSpec,
     ProjectToKeySpec,
     RelationRole,
@@ -37,12 +39,12 @@ from fervis.lookup.answer_program.operations import (
     UnionSpec,
     UniversalConditionSpec,
 )
+from fervis.lookup.answer_program.expressions import FieldRef
 from fervis.lookup.plan_execution.operation_runtime import (
     ExecutableOperation,
-    ResolvedComputeSpec,
-    ResolvedRankSpec,
-    resolved_compute_references,
 )
+from fervis.lookup.answer_program.expressions import expression_references
+from fervis.lookup.answer_program.expressions import expression_input_id
 from fervis.lookup.outcomes.errors import UndefinedOperationError
 from fervis.lookup.outcomes.operation_semantics import (
     empty_aggregation_undefined_reason,
@@ -108,7 +110,7 @@ def _require_grain(
 
 def _project_output(
     row: Row,
-    fields: tuple[ProjectField, ...],
+    fields: tuple[NamedExpression, ...],
     *,
     grain_keys: tuple[str, ...] = (),
 ) -> dict[str, RuntimeValue]:
@@ -116,8 +118,14 @@ def _project_output(
     for grain_field in grain_keys:
         _assign_or_match(output, grain_field, _field(row, grain_field))
     for field in fields:
+        if not isinstance(field.expression, FieldRef):
+            raise RelationEngineError(
+                "role projection requires direct field expressions"
+            )
         _assign_or_match(
-            output, field.output or field.source, _field(row, field.source)
+            output,
+            field.output_field,
+            _field(row, field.expression.field_id),
         )
     return output
 
@@ -198,11 +206,15 @@ def _operation_relation(
 
 def _project_grain(
     input_relation: RelationRows,
-    fields: tuple[ProjectField, ...],
+    fields: tuple[NamedExpression, ...],
 ) -> tuple[str, ...]:
     if not input_relation.grain_keys:
         return ()
-    projections = {field.source: field.output or field.source for field in fields}
+    projections = {
+        field.expression.field_id: field.output_field
+        for field in fields
+        if isinstance(field.expression, FieldRef)
+    }
     if not all(field in projections for field in input_relation.grain_keys):
         return ()
     return tuple(projections[field] for field in input_relation.grain_keys)
@@ -242,8 +254,13 @@ def _input_scalar_proof_refs(
 
 def _operation_scalar_refs(operation: ExecutableOperation) -> tuple[str, ...]:
     spec = operation.spec
-    if isinstance(spec, ResolvedComputeSpec):
-        return resolved_compute_references(spec.expression).output_refs
+    if isinstance(spec, ComputeSpec):
+        references = expression_references(spec.expression)
+        return (
+            *(item.output_id for item in references.outputs),
+            *(expression_input_id(item) for item in references.parameters),
+            *(expression_input_id(item) for item in references.constants),
+        )
     if isinstance(spec, FilterSpec):
         return _predicate_scalar_refs(spec.predicate)
     if isinstance(spec, UniversalConditionSpec):
@@ -252,7 +269,14 @@ def _operation_scalar_refs(operation: ExecutableOperation) -> tuple[str, ...]:
 
 
 def _predicate_scalar_refs(predicate: Predicate) -> tuple[str, ...]:
-    return (predicate.right_scalar,) if predicate.right_scalar else ()
+    if predicate.right is None:
+        return ()
+    references = expression_references(predicate.right)
+    return (
+        *(item.output_id for item in references.outputs),
+        *(expression_input_id(item) for item in references.parameters),
+        *(expression_input_id(item) for item in references.constants),
+    )
 
 
 def _input_relations(
@@ -265,10 +289,11 @@ def _input_relations(
         (
             FilterSpec,
             ProjectSpec,
+            OrderSpec,
             ProjectToKeySpec,
             RoleExpandSpec,
             AggregateSpec,
-            ResolvedRankSpec,
+            OrderSpec,
         ),
     ):
         return (_relation(relations, spec.input_relation),)

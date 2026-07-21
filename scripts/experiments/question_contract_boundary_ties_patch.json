@@ -1,0 +1,14 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "all_results keeps every result; take_one keeps exactly one result; take keeps the explicit number supplied by one result_limit input.",
+      "new": "all_results keeps every result; take_one keeps every result tied for the first ordering value; take keeps the first explicit number of ordered results plus any later results tied with the last one kept.",
+      "expected_count": 1
+    },
+    {
+      "old": "Use take_one for a singular first, last, highest, or lowest result. Do not create a result_limit input for take_one.",
+      "new": "Use take_one for a singular first, last, highest, or lowest request; tied results are co-results. Do not create a result_limit input for take_one.",
+      "expected_count": 1
+    }
+  ]
+}

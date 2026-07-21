@@ -1,0 +1,34 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Within each answer_request, author answer_expression, then question_input_uses, then answer_population.\nquestion_input_uses assigns each input used by this answer_request to exactly one semantic owner kind.\nCreate exactly one question_input_uses record for each fact-local input_ref.\nUse GROUP_KEY exactly for concrete members of a specified_question_inputs group key; source_value and temporal_bucket group keys have no GROUP_KEY inputs.\nGROUP_KEY inputs are not candidate-row predicates; create no EXPLICIT_USER_CONSTRAINT for them.\nUse POPULATION_TESTS when the input is an operand of one or more EXPLICIT_USER_CONSTRAINT membership tests, and give that use a unique use_id.\nUse COMPUTE_EXPRESSION when a formula_value is an operand in the requested computed_scalar expression.\nUse RESULT_LIMIT when the input supplies answer_expression's requested result limit.\nOne population test may reference several POPULATION_TESTS use_ids, and several tests may reference the same use_id.\nEach EXPLICIT_USER_CONSTRAINT lists every POPULATION_TESTS use_id it consumes in question_input_use_refs.\nGROUP_KEY, COMPUTE_EXPRESSION, and RESULT_LIMIT inputs have no use_id and cannot be membership-test operands.\nSUBJECT_IDENTITY, NORMAL_INSTANCE_GUARD, and RAW_RECORD_GUARD use an empty question_input_use_refs array.",
+      "new": "Within each answer_request, author answer_expression, then answer_population, then question_input_uses.\nquestion_input_uses assigns each input used by this answer_request to exactly one semantic owner kind.\nCreate exactly one question_input_uses record for each fact-local input_ref.\nUse GROUP_KEY exactly for concrete members of a specified_question_inputs group key; source_value and temporal_bucket group keys have no GROUP_KEY inputs.\nA specified_question_inputs group key restricts the result-key domain to its GROUP_KEY inputs and groups by them; do not also create population predicates for those inputs.\nUse POPULATION_TESTS when the input is an operand of one or more EXPLICIT_USER_CONSTRAINT membership tests, and list those test IDs in membership_test_ids.\nUse COMPUTE_EXPRESSION when a formula_value is an operand in the requested computed_scalar expression.\nUse RESULT_LIMIT when the input supplies answer_expression's requested result limit.\nOne POPULATION_TESTS input may supply several membership tests, and one test may consume several POPULATION_TESTS inputs.\nGROUP_KEY, COMPUTE_EXPRESSION, and RESULT_LIMIT inputs have no membership_test_ids and cannot be membership-test operands.",
+      "expected_count": 1
+    },
+    {
+      "old": "When a time input constrains an answer_request, assign it one POPULATION_TESTS use and reference that use from the applicable EXPLICIT_USER_CONSTRAINT.",
+      "new": "When a time input constrains an answer_request, assign its POPULATION_TESTS use to the applicable EXPLICIT_USER_CONSTRAINT through membership_test_ids.",
+      "expected_count": 1
+    },
+    {
+      "old": "Before returning a complete contract, verify that each copied question occurrence is declared once, every fact-local input appears once in question_input_uses, group-key and compute-expression inputs appear in no population test, and every POPULATION_TESTS use is referenced by at least one EXPLICIT_USER_CONSTRAINT.",
+      "new": "Before returning a complete contract, verify that each copied question occurrence is declared once, every fact-local input appears once in question_input_uses, group-key and compute-expression inputs appear in no population test, and every POPULATION_TESTS use names at least one EXPLICIT_USER_CONSTRAINT.",
+      "expected_count": 1
+    }
+  ],
+  "schema_patches": [
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/question_input_uses/items/oneOf/1/properties/use_id"},
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/question_input_uses/items/oneOf/1/required/2"},
+    {"tool_name": "submit_question_contract_outcome", "op": "add", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/question_input_uses/items/oneOf/1/properties/membership_test_ids", "value": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}},
+    {"tool_name": "submit_question_contract_outcome", "op": "add", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/question_input_uses/items/oneOf/1/required/-", "value": "membership_test_ids"},
+    {"tool_name": "submit_question_contract_outcome", "op": "move_before", "from": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/question_input_uses", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_outputs"},
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items/oneOf/0/properties/question_input_use_refs"},
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items/oneOf/0/required/0"},
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items/oneOf/1/properties/question_input_use_refs"},
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items/oneOf/1/required/0"},
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items/oneOf/2/properties/question_input_use_refs"},
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items/oneOf/2/required/0"},
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items/oneOf/3/properties/question_input_use_refs"},
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_population/properties/membership_tests/items/oneOf/3/required/0"}
+  ]
+}

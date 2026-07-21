@@ -50,12 +50,11 @@ from fervis.lookup.answer_program.values import ConstantRef
 from fervis.lookup.answer_program.values import BindingSet, FactValue, LiteralType
 from fervis.lookup.answer_program.operations import (
     Operation,
-    RankSpec,
+    OrderSpec,
     SortDirection,
     SortKey,
-    TiePolicy,
+    Take,
 )
-from fervis.lookup.plan_execution.operation_runtime import ResolvedRankSpec
 from tests.testkit.catalog import catalog_from_payload
 from tests.testkit.question_contract import question_contract_from_payload
 from tests.testkit.serialization import portable_value
@@ -346,7 +345,7 @@ def run_answer_program_invoke_case(payload: dict[str, Any]) -> list[str]:
     )
 
 
-def run_answer_program_rank_limit_case(payload: dict[str, Any]) -> list[str]:
+def run_answer_program_order_take_case(payload: dict[str, Any]) -> list[str]:
     input_payload = payload["input"]
     limit = ConstantRef(
         constant_id="rank_limit",
@@ -357,32 +356,27 @@ def run_answer_program_rank_limit_case(payload: dict[str, Any]) -> list[str]:
             value=str(input_payload["value"]),
         ),
     )
-    operations, _inputs = _instantiate_operations(
+    _operations, inputs = _instantiate_operations(
         AnswerProgram(
             operations=(
                 Operation(
-                    id="rank",
-                    spec=RankSpec(
+                    id="order",
+                    spec=OrderSpec(
                         input_relation="rows",
                         order_by=(
                             SortKey(field="value", direction=SortDirection.DESC),
                         ),
-                        tie_policy=TiePolicy.FIELD,
-                        limit=limit,
-                        tie_breakers=(
-                            SortKey(field="id", direction=SortDirection.ASC),
-                        ),
+                        selection=Take(limit=limit),
                     ),
-                    output_relation="ranked",
+                    output_relation="ordered",
                 ),
             ),
         ),
         bindings=BindingSet(),
     )
-    resolved = operations[0].spec
     return _mismatches(
         payload,
-        actual={"limit": resolved.limit if isinstance(resolved, ResolvedRankSpec) else None},
+        actual={"limit": inputs[0].value},
     )
 
 

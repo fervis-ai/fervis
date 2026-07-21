@@ -7,13 +7,11 @@ from fervis.lookup.answer_program.operations import (
     Operation,
     Predicate,
     PredicateOperator,
-    RankSpec,
-    SortDirection,
+    OrderSpec,
     SortKey,
-    TiePolicy,
 )
-from fervis.lookup.fact_planning.compiled_patterns import CompiledMetric, CompiledRank
-from fervis.lookup.answer_program.compiler_inputs import CompilerInputContext
+from fervis.lookup.answer_program.expressions import FieldRef
+from fervis.lookup.fact_planning.compiled_patterns import CompiledMetric, CompiledOrdering
 
 
 def _aggregate_operations(
@@ -43,19 +41,18 @@ def _aggregate_operations(
     )
 
 
-def _ranked_aggregate_operations(
+def _ordered_aggregate_operations(
     *,
     input_relation_id: str,
     aggregate_relation_id: str,
     output_relation_id: str,
-    rank_operation_id: str,
+    order_operation_id: str,
     group_fields: tuple[dict[str, str], ...],
     metric: CompiledMetric,
-    rank: CompiledRank,
-    input_context: CompilerInputContext,
+    ordering: CompiledOrdering,
+    ordering_field_id: str,
     required_group_fields: tuple[str, ...] = (),
 ) -> tuple[Operation, ...]:
-    aggregate_output_id = metric.output_field_id
     filtered_input, filters = _not_null_group_filters(
         input_relation_id=input_relation_id,
         output_relation_id=aggregate_relation_id,
@@ -73,21 +70,16 @@ def _ranked_aggregate_operations(
             output_relation=aggregate_relation_id,
         ),
         Operation(
-            id=rank_operation_id,
-            spec=RankSpec(
+            id=order_operation_id,
+            spec=OrderSpec(
                 input_relation=aggregate_relation_id,
                 order_by=(
                     SortKey(
-                        field=aggregate_output_id,
-                        direction=rank.direction,
+                        field=ordering_field_id,
+                        direction=ordering.direction,
                     ),
                 ),
-                tie_policy=TiePolicy.FIELD,
-                limit=rank.limit_expression(input_context),
-                tie_breakers=tuple(
-                    SortKey(field=item["field_id"], direction=SortDirection.ASC)
-                    for item in group_fields
-                ),
+                selection=ordering.selection,
             ),
             output_relation=output_relation_id,
         ),
@@ -110,7 +102,7 @@ def _not_null_group_filters(
                 spec=FilterSpec(
                     input_relation=current_relation,
                     predicate=Predicate(
-                        left=field_id,
+                        left=FieldRef(field_id),
                         operator=PredicateOperator.NOT_NULL,
                     ),
                 ),

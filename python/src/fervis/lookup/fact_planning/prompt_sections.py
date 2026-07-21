@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from fervis.lookup.fact_planning.grouped_ranked_choices import (
-    GROUPED_RANKED_PLAN_SHAPES,
+from fervis.lookup.fact_planning.grouped_aggregate_choices import (
+    GROUPED_AGGREGATE_PLAN_SHAPES,
 )
 from fervis.lookup.turn_prompts import PromptSection, TurnPromptBuilder
 
@@ -49,9 +49,9 @@ def fact_plan_instruction_sections(
                 "When source_binding_id is included, copy its value verbatim from Bound sources.",
             )
         )
-    if plan_shapes_use_grouped_ranked_choices(plan_shapes):
+    if plan_shapes_use_grouped_aggregate_choices(plan_shapes):
         source_selection_lines.append(
-            "For aggregate_by_group and ranked_aggregate, copy source_binding_id from Grouped/ranked operation choices."
+            "For aggregate_by_group, copy source_binding_id from Grouped aggregate operation choices."
         )
     if plan_shapes_use_required_fulfillment_evidence(plan_shapes):
         source_selection_lines.append(
@@ -93,13 +93,13 @@ def fact_plan_instruction_sections(
                     "For each selected scalar aggregate part, write selection_basis before copying the selected id and field/value.",
                 )
             )
-        if plan_shapes_use_grouped_ranked_choices(plan_shapes):
+        if plan_shapes_use_grouped_aggregate_choices(plan_shapes):
             metric_lines.extend(
                 (
-                    "For aggregate_by_group and ranked_aggregate, use the source-binding group shown in Grouped/ranked operation choices.",
-                    "For aggregate_by_group and ranked_aggregate, choose metric, function, and rank from Grouped/ranked operation choices.",
-                    "For each selected grouped/ranked metric, function, or rank, write selection_basis before copying the selected id and field/value.",
-                    "Do not output separate group fields, answer fields, or source evidence for grouped/ranked patterns.",
+                    "For aggregate_by_group, use the source-binding group shown in Grouped aggregate operation choices.",
+                    "For aggregate_by_group, choose metric and function from Grouped aggregate operation choices.",
+                    "For each selected grouped metric or function, write selection_basis before copying the selected id and field/value.",
+                    "Do not output separate group fields, answer fields, or source evidence for grouped aggregate patterns.",
                 )
             )
         sections.append(
@@ -108,17 +108,22 @@ def fact_plan_instruction_sections(
                 metric_lines,
             )
         )
-    if plan_shapes_use_grouped_ranked_choices(plan_shapes):
+    if plan_shapes_use_grouped_aggregate_choices(plan_shapes):
         sections.append(
             builder.instruction_block(
                 "Grouped Metric Patterns",
                 (
                     "For aggregate_by_group, the source-binding group defines the answer grouping, metric defines the measured value, and function defines the aggregate computation.",
-                    "For ranked_aggregate, the source-binding group defines the answer grouping, metric and function define the computed ranking value, and rank defines which groups to return.",
-                    "rank.sort=desc returns larger metric values before smaller metric values.",
-                    "rank.sort=asc returns smaller metric values before larger metric values.",
-                    "rank.limit is the number of ranked groups to return.",
-                    "rank.limit_value_id is optional. Include it only when Operation input values contains a value_id for that exact rank limit.",
+                    "When the requested groups are ordered by that computed aggregate, do not select another ordering field. The backend uses the aggregate output.",
+                ),
+            )
+        )
+        sections.append(
+            builder.instruction_block(
+                "Derived Group Key",
+                (
+                    "When group_key_source_fields are shown, select exactly one source_field_id whose declared value is divided into the requested groups.",
+                    "The requested group key already fixes the temporal grain. Do not copy or reinterpret it.",
                 ),
             )
         )
@@ -127,11 +132,11 @@ def fact_plan_instruction_sections(
             builder.instruction_block(
                 "Computed Scalar",
                 (
-                    "Use computed_scalar only with bound value sources.",
-                    "scalar_inputs are the bound value sources used by computed_scalar.",
-                    "Copy source_binding_id values verbatim from Bound sources where kind is value.",
+                    "Use computed_scalar only with values shown in Operation input values.",
+                    "Each scalar_inputs item maps one expression input_id to one shown value_id.",
+                    "Each input_id used by expression must appear exactly once in scalar_inputs.",
                     "expression is reverse-Polish tokens: input_id operands followed by add, subtract, multiply, divide, or negate operators.",
-                    "output.scalar_id is the ID for the computed scalar result.",
+                    "output.scalar_id identifies the computed scalar result.",
                     "output.label is an optional output name.",
                 ),
             )
@@ -183,10 +188,10 @@ def fact_plan_instruction_sections(
 
 def _list_field_pattern_lines(plan_shapes: frozenset[str]) -> tuple[str, ...]:
     lines_by_shape = {
-        "list_rows": ("For list_rows, output_fields are the raw fields to show.",),
-        "ranked_rows": (
-            "For ranked_rows, output_fields are the requested raw fields, order_field is the source field that establishes the requested order, and rank.sort states whether earlier/smaller or later/larger values come first.",
-            "For ranked_rows, include rank.limit_value_id only when Operation input values contains the exact explicit result-limit value.",
+        "list_rows": (
+            "For list_rows, output_fields are the requested fields to return.",
+            "When ordering_field is required by the schema, choose the shown source field that supplies the requested ordering basis. Write selection_basis before field_id and copy field_id exactly.",
+            "Do not output ordering direction, selection kind, or result limit. They are already fixed by the requested fact.",
         ),
         "grouped_rows": (
             "For grouped_rows, group_fields define each group and output_fields are the raw fields to show inside each group.",
@@ -203,16 +208,11 @@ def _list_field_pattern_lines(plan_shapes: frozenset[str]) -> tuple[str, ...]:
     )
 
 
-_LIST_FIELD_PLAN_SHAPES = frozenset(
-    {"list_rows", "ranked_rows", "grouped_rows", "direct_field_value"}
-)
-_METRIC_PLAN_SHAPES = frozenset(
-    {"aggregate_scalar", "aggregate_by_group", "ranked_aggregate"}
-)
+_LIST_FIELD_PLAN_SHAPES = frozenset({"list_rows", "grouped_rows", "direct_field_value"})
+_METRIC_PLAN_SHAPES = frozenset({"aggregate_scalar", "aggregate_by_group"})
 _SOURCE_BINDING_ID_PLAN_SHAPES = frozenset(
     {
         "list_rows",
-        "ranked_rows",
         "grouped_rows",
         "direct_field_value",
         "aggregate_scalar",
@@ -223,7 +223,6 @@ _SOURCE_BINDING_ID_PLAN_SHAPES = frozenset(
 _FIELD_SELECTION_PLAN_SHAPES = frozenset(
     {
         "list_rows",
-        "ranked_rows",
         "grouped_rows",
         "direct_field_value",
         "set_difference",
@@ -232,24 +231,24 @@ _FIELD_SELECTION_PLAN_SHAPES = frozenset(
 )
 
 
-def plan_shapes_use_grouped_ranked_choices(plan_shapes: frozenset[str]) -> bool:
-    return bool(plan_shapes & GROUPED_RANKED_PLAN_SHAPES)
+def plan_shapes_use_grouped_aggregate_choices(plan_shapes: frozenset[str]) -> bool:
+    return bool(plan_shapes & GROUPED_AGGREGATE_PLAN_SHAPES)
 
 
 def plan_shapes_use_answer_output_ids(plan_shapes: frozenset[str]) -> bool:
-    return bool(plan_shapes - GROUPED_RANKED_PLAN_SHAPES)
+    return bool(plan_shapes - GROUPED_AGGREGATE_PLAN_SHAPES)
 
 
 def plan_shapes_use_source_binding_id(plan_shapes: frozenset[str]) -> bool:
     return bool(
-        plan_shapes & (_SOURCE_BINDING_ID_PLAN_SHAPES | GROUPED_RANKED_PLAN_SHAPES)
+        plan_shapes & (_SOURCE_BINDING_ID_PLAN_SHAPES | GROUPED_AGGREGATE_PLAN_SHAPES)
     )
 
 
 def plan_shapes_use_required_fulfillment_evidence(
     plan_shapes: frozenset[str],
 ) -> bool:
-    return bool(plan_shapes - GROUPED_RANKED_PLAN_SHAPES)
+    return bool(plan_shapes - GROUPED_AGGREGATE_PLAN_SHAPES)
 
 
 def plan_shapes_use_field_selection(plan_shapes: frozenset[str]) -> bool:

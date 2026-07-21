@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Do not narrow the requested population for an unstated preference for cleaner, safer, validated, finalized, or higher-quality evidence. Exclude a choice only when the requested fact, supplied semantic authority, or a population test supports excluding its rows.",
+      "new": "",
+      "expected_count": 1
+    }
+  ]
+}

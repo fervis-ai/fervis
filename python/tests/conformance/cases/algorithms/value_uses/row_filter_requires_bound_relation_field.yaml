@@ -1,5 +1,5 @@
-id: row_filter_requires_bound_relation_field
-description: A row filter targeting a field outside the bound relation fails closed.
+id: applied_filter_requires_bound_relation_field
+description: An applied filter targeting a field outside the bound relation fails closed.
 migrates:
   - api/tests/fervis/lookup/fact_planning/test_values.py::test_row_filter_must_target_bound_relation_field
 kind: algorithm
@@ -21,8 +21,8 @@ input:
       source:
         kind: api_read
         read_id: records
-        row_filters:
-          - field_id: data_entity_label
+        applied_filters:
+          - field_ids: [data_entity_label]
             operator: equals
             value_id: alpha
       fields:

@@ -1,0 +1,105 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "If the question asks for counts per group, by group, or for each specified key, use grouped_aggregate.",
+      "new": "If the question asks for any aggregate measure once per group, including a count, sum, average, minimum, or maximum, use grouped_aggregate.",
+      "expected_count": 1
+    },
+    {
+      "old": "answer_expression.group_key.description names the result key or grouping dimension, such as region, period, category, or supplied key.\nUse answer_expression.group_key.domain=SPECIFIED_QUESTION_INPUTS when groups are exactly declared question_inputs; otherwise use SOURCE_RESULT_VALUES.\nFor a repeated measure over specified inputs, set answer_expression.group_key with domain=SPECIFIED_QUESTION_INPUTS and put one measure/count result column in answer_outputs, not one output per key value.",
+      "new": "answer_expression.group_key.description names the result key or grouping dimension.\nFor an existing source attribute used directly as the group key, return description only.\nFor a supplied grouping_grain, set derivation_input_ref to that input.\nFor concrete supplied group members, set question_input_refs to those inputs.\nFor a repeated measure over specified inputs, put one measure/count result column in answer_outputs, not one output per key value.",
+      "expected_count": 1
+    },
+    {
+      "old": "Use grouping_grain when a supplied unit such as day, week, month, or quarter states how source values are divided into result groups.\nA grouping_grain is neither the queried time period nor a group member. For 'events per day during March,' day is the grouping_grain and March is the time_value.",
+      "new": "A grouping_grain is a supplied temporal unit used to derive buckets from a timestamp.\nA grouping dimension is an existing source attribute used directly as the group key; it is not a grouping_grain or a question input.",
+      "expected_count": 1
+    },
+    {
+      "old": "Assign a result_limit through one RESULT_LIMIT question_input_uses record on the answer_request.",
+      "new": "The answer expression references the result_limit input that supplies the count.",
+      "expected_count": 1
+    },
+    {
+      "old": "When one input constrains multiple requested facts, declare it once in question_inputs; each applicable answer_request gives it one fact-local question_input_uses record.",
+      "new": "When one input constrains multiple requested facts, declare it once in question_inputs; each consuming operation references it in the applicable answer_request.",
+      "expected_count": 1
+    },
+    {
+      "old": "Within each answer_request, author answer_expression, then answer_population, then question_input_uses.\nquestion_input_uses assigns each input used by this answer_request to exactly one semantic owner kind.\nCreate exactly one question_input_uses record for each fact-local input_ref.\nUse GROUP_KEY when the input defines a requested result group under SPECIFIED_QUESTION_INPUTS.\nA SPECIFIED_QUESTION_INPUTS group key restricts results to its GROUP_KEY inputs and groups by them.\nGROUP_KEY inputs are not candidate-row predicates; create no EXPLICIT_USER_CONSTRAINT for them.\nUse POPULATION_TESTS when the input is an operand of one or more EXPLICIT_USER_CONSTRAINT membership tests.\nUse COMPUTE_EXPRESSION when a formula_value is an operand in the requested computed_scalar expression.\nUse GROUP_KEY_DERIVATION when a grouping_grain determines how source values are converted into a SOURCE_RESULT_VALUES group key.\nUse RESULT_LIMIT when the input supplies answer_expression's requested result limit.\nEach EXPLICIT_USER_CONSTRAINT lists the input_ref of every POPULATION_TESTS operand it consumes in question_input_refs.\nOne population test may reference several POPULATION_TESTS inputs, and one POPULATION_TESTS input may be referenced by several tests.\nquestion_input_refs may name only POPULATION_TESTS inputs. GROUP_KEY, GROUP_KEY_DERIVATION, COMPUTE_EXPRESSION, and RESULT_LIMIT inputs are never membership-test operands.\nSUBJECT_IDENTITY asks only whether the candidate is an instance of answer_subject and has no input operands.\nAn input identifying a related entity uses POPULATION_TESTS unless it is a SPECIFIED_QUESTION_INPUTS group member, in which case it uses GROUP_KEY only.\nSUBJECT_IDENTITY, NORMAL_INSTANCE_GUARD, and RAW_RECORD_GUARD use an empty question_input_refs array.",
+      "new": "Place each input_ref on the operation that consumes it.\nPopulation predicates reference their operands in question_input_refs.\nA group key references either one grouping-grain derivation input or its concrete supplied group members.\nDo not repeat a group-key, grouping-grain, formula, or result-limit input in a population test.\nOne population test may reference several inputs, and one input may be referenced by several population tests.\nSUBJECT_IDENTITY, NORMAL_INSTANCE_GUARD, and RAW_RECORD_GUARD use an empty question_input_refs array.",
+      "expected_count": 1
+    },
+    {
+      "old": "Before returning a complete contract, verify that each copied question occurrence is declared once, every fact-local input appears once in question_input_uses, group-key and compute-expression inputs appear in no population test, and every POPULATION_TESTS input is referenced by at least one EXPLICIT_USER_CONSTRAINT.",
+      "new": "Before returning a complete contract, verify that each copied question occurrence is declared once, each input is referenced by its consuming operation, group-key and compute-expression inputs appear in no population test, and every population-test operand is referenced by at least one EXPLICIT_USER_CONSTRAINT.",
+      "expected_count": 1
+    }
+  ],
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/properties/outcome/oneOf/0/properties/question_inputs/items/oneOf/5/properties/operand_text",
+      "value": {"enum": ["day", "week", "month", "quarter", "year"]}
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "remove",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/question_input_uses"
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "remove",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/required/4"
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_expression/oneOf/4/properties/group_key",
+      "value": {
+        "oneOf": [
+          {"type": "object", "additionalProperties": false, "properties": {"description": {"type": "string", "minLength": 1}}, "required": ["description"]},
+          {"type": "object", "additionalProperties": false, "properties": {"description": {"type": "string", "minLength": 1}, "derivation_input_ref": {"type": "string", "minLength": 1}}, "required": ["description", "derivation_input_ref"]},
+          {"type": "object", "additionalProperties": false, "properties": {"description": {"type": "string", "minLength": 1}, "question_input_refs": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}, "required": ["description", "question_input_refs"]}
+        ]
+      }
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_expression/oneOf/5/properties/group_key",
+      "value": {
+        "oneOf": [
+          {"type": "object", "additionalProperties": false, "properties": {"description": {"type": "string", "minLength": 1}}, "required": ["description"]},
+          {"type": "object", "additionalProperties": false, "properties": {"description": {"type": "string", "minLength": 1}, "derivation_input_ref": {"type": "string", "minLength": 1}}, "required": ["description", "derivation_input_ref"]},
+          {"type": "object", "additionalProperties": false, "properties": {"description": {"type": "string", "minLength": 1}, "question_input_refs": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}, "required": ["description", "question_input_refs"]}
+        ]
+      }
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_expression/oneOf/6/properties/group_key",
+      "value": {
+        "oneOf": [
+          {"type": "object", "additionalProperties": false, "properties": {"description": {"type": "string", "minLength": 1}}, "required": ["description"]},
+          {"type": "object", "additionalProperties": false, "properties": {"description": {"type": "string", "minLength": 1}, "derivation_input_ref": {"type": "string", "minLength": 1}}, "required": ["description", "derivation_input_ref"]},
+          {"type": "object", "additionalProperties": false, "properties": {"description": {"type": "string", "minLength": 1}, "question_input_refs": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}, "required": ["description", "question_input_refs"]}
+        ]
+      }
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "replace",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_expression/oneOf/7/properties/group_key",
+      "value": {
+        "oneOf": [
+          {"type": "object", "additionalProperties": false, "properties": {"description": {"type": "string", "minLength": 1}}, "required": ["description"]},
+          {"type": "object", "additionalProperties": false, "properties": {"description": {"type": "string", "minLength": 1}, "derivation_input_ref": {"type": "string", "minLength": 1}}, "required": ["description", "derivation_input_ref"]},
+          {"type": "object", "additionalProperties": false, "properties": {"description": {"type": "string", "minLength": 1}, "question_input_refs": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}, "required": ["description", "question_input_refs"]}
+        ]
+      }
+    }
+  ]
+}

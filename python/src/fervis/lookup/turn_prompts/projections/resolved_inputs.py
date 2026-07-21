@@ -11,7 +11,6 @@ from fervis.lookup.answer_program.values import (
     LiteralValuePayload,
     NamedValuePayload,
     TimeValuePayload,
-    ValueFilterOperator,
 )
 from fervis.lookup.question_contract import RequestedFact
 
@@ -154,7 +153,5 @@ def _resolved_value_detail_payload(value: FactValue) -> ResolvedInputPayload:
         return output
     if isinstance(payload, NamedValuePayload):
         output["text"] = payload.text
-        if payload.filter_operator is not ValueFilterOperator.EQUALS:
-            output["operator"] = payload.filter_operator.value
         return output
     return output

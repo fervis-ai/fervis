@@ -4,7 +4,13 @@ from typing import Any
 
 from fervis.lookup.answer_program.compilation import compile_answer_program
 from fervis.lookup.answer_program.model import AnswerProgram, FactFulfillment
-from fervis.lookup.answer_program.operations import Operation
+from fervis.lookup.answer_program.operations import (
+    FilterSpec,
+    Operation,
+    Predicate,
+    PredicateOperator,
+)
+from fervis.lookup.answer_program.expressions import FieldRef
 from fervis.lookup.answer_program.relations import (
     EndpointParamBinding,
     FieldBindingRole,
@@ -13,7 +19,6 @@ from fervis.lookup.answer_program.relations import (
     Relation,
     RelationField,
     RelationSource,
-    RelationSourceAppliedFilter,
     SourceKind,
 )
 from fervis.lookup.question_contract import MembershipTestRef
@@ -95,13 +100,20 @@ def _program(payload: dict[str, Any]) -> AnswerProgram:
             for input_id in input_ids
         ),
         relations=tuple(_relation(item) for item in payload["relations"]),
-        operations=tuple(
-            Operation(
-                id=str(item["id"]),
-                spec=operation_spec_from_payload(item["spec"]),
-                output_relation=str(item["output_relation"]),
-            )
-            for item in payload.get("operations") or ()
+        operations=(
+            *(
+                operation
+                for relation in payload["relations"]
+                for operation in _applied_filter_operations(relation)
+            ),
+            *(
+                Operation(
+                    id=str(item["id"]),
+                    spec=operation_spec_from_payload(item["spec"]),
+                    output_relation=str(item["output_relation"]),
+                )
+                for item in payload.get("operations") or ()
+            ),
         ),
         result_projection=ResultProjection(
             relation_outputs=(
@@ -118,11 +130,13 @@ def _program(payload: dict[str, Any]) -> AnswerProgram:
 
 def _relation(payload: dict[str, Any]) -> Relation:
     identity_fields = {str(item) for item in payload.get("identity_fields") or ()}
-    predicate_fields = {
-        str(item) for item in payload.get("predicate_fields") or ()
-    }
+    predicate_fields = {str(item) for item in payload.get("predicate_fields") or ()}
     return Relation(
-        id=str(payload["id"]),
+        id=(
+            f"{payload['id']}__source"
+            if payload.get("applied_inputs")
+            else str(payload["id"])
+        ),
         source=RelationSource(
             kind=SourceKind.API_READ,
             read_id=str(payload["id"]),
@@ -136,32 +150,26 @@ def _relation(payload: dict[str, Any]) -> Relation:
                 )
                 for item in payload.get("param_inputs") or ()
             ),
-            applied_filters=tuple(
-                RelationSourceAppliedFilter(
-                    predicate_field_ids=(str(item["field_id"]),),
-                    value_expr=ParameterRef(
-                        parameter_id=_parameter_id(str(item["input_id"]))
-                    ),
-                    proof_refs=(
-                        f"returned_filter:{payload['id']}.{item['field_id']}",
-                    ),
-                )
-                for item in payload.get("applied_inputs") or ()
-            ),
-            population_coverage_claims=tuple(
-                PopulationCoverageClaim(
-                    test_ref=MembershipTestRef(
-                        requested_fact_id=str(
-                            item.get("requested_fact_id") or "fact_1"
+            population_coverage_claims=(
+                ()
+                if payload.get("applied_inputs")
+                else tuple(
+                    PopulationCoverageClaim(
+                        test_ref=MembershipTestRef(
+                            requested_fact_id=str(
+                                item.get("requested_fact_id") or "fact_1"
+                            ),
+                            membership_test_id=str(item["membership_test_id"]),
                         ),
-                        membership_test_id=str(item["membership_test_id"]),
-                    ),
-                    role=PopulationCoverageRole(str(item["role"])),
-                    proof_refs=(str(item["proof_ref"]),),
+                        role=PopulationCoverageRole(str(item["role"])),
+                        proof_refs=(str(item["proof_ref"]),),
+                    )
+                    for item in payload.get("coverage_claims") or ()
                 )
-                for item in payload.get("coverage_claims") or ()
             ),
-            proof_refs=tuple(str(ref) for ref in payload.get("source_proof_refs") or ()),
+            proof_refs=tuple(
+                str(ref) for ref in payload.get("source_proof_refs") or ()
+            ),
         ),
         fields=tuple(
             RelationField(
@@ -181,6 +189,57 @@ def _relation(payload: dict[str, Any]) -> Relation:
     )
 
 
+def _applied_filter_operations(payload: dict[str, Any]) -> tuple[Operation, ...]:
+    filters = tuple(payload.get("applied_inputs") or ())
+    if not filters:
+        return ()
+    input_relation = f"{payload['id']}__source"
+    operations: list[Operation] = []
+    for index, item in enumerate(filters, start=1):
+        output_relation = (
+            str(payload["id"])
+            if index == len(filters)
+            else f"{payload['id']}__filter_{index}"
+        )
+        proof_ref = f"returned_filter:{payload['id']}.{item['field_id']}"
+        operations.append(
+            Operation(
+                id=f"{payload['id']}__filter_operation_{index}",
+                spec=FilterSpec(
+                    input_relation=input_relation,
+                    predicate=Predicate(
+                        left=FieldRef(str(item["field_id"])),
+                        operator=PredicateOperator.EQUALS,
+                        right=ParameterRef(
+                            parameter_id=_parameter_id(str(item["input_id"]))
+                        ),
+                    ),
+                    proof_refs=(proof_ref,),
+                    population_coverage_claims=(
+                        tuple(
+                            PopulationCoverageClaim(
+                                test_ref=MembershipTestRef(
+                                    requested_fact_id=str(
+                                        claim.get("requested_fact_id") or "fact_1"
+                                    ),
+                                    membership_test_id=str(claim["membership_test_id"]),
+                                ),
+                                role=PopulationCoverageRole(str(claim["role"])),
+                                proof_refs=(str(claim["proof_ref"]),),
+                            )
+                            for claim in payload.get("coverage_claims") or ()
+                        )
+                        if index == len(filters)
+                        else ()
+                    ),
+                ),
+                output_relation=output_relation,
+            )
+        )
+        input_relation = output_relation
+    return tuple(operations)
+
+
 def _bindings(payload: dict[str, Any]) -> BindingSet:
     return BindingSet.from_bindings(
         tuple(
@@ -191,11 +250,7 @@ def _bindings(payload: dict[str, Any]) -> BindingSet:
                     key=entity_key_value(
                         str(item["entity_kind"]),
                         str(item.get("key_id") or "primary_key"),
-                        {
-                            str(item["key_component_id"]): str(
-                                item["canonical_value"]
-                            )
-                        },
+                        {str(item["key_component_id"]): str(item["canonical_value"])},
                     ),
                     display_value=str(item["value"]),
                     known_input_id=str(item["id"]),
@@ -221,9 +276,7 @@ def _catalog_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 "id": str(relation["id"]),
                 "endpoint_name": str(relation["id"]),
                 "resource_names": [str(relation["id"])],
-                "row_paths": [
-                    {"id": "data", "path": "data", "cardinality": "many"}
-                ],
+                "row_paths": [{"id": "data", "path": "data", "cardinality": "many"}],
                 "fields": [
                     {
                         "ref": f"field.{relation['id']}.{field_id}",
@@ -251,9 +304,7 @@ def _catalog_payload(payload: dict[str, Any]) -> dict[str, Any]:
                             "components": [
                                 {
                                     "id": str(field_id),
-                                    "field_ref": (
-                                        f"field.{relation['id']}.{field_id}"
-                                    ),
+                                    "field_ref": (f"field.{relation['id']}.{field_id}"),
                                 }
                                 for field_id in relation.get("identity_fields") or ()
                             ],

@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "question_input_uses assigns each input used by this answer_request to exactly one semantic owner kind.\nCreate exactly one question_input_uses record for each fact-local input_ref.",
+      "new": "question_input_uses assigns each fact-local input not already owned by answer_expression.group_key to exactly one semantic owner kind.\nCreate exactly one question_input_uses record for each such input_ref.",
+      "expected_count": 1
+    }
+  ]
+}

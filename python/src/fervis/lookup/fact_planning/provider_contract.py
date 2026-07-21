@@ -33,39 +33,13 @@ class FunctionSelectionOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
-class RankSelectionOutput(ProviderOutput):
-    selection_basis: str
-    id: str
-    sort: str
-    limit: int
-    limit_value_id: Optional[str] = None
-
-
-@dataclass(frozen=True)
-class RowRankSelectionOutput(ProviderOutput):
-    selection_basis: str
-    sort: str
-    limit_value_id: Optional[str] = None
-
-
-@dataclass(frozen=True)
 class ListRowsAnswerOutput(ProviderOutput):
     requested_fact_id: str
     answer_output_ids: tuple[str, ...]
     pattern: str
     source_binding_id: str
     output_fields: tuple[FieldSelectionOutput, ...]
-
-
-@dataclass(frozen=True)
-class RankedRowsAnswerOutput(ProviderOutput):
-    requested_fact_id: str
-    answer_output_ids: tuple[str, ...]
-    pattern: str
-    source_binding_id: str
-    output_fields: tuple[FieldSelectionOutput, ...]
-    order_field: OrderFieldSelectionOutput
-    rank: RowRankSelectionOutput
+    ordering_field: Optional[OrderFieldSelectionOutput] = None
 
 
 @dataclass(frozen=True)
@@ -98,22 +72,19 @@ class AggregateScalarAnswerOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
+class GroupKeySourceFieldOutput(ProviderOutput):
+    source_field_id: str
+
+
+@dataclass(frozen=True)
 class GroupedAggregateAnswerOutput(ProviderOutput):
     requested_fact_id: str
     pattern: str
     source_binding_id: str
     metric: MetricSelectionOutput
     function: FunctionSelectionOutput
-
-
-@dataclass(frozen=True)
-class RankedAggregateAnswerOutput(ProviderOutput):
-    requested_fact_id: str
-    pattern: str
-    source_binding_id: str
-    metric: MetricSelectionOutput
-    function: FunctionSelectionOutput
-    rank: RankSelectionOutput
+    group_key_source_field: Optional[GroupKeySourceFieldOutput] = None
+    ordering_field: Optional[OrderFieldSelectionOutput] = None
 
 
 @dataclass(frozen=True)
@@ -161,9 +132,9 @@ class JoinedRowsAnswerOutput(ProviderOutput):
 
 
 @dataclass(frozen=True)
-class SourceScalarInputOutput(ProviderOutput):
+class ScalarInputOutput(ProviderOutput):
     input_id: str
-    source_binding_id: str
+    value_id: str
 
 
 @dataclass(frozen=True)
@@ -198,19 +169,17 @@ class ComputedScalarAnswerOutput(ProviderOutput):
     requested_fact_id: str
     answer_output_ids: tuple[str, ...]
     pattern: str
-    scalar_inputs: tuple[SourceScalarInputOutput, ...]
+    scalar_inputs: tuple[ScalarInputOutput, ...]
     expression: tuple[ProviderObject, ...]
     output: ScalarOutputOutput
 
 
 PatternAnswerOutput = (
     ListRowsAnswerOutput
-    | RankedRowsAnswerOutput
     | GroupedRowsAnswerOutput
     | DirectFieldValueAnswerOutput
     | AggregateScalarAnswerOutput
     | GroupedAggregateAnswerOutput
-    | RankedAggregateAnswerOutput
     | SetDifferenceAnswerOutput
     | JoinedRowsAnswerOutput
     | ComputedScalarAnswerOutput
@@ -221,8 +190,6 @@ def parse_pattern_answer(value: ProviderObject) -> PatternAnswerOutput:
     pattern = value.discriminator("pattern")
     if pattern == "list_rows":
         return value.parse_as(ListRowsAnswerOutput)
-    if pattern == "ranked_rows":
-        return value.parse_as(RankedRowsAnswerOutput)
     if pattern == "grouped_rows":
         return value.parse_as(GroupedRowsAnswerOutput)
     if pattern == "direct_field_value":
@@ -231,8 +198,6 @@ def parse_pattern_answer(value: ProviderObject) -> PatternAnswerOutput:
         return value.parse_as(AggregateScalarAnswerOutput)
     if pattern == "aggregate_by_group":
         return value.parse_as(GroupedAggregateAnswerOutput)
-    if pattern == "ranked_aggregate":
-        return value.parse_as(RankedAggregateAnswerOutput)
     if pattern == "set_difference":
         return value.parse_as(SetDifferenceAnswerOutput)
     if pattern == "joined_rows":

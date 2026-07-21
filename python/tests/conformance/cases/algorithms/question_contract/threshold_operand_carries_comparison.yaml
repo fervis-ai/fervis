@@ -1,0 +1,55 @@
+id: threshold_operand_carries_comparison
+description: A numeric population boundary is a threshold input and its fact predicate owns the ordered comparison.
+kind: algorithm
+algorithm: question_contract.parse
+input:
+  question_context: How many records have a measured value over 1000?
+  payload:
+    kind: question_contract
+    answer_requests_count: 1
+    question_inputs:
+    - input_ref: boundary
+      kind: literal_text
+      source: question_context
+      value_source_text: '1000'
+      field_label_text: measured value
+      operand_text: '1000'
+      value_meaning_hint: numeric boundary
+      role: threshold_value
+      comparison_operator: gt
+      inventory_check:
+        why_this_is_an_input: It is the fixed boundary of the population predicate.
+    answer_requests:
+    - answer_fact: count of records above the supplied boundary
+      answer_expression:
+        family: scalar_aggregate
+      question_input_uses:
+      - {input_ref: boundary, owner_kind: POPULATION_TESTS, use_id: boundary_use}
+      answer_subject:
+        subject_text: records
+        instance_interpretation:
+          kind: NORMAL_BUSINESS_INSTANCE
+      answer_population:
+        membership_tests:
+        - polarity: MUST_PASS
+          test_question: Is the measured value greater than the supplied boundary?
+          population_use_refs: [boundary_use]
+      answer_outputs:
+      - description: record count
+        role: ROW_COUNT
+    question_input_inventory_check:
+      all_input_like_phrases_declared: true
+expect:
+  result_contains:
+    question_inputs:
+    - id: boundary
+      resolved_value_text: '1000'
+      role: threshold_value
+    requested_facts:
+    - answer_request:
+        answer_population:
+          membership_tests:
+          - test_id: pop_test_1
+          - test_id: pop_test_2
+          - test_id: explicit_user_constraint_1
+            comparison_operator: gt

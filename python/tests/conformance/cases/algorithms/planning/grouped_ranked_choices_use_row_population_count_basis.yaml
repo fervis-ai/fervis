@@ -1,12 +1,12 @@
-id: grouped_ranked_choices_use_row_population_count_basis
+id: grouped_aggregate_choices_use_row_population_count_basis
 description: Grouped/ranked planning can use a many-row population as the count-records metric basis.
 migrates:
-  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_grouped_ranked_choices_use_row_population_count_basis
+  - api/tests/fervis/lookup/test_source_binding_one_call.py::test_grouped_aggregate_choices_use_row_population_count_basis
 kind: algorithm
-algorithm: planning.grouped_ranked_choices
+algorithm: planning.grouped_aggregate_choices
 input:
   requested_fact_id: fact_1
-  plan_shape: ranked_aggregate
+  plan_shape: aggregate_by_group
   source:
     id: sb_1
     requested_fact_id: fact_1

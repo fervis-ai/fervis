@@ -5,36 +5,32 @@ from __future__ import annotations
 from typing_extensions import assert_never
 
 from fervis.lookup.plan_execution.errors import VerificationError
-from fervis.lookup.answer_program.values import (
-    ConstantRef,
-    EnvironmentRef,
-    NodeOutputRef,
-    ParameterRef,
-)
 from fervis.lookup.answer_program.operations import (
     AggregateSpec,
     AggregationFunction,
     AntiJoinSpec,
     ComputeSpec,
-    compute_expression_leaves,
     CrossJoinSpec,
     FilterSpec,
     JoinSpec,
+    NamedExpression,
     Operation,
     Predicate,
     PredicateOperator,
     ProjectSpec,
     ProjectToKeySpec,
-    RankSpec,
+    KeepAll,
+    OrderSpec,
+    Take,
     RelationRole,
     RelationRoleRef,
     RoleExpandSpec,
     SortDirection,
     SortKey,
-    TiePolicy,
     UnionSpec,
     UniversalConditionSpec,
 )
+from fervis.lookup.answer_program.expressions import FieldRef, expression_references
 
 
 BINARY_PREDICATE_OPERATORS = frozenset(
@@ -45,6 +41,7 @@ BINARY_PREDICATE_OPERATORS = frozenset(
         PredicateOperator.LTE,
         PredicateOperator.GT,
         PredicateOperator.GTE,
+        PredicateOperator.IN,
         PredicateOperator.CONTAINS,
     }
 )
@@ -65,10 +62,10 @@ def verify_operation(operation: Operation) -> None:
         _require_predicate(spec.predicate, "filter")
     elif isinstance(spec, ProjectSpec):
         _require_input(spec.input_relation, "project")
-        if not spec.fields:
+        if not spec.outputs:
             raise VerificationError("project requires fields")
         _require_unique_fields(
-            tuple(field.output or field.source for field in spec.fields),
+            tuple(output.output_field for output in spec.outputs),
             "project",
         )
     elif isinstance(spec, ProjectToKeySpec):
@@ -110,22 +107,32 @@ def verify_operation(operation: Operation) -> None:
         if not spec.output_fields:
             raise VerificationError("anti_join requires output fields")
         _require_unique_fields(
-            tuple(field.output or field.source for field in spec.output_fields),
+            tuple(output.output_field for output in spec.output_fields),
             "anti_join",
         )
+        _require_direct_projections(spec.output_fields, "anti_join")
     elif isinstance(spec, UniversalConditionSpec):
         _require_universal_condition(spec)
+        _require_direct_projections(spec.output_fields, "universal_condition")
     elif isinstance(spec, AggregateSpec):
         _require_input(spec.input_relation, "aggregate")
         if not spec.aggregations:
             raise VerificationError("aggregate requires aggregations")
         _require_aggregations(spec)
-    elif isinstance(spec, RankSpec):
-        _require_rank(spec)
+    elif isinstance(spec, OrderSpec):
+        _require_order(spec)
     elif isinstance(spec, ComputeSpec):
         _require_compute(spec)
     else:
         assert_never(spec)
+
+
+def _require_direct_projections(
+    outputs: tuple[NamedExpression, ...],
+    label: str,
+) -> None:
+    if any(not isinstance(output.expression, FieldRef) for output in outputs):
+        raise VerificationError(f"{label} output requires direct field expression")
 
 
 def _require_input(input_relation: str, label: str) -> None:
@@ -169,7 +176,7 @@ def _require_universal_condition(spec: UniversalConditionSpec) -> None:
         raise VerificationError("universal_condition requires output fields")
     _require_predicate(spec.predicate, "universal_condition")
     _require_unique_fields(
-        tuple(field.output or field.source for field in spec.output_fields),
+        tuple(output.output_field for output in spec.output_fields),
         "universal_condition",
     )
 
@@ -187,27 +194,22 @@ def _require_relation_role(
         raise VerificationError(f"{label} requires grain obligation")
 
 
-def _require_rank(spec: RankSpec) -> None:
-    _require_input(spec.input_relation, "rank")
+def _require_order(spec: OrderSpec) -> None:
+    _require_input(spec.input_relation, "order")
     if not spec.order_by:
-        raise VerificationError("rank requires ordering and deterministic tie policy")
-    if not spec.tie_policy:
-        raise VerificationError("rank requires deterministic tie policy")
-    _require_sort_keys(spec.order_by, "rank")
-    if spec.tie_policy not in set(TiePolicy):
-        raise VerificationError("rank requires deterministic tie policy")
-    if not isinstance(
-        spec.limit,
-        (ParameterRef, NodeOutputRef, ConstantRef, EnvironmentRef),
+        raise VerificationError("order requires ordering keys")
+    _require_sort_keys(spec.order_by, "order")
+    if not isinstance(spec.selection, (KeepAll, Take)):
+        raise VerificationError("order requires a selection")
+    if (
+        isinstance(spec.selection, Take)
+        and not expression_references(spec.selection.limit).leaves
     ):
-        raise VerificationError("rank limit has unclassified value origin")
-    if not spec.tie_breakers:
-        raise VerificationError("field tie policy requires tie breakers")
-    _require_sort_keys(spec.tie_breakers, "rank")
+        raise VerificationError("order take limit requires an expression")
 
 
 def _require_compute(spec: ComputeSpec) -> None:
-    if not compute_expression_leaves(spec.expression):
+    if not expression_references(spec.expression).leaves:
         raise VerificationError("compute requires scalar inputs")
     if not spec.output_scalar:
         raise VerificationError("compute requires output scalar")
@@ -218,15 +220,11 @@ def _require_predicate(predicate: Predicate, label: str) -> None:
         raise VerificationError(f"{label} requires predicate")
     if predicate.operator not in set(PredicateOperator):
         raise VerificationError(f"{label} requires supported predicate operator")
-    has_field_rhs = bool(predicate.right)
-    has_scalar_rhs = bool(predicate.right_scalar)
     if predicate.operator in BINARY_PREDICATE_OPERATORS:
-        if has_field_rhs == has_scalar_rhs:
-            raise VerificationError(f"{label} requires exactly one right-hand side")
+        if predicate.right is None:
+            raise VerificationError(f"{label} requires a right-hand side")
         return
-    if predicate.operator in UNARY_PREDICATE_OPERATORS and (
-        has_field_rhs or has_scalar_rhs
-    ):
+    if predicate.operator in UNARY_PREDICATE_OPERATORS and predicate.right is not None:
         raise VerificationError(f"{label} does not accept a right-hand side")
 
 

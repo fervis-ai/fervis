@@ -1,0 +1,10 @@
+{
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "move_before",
+      "from": "/properties/outcome/oneOf/0/properties/answer_requests_count",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests"
+    }
+  ]
+}

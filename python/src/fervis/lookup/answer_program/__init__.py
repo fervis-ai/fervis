@@ -18,12 +18,12 @@ from .contracts import (
     ProgramInputs,
     SetParameter,
     UnsetParameter,
-    ValueExpression,
     ValueExpressionOrigin,
     ValueDependency,
     ValueDependencyKind,
     canonical_fact_value,
 )
+from .expressions import Expression
 from .capability_contracts import (
     CapabilityApplication,
     CapabilityKind,
@@ -82,7 +82,7 @@ __all__ = [
     "SourceContractPin",
     "SourceContractKind",
     "UnsetParameter",
-    "ValueExpression",
+    "Expression",
     "ValueExpressionOrigin",
     "ValueDependency",
     "ValueDependencyKind",

@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from fervis.types.enums import StrEnum
-from typing import Callable, TypeVar
-from typing_extensions import assert_never
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from fervis.lookup.answer_program.expressions import Expression
 
 from fervis.lookup.answer_program.errors import AnswerProgramContractError
+from fervis.lookup.question_inputs import normalize_decimal_text
 from fervis.lookup.canonical_data import (
     EntityKeyComponentValue,
     EntityKeyValue,
@@ -35,12 +38,6 @@ class LiteralType(StrEnum):
     NUMBER = "number"
     STRING = "string"
     BOOLEAN = "boolean"
-
-
-class ValueFilterOperator(StrEnum):
-    EQUALS = "equals"
-    IN = "in"
-    CONTAINS = "contains"
 
 
 class ValueDependencyKind(StrEnum):
@@ -208,7 +205,6 @@ class NamedValuePayload:
     reference_text: str = ""
     matched_field_ref: str = ""
     matched_field_path: str = ""
-    filter_operator: ValueFilterOperator = ValueFilterOperator.EQUALS
 
     @property
     def kind(self) -> ValueKind:
@@ -427,20 +423,12 @@ class StringSetValuePayload:
 
 def _normalized_number(value: str) -> str:
     try:
-        parsed = Decimal(value.strip())
-    except InvalidOperation as exc:
+        return normalize_decimal_text(value)
+    except ValueError as exc:
         raise AnswerProgramContractError(
             "binding_type_mismatch",
             "number binding contains a non-numeric value",
         ) from exc
-    if not parsed.is_finite():
-        raise AnswerProgramContractError(
-            "binding_type_mismatch",
-            "number binding must be finite",
-        )
-    if parsed == 0:
-        return "0"
-    return format(parsed.normalize(), "f")
 
 
 def _decimal_number(value: str) -> Decimal:
@@ -572,7 +560,6 @@ class FactValue:
         reference_text: str = "",
         matched_field_ref: str = "",
         matched_field_path: str = "",
-        filter_operator: ValueFilterOperator = ValueFilterOperator.EQUALS,
         proof_refs: tuple[str, ...] = (),
         source_refs: tuple[str, ...] = (),
         dependencies: tuple[ValueDependency, ...] = (),
@@ -588,7 +575,6 @@ class FactValue:
                 reference_text=reference_text or text,
                 matched_field_ref=matched_field_ref,
                 matched_field_path=matched_field_path,
-                filter_operator=filter_operator,
             ),
             proof_refs=tuple(proof_refs),
             source_refs=tuple(source_refs),
@@ -762,44 +748,6 @@ class EnvironmentRef:
             raise ValueError("environment reference requires key")
 
 
-ValueExpression = ParameterRef | NodeOutputRef | ConstantRef | EnvironmentRef
-
-_ValueExpressionFoldResult = TypeVar("_ValueExpressionFoldResult")
-
-
-def fold_value_expression(
-    expression: ValueExpression,
-    *,
-    parameter: Callable[[ParameterRef], _ValueExpressionFoldResult],
-    output: Callable[[NodeOutputRef], _ValueExpressionFoldResult],
-    constant: Callable[[ConstantRef], _ValueExpressionFoldResult],
-    environment: Callable[[EnvironmentRef], _ValueExpressionFoldResult],
-) -> _ValueExpressionFoldResult:
-    """Exhaustively interpret one closed value-expression variant."""
-
-    if isinstance(expression, ParameterRef):
-        return parameter(expression)
-    if isinstance(expression, NodeOutputRef):
-        return output(expression)
-    if isinstance(expression, ConstantRef):
-        return constant(expression)
-    if isinstance(expression, EnvironmentRef):
-        return environment(expression)
-    assert_never(expression)
-
-
-def value_expression_constant(
-    expression: ValueExpression,
-) -> ConstantRef | None:
-    return fold_value_expression(
-        expression,
-        parameter=lambda _expression: None,
-        output=lambda _expression: None,
-        constant=lambda constant: constant,
-        environment=lambda _expression: None,
-    )
-
-
 class ParameterRole(StrEnum):
     QUESTION_INPUT = "question_input"
     SEMANTIC_CONTROL = "semantic_control"
@@ -924,7 +872,7 @@ class BindingSet:
 @dataclass(frozen=True)
 class NamedValueExpression:
     sink: str
-    expression: ValueExpression
+    expression: Expression
 
     def __post_init__(self) -> None:
         if not self.sink:

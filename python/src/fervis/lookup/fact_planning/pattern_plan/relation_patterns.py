@@ -10,12 +10,12 @@ from fervis.lookup.answer_program.operations import (
     JoinKey,
     JoinSpec,
     Operation,
-    ProjectField,
+    NamedExpression,
     ProjectSpec,
     RelationRole,
     RelationRoleRef,
 )
-from fervis.lookup.answer_program.relations import Relation
+from fervis.lookup.answer_program.expressions import FieldRef
 from fervis.lookup.answer_program.result_projection import RelationResultOutput
 from fervis.lookup.answer_program.result_projection import (
     EntityKeyProjection,
@@ -41,6 +41,7 @@ from .shared import (
     _relation_for_bound_source,
 )
 from .result_ids import _result_output_id
+from .parameterization import ParameterizedRelation
 from fervis.lookup.fact_planning.compiled_patterns import (
     CompiledPattern,
     PatternAddress,
@@ -95,7 +96,7 @@ def _compile_set_difference_answer(
     output_relation_id = _pattern_output_relation_id(index)
     candidate_relation_fields = _identity_relation_fields(candidate_identity_fields)
     observed_relation_fields = _identity_relation_fields(observed_identity_fields)
-    relations = (
+    built_relations = (
         _relation_for_bound_source(
             relation_id=candidate_relation_id,
             address=PatternAddress(
@@ -122,6 +123,7 @@ def _compile_set_difference_answer(
         ),
     )
     operations = (
+        *(operation for item in built_relations for operation in item.operations),
         Operation(
             id=f"{output_relation_id}_anti_join",
             spec=AntiJoinSpec(
@@ -144,7 +146,9 @@ def _compile_set_difference_answer(
                     )
                 ),
                 output_fields=tuple(
-                    ProjectField(source=field_id, output=field_id)
+                    NamedExpression(
+                        output_field=field_id, expression=FieldRef(field_id)
+                    )
                     for field_id in candidate_identity_fields
                 ),
             ),
@@ -165,7 +169,7 @@ def _compile_set_difference_answer(
     )
     return CompiledPattern(
         fulfillment=fact_fulfillment,
-        relations=relations,
+        relations=tuple(item.relation for item in built_relations),
         operations=operations,
         relation_outputs=result_outputs,
         scalar_outputs=(),
@@ -364,10 +368,10 @@ def _compile_joined_rows_answer(
                 id=f"{output_relation_id}_project",
                 spec=ProjectSpec(
                     input_relation=joined_relation_id,
-                    fields=tuple(
-                        ProjectField(
-                            source=item["field_id"],
-                            output=item["output_field_id"],
+                    outputs=tuple(
+                        NamedExpression(
+                            output_field=item["output_field_id"],
+                            expression=FieldRef(item["field_id"]),
                         )
                         for item in output_fields
                     ),
@@ -386,7 +390,7 @@ def _compiled_multi_relation_pattern(
     *,
     requested_fact_id: str,
     answer_output_ids: tuple[str, ...],
-    relations: tuple[Relation, ...],
+    relations: tuple[ParameterizedRelation, ...],
     operations: tuple[Operation, ...],
     output_relation_id: str,
     output_fields: tuple[dict[str, str], ...],
@@ -423,8 +427,11 @@ def _compiled_multi_relation_pattern(
     )
     return CompiledPattern(
         fulfillment=fulfillment,
-        relations=relations,
-        operations=operations,
+        relations=tuple(item.relation for item in relations),
+        operations=(
+            *(operation for item in relations for operation in item.operations),
+            *operations,
+        ),
         relation_outputs=relation_outputs,
         scalar_outputs=(),
     )

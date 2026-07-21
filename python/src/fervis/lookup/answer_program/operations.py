@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from fervis.types.enums import StrEnum
-from typing import TypeAlias, TypeVar
+from typing import TypeAlias
 from typing_extensions import assert_never
 
-from fervis.lookup.answer_program.values import (
-    ConstantRef,
-    NodeOutputRef,
-    ParameterRef,
-    ValueExpression,
-)
+from fervis.lookup.answer_program.expressions import Expression, expression_input_id
+from fervis.lookup.answer_program.values import ConstantRef, ParameterRef
 from fervis.lookup.answer_program.relations import PopulationCoverageClaim
+from fervis.lookup.predicate_operators import PredicateOperator
 
 
 class OperationKind(StrEnum):
@@ -28,20 +24,8 @@ class OperationKind(StrEnum):
     ANTI_JOIN = "anti_join"
     UNIVERSAL_CONDITION = "universal_condition"
     AGGREGATE = "aggregate"
-    RANK = "rank"
+    ORDER = "order"
     COMPUTE = "compute"
-
-
-class PredicateOperator(StrEnum):
-    EQUALS = "equals"
-    NOT_EQUALS = "not_equals"
-    LT = "lt"
-    LTE = "lte"
-    GT = "gt"
-    GTE = "gte"
-    CONTAINS = "contains"
-    IS_NULL = "is_null"
-    NOT_NULL = "not_null"
 
 
 class SortDirection(StrEnum):
@@ -55,17 +39,6 @@ class AggregationFunction(StrEnum):
     MIN = "min"
     MAX = "max"
     AVG = "avg"
-
-
-class TiePolicy(StrEnum):
-    FIELD = "field"
-
-
-class ComputeBinaryOperator(StrEnum):
-    ADD = "add"
-    SUBTRACT = "subtract"
-    MULTIPLY = "multiply"
-    DIVIDE = "divide"
 
 
 class RelationRole(StrEnum):
@@ -91,10 +64,9 @@ class RelationRoleRef:
 
 @dataclass(frozen=True)
 class Predicate:
-    left: str
+    left: Expression
     operator: PredicateOperator
-    right: str = ""
-    right_scalar: str = ""
+    right: Expression | None = None
 
 
 @dataclass(frozen=True)
@@ -104,9 +76,9 @@ class SortKey:
 
 
 @dataclass(frozen=True)
-class ProjectField:
-    source: str
-    output: str = ""
+class NamedExpression:
+    output_field: str
+    expression: Expression
 
 
 @dataclass(frozen=True)
@@ -127,13 +99,15 @@ class AggregationSpec:
 class FilterSpec:
     input_relation: str
     predicate: Predicate
+    proof_refs: tuple[str, ...] = ()
+    population_coverage_claims: tuple[PopulationCoverageClaim, ...] = ()
     kind: OperationKind = field(default=OperationKind.FILTER, init=False)
 
 
 @dataclass(frozen=True)
 class ProjectSpec:
     input_relation: str
-    fields: tuple[ProjectField, ...]
+    outputs: tuple[NamedExpression, ...]
     kind: OperationKind = field(default=OperationKind.PROJECT, init=False)
 
 
@@ -182,7 +156,7 @@ class AntiJoinSpec:
     candidate: RelationRoleRef
     observed: RelationRoleRef
     join_keys: tuple[JoinKey, ...]
-    output_fields: tuple[ProjectField, ...]
+    output_fields: tuple[NamedExpression, ...]
     kind: OperationKind = field(default=OperationKind.ANTI_JOIN, init=False)
 
 
@@ -194,7 +168,7 @@ class UniversalConditionSpec:
     subject_keys: tuple[JoinKey, ...]
     dimension_keys: tuple[JoinKey, ...]
     predicate: Predicate
-    output_fields: tuple[ProjectField, ...]
+    output_fields: tuple[NamedExpression, ...]
     kind: OperationKind = field(
         default=OperationKind.UNIVERSAL_CONDITION,
         init=False,
@@ -210,100 +184,24 @@ class AggregateSpec:
 
 
 @dataclass(frozen=True)
-class RankSpec:
+class KeepAll:
+    pass
+
+
+@dataclass(frozen=True)
+class Take:
+    limit: Expression
+
+
+OrderSelection: TypeAlias = KeepAll | Take
+
+
+@dataclass(frozen=True)
+class OrderSpec:
     input_relation: str
     order_by: tuple[SortKey, ...]
-    tie_policy: TiePolicy
-    limit: ValueExpression
-    tie_breakers: tuple[SortKey, ...] = ()
-    kind: OperationKind = field(default=OperationKind.RANK, init=False)
-
-
-@dataclass(frozen=True)
-class ComputeNegation:
-    operand: ComputeExpression
-
-
-@dataclass(frozen=True)
-class ComputeBinary:
-    operator: ComputeBinaryOperator
-    left: ComputeExpression
-    right: ComputeExpression
-
-
-ComputeExpression: TypeAlias = (
-    ParameterRef | NodeOutputRef | ConstantRef | ComputeNegation | ComputeBinary
-)
-ComputeExpressionLeaf: TypeAlias = ParameterRef | NodeOutputRef | ConstantRef
-
-_FoldResult = TypeVar("_FoldResult")
-
-
-def fold_compute_expression(
-    expression: ComputeExpression,
-    *,
-    parameter: Callable[[ParameterRef], _FoldResult],
-    output: Callable[[NodeOutputRef], _FoldResult],
-    constant: Callable[[ConstantRef], _FoldResult],
-    negation: Callable[[ComputeNegation, _FoldResult], _FoldResult],
-    binary: Callable[
-        [ComputeBinary, _FoldResult, _FoldResult],
-        _FoldResult,
-    ],
-) -> _FoldResult:
-    """Exhaustively interpret one closed compute-expression tree."""
-
-    def visit(current: ComputeExpression) -> _FoldResult:
-        if isinstance(current, ParameterRef):
-            return parameter(current)
-        if isinstance(current, NodeOutputRef):
-            return output(current)
-        if isinstance(current, ConstantRef):
-            return constant(current)
-        if isinstance(current, ComputeNegation):
-            return negation(current, visit(current.operand))
-        if isinstance(current, ComputeBinary):
-            return binary(current, visit(current.left), visit(current.right))
-        assert_never(current)
-
-    return visit(expression)
-
-
-@dataclass(frozen=True)
-class ComputeExpressionReferences:
-    leaves: tuple[ComputeExpressionLeaf, ...] = ()
-    parameters: tuple[ParameterRef, ...] = ()
-    outputs: tuple[NodeOutputRef, ...] = ()
-    constants: tuple[ConstantRef, ...] = ()
-
-
-def compute_expression_references(
-    expression: ComputeExpression,
-) -> ComputeExpressionReferences:
-    """Return the complete typed reference projection of an expression tree."""
-
-    return fold_compute_expression(
-        expression,
-        parameter=lambda item: ComputeExpressionReferences(
-            leaves=(item,),
-            parameters=(item,),
-        ),
-        output=lambda item: ComputeExpressionReferences(
-            leaves=(item,),
-            outputs=(item,),
-        ),
-        constant=lambda item: ComputeExpressionReferences(
-            leaves=(item,),
-            constants=(item,),
-        ),
-        negation=lambda _expression, operand: operand,
-        binary=lambda _expression, left, right: ComputeExpressionReferences(
-            leaves=(*left.leaves, *right.leaves),
-            parameters=(*left.parameters, *right.parameters),
-            outputs=(*left.outputs, *right.outputs),
-            constants=(*left.constants, *right.constants),
-        ),
-    )
+    selection: OrderSelection
+    kind: OperationKind = field(default=OperationKind.ORDER, init=False)
 
 
 @dataclass(frozen=True)
@@ -318,7 +216,7 @@ class ComputeInputPopulationCoverage:
 
 @dataclass(frozen=True)
 class ComputeSpec:
-    expression: ComputeExpression
+    expression: Expression
     output_scalar: str = ""
     input_population_coverage: tuple[ComputeInputPopulationCoverage, ...] = ()
     kind: OperationKind = field(default=OperationKind.COMPUTE, init=False)
@@ -329,18 +227,10 @@ class ComputeSpec:
             raise ValueError("compute input population coverage must be unique")
 
 
-def compute_value_input_id(expression: ValueExpression) -> str:
-    if isinstance(expression, ParameterRef):
-        return f"parameter:{expression.parameter_id}"
-    if isinstance(expression, ConstantRef):
-        return f"constant:{expression.constant_id}@{expression.version_ref}"
+def compute_value_input_id(expression: Expression) -> str:
+    if isinstance(expression, (ParameterRef, ConstantRef)):
+        return expression_input_id(expression)
     raise ValueError("compute input coverage requires a parameter or constant")
-
-
-def compute_expression_leaves(
-    expression: ComputeExpression,
-) -> tuple[ValueExpression, ...]:
-    return compute_expression_references(expression).leaves
 
 
 OperationSpec: TypeAlias = (
@@ -354,7 +244,7 @@ OperationSpec: TypeAlias = (
     | AntiJoinSpec
     | UniversalConditionSpec
     | AggregateSpec
-    | RankSpec
+    | OrderSpec
     | ComputeSpec
 )
 
@@ -389,7 +279,7 @@ def operation_input_relation_ids(spec: OperationSpec) -> tuple[str, ...]:
             ProjectToKeySpec,
             RoleExpandSpec,
             AggregateSpec,
-            RankSpec,
+            OrderSpec,
         ),
     ):
         return (spec.input_relation,)
@@ -408,3 +298,13 @@ def operation_input_relation_ids(spec: OperationSpec) -> tuple[str, ...]:
     if isinstance(spec, ComputeSpec):
         return ()
     assert_never(spec)
+
+
+def operation_scalar_output_ids(spec: OperationSpec) -> tuple[str, ...]:
+    """Return outputs that one operation proves are scalar-addressable."""
+
+    if isinstance(spec, ComputeSpec):
+        return (spec.output_scalar,) if spec.output_scalar else ()
+    if isinstance(spec, AggregateSpec) and not spec.group_by:
+        return tuple(aggregation.output_field for aggregation in spec.aggregations)
+    return ()

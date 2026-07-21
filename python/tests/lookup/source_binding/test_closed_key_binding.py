@@ -117,11 +117,11 @@ def test_resolved_endpoint_params_use_input_applications_not_param_decisions():
     }
     backend_param_ids = direct_param_ids | key_param_ids
     application_target_ids = {
-        target_id
+        str(target["target_id"])
         for target_ids in target["resolved_input_application"][
             "targets_by_kind"
         ].values()
-        for target_id in target_ids
+        for target in target_ids
     }
 
     assert param_properties == {}
@@ -419,7 +419,7 @@ def test_parse_source_fulfillment_derives_required_row_count_without_selectable_
     assert count_fulfillment.row_count_basis_evidence_ids == ("row_population.data",)
 
 
-def test_ranked_rows_rejects_repeating_entity_reference_fulfillment():
+def test_ordered_rows_hide_fulfillment_that_does_not_identify_row_grain():
     evidence_items = tuple(
         parse_evidence_item(item)
         for item in (
@@ -480,38 +480,19 @@ def test_ranked_rows_rejects_repeating_entity_reference_fulfillment():
     visible_supports = _grain_safe_fulfillment_supports(
         candidate,
         target=SourceBindingTarget(
-            binding_target_id="target.fact_1.ranked_rows.source_1.primary",
+            binding_target_id="target.fact_1.list_rows.source_1.primary",
             requested_fact_id="fact_1",
-            plan_shape="ranked_rows",
+            plan_shape="list_rows",
             source_candidate_id="source_1",
             requirement_id="primary",
             answer_output_ids=("answer_staff",),
             required_answer_output_ids=("answer_staff",),
         ),
+        ordered=True,
         fulfillment_supports={"answer_staff": ("fulfillment_staff",)},
     )
 
     assert visible_supports == {"answer_staff": ()}
-
-    with pytest.raises(
-        ValueError,
-        match="ranked_rows entity fulfillment does not identify source row grain",
-    ):
-        parse_source_fulfillments(
-            {
-                "answer_staff": FulfillmentDecisionOutput(
-                    fulfillment_choice_id="fulfillment_staff",
-                    match_basis_explanation="Return the staff on the highest row.",
-                )
-            },
-            requested_fact_id="fact_1",
-            answer_output_ids={"answer_staff"},
-            required_answer_output_ids={"answer_staff"},
-            metric_answer_output_ids=set(),
-            candidate=candidate,
-            plan_shape="ranked_rows",
-            metric_fit_reviews_by_requested_output={},
-        )
 
 
 def test_closed_key_source_binding_retains_input_proofs_through_grouped_count_plan():
@@ -580,11 +561,12 @@ def test_closed_key_source_binding_retains_input_proofs_through_grouped_count_pl
         source_binding_ids_by_requirement_by_requested_fact_id={
             "fact_1": {"operation": (bound_source.id,)}
         },
-        input_context=compiler_input_context(
-            values=request.available_values,
-            question_contract=request.question_contract,
-        ),
-    )
+            input_context=compiler_input_context(
+                values=request.available_values,
+                question_contract=request.question_contract,
+            ),
+            requested_facts=request.requested_facts,
+        )
 
     from fervis.lookup.answer_program.compilation import compile_answer_program
     from fervis.lookup.answer_program.instantiation import (

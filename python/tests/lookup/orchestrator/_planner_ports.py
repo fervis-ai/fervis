@@ -6,7 +6,7 @@ from tests.lookup.source_binding_helpers import (
     source_binding_payload_from_fact_plan_with_invocation_overrides,
 )
 from tests.testkit.question_contract_provider import (
-    provider_membership_tests,
+    provider_answer_population,
     provider_question_input_ownership,
 )
 
@@ -17,17 +17,15 @@ def _provider_population_without_input_uses(
     subject_text: str,
 ) -> dict[str, Any]:
     payload = default_answer_population(
-        description=description,
         subject_text=subject_text,
         instance_interpretation=RequestedFactAnswerSubject(
             subject_text=subject_text
         ).instance_interpretation,
     ).to_question_contract_dict()
-    payload["membership_tests"] = provider_membership_tests(
-        payload["membership_tests"],
+    return provider_answer_population(
+        payload,
         ownership=provider_question_input_ownership(),
     )
-    return payload
 
 
 def _offered_conversation_resolution_tool_names(
@@ -503,7 +501,10 @@ class _PromptSurfacePlannerPort:
                 "answer_requests": [
                     {
                         "answer_fact": "salespeople with sales",
-                        "answer_expression": {"family": "list_rows"},
+                        "answer_expression": {
+                            "family": "list_rows",
+                            "selection": {"kind": "all_results"},
+                        },
                         "answer_subject": _answer_subject_payload("salespeople"),
                         "answer_population": _provider_population_without_input_uses(
                             description="salespeople with sales",
@@ -738,7 +739,10 @@ class _QuestionIntentAwarePlannerPort:
                     "answer_requests": [
                         {
                             "answer_fact": "total for the prior referenced sales amount",
-                            "answer_expression": {"family": "list_rows"},
+                            "answer_expression": {
+                                "family": "list_rows",
+                                "selection": {"kind": "all_results"},
+                            },
                             "answer_subject": _answer_subject_payload("total"),
                             "answer_population": _provider_population_without_input_uses(
                                 description="total for the prior referenced sales amount",

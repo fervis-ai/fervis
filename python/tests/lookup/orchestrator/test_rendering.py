@@ -55,9 +55,7 @@ def test_renderer_exposes_answer_and_ranking_outputs_without_support_fields():
 
     rendered = render_fact_result(result)
 
-    assert rendered.rows == (
-        {"staff": "staff-3", "compensation": Decimal("1200.00")},
-    )
+    assert rendered.rows == ({"staff": "staff-3", "compensation": Decimal("1200.00")},)
     assert rendered_fact_payload(rendered)["renderOutputs"] == [
         {"key": "staff", "role": "answer_value"},
         {"key": "compensation", "role": "ranking_metric"},
@@ -94,9 +92,14 @@ def test_lookup_cutover_persists_fact_addresses_with_typed_entity_results():
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="staff_sales_rows",
-                        fields=(
-                            ProjectField(source="staff_id"),
-                            ProjectField(source="sales_total"),
+                        outputs=(
+                            NamedExpression(
+                                output_field="staff_id", expression=FieldRef("staff_id")
+                            ),
+                            NamedExpression(
+                                output_field="sales_total",
+                                expression=FieldRef("sales_total"),
+                            ),
                         ),
                     ),
                     output_relation="answer_rows",
@@ -272,7 +275,12 @@ def test_lookup_cutover_fact_addresses_expose_only_rendered_answer_fields():
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="customer_rows",
-                        fields=(ProjectField(source="customer_name"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="customer_name",
+                                expression=FieldRef("customer_name"),
+                            ),
+                        ),
                     ),
                     output_relation="answer_rows",
                 ),
@@ -371,7 +379,12 @@ def test_lookup_cutover_result_data_exposes_only_rendered_answer_fields():
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="customer_rows",
-                        fields=(ProjectField(source="customer_name"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="customer_name",
+                                expression=FieldRef("customer_name"),
+                            ),
+                        ),
                     ),
                     output_relation="answer_rows",
                 ),

@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Mapping
 
 from fervis.lineage.enums import (
     ContributionOrigin,
@@ -33,37 +32,37 @@ from fervis.lookup.answer_program.values import (
     FactValue,
     ParameterRef,
 )
+from fervis.lookup.canonical_data import RuntimeValue
 from fervis.lookup.answer_program.operations import (
-    ComputeExpression,
     ComputeSpec,
-    RankSpec,
-    fold_compute_expression,
+    FilterSpec,
+    OrderSpec,
+    Take,
+    UniversalConditionSpec,
 )
-from fervis.lookup.answer_program.contracts import AnswerProgramContractError
 from fervis.lookup.answer_program.inputs import (
     compile_answer_program_inputs,
     program_value_expressions,
     resolve_value_expression,
+    resolved_value_expression_type,
 )
 from fervis.lookup.answer_program.compatibility import (
     verify_program_compatibility,
 )
 from fervis.lookup.answer_program.values import (
     BindingSet,
-    value_expression_constant,
+)
+from fervis.lookup.answer_program.expressions import (
+    Expression,
+    expression_constant,
+    expression_input_id,
+    expression_references,
 )
 from fervis.lookup.question_contract import QuestionContract, RequestedFact
 from fervis.lookup.question_contract import MembershipTestRef
 from fervis.lookup.plan_execution.operation_runtime import (
     ExecutableOperation,
-    ResolvedComputeBinary,
-    ResolvedComputeExpression,
-    ResolvedComputeNegation,
-    ResolvedComputeOutput,
-    ResolvedComputeSpec,
-    ResolvedComputeValue,
     ResolvedOperationInput,
-    ResolvedRankSpec,
 )
 
 if TYPE_CHECKING:
@@ -82,6 +81,8 @@ class ExecutionEnvironment:
     catalog_selection: CatalogSelectionResult | None = None
     memory_relations: tuple[RelationRows, ...] = ()
     authority_ref: str = ""
+    expression_values: Mapping[str, RuntimeValue] | None = None
+    expression_types: Mapping[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -167,6 +168,8 @@ class _MaterializedExecution:
     proof_graph: ExecutionProofGraph
     effective_requested_facts: tuple[RequestedFact, ...]
     operation_inputs: tuple[ResolvedOperationInput, ...] = ()
+    expression_values: Mapping[str, RuntimeValue] | None = None
+    expression_types: Mapping[str, str] | None = None
 
     @property
     def proof_node_refs_by_result_output_id(self) -> dict[str, tuple[str, ...]]:
@@ -200,18 +203,6 @@ class _MaterializedExecution:
         return {
             operation_id: _dedupe_refs(tuple(refs))
             for operation_id, refs in grouped.items()
-        }
-
-    @property
-    def row_filter_scope_refs(self) -> dict[str, frozenset[str]]:
-        refs_by_relation: dict[str, set[str]] = {}
-        for row_filter in self.instantiated_inputs.row_filters:
-            refs_by_relation.setdefault(row_filter.relation_id, set()).update(
-                _dedupe_refs(tuple(row_filter.proof_refs))
-            )
-        return {
-            relation_id: frozenset(refs)
-            for relation_id, refs in refs_by_relation.items()
         }
 
 
@@ -285,6 +276,8 @@ def instantiate_answer_program(
         proof_graph=materialized.proof_graph,
         effective_requested_facts=materialized.effective_requested_facts,
         operation_inputs=materialized.operation_inputs,
+        expression_values=environment.expression_values,
+        expression_types=environment.expression_types,
     )
 
 
@@ -362,7 +355,6 @@ def _with_population_coverage(
     proof_context = ExecutionProofContext(
         endpoint_arg_scope_refs=_instantiated_endpoint_arg_refs(instantiated_inputs),
         operation_refs=_operation_input_refs(graph),
-        row_filter_scope_refs=_instantiated_row_filter_refs(instantiated_inputs),
     )
     relation_contracts = _relation_contracts(
         answer,
@@ -419,15 +411,6 @@ def _instantiated_endpoint_arg_refs(
     return {relation_id: frozenset(items) for relation_id, items in refs.items()}
 
 
-def _instantiated_row_filter_refs(
-    inputs: InstantiatedProgramInputs,
-) -> dict[str, frozenset[str]]:
-    refs: dict[str, set[str]] = {}
-    for item in inputs.row_filters:
-        refs.setdefault(item.relation_id, set()).update(item.proof_refs)
-    return {relation_id: frozenset(items) for relation_id, items in refs.items()}
-
-
 def _operation_input_refs(
     graph: ExecutionProofGraph,
 ) -> dict[str, frozenset[str]]:
@@ -451,7 +434,7 @@ def _instantiate_operations(
     for operation in answer.operations:
         spec = operation.spec
         if isinstance(spec, ComputeSpec):
-            resolved = _resolve_compute_expression(
+            resolved_inputs = _resolve_expression_inputs(
                 spec.expression,
                 bindings=bindings,
                 operation_id=operation.id,
@@ -459,16 +442,25 @@ def _instantiate_operations(
             operations.append(
                 ExecutableOperation(
                     id=operation.id,
-                    spec=ResolvedComputeSpec(
-                        expression=resolved.expression,
-                        output_scalar=spec.output_scalar,
-                    ),
+                    spec=spec,
                     output_relation=operation.output_relation,
                 )
             )
-            inputs.extend(resolved.inputs)
+            inputs.extend(resolved_inputs)
             continue
-        if not isinstance(spec, RankSpec):
+        if isinstance(spec, (FilterSpec, UniversalConditionSpec)):
+            for expression in (
+                spec.predicate.left,
+                *((spec.predicate.right,) if spec.predicate.right is not None else ()),
+            ):
+                inputs.extend(
+                    _resolve_expression_inputs(
+                        expression,
+                        bindings=bindings,
+                        operation_id=operation.id,
+                    )
+                )
+        if not isinstance(spec, OrderSpec):
             operations.append(
                 ExecutableOperation(
                     id=operation.id,
@@ -477,41 +469,26 @@ def _instantiate_operations(
                 )
             )
             continue
-        try:
-            resolved_limit = resolve_value_expression(
-                spec.limit,
-                bindings=bindings,
-            )
-        except AnswerProgramContractError as exc:
-            raise VerificationError(f"{exc.code}: {exc}") from exc
-        try:
-            limit = exact_positive_integer(resolved_limit.value)
-        except (TypeError, ValueError) as exc:
-            message = str(exc)
-            if "positive integer" in message:
-                raise VerificationError("rank limit must be a positive integer") from exc
-            raise VerificationError("rank limit must be numeric") from exc
         operations.append(
             ExecutableOperation(
                 id=operation.id,
-                spec=ResolvedRankSpec(
-                    input_relation=spec.input_relation,
-                    order_by=spec.order_by,
-                    tie_policy=spec.tie_policy,
-                    limit=limit,
-                    tie_breakers=spec.tie_breakers,
-                ),
+                spec=spec,
                 output_relation=operation.output_relation,
             )
         )
-        inputs.append(
-            ResolvedOperationInput(
+        if isinstance(spec.selection, Take):
+            limit_inputs = _resolve_expression_inputs(
+                spec.selection.limit,
+                bindings=bindings,
                 operation_id=operation.id,
-                input_id="rank_limit",
-                value=limit,
-                proof_refs=resolved_limit.proof_refs,
             )
-        )
+            try:
+                exact_positive_integer(limit_inputs[0].value)
+            except (IndexError, TypeError, ValueError) as exc:
+                raise VerificationError(
+                    "order take requires a positive integer limit"
+                ) from exc
+            inputs.extend(limit_inputs)
     return tuple(operations), _dedupe_operation_inputs(inputs)
 
 
@@ -528,77 +505,47 @@ def _dedupe_operation_inputs(
     return tuple(by_identity.values())
 
 
-@dataclass(frozen=True)
-class _ResolvedCompute:
-    expression: ResolvedComputeExpression
-    inputs: tuple[ResolvedOperationInput, ...] = ()
-
-
-def _resolve_compute_expression(
-    expression: ComputeExpression,
+def _resolve_expression_inputs(
+    expression: Expression,
     *,
     bindings: BindingSet,
     operation_id: str,
-) -> _ResolvedCompute:
-    return fold_compute_expression(
-        expression,
-        parameter=lambda item: _resolve_compute_value(
-            item,
-            input_ref=f"parameter:{item.parameter_id}",
-            bindings=bindings,
-            operation_id=operation_id,
+) -> tuple[ResolvedOperationInput, ...]:
+    references = expression_references(expression)
+    return (
+        *(
+            _resolve_expression_value(
+                item,
+                bindings=bindings,
+                operation_id=operation_id,
+            )
+            for item in references.parameters
         ),
-        output=lambda item: _ResolvedCompute(
-            expression=ResolvedComputeOutput(
-                node_id=item.node_id,
-                output_id=item.output_id,
-            ),
-        ),
-        constant=lambda item: _resolve_compute_value(
-            item,
-            input_ref=f"constant:{item.constant_id}@{item.version_ref}",
-            bindings=bindings,
-            operation_id=operation_id,
-        ),
-        negation=lambda _item, operand: _ResolvedCompute(
-            expression=ResolvedComputeNegation(operand=operand.expression),
-            inputs=operand.inputs,
-        ),
-        binary=lambda item, left, right: _ResolvedCompute(
-            expression=ResolvedComputeBinary(
-                operator=item.operator,
-                left=left.expression,
-                right=right.expression,
-            ),
-            inputs=(*left.inputs, *right.inputs),
+        *(
+            _resolve_expression_value(
+                item,
+                bindings=bindings,
+                operation_id=operation_id,
+            )
+            for item in references.constants
         ),
     )
 
 
-def _resolve_compute_value(
+def _resolve_expression_value(
     expression: ParameterRef | ConstantRef,
     *,
-    input_ref: str,
     bindings: BindingSet,
     operation_id: str,
-) -> _ResolvedCompute:
+) -> ResolvedOperationInput:
     resolved = resolve_value_expression(expression, bindings=bindings)
-    value = cast(Decimal, resolved.value)
     proof_refs = _dedupe_refs((*resolved.source_refs, *resolved.proof_refs))
-    return _ResolvedCompute(
-        expression=ResolvedComputeValue(
-            input_ref=input_ref,
-            value=value,
-            proof_refs=proof_refs,
-        ),
-        inputs=(
-            ResolvedOperationInput(
-                operation_id=operation_id,
-                input_id=input_ref,
-                value=value,
-                proof_refs=proof_refs,
-            ),
-        ),
+    return ResolvedOperationInput(
+        operation_id=operation_id,
+        input_id=expression_input_id(expression),
+        value=resolved.value,
+        value_type=resolved_value_expression_type(expression, resolved),
+        proof_refs=proof_refs,
     )
 
 
@@ -611,7 +558,7 @@ def _program_input_values(
     values.extend(
         constant.value
         for named in program_value_expressions(answer)
-        if (constant := value_expression_constant(named.expression)) is not None
+        if (constant := expression_constant(named.expression)) is not None
     )
     return tuple({value.id: value for value in values}.values())
 
@@ -678,41 +625,6 @@ def _execution_proof_graph(
                 source=node_id,
                 target=f"relation:{arg.relation_id}",
                 role=ProofEdgeRole.SCOPES,
-            )
-        )
-    for row_filter in instantiated_inputs.row_filters:
-        node_id = f"row_filter:{row_filter.relation_id}:{row_filter.field_id}"
-        nodes.append(
-            ExecutionProofNode(
-                id=node_id,
-                kind=ProofNodeKind.ROW_FILTER,
-                proof_refs=tuple(row_filter.proof_refs),
-                label=_filter_label(
-                    row_filter.field_id,
-                    operator=row_filter.operator.value,
-                    value=row_filter.value,
-                ),
-                value=row_filter.value,
-                operator=row_filter.operator.value,
-            )
-        )
-        contributions.extend(
-            _node_contributions(
-                node_id=node_id,
-                label=_filter_label(
-                    row_filter.field_id,
-                    operator=row_filter.operator.value,
-                    value=row_filter.value,
-                ),
-                proof_refs=row_filter.proof_refs,
-                explicit_labels_by_ref=explicit_labels_by_ref,
-            )
-        )
-        edges.append(
-            ExecutionProofEdge(
-                source=node_id,
-                target=f"relation:{row_filter.relation_id}",
-                role=ProofEdgeRole.NARROWS,
             )
         )
     for choice in instantiated_inputs.population_choices:

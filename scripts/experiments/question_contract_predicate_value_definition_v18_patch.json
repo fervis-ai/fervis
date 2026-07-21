@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "After writing answer_population, inspect each EXPLICIT_USER_CONSTRAINT. A predicate_value is an explicit word or phrase that states which property value qualifying candidates must have. This includes adjectival and compound modifiers; copy the user's phrase without inferring catalog field boundaries.\nEach predicate_value supplies the membership test or tests whose required property value it states. A compound phrase may supply several tests. Do not turn the answer subject or counted unit into an input.",
+      "new": "Use predicate_value when an explicit phrase is a property value that may apply to many candidate instances.\nA predicate_value does not identify one particular resource. Do not turn the answer subject or counted unit into an input.",
+      "expected_count": 1
+    }
+  ]
+}

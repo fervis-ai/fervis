@@ -1,0 +1,42 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Do not infer predicate meaning from parameter or field names.",
+      "new": "A request parameter receives value_component, not value_meaning. Choose it only when the shown target represents that component; compatible type alone is not sufficient.",
+      "expected_count": 1
+    }
+  ],
+  "schema_patches": [
+    {
+      "tool_name": "submit_source_binding",
+      "op": "replace",
+      "path": "/properties/outcome/oneOf/0/properties/bindings_for_fact_1/properties/metric/properties/resolved_input_applications/items/oneOf/0/properties/applications/items/properties",
+      "value": {
+        "value_component": {
+          "enum": ["area_id", "canonical_key"]
+        },
+        "application_target_id": {
+          "enum": [
+            "request_parameter.ordering",
+            "request_parameter.name",
+            "returned_identity.source_3.data.reference.area_area_id_reference"
+          ]
+        },
+        "match_basis_explanation": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    {
+      "tool_name": "submit_source_binding",
+      "op": "replace",
+      "path": "/properties/outcome/oneOf/0/properties/bindings_for_fact_1/properties/metric/properties/resolved_input_applications/items/oneOf/0/properties/applications/items/required",
+      "value": [
+        "value_component",
+        "application_target_id",
+        "match_basis_explanation"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Do not infer predicate meaning from parameter or field names.",
+      "new": "opaque_query_param has no declared predicate meaning. Do not apply an identity to an optional opaque_query_param when a returned_identity target can enforce that identity.",
+      "expected_count": 1
+    }
+  ]
+}

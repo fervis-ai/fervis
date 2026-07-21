@@ -11,7 +11,6 @@ from fervis.lookup.answer_program.values import (
     LiteralValuePayload,
     NamedValuePayload,
     TimeValuePayload,
-    ValueFilterOperator,
     ValueKind,
     known_input_id_for_value,
 )
@@ -198,8 +197,6 @@ def _row_set_filter_payload(
         return payload
     if value.kind == ValueKind.NAMED and isinstance(value.payload, NamedValuePayload):
         payload["display_value"] = value.payload.reference_text or value.payload.text
-        if value.payload.filter_operator is not ValueFilterOperator.EQUALS:
-            payload["operator"] = value.payload.filter_operator.value
         if value.payload.matched_field_ref:
             payload["matched_field_ref"] = value.payload.matched_field_ref
         if value.payload.matched_field_path:

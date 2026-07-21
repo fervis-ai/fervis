@@ -16,12 +16,10 @@ from fervis.lookup.source_binding.compiler_ir import (
     DraftRelationSourceAppliedFilter,
     SourceAppliedFilter,
     DraftRelationSourcePopulationChoice,
-    DraftRelationSourceRowFilter,
 )
 from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
     PopulationChoiceControllerKind,
-    Relation,
     RelationField,
 )
 from fervis.lookup.answer_program.result_projection import (
@@ -39,6 +37,7 @@ from fervis.lookup.fact_planning.fulfillment_evidence import (
 from fervis.lookup.source_binding import BoundSource
 
 from .result_ids import _safe_field_id
+from .parameterization import ParameterizedRelation
 from fervis.lookup.fact_planning.compiled_patterns import (
     CompiledMetric,
     CompiledPattern,
@@ -48,7 +47,7 @@ from fervis.lookup.fact_planning.compiled_patterns import (
 
 RelationBuilder = Callable[
     [str, DraftRelationSource, tuple[RelationField, ...]],
-    Relation,
+    ParameterizedRelation,
 ]
 
 
@@ -161,23 +160,22 @@ def _relations_for_bound_source(
         (bound.source,) if bound.source is not None else ()
     )
     if len(invocations) <= 1:
-        return {
-            "relations": (
-                _relation_for_bound(
-                    relation_id=relation_id,
-                    address=address,
-                    bound=bound,
-                    relation_fields=relation_fields,
-                    required_answer_evidence_ids_by_output=(
-                        required_answer_evidence_ids_by_output
-                    ),
-                    selected_metric=selected_metric,
-                    relation_builder=relation_builder,
-                ),
+        built = _relation_for_bound(
+            relation_id=relation_id,
+            address=address,
+            bound=bound,
+            relation_fields=relation_fields,
+            required_answer_evidence_ids_by_output=(
+                required_answer_evidence_ids_by_output
             ),
-            "operations": (),
+            selected_metric=selected_metric,
+            relation_builder=relation_builder,
+        )
+        return {
+            "relations": (built.relation,),
+            "operations": built.operations,
         }
-    relations = tuple(
+    built_relations = tuple(
         _relation_for_bound(
             relation_id=f"{relation_id}_invocation_{index}",
             address=address,
@@ -192,12 +190,15 @@ def _relations_for_bound_source(
         for index, source in enumerate(invocations, start=1)
     )
     return {
-        "relations": relations,
+        "relations": tuple(item.relation for item in built_relations),
         "operations": (
+            *(operation for item in built_relations for operation in item.operations),
             Operation(
                 id=f"{relation_id}_union",
                 spec=UnionSpec(
-                    inputs=tuple(relation.id for relation in relations),
+                    inputs=tuple(
+                        relation.output_relation_id for relation in built_relations
+                    ),
                     output_fields=tuple(field.field_id for field in relation_fields),
                     identity_fields=tuple(
                         field.field_id
@@ -220,7 +221,7 @@ def _relation_for_bound_source(
     relation_builder: RelationBuilder,
     required_answer_evidence_ids_by_output: Mapping[str, tuple[str, ...]] | None = None,
     selected_metric: CompiledMetric | None = None,
-) -> Relation:
+) -> ParameterizedRelation:
     bound = _bound_source(address.source_binding_id, bound_sources=bound_sources)
     return _relation_for_bound(
         relation_id=relation_id,
@@ -261,21 +262,18 @@ def _relation_for_bound(
     relation_builder: RelationBuilder,
     required_answer_evidence_ids_by_output: Mapping[str, tuple[str, ...]] | None = None,
     selected_metric: CompiledMetric | None = None,
-) -> Relation:
+) -> ParameterizedRelation:
     if bound.source is None:
         raise ValueError("fact plan references unknown relation source binding")
     source_filters = _relation_source_filters(bound.applied_filters)
-    row_filters = tuple(bound.source.row_filters) if bound.source is not None else ()
     relation_fields = _relation_fields_with_source_requirements(
         relation_fields,
         source_filters=source_filters,
-        row_filters=row_filters,
         population_choices=bound.source.population_choices,
     )
     source = _source_with_filters(
         bound.source,
         source_filters=source_filters,
-        row_filters=row_filters,
     )
     _validate_relation_fields_for_bound(
         address=address,
@@ -291,11 +289,10 @@ def _source_with_filters(
     source: DraftRelationSource,
     *,
     source_filters: tuple[DraftRelationSourceAppliedFilter, ...],
-    row_filters: tuple[DraftRelationSourceRowFilter, ...],
 ) -> DraftRelationSource:
-    if not source_filters and not row_filters:
+    if not source_filters:
         return source
-    return replace(source, applied_filters=source_filters, row_filters=row_filters)
+    return replace(source, applied_filters=source_filters)
 
 
 def _relation_source_filters(
@@ -313,10 +310,9 @@ def _relation_fields_with_source_requirements(
     relation_fields: tuple[RelationField, ...],
     *,
     source_filters: tuple[DraftRelationSourceAppliedFilter, ...],
-    row_filters: tuple[DraftRelationSourceRowFilter, ...],
     population_choices: tuple[DraftRelationSourcePopulationChoice, ...],
 ) -> tuple[RelationField, ...]:
-    if not source_filters and not row_filters and not population_choices:
+    if not source_filters and not population_choices:
         return relation_fields
     output = list(relation_fields)
     existing = {field.field_id for field in output}
@@ -325,17 +321,6 @@ def _relation_fields_with_source_requirements(
         for source_filter in source_filters
         for field_id in source_filter.predicate_field_ids
     ):
-        if field_id in existing:
-            continue
-        output.append(
-            RelationField(
-                field_id=field_id,
-                roles=(FieldBindingRole.PREDICATE,),
-            )
-        )
-        existing.add(field_id)
-    for source_filter in row_filters:
-        field_id = source_filter.field_id
         if field_id in existing:
             continue
         output.append(
@@ -574,7 +559,7 @@ def _entity_field_evidence_ids_for_plan(
     *,
     plan_shape: str,
 ) -> tuple[str, ...]:
-    if plan_shape not in {"aggregate_by_group", "ranked_aggregate"}:
+    if plan_shape != "aggregate_by_group":
         return ()
     return entity_field_evidence_ids(fulfillment)
 

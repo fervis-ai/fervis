@@ -57,8 +57,6 @@ from fervis.lookup.answer_program.operations import (
     AggregationFunction,
     AggregationSpec,
     AntiJoinSpec,
-    ComputeBinary,
-    ComputeBinaryOperator,
     ComputeSpec,
     CrossJoinSpec,
     FilterSpec,
@@ -67,17 +65,25 @@ from fervis.lookup.answer_program.operations import (
     Operation,
     Predicate,
     PredicateOperator,
-    ProjectField,
+    NamedExpression,
     ProjectSpec,
     ProjectToKeySpec,
-    RankSpec,
+    OrderSpec,
     RelationRole,
     RelationRoleRef,
     RoleExpandSpec,
     RoleMapping,
     SortDirection,
     SortKey,
-    TiePolicy,
+    Take,
+)
+from fervis.lookup.answer_program.expressions import (
+    BinaryExpression,
+    ExpressionFunction,
+    FieldRef,
+    ExpressionBinaryOperator,
+    FunctionExpression,
+    ParameterRef,
 )
 from fervis.lookup.answer_program.relations import (
     FieldBindingRole,
@@ -85,8 +91,6 @@ from fervis.lookup.answer_program.relations import (
     Relation,
     RelationField,
     RelationSource,
-    RelationSourceAppliedFilter,
-    RelationSourceRowFilter,
     SourceKind,
 )
 from fervis.lookup.fact_plan.row_sources import (
@@ -96,8 +100,8 @@ from fervis.lookup.fact_plan.row_sources import (
 from fervis.lookup.answer_program.values import (
     ConstantRef,
     FactValue,
+    EnvironmentRef,
     NodeOutputRef,
-    ParameterRef,
     TimeComponent,
     ValueComponent,
 )
@@ -418,10 +422,15 @@ def _source_description_inner(
         return bindings.get(relation_id, {}).get(field_id, field_id)
     spec = operation.spec
     if isinstance(spec, ProjectSpec):
-        for field in spec.fields:
-            if (field.output or field.source) == field_id:
+        for output in spec.outputs:
+            if output.output_field == field_id and isinstance(
+                output.expression, FieldRef
+            ):
                 return _source_description_inner(
-                    answer, spec.input_relation, field.source, seen=seen
+                    answer,
+                    spec.input_relation,
+                    output.expression.field_id,
+                    seen=seen,
                 )
     if isinstance(spec, ProjectToKeySpec):
         if field_id in spec.key_fields:
@@ -692,7 +701,9 @@ def _project_operation(
         id="project",
         spec=ProjectSpec(
             input_relation=input_relation,
-            fields=(ProjectField(source="name", output="name"),),
+            outputs=(
+                NamedExpression(output_field="name", expression=FieldRef("name")),
+            ),
         ),
         output_relation=output_relation,
     )
@@ -711,63 +722,47 @@ def _rows_relation() -> Relation:
     )
 
 
-def _rows_relation_with_filter(
+def _row_filter_operation(
     expression,
     *,
     field_id: str = "name",
-) -> Relation:
-    relation = _rows_relation()
-    return replace(
-        relation,
-        source=replace(
-            relation.source,
-            row_filters=(
-                RelationSourceRowFilter(
-                    field_id=field_id,
-                    operator="equals",
-                    value_expr=expression,
-                ),
+) -> Operation:
+    return Operation(
+        id="filter_rows",
+        spec=FilterSpec(
+            input_relation="rows",
+            predicate=Predicate(
+                left=FieldRef(field_id),
+                operator=PredicateOperator.EQUALS,
+                right=expression,
             ),
         ),
+        output_relation="filtered_rows",
     )
 
 
-def _rows_relation_filtered_by_known_input(known_input_id: str) -> Relation:
-    return Relation(
-        id="rows",
-        source=RelationSource(
-            kind=SourceKind.API_READ,
-            read_id="records",
-            row_filters=(
-                RelationSourceRowFilter(
-                    field_id="name",
-                    operator="equals",
-                    value_expr=_constant_expression(
-                        FactValue.named(
-                            id=f"filter_{known_input_id}",
-                            text="yesterday",
-                            proof_refs=(f"known_input:{known_input_id}",),
-                        ),
-                        ref_id=f"filter_{known_input_id}",
-                    ),
-                    proof_refs=(f"known_input:{known_input_id}",),
-                ),
+def _known_input_filter(known_input_id: str) -> Operation:
+    return _row_filter_operation(
+        _constant_expression(
+            FactValue.named(
+                id=f"filter_{known_input_id}",
+                text="yesterday",
+                proof_refs=(f"known_input:{known_input_id}",),
             ),
+            ref_id=f"filter_{known_input_id}",
         ),
-        fields=(
-            RelationField(
-                field_id="name",
-                roles=(FieldBindingRole.OUTPUT,),
-            ),
-        ),
+        field_id="name",
     )
 
 
-def test_row_filter_references_existing_value():
+def test_filter_references_existing_value():
     plan = FactPlan(
         outcome=_answer_plan(
-            relations=(_rows_relation_with_filter(ParameterRef("missing")),),
-            operations=(_project_operation(input_relation="rows"),),
+            relations=(_rows_relation(),),
+            operations=(
+                _row_filter_operation(ParameterRef("missing")),
+                _project_operation(input_relation="filtered_rows"),
+            ),
             result_projection=ResultProjection(
                 relation_outputs=(
                     RelationResultOutput(
@@ -784,13 +779,14 @@ def test_row_filter_references_existing_value():
         verify_fact_plan(plan)
 
 
-def test_row_filter_can_reference_known_question_input():
+def test_filter_can_reference_known_question_input():
     plan = FactPlan(
         outcome=_answer_plan(
-            relations=(
-                _rows_relation_with_filter(ParameterRef("question.person_name")),
+            relations=(_rows_relation(),),
+            operations=(
+                _row_filter_operation(ParameterRef("question.person_name")),
+                _project_operation(input_relation="filtered_rows"),
             ),
-            operations=(_project_operation(input_relation="rows"),),
             result_projection=ResultProjection(
                 relation_outputs=(
                     RelationResultOutput(
@@ -846,11 +842,14 @@ def test_known_inputs_are_inventory_not_automatic_obligations():
     )
 
 
-def test_unclassified_literal_cannot_supply_row_filter_value():
+def test_unclassified_literal_cannot_supply_filter_value():
     plan = FactPlan(
         outcome=_answer_plan(
-            relations=(_rows_relation_with_filter({"literal": "Alice"}),),
-            operations=(_project_operation(input_relation="rows"),),
+            relations=(_rows_relation(),),
+            operations=(
+                _row_filter_operation({"literal": "Alice"}),
+                _project_operation(input_relation="filtered_rows"),
+            ),
             result_projection=ResultProjection(
                 relation_outputs=(
                     RelationResultOutput(
@@ -911,7 +910,7 @@ def test_endpoint_time_param_can_reference_grounded_time_input():
         start="2026-04-08",
         end="2026-04-08",
     )
-    relation = _rows_relation_filtered_by_known_input("period")
+    relation = _rows_relation()
     relation = replace(
         relation,
         source=replace(
@@ -932,7 +931,10 @@ def test_endpoint_time_param_can_reference_grounded_time_input():
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(relation,),
-            operations=(_project_operation(input_relation="rows"),),
+            operations=(
+                _known_input_filter("period"),
+                _project_operation(input_relation="filtered_rows"),
+            ),
             result_projection=ResultProjection(
                 relation_outputs=(
                     RelationResultOutput(
@@ -1119,7 +1121,11 @@ def test_empty_operation_id_is_rejected():
                     id="",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(ProjectField(source="name"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="name", expression=FieldRef("name")
+                            ),
+                        ),
                     ),
                     output_relation="result",
                 ),
@@ -1209,8 +1215,11 @@ def test_shared_question_input_refs_are_valid_across_answer_requests():
                     result_output_id="store",
                 ),
             ),
-            relations=(_rows_relation_filtered_by_known_input("period"),),
-            operations=(_project_operation(input_relation="rows"),),
+            relations=(_rows_relation(),),
+            operations=(
+                _known_input_filter("period"),
+                _project_operation(input_relation="filtered_rows"),
+            ),
             result_projection=ResultProjection(
                 relation_outputs=(
                     RelationResultOutput(
@@ -1234,21 +1243,17 @@ def test_shared_question_input_refs_are_valid_across_answer_requests():
     )
 
 
-def test_known_limit_input_must_match_rank_limit():
+def test_known_limit_input_must_match_order_take_limit():
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(_rows_relation(),),
             operations=(
                 Operation(
                     id="top_rows",
-                    spec=RankSpec(
+                    spec=OrderSpec(
                         input_relation="rows",
                         order_by=(SortKey(field="name", direction=SortDirection.DESC),),
-                        tie_policy=TiePolicy.FIELD,
-                        tie_breakers=(
-                            SortKey(field="name", direction=SortDirection.ASC),
-                        ),
-                        limit=ParameterRef("question.result_limit"),
+                        selection=Take(limit=ParameterRef("question.result_limit")),
                     ),
                     output_relation="result",
                 ),
@@ -1273,21 +1278,17 @@ def test_known_limit_input_must_match_rank_limit():
     )
 
 
-def test_rank_limit_allows_literal_limit_without_bound_known_input():
+def test_order_take_allows_literal_limit_without_bound_known_input():
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(_rows_relation(),),
             operations=(
                 Operation(
                     id="top_rows",
-                    spec=RankSpec(
+                    spec=OrderSpec(
                         input_relation="rows",
                         order_by=(SortKey(field="name", direction=SortDirection.DESC),),
-                        tie_policy=TiePolicy.FIELD,
-                        tie_breakers=(
-                            SortKey(field="name", direction=SortDirection.ASC),
-                        ),
-                        limit=_rank_limit_constant(5),
+                        selection=Take(limit=_rank_limit_constant(5)),
                     ),
                     output_relation="result",
                 ),
@@ -1307,7 +1308,7 @@ def test_rank_limit_allows_literal_limit_without_bound_known_input():
     verify_fact_plan(plan)
 
 
-def test_rank_limit_expression_requires_positive_integer_value():
+def test_order_take_expression_requires_positive_integer_value():
     for value in ("0", "-1", "5.5"):
         with pytest.raises(VerificationError, match="positive integer"):
             plan = FactPlan(
@@ -1316,7 +1317,7 @@ def test_rank_limit_expression_requires_positive_integer_value():
                     operations=(
                         Operation(
                             id="top_rows",
-                            spec=RankSpec(
+                            spec=OrderSpec(
                                 input_relation="rows",
                                 order_by=(
                                     SortKey(
@@ -1324,20 +1325,15 @@ def test_rank_limit_expression_requires_positive_integer_value():
                                         direction=SortDirection.DESC,
                                     ),
                                 ),
-                                tie_policy=TiePolicy.FIELD,
-                                tie_breakers=(
-                                    SortKey(
-                                        field="name",
-                                        direction=SortDirection.ASC,
-                                    ),
-                                ),
-                                limit=_constant_expression(
-                                    FactValue.literal(
-                                        id=f"rank_limit_{value}",
-                                        literal_type=LiteralType.NUMBER,
-                                        value=value,
-                                    ),
-                                    ref_id=f"rank_limit_{value}",
+                                selection=Take(
+                                    limit=_constant_expression(
+                                        FactValue.literal(
+                                            id=f"rank_limit_{value}",
+                                            literal_type=LiteralType.NUMBER,
+                                            value=value,
+                                        ),
+                                        ref_id=f"rank_limit_{value}",
+                                    )
                                 ),
                             ),
                             output_relation="result",
@@ -1349,27 +1345,25 @@ def test_rank_limit_expression_requires_positive_integer_value():
             verify_fact_plan(plan)
 
 
-def test_rank_limit_rejects_non_numeric_expression():
+def test_order_take_rejects_non_numeric_expression():
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(_rows_relation(),),
             operations=(
                 Operation(
                     id="top_rows",
-                    spec=RankSpec(
+                    spec=OrderSpec(
                         input_relation="rows",
                         order_by=(SortKey(field="name", direction=SortDirection.DESC),),
-                        tie_policy=TiePolicy.FIELD,
-                        tie_breakers=(
-                            SortKey(field="name", direction=SortDirection.ASC),
-                        ),
-                        limit=_constant_expression(
-                            FactValue.literal(
-                                id="rank_limit_four",
-                                literal_type=LiteralType.STRING,
-                                value="four",
-                            ),
-                            ref_id="rank_limit_four",
+                        selection=Take(
+                            limit=_constant_expression(
+                                FactValue.literal(
+                                    id="rank_limit_four",
+                                    literal_type=LiteralType.STRING,
+                                    value="four",
+                                ),
+                                ref_id="rank_limit_four",
+                            )
                         ),
                     ),
                     output_relation="result",
@@ -1387,7 +1381,7 @@ def test_rank_limit_rejects_non_numeric_expression():
         )
     )
 
-    with pytest.raises(VerificationError, match="numeric"):
+    with pytest.raises(VerificationError, match="positive integer"):
         verify_fact_plan(plan)
 
 
@@ -1476,10 +1470,10 @@ def test_field_binding_id_must_exist_on_row_source():
                     id="project",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(
-                            ProjectField(
-                                source="restricted.full_value",
-                                output="answer",
+                        outputs=(
+                            NamedExpression(
+                                output_field="answer",
+                                expression=FieldRef("restricted.full_value"),
                             ),
                         ),
                     ),
@@ -1541,15 +1535,19 @@ def test_proof_backed_scalar_output_can_satisfy_requested_derived_fact():
                     id="project",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(ProjectField(source="name", output="name"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="name", expression=FieldRef("name")
+                            ),
+                        ),
                     ),
                     output_relation="result",
                 ),
                 Operation(
                     id="compute",
                     spec=ComputeSpec(
-                        expression=ComputeBinary(
-                            operator=ComputeBinaryOperator.SUBTRACT,
+                        expression=BinaryExpression(
+                            operator=ExpressionBinaryOperator.SUBTRACT,
                             left=_constant_expression(
                                 target_value,
                                 ref_id="target_value",
@@ -1630,15 +1628,19 @@ def test_chained_compute_scalar_output_preserves_evidence_proof():
                     id="project",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(ProjectField(source="name", output="name"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="name", expression=FieldRef("name")
+                            ),
+                        ),
                     ),
                     output_relation="result",
                 ),
                 Operation(
                     id="subtotal",
                     spec=ComputeSpec(
-                        expression=ComputeBinary(
-                            operator=ComputeBinaryOperator.SUBTRACT,
+                        expression=BinaryExpression(
+                            operator=ExpressionBinaryOperator.SUBTRACT,
                             left=_constant_expression(
                                 target_value,
                                 ref_id="target_value",
@@ -1705,9 +1707,15 @@ def test_fulfillment_must_reference_projected_relation_field():
                     id="project",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(
-                            ProjectField(source="name", output="display_total"),
-                            ProjectField(source="name", output="internal_total"),
+                        outputs=(
+                            NamedExpression(
+                                output_field="display_total",
+                                expression=FieldRef("name"),
+                            ),
+                            NamedExpression(
+                                output_field="internal_total",
+                                expression=FieldRef("name"),
+                            ),
                         ),
                     ),
                     output_relation="result",
@@ -1765,7 +1773,12 @@ def test_fulfillment_allows_fact_scoped_selected_read_without_global_selection()
                     id="project",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(ProjectField(source="staff_name"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="staff_name",
+                                expression=FieldRef("staff_name"),
+                            ),
+                        ),
                     ),
                     output_relation="result",
                 ),
@@ -1881,7 +1894,12 @@ def test_fulfillment_allows_source_binding_authorized_api_replay():
                     id="project",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(ProjectField(source="sales_total"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="sales_total",
+                                expression=FieldRef("sales_total"),
+                            ),
+                        ),
                     ),
                     output_relation="result",
                 ),
@@ -1986,7 +2004,12 @@ def test_execution_uses_same_authorized_catalog_as_verification():
                     id="project",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(ProjectField(source="sales_total"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="sales_total",
+                                expression=FieldRef("sales_total"),
+                            ),
+                        ),
                     ),
                     output_relation="result",
                 ),
@@ -2197,7 +2220,11 @@ def test_api_execution_records_one_source_read_for_one_backend_request():
                     id="project_summary",
                     spec=ProjectSpec(
                         input_relation="summary",
-                        fields=(ProjectField(source="total", output="total"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="total", expression=FieldRef("total")
+                            ),
+                        ),
                     ),
                     output_relation="summary_result",
                 ),
@@ -2425,7 +2452,12 @@ def _execute_location_id_plan_with_observed_label():
                     id="project",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(ProjectField(source="location_id"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="location_id",
+                                expression=FieldRef("location_id"),
+                            ),
+                        ),
                     ),
                     output_relation="result",
                 ),
@@ -2514,32 +2546,25 @@ def _execute_location_id_plan_with_observed_label():
     )
 
 
-def test_relation_source_applied_filter_constrains_rows_before_operation():
+def test_filter_operation_constrains_rows_before_aggregate():
     area_expression = _constant_expression(
         FactValue.identity(
             id="nairobi_area",
-            key=entity_key_value(
-                "area", "primary_key", {"area_id": "area_nairobi"}
-            ),
+            key=entity_key_value("area", "primary_key", {"area_id": "area_nairobi"}),
             display_value="Nairobi",
             proof_refs=("known_input:input_1",),
         ),
         ref_id="nairobi_area",
     )
+    area_expression = replace(area_expression, component="key_component:area_id")
     plan = FactPlan(
         outcome=_answer_plan(
             relations=(
                 Relation(
-                    id="rows",
+                    id="source_rows",
                     source=RelationSource(
                         kind=SourceKind.API_READ,
                         read_id="locations",
-                        applied_filters=(
-                            RelationSourceAppliedFilter(
-                                predicate_field_ids=("area_id",),
-                                value_expr=area_expression,
-                            ),
-                        ),
                     ),
                     fields=(
                         RelationField(
@@ -2558,6 +2583,18 @@ def test_relation_source_applied_filter_constrains_rows_before_operation():
                 ),
             ),
             operations=(
+                Operation(
+                    id="filter_area",
+                    spec=FilterSpec(
+                        input_relation="source_rows",
+                        predicate=Predicate(
+                            left=FieldRef("area_id"),
+                            operator=PredicateOperator.EQUALS,
+                            right=area_expression,
+                        ),
+                    ),
+                    output_relation="rows",
+                ),
                 Operation(
                     id="sum_metric",
                     spec=AggregateSpec(
@@ -2664,7 +2701,8 @@ def test_relation_source_applied_filter_constrains_rows_before_operation():
         memory=LookupMemory(),
     )
 
-    assert result.relations[0].rows == (
+    filtered_rows = next(item for item in result.relations if item.id == "rows")
+    assert filtered_rows.rows == (
         {
             "location_id": "loc_1",
             "area_id": "area_nairobi",
@@ -2694,7 +2732,11 @@ def test_fulfillment_rejects_rendered_scalar_without_evidence_proof():
                     id="project",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(ProjectField(source="name"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="name", expression=FieldRef("name")
+                            ),
+                        ),
                     ),
                     output_relation="result",
                 ),
@@ -2740,16 +2782,17 @@ def test_fulfillment_rejects_rendered_scalar_without_evidence_proof():
         )
 
 
-def test_row_filter_targets_are_verified_against_catalog_and_relations():
+def test_filter_targets_are_verified_against_catalog_and_relations():
     plan = FactPlan(
         outcome=_answer_plan(
-            relations=(
-                _rows_relation_with_filter(
+            relations=(_rows_relation(),),
+            operations=(
+                _row_filter_operation(
                     ParameterRef("question.known"),
                     field_id="field.missing",
                 ),
+                _project_operation(input_relation="filtered_rows"),
             ),
-            operations=(_project_operation(input_relation="rows"),),
             result_projection=ResultProjection(
                 relation_outputs=(
                     RelationResultOutput(
@@ -2788,25 +2831,10 @@ def test_fulfillment_rejects_known_input_proof_from_unrelated_join_branch():
                     ),
                 ),
                 Relation(
-                    id="scoped_rows",
+                    id="scoped_source_rows",
                     source=RelationSource(
                         kind=SourceKind.API_READ,
                         read_id="records",
-                        row_filters=(
-                            RelationSourceRowFilter(
-                                field_id="entity_id",
-                                operator="equals",
-                                value_expr=_constant_expression(
-                                    FactValue.named(
-                                        id="filter_entity_1",
-                                        text="entity_1",
-                                        proof_refs=("known_input:input_1",),
-                                    ),
-                                    ref_id="filter_entity_1",
-                                ),
-                                proof_refs=("known_input:input_1",),
-                            ),
-                        ),
                     ),
                     fields=(
                         RelationField(
@@ -2817,6 +2845,25 @@ def test_fulfillment_rejects_known_input_proof_from_unrelated_join_branch():
                 ),
             ),
             operations=(
+                Operation(
+                    id="filter_scoped_rows",
+                    spec=FilterSpec(
+                        input_relation="scoped_source_rows",
+                        predicate=Predicate(
+                            left=FieldRef("entity_id"),
+                            operator=PredicateOperator.EQUALS,
+                            right=_constant_expression(
+                                FactValue.named(
+                                    id="filter_entity_1",
+                                    text="entity_1",
+                                    proof_refs=("known_input:input_1",),
+                                ),
+                                ref_id="filter_entity_1",
+                            ),
+                        ),
+                    ),
+                    output_relation="scoped_rows",
+                ),
                 Operation(
                     id="join_unrelated_scope",
                     spec=CrossJoinSpec(
@@ -3082,7 +3129,12 @@ def test_api_identity_binding_can_use_catalog_display_field_as_relation_grain():
                     id="project",
                     spec=ProjectSpec(
                         input_relation="staff_candidates",
-                        fields=(ProjectField(source="staff_name"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="staff_name",
+                                expression=FieldRef("staff_name"),
+                            ),
+                        ),
                     ),
                     output_relation="answer_rows",
                 ),
@@ -3175,7 +3227,11 @@ def test_api_identity_binding_declares_relation_grain_without_entity_metadata():
                     id="project",
                     spec=ProjectSpec(
                         input_relation="records",
-                        fields=(ProjectField(source="name"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="name", expression=FieldRef("name")
+                            ),
+                        ),
                     ),
                     output_relation="answer_rows",
                 ),
@@ -3251,7 +3307,11 @@ def test_api_identity_binding_requires_primary_stable_row_key():
                     id="project",
                     spec=ProjectSpec(
                         input_relation="records",
-                        fields=(ProjectField(source="name"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="name", expression=FieldRef("name")
+                            ),
+                        ),
                     ),
                     output_relation="answer_rows",
                 ),
@@ -3381,7 +3441,11 @@ def test_api_relation_child_rows_can_include_parent_identity_fields():
                     id="project",
                     spec=ProjectSpec(
                         input_relation="item_rows",
-                        fields=(ProjectField(source="sku"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="sku", expression=FieldRef("sku")
+                            ),
+                        ),
                     ),
                     output_relation="answer_rows",
                 ),
@@ -3460,7 +3524,11 @@ def test_api_relation_field_requirements_are_satisfied_by_row_source_default():
                     id="project",
                     spec=ProjectSpec(
                         input_relation="item_rows",
-                        fields=(ProjectField(source="name", output="item_name"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="item_name", expression=FieldRef("name")
+                            ),
+                        ),
                     ),
                     output_relation="answer_rows",
                 ),
@@ -3523,9 +3591,9 @@ def test_predicate_scalar_rhs_requires_prior_scalar_output():
         spec=FilterSpec(
             input_relation="rows",
             predicate=Predicate(
-                left="amount",
+                left=FieldRef("amount"),
                 operator=PredicateOperator.LTE,
-                right_scalar="max_amount",
+                right=NodeOutputRef(node_id="missing", output_id="max_amount"),
             ),
         ),
         output_relation="filtered",
@@ -3558,7 +3626,11 @@ def test_operation_input_references_existing_relation_or_prior_operation():
                     id="project",
                     spec=ProjectSpec(
                         input_relation="missing_rows",
-                        fields=(ProjectField(source="name", output="name"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="name", expression=FieldRef("name")
+                            ),
+                        ),
                     ),
                     output_relation="result",
                 ),
@@ -3658,9 +3730,9 @@ def test_operation_field_references_must_exist_on_input_relation_contracts():
             spec=FilterSpec(
                 input_relation="rows",
                 predicate=Predicate(
-                    left="missing",
+                    left=FieldRef("missing"),
                     operator=PredicateOperator.EQUALS,
-                    right="name",
+                    right=FieldRef("name"),
                 ),
             ),
             output_relation="filtered",
@@ -3676,12 +3748,10 @@ def test_operation_field_references_must_exist_on_input_relation_contracts():
         ),
         Operation(
             id="rank",
-            spec=RankSpec(
+            spec=OrderSpec(
                 input_relation="rows",
                 order_by=(SortKey(field="missing", direction=SortDirection.ASC),),
-                tie_policy=TiePolicy.FIELD,
-                tie_breakers=(SortKey(field="name", direction=SortDirection.ASC),),
-                limit=_rank_limit_constant(5),
+                selection=Take(limit=_rank_limit_constant(5)),
             ),
             output_relation="ranked",
         ),
@@ -3911,7 +3981,11 @@ def test_result_outputs_may_use_multiple_final_relations():
                     id="project_b",
                     spec=ProjectSpec(
                         input_relation="rows",
-                        fields=(ProjectField(source="name", output="name"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="name", expression=FieldRef("name")
+                            ),
+                        ),
                     ),
                     output_relation="result_b",
                 ),
@@ -3959,7 +4033,11 @@ def test_render_relation_must_be_terminal_operation_output():
                     id="final_project",
                     spec=ProjectSpec(
                         input_relation="intermediate",
-                        fields=(ProjectField(source="name"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="name", expression=FieldRef("name")
+                            ),
+                        ),
                     ),
                     output_relation="final_rows",
                 ),
@@ -4024,7 +4102,11 @@ def test_entity_result_output_requires_key_metadata():
                             required_identity_fields=("observed_id",),
                         ),
                         join_keys=(JoinKey(left="entity_id", right="observed_id"),),
-                        output_fields=(ProjectField(source="display", output="name"),),
+                        output_fields=(
+                            NamedExpression(
+                                output_field="name", expression=FieldRef("display")
+                            ),
+                        ),
                     ),
                     output_relation="answer_rows",
                 ),
@@ -4098,7 +4180,9 @@ def test_derived_candidate_output_fields_keep_roles():
                         ),
                         join_keys=(JoinKey(left="entity_id", right="observed_id"),),
                         output_fields=(
-                            ProjectField(source="entity_id", output="name"),
+                            NamedExpression(
+                                output_field="name", expression=FieldRef("entity_id")
+                            ),
                         ),
                     ),
                     output_relation="answer_rows",
@@ -4158,9 +4242,14 @@ def test_project_cannot_partially_change_relation_grain_for_coverage_role():
                     id="project_entity",
                     spec=ProjectSpec(
                         input_relation="event_rows",
-                        fields=(
-                            ProjectField(source="entity_id"),
-                            ProjectField(source="display"),
+                        outputs=(
+                            NamedExpression(
+                                output_field="entity_id",
+                                expression=FieldRef("entity_id"),
+                            ),
+                            NamedExpression(
+                                output_field="display", expression=FieldRef("display")
+                            ),
                         ),
                     ),
                     output_relation="entity_rows",
@@ -4179,7 +4268,11 @@ def test_project_cannot_partially_change_relation_grain_for_coverage_role():
                             required_identity_fields=("observed_id",),
                         ),
                         join_keys=(JoinKey(left="entity_id", right="observed_id"),),
-                        output_fields=(ProjectField(source="display"),),
+                        output_fields=(
+                            NamedExpression(
+                                output_field="display", expression=FieldRef("display")
+                            ),
+                        ),
                     ),
                     output_relation="answer_rows",
                 ),
@@ -4245,6 +4338,76 @@ def test_project_to_key_rejects_undeclared_entity_key(
                                 EntityKeyProjectionComponent(
                                     component_id=component_id,
                                     field_id="entity_id",
+                                ),
+                            ),
+                        ),
+                    ),
+                )
+            ),
+        )
+    )
+
+    with pytest.raises(VerificationError, match="declared entity key"):
+        verify_fact_plan(plan)
+
+
+def test_derived_projection_cannot_fabricate_entity_identity() -> None:
+    plan = FactPlan(
+        outcome=_answer_plan(
+            relations=(
+                Relation(
+                    id="source_rows",
+                    source=_source(),
+                    fields=(
+                        RelationField(
+                            field_id="entity_id",
+                            roles=(FieldBindingRole.IDENTITY,),
+                        ),
+                    ),
+                ),
+            ),
+            operations=(
+                Operation(
+                    id="bucket_rows",
+                    spec=ProjectSpec(
+                        input_relation="source_rows",
+                        outputs=(
+                            NamedExpression(
+                                output_field="bucket",
+                                expression=FunctionExpression(
+                                    function=ExpressionFunction.TEMPORAL_BUCKET,
+                                    arguments=(
+                                        FieldRef("entity_id"),
+                                        ConstantRef(
+                                            constant_id="grain.day",
+                                            version_ref="test@1",
+                                            value=FactValue.literal(
+                                                id="grain.day",
+                                                literal_type=LiteralType.STRING,
+                                                value="day",
+                                            ),
+                                        ),
+                                        EnvironmentRef(key="ANCHOR_TIMEZONE"),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                    output_relation="bucket_rows",
+                ),
+            ),
+            result_projection=ResultProjection(
+                relation_outputs=(
+                    RelationResultOutput(
+                        id="answer",
+                        relation_id="bucket_rows",
+                        entity_key=EntityKeyProjection(
+                            entity_kind="entity",
+                            key_id="primary_key",
+                            components=(
+                                EntityKeyProjectionComponent(
+                                    component_id="entity_id",
+                                    field_id="bucket",
                                 ),
                             ),
                         ),

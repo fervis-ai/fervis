@@ -1,6 +1,6 @@
 """Export captured Fervis model-turn prompts.
 
-Use `fervis inspect prompts --run-id <run-id>` to write raw JSON.
+Use `fervis debug prompts --run-id <run-id>` to write raw JSON.
 Use `--viewer-format html` to render the browser viewer.
 """
 

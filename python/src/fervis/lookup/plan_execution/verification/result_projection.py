@@ -16,7 +16,7 @@ from .contract_types import (
 )
 from .contracts import _scalar_contracts
 from .operations import _operation_input_refs
-from .scalars import _operation_scalar_inputs
+from .scalars import _operation_node_output_refs, _operation_scalar_inputs
 from fervis.lookup.plan_execution.operation_runtime import ResolvedOperationInput
 from fervis.lookup.answer_program.result_projection import (
     RelationResultOutput,
@@ -35,10 +35,7 @@ def _result_output_fact_refs(
         relation_contracts=relation_contracts,
         operation_inputs=operation_inputs,
     )
-    return {
-        output_id: proof.fulfillment_refs()
-        for output_id, proof in proofs.items()
-    }
+    return {output_id: proof.fulfillment_refs() for output_id, proof in proofs.items()}
 
 
 def _result_output_proofs(
@@ -62,9 +59,7 @@ def _result_output_proofs(
                 ref for field_proof in field_proofs for ref in field_proof.value_refs
             ),
             population_coverage=PopulationCoverage.guaranteed_by_every(
-                tuple(
-                    field_proof.population_coverage for field_proof in field_proofs
-                )
+                tuple(field_proof.population_coverage for field_proof in field_proofs)
             ),
         )
     scalar_contracts = _scalar_contracts(
@@ -75,9 +70,7 @@ def _result_output_proofs(
     for scalar_output in answer.result_projection.scalar_outputs:
         scalar_contract = scalar_contracts.get(scalar_output.scalar_id)
         proofs[scalar_output.id] = (
-            scalar_contract.proof
-            if scalar_contract is not None
-            else ProofLineage()
+            scalar_contract.proof if scalar_contract is not None else ProofLineage()
         )
     return proofs
 
@@ -238,8 +231,18 @@ def _verify_result_scalar_references(
 
 def _operation_input_refs_for_all(operations: tuple[Operation, ...]) -> tuple[str, ...]:
     refs: list[str] = []
+    output_relation_by_node_id = {
+        operation.id: operation.output_relation
+        for operation in operations
+        if operation.output_relation
+    }
     for operation in operations:
         refs.extend(_operation_input_refs(operation))
+        refs.extend(
+            output_relation_by_node_id[reference.node_id]
+            for reference in _operation_node_output_refs(operation)
+            if reference.node_id in output_relation_by_node_id
+        )
     return tuple(refs)
 
 

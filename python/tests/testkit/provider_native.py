@@ -26,19 +26,7 @@ def provider_native_test_arguments(
                             },
                         },
                         "answer_population": {
-                            "population_label": "test adapter answer",
-                            "counted_unit": "test adapter answer",
-                            "membership_tests": [
-                                {
-                                    "test_id": "pop_test_1",
-                                    "kind": "SUBJECT_IDENTITY",
-                                    "polarity": "MUST_PASS",
-                                    "test_question": (
-                                        "Does the row/value represent test adapter answer?"
-                                    ),
-                                    "question_input_use_refs": [],
-                                }
-                            ],
+                            "membership_tests": [],
                         },
                         "answer_outputs": [
                             {

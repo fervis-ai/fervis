@@ -15,7 +15,6 @@ from fervis.lookup.answer_program.model import (
     SourceContractPin,
 )
 from fervis.lookup.answer_program.relations import (
-    PopulationChoiceControllerKind,
     RelationSource,
     SourceKind,
 )
@@ -67,8 +66,6 @@ def compatibility_requirements(
         for relation in program.relations
     ):
         function_keys.update(("source.instantiate_read", "source.read_relation"))
-    if program.capabilities or _uses_row_filtering(program):
-        function_keys.add("relation.row_filter")
     if program.capabilities:
         function_keys.add("program.capability.narrow_population")
 
@@ -183,18 +180,6 @@ def _is_exact_manifest(
     return (
         function_keys == requirements.function_keys
         and source_keys == requirements.source_keys
-    )
-
-
-def _uses_row_filtering(program: AnswerProgram) -> bool:
-    return any(
-        relation.source.row_filters
-        or relation.source.applied_filters
-        or any(
-            choice.controller_kind is PopulationChoiceControllerKind.ROW_PREDICATE
-            for choice in relation.source.population_choices
-        )
-        for relation in program.relations
     )
 
 

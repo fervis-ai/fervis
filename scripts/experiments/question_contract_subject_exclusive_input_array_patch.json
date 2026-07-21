@@ -1,0 +1,10 @@
+{
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "add",
+      "path": "/properties/outcome/oneOf/0/properties/question_inputs/description",
+      "value": "Every concrete input-bearing phrase; never include text that belongs to the complete noun compound naming answer_subject."
+    }
+  ]
+}

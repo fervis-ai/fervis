@@ -1,0 +1,18 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "For each requested fact, write exactly one requested_fact_resource_name_matches item.\nWithin it, write answer_output_resource_lineage rows.\nEach row says: for this answer_output and support_role, this source_text could be backed by these API resource_names.\nCopy answer_output_id verbatim from requested_facts.answer_outputs.\nCopy support_role from the allowed support_roles.\nEach source_text is an exact phrase from the current question, requested fact, answer output, or resolved question inputs.\nCreate source_text entries for phrases that could name a domain concept, event, record, amount source, actor, object, or grouping entity in the API.\nDo not create entries for words that only express operation, ranking, output shape, or time scope unless they also name an API resource.\nFor each answer_output, include every resource_name that could support that output's row population, answer value, measured value, group key, or population scope.\nWhen more than one resource lineage is plausible for the same answer_output and support_role, preserve all plausible resource_names.\nIf a field or metric phrase points to a resource_name indirectly, include that resource_name in the matching lineage row.\nFor each lineage row, copy every API catalog resource_name that could match source_text for that answer_output and support_role.\nDo not choose final query terms here. Do not rank. Do not decide which match is correct.",
+      "new": "For each requested fact, write exactly one requested_fact_resource_name_matches item.\nWrite exactly one answer_output_resource_lineage row for every shown answer_output.\nCopy answer_output_id verbatim. matching_resource_names contains every shown API resource_name that could supply that answer_output.\nDo not invent additional output rows, roles, or source text.\nDo not choose final reads or decide which resource-name match is correct.",
+      "expected_count": 1
+    }
+  ],
+  "schema_property_removals": [
+    {
+      "tool_name": "submit_query_enrichment",
+      "property_names": [
+        "support_role",
+        "source_text"
+      ]
+    }
+  ]
+}

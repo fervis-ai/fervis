@@ -5,7 +5,7 @@ description: Open JSON fields cannot carry self-describing contract objects.
 input:
   schema_revision: 1
   program:
-    schema_revision: 3
+    schema_revision: 6
     program:
       $type: AnswerProgram
       fields:
@@ -18,59 +18,60 @@ input:
           $tuple:
             - $type: Operation
               fields:
-                id: rank_1
+                id: order_1
                 spec:
-                  $type: RankSpec
+                  $type: OrderSpec
                   fields:
                     input_relation: r
                     order_by: {$tuple: []}
-                    tie_policy: {$enum: TiePolicy, value: field}
-                    limit:
-                      $type: ConstantRef
+                    selection:
+                      $type: Take
                       fields:
-                        constant_id: time_1
-                        version_ref: "1"
-                        value:
-                          $type: FactValue
+                        limit:
+                          $type: ConstantRef
                           fields:
-                            id: time_1
-                            payload:
-                              $type: TimeValuePayload
+                            constant_id: time_1
+                            version_ref: "1"
+                            value:
+                              $type: FactValue
                               fields:
-                                expression: today
-                                intent:
-                                  $map:
-                                    - - hidden_contract
-                                      - $type: ProgramCompatibility
-                                        fields:
-                                          schema_revision: 3
-                                          compiler_version: ""
-                                          function_semantics: {$tuple: []}
-                                          source_contracts: {$tuple: []}
-                                anchor_date_ref: ANCHOR_DATE
-                                timezone_ref: ANCHOR_TIMEZONE
-                                resolved_start: "2026-07-10"
-                                resolved_end: "2026-07-10"
-                                granularity: day
-                            known_input_id: ""
-                            label: today
-                            proof_refs: {$tuple: []}
-                            source_refs: {$tuple: []}
-                            dependencies: {$tuple: []}
-                            applies_to_requested_fact_ids: {$tuple: []}
-                        component: value
-                        item_index: null
-                        origin:
-                          $enum: ValueExpressionOrigin
-                          value: constant
-                    tie_breakers: {$tuple: []}
-                    kind: {$enum: OperationKind, value: rank}
-                output_relation: ranked
+                                id: time_1
+                                payload:
+                                  $type: TimeValuePayload
+                                  fields:
+                                    expression: today
+                                    intent:
+                                      $map:
+                                        - - hidden_contract
+                                          - $type: ProgramCompatibility
+                                            fields:
+                                              schema_revision: 6
+                                              compiler_version: ""
+                                              function_semantics: {$tuple: []}
+                                              source_contracts: {$tuple: []}
+                                    anchor_date_ref: ANCHOR_DATE
+                                    timezone_ref: ANCHOR_TIMEZONE
+                                    resolved_start: "2026-07-10"
+                                    resolved_end: "2026-07-10"
+                                    granularity: day
+                                known_input_id: ""
+                                label: today
+                                proof_refs: {$tuple: []}
+                                source_refs: {$tuple: []}
+                                dependencies: {$tuple: []}
+                                applies_to_requested_fact_ids: {$tuple: []}
+                            component: value
+                            item_index: null
+                            origin:
+                              $enum: ValueExpressionOrigin
+                              value: constant
+                    kind: {$enum: OperationKind, value: order}
+                output_relation: ordered
         result_projection: null
         compatibility:
           $type: ProgramCompatibility
           fields:
-            schema_revision: 3
+            schema_revision: 6
             compiler_version: ""
             function_semantics: {$tuple: []}
             source_contracts: {$tuple: []}

@@ -1,0 +1,62 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "List all completed in-person sale records from March 2026.",
+      "new": "List all deleted sales from March 2026.",
+      "expected_count": 1
+    },
+    {
+      "old": "Each membership test asks one predicate about one candidate property. Create separate EXPLICIT_USER_CONSTRAINT tests for different properties, even when they consume the same input; omit predicates already enforced by answer_expression.",
+      "new": "An EXPLICIT_USER_CONSTRAINT narrows the population: MUST_PASS requires a candidate property, while MUST_FAIL excludes it. A permission to include additional candidates is not an EXPLICIT_USER_CONSTRAINT.",
+      "expected_count": 1
+    },
+    {
+      "old": "After writing answer_population, inspect each EXPLICIT_USER_CONSTRAINT. When the question supplies a concrete value used by that test, declare the smallest copied value phrase as one predicate_value and reference that input from the test. Do not turn the answer subject or counted unit into an input.\nA predicate_value does not identify one particular resource.",
+      "new": "Use predicate_value for the concrete value required or excluded by an EXPLICIT_USER_CONSTRAINT. Use population_override for a complete phrase that explicitly permits candidates outside the normal population. A population_override creates no membership test. Do not turn the answer subject or counted unit into an input.",
+      "expected_count": 1
+    },
+    {
+      "old": "Use POPULATION_TESTS when the input is an operand of one or more EXPLICIT_USER_CONSTRAINT membership tests.",
+      "new": "Use POPULATION_TESTS when the input is an operand of one or more EXPLICIT_USER_CONSTRAINT membership tests. Use POPULATION_OVERRIDE only for a population_override input.",
+      "expected_count": 1
+    }
+  ],
+  "schema_patches": [
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "add",
+      "path": "/properties/outcome/oneOf/0/properties/question_inputs/items/oneOf/-",
+      "value": {
+        "additionalProperties": false,
+        "properties": {
+          "field_label_text": {"minLength": 1, "type": "string"},
+          "input_ref": {"minLength": 1, "type": "string"},
+          "inventory_check": {"additionalProperties": false, "properties": {"why_this_is_an_input": {"minLength": 1, "type": "string"}}, "required": ["why_this_is_an_input"], "type": "object"},
+          "kind": {"enum": ["literal_text"]},
+          "occurrence": {"minimum": 1, "type": "integer"},
+          "operand_text": {"minLength": 1, "type": "string"},
+          "role": {"enum": ["population_override"]},
+          "source": {"enum": ["question_context"]},
+          "value_meaning_hint": {"minLength": 1, "type": "string"},
+          "value_source_text": {"minLength": 1, "type": "string"}
+        },
+        "required": ["input_ref", "source", "value_source_text", "operand_text", "role", "inventory_check", "kind"],
+        "type": "object"
+      }
+    },
+    {
+      "tool_name": "submit_question_contract_outcome",
+      "op": "add",
+      "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/question_input_uses/items/oneOf/-",
+      "value": {
+        "additionalProperties": false,
+        "properties": {
+          "input_ref": {"minLength": 1, "type": "string"},
+          "owner_kind": {"enum": ["POPULATION_OVERRIDE"]}
+        },
+        "required": ["input_ref", "owner_kind"],
+        "type": "object"
+      }
+    }
+  ]
+}

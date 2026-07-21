@@ -1,0 +1,9 @@
+id: order_take_preserves_large_exact_integer
+kind: algorithm
+algorithm: answer_program.order_take
+description: Order-take instantiation preserves an exact integer beyond binary floating-point precision.
+input:
+  value: "9007199254740993"
+expect:
+  result_contains:
+    limit: 9007199254740993

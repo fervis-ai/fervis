@@ -1,5 +1,5 @@
-id: named_value_compiles_to_row_filter
-description: A named value with a row-filter sink compiles to a bound relation field filter.
+id: named_value_compiles_to_applied_filter
+description: A named value constraint compiles through the canonical applied-filter path.
 migrates:
   - api/tests/fervis/lookup/fact_planning/test_values.py::test_named_value_compiles_to_row_filter_when_sink_selects_field
 kind: algorithm
@@ -18,8 +18,8 @@ input:
       source:
         kind: api_read
         read_id: records
-        row_filters:
-          - field_id: data_group_label
+        applied_filters:
+          - field_ids: [data_group_label]
             operator: equals
             value_id: alpha
       fields:
@@ -32,8 +32,10 @@ input:
 expect:
   result_contains:
     endpoint_args: []
-    row_filters:
-      - relation_id: records_rows
+    filters:
+      - input_relation: records_rows__source
+        output_relation: records_rows
         field_id: data_group_label
         operator: equals
-        value: Alpha
+        value_ref: parameter:value.alpha
+        proof_refs: []

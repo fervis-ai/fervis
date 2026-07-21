@@ -25,10 +25,11 @@ from fervis.lookup.fact_planning.metric_options import (
     scalar_aggregate_choices_for_source,
     scalar_aggregate_choices_prompt,
 )
-from fervis.lookup.fact_planning.grouped_ranked_choices import (
-    GROUPED_RANKED_PLAN_SHAPES,
-    grouped_ranked_choices_by_requested_fact_id,
-    grouped_ranked_choices_prompt,
+from fervis.lookup.fact_planning.grouped_aggregate_choices import (
+    GROUPED_AGGREGATE_PLAN_SHAPES,
+    group_key_source_field_candidates,
+    grouped_aggregate_choices_by_requested_fact_id,
+    grouped_aggregate_choices_prompt,
 )
 from fervis.lookup.fact_planning.prompt_sections import (
     fact_plan_instruction_sections,
@@ -48,7 +49,9 @@ from fervis.lookup.turn_prompts import (
     TurnPromptBuilder,
 )
 from fervis.lookup.question_contract import (
+    GroupKeySourceKind,
     QuestionContract,
+    RequestedFact,
     requested_fact_evidence_ref,
 )
 from fervis.lookup.plan_selection import BoundPlanSelectionSet
@@ -59,6 +62,10 @@ from fervis.lookup.source_binding import (
 )
 from fervis.lookup.fact_planning.schema import (
     build_fact_plan_schema,
+)
+from fervis.lookup.fact_planning.scalar_values import (
+    SourceDerivedScalarValue,
+    source_derived_scalar_values_by_fact,
 )
 from fervis.model_io.structured_output.specs import required_tool_spec
 
@@ -100,12 +107,18 @@ class PatternFactPlanTurnPrompt(TurnPromptBase):
     ) -> None:
         self.request = request
         self.plan_selection = plan_selection
-        self._grouped_ranked_choices = _grouped_ranked_choices_by_requested_fact_id(
-            request,
-            plan_selection=plan_selection,
+        self._grouped_aggregate_choices = (
+            _grouped_aggregate_choices_by_requested_fact_id(
+                request,
+                plan_selection=plan_selection,
+            )
         )
         self._scalar_aggregate_choices = _scalar_aggregate_choices_by_requested_fact_id(
             request,
+            plan_selection=plan_selection,
+        )
+        self._source_derived_scalar_values = source_derived_scalar_values_by_fact(
+            bound_sources=request.bound_sources,
             plan_selection=plan_selection,
         )
 
@@ -124,9 +137,9 @@ class PatternFactPlanTurnPrompt(TurnPromptBase):
             ),
             builder.json_section(
                 "Operation input values:",
-                operation_input_values_payload(
-                    available_values=self.request.available_values,
-                    available_value_uses=self.request.available_value_uses,
+                _operation_input_values_payload(
+                    self.request,
+                    source_values_by_fact=self._source_derived_scalar_values,
                 ),
             ),
             builder.json_section(
@@ -136,14 +149,14 @@ class PatternFactPlanTurnPrompt(TurnPromptBase):
                 ),
             ),
         ]
-        grouped_ranked_prompt = grouped_ranked_choices_prompt(
-            self._grouped_ranked_choices
+        grouped_aggregate_prompt = grouped_aggregate_choices_prompt(
+            self._grouped_aggregate_choices
         )
-        if grouped_ranked_prompt:
+        if grouped_aggregate_prompt:
             sections.append(
                 builder.text_section(
-                    "Grouped/ranked operation choices:",
-                    grouped_ranked_prompt,
+                    "Grouped aggregate operation choices:",
+                    grouped_aggregate_prompt,
                 )
             )
         scalar_aggregate_prompt = scalar_aggregate_choices_prompt(
@@ -224,11 +237,30 @@ class PatternFactPlanTurnPrompt(TurnPromptBase):
             source_binding_ids_by_requirement_by_requested_fact_id=(
                 self.plan_selection.source_binding_ids_by_requirement_by_requested_fact_id()
             ),
-            grouped_ranked_choices_by_requested_fact_id=(self._grouped_ranked_choices),
+            grouped_aggregate_choices_by_requested_fact_id=(
+                self._grouped_aggregate_choices
+            ),
             scalar_aggregate_choices_by_requested_fact_id=(
                 self._scalar_aggregate_choices
             ),
-            rank_limit_value_ids=_rank_limit_value_ids(self.request.available_values),
+            ordering_required_by_requested_fact_id={
+                fact.id: bool(
+                    fact.answer_expression
+                    and fact.answer_expression.ordering_direction is not None
+                )
+                for fact in self.request.question_contract.requested_facts
+            },
+            value_ids_by_requested_fact_id=_value_ids_by_requested_fact_id(
+                self.request,
+                source_values_by_fact=self._source_derived_scalar_values,
+            ),
+        )
+
+    def source_derived_scalar_values(self) -> tuple[SourceDerivedScalarValue, ...]:
+        return tuple(
+            value
+            for values in self._source_derived_scalar_values.values()
+            for value in values
         )
 
 
@@ -355,7 +387,7 @@ def _required_fulfillment_evidence_items(
         if allowed_source_ids is not None and source.id not in allowed_source_ids:
             continue
         plan_shape = (shape_by_fact or {}).get(fulfillment.requested_fact_id, "")
-        if plan_shape in GROUPED_RANKED_PLAN_SHAPES:
+        if plan_shape in GROUPED_AGGREGATE_PLAN_SHAPES:
             continue
         if _plan_shape_uses_count_metric_for_source(
             source,
@@ -399,12 +431,12 @@ def _required_fulfillment_evidence_items(
     return tuple(output)
 
 
-def _grouped_ranked_choices_by_requested_fact_id(
+def _grouped_aggregate_choices_by_requested_fact_id(
     request: FactPlanRequest,
     *,
     plan_selection: BoundPlanSelectionSet,
 ) -> dict[str, Any]:
-    return grouped_ranked_choices_by_requested_fact_id(
+    choices = grouped_aggregate_choices_by_requested_fact_id(
         request.bound_sources,
         selected_plan_shapes_by_requested_fact_id=(
             plan_selection.plan_shapes_by_requested_fact_id()
@@ -414,6 +446,54 @@ def _grouped_ranked_choices_by_requested_fact_id(
             for plan in plan_selection.plan_selections
         },
     )
+    facts_by_id = {fact.id: fact for fact in request.question_contract.requested_facts}
+    sources_by_id = {source.id: source for source in request.bound_sources}
+    output: dict[str, tuple[dict[str, Any], ...]] = {}
+    for requested_fact_id, fact_choices in choices.items():
+        projected = tuple(
+            candidate
+            for choice in fact_choices
+            if (
+                candidate := _with_group_key_source_fields(
+                    choice,
+                    requested_fact=facts_by_id.get(requested_fact_id),
+                    sources_by_id=sources_by_id,
+                )
+            )
+            is not None
+        )
+        if projected:
+            output[requested_fact_id] = projected
+    return output
+
+
+def _with_group_key_source_fields(
+    choice: dict[str, Any],
+    *,
+    requested_fact: RequestedFact | None,
+    sources_by_id: dict[str, BoundSource],
+) -> dict[str, Any] | None:
+    if requested_fact is None or requested_fact.answer_expression is None:
+        return choice
+    group_key = requested_fact.answer_expression.group_key
+    if (
+        group_key is None
+        or group_key.source_kind is not GroupKeySourceKind.TEMPORAL_BUCKET
+    ):
+        return choice
+    source = sources_by_id.get(str(choice.get("source_binding_id") or ""))
+    if source is None:
+        return choice
+    grain_value_id = group_key.temporal_grain_value_id(
+        requested_fact_id=requested_fact.id,
+    )
+    if source.source is not None and any(
+        binding.value_id == grain_value_id
+        for binding in source.source.param_bindings
+    ):
+        return choice
+    fields = group_key_source_field_candidates(choice)
+    return {**choice, "group_key_source_fields": fields} if fields else None
 
 
 def _plan_shape_uses_count_metric_for_source(
@@ -425,7 +505,6 @@ def _plan_shape_uses_count_metric_for_source(
     if plan_shape not in {
         "aggregate_scalar",
         "aggregate_by_group",
-        "ranked_aggregate",
     }:
         return False
     choice = scalar_aggregate_choices_for_source(
@@ -517,7 +596,6 @@ _MANY_ROW_PLAN_SHAPES = frozenset(
         "grouped_rows",
         "aggregate_scalar",
         "aggregate_by_group",
-        "ranked_aggregate",
     }
 )
 
@@ -647,4 +725,44 @@ def _schema_clarification_inputs(
     return {
         "required_catalog_input_ids": tuple(required_input_ids),
         "required_catalog_choice_input_ids": tuple(choice_input_ids),
+    }
+
+
+def _value_ids_by_requested_fact_id(
+    request: FactPlanRequest,
+    *,
+    source_values_by_fact: dict[str, tuple[SourceDerivedScalarValue, ...]],
+) -> dict[str, tuple[str, ...]]:
+    return {
+        fact.id: (
+            *tuple(
+                value.id
+                for value in request.available_values
+                if not value.applies_to_requested_fact_ids
+                or fact.id in value.applies_to_requested_fact_ids
+            ),
+            *(value.value_id for value in source_values_by_fact.get(fact.id, ())),
+        )
+        for fact in request.question_contract.requested_facts
+    }
+
+
+def _operation_input_values_payload(
+    request: FactPlanRequest,
+    *,
+    source_values_by_fact: dict[str, tuple[SourceDerivedScalarValue, ...]],
+) -> dict[str, Any]:
+    literal_values = operation_input_values_payload(
+        available_values=request.available_values,
+        available_value_uses=request.available_value_uses,
+    )
+    return {
+        "values": [
+            *(literal_values.get("values") or ()),
+            *(
+                value.payload
+                for values in source_values_by_fact.values()
+                for value in values
+            ),
+        ]
     }

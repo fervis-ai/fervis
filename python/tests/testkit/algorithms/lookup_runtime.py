@@ -82,7 +82,7 @@ from tests.testkit.assertions import subset_mismatches
 from tests.testkit.catalog import catalog_from_payload
 from tests.testkit.answer_program_contracts import binding_set_from_payload
 from tests.testkit.question_contract_provider import (
-    provider_membership_tests,
+    provider_answer_population,
     provider_question_input_ownership,
 )
 
@@ -732,13 +732,20 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
         for item in question_inputs
         if item.get("role") == LiteralInputRole.RESULT_LIMIT.value
     )
+    compute_refs = tuple(
+        str(item["input_ref"])
+        for item in question_inputs
+        if item.get("role") == LiteralInputRole.FORMULA_VALUE.value
+    )
     population_refs = tuple(
         str(item["input_ref"])
         for item in question_inputs
-        if str(item["input_ref"]) not in {*group_refs, *result_limit_refs}
+        if str(item["input_ref"])
+        not in {*group_refs, *compute_refs, *result_limit_refs}
     )
     ownership = provider_question_input_ownership(
         group_key_input_refs=group_refs,
+        compute_input_refs=compute_refs,
         population_input_refs_by_test_id=(
             {
                 f"input_constraint_{index}": (input_ref,)
@@ -748,14 +755,13 @@ def _scripted_question_contract_payload(payload: dict[str, Any]) -> dict[str, An
         result_limit_input_ref=result_limit_refs[0] if result_limit_refs else "",
     )
     population = default_answer_population(
-        description=fact_description,
         subject_text=subject_text,
         instance_interpretation=RequestedFactAnswerSubject(
             subject_text=subject_text
         ).instance_interpretation,
     ).to_question_contract_dict()
-    population["membership_tests"] = provider_membership_tests(
-        population["membership_tests"],
+    population = provider_answer_population(
+        population,
         ownership=ownership,
     )
     return {
@@ -796,6 +802,12 @@ def _scripted_answer_expression(payload: dict[str, Any]) -> dict[str, Any]:
     output = {"family": family}
     if isinstance(payload.get("group_key"), dict):
         output["group_key"] = dict(payload["group_key"])
+    if family in {"list_rows", "grouped_aggregate"}:
+        output["selection"] = dict(
+            payload.get("selection") or {"kind": "all_results"}
+        )
+        if isinstance(payload.get("ordering"), dict):
+            output["ordering"] = dict(payload["ordering"])
     return output
 
 
@@ -1532,14 +1544,13 @@ def _question_contract_decisions_payload() -> dict[str, Any]:
         }
     )
     population = default_answer_population(
-        description=fact.description,
         subject_text="products",
         instance_interpretation=RequestedFactAnswerSubject(
             subject_text="products"
         ).instance_interpretation,
     ).to_question_contract_dict()
-    population["membership_tests"] = provider_membership_tests(
-        population["membership_tests"],
+    population = provider_answer_population(
+        population,
         ownership=ownership,
     )
     return {
@@ -1573,7 +1584,10 @@ def _question_contract_decisions_payload() -> dict[str, Any]:
         "answer_requests": [
             {
                 "answer_fact": fact.description,
-                "answer_expression": {"family": "list_rows"},
+                "answer_expression": {
+                    "family": "list_rows",
+                    "selection": {"kind": "all_results"},
+                },
                 "question_input_uses": list(ownership.question_input_uses),
                 "answer_subject": _answer_subject_payload("products"),
                 "answer_population": population,

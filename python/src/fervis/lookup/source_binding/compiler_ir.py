@@ -13,10 +13,8 @@ from fervis.lookup.answer_program.relations import (
     RelationSourceReviewScopeDecision,
     SourceKind,
 )
-from fervis.lookup.answer_program.values import (
-    ParameterRef,
-    ValueExpression,
-)
+from fervis.lookup.answer_program.expressions import ConstantRef, Expression, ParameterRef
+from fervis.lookup.answer_program.values import FactValue, LiteralType
 
 
 _SourceAppliedFilterPayloadValue: TypeAlias = str | list[str]
@@ -32,7 +30,7 @@ class RelationInputOrigin(StrEnum):
 class DraftEndpointParamBinding:
     param_id: str
     value: object | None = None
-    value_expr: ValueExpression | None = None
+    value_expr: Expression | None = None
     origin_kind: RelationInputOrigin = RelationInputOrigin.CONTEXT_CONSTANT
     value_id: str = ""
     value_component: str = "value"
@@ -64,7 +62,7 @@ class DraftRelationSourceAppliedFilter:
     predicate_field_ids: tuple[str, ...]
     known_input_id: str
     value_id: str = ""
-    value_expr: ValueExpression | None = None
+    value_expr: Expression | None = None
     value_kind: str = ""
     value_component: str = "value"
     operator: str = "equals"
@@ -94,6 +92,8 @@ class SourceAppliedFilter:
     resolved_end: str = ""
     literal_type: str = ""
     operator: str = "equals"
+    application_value: str = ""
+    application_values: tuple[str, ...] = ()
     proof_refs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -103,10 +103,43 @@ class SourceAppliedFilter:
     def relation_filter(self) -> DraftRelationSourceAppliedFilter | None:
         if not self.predicate_field_ids:
             return None
+        if self.application_value and self.application_values:
+            raise ValueError("source applied filter has competing application values")
+        value_expr = (
+            ConstantRef(
+                constant_id=f"source_filter.{self.value_id}.application_value",
+                version_ref="source-binding@1",
+                value=FactValue.literal(
+                    id=f"{self.value_id}.application_value",
+                    known_input_id=self.known_input_id,
+                    literal_type=LiteralType.STRING,
+                    value=self.application_value,
+                    label=self.display_value,
+                    proof_refs=self.proof_refs,
+                ),
+            )
+            if self.application_value
+            else (
+                ConstantRef(
+                    constant_id=f"source_filter.{self.value_id}.application_values",
+                    version_ref="source-binding@1",
+                    value=FactValue.string_set(
+                        id=f"{self.value_id}.application_values",
+                        known_input_id=self.known_input_id,
+                        values=self.application_values,
+                        label=self.display_value,
+                        proof_refs=self.proof_refs,
+                    ),
+                )
+                if self.application_values
+                else None
+            )
+        )
         return DraftRelationSourceAppliedFilter(
             predicate_field_ids=self.predicate_field_ids,
-            known_input_id=self.known_input_id,
+            known_input_id="" if value_expr is not None else self.known_input_id,
             value_id=self.value_id,
+            value_expr=value_expr,
             value_kind=self.value_kind,
             value_component=self.value_component,
             operator=self.operator,
@@ -127,6 +160,10 @@ class SourceAppliedFilter:
             payload["value_component"] = self.value_component
         if self.operator != "equals":
             payload["operator"] = self.operator
+        if self.application_value:
+            payload["application_value"] = self.application_value
+        if self.application_values:
+            payload["application_values"] = list(self.application_values)
         for key, value in (
             ("display_value", self.display_value),
             ("matched_field_ref", self.matched_field_ref),
@@ -138,26 +175,6 @@ class SourceAppliedFilter:
             if value:
                 payload[key] = value
         return payload
-
-
-@dataclass(frozen=True)
-class DraftRelationSourceRowFilter:
-    field_id: str
-    operator: str
-    values: tuple[object, ...] = ()
-    value_expr: ValueExpression | None = None
-    parameter_id: str = ""
-    proof_refs: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        if not self.field_id:
-            raise ValueError("relation source row filter requires field")
-        if not self.operator:
-            raise ValueError("relation source row filter requires operator")
-        if bool(self.values) == (self.value_expr is not None):
-            raise ValueError(
-                "relation source row filter requires values or one expression"
-            )
 
 
 @dataclass(frozen=True)
@@ -208,7 +225,6 @@ class DraftRelationSource:
     memory_relation_id: str = ""
     param_bindings: tuple[DraftEndpointParamBinding, ...] = ()
     applied_filters: tuple[DraftRelationSourceAppliedFilter, ...] = ()
-    row_filters: tuple[DraftRelationSourceRowFilter, ...] = ()
     population_choices: tuple[DraftRelationSourcePopulationChoice, ...] = ()
     population_binding: RelationSourcePopulationBinding | None = None
     population_coverage_claims: tuple[PopulationCoverageClaim, ...] = ()

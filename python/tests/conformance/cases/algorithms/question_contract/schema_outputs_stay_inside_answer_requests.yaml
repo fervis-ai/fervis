@@ -8,28 +8,19 @@ input: {}
 expect:
   result_contains:
     answer_expression_schema_kind: oneOf
-    answer_expression_one_of_branch_count: 2
+    answer_expression_one_of_branch_count: 9
     grouped_answer_expression_branch:
-      required: [family, group_key]
-      properties: [family, group_key]
+      required: [family, selection, group_key]
+      properties: [family, group_key, selection]
       family_enum: [grouped_aggregate]
       allows_group_key: true
       additional_properties: false
       group_key_schema_kind: oneOf
-      group_key_branch_count: 2
+      group_key_branch_count: 3
     ordinary_answer_expression_branch:
-      required: [family]
-      properties: [family]
-      family_enum:
-        - list_rows
-        - ranked_selection
-        - scalar_value
-        - scalar_aggregate
-        - computed_scalar
-        - set_difference
-        - coverage_check
-        - existence_check
-        - comparison_check
+      required: [family, selection]
+      properties: [family, selection]
+      family_enum: [list_rows]
       allows_group_key: false
       additional_properties: false
     answer_output_schema_kind: object
@@ -45,6 +36,6 @@ expect:
       additional_properties: false
   result_exact_fields:
     answer_expression_schema_kind: oneOf
-    answer_expression_one_of_branch_count: 2
+    answer_expression_one_of_branch_count: 9
     answer_output_schema_kind: object
     answer_output_one_of_branch_count: 0

@@ -1,0 +1,101 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Use question_text, field_label_text, and value_meaning_hint as catalog-blind semantic evidence. Write resource_type_basis first, stating which resource the input identifies. Then set resource_type_x to exactly one shown_resource_type. Use NO_SHOWN_RESOURCE_TYPE only when none represents that resource.",
+      "new": "Use question_text, field_label_text, and value_meaning_hint as catalog-blind semantic evidence. Write resource_type_basis first, stating what kind of resource instance lookup_text may identify. Then write resource_type_compatibility for every shown_resource_type. Use SAME_RESOURCE_TYPE for each shown type whose returned instance can itself be what lookup_text denotes; otherwise use DIFFERENT_RESOURCE_TYPE.",
+      "expected_count": 1
+    },
+    {
+      "old": "Keep resource_type_x fixed across every option. Copy each option's shown resource_type first. SAME_RESOURCE_TYPE means it exactly equals resource_type_x; otherwise use DIFFERENT_RESOURCE_TYPE.",
+      "new": "Copy each option's shown resource_type first, then copy that type's input-wide resource_type_compatibility value into resource_type_match.",
+      "expected_count": 1
+    },
+    {
+      "old": "SAME_RESOURCE_TYPE means an instance returned by the resolver is itself an instance of resource_type_x. A resource that references, contains information about, records activity for, or otherwise relates to resource_type_x is DIFFERENT_RESOURCE_TYPE.",
+      "new": "SAME_RESOURCE_TYPE means an instance returned by the resolver could itself be what lookup_text denotes in the question. Assess each shown type independently; several may be SAME_RESOURCE_TYPE. A resource that merely references, contains information about, records activity for, or otherwise relates to that referent is DIFFERENT_RESOURCE_TYPE.",
+      "expected_count": 1
+    },
+    {
+      "old": "Before option_reviews, write identifier_kind_basis and then identifier_kind once for the known input. Use PRIMARY_KEY when lookup_text is intended as the complete primary-key value of resource_type_x. Use DESCRIPTIVE when lookup_text is a non-primary-key value used to refer to resource_type_x.",
+      "new": "Before option_reviews, write identifier_kind_basis and then identifier_kind once for the known input. Use PRIMARY_KEY when lookup_text is intended as the complete primary-key value of a SAME_RESOURCE_TYPE. Use DESCRIPTIVE when lookup_text is a non-primary-key value used to refer to a SAME_RESOURCE_TYPE.",
+      "expected_count": 1
+    },
+    {
+      "old": "return the resource type described by the input-wide resource_type_x?",
+      "new": "return a resource type marked SAME_RESOURCE_TYPE in the input-wide resource_type_compatibility?",
+      "expected_count": 4
+    },
+    {
+      "old": "Within each known-input review, write fields in this order: resource_type_basis, resource_type_x, identifier_kind_basis, identifier_kind, option_reviews.",
+      "new": "Within each known-input review, write fields in this order: resource_type_basis, resource_type_compatibility, identifier_kind_basis, identifier_kind, option_reviews.",
+      "expected_count": 1
+    },
+    {
+      "old": "For CAN_RESOLVE_LOOKUP_TEXT, write because as: \"{resource_type} represents {resource_type_x}. With identifier_kind={identifier_kind}, this route can resolve {lookup_text} because {route evidence}.\"",
+      "new": "For CAN_RESOLVE_LOOKUP_TEXT, write because as: \"{resource_type} is SAME_RESOURCE_TYPE. With identifier_kind={identifier_kind}, this route can resolve {lookup_text} because {route evidence}.\"",
+      "expected_count": 1
+    },
+    {
+      "old": "For CANNOT_RESOLVE_LOOKUP_TEXT, write because as either: \"{resource_type} does not represent {resource_type_x}.\" or \"{resource_type} represents {resource_type_x}, but with identifier_kind={identifier_kind}, this route cannot resolve {lookup_text} because {route evidence}.\"",
+      "new": "For CANNOT_RESOLVE_LOOKUP_TEXT, write because as either: \"{resource_type} is DIFFERENT_RESOURCE_TYPE.\" or \"{resource_type} is SAME_RESOURCE_TYPE, but with identifier_kind={identifier_kind}, this route cannot resolve {lookup_text} because {route evidence}.\"",
+      "expected_count": 1
+    },
+    {
+      "old": "lookup_request_params answers: Which shown request parameter or parameters exactly match lookup_text's identifier meaning for resource_type_x?",
+      "new": "lookup_request_params answers: Which shown request parameter or parameters exactly match lookup_text's identifier meaning for this SAME_RESOURCE_TYPE?",
+      "expected_count": 1
+    }
+  ],
+  "schema_patches": [
+    {
+      "tool_name": "submit_grounding",
+      "op": "remove",
+      "path": "/properties/known_input_binding_reviews/properties/q1_input_1/properties/resource_type_x"
+    },
+    {
+      "tool_name": "submit_grounding",
+      "op": "add",
+      "path": "/properties/known_input_binding_reviews/properties/q1_input_1/properties/resource_type_compatibility",
+      "value": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "area": {"type": "string", "enum": ["SAME_RESOURCE_TYPE", "DIFFERENT_RESOURCE_TYPE"]},
+          "location": {"type": "string", "enum": ["SAME_RESOURCE_TYPE", "DIFFERENT_RESOURCE_TYPE"]},
+          "store": {"type": "string", "enum": ["SAME_RESOURCE_TYPE", "DIFFERENT_RESOURCE_TYPE"]}
+        },
+        "required": ["area", "location", "store"]
+      }
+    },
+    {
+      "tool_name": "submit_grounding",
+      "op": "replace",
+      "path": "/properties/known_input_binding_reviews/properties/q1_input_1/required",
+      "value": ["resource_type_basis", "resource_type_compatibility", "identifier_kind_basis", "identifier_kind", "option_reviews"]
+    },
+    {
+      "tool_name": "submit_grounding",
+      "op": "replace",
+      "path": "/properties/known_input_binding_reviews/properties/q1_input_1/properties/option_reviews/properties/bind_q1_input_1_rs_7de03e00183c6709_area_primary_key/properties/resolver_fit_question/enum",
+      "value": ["Does read list_area_list, which returns resource_type area, return a resource type marked SAME_RESOURCE_TYPE in the input-wide resource_type_compatibility? If not, it cannot resolve Nairobi. If it does, can this route resolve Nairobi under the input-wide identifier_kind?"]
+    },
+    {
+      "tool_name": "submit_grounding",
+      "op": "replace",
+      "path": "/properties/known_input_binding_reviews/properties/q1_input_1/properties/option_reviews/properties/bind_q1_input_1_rs_7d752a2759a3cfdc_location_primary_key/properties/resolver_fit_question/enum",
+      "value": ["Does read list_location_list, which returns resource_type location, return a resource type marked SAME_RESOURCE_TYPE in the input-wide resource_type_compatibility? If not, it cannot resolve Nairobi. If it does, can this route resolve Nairobi under the input-wide identifier_kind?"]
+    },
+    {
+      "tool_name": "submit_grounding",
+      "op": "replace",
+      "path": "/properties/known_input_binding_reviews/properties/q1_input_1/properties/option_reviews/properties/bind_q1_input_1_rs_3383b7033a2e3bc8_store_primary_key/properties/resolver_fit_question/enum",
+      "value": ["Does read list_store_list, which returns resource_type store, return a resource type marked SAME_RESOURCE_TYPE in the input-wide resource_type_compatibility? If not, it cannot resolve Nairobi. If it does, can this route resolve Nairobi under the input-wide identifier_kind?"]
+    },
+    {
+      "tool_name": "submit_grounding",
+      "op": "replace",
+      "path": "/properties/known_input_binding_reviews/properties/q1_input_1/properties/option_reviews/properties/bind_q1_input_1_rs_039b3b47e1731eb9_area_primary_key/properties/resolver_fit_question/enum",
+      "value": ["Does read get_area_detail, which returns resource_type area, return a resource type marked SAME_RESOURCE_TYPE in the input-wide resource_type_compatibility? If not, it cannot resolve Nairobi. If it does, can this route resolve Nairobi under the input-wide identifier_kind?"]
+    }
+  ]
+}

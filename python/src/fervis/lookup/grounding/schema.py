@@ -7,7 +7,6 @@ from fervis.lookup.grounding.model import (
     GroundingRequest,
     IdentifierKind,
     LookupTextResolutionDecision,
-    NO_SHOWN_RESOURCE_TYPE,
     ResourceTypeMatch,
     resolver_fit_question_for_option,
 )
@@ -16,7 +15,7 @@ from fervis.lookup.grounding.surface import (
     resolver_option_surface,
 )
 from fervis.lookup.grounding.time_intents import TIME_INTENT_FIELDS
-from fervis.lookup.fact_plan.row_sources import RowSourceParam
+from fervis.lookup.fact_plan.row_sources import RowSourceField, RowSourceParam
 
 
 def build_grounding_schema(request: GroundingRequest) -> dict[str, object]:
@@ -37,12 +36,17 @@ def build_grounding_schema(request: GroundingRequest) -> dict[str, object]:
             provider_output.KnownInputBindingReviewOutput.schema(
                 {
                     "resource_type_basis": {"type": "string", "minLength": 1},
-                    "resource_type_x": {
-                        "type": "string",
-                        "enum": [
-                            *task.shown_resource_types,
-                            NO_SHOWN_RESOURCE_TYPE,
-                        ],
+                    "resource_type_compatibility": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            resource_type: {
+                                "type": "string",
+                                "enum": [match.value for match in ResourceTypeMatch],
+                            }
+                            for resource_type in task.shown_resource_types
+                        },
+                        "required": list(task.shown_resource_types),
                     },
                     "identifier_kind_basis": {
                         "type": "string",
@@ -107,10 +111,6 @@ def _option_review_schema(
             "type": "string",
             "enum": [surface.option.candidate.entity_kind],
         },
-        "resource_type_match": {
-            "type": "string",
-            "enum": [match.value for match in ResourceTypeMatch],
-        },
         "resolver_fit_question": {
             "type": "string",
             "enum": [resolver_fit_question],
@@ -120,8 +120,11 @@ def _option_review_schema(
     compatible_parameters = surface.compatible_request_parameters(
         lookup_text=lookup_text
     )
+    compatible_response_fields = surface.compatible_response_match_fields(
+        lookup_text=lookup_text
+    )
     positive_allowed = (
-        bool(surface.response_match_fields)
+        bool(compatible_response_fields)
         and bool(compatible_parameters)
         and surface.required_request_parameters_accept(
             lookup_text=lookup_text
@@ -136,6 +139,7 @@ def _option_review_schema(
                     surface,
                     lookup_text=lookup_text,
                     parameters=compatible_parameters,
+                    response_fields=compatible_response_fields,
                 ),
             ]
         }
@@ -150,6 +154,7 @@ def _positive_resolution_schema(
     *,
     lookup_text: str,
     parameters: tuple[RowSourceParam, ...],
+    response_fields: tuple[RowSourceField, ...],
 ) -> dict[str, object]:
     parameter_schemas = [
         provider_output.LookupRequestParamOutput.schema(
@@ -193,12 +198,10 @@ def _positive_resolution_schema(
                 "type": "array",
                 "items": {
                     "type": "string",
-                    "enum": [
-                        field.path for field in surface.response_match_fields
-                    ],
+                    "enum": [field.path for field in response_fields],
                 },
                 "minItems": 1,
-                "maxItems": len(surface.response_match_fields),
+                "maxItems": len(response_fields),
                 "uniqueItems": True,
             },
         }

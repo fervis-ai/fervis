@@ -1,0 +1,36 @@
+{
+  "prompt_replacements": [
+    {
+      "old": "Use value_source.kind=source_value when an existing source value is the group key.\nUse value_source.kind=temporal_bucket with grain when timestamps are divided into calendar buckets.\nUse value_source.kind=specified_question_inputs when concrete supplied inputs are the group members.",
+      "new": "Use value_source.kind=source_value when the group key comes from qualifying source rows, including rows restricted by supplied predicate values.\nUse value_source.kind=temporal_bucket with grain when timestamps are divided into calendar buckets.",
+      "expected_count": 1
+    },
+    {
+      "old": "Each question_input must have one primary contract role: population predicate operand, specified group member, time constraint, computation operand, or result limit.",
+      "new": "Each question_input must have one primary contract role: population predicate operand, time constraint, computation operand, or result limit.",
+      "expected_count": 1
+    },
+    {
+      "old": "Create question_inputs for concrete values supplied by the question or conversation resolution that a population predicate, specified group-member set, time constraint, compute expression, or result limit consumes.",
+      "new": "Create question_inputs for concrete values supplied by the question or conversation resolution that a population predicate, time constraint, compute expression, or result limit consumes.",
+      "expected_count": 1
+    },
+    {
+      "old": "Use GROUP_KEY exactly for concrete members of a specified_question_inputs group key; source_value and temporal_bucket group keys have no GROUP_KEY inputs.\nA specified_question_inputs group key restricts the result-key domain to its GROUP_KEY inputs and groups by them; do not also create population predicates for those inputs.\nUse POPULATION_TESTS when the input is an operand of one or more EXPLICIT_USER_CONSTRAINT membership tests.",
+      "new": "source_value and temporal_bucket group keys have no question-input owner.\nUse POPULATION_TESTS when the input is an operand of one or more EXPLICIT_USER_CONSTRAINT membership tests.",
+      "expected_count": 1
+    },
+    {
+      "old": "GROUP_KEY, COMPUTE_EXPRESSION, and RESULT_LIMIT inputs are never membership-test operands.",
+      "new": "COMPUTE_EXPRESSION and RESULT_LIMIT inputs are never membership-test operands.",
+      "expected_count": 1
+    }
+  ],
+  "schema_patches": [
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/question_input_uses/items/oneOf/0"},
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_expression/oneOf/4/properties/group_key/oneOf/2"},
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_expression/oneOf/5/properties/group_key/oneOf/2"},
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_expression/oneOf/6/properties/group_key/oneOf/2"},
+    {"tool_name": "submit_question_contract_outcome", "op": "remove", "path": "/properties/outcome/oneOf/0/properties/answer_requests/items/properties/answer_expression/oneOf/7/properties/group_key/oneOf/2"}
+  ]
+}

@@ -9,7 +9,7 @@ from tests.lookup.orchestrator._helpers import *  # noqa: F403
 from tests.lookup.prompt_sections import prompt_section_payload
 
 
-def test_lookup_cutover_executes_rank_limit_value_use_as_proof_link():
+def test_lookup_cutover_executes_take_limit_value_use_as_proof_link():
     known_inputs = (
         _known_result_limit_input(
             "result_limit",
@@ -24,7 +24,7 @@ def test_lookup_cutover_executes_rank_limit_value_use_as_proof_link():
                 description="top metric totals",
                 answer_subject=RequestedFactAnswerSubject(subject_text="metric totals"),
                 answer_expression=_requested_fact_answer_expression(
-                    RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
+                    RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
                     known_inputs=known_inputs,
                 ),
                 answer_outputs=(
@@ -41,18 +41,13 @@ def test_lookup_cutover_executes_rank_limit_value_use_as_proof_link():
                 "answers": [
                     {
                         "requested_fact_id": "fact_1",
-                        "pattern": "ranked_aggregate",
+                        "pattern": "aggregate_by_group",
                         "aggregate_choice": {
                             "group_field_ids": ("location_id",),
                             "metric_field_id": "metric_total",
                             "metric_function": "sum",
                         },
                         "source_hint": {"kind": "read", "read_id": "metric_read"},
-                        "rank": {
-                            "sort": "desc",
-                            "limit": 2,
-                            "limit_value_id": "grounded_fact_1_limit_1",
-                        },
                     }
                 ],
             }
@@ -255,7 +250,7 @@ def test_lookup_cutover_grounded_named_entity_is_stored_as_memory_identity():
                     ],
                 }
             },
-        }
+        },
     )
     result = run_lookup_question(
         LookupRequest(
@@ -428,7 +423,7 @@ def test_lookup_orchestrator_repeated_named_target_does_not_reuse_inactive_memor
                     ],
                 }
             },
-        }
+        },
     )
     data_access = _DataAccessPort(
         {
@@ -603,7 +598,11 @@ def test_lookup_cutover_coalesces_identical_api_reads_for_multiple_row_relations
                     id="project_answer",
                     spec=ProjectSpec(
                         input_relation="summary_rows",
-                        fields=(ProjectField(source="name"),),
+                        outputs=(
+                            NamedExpression(
+                                output_field="name", expression=FieldRef("name")
+                            ),
+                        ),
                     ),
                     output_relation="answer_rows",
                 ),
@@ -752,7 +751,6 @@ def test_lookup_cutover_preserves_scalar_memory_proofs_for_undefined_compute():
                                 "requested_fact_id": "rf_answer",
                                 "answer_output_ids": ["ratio"],
                                 "pattern": "computed_scalar",
-                                "source": {"kind": "values"},
                                 "scalar_inputs": [
                                     {
                                         "input_id": "current",
@@ -896,7 +894,6 @@ def test_lookup_cutover_computes_across_single_cell_prior_answer_relations():
                                 "requested_fact_id": "rf_answer",
                                 "answer_output_ids": ["total"],
                                 "pattern": "computed_scalar",
-                                "source": {"kind": "values"},
                                 "scalar_inputs": [
                                     {
                                         "input_id": "day_1",
@@ -1040,7 +1037,6 @@ def test_lookup_cutover_computes_increase_across_multi_row_prior_answer_relation
                                 "requested_fact_id": "rf_answer",
                                 "answer_output_ids": ["increase"],
                                 "pattern": "computed_scalar",
-                                "source": {"kind": "values"},
                                 "scalar_inputs": [
                                     {
                                         "input_id": "previous",
@@ -1585,28 +1581,28 @@ def test_lookup_cutover_resolves_generated_calendar_dates_from_time_values():
                         }
                     ],
                 }
+            },
+            question_contract=question_contract,
+            source_binding_invocation_overrides=(
+                {
+                    "requested_fact_id": "fact_1",
+                    "resolved_input_applications": (
+                        {
+                            "value_id": "grounded_fact_1_time_1",
+                            "value_component": "start",
+                            "target_kind": "request_parameter",
+                            "target_id": "interval_start",
+                        },
+                        {
+                            "value_id": "grounded_fact_1_time_1",
+                            "value_component": "end",
+                            "target_kind": "request_parameter",
+                            "target_id": "interval_end",
+                        },
+                    ),
                 },
-                question_contract=question_contract,
-                source_binding_invocation_overrides=(
-                    {
-                        "requested_fact_id": "fact_1",
-                        "resolved_input_applications": (
-                            {
-                                "value_id": "grounded_fact_1_time_1",
-                                "value_component": "start",
-                                "target_kind": "request_parameter",
-                                "target_id": "interval_start",
-                            },
-                            {
-                                "value_id": "grounded_fact_1_time_1",
-                                "value_component": "end",
-                                "target_kind": "request_parameter",
-                                "target_id": "interval_end",
-                            },
-                        ),
-                    },
-                ),
             ),
+        ),
     )
 
     result = run_lookup_question(

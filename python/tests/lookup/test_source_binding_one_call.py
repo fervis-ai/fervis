@@ -29,12 +29,15 @@ from fervis.lookup.fact_plan.fact_plan import (
 from fervis.lookup.fact_plan.row_sources import api_row_source_id
 from fervis.lookup.answer_program.values import (
     FactValue,
+    LiteralType,
     TimeComponent,
 )
 from fervis.lookup.canonical_data import entity_key_value
 from fervis.lookup.question_contract import (
     AnswerPopulationMembershipTestKind,
     AnswerPopulationMembershipTestPolarity,
+    GroupKeyDomainKind,
+    GroupKeySourceKind,
     KnownInputSource,
     LiteralInputRole,
     NormalInstanceExcludedStateRole,
@@ -44,6 +47,8 @@ from fervis.lookup.question_contract import (
     RequestedFactAnswerPopulationMembershipTest,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
+    RequestedFactGroupKey,
+    RequestedFactOrderingDirection,
     ResultSelectionKind,
     RequestedFactAnswerOutput,
     RequestedFactAnswerSubject,
@@ -251,7 +256,6 @@ def test_source_candidate_discovery_uses_retained_read_authority(
     fact = replace(
         base_request.requested_facts[0],
         answer_population=RequestedFactAnswerPopulation(
-            population_label="stores in Nairobi",
             counted_unit="stores",
             membership_tests=(
                 RequestedFactAnswerPopulationMembershipTest(
@@ -363,6 +367,53 @@ def test_source_candidate_discovery_uses_retained_read_authority(
     assert [candidate["read_id"] for candidate in _source_options(payload)] == [
         "list_location_list"
     ]
+
+
+def test_formula_literal_is_not_projected_as_plan_selection_source(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    base_request = _request_with_optional_params()
+    formula_input = RequestedFactLiteralInput(
+        id="fraction",
+        source=KnownInputSource.QUESTION_CONTEXT,
+        text="10%",
+        resolved_value_text="10%",
+        role=LiteralInputRole.FORMULA_VALUE,
+    )
+    fact = replace(
+        base_request.requested_facts[0],
+        answer_expression=RequestedFactAnswerExpression(
+            family=RequestedFactAnswerExpressionFamily.COMPUTED_SCALAR,
+        ),
+        known_inputs=(formula_input,),
+        input_refs=("fraction",),
+    )
+    formula_value = FactValue.literal(
+        id="grounded_fraction",
+        known_input_id="fraction",
+        literal_type=LiteralType.NUMBER,
+        value="0.1",
+        applies_to_requested_fact_ids=("fact_1",),
+    )
+    request = replace(
+        base_request,
+        question_contract=QuestionContract(
+            question_inputs=(formula_input,),
+            requested_facts=(fact,),
+        ),
+        requested_facts=(fact,),
+        available_values=(formula_value,),
+        available_value_uses=(),
+    )
+    monkeypatch.setattr(
+        raw_payload_module,
+        "selected_relation_catalog_payload",
+        lambda *args, **kwargs: {"requested_fact_relations": []},
+    )
+
+    payload = raw_payload_module._raw_source_binding_candidate_payload(request)
+
+    assert "value_source_candidates" not in payload
 
 
 def test_source_binding_registry_candidates_use_model_visible_support_sets():
@@ -629,7 +680,7 @@ def test_source_linked_value_usage_checks_metric_evidence():
     assert candidate_value_is_used_by_bound_source(candidate, bound)
 
 
-def test_ranked_aggregate_source_binding_keeps_selected_group_key_lineage():
+def test_grouped_aggregate_source_binding_keeps_selected_group_key_lineage():
     base = _request_with_optional_params(
         include_extra_evidence_field=True,
         include_identity_evidence_field=True,
@@ -639,9 +690,14 @@ def test_ranked_aggregate_source_binding_keeps_selected_group_key_lineage():
     fact = replace(
         base.requested_facts[0],
         answer_expression=RequestedFactAnswerExpression(
-            family=RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
-            selection_kind=ResultSelectionKind.LIMITED_RESULTS,
-            limit_input_ref="limit",
+            family=RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
+            group_key=RequestedFactGroupKey(
+                id="answer_group",
+                description="grouped answer identity",
+                domain=GroupKeyDomainKind.SOURCE_RESULT_VALUES,
+                source_kind=GroupKeySourceKind.SOURCE_VALUE,
+            ),
+            selection_kind=ResultSelectionKind.ALL_RESULTS,
         ),
     )
     request = replace(
@@ -651,7 +707,7 @@ def test_ranked_aggregate_source_binding_keeps_selected_group_key_lineage():
         plan_selection=PlanSelectionSet(
             plan_selections=(
                 replace(
-                    _selected_plan(plan_shape="ranked_aggregate").plan_selections[0],
+                    _selected_plan(plan_shape="aggregate_by_group").plan_selections[0],
                     source_members=(
                         SourceStrategyMember(
                             source_candidate_id="source_1",
@@ -683,7 +739,7 @@ def test_ranked_aggregate_source_binding_keeps_selected_group_key_lineage():
         "fact_1": {
             evidence_id: {
                 "metric_meaning": f"{evidence_id} is a candidate metric.",
-                "fit_basis": f"{evidence_id} fits the ranked answer.",
+                "fit_basis": f"{evidence_id} fits the ordered grouped answer.",
             }
             for evidence_id in metric_evidence_ids
         }
@@ -738,14 +794,15 @@ def test_source_binding_prompt_shows_fact_scoped_resolved_input():
     assert not hasattr(prompt, "grounded_values_payload")
 
 
-def test_ranked_aggregate_source_binding_choices_use_canonical_group_identity():
-    request = _ranked_staff_compensation_request()
+def test_grouped_aggregate_source_binding_choices_use_canonical_group_identity():
+    request = _ordered_staff_compensation_request()
     expected_choice_id = "source_1.data.reference.compensation_staff"
     candidate = source_candidate_registry(request).candidates_by_id["source_1"]
     selected_support_set = next(
         support_set
         for support_set in candidate.fulfillment_support_sets
         if support_set.fulfillment_choice_id == expected_choice_id
+        and support_set.answer_output_id == "answer_1"
     )
     selected_plan = request.plan_selection.plan_selections[0]
     selected_member = replace(
@@ -781,8 +838,8 @@ def test_ranked_aggregate_source_binding_choices_use_canonical_group_identity():
     assert '<choice id="source_1.data.location_name"' not in candidate_prompt
 
 
-def test_ranked_aggregate_source_binding_exposes_declared_entity_evidence():
-    request = _ranked_store_sales_request()
+def test_grouped_aggregate_source_binding_exposes_declared_entity_evidence():
+    request = _ordered_store_sales_request()
     prompt = SourceBindingTurnPrompt(request)
     candidate_payload = prompt.source_invocation_candidate_payload()
     candidate = _source_candidate(
@@ -1541,7 +1598,7 @@ def _request_with_identity_field_filter() -> SourceBindingRequest:
     )
 
 
-def _ranked_staff_compensation_request() -> SourceBindingRequest:
+def _ordered_staff_compensation_request() -> SourceBindingRequest:
     fact = RequestedFact(
         id="fact_1",
         description="staff member with the highest compensation this month",
@@ -1554,9 +1611,16 @@ def _ranked_staff_compensation_request() -> SourceBindingRequest:
             ),
         ),
         answer_expression=RequestedFactAnswerExpression(
-            family=RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
-            selection_kind=ResultSelectionKind.LIMITED_RESULTS,
-            limit_input_ref="limit",
+            family=RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
+            group_key=RequestedFactGroupKey(
+                id="answer_group",
+                description="staff member",
+                domain=GroupKeyDomainKind.SOURCE_RESULT_VALUES,
+                source_kind=GroupKeySourceKind.SOURCE_VALUE,
+            ),
+            ordering_basis="compensation total",
+            ordering_direction=RequestedFactOrderingDirection.DESCENDING,
+            selection_kind=ResultSelectionKind.TAKE_ONE,
         ),
     )
     catalog = RelationCatalog(
@@ -1692,12 +1756,12 @@ def _ranked_staff_compensation_request() -> SourceBindingRequest:
         requested_facts=(fact,),
         relation_catalog=catalog,
         catalog_selection=catalog_selection,
-        plan_selection=_selected_plan(plan_shape="ranked_aggregate"),
+        plan_selection=_selected_plan(plan_shape="aggregate_by_group"),
         read_eligibility=read_eligibility,
     )
 
 
-def _ranked_store_sales_request() -> SourceBindingRequest:
+def _ordered_store_sales_request() -> SourceBindingRequest:
     fact = RequestedFact(
         id="fact_1",
         description="store with the highest sales this month",
@@ -1710,9 +1774,16 @@ def _ranked_store_sales_request() -> SourceBindingRequest:
             ),
         ),
         answer_expression=RequestedFactAnswerExpression(
-            family=RequestedFactAnswerExpressionFamily.RANKED_SELECTION,
-            selection_kind=ResultSelectionKind.LIMITED_RESULTS,
-            limit_input_ref="limit",
+            family=RequestedFactAnswerExpressionFamily.GROUPED_AGGREGATE,
+            group_key=RequestedFactGroupKey(
+                id="answer_group",
+                description="store",
+                domain=GroupKeyDomainKind.SOURCE_RESULT_VALUES,
+                source_kind=GroupKeySourceKind.SOURCE_VALUE,
+            ),
+            ordering_basis="sales total",
+            ordering_direction=RequestedFactOrderingDirection.DESCENDING,
+            selection_kind=ResultSelectionKind.TAKE_ONE,
         ),
     )
     catalog = RelationCatalog(
@@ -1852,7 +1923,7 @@ def _ranked_store_sales_request() -> SourceBindingRequest:
         requested_facts=(fact,),
         relation_catalog=catalog,
         catalog_selection=catalog_selection,
-        plan_selection=_selected_plan(plan_shape="ranked_aggregate"),
+        plan_selection=_selected_plan(plan_shape="aggregate_by_group"),
         read_eligibility=read_eligibility,
     )
 
@@ -2589,8 +2660,6 @@ def _choice_population_test_results(
         "role_match_basis": (
             f"The {value.lower()} choice {effect_text} the normal instance test."
         ),
-        "explicit_user_override_evidence": [],
-        "explicit_user_override_applies": False,
         "population_consequence": (
             f"The {value.lower()} choice {effect_text} the normal instance test."
         ),
@@ -2658,8 +2727,6 @@ def _normal_instance_guard_fields(
     choice: str,
     matching_roles: tuple[NormalInstanceExcludedStateRole, ...] = (),
     unknown_role_match: bool = False,
-    override_evidence: tuple[dict[str, str], ...] = (),
-    explicit_user_override_applies: bool = False,
 ) -> dict[str, object]:
     label = choice.capitalize()
     if len(matching_roles) > 1:
@@ -2673,8 +2740,6 @@ def _normal_instance_guard_fields(
     )
     return {
         "role_match_basis": f"{label} was compared to the excluded normal-instance roles.",
-        "explicit_user_override_evidence": list(override_evidence),
-        "explicit_user_override_applies": explicit_user_override_applies,
         "disposition": {
             "matched_excluded_role": matched_role,
             "test_effect": (

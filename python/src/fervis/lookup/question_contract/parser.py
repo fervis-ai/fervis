@@ -25,9 +25,11 @@ from fervis.lookup.question_contract.model import (
     QuestionContractNeedsClarification,
     QuestionContractResult,
     GroupKeyDomainKind,
+    GroupKeySourceKind,
     RequestedFact,
     RequestedFactAnswerExpression,
     RequestedFactAnswerExpressionFamily,
+    RequestedFactOrderingDirection,
     ResultSelectionKind,
     RequestedFactGroupKey,
     RequestedFactAnswerPopulation,
@@ -38,11 +40,13 @@ from fervis.lookup.question_contract.model import (
     RequestedFactKnownInput,
     RequestedFactLiteralInput,
     RequestedFactRowSetReferenceInput,
+    default_answer_population,
 )
 from fervis.lookup.question_contract.tools import (
     QUESTION_CONTRACT_TOOL_NAME,
 )
 from fervis.lookup.provider_contract import ProviderObject
+from fervis.lookup.predicate_operators import PredicateOperator
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +56,7 @@ class _ParsedMembershipTest:
     polarity: AnswerPopulationMembershipTestPolarity
     test_question: str
     owned_question_input_refs: tuple[str, ...]
+    comparison_operator: PredicateOperator | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,7 +64,14 @@ class _ParsedQuestionInputUses:
     input_refs: tuple[str, ...]
     group_key_input_refs: tuple[str, ...]
     population_input_refs_by_use_id: dict[str, str]
+    compute_input_refs: tuple[str, ...]
     result_limit_input_ref: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ParsedQuestionInputs:
+    values: tuple[RequestedFactKnownInput, ...]
+    threshold_operators_by_input_ref: dict[str, PredicateOperator]
 
 
 def parse_question_contract(
@@ -118,30 +130,33 @@ def parse_question_contract(
     kind = parsed.kind
     if kind != "question_contract":
         raise ValueError("invalid question contract kind")
-    question_inputs = _question_inputs(
+    parsed_question_inputs = _question_inputs(
         parsed.question_inputs,
         current_question_texts=current_question_texts,
         question_context_texts=context_texts,
     )
     _validate_conversation_resolution_question_inputs(
-        question_inputs,
+        parsed_question_inputs.values,
         conversation_resolution=conversation_resolution,
     )
     requested_facts = _requested_facts(
         parsed.answer_requests,
-        question_inputs=question_inputs,
+        question_inputs=parsed_question_inputs.values,
+        threshold_operators_by_input_ref=(
+            parsed_question_inputs.threshold_operators_by_input_ref
+        ),
         question_context_texts=context_texts,
     )
     _reject_unowned_question_inputs(
-        question_inputs,
+        parsed_question_inputs.values,
         requested_facts=requested_facts,
     )
     _reject_answer_subject_question_inputs(
-        question_inputs,
+        parsed_question_inputs.values,
         requested_facts=requested_facts,
     )
     question_inputs = _referenced_question_inputs(
-        question_inputs,
+        parsed_question_inputs.values,
         requested_facts=requested_facts,
     )
     _validate_answer_requests_count(
@@ -233,6 +248,7 @@ def _requested_facts(
     items: tuple[provider_output.AnswerRequestOutput, ...],
     *,
     question_inputs: tuple[RequestedFactKnownInput, ...],
+    threshold_operators_by_input_ref: dict[str, PredicateOperator],
     question_context_texts: tuple[str, ...],
 ) -> tuple[RequestedFact, ...]:
     output: list[RequestedFact] = []
@@ -250,7 +266,6 @@ def _requested_facts(
             parsed.question_input_uses,
             inputs_by_id=inputs_by_id,
             answer_expression=parsed.answer_expression,
-            expression_path=f"{path}.answer_expression",
             path=f"{path}.question_input_uses",
         )
         membership_tests = _parsed_membership_tests(
@@ -258,6 +273,8 @@ def _requested_facts(
             population_input_refs_by_use_id=(
                 input_uses.population_input_refs_by_use_id
             ),
+            inputs_by_id=inputs_by_id,
+            threshold_operators_by_input_ref=threshold_operators_by_input_ref,
             path=f"{path}.answer_population.membership_tests",
         )
         answer_subject = _answer_subject(
@@ -265,17 +282,16 @@ def _requested_facts(
             question_context_texts=question_context_texts,
             path=f"{path}.answer_subject",
         )
-        known_inputs = tuple(
-            inputs_by_id[input_ref] for input_ref in input_uses.input_refs
-        )
+        fact_input_refs = input_uses.input_refs
+        known_inputs = tuple(inputs_by_id[input_ref] for input_ref in fact_input_refs)
         answer_population = _answer_population(
-            parsed.answer_population,
+            answer_subject=answer_subject,
             membership_tests=membership_tests,
-            path=f"{path}.answer_population",
         )
         answer_expression = _answer_expression(
             parsed.answer_expression,
             group_key_input_refs=input_uses.group_key_input_refs,
+            compute_input_refs=input_uses.compute_input_refs,
             limit_input_ref=input_uses.result_limit_input_ref,
             path=f"{path}.answer_expression",
         )
@@ -291,7 +307,7 @@ def _requested_facts(
                 answer_population=answer_population,
                 answer_outputs=answer_outputs,
                 known_inputs=known_inputs,
-                input_refs=input_uses.input_refs,
+                input_refs=fact_input_refs,
             )
         )
     return tuple(output)
@@ -301,17 +317,25 @@ def _answer_expression(
     item: provider_output.AnswerExpressionOutput,
     *,
     group_key_input_refs: tuple[str, ...],
+    compute_input_refs: tuple[str, ...],
     limit_input_ref: str,
     path: str,
 ) -> RequestedFactAnswerExpression:
     family = RequestedFactAnswerExpressionFamily(
         _required_text(item.family, path=f"{path}.family")
     )
-    selection_kind = None
-    if family is RequestedFactAnswerExpressionFamily.LIST_ROWS:
-        selection_kind = ResultSelectionKind.ALL_RESULTS
-    elif family is RequestedFactAnswerExpressionFamily.RANKED_SELECTION:
-        selection_kind = ResultSelectionKind.LIMITED_RESULTS
+    selection_kind = (
+        ResultSelectionKind(item.selection.kind) if item.selection is not None else None
+    )
+    ordering_basis = ""
+    ordering_direction = None
+    if item.ordering is not None:
+        ordering_basis = _required_text(
+            item.ordering.basis, path=f"{path}.ordering.basis"
+        )
+        ordering_direction = RequestedFactOrderingDirection(
+            _required_text(item.ordering.direction, path=f"{path}.ordering.direction")
+        )
     return RequestedFactAnswerExpression(
         family=family,
         group_key=_answer_expression_group_key(
@@ -319,8 +343,11 @@ def _answer_expression(
             question_input_refs=group_key_input_refs,
             path=f"{path}.group_key",
         ),
+        ordering_basis=ordering_basis,
+        ordering_direction=ordering_direction,
         selection_kind=selection_kind,
         limit_input_ref=limit_input_ref,
+        compute_input_refs=compute_input_refs,
     )
 
 
@@ -335,6 +362,8 @@ def _answer_expression_group_key(
     return RequestedFactGroupKey(
         description=_required_text(item.description, path=f"{path}.description"),
         domain=_group_key_domain(item, path=path),
+        source_kind=_group_key_source_kind(item, path=path),
+        temporal_grain=(item.value_source.grain or ""),
         question_input_refs=question_input_refs,
     )
 
@@ -344,10 +373,24 @@ def _group_key_domain(
     *,
     path: str,
 ) -> GroupKeyDomainKind:
+    kind = _required_text(item.value_source.kind, path=f"{path}.value_source.kind")
+    if kind == "specified_question_inputs":
+        return GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS
+    return GroupKeyDomainKind.SOURCE_RESULT_VALUES
+
+
+def _group_key_source_kind(
+    item: provider_output.GroupKeyOutput,
+    *,
+    path: str,
+) -> GroupKeySourceKind | None:
+    kind = item.value_source.kind
+    if kind == "specified_question_inputs":
+        return None
     try:
-        return GroupKeyDomainKind(_required_text(item.domain, path=f"{path}.domain"))
+        return GroupKeySourceKind(kind)
     except ValueError as exc:
-        raise ValueError(f"{path}.domain is invalid") from exc
+        raise ValueError(f"{path}.value_source.kind is invalid") from exc
 
 
 def _answer_subject(
@@ -376,21 +419,14 @@ def _instance_interpretation(
 
 
 def _answer_population(
-    item: provider_output.AnswerPopulationOutput,
     *,
+    answer_subject: RequestedFactAnswerSubject,
     membership_tests: tuple[_ParsedMembershipTest, ...],
-    path: str,
 ) -> RequestedFactAnswerPopulation:
-    return RequestedFactAnswerPopulation(
-        population_label=_required_text(
-            item.population_label,
-            path=f"{path}.population_label",
-        ),
-        counted_unit=_required_text(
-            item.counted_unit,
-            path=f"{path}.counted_unit",
-        ),
-        membership_tests=_answer_population_membership_tests(
+    return default_answer_population(
+        subject_text=answer_subject.subject_text,
+        instance_interpretation=answer_subject.instance_interpretation,
+        explicit_membership_tests=_answer_population_membership_tests(
             membership_tests,
         ),
     )
@@ -400,53 +436,66 @@ def _parsed_membership_tests(
     items: tuple[provider_output.AnswerPopulationMembershipTestOutput, ...],
     *,
     population_input_refs_by_use_id: dict[str, str],
+    inputs_by_id: dict[str, RequestedFactKnownInput],
+    threshold_operators_by_input_ref: dict[str, PredicateOperator],
     path: str,
 ) -> tuple[_ParsedMembershipTest, ...]:
     output: list[_ParsedMembershipTest] = []
-    seen_ids: set[str] = set()
     consumed_use_ids: set[str] = set()
     for index, item in enumerate(items):
         item_path = f"{path}[{index}]"
-        test_id = _required_text(item.test_id, path=f"{item_path}.test_id")
-        if test_id in seen_ids:
-            raise ValueError(f"{item_path}.test_id duplicates membership test")
-        seen_ids.add(test_id)
-        kind = AnswerPopulationMembershipTestKind(item.kind.strip())
+        test_id = f"explicit_user_constraint_{index + 1}"
         owned_input_refs: list[str] = []
         seen_use_refs: set[str] = set()
-        for use_index, raw_use_ref in enumerate(item.question_input_use_refs):
-            use_path = f"{item_path}.question_input_use_refs[{use_index}]"
+        for use_index, raw_use_ref in enumerate(item.population_use_refs):
+            use_path = f"{item_path}.population_use_refs[{use_index}]"
             use_ref = _required_text(raw_use_ref, path=use_path)
             if use_ref in seen_use_refs:
-                raise ValueError(f"{use_path} duplicates question input use")
+                raise ValueError(f"{use_path} duplicates population input use")
             seen_use_refs.add(use_ref)
             input_ref = population_input_refs_by_use_id.get(use_ref)
             if input_ref is None:
-                raise ValueError(f"{use_path} references unknown question input use")
+                raise ValueError(f"{use_path} references unknown population input use")
             owned_input_refs.append(input_ref)
             consumed_use_ids.add(use_ref)
-        if kind is AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT:
-            if not owned_input_refs:
+        if not owned_input_refs:
+            raise ValueError(
+                f"explicit membership test {test_id} requires at least one "
+                "question input"
+            )
+        threshold_refs = tuple(
+            input_ref
+            for input_ref in owned_input_refs
+            if isinstance(
+                known_input := inputs_by_id[input_ref], RequestedFactLiteralInput
+            )
+            and known_input.is_threshold_value
+        )
+        if threshold_refs:
+            if len(threshold_refs) != len(owned_input_refs):
                 raise ValueError(
-                    f"explicit membership test {test_id} requires at least one "
-                    "question input"
+                    f"{item_path} threshold comparison cannot mix operand roles"
                 )
-        elif owned_input_refs:
-            raise ValueError(f"{item_path} non-explicit membership test has operands")
+            if len(threshold_refs) != 1:
+                raise ValueError(
+                    f"{item_path} threshold comparison requires one boundary"
+                )
+            comparison_operator = threshold_operators_by_input_ref[threshold_refs[0]]
+        else:
+            comparison_operator = None
         output.append(
             _ParsedMembershipTest(
                 id=test_id,
-                kind=kind,
+                kind=AnswerPopulationMembershipTestKind.EXPLICIT_USER_CONSTRAINT,
                 polarity=AnswerPopulationMembershipTestPolarity(item.polarity.strip()),
                 test_question=_required_text(
                     item.test_question,
                     path=f"{item_path}.test_question",
                 ),
                 owned_question_input_refs=tuple(owned_input_refs),
+                comparison_operator=comparison_operator,
             )
         )
-    if not output:
-        raise ValueError(f"{path} must not be empty")
     unused_use_ids = set(population_input_refs_by_use_id) - consumed_use_ids
     if unused_use_ids:
         raise ValueError(
@@ -466,6 +515,7 @@ def _answer_population_membership_tests(
             polarity=item.polarity,
             test_question=item.test_question,
             owned_question_input_refs=item.owned_question_input_refs,
+            comparison_operator=item.comparison_operator,
         )
         for item in items
     )
@@ -523,7 +573,7 @@ def _reject_answer_subject_question_inputs(
     duplicate_input_ids = {
         known.id
         for known in question_inputs
-        if known.is_reference_value
+        if isinstance(known, RequestedFactLiteralInput)
         and any(
             _same_question_text(known.text, text)
             for fact in requested_facts
@@ -585,24 +635,15 @@ def _question_input_uses(
     *,
     inputs_by_id: dict[str, RequestedFactKnownInput],
     answer_expression: provider_output.AnswerExpressionOutput,
-    expression_path: str,
     path: str,
 ) -> _ParsedQuestionInputUses:
     input_refs: list[str] = []
     group_key_input_refs: list[str] = []
     population_input_refs_by_use_id: dict[str, str] = {}
+    compute_input_refs: list[str] = []
     result_limit_input_ref = ""
     seen_inputs: set[str] = set()
     seen_use_ids: set[str] = set()
-    group_domain = (
-        None
-        if answer_expression.group_key is None
-        else _group_key_domain(
-            answer_expression.group_key,
-            path=f"{expression_path}.group_key",
-        )
-    )
-
     for index, raw_item in enumerate(raw):
         item_path = f"{path}[{index}]"
         item = raw_item.parse_as(provider_output.QuestionInputUseOutput)
@@ -617,16 +658,12 @@ def _question_input_uses(
         _validate_input_owner_kind(
             known_input,
             owner_kind=owner_kind,
+            answer_expression=answer_expression,
             path=f"{item_path}.owner_kind",
         )
         input_refs.append(input_ref)
 
         if owner_kind is provider_output.QuestionInputOwnerKind.GROUP_KEY:
-            if group_domain is not GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS:
-                raise ValueError(
-                    f"{item_path}.owner_kind GROUP_KEY requires "
-                    "SPECIFIED_QUESTION_INPUTS"
-                )
             group_key_input_refs.append(input_ref)
             continue
 
@@ -636,16 +673,22 @@ def _question_input_uses(
             result_limit_input_ref = input_ref
             continue
 
+        if owner_kind is provider_output.QuestionInputOwnerKind.COMPUTE_EXPRESSION:
+            compute_input_refs.append(input_ref)
+            continue
+
         use_id = _required_text(item.use_id or "", path=f"{item_path}.use_id")
         if use_id in seen_use_ids:
             raise ValueError(f"{item_path}.use_id duplicates use ID")
         seen_use_ids.add(use_id)
         population_input_refs_by_use_id[use_id] = input_ref
 
-    if (
-        group_domain is GroupKeyDomainKind.SPECIFIED_QUESTION_INPUTS
-        and not group_key_input_refs
-    ):
+    group_key = answer_expression.group_key
+    specified_group_key = (
+        group_key is not None
+        and group_key.value_source.kind == "specified_question_inputs"
+    )
+    if specified_group_key and not group_key_input_refs:
         raise ValueError(
             "SPECIFIED_QUESTION_INPUTS requires at least one GROUP_KEY input use"
         )
@@ -653,6 +696,7 @@ def _question_input_uses(
         input_refs=tuple(input_refs),
         group_key_input_refs=tuple(group_key_input_refs),
         population_input_refs_by_use_id=population_input_refs_by_use_id,
+        compute_input_refs=tuple(compute_input_refs),
         result_limit_input_ref=result_limit_input_ref,
     )
 
@@ -672,12 +716,49 @@ def _validate_input_owner_kind(
     known_input: RequestedFactKnownInput,
     *,
     owner_kind: provider_output.QuestionInputOwnerKind,
+    answer_expression: provider_output.AnswerExpressionOutput,
     path: str,
 ) -> None:
+    if owner_kind is provider_output.QuestionInputOwnerKind.GROUP_KEY:
+        group_key = answer_expression.group_key
+        if (
+            group_key is None
+            or group_key.value_source.kind != "specified_question_inputs"
+        ):
+            raise ValueError(
+                f"{path} GROUP_KEY requires a specified_question_inputs group key"
+            )
+        return
     if owner_kind is provider_output.QuestionInputOwnerKind.RESULT_LIMIT:
         if not known_input.is_result_limit:
             raise ValueError(f"{path} RESULT_LIMIT requires a result_limit input")
         return
+    if owner_kind is provider_output.QuestionInputOwnerKind.COMPUTE_EXPRESSION:
+        if not (
+            isinstance(known_input, RequestedFactLiteralInput)
+            and known_input.is_formula_value
+        ):
+            raise ValueError(
+                f"{path} COMPUTE_EXPRESSION requires a formula_value input"
+            )
+        if answer_expression.family != (
+            RequestedFactAnswerExpressionFamily.COMPUTED_SCALAR.value
+        ):
+            raise ValueError(f"{path} COMPUTE_EXPRESSION requires computed_scalar")
+        return
+    if isinstance(known_input, RequestedFactLiteralInput) and (
+        known_input.is_predicate_value or known_input.is_threshold_value
+    ):
+        if owner_kind is not provider_output.QuestionInputOwnerKind.POPULATION_TESTS:
+            raise ValueError(
+                f"{path} for predicate or threshold input must be POPULATION_TESTS"
+            )
+        return
+    if (
+        isinstance(known_input, RequestedFactLiteralInput)
+        and known_input.is_formula_value
+    ):
+        raise ValueError(f"{path} for formula_value input must be COMPUTE_EXPRESSION")
     if known_input.is_result_limit:
         raise ValueError(f"{path} for result_limit input must be RESULT_LIMIT")
 
@@ -687,8 +768,9 @@ def _question_inputs(
     *,
     current_question_texts: tuple[str, ...],
     question_context_texts: tuple[str, ...],
-) -> tuple[RequestedFactKnownInput, ...]:
+) -> _ParsedQuestionInputs:
     output: list[RequestedFactKnownInput] = []
+    threshold_operators_by_input_ref: dict[str, PredicateOperator] = {}
     seen_ids: set[str] = set()
     for index, raw_item in enumerate(raw):
         path = f"question_inputs[{index}]"
@@ -721,18 +803,60 @@ def _question_inputs(
             question_context_texts=span_contexts,
             path=f"{path}.{input_text_key}",
         )
-        output.append(
-            _question_input(
-                parsed,
-                input_ref=input_ref,
-                kind=kind,
-                source=source,
-                reference_text=copied_reference_text,
-                question_context_texts=question_context_texts,
-                path=path,
-            )
+        known_input = _question_input(
+            parsed,
+            input_ref=input_ref,
+            kind=kind,
+            source=source,
+            reference_text=copied_reference_text,
+            question_context_texts=question_context_texts,
+            path=path,
         )
-    return tuple(output)
+        output.append(known_input)
+        comparison_operator = _question_input_comparison_operator(
+            parsed,
+            known_input=known_input,
+            path=path,
+        )
+        if comparison_operator is not None:
+            threshold_operators_by_input_ref[input_ref] = comparison_operator
+    return _ParsedQuestionInputs(
+        values=tuple(output),
+        threshold_operators_by_input_ref=threshold_operators_by_input_ref,
+    )
+
+
+def _question_input_comparison_operator(
+    item: provider_output.LiteralTextInputOutput
+    | provider_output.RowSetReferenceInputOutput,
+    *,
+    known_input: RequestedFactKnownInput,
+    path: str,
+) -> PredicateOperator | None:
+    if not isinstance(item, provider_output.LiteralTextInputOutput):
+        return None
+    raw_operator = (item.comparison_operator or "").strip()
+    if (
+        not isinstance(known_input, RequestedFactLiteralInput)
+        or not known_input.is_threshold_value
+    ):
+        if raw_operator:
+            raise ValueError(f"{path}.comparison_operator requires threshold_value")
+        return None
+    try:
+        operator = PredicateOperator(raw_operator)
+    except ValueError as exc:
+        raise ValueError(
+            f"{path}.comparison_operator requires lt, lte, gt, or gte"
+        ) from exc
+    if operator not in {
+        PredicateOperator.LT,
+        PredicateOperator.LTE,
+        PredicateOperator.GT,
+        PredicateOperator.GTE,
+    }:
+        raise ValueError(f"{path}.comparison_operator requires lt, lte, gt, or gte")
+    return operator
 
 
 def _question_input_output(

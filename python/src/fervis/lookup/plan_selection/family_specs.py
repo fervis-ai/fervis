@@ -29,15 +29,15 @@ _MEMBER_REQUIREMENT_SUPPORT_ROLES: dict[str, frozenset[str]] = {
     "metric": frozenset(("MEASURED_VALUE", "ROW_COUNT")),
     "group_identity": frozenset(("GROUP_KEY",)),
     "operation": frozenset(("MEASURED_VALUE", "ROW_COUNT", "GROUP_KEY")),
-    "value_1": frozenset(("VALUE_SOURCE",)),
-    "value_2": frozenset(("VALUE_SOURCE",)),
+    "value_1": frozenset(("VALUE_SOURCE", "MEASURED_VALUE", "ROW_COUNT")),
+    "value_2": frozenset(("VALUE_SOURCE", "MEASURED_VALUE", "ROW_COUNT")),
 }
 
 
 _MEMBER_REQUIREMENT_BINDING_ROLES: dict[str, frozenset[str]] = {
     "group_identity": frozenset(("GROUP_KEY",)),
-    "value_1": frozenset(("VALUE_SOURCE",)),
-    "value_2": frozenset(("VALUE_SOURCE",)),
+    "value_1": frozenset(("VALUE_SOURCE", "MEASURED_VALUE", "ROW_COUNT")),
+    "value_2": frozenset(("VALUE_SOURCE", "MEASURED_VALUE", "ROW_COUNT")),
 }
 
 
@@ -86,7 +86,7 @@ class PlanSelectionShapeSpec:
                 "MEASURED_VALUE" in option.support_roles for option in support_options
             )
             if (
-                self.plan_shape in {"aggregate_by_group", "ranked_aggregate"}
+                self.plan_shape == "aggregate_by_group"
                 and has_measured_value
             ):
                 return frozenset(("MEASURED_VALUE",))

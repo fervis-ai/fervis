@@ -1,0 +1,23 @@
+id: order_take_rejects_non_positive_limit
+description: Order/take fails closed when limit is not positive.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_rank_rejects_non_positive_limit_at_runtime
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  scalar_inputs: [{id: limit, value: 0, value_type: integer}]
+  relations:
+    - id: rows
+      rows: [{id: a}]
+      grain_keys: []
+  operations:
+    - id: ordered
+      output_relation: result
+      spec:
+        kind: order
+        input_relation: rows
+        order_by: [{field: id, direction: asc}]
+        selection: {kind: take, limit_input_id: limit}
+expect:
+  result_contains:
+    status: rejected

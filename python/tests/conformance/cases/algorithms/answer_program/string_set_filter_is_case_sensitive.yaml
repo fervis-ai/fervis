@@ -35,5 +35,6 @@ expect:
       - id: exact_case
         status: completed
         relations:
+          - id: sales_rows__source
           - id: sales_rows
             rows: []

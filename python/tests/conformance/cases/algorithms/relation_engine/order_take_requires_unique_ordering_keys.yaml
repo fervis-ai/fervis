@@ -1,0 +1,31 @@
+id: order_take_preserves_boundary_ties
+description: Ordered selection keeps every row sharing the selected boundary value.
+migrates:
+  - api/tests/fervis/lookup/plan_execution/test_relation_engine_operations.py::test_rank_requires_unique_ordering_keys_for_limited_results
+kind: algorithm
+algorithm: execution.relation_engine
+input:
+  scalar_inputs: [{id: limit, value: 1, value_type: integer}]
+  relations:
+    - id: items
+      rows:
+        - {item_id: a, amount: "100"}
+        - {item_id: b, amount: "100"}
+        - {item_id: c, amount: "50"}
+      grain_keys: [item_id]
+      field_types: {item_id: string, amount: decimal}
+      completeness: {status: complete, source_kind: api_read, set_kind: unknown}
+  operations:
+    - id: ordered
+      output_relation: top_item
+      spec:
+        kind: order
+        input_relation: items
+        order_by: [{field: amount, direction: desc}]
+        selection: {kind: take, limit_input_id: limit}
+expect:
+  result_contains:
+    top_item:
+      rows:
+        - {item_id: a, amount: "100"}
+        - {item_id: b, amount: "100"}

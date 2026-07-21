@@ -14,25 +14,16 @@ input:
       answer_expression:
         family: scalar_aggregate
       question_input_uses:
-      - {use_id: use_time, input_ref: time_1, owner_kind: POPULATION_TESTS}
+      - {input_ref: time_1, owner_kind: POPULATION_TESTS, use_id: time_use}
       answer_subject:
         subject_text: shifts
         instance_interpretation:
           kind: NORMAL_BUSINESS_INSTANCE
       answer_population:
-        population_label: shifts today
-        counted_unit: shifts
         membership_tests:
-        - test_id: pop_test_1
-          kind: SUBJECT_IDENTITY
-          polarity: MUST_PASS
-          test_question: Does the row/value represent shifts?
-          question_input_use_refs: []
-        - test_id: pop_test_2
-          kind: EXPLICIT_USER_CONSTRAINT
-          polarity: MUST_PASS
+        - polarity: MUST_PASS
           test_question: Does the shift fall within today?
-          question_input_use_refs: [use_time]
+          population_use_refs: [time_use]
       answer_outputs:
       - description: number of shifts
         role: ANSWER_VALUE

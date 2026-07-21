@@ -22,9 +22,10 @@ from fervis.lookup.answer_program.expression_instantiation import (
 )
 from fervis.lookup.answer_program.operations import (
     ComputeSpec,
-    compute_expression_leaves,
+    FilterSpec,
     compute_value_input_id,
 )
+from fervis.lookup.answer_program.expressions import expression_references
 from fervis.lookup.answer_program.inputs import resolve_value_expression
 from fervis.lookup.answer_program.values import ConstantRef, ParameterRef
 from fervis.lookup.question_contract import (
@@ -107,6 +108,7 @@ def _verify_source_population_coverage_claims(
     *,
     question_contract: QuestionContract,
     row_sources: RowSourceCatalog,
+    bindings,
 ) -> None:
     tests = {
         (fact.id, test.id): test
@@ -117,31 +119,74 @@ def _verify_source_population_coverage_claims(
             else ()
         )
     }
+    mechanic_refs_by_relation: dict[str, set[str]] = {}
     for relation in answer.relations:
         seen: set[tuple[str, str, str]] = set()
         source_refs = _source_mechanic_proof_refs(relation)
+        mechanic_refs_by_relation[relation.id] = source_refs
         for claim in relation.source.population_coverage_claims:
-            test_key = (
-                claim.test_ref.requested_fact_id,
-                claim.test_ref.membership_test_id,
+            _verify_population_coverage_claim(
+                claim,
+                tests=tests,
+                seen=seen,
+                mechanic_refs=source_refs,
             )
-            test = tests.get(test_key)
-            if test is None:
-                raise VerificationError(
-                    "population coverage claim references unknown membership test"
-                )
-            if test.kind is AnswerPopulationMembershipTestKind.SUBJECT_IDENTITY:
-                raise VerificationError(
-                    "subject identity cannot be a source population coverage claim"
-                )
-            claim_key = (*test_key, claim.role.value)
-            if claim_key in seen:
-                raise VerificationError("duplicate population coverage claim")
-            seen.add(claim_key)
-            if not set(claim.proof_refs).issubset(source_refs):
-                raise VerificationError(
-                    "population coverage claim lacks source-mechanic proof"
-                )
+    for operation in answer.operations:
+        spec = operation.spec
+        if not isinstance(spec, FilterSpec):
+            continue
+        seen = set()
+        mechanic_refs = {
+            *mechanic_refs_by_relation.get(spec.input_relation, set()),
+            *spec.proof_refs,
+        }
+        references = expression_references(
+            spec.predicate.left,
+            *((spec.predicate.right,) if spec.predicate.right is not None else ()),
+        )
+        for parameter in references.parameters:
+            resolved = resolve_value_expression(parameter, bindings=bindings)
+            mechanic_refs.update((*resolved.proof_refs, *resolved.source_refs))
+        for constant in references.constants:
+            resolved = resolve_value_expression(constant, bindings=bindings)
+            mechanic_refs.update((*resolved.proof_refs, *resolved.source_refs))
+        for claim in spec.population_coverage_claims:
+            _verify_population_coverage_claim(
+                claim,
+                tests=tests,
+                seen=seen,
+                mechanic_refs=mechanic_refs,
+            )
+        if operation.output_relation:
+            mechanic_refs_by_relation[operation.output_relation] = mechanic_refs
+
+
+def _verify_population_coverage_claim(
+    claim,
+    *,
+    tests,
+    seen: set[tuple[str, str, str]],
+    mechanic_refs: set[str],
+) -> None:
+    test_key = (
+        claim.test_ref.requested_fact_id,
+        claim.test_ref.membership_test_id,
+    )
+    test = tests.get(test_key)
+    if test is None:
+        raise VerificationError(
+            "population coverage claim references unknown membership test"
+        )
+    if test.kind is AnswerPopulationMembershipTestKind.SUBJECT_IDENTITY:
+        raise VerificationError(
+            "subject identity cannot be a source population coverage claim"
+        )
+    claim_key = (*test_key, claim.role.value)
+    if claim_key in seen:
+        raise VerificationError("duplicate population coverage claim")
+    seen.add(claim_key)
+    if not set(claim.proof_refs).issubset(mechanic_refs):
+        raise VerificationError("population coverage claim lacks source-mechanic proof")
 
 
 def _verify_compute_input_population_coverage_claims(
@@ -165,7 +210,7 @@ def _verify_compute_input_population_coverage_claims(
             continue
         leaves = {
             compute_value_input_id(expression): expression
-            for expression in compute_expression_leaves(spec.expression)
+            for expression in expression_references(spec.expression).leaves
             if isinstance(expression, (ParameterRef, ConstantRef))
         }
         for input_coverage in spec.input_population_coverage:
@@ -207,10 +252,6 @@ def _source_mechanic_proof_refs(
     for binding in source.param_bindings:
         refs.update(binding.proof_refs)
         refs.add(f"source_param:{binding.param_id}")
-    for applied_filter in source.applied_filters:
-        refs.update(applied_filter.proof_refs)
-    for row_filter in source.row_filters:
-        refs.update(row_filter.proof_refs)
     for choice in source.population_choices:
         refs.update(choice.proof_refs)
     return refs
@@ -333,7 +374,8 @@ def _verify_api_relation_catalog_refs(
                 row_source_field = row_source.field(field.field_id)
             except KeyError as exc:
                 raise VerificationError(
-                    f"relation {relation.id} references unknown source field"
+                    f"relation {relation.id} references unknown source field "
+                    f"{field.field_id} on row source {row_source.id}"
                 ) from exc
             for role in field.roles:
                 if role not in row_source_field.allowed_roles:

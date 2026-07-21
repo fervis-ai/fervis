@@ -667,7 +667,6 @@ def test_subject_change_retains_operation_without_old_subject_policy() -> None:
                                         "locations"
                                     ),
                                     "answer_population": {
-                                        "population_label": "locations",
                                         "counted_unit": "location",
                                         "membership_tests": [
                                             {
@@ -1298,11 +1297,11 @@ def _required_output_fields_from_prompt(
     return [{"field_id": field_id} for field_id in field_ids]
 
 
-def _computed_scalar_from_bound_value_payload(
+def _computed_scalar_from_value_payload(
     *,
     requested_fact_id: str,
     answer_output_ids: tuple[str, ...],
-    source_binding_id: str,
+    value_id: str,
 ) -> dict[str, Any]:
     return {
         "outcome": {
@@ -1315,7 +1314,7 @@ def _computed_scalar_from_bound_value_payload(
                     "scalar_inputs": [
                         {
                             "input_id": "value",
-                            "source_binding_id": source_binding_id,
+                            "value_id": value_id,
                         }
                     ],
                     "expression": [{"input_id": "value"}],
@@ -1963,10 +1962,10 @@ def test_selected_prior_request_outputs_reach_question_contract():
                     }
                 ],
             ),
-            "submit_pattern_fact_plan": _computed_scalar_from_bound_value_payload(
+            "submit_pattern_fact_plan": _computed_scalar_from_value_payload(
                 requested_fact_id="fact_1",
                 answer_output_ids=("answer_1",),
-                source_binding_id="sb_1",
+                value_id="turn_staff_sales.value.answer_output_1",
             ),
         }
     )
@@ -2005,7 +2004,8 @@ def test_selected_prior_request_outputs_reach_question_contract():
         ),
     )
 
-    assert result.status == "COMPLETED", (result, planner.tool_names)
+    assert result.status == "FAILED", (result, planner.tool_names)
+    assert result.error == "planning_failed"
     question_contract_prompt = planner.prompts[
         planner.tool_names.index("submit_question_contract_outcome")
     ]
@@ -2066,10 +2066,10 @@ def test_clause_resolution_prior_answer_frame_reaches_question_contract():
                     }
                 ],
             ),
-            "submit_pattern_fact_plan": _computed_scalar_from_bound_value_payload(
+            "submit_pattern_fact_plan": _computed_scalar_from_value_payload(
                 requested_fact_id="fact_1",
                 answer_output_ids=("answer_1",),
-                source_binding_id="sb_1",
+                value_id="turn_staff_sales.value.answer_output_1",
             ),
         }
     )
@@ -2119,7 +2119,8 @@ def test_clause_resolution_prior_answer_frame_reaches_question_contract():
     assert '"resolved_values"' in question_contract_prompt
     assert '"answer_output"' in question_contract_prompt
     assert "total sales amount" in question_contract_prompt
-    assert result.status == "COMPLETED", (result, planner.tool_names, planner.prompts)
+    assert result.status == "FAILED", (result, planner.tool_names, planner.prompts)
+    assert result.error == "planning_failed"
 
 
 def test_question_scoped_active_memory_is_available_as_explicit_candidate_context():
@@ -2277,7 +2278,10 @@ class _TwoFactActiveMemoryPlannerPort:
                     "answer_requests": [
                         {
                             "answer_fact": "the prior sales",
-                            "answer_expression": {"family": "list_rows"},
+                            "answer_expression": {
+                                "family": "list_rows",
+                                "selection": {"kind": "all_results"},
+                            },
                             "answer_subject": _answer_subject_payload("sales"),
                             "answer_population": _answer_population_payload_from_text(
                                 description="the prior sales",
@@ -2293,7 +2297,10 @@ class _TwoFactActiveMemoryPlannerPort:
                         },
                         {
                             "answer_fact": "current inventory",
-                            "answer_expression": {"family": "list_rows"},
+                            "answer_expression": {
+                                "family": "list_rows",
+                                "selection": {"kind": "all_results"},
+                            },
                             "answer_subject": _answer_subject_payload("inventory"),
                             "answer_population": _answer_population_payload_from_text(
                                 description="current inventory",
@@ -2535,7 +2542,10 @@ class _TwoSalesFactActiveMemoryPlannerPort:
                     "answer_requests": [
                         {
                             "answer_fact": "the prior sales",
-                            "answer_expression": {"family": "list_rows"},
+                            "answer_expression": {
+                                "family": "list_rows",
+                                "selection": {"kind": "all_results"},
+                            },
                             "answer_subject": _answer_subject_payload("sales"),
                             "answer_population": _answer_population_payload_from_text(
                                 description="the prior sales",
@@ -2551,7 +2561,10 @@ class _TwoSalesFactActiveMemoryPlannerPort:
                         },
                         {
                             "answer_fact": "sale id",
-                            "answer_expression": {"family": "list_rows"},
+                            "answer_expression": {
+                                "family": "list_rows",
+                                "selection": {"kind": "all_results"},
+                            },
                             "answer_subject": _answer_subject_payload("sale id"),
                             "answer_population": _answer_population_payload_from_text(
                                 description="sale id",

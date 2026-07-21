@@ -7,7 +7,8 @@ input:
   requested_fact:
     description: staff who earned the most compensation this month
     subject_text: staff
-    answer_expression_family: ranked_selection
+    answer_expression_family: grouped_aggregate
+    group_key: {description: staff, domain: SOURCE_RESULT_VALUES, source_kind: source_value}
   catalog:
     reads:
       - id: list_staff_list
@@ -85,4 +86,4 @@ expect:
     entity_fields:
       staff_id: true
     metric_fields:
-      calculated_pay: false
+      calculated_pay: true

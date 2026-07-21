@@ -54,7 +54,7 @@ input:
         program_invocations:
           - run_id: run_base
             kind: compiled_question
-            program: {$ref: ../../../fixtures/answer_program_memory_rank_limit_v1.yaml}
+            program: {$ref: ../../../fixtures/answer_program_memory_order_take_v1.yaml}
             bindings: []
       command:
         question_id: question_1

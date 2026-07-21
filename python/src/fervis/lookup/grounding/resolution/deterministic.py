@@ -28,7 +28,9 @@ from fervis.lookup.answer_program.values import (
     LiteralType,
     TimeComponent,
 )
+from fervis.lookup.question_inputs import normalize_scalar_literal_text
 from fervis.lookup.question_contract import (
+    GroupKeySourceKind,
     QuestionContract,
     RequestedFactKnownInput,
     RequestedFactLiteralInput,
@@ -37,7 +39,7 @@ from fervis.lookup.question_contract import (
 from .values import _grounded_value_id
 
 
-def _deterministic_known_inputs(
+def _deterministic_fact_values(
     question_contract: QuestionContract,
     *,
     runtime_values: RuntimeValueContext | None,
@@ -56,10 +58,51 @@ def _deterministic_known_inputs(
             )
             values.append(literal)
             continue
+        if known.is_formula_value:
+            values.append(
+                _formula_value(
+                    known,
+                    applies_to_requested_fact_ids=requested_fact_ids,
+                )
+            )
+            continue
+        if known.is_predicate_value or known.is_threshold_value:
+            values.append(
+                _predicate_operand_value(
+                    known,
+                    applies_to_requested_fact_ids=requested_fact_ids,
+                )
+            )
+            continue
+    values.extend(_group_key_values(question_contract))
     return CanonicalInputLedger(
         values=tuple(values),
         issues=(),
     )
+
+
+def _group_key_values(question_contract: QuestionContract) -> tuple[FactValue, ...]:
+    values: list[FactValue] = []
+    for fact in question_contract.requested_facts:
+        expression = fact.answer_expression
+        group_key = expression.group_key if expression is not None else None
+        if (
+            group_key is None
+            or group_key.source_kind is not GroupKeySourceKind.TEMPORAL_BUCKET
+        ):
+            continue
+        value_id = group_key.temporal_grain_value_id(requested_fact_id=fact.id)
+        values.append(
+            FactValue.literal(
+                id=value_id,
+                literal_type=LiteralType.STRING,
+                value=group_key.temporal_grain,
+                label=group_key.temporal_grain,
+                proof_refs=(f"requested_fact:{fact.id}",),
+                applies_to_requested_fact_ids=(fact.id,),
+            )
+        )
+    return tuple(values)
 
 
 def time_resolution_tasks(
@@ -276,6 +319,44 @@ def _result_limit_value(
     )
 
 
+def _formula_value(
+    known: RequestedFactLiteralInput,
+    *,
+    applies_to_requested_fact_ids: tuple[str, ...],
+) -> FactValue:
+    literal_type, value = normalize_scalar_literal_text(known.resolved_value_text)
+    if literal_type != LiteralType.NUMBER.value:
+        raise ValueError("formula_value requires a numeric scalar literal")
+    return FactValue.literal(
+        id=_grounded_value_id(known.id),
+        known_input_id=known.id,
+        literal_type=LiteralType(literal_type),
+        value=value,
+        label=known.text,
+        proof_refs=(f"known_input:{known.id}",),
+        applies_to_requested_fact_ids=applies_to_requested_fact_ids,
+    )
+
+
+def _predicate_operand_value(
+    known: RequestedFactLiteralInput,
+    *,
+    applies_to_requested_fact_ids: tuple[str, ...],
+) -> FactValue:
+    literal_type, value = normalize_scalar_literal_text(known.resolved_value_text)
+    if known.is_threshold_value and literal_type != LiteralType.NUMBER.value:
+        raise ValueError("threshold_value requires a numeric scalar literal")
+    return FactValue.literal(
+        id=_grounded_value_id(known.id),
+        known_input_id=known.id,
+        literal_type=LiteralType(literal_type),
+        value=value,
+        label=known.text,
+        proof_refs=(f"known_input:{known.id}",),
+        applies_to_requested_fact_ids=applies_to_requested_fact_ids,
+    )
+
+
 def _known_input_bindings(
     question_contract: QuestionContract,
 ) -> tuple[tuple[RequestedFactKnownInput, tuple[str, ...]], ...]:
@@ -302,9 +383,6 @@ def _requested_fact_card(fact: Any) -> GroundingRequestedFactCard:
     return GroundingRequestedFactCard(
         requested_fact_id=fact.id,
         answer_fact=fact.description,
-        answer_population_label=(
-            answer_population.population_label if answer_population is not None else ""
-        ),
         answer_population_counted_unit=(
             answer_population.counted_unit if answer_population is not None else ""
         ),
